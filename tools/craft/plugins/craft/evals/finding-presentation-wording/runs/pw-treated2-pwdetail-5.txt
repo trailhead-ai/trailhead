@@ -1,0 +1,51 @@
+**Detail on the three findings that need your decision from the spec review.** I propose fixing all three in the spec, and the edit text below is what would be applied word for word.
+
+---
+
+**Members are not told what goes back in the case (C1)**
+*Fixed in the spec. Would build the wrong thing, needs your decision.*
+
+I recommend telling members what goes back in the case when they borrow, not only near the end. Otherwise the club keeps losing finder caps. Today the borrowing confirmation states only the loan and its return date (AC1). The list of the telescope, eyepieces and finder cap first reaches the member in the reminder two days before the return date (AC5). So a member can pack the scope away on the first night without the cap, and only hears it mattered once it's gone. If that one reminder goes to a mistyped address, they never hear at all. Then they are asked to replace a cap nobody told them about.
+
+Fix: add `", and lists what goes back in the case: the telescope, its eyepieces, and the finder cap"` to the end of the borrowing criterion (AC1), so the list arrives with the confirmation.
+
+Raised by: ease of use. The failure cases reviewer separately flagged the bounced-reminder gap, which makes this worse.
+
+---
+
+**A loan ties up a whole telescope for the full dates asked (C2)**
+*Fixed in the spec. Would build the wrong thing, needs your decision.*
+
+I recommend lending by the night, with members able to add nights, instead of by a start date and an open-ended loan. As written, the spec never says how long a loan lasts or who sets its return date. A member gives only a start date (AC1), and a second request "for the same telescope and dates" is refused (AC2). So a member who wants the largest scope for one clear night can hold it for as long as the build lets them. Other members get offered a "next free start date" weeks away, while the scope sits unused in someone's car boot.
+
+Fix: members would pick the nights they want and could add free nights later, and a clash would be refused one night at a time. This rewrites the borrowing criterion (AC1) and the one-member-at-a-time rule (AC2):
+
+    AC1. A member borrows a telescope by giving a name, an email address, the telescope
+         and the nights wanted, and receives a confirmation email that states the loan,
+         the nights it covers, and its return date (the morning after the last night).
+    AC2. A telescope is on loan to one member at a time, night by night. A request for a
+         night already taken is refused and the next free night is offered instead. A
+         member can add free nights to a loan they already hold.
+
+One caveat could change whether to take this. The reviewer couldn't tell how often members actually want a single night. If most loans really are weekend-long, say so with "answer C2: …". The fix would then be a stated maximum loan length instead of nightly lending.
+
+Raised by: right problem.
+
+---
+
+**A scope left in the cupboard shows as free with no condition note (C3)**
+*Fixed in the spec. Would build the wrong thing, needs your decision.*
+
+I recommend that a returned telescope stays "returned, unchecked" until the loan officer has recorded its condition. That is the only way the spec actually fixes the scratched-mirror problem it opens with. As written, the telescope "shows as free on the club's loan calendar from that day" just because the return date arrived (AC4). The condition note depends on the loan officer being there. A member who leaves the scope in the cupboard on a night the officer is away leaves it showing as free with no note. The next member finds the scratch, and the history can't say whether the damage happened before or after the hand-back. That is exactly the gap described in the Problem. This spec is stamped production maturity, so a failure nobody would see until a member reports it counts at full weight.
+
+Fix: replace the returns criterion (AC4) with:
+
+    AC4. When a telescope comes back it shows as returned and unchecked on the club's
+         loan calendar. It shows as free only once the loan officer has recorded it as
+         back with a note of its condition.
+
+Raised by: failure cases.
+
+---
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

@@ -1,0 +1,37 @@
+**Gauntlet: telescope loan desk spec, round 1.** maturity: production (basis: stamp). No concerns were waived.
+
+**What the passes found.** The passes clustered around two places. The first is the hand-back. As written, the condition note on a returned telescope depends on the loan officer being there on the return date, and a confirmation or reminder email that never arrives leaves no trace. That undercuts two things the spec promises: that the club can tell who had a scope when its mirror was scratched, and that the loan reaches the right member. The second is the edges of the criteria. The objective that a member can see where their loan stands is never delivered past the first email. The waiting-list offer is neither recorded nor closed. The 48-hour cancel window has no fixed starting point. Nothing says who can read the condition notes or who can cancel a loan.
+
+**Whether it holds, and where it came from.** The failure-cases pass found the strongest point. Read plainly, the condition note in "records the telescope as back, with a note of its condition, and the telescope shows as free" (AC4) is skipped whenever a member drops a scope in the cupboard. That is exactly the scratched-mirror problem the spec was written to fix. Its point about bounced emails was filed as worth fixing. But at production maturity, a failure nobody sees is a decision for you, so I have raised it. The right-problem pass's proposal to lend by the night depends on how often members want a single night, and its own confidence line says the spec doesn't know. So I've moved it down to worth fixing. Its other claim, that the spec builds more than the complaint needs, misreads the Problem, which lists three complaints, not one. The ease-of-use pass's missing-finder-cap scenario overlooks the reminder that lists the case contents two days before return (AC5), so I've moved it down too. Where passes agreed independently, I trusted the finding more: self-consistency with ease of use on the loan-status gap, buildability with self-consistency on the waiting list, left-undecided with failure cases on the 48-hour clock, and security with left-undecided on who sees the history. The fact check found that the club has seven telescopes, not six. Nothing in the spec depends on that number.
+
+**What to do about it.** Close the hand-back in two edits: a telescope stays "returned and unchecked" until its condition note is recorded, and a failed email is shown to the loan officer. Those two make the spec ready to advance. The worth-fixing items are listed below for your call. The loan-status and waiting-list gaps are the ones I'd take on next.
+
+**Recommended outcome:** advance to `ready` this round. Both Criticals are `resolved`, and neither needs a revise round.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A scope left in the cupboard shows as free with no condition note | `resolved` | Rewrite AC4 so a telescope is free only once its condition note is recorded, and shows as returned and unchecked until then |
+| C2 | An undelivered confirmation or reminder email is invisible to everyone | `resolved` | Add AC7: when an email cannot be delivered, the loan officer sees the loan, the member and the address that failed |
+
+Drafted text, applied word for word if you accept:
+- **AC4.** *The loan officer records a returned telescope as back, with a note of its condition, and from that day the telescope shows as free on the club's loan calendar. A telescope past its return date with no condition note shows on the calendar as returned and unchecked, and is not offered for loan until its note is recorded.*
+- **AC7** (under Returns and care). *When a confirmation or reminder email cannot be delivered, the loan officer is shown the loan, the member, and the address that failed, so the member can be reached another way.*
+
+**Would cause trouble later, worth fixing, your call (8):**
+- "see where the loan stands" has no criterion behind it
+- a waiting-list offer is neither recorded nor closed
+- the 48-hour cancel clock has no fixed start
+- condition notes are visible to every member
+- anyone holding a forwarded email can cancel a loan
+- one member can hold two scopes on the same dates
+- lending by the night (moved down from a decision)
+- case contents arrive only with the reminder (moved down from a decision)
+
+**Rough edges, nothing to decide (3):**
+- the Problem says six telescopes, but the register lists seven
+- the confirmation email reveals which dates are taken
+- whether the history is stored or worked out from events
+
+I dropped four wording-only notes. Ask for the full detail on any item, for example "show me C1".
+
+Reply **go** to accept. Or override a row with its reason, for example "dispute C2 because …, otherwise go", or "answer C1: … , otherwise go".

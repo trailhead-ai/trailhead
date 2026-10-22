@@ -1,0 +1,34 @@
+The spec review (gauntlet) of the Hollin Hill telescope loan desk spec. Maturity: production (basis: stamp). No stand-downs. The fact check confirmed 2 of 4 claims, refuted 1 and could not settle 1.
+
+**What the passes found.** The reviewers kept returning to two weak points: what happens when a telescope comes back, and what happens around a loan once it is booked. On returns, the criteria let a telescope show as free on the loan calendar without anyone having checked it. That reopens the exact gap the Problem names: nobody can tell who had a scope when its mirror was scratched. Around the loan, several things are promised or implied but never specified: how a member sees where a loan stands, how anyone joins or leaves a waiting list, who may cancel, and who can read the condition notes.
+
+**Whether it holds.** The failure-cases reviewer's unchecked-return finding holds. It is concrete, it traces straight back to the Problem, and one edit fixes it. Two other findings rated "needs your decision" overreach:
+- The right-problem reviewer's case for lending by the night rests on how often members want a single night, and its own confidence line says the spec doesn't show that. It's a guess about member behaviour, so I moved it to "worth fixing, your call".
+- The ease-of-use reviewer said members are never told to return the finder cap. But the reminder sent two days before the return date already lists what goes back in the case (AC5). The real risk is a reminder that never arrives, which the failure-cases reviewer raised separately. I moved this one down to "worth fixing, your call" too.
+
+The strongest signal at that level is agreement: self-consistency and ease of use each found, independently, that "see where the loan stands" in the Objectives has no criterion behind it. Buildability and self-consistency also both found the waiting list half-specified. The fact check found seven telescopes in the club's equipment register, not six. Nothing in the spec depends on that number.
+
+**What to do.** Rewrite the return criterion so a telescope is free only once its condition is on record. Then advance the spec. Before planning, I'd also add a criterion for checking a loan's status and one for joining the waiting list. Those are worth your call but don't block.
+
+**Recommended outcome:** advance to `ready` this round, with the edit below applied.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An unchecked return shows the telescope as free, so damage can't be traced to a borrower* (C1) | fixed in the spec | *rewrite AC4 so a telescope is free only after its condition note is recorded* |
+
+The drafted replacement for the return criterion (AC4):
+
+> **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and from then it shows as free on the club's loan calendar. A telescope past its return date with no condition note recorded shows as returned and unchecked, and is not offered to another member.
+
+Reply go, or dispute C1: <why>, accept C1 as a risk: <why>, answer C1: <what you know>.
+
+**Worth fixing, your call (7):**
+- The Objectives promise a member can see where a loan stands, but no criterion delivers it.
+- Nothing lets a member join the waiting list that the cancellation rule (AC3) offers freed dates to, and an offer is never recorded or closed.
+- Anyone holding a forwarded confirmation email could cancel the loan, and nothing says who may read condition notes.
+- Lending by the night might suit the largest scope better than lending by start and return date (moved down from "needs your decision").
+- A member might hand back the case without its finder cap, and a reminder that bounces is never seen (moved down from "needs your decision").
+- Two choices are unpinned: whether a member may hold two telescopes on the same dates, and which clock the 48-hour cancellation window runs on.
+- The Objectives could be narrowed to what members actually complained about: double loans.
+
+**Rough edges, nothing to decide (4):** the spec says six telescopes but the register lists seven; "loan calendar" and "loan history" aren't defined against each other; "waiting list" may read as jargon; the confirmation email reveals which dates a scope is taken.

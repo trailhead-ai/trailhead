@@ -1,0 +1,28 @@
+The spec review (gauntlet) of the Hollin Hill telescope loan desk spec: all eight passes are back. **Maturity: production (basis: stamp)**, with no stand-downs. The fact check confirmed 2 of 4 claims, refuted 1 and could not settle 1.
+
+**What the passes found.** The reviewers kept coming back to what happens around a return. The criterion that a returned telescope is recorded with a condition note and shows as free from that day (AC4) assumes the loan officer is there on the return date. Nothing covers a scope left in the cupboard unchecked, and that is exactly the scratched-mirror case the Problem names. The loan emails can also fail without anyone noticing. A mistyped address means the confirmation and the reminder of what goes back in the case (AC5) are never seen, and the officer is never told. The other themes were details left open in the cancel-and-waiting-list flow (AC3) and the loan history (AC6), and a promise in the Objectives that no criterion delivers.
+
+**Whether it holds.** The failure-cases reviewer was right about the unchecked return. Its finding is concrete and goes back to the Problem itself. It rated the bounced-email point "worth fixing", but at production maturity a failure that nobody sees until a member reports it needs your decision, so I raised it. The right-problem reviewer's idea of lending by the night is a fair question. Its own report says nobody knows how often members borrow for one night, which makes it a guess about how members behave, so I lowered it to "worth fixing". Its claim that the build is bigger than the complaint overreached: the Problem names three complaints, and each one has criteria. The ease-of-use reviewer wanted the case contents in the confirmation email but missed that the two-day reminder (AC5) already lists them, so that is now "worth fixing" too. The left-undecided and self-consistency reviewers agreed with each other on several gaps that are worth fixing, though none of them leads to building the wrong thing. The fact check found the club owns seven telescopes, not six. Nothing in the spec depends on the number.
+
+**What to do.** Make two edits in one write, then mark the spec ready: rewrite AC4 so a telescope shows as free only once its condition note is recorded, and add a criterion that an undeliverable loan email reaches the loan officer.
+
+**Recommended outcome:** the spec advances this round once both edits land.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An unchecked return shows as free, so damage can't be traced (C1)* | fixed in the spec | *rewrite AC4 so the scope shows as "returned, unchecked" until its condition note is recorded* |
+| *An undeliverable loan email is never seen by anyone (C2)* | fixed in the spec | *add AC7: the loan officer sees every email that could not be delivered* |
+
+Drafted text that would be applied as written:
+- AC4 → "**AC4.** When a telescope comes back, the club's loan calendar shows it as returned and unchecked until the loan officer records a note of its condition, and shows it as free only from the day that note is recorded."
+- new → "**AC7.** When a confirmation, reminder or waiting-list offer email cannot be delivered, the loan officer is shown which member and which loan it was for."
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Worth fixing, your call (8):**
+- **How long a loan lasts:** lend by the night rather than by start and return date. The case contents could also go in the confirmation, since a loan shorter than two days gets no useful reminder.
+- **Unfinished flows:** no criterion lets a member "see where the loan stands" after the confirmation, and the waiting-list offers in the cancel criterion (AC3) are neither recorded nor closed.
+- **Left open:** whether one member can hold two scopes on the same dates, and which clock the 48-hour cancel window runs on.
+- **Security:** a forwarded confirmation email is enough to cancel someone's loan, and condition notes on a history every member can read may carry personal details.
+
+**Rough edges, nothing to decide (2):** the club has seven telescopes, not six, and "loan calendar" versus "loan history" needs one sentence saying which page is which. Four editorial notes were dropped, among them naming the mail provider and how the history is stored.

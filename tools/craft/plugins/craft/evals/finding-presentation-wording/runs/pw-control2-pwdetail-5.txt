@@ -1,0 +1,35 @@
+Here is the detail on the three findings that need your decision.
+
+---
+
+**C1. Members are told what goes back in the case only once, late in the loan.** Should the confirmation email also list what goes back in the case? I recommend yes. It costs one clause, and a missing finder cap is the kind of loss the club can't trace back to anyone later.
+
+The ease-of-use reviewer says the confirmation email gives only "the loan and its return date" (AC1), so a member never learns the finder cap has to go back. That overstates it. The reminder sent "two days before the return date… listing what goes back in the case: the telescope, its eyepieces, and the finder cap" (AC5) already tells them. The real gap is narrower. That reminder is the only time the list arrives, and it comes at the end of the loan. The failure-cases reviewer separately points out that a reminder sent to a mistyped address is never seen. So the worst case is this: a member types their email wrong, the reminder bounces, and the scope comes back without its finder cap. Because the spec never asked anyone to check, the member is then asked to replace a cap they were never told about. I'd rate this lower than when I first raised it, and the decision is yours.
+
+Fix: `"and receives a confirmation email that states the loan, its return date, and what goes back in the case: the telescope, its eyepieces, and the finder cap"`, replacing the end of the confirmation-email sentence (AC1). The list then reaches the member at the start of the loan as well as in the reminder.
+
+*Raised by: ease of use. Supported by: failure cases (the bounced reminder).*
+
+---
+
+**C2. A loan ties up a whole telescope, and the spec never says for how long.** Should members book telescopes by the night instead of by a start date? I recommend deciding this before planning, because the unit of a loan shapes the calendar, cancellations, the waiting list and returns.
+
+The right-problem reviewer's worst case is a member who wants the largest scope for one clear night but holds it for a whole weekend, while others wait weeks for a night it sat unused. When I checked the spec, the concrete gap is a different one. A member gives only "a start date" when borrowing (AC1), and nothing anywhere says how long a loan lasts or who sets the return date. "Refused for the same telescope and dates" (AC2) has no defined length to compare against. The by-night redesign depends on how members actually use the scopes. The reviewer admits that isn't in the spec, and the Problem's mention of "the same weekend" hints that members borrow for a weekend today. That part is guesswork about member behaviour. The missing loan length is not.
+
+Fix: members would book one or more nights instead of a start date, and the calendar would show single free nights. This rewrites the Objectives and the borrowing, double-booking, cancellation and return criteria (AC1, AC2, AC3, AC4). The caveat: this is only worth doing if single-night loans are common. If members really borrow for a weekend, the smaller fix is to state the loan length in the same borrowing criterion (AC1). Either way, you know the fact that settles it and the reviewers don't.
+
+*Raised by: right problem.*
+
+---
+
+**C3. A scope that comes back without a check shows as free with no condition note.** Should a returned telescope stay off the calendar until someone has noted its condition? I recommend yes. This is exactly the scratched-mirror problem the spec was written to solve.
+
+The return criterion says the loan officer "records the telescope as back, with a note of its condition, and the telescope shows as free… from that day" (AC4). It assumes the officer is there on the return date. When a member leaves the scope in the cupboard instead, the calendar shows it free anyway, with no note. The next member finds the scratch, and the history that's meant to list every return "with the date and the condition note" (AC6) has an empty note against the one return that mattered. Nobody can say who had it. The failure-cases reviewer is right, and the Problem statement backs them up directly.
+
+Fix: `"and the telescope shows as free on the club's loan calendar only once its condition note is recorded; until then it shows as returned and unchecked"`, replacing the end of the return criterion (AC4).
+
+*Raised by: failure cases.*
+
+---
+
+The recommended dispositions are next. If you already know how members borrow, that settles the loan-length question (C2), and you can tell me now.

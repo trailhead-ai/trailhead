@@ -28,8 +28,7 @@ everything that already constrains it — the corpus of what the vault records, 
 made, the code that actually exists, and the realities of the world the spec has to survive in — so
 the version that reaches planning is the one worth building. Its output is a better spec and more
 momentum, not a delay to be endured; a pass that only slows the record down without changing it has
-failed at its job. Treat the findings as the fastest available route forward, because they are: the
-alternative is discovering the same things after they are load-bearing.
+failed at its job.
 
 Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
 main session adjudicates what comes back and turns it into one recommendation. Nothing advances
@@ -45,8 +44,7 @@ independently — so a clean fact pass is never read as evidence the spec is sou
 
 This step runs on **every** spec before it flips to `ready`. There is no skip flag. Calibration is
 tuned through the per-lens Critical bars in `_shared/council.md` and the severity rules below —
-never through per-invocation opt-outs. A spec that "obviously doesn't need it" is the spec the
-premise pass most often reframes.
+never through per-invocation opt-outs.
 
 ## Process
 
@@ -151,9 +149,7 @@ Claims:
 
 Sibling specs are **not optional context here** — a spec's factual claims include what it assumes
 about capabilities *other specs depend on*, and that dependency lives in the sibling's text, not in
-the code. In the pilot, the highest-severity finding of the entire run came from a sibling spec's
-dependency on a capability the spec under review proposed to delete. Code-only verification would
-have returned a clean sweep and missed it.
+the code.
 
 **Pass 2 — premise attack.** Dispatch `premise-attacker` with the spec path and the Premise claims.
 It is the only pass licensed to reject the spec's framing outright — do not soften its mandate in
@@ -199,17 +195,14 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    disposition — they are only logged for the audit trail — so a compound criterion filed at either
    severity is noted and the spec advances with it intact. Critical is what forces a disposition:
    `resolved` means the adjudicator drafts and applies the split before the record advances, which
-   is what keeps the compound criterion from surviving. This bar pins measured behavior, not new
-   behavior — under the auditor's current output shape a reported compound criterion already reaches
-   Critical here. Write it as a rule so an edit to that output shape, or to this step, does not
-   silently regress it. **This bar is not subject to item 5's auto-downgrade.** Independent
-   deliverability is a judgment about how work would be sliced, which can read as "guessing about
-   future state" — but it is answered from the criterion's own text, and downgrading it to Important
-   strips the disposition that makes the finding land at all.
+   is what keeps the compound criterion from surviving. Write it as a rule so an edit to the
+   auditor's output shape does not silently regress it. **This bar is not subject to item 5's
+   auto-downgrade.** Independent deliverability is a judgment about how work would be sliced, which
+   can read as "guessing about future state" — but it is answered from the criterion's own text, and
+   downgrading it to Important strips the disposition that makes the finding land at all.
 7. **Hold every `revise` finding to the prescription-specificity bar.** A finding that cannot
    produce a prescription this specific is not a Critical — a severity bar applied here, at
-   consolidation, before a finding is numbered, not a step-5 consult. `dispositions.md`'s `revise`
-   glossary entry restates it beside the term it defines, downstream of this decision.
+   consolidation, before a finding is numbered, not a step-5 consult.
 8. **Spot-verify contentious claims.** Any finding that would be expensive to act on, that
    contradicts another pass, or that arrives in a transcript reading anomalously (over-confident,
    thin on evidence, or wandering outside its stated lane) gets checked yourself before it reaches
@@ -219,15 +212,20 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    override, and the audit trail records it — so never renumber after presenting, not even when an
    override collapses a row's relevance.
 
-Consolidation is not the deliverable. What the operator sees is the recommendation step 5 builds out
-of it.
-
 ### 5. Recommend, then accept
 
 The operator's job here is to **decide, not to re-derive**. A finding dump makes them re-open the
 record to judge each item; a recommendation lets them judge in place. So the default output is one
 compact deliverable — target one terminal screen (~40 lines) for a typical run — and one word ("go")
 is a complete answer to it.
+
+The first line you show the reader calls this "the spec review (gauntlet)", with the word in
+brackets once; every later line says "the spec review". `/craft:gauntlet` stays a command.
+
+Everywhere else your own prose mentions a finding — the synthesis, a list, a next-steps line — name
+it by its headline, or a faithful short form, with the id in round brackets after: "apply the cache
+TTL fix (C1) and the tenant rewrite (C2)", never "apply C1 and C2", "the C1 edit" or "C1's change".
+The table, the rewrite headers and the reply line keep their own forms.
 
 The deliverable is these four parts, in this order — all four whenever there is a Critical to
 disposition, and the same parts minus the table on a run that produced none (`dispositions.md`'s
@@ -239,11 +237,10 @@ disposition, and the same parts minus the table on a run that produced none (`di
    `_shared/council.md`. Read it there; do not restate it here. Two things about it are worth naming
    for this caller in particular:
 
-   - **No sentence cap.** Three movements do not fit a fixed sentence count, and a cap tight enough
-     to squeeze them squeezes two of the three down into the table instead — which is the reader
-     reconstructing the explanation from rows again. What holds the length is the one-screen budget
-     above, plus the shared rule that a synthesis which will not fit means the finding set is
-     **under-consolidated**: go back to step 4 rather than spend more of the screen.
+   - **No sentence cap.** A cap tight enough to squeeze three movements squeezes two of them into
+     the table, which is the reader reconstructing the explanation from rows again. The one-screen
+     budget holds the length, and a synthesis that will not fit means the finding set is
+     **under-consolidated**: go back to step 4.
    - **The interpretive per-pass read is the point.** Eight passes attacked this record from lanes
      that could not see each other, and which of them were right is a judgment only the adjudicator
      is positioned to make. Making it is movement two's whole job; the shared contract names what
@@ -261,13 +258,17 @@ disposition, and the same parts minus the table on a run that produced none (`di
    that line in front of the operator: the label is vault-sourced and can name an unrelated spec.
 3. **The per-Critical table** — supporting detail, not the explanation. The synthesis has already
    said what the findings mean and what you propose doing; the table is the row-level view for
-   checking that against the findings, and the handle the operator names to override — into
-   `accepted-as-risk`, `disputed`, or `answered` when the operator holds a counterargument the
-   passes did not have. One row per Critical, in `C1`…`Cn` order:
+   checking that against the findings, and the handle the operator names to override — by accepting
+   the finding as a risk, disputing it, or answering it when the operator holds a counterargument
+   the passes did not have. One row per Critical, in `C1`…`Cn` order:
 
-   | id | finding | proposed disposition | proposed edit |
-   |---|---|---|---|
-   | C1 | *headline, one line* | `resolved` | *one clause: what the edit does* |
+   | finding | proposed outcome | proposed edit |
+   |---|---|---|
+   | *headline, one line* (C1) | fixed in the spec | *one clause: what the edit does* |
+
+Close the table with one reply line: "Reply go, or dispute C2: <why>, accept C2 as a risk: <why>,
+answer C2: <what you know>." The echo after a reply shows each row's plain reading, and for the
+operator's three the reply words: accepted as a risk, disputed, answered.
 
 **A `revise` row cannot fit in that one-clause edit cell** — its prescription names what is wrong,
 what to change, and how, and a `reaches-downstream` prescription also names the specs it
@@ -275,36 +276,35 @@ invalidates. Render it instead of a table row, as a compact header line followed
 prescription block:
 
    ```
-   **C2** — *headline, one line* — `revise` (`record-only`)
+   **headline, one line (C2)** — needs a rewrite (`record-only`)
      Prescription: <what is wrong, what to change, and how>
    ```
 
 A `reaches-downstream` prescription's block adds the specs it names:
 
    ```
-   **C3** — *headline, one line* — `revise` (`reaches-downstream`)
+   **headline, one line (C3)** — needs a rewrite (`reaches-downstream`)
      Prescription: <what is wrong, what to change, and how>
      Reaches: spec/<name-one>, spec/<name-two>
    ```
 
-Worked example — three Criticals, one `resolved`, one `revise` of each scope:
+Worked example — three Criticals, one fixed in the spec and one rewrite of each scope:
 
    <!-- worked-example:start -->
-   | id | finding | proposed disposition | proposed edit |
-   |---|---|---|---|
-   | C1 | *cache TTL undocumented* | `resolved` | *add a Constraints row stating the TTL* |
+   | finding | proposed outcome | proposed edit |
+   |---|---|---|
+   | *cache TTL undocumented* (C1) | fixed in the spec | *add a Constraints row stating the TTL* |
 
-**C2** — *auth model assumes single tenant* — `revise` (`record-only`) Prescription: rewrite the
-Objectives to state multi-tenant is out of scope, or the criteria to require tenant scoping.
+**auth model assumes single tenant (C2)** — needs a rewrite (`record-only`) Prescription: rewrite
+the Objectives to state multi-tenant is out of scope, or the criteria to require tenant scoping.
 
-**C3** — *retry policy duplicates existing library behavior* — `revise` (`reaches-downstream`)
+**retry policy duplicates existing library behavior (C3)** — needs a rewrite (`reaches-downstream`)
 Prescription: drop the custom backoff loop; the existing HTTP client already retries with jitter.
 Reaches: spec/retry-policy-for-the-notification-worker
    <!-- worked-example:end -->
 
-The block stays inside the one-screen budget the deliverable is held to — one header line and at
-most two prescription lines per `revise` Critical, same as the one-clause edit it replaces for every
-other disposition.
+The block stays inside the one-screen budget: one header line and at most two prescription lines per
+`revise` Critical.
 
 4. **Important and Minor, compressed** to a count plus a one-line theme apiece. They take no
    disposition — they are logged for the audit trail.
@@ -316,8 +316,10 @@ operator never approved.
 
 **Full finding detail is not printed by default.** It is one request away ("show me the detail on
 C2") and it is retained in the audit trail either way. When you do print it, write the finding in
-the shape "How a finding reads" defines in `_shared/council.md` — that shape is what makes a finding
-readable by someone who has not read the document under review.
+the shape "How a finding reads" defines in `_shared/council.md`, and open each finding with its
+proposed outcome in plain words — "fixed in the spec", "needs a rewrite", or the reading of an
+operator outcome — before its reasoning. That shape is what makes a finding readable by someone who
+has not read the document under review.
 
 A pass that shows a *different* record is wrong, with a known fix, has no disposition and is not a
 `reaches-downstream` scope either. The test: a record that is wrong *because of a change this review
@@ -328,8 +330,7 @@ another record. List the latter apart, as the contract in `_shared/council.md` s
 **Security Criticals are never compressed.** A Critical raised by the attacker lens renders its row
 in full — the whole finding and the actual proposed edit text, never a clause standing in for it.
 Compression is a convenience for the operator, and a one-clause summary of a security finding reads
-as reasonable no matter what it elides. This mirrors drift-gate's rule that security surface is
-conformance, not quality.
+as reasonable no matter what it elides.
 
 #### Who may propose what
 
@@ -359,8 +360,7 @@ under the operator's signature.
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
 terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
 means and requires. The propose-only rule, the edit-first test, and the never-draft-the-operator's-
-reason rule above stay inline because this skill must apply them unprompted. The reference document
-defines all five terms in full, the parts restated here included — that overlap is deliberate.
+reason rule above stay inline because this skill must apply them unprompted.
 
 #### Advancing, revise rounds, and runs
 
@@ -368,16 +368,13 @@ defines all five terms in full, the parts restated here included — that overla
 the run/revise-round distinction, why a revise round still lands its `resolved` edits and
 provenance, and why `answered` blocks the advance check until re-adjudicated. The `revise`
 prescription-specificity bar in step 4, step 6's advance condition below, and the shape a
-prescription and a `reaches-downstream` scope must take all stay inline — each fires unprompted. Two
-they only summarise: the downstream evidence bar, and that a `reaches-downstream` prescription
-writes nothing to the specs it names.
+prescription and a `reaches-downstream` scope must take all stay inline — each fires unprompted.
 
 #### Zero Criticals is still a decision
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines why a clean run still
 presents the deliverable — minus the per-Critical table, since there are no Critical rows to hold
-one — and still gates on operator acceptance. Beyond that minus-the-table rule, also named in step
-5's deliverable list, nothing on this topic is inline: none of it fires until a run has gone clean.
+one — and still gates on operator acceptance.
 
 #### Accepting, and overriding in one round-trip
 
@@ -473,7 +470,11 @@ count (see above):
   C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
   answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
   Important <n>, Minor <n>, detail below.
-- <the consolidated detail, per finding, in the shape `_shared/council.md` defines>
+- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with
+  its proposed outcome in plain words and put each Critical's id after its headline in round
+  brackets. Name every criterion by its own text with its number after it in round brackets, also
+  where several are listed together: "the packet limit per swap (AC1) and the labelling rule
+  (AC2)", never "this rewrites AC1 and AC2">
 ```
 
 That is one invocation. `$EDITS` is the unified diff carrying all three payloads — every `resolved`
@@ -527,5 +528,4 @@ writes no status for "still revising."
 ## Calibration
 
 **Read `gauntlet/calibration.md` now and follow it in full.** It holds pilot-run provenance and
-tuning notes, consulted after a run rather than restated here; the compound-criterion Critical bar
-is covered by `tools/craft/MANUAL-EVAL.md`'s manual eval, not CI.
+tuning notes, consulted after a run rather than restated here.

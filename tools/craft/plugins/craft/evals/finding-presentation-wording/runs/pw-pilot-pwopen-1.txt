@@ -1,0 +1,41 @@
+**Gauntlet: telescope loan desk spec, round 1**
+maturity: production (basis: stamp) · no stand-downs · fact check: 2 of 4 confirmed, 1 refuted, 1 unverifiable
+
+The reviewers found two kinds of problem. The bigger one is in Returns and care. The spec promises to fix the complaint that "nobody can tell afterwards who had a scope when its mirror was scratched". But it only gets a condition note when the loan officer is there on the return day (AC4). A telescope left in the cupboard shows as free with no note, so the original complaint survives. Most of the other findings concern parts the spec mentions but never defines. "See where the loan stands" is in the Objectives, but no criterion delivers it. Nothing says how a member joins the waiting list or how an offer from it closes. The spec doesn't say who may cancel a loan, or which clock the 48 hours run on.
+
+The failure-cases reviewer was the only one whose findings hold at full weight. Three reviewers raised the unanswered Objective independently: ease of use, self-consistency and right problem. That makes it the strongest of the "worth fixing" group. Two lead findings were overstated and I've moved them from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call":
+- **Right problem's lend-by-the-night idea.** It depends on guessing how often members want a single night, and the reviewer says so. The stated complaint is about weekends.
+- **Ease of use's claim that the finder cap goes unmentioned.** The reminder already lists what goes back in the case: "the telescope, its eyepieces, and the finder cap" (AC5).
+
+I moved one finding the other way. Failure cases raised a bounced reminder at "worth fixing". At production maturity, a failure nobody sees until damage turns up needs your decision. The "left undecided" and security reviewers disagree on whether every member sees condition notes. That is a real choice for you, not a defect.
+
+My proposal: make the two edits below, carry the "worth fixing" items as Important, and let the spec advance.
+
+**Recommended outcome:** advance to `ready` this round once you accept.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope handed back without the officer present shows as free with no note, so damage can't be traced to anyone | `resolved` | Rewrite AC4 so a telescope shows as free only once a condition note exists, and until then shows as "returned and unchecked" with who had it |
+| C2 | A confirmation or reminder sent to a mistyped address fails without anyone knowing | `resolved` | Add AC7, which shows the loan officer every email that couldn't be delivered |
+
+The edit text, drafted in full:
+- **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and the telescope shows as free on the club's loan calendar only from the day that note is recorded. A telescope whose return date has passed without a condition note shows as returned and unchecked, not free, and names the member who last had it.
+- **AC7.** When a confirmation or reminder email cannot be delivered, the loan officer is shown which member and which loan it was for.
+
+**Worth fixing, your call (9 findings, Important).** Most important first:
+- No criterion delivers "see where the loan stands".
+- The waiting list has no defined lifecycle: how a member joins, how an offer is recorded, and how it closes.
+- Anyone holding a forwarded email could cancel a loan.
+- Whether every member sees condition notes is unsettled.
+- The 48-hour cutoff has no fixed clock.
+- One member could hold two telescopes on the same dates.
+- The case list could also go in the confirmation email.
+- Lend by the night instead of by date range.
+- The build may be larger than the double-booking complaint needs.
+
+**Rough edges, nothing to decide (3 findings, Minor).**
+- The spec says six telescopes. The fact check reports the equipment register lists seven. I haven't checked the register myself.
+- "Loan calendar" and "loan history" need telling apart.
+- A confirmation email shows which dates are taken.
+
+Reply "go" to accept. To override a row, use `accepted-as-risk`, `disputed` or `answered`, with your reason, for example "dispute C2 because …, otherwise go".

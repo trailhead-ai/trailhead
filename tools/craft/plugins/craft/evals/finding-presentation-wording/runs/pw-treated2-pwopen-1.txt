@@ -1,0 +1,38 @@
+The spec review (gauntlet) of the telescope loan desk spec is complete. All eight reviewers reported. Maturity is production (basis: stamp), and no concerns were waived.
+
+The reviewers kept returning to three things. First, the spec stops tracking a telescope at the moment it comes back. When the loan officer records the telescope as back with a note of its condition, it shows as free (AC4), so a scope left in the cupboard with no check looks ready to lend. That is exactly how the scratched mirror in the Problem goes unexplained. Second, every message to a member goes by email, and nothing tells anyone when one fails to arrive. Third, some steps of a loan's life are only half written: how a member sees where the loan stands after the first email, how someone joins and leaves a telescope's waiting list, who can cancel, and who can read the condition notes.
+
+Most of the findings hold up. The failure-cases reviewer found the most serious problem, the unchecked return, and it ties directly to the Problem. That reviewer rated the silent email failure as "worth fixing, your call". I've raised it to "needs your decision", because at production maturity, failure that nobody can see is a "needs your decision" concern, and here the first person to notice would be a member at the cupboard missing a finder cap. Two reviewers who couldn't see each other's work (ease of use and self-consistency) both found that the Objectives promise a member can "see where the loan stands" but no criterion delivers it. That makes it the strongest of the "worth fixing" findings. Three findings went too far:
+- **Right problem: lend by the night.** Its idea of lending by the night guesses at how members borrow, and its own confidence line admits that, so I downgraded it.
+- **Right problem: the spec is a bigger build than the complaint.** It misreads the Problem, which names three complaints, not one.
+- **Ease of use: what goes back in the case.** It said members are never told what goes back in the case, but the reminder two days before the return date lists it (AC5). What's left is the smaller gap of telling them when they collect.
+
+The fact check found that the club has seven telescopes, not six. The 48-hour cancellation rule came back unverifiable, but only because it is a new rule and was wrongly listed as a fact.
+
+My recommendation is two edits, both drafted below, and then let the spec advance. The "worth fixing" items are worth doing in your own time, and none of them blocks planning.
+
+**Recommended outcome:** the spec advances to ready this round once the two edits below land. Nothing needs a rewrite.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *a returned telescope shows as free before anyone has checked it* (C1) | fixed in the spec | *rewrite AC4 so the telescope shows as "returned, unchecked" and can't be borrowed until its condition note is recorded* |
+| *an email that never arrives goes unnoticed* (C2) | fixed in the spec | *add AC7: a confirmation or reminder that can't be delivered is shown to the loan officer, with its loan* |
+
+The drafted text:
+
+- **AC4 (replaces the current text):** "On the return date the loan officer records the telescope as back. Until a note of its condition is recorded, the telescope shows on the club's loan calendar as returned and unchecked and cannot be borrowed; once the note is recorded, it shows as free from that day."
+- **AC7 (new, under Returns and care):** "When a confirmation or reminder email cannot be delivered, the loan officer is shown the loan it belongs to and the address that failed."
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call: 8.**
+- No criterion lets a member see where the loan stands after the first email. Two reviewers found this separately.
+- The waiting list has no criterion for joining it, recording an offer or closing one.
+- Nothing ties a cancellation to the member who borrowed, so anyone holding a forwarded confirmation email could cancel.
+- Nobody has decided who can read the loan history and its condition notes.
+- Nothing says whether one member may hold two telescopes on the same dates.
+- Nothing says which clock the 48 hours before a cancelled loan starts run on.
+- The idea of lending by the night was downgraded from "needs your decision".
+- The idea of telling members what goes back in the case when they collect it was also downgraded from "needs your decision".
+
+**Rough edges, nothing to decide: 1.** The Problem says the club has six telescopes, but the equipment register lists seven.

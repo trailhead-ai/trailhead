@@ -1,0 +1,47 @@
+**Gauntlet: telescope loan desk spec (draft), round 1**
+maturity: production (basis: stamp). No stand-downs.
+
+**What the passes found.** The reviewers kept coming back to two things. The first is the return. The Problem says nobody can tell who had a scope when its mirror was scratched, yet the spec never says what happens when nobody checks a telescope in. The second is the club's emails. Most of what the spec promises reaches members by email: the confirmation, the reminder with the case list, and the waiting-list offer. Nothing says what happens when one of those emails never arrives. Around these two are smaller gaps:
+- The Objectives promise that a member can "see where the loan stands", but no criterion delivers it.
+- Waiting-list offers are never closed or recorded.
+- The cancellation window is unpinned.
+- The spec doesn't say who may cancel a loan, or who may read the condition notes.
+
+**Whether it holds.** The failure-cases reviewer was right about the unchecked return, and the spec's own Problem backs it. That reviewer rated the undelivered-email gap as only worth fixing. I've raised it to needs your decision: this spec is stamped production, and at production a failure no human would see is a decision for you. It also breaks the Objective that a loan "reach the right member". Two other "needs your decision" findings didn't hold up, and I've moved both to worth fixing, your call:
+- **Ease of use** said members are never told what goes back in the case. The two-days-before reminder already lists it (AC5). What's left is the reminder going unseen, and that is covered by the email decision.
+- **Right problem** proposed lending by the night. It rests on a guess about how often members want a single night, which its own confidence line admits. The Problem's actual complaint is about weekends.
+
+The right-problem reviewer's claim that six criteria are more than the complaint needs also overreaches. The Problem names three complaints, not one.
+
+The fact check found that the equipment register lists seven telescopes, not six. Nothing in the spec relies on the number.
+
+**What to do.** Make two edits and advance:
+- Rewrite AC4 so a telescope shows as free only once someone records its condition.
+- Add one criterion that shows the loan officer any email that couldn't be delivered.
+
+The worth-fixing gaps can be pinned now or left for planning. None of them changes what the spec commits to.
+
+**Recommended outcome:** advance to `ready` this round, once C1 and C2 are applied.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope nobody checks in still shows as free, so damage can't be traced to whoever had it | `resolved` | *rewrite AC4: an overdue return with no condition note shows as "returned, unchecked" and can't be lent until a note is recorded* |
+| C2 | An email that can't be delivered fails silently, so the member never gets the loan details or the case list | `resolved` | *add AC7: the loan officer is shown each email that couldn't be delivered, with its loan and address* |
+
+Drafted text:
+- **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and from that day it shows as free on the club's loan calendar. A telescope whose return date has passed with no condition note shows as returned and unchecked, not free, and cannot be lent until a note is recorded.
+- **AC7.** When a confirmation, reminder or waiting-list offer email cannot be delivered, the loan officer is shown the email, the loan it belongs to, and the address it was sent to.
+
+**Would cause trouble later, worth fixing, your call (8):**
+- Two reviewers each found that the promise to "see where the loan stands" has no criterion.
+- Two reviewers each found that waiting-list offers are never closed or recorded (AC3, AC6).
+- Two reviewers each found that the 48-hour cancellation clock is unpinned.
+- One member could hold two scopes on the same dates.
+- Anyone holding a forwarded confirmation email could cancel the loan.
+- Condition notes are readable by every member. The security and left-undecided reviewers disagree on whether they should be.
+- The end-of-case list reaches members only via the reminder.
+- Lending by the night.
+
+**Rough edges, nothing to decide (2):** the register lists seven telescopes, not six; and the confirmation email reveals which dates are taken.
+
+Reply "go" to apply C1 and C2 and flip the spec to `ready`. You can also override any row by its id, with your reason.

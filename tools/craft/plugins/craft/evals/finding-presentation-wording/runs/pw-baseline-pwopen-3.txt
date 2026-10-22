@@ -1,0 +1,36 @@
+## Gauntlet: telescope loan desk spec
+
+Maturity: production (read from the spec's own stamp). No concerns were waived.
+
+**What the passes found.** All eight passes probed the same weak spot: what happens to a telescope, and to the member's view of it, after the first email. The return is underspecified. The spec only covers the loan officer being there on the return date to record the telescope as back with a condition note (AC4). The waiting-list offer that a cancellation triggers (AC3) is never recorded and never closed. And the Objectives promise that a member can "see where the loan stands", but no criterion after the confirmation email delivers that. Smaller gaps cluster around cancellation: who is allowed to cancel, and which clock the 48 hours run on. The fact check also found the club has seven telescopes, not six.
+
+**Whether it holds.** The failure-cases pass found the most serious problem, and it holds. The Problem says nobody can tell who had a scope when its mirror was scratched, yet as written a telescope can come back with no condition note. That is the exact failure the spec exists to fix. I downgraded two other passes' top findings from "needs your decision" to "worth fixing, your call":
+- **Right problem:** it wants lending by the night instead of by date range. That rests on a guess about how often members want a single night, which its own confidence line admits the spec doesn't say. The complaint in the Problem is about double requests, and blocking a second request for the same telescope and dates (AC2) already handles that.
+- **Ease of use:** it wants the finder-cap list in the confirmation email. Its failure case assumes the member is never told, but the reminder two days before the return date already lists the telescope, eyepieces and finder cap (AC5).
+
+The strongest signal of the run is that ease of use and self-consistency independently reached the same gap about seeing where the loan stands. I've ranked it first among the "worth fixing" items.
+
+**What to do.** Change AC4 so a returned telescope shows as unchecked until its condition note is recorded. Then the spec advances. Each of the cheap "worth fixing" edits is your call: the loan-status gap, recording the waiting-list offer, and the telescope count.
+
+**Recommended outcome:** advance to `ready` this round, after C1's edit lands.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *A telescope left back without the officer present shows as free with no condition note, so damage can't be traced to the member who had it* | `resolved` | *Rewrite AC4 so a telescope is only shown as free once its condition is recorded* |
+
+C1's drafted replacement for AC4, in full:
+
+> **AC4.** When a telescope comes back, the loan calendar shows it as returned and unchecked until the loan officer records a note of its condition. Only once that note is recorded does the telescope show as free, and the loan history names the member whose loan it was.
+
+**Worth fixing, your call (11):**
+- No criterion lets a member see where the loan stands after the first email (raised by both ease of use and self-consistency).
+- The waiting-list offer is never recorded or closed (buildability and self-consistency).
+- Cancelling isn't tied to the member who borrowed, and condition notes may expose personal detail to every member (security; left undecided also raised who sees the history).
+- Builds could legitimately differ on whether one member may hold two loans at once, and on which clock the 48 hours run (left undecided, failure cases).
+- A bounced reminder goes unseen; the history could be stored or derived from events.
+- The two downgraded findings above: lending by the night, and the finder-cap list in the confirmation email.
+- Objectives broader than the complaint.
+
+**Rough edges, nothing to decide (3):** the club has seven telescopes, not six; the confirmation email reveals which dates are taken; "loan calendar" and "loan history" are used without saying they are different pages.
+
+Reply "go" to apply C1's edit and stamp the review. To override, give C1 and your reason, e.g. "dispute C1: …" or "answer C1: …". You can also ask for the full detail on any finding.

@@ -1,0 +1,36 @@
+**Gauntlet: telescope loan desk spec, round 1**
+maturity: production (basis: stamp) · no waivers
+
+**What the passes found.** The reviewers keep coming back to two parts of the spec: what happens when a telescope comes back, and the waiting list. On returns, a telescope "shows as free on the club's loan calendar from" the return date, as long as the loan officer has recorded it back with a condition note (AC4). If the officer isn't there, nothing holds the telescope back from being lent again. That leaves open the problem the spec names: "nobody can tell afterwards who had a scope when its mirror was scratched." On the waiting list, freed dates go "to the first member on that telescope's waiting list" (AC3). But no criterion puts anyone on that list, records the offer, or closes it once taken. Around these sit several smaller gaps. The objective that a member can "see where the loan stands" has no criterion behind it after the first email. Nothing ties a cancellation to the member who borrowed. And a few rules are left open: the 48-hour clock, whether one member can hold two scopes at once, and who can read the condition notes.
+
+**Whether it holds.** The failure-cases reviewer's point about unchecked returns holds, and it is the one finding that needs your decision. It ties straight back to the Problem, and one edit to AC4 closes it. Two other findings came in rated as needing your decision, and I've moved both to "worth fixing, your call." The right-problem reviewer wants loans by the night instead of by start date. That rests on how often members want a single night, which the reviewer itself says it doesn't know, and the Problem describes members competing for weekends. The ease-of-use reviewer says members are never told the finder cap goes back in the case. But the reminder sent "two days before the return date" lists exactly that (AC5). The real gap is narrower: on a loan shorter than two days, the reminder date falls before the loan starts. The right-problem reviewer's claim that the spec is "a larger build than the complaint" doesn't hold, because the Problem names three complaints, not one. The ease-of-use and self-consistency reviewers reached the "see where the loan stands" gap independently, so it heads the list below. The fact check found the club's register shows **seven** telescopes, not six. One gap no reviewer raised: nothing says how loans already in the paper ledger move online, and at production maturity that matters.
+
+**What to do.** Apply the AC4 edit below and advance the spec. Each "worth fixing" item is a small, cheap edit. The waiting-list and "see where the loan stands" gaps are the ones I'd fold in now if you want them.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | *An unchecked return shows as free, so damage can't be traced to a borrower* | `resolved` | *AC4 holds a returned scope as "returned and unchecked" until its condition note is recorded* |
+
+C1 drafted text, replacing AC4 in full:
+> **AC4.** A returned telescope shows on the club's loan calendar as returned and unchecked until the loan officer records it as back with a note of its condition, and shows as free only from the day that note is recorded.
+
+**Worth fixing, your call (9).** In order of weight:
+- "see where the loan stands" has nothing delivering it
+- the waiting list is never joined, recorded or closed
+- a cancel isn't tied to the borrower, so a forwarded email is enough to cancel
+- condition notes are visible to every member, and the reviewers disagree on whether they should be
+- the 48-hour clock is unset
+- nothing limits a member to one loan per date
+- a bounced reminder goes unseen
+- loans could be by the night
+- on loans under two days, the reminder comes too early
+
+**Rough edges, nothing to decide (4).**
+- the Problem says six telescopes, but there are seven (a one-word fix)
+- the "loan calendar" and "loan history" pages are never told apart
+- the confirmation email shows which dates are taken
+- whether the history is stored or worked out from events is a build choice
+
+Dropped: naming the mail provider, and calling the waiting list "next in line".
+
+Reply **"go"** to apply C1 and mark the spec ready. Or override, for example "dispute C1: <your reason>", or "answer C1: <what the reviewers didn't know>". You can also ask for the full detail on any item.

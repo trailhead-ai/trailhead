@@ -1,0 +1,35 @@
+## Spec review: telescope loan desk, round 1
+
+Maturity: production (basis: stamp). No waivers.
+
+**What the passes found.** The findings fall into two groups. First, the spec's record of who had a telescope and in what state has two gaps. A telescope can show as free before anyone has checked it. And the emails the spec relies on can fail without anyone finding out. Second, the borrowing flow leaves several loose ends. The promise that a member can "see where the loan stands" has no criterion behind it. Waiting-list offers are never recorded and never closed. And the spec doesn't decide who may cancel a loan, who may read condition notes, or whether one member can hold two telescopes on the same dates.
+
+**Whether it holds.** The failure-cases pass found the most important problem. The spec's own Problem is that nobody can tell who had a scope when its mirror got scratched. The return criterion, the loan officer recording the telescope as back with a condition note on the return date, after which it shows as free (AC4), brings that gap back whenever the officer isn't there on the day. The same pass rated undelivered reminders as worth fixing. I've moved that up to needs-your-decision. The objective that a loan and its return date reach the right member gives no signal when an email doesn't arrive, and at production maturity that kind of silent failure needs your decision. Two passes overreached:
+- **Right problem:** it proposed lending by the night instead. That depends on how often members want only one night, and its own confidence line says the spec doesn't show that. Because it rests on a guess about how members behave, I downgraded it to worth fixing, your call.
+- **Ease of use:** it said members aren't told what goes back in the case. That misses the reminder two days before the return date, which lists the telescope, its eyepieces and the finder cap (AC5). The real risk is that reminder never arriving, which C2 covers.
+
+The self-consistency and ease-of-use passes both found, without seeing each other's work, that the "see where the loan stands" promise is unbacked. That makes it the strongest of the worth-fixing items. The fact check says the club has seven telescopes, not six, but gave no record or file for it, or for its confirmations. I haven't acted on it, and nothing in the spec depends on the number.
+
+**What to do.** Make two edits and advance the spec. Rewrite the return criterion so a telescope shows as free only once its condition note is recorded. Add one criterion so an email that can't be delivered is shown to the loan officer. The worth-fixing items stay logged and go forward with the spec. Before planning, decide who may read condition notes, because the security and left-undecided passes disagree on it.
+
+**Recommended outcome: apply C1 and C2 and mark the spec `ready` this round.**
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope returned without the officer there shows as free with no condition note | `resolved` | *rewrite AC4 so it shows free only once a condition note is recorded* |
+| C2 | A confirmation or reminder that can't be delivered fails silently | `resolved` | *add AC7 that shows undelivered emails to the loan officer* |
+
+The text applied verbatim if you accept:
+- **AC4.** When a telescope comes back, the loan officer records it as back, with a note of its condition. Until that note is recorded, the club's loan calendar shows the telescope as returned and unchecked; it shows as free from the day the note is recorded.
+- **AC7.** When a confirmation or reminder email cannot be delivered, the loan officer is shown which member and which loan it was for.
+
+**Would cause trouble later, worth fixing, your call (10):**
+- Nothing delivers the promise that a member can "see where the loan stands" (ease of use and self-consistency both found this).
+- Waiting-list offers are never recorded or closed, so cancellation that offers freed dates to the first member on the waiting list (AC3) has no end state (buildability and self-consistency).
+- Points left undecided: which clock the 48-hour cancellation cutoff runs on; whether a member can hold two loans on the same dates; whether the loan history is stored or worked out from events.
+- Security: the spec doesn't say how a cancellation is tied to the member who borrowed. Condition notes on a history every member can read may carry personal detail. The left-undecided pass instead suggested showing the history to every member, so this needs your call.
+- Downgraded: lending by the night; the finder-cap list in the confirmation email; the objectives being a larger build than the double-booking complaint needs.
+
+**Rough edges, nothing to decide (2):** the telescope count in the Problem (the fact check gave no source for it); a confirmation email reveals which dates a scope is taken.
+
+Reply **"go"** to accept, or override by id: `disputed`, `accepted-as-risk` or `answered`, each with your reason. Full detail on any finding is available on request.

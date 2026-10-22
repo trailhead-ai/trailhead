@@ -1,0 +1,43 @@
+**Detail on the three findings that need your decision**
+
+*Would build the wrong thing, needs your decision*
+
+---
+
+**C1 — Members aren't told what goes back in the case until the loan is nearly over** · *raised by: ease of use*
+
+Should the confirmation email list what goes back in the case? I recommend it should. Without it, members lose parts they were never told they were responsible for.
+
+Worst case: a member collects a telescope, puts the finder cap down somewhere at home, and only learns it belongs in the case when the reminder arrives two days before the return date. By then the cap is gone, and the member is asked to replace it. The spec's confirmation email gives only the loan and its return date (AC1). The list of what goes back (the telescope, its eyepieces and the finder cap) first appears in the reminder (AC5), which is too late to prevent the loss.
+
+Fix: `, and lists what goes back in the case: the telescope, its eyepieces, and the finder cap` added to the end of the confirmation email sentence in AC1, so a member knows from day one what they're holding. The reminder in AC5 stays as it is. A related point worth fixing, your call: a reminder sent to a mistyped address is never seen, so failure cases suggests showing the loan officer any reminder that bounces.
+
+Proposed: `resolved`.
+
+---
+
+**C2 — A loan ties up a whole telescope for every date asked, even if the member wants one night** · *raised by: right problem*
+
+Should loans be by the night instead of from a start date to a return date? I recommend it, with one caveat below. As written, the club's most wanted scope can sit unused for days while members wait weeks for a turn.
+
+Worst case: a member wants the largest telescope for one clear Saturday and books it for the weekend. It's used one night and sits in a car boot for the rest, while the next member's request is refused and pointed to a start date weeks away. The spec ties every loan to a telescope plus a start date and a return date (AC1, AC2). So the refusal in AC2 is working exactly as specified, and that is the problem.
+
+Fix: members would book a telescope by the night and could add nights, and a single-night booking would no longer block the dates around it. This rewrites the Objectives (the "loan and its return date" wording) and criteria AC1 and AC2. It also touches AC3 (cancelling frees "the dates"), AC4 (the return date) and AC5 (the reminder timed off the return date). Caveat: the reviewer had no evidence of how often members want a single night. The loan officer would know. If most loans really are weekend-long, this finding loses its force, and you can answer it with that.
+
+Proposed: `resolved`. The rewrite stays inside this spec and doesn't affect any other record.
+
+---
+
+**C3 — A scope left in the cupboard shows as free with no record of its condition** · *raised by: failure cases*
+
+Should a returned telescope stay off the calendar until someone has checked it? I recommend yes. As written, the spec rebuilds the exact problem it opens with: nobody can say who had a scope when its mirror was scratched.
+
+Worst case: a member drops a telescope back in the cupboard on a day the loan officer isn't there. The calendar shows it as free from that day, with no condition note. The next member finds the scratched mirror, and the history can't say whether it happened on the last loan or the one before. The spec only records a condition note when the loan officer is there on the return date (AC4). Reality is that returns often happen without the officer, and that gap undermines the Objectives' promise that every change to a telescope's record can be checked afterwards.
+
+Fix: a returned telescope would show as "returned, not yet checked" until the loan officer writes its condition note, and only then as free. This changes AC4 and adds that in-between state to the loan calendar.
+
+Proposed: `resolved`.
+
+---
+
+Each of these is covered by an edit to the spec itself, and I've drafted all three. Say **"go"** to accept them as proposed. To override one, give its number (C1, C2 or C3) and your reason, for example "answer C2: most of our loans are weekend trips, otherwise go."

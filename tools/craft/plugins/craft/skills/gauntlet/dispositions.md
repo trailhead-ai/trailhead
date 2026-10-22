@@ -18,15 +18,18 @@ where control passes to a human.
 
 ## The disposition glossary
 
-- `resolved` — the record is edited to address the finding. It is still `draft`; edits are free
-  here, which is the entire point of reviewing now.
-- `revise` — the finding needs a change the edit-first test could not resolve on the spot. This is
-  the premise pass's characteristic outcome, and landing on it is a *success* of the gauntlet, not a
-  failure of the record — a prescription here costs a conversation; the same gap discovered
-  mid-build costs the build. **Every `revise` carries a prescription** naming what is wrong, what to
-  change, and how — specific enough to act on without re-deriving the reasoning. **A finding that
-  cannot produce a prescription this specific is not a Critical.** Every prescription also declares
-  a **scope**:
+Each term has a plain reading, which is what the operator sees in its place; the term is what the
+record stores.
+
+- `resolved` — read as "fixed in the spec": the record is edited to address the finding. It is still
+  `draft`; edits are free here, which is the entire point of reviewing now.
+- `revise` — read as "needs a rewrite": the finding needs a change the edit-first test could not
+  resolve on the spot. This is the premise pass's characteristic outcome, and landing on it is a
+  *success* of the gauntlet, not a failure of the record — a prescription here costs a conversation;
+  the same gap discovered mid-build costs the build. **Every `revise` carries a prescription**
+  naming what is wrong, what to change, and how — specific enough to act on without re-deriving the
+  reasoning. **A finding that cannot produce a prescription this specific is not a Critical.** Every
+  prescription also declares a **scope**:
   - **`record-only`** — the change lands inside the record under review; the finding is its own
     evidence.
   - **`reaches-downstream`** — the change invalidates work already seeded from this record. It must
@@ -38,27 +41,29 @@ where control passes to a human.
     re-entry into brainstorming is the operator's act.
   - A *different* record found wrong with a known fix is neither scope: it is not a finding on this
     record. List it as `_shared/council.md` defines under "Corrections to other records".
-- `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit.
-- `disputed: <reason>` — the operator disagrees with the finding; recorded for audit.
-- `answered: <reason>` — the operator supplies a counterargument the passes did not have, and the
-  finding is **re-adjudicated in light of it** rather than vetoed. It is the operator's move for
-  "you are measuring the system as it is and I am changing it", "that capability is absent because I
-  intend to build it", and "that is out of scope, here is the bound" — one instance of a general
-  rule: any finding the passes raised for lack of information the operator actually holds is
-  answered, not disputed or accepted as risk. `answered` is **not terminal** — **the adjudicator
-  re-adjudicates it**, on the same footing as its original proposal: the re-adjudicated outcome is
-  `resolved` or `revise`, the same two terms and no others — never `accepted-as-risk`, `disputed`,
-  or `answered` again. Those three stay operator-only overrides; re-adjudicating into one would let
-  the adjudicator self-author an operator-only disposition under cover of "answering" it. `resolved`
-  is the ordinary case, and **the counterargument is folded into the record as an edit**. This is
-  the load-bearing half: a counterargument the artifact does not carry is one the next gauntlet
-  raises again, because the record still does not say it. **Whichever of the two terms the
-  re-adjudication lands on, it re-presents before anything is written** — an answered row that
-  becomes `resolved` needs its edit drafted and therefore re-presents, which the existing "override
-  *into* `resolved` re-presents too" rule below already covers; an answered row that becomes
-  `revise` re-presents on the same footing, including on a run where another `revise` row already
-  holds the advance decision, so the discarded counterargument is never dropped without the operator
-  seeing the swap.
+- `accepted-as-risk: <reason>` — read as "accepted as a risk": explicit acceptance, recorded for
+  audit.
+- `disputed: <reason>` — read as "disputed": the operator disagrees with the finding; recorded for
+  audit.
+- `answered: <reason>` — read as "answered": the operator supplies a counterargument the passes did
+  not have, and the finding is **re-adjudicated in light of it** rather than vetoed. It is the
+  operator's move for "you are measuring the system as it is and I am changing it", "that capability
+  is absent because I intend to build it", and "that is out of scope, here is the bound" — one
+  instance of a general rule: any finding the passes raised for lack of information the operator
+  actually holds is answered, not disputed or accepted as risk. `answered` is **not terminal** —
+  **the adjudicator re-adjudicates it**, on the same footing as its original proposal: the
+  re-adjudicated outcome is `resolved` or `revise`, the same two terms and no others — never
+  `accepted-as-risk`, `disputed`, or `answered` again. Those three stay operator-only overrides;
+  re-adjudicating into one would let the adjudicator self-author an operator-only disposition under
+  cover of "answering" it. `resolved` is the ordinary case, and **the counterargument is folded into
+  the record as an edit**. This is the load-bearing half: a counterargument the artifact does not
+  carry is one the next gauntlet raises again, because the record still does not say it. **Whichever
+  of the two terms the re-adjudication lands on, it re-presents before anything is written** — an
+  answered row that becomes `resolved` needs its edit drafted and therefore re-presents, which the
+  existing "override *into* `resolved` re-presents too" rule below already covers; an answered row
+  that becomes `revise` re-presents on the same footing, including on a run where another `revise`
+  row already holds the advance decision, so the discarded counterargument is never dropped without
+  the operator seeing the swap.
 
 ## Advancing, revise rounds, and runs
 
@@ -97,24 +102,30 @@ operator is the one who accepts it.
 
 ## Accepting, and overriding in one round-trip
 
-Present, then wait. The operator either accepts ("go") or overrides — "dispute C3, otherwise go", or
-"answer C3: we're changing the auth provider next quarter, otherwise go" when the operator holds a
-counterargument the passes did not have. Overrides apply in **one round-trip**: take every override
-from that one reply, apply them together, and do not walk back through the table finding by finding.
+Present, then wait. The operator either accepts ("go") or overrides, each override with its reason:
+"dispute C3: <why>", "accept C2 as a risk: <why>", or "answer C3: we're changing the auth provider
+next quarter" when the operator holds a counterargument the passes did not have; "otherwise go" may
+follow any of them. The stored-term form, "accepted-as-risk C2: <why>" (likewise "disputed C3:
+<why>" and "answered C3: <why>"), is the same override and is recorded identically. Overrides apply
+in **one round-trip**: take every override from that one reply, apply them together, and do not walk
+back through the table finding by finding.
 
 - **Echo the full post-override table.** After applying any override, re-render the complete
-  `C1`…`Cn` disposition table — **not just the outcome line** — as the last thing before the
-  accepted tail executes. A misapplied override ("dispute C3" recorded against C4) changes nothing
-  that one line displays, and the audit trail it lands in is permanent.
+  `C1`…`Cn` table — **not just the outcome line** — as the last thing before the accepted tail
+  executes. Each row's outcome shows the plain reading from the glossary above, and the operator's
+  three outcomes show it in the reply words: accepted as a risk, disputed, answered. A misapplied
+  override ("dispute C3" recorded against C4) changes nothing that one line displays, and the audit
+  trail it lands in is permanent.
 - **An override naming an id outside the presented range is rejected.** "dispute C7" against a
-  five-row table is an error, not a puzzle: say which ids exist and ask again. **Never map an
-  unknown id onto the id you think was meant.**
+  five-row table is an error, not a puzzle: name the findings that exist, each by its headline with
+  its id in round brackets, and ask again. **Never map an unknown id onto the id you think was
+  meant.** This holds for all three forms — dispute, accept as a risk, answer.
 - **An override with no reason is incomplete.** `accepted-as-risk`, `disputed`, and `answered` carry
-  the operator's reason text, and you may not write it for them — so "dispute C3" or "answer C3",
-  with nothing said about why, is not yet a disposition: ask for the reason and record nothing until
-  they give it. **Never record any of the three with a reason you drafted, and never with the reason
-  slot empty.** This is the one path by which text you wrote could enter the permanent trail wearing
-  the operator's signature.
+  the operator's reason text, and you may not write it for them — so "dispute C3", "accept C3 as a
+  risk" or "answer C3", with nothing said about why, is not yet a disposition: ask for the reason
+  and record nothing until they give it. This holds for all three forms. **Never record any of the
+  three with a reason you drafted, and never with the reason slot empty.** This is the one path by
+  which text you wrote could enter the permanent trail wearing the operator's signature.
 - **An override off `resolved` withdraws that row's drafted edit.** Every `resolved` row's edit text
   was drafted before you presented, and only the rows still `resolved` once the overrides are
   applied belong to the accepted set. An override to `disputed`, `accepted-as-risk`, `answered`, or

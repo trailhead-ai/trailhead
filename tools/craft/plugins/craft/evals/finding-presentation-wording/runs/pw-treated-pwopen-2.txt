@@ -1,0 +1,30 @@
+The spec review (gauntlet) of the Hollin Hill telescope loan desk spec: all eight reviewers have reported. Maturity: production (basis: stamp). No concerns were waived.
+
+The spec mostly holds up. The reviewers found two problems serious enough to need your decision, and both are about what happens when a loan doesn't end cleanly. The Problem says nobody can tell who had a scope when its mirror was scratched. But the criterion where "the loan officer records the telescope as back, with a note of its condition" (AC4) only works if the officer is there on the return date. A scope a member leaves in the cupboard shows as free with no note, which is the same failure the spec was written to fix. The second problem is emails that never arrive. The confirmation and the reminder "listing what goes back in the case" (AC5) both depend on the address being typed correctly, and nothing tells anyone when they bounce. Below those two, several reviewers kept landing on the same gaps: the promise that a member can "see where the loan stands" has nothing delivering it, and the waiting-list offer in the cancellation criterion (AC3) is never closed or recorded.
+
+The failure-cases reviewer was right on both serious points. It rated the bounced-email point as only worth fixing. I raised it to needs your decision because the spec is at production maturity, where a failure nobody can see is rated that way. The right-problem reviewer's idea of lending by the night is worth considering. But its own confidence note says nobody knows how often a loan is for one night, so it rests on a guess about members and I moved it down to "worth fixing, your call". The ease-of-use reviewer wanted the finder-cap list added to the confirmation email, but it missed that the reminder (AC5) already carries that list. The real risk is the reminder not arriving, which is the bounced-email problem, so that one moved down too. The fact check found one wrong fact: the club's equipment register lists seven telescopes, not six. That's a one-word fix, and the spec doesn't depend on the number anywhere else.
+
+My recommendation is to make two edits and let the spec advance. Change AC4 so a scope that comes back without a note shows as unchecked, not free. Add a seventh criterion so an undelivered email shows up for the loan officer. The "worth fixing" items below are yours to take or leave. I'd at least correct the telescope count and settle the "see where the loan stands" wording.
+
+**Recommended outcome:** apply both edits, and the spec advances to ready in this round.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *A telescope left without a condition note shows as free, and nobody can tell who had it* (C1) | fixed in the spec | *rewrite AC4: no condition note means "returned and unchecked", still tied to the borrower, and it can't be lent* |
+| *A confirmation or reminder that bounces is never seen by anyone* (C2) | fixed in the spec | *add AC7: the loan officer sees an undelivered email against its loan, with the member and the address used* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Worth fixing, your call: 10 findings.**
+- The register lists seven telescopes, not six.
+- The promise to "see where the loan stands" has nothing delivering it (raised by two reviewers).
+- The waiting-list offer is never closed or recorded (raised by two reviewers).
+- Who may read condition notes is unsettled: one reviewer says only the committee, another says every member.
+- Nothing ties a cancellation to the member who borrowed.
+- Nobody has said which clock the 48 hours run on.
+- Nothing stops one member holding two loans on the same dates.
+- Lending by the night instead of by dates (moved down).
+- The finder-cap list in the confirmation email (moved down).
+- Whether the history is stored or rebuilt from events, which is a question for planning.
+
+**Rough edges, nothing to decide: 2 findings.** The confirmation email shows which dates a scope is taken, and the spec uses "loan calendar" and "loan history" as if they were one page.

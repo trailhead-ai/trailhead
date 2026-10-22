@@ -1,0 +1,45 @@
+**Spec review: the telescope loan desk, round 1**
+Maturity: production (basis: stamp). No concerns were waived.
+
+The review found three gaps that matter. First, the Objectives promise that a member can "see where the loan stands", but nothing after the first confirmation email lets them do that. Second, the spec doesn't fix the scratched-mirror problem it opens with. The return criterion says the loan officer records the telescope as back with a note of its condition, and that it shows as free from that day (AC4). Under that wording, a scope a member leaves in the cupboard shows as free with no note on it. Third, every message to a member goes to an email address that nobody checks. One mistyped address silently loses the confirmation, any waiting-list offer and the return reminder. The smaller gaps are: the waiting list never closes; the 48-hour cancel window has no stated clock; nothing ties a cancel to the person who borrowed; and nobody has decided who can read condition notes.
+
+The missing loan status is the strongest finding: the self-consistency and ease-of-use passes reached it separately. The failure-cases pass was right on both of its points but rated the undelivered email too low. At production maturity, a failure that nobody notices until a member complains needs your decision. The right-problem pass went too far. Lending by the night depends on how often members want a single night, which its own confidence line admits nobody knows, and the spec's complaint is about weekend clashes. That makes it worth your consideration, not a defect. The ease-of-use pass's finder-cap finding misread the spec: the reminder two days before the return date already lists what goes back in the case (AC5). The fact check found seven telescopes in the club's register, not six. Nothing in the spec depends on that number. One question surfaced from two directions: whether every member can read the history, condition notes included (raised by both the security and left-undecided passes).
+
+What I recommend: apply three edits, then move the spec forward. Add a loan-status criterion, show a telescope as free only after its condition note is recorded, and show undelivered emails to the loan officer. You can fix the rest by hand now or take it into planning.
+
+**Recommended outcome:** move to `ready` this round, once the edits for C1–C3 land.
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | The Objectives promise "see where the loan stands", but no criterion delivers it | `resolved` | add AC7: a member can see each loan's state and dates at any time |
+| C2 | A telescope nobody checked shows as free with no condition note, so a scratch can't be traced | `resolved` | rewrite AC4: free only once the note is recorded |
+| C3 | An undeliverable confirmation, offer or reminder email is never seen by anyone | `resolved` | add AC8: an undelivered email is shown to the loan officer |
+
+Drafted text, applied word for word if you accept:
+- **AC7.** A member can see each of their loans and where it stands (booked, on loan, back or cancelled) with its start and return dates, at any time after the confirmation email.
+- **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition, and it shows as free on the club's loan calendar only from the day that note is recorded. Until then, a telescope past its return date shows as returned and unchecked, and is not lent.
+- **AC8.** When a confirmation, waiting-list offer or reminder email cannot be delivered, the loan officer is shown the loan it belongs to and the address that failed.
+
+Two caveats:
+- **C1:** how a member proves a loan is theirs is the same open question as the unprotected cancel.
+- **C2:** the next loan of that telescope waits until the loan officer records the note.
+
+**Worth fixing, your call (7):**
+- Lending by the night instead of by date range (downgraded: it rests on guesses about how members borrow).
+- The scope is larger than the double-booking complaint needs.
+- A waiting-list offer is never recorded or closed.
+- Anyone holding a forwarded confirmation email can cancel the loan.
+- Condition notes are visible to every member.
+- A member can hold two telescopes on the same dates.
+- No stated clock for the 48-hour cancel window.
+
+**Rough edges, nothing to decide (5):**
+- The register lists seven telescopes, not six.
+- Finder cap missing from the confirmation email (downgraded: the return reminder already lists it).
+- "Loan calendar" and "loan history" are used loosely.
+- "Waiting list" reads as jargon.
+- The confirmation email reveals which dates are already taken.
+
+I dropped two editorial points: naming the mail provider, and whether the history is stored or worked out from events.
+
+Reply "go" to apply all three edits and move the spec to `ready`. To change a row, name it with your reason, for example "dispute C2: …", "accept C3 as a risk: …" or "answer C1: …".

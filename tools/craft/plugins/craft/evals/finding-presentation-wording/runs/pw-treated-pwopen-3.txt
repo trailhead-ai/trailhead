@@ -1,0 +1,37 @@
+The spec review (gauntlet) of the telescope loan desk spec: maturity is production (basis: stamp), no concerns were waived, and 2 of 4 facts were confirmed.
+
+**What the passes found.** Most findings are about loose ends in the loan's lifecycle, not about the core idea of borrowing. The biggest gap is at the hand-back. "The loan officer records the telescope as back, with a note of its condition, and the telescope shows as free… from that day" (AC4) assumes the officer is there on the return date. If they aren't, the scope shows as free with no condition note, which is the scratched-mirror problem from the spec's own Problem statement. The second gap is email. The Objectives promise that "a loan and its return date reach the right member", but nothing tells anyone when a confirmation or reminder never arrives. Around those two sit smaller holes: the promised "see where the loan stands" has no criterion behind it, waiting-list offers are never recorded or closed, and the 48-hour cancel cut-off, who may cancel, and who may read condition notes are all left open.
+
+**Whether it holds.** The failure-cases reviewer was right about the unchecked return. It rated the bounced-email problem only "worth fixing", but this spec is at production maturity, where a failure nobody can see needs your decision, so I raised it. The right-problem reviewer's call to lend by the night instead of by date range rests on a guess about how members use the scopes, and its own confidence line says the spec doesn't show that. The Problem talks about weekends, so I moved it down to "worth fixing, your call". The ease-of-use reviewer wanted the case contents in the confirmation email. That overreached, because "the member receives a reminder listing what goes back in the case" (AC5) already covers it, and what's left is the bounced-reminder case. The self-consistency and ease-of-use reviewers, working separately, both found the missing "see where the loan stands" criterion. That makes it the strongest of the "worth fixing" findings. I dropped three findings: naming the mail provider and the "next in line" wording are editorial, and whether the history is stored or rebuilt from events is a question for planning. The fact check found that the equipment register lists seven telescopes, not six. I haven't checked the register myself.
+
+**What to do.** Fix both problems with edits to the spec itself: rewrite the return criterion so a scope counts as free only after a condition note, and add one criterion that shows the loan officer any email that couldn't be delivered. Nothing needs a rewrite of the spec's framing.
+
+**Recommended outcome:** the spec advances to `ready` this round once you accept.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *A scope returned with no officer present shows as free with no condition note (C1)* | fixed in the spec | *rewrite the return criterion (AC4) so free starts only once a condition note is recorded* |
+| *Nobody learns when a confirmation or reminder email never arrives (C2)* | fixed in the spec | *add a new criterion (AC7) showing the loan officer each email that couldn't be delivered* |
+
+The drafted text for each:
+
+- **C1:** "**AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition. It shows as free on the club's loan calendar only from the day that note is recorded; until then it shows as returned and unchecked, against the member who borrowed it."
+- **C2:** "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer sees which member and which loan it was for, so the member can be reached another way."
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Worth fixing, your call (9).** No decision needed on these; they're logged in the spec's review record.
+- The Objectives promise a member can "see where the loan stands", but no criterion delivers that.
+- Waiting-list offers aren't recorded and have no way to close, even though the history (AC6) lists them.
+- The 48-hour cancel cut-off has no stated clock (midnight or noon).
+- Anyone holding a forwarded confirmation email could cancel the loan.
+- Condition notes are readable by every member, and the two reviewers who looked disagree on whether they should be.
+- One member could hold two scopes on the same dates.
+- Lending by the night instead of by date range (moved down from "needs your decision").
+- The six criteria are a bigger build than the double-booking complaint needs.
+- The case contents appear only in the reminder (moved down from "needs your decision").
+
+**Rough edges, nothing to decide (3).**
+- The spec says six telescopes where the register lists seven.
+- "Loan calendar" and "loan history" are two different pages.
+- The confirmation email reveals which dates a scope is taken.

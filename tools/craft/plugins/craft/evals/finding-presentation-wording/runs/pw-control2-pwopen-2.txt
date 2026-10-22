@@ -1,0 +1,47 @@
+# Gauntlet: telescope loan desk spec, round 1
+
+Maturity: production (basis: stamp). No concerns were waived. All eight reviewers returned.
+
+**What the reviewers found.** The spec puts the paper ledger online, and most of it holds. The weak point is the return, which is the one place the Problem's third complaint is supposed to get fixed. AC4 marks a telescope free on its return date, whether or not anyone has checked it. Members' emails also have no failure path: a confirmation or reminder that never arrives fails silently, and at production maturity that needs your decision. Below those two issues sits a cluster of smaller gaps. "See where the loan stands" is promised but no criterion delivers it. Waiting-list offers are never closed or recorded. Who may cancel a loan isn't stated, and neither is who can read condition notes. Several rules are loose enough that two different builds would both pass: the 48-hour clock, and one loan per member.
+
+**Whether it holds.** The failure-cases reviewer's unchecked return is the strongest finding. A scope left in the cupboard shows as free with no note, so the next member finds the scratch and nobody knows who had it. That is exactly the complaint the spec exists to fix. The same reviewer rated a bounced reminder as "worth fixing". I have raised it, because the spec names no signal a human would see when an email fails, and production maturity puts that in "needs your decision". I downgraded two Criticals:
+
+- **Right problem: lend by the night.** The reviewer admits that how often a loan is for a single night is not known, so the finding rests on a guess about how members behave.
+- **Ease of use: finder cap missing from the confirmation email.** The reviewer missed that AC5's reminder already lists what goes back in the case.
+
+The right-problem reviewer's claim that six criteria are too big a build for the complaint also overreaches, because the Problem names three complaints, not one. The fact check found the club owns seven telescopes, not six. Nothing in the spec depends on that number.
+
+**What to do.** Rewrite AC4 so a returned scope is "returned, unchecked" until the officer records a condition note. Add one criterion that shows the loan officer any email that could not be delivered. Both are edits to the spec's own text, so it can advance this round. The "worth fixing" gaps are logged but don't hold up the spec. The two that two reviewers reached independently are the best to fix next: the undelivered "see where the loan stands" and the unrecorded waiting-list offers.
+
+**Recommended outcome: apply C1 and C2, then the spec advances to `ready` this round.**
+
+| id | finding | proposed disposition | proposed edit |
+|---|---|---|---|
+| C1 | A telescope shows as free on its return date even if nobody checked its condition | `resolved` | rewrite AC4 so the scope shows "returned, unchecked", with who had it, until a condition note is recorded |
+| C2 | A confirmation or reminder that bounces is never seen by anyone | `resolved` | add AC7 so the loan officer sees every email that could not be delivered |
+
+Drafted text that will be applied as written:
+
+- **C1** replaces AC4 with: "**AC4.** When a telescope comes back, the club's loan calendar shows it as returned and unchecked, with the member who last had it, until the loan officer records a note of its condition; from then it shows as free."
+- **C2** adds this criterion after AC6: "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer is shown the email, the member it was for, and the loan it belongs to."
+
+**Would cause trouble later, worth fixing, your call: 8.**
+
+- **Raised by two reviewers each:**
+  - "See where the loan stands" has no criterion behind it (ease of use, self-consistency).
+  - Waiting-list offers are neither recorded nor closed (buildability, self-consistency).
+  - The 48-hour cancel clock is unanchored (left undecided, failure cases).
+  - Who sees condition notes: security says only the officer, the left-undecided reviewer would pin every member.
+- **Raised by one reviewer each:**
+  - Anyone holding a forwarded email can cancel a loan (security).
+  - One member can hold two scopes on the same dates (left undecided).
+  - Lend by the night (right problem, downgraded).
+  - Finder cap in the confirmation email (ease of use, downgraded).
+
+**Rough edges, nothing to decide: 3.**
+
+- The Problem says six telescopes, but the register lists seven.
+- The confirmation email reveals which dates a scope is taken.
+- The terms "loan calendar" and "loan history" are used without a defined relationship.
+
+Full detail on any finding is available on request. Reply "go" to accept, or override by id. For example: "dispute C2: <your reason>", "accept C1 as risk: <your reason>", or "answer C1: <a counterargument the reviewers didn't have>".

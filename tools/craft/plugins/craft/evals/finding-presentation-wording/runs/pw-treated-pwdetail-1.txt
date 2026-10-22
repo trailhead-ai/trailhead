@@ -1,0 +1,23 @@
+The spec review: full detail on the three findings that need your decision
+
+**Would build the wrong thing, needs your decision**
+
+**Members are not told what goes back in the case until the loan is nearly over (C1)**
+Should the first email a member gets also list what goes back in the case? I recommend it, because otherwise a member can lose a part they were never told was theirs to look after.
+The confirmation email gives only the loan and its return date (AC1). The kit list arrives later, in the reminder two days before the return date that names the telescope, its eyepieces and the finder cap (AC5). So a member collects a scope without knowing the finder cap is part of the loan and loses it in the first week. Or the reminder goes to a mistyped address and never arrives, and the case comes back without the cap. Either way the member is asked to pay for a replacement they were never warned about. Reading the spec closely, the ease of use reviewer went a little too far in saying members are never told. They are told, but only at the end, and only if the reminder gets through.
+Fix: `, and lists what goes back in the case: the telescope, its eyepieces, and the finder cap` added to the end of the confirmation email criterion (AC1). The list is copied word for word from the reminder (AC5), so the two cannot disagree.
+Raised by: ease of use. Failure cases came at the same gap separately, through the reminder that bounces.
+
+**A loan takes up a whole telescope for the full loan period, even when the member only wants one night (C2)**
+Should the club lend telescopes by the night rather than from a start date to a set return date? I recommend it only if single-night loans are common, because the answer reshapes how borrowing works throughout the spec.
+A member borrows by giving a start date and is sent a return date (AC1), and a scope is on loan to one member at a time (AC2). A member who wants the club's largest scope for one clear Saturday therefore holds it for the whole loan period. Someone else who wanted the Sunday is turned away and offered the next free start date, which may be weeks away, while the scope sits unused. That is the double-booking complaint in the Problem coming back in another form.
+Fix: members would book the nights they want, add more nights if they need them, and the scope would be free on every other night. This rewrites the Objectives and five criteria: borrowing from a start date (AC1), one member at a time (AC2), cancelling up to 48 hours before the start (AC3), recording the return on the return date (AC4), and the reminder two days before the return date (AC5). Caveat: the reviewer did not know how often a loan is really for a single night, and nothing in the spec says. If you know most loans are for a weekend or longer, this finding loses most of its force. Answering it with that fact is the right move rather than disputing it.
+Raised by: right problem.
+
+**A telescope dropped back in the cupboard shows as free with no condition note (C3)**
+Should a returned telescope stay off the calendar until someone has checked it? I recommend it, because that check is the only thing that answers the Problem's question of who had the scope when its mirror was scratched.
+The return criterion has the loan officer record the telescope as back, with a note of its condition, and the scope shows as free on the loan calendar "from that day" (AC4). If the officer is not there on the return date and the member leaves the scope in the cupboard, the calendar still shows it free and there is no note. The next member finds the scratched mirror, and the loan history, which shows each return with its date and condition note (AC6), has no note to show. Nobody can say whether the damage happened on the last loan or this one.
+Fix: `and the telescope shows as free on the club's loan calendar only once that note is recorded; until then it shows as returned and unchecked` in place of the closing clause of the return criterion (AC4), "and the telescope shows as free on the club's loan calendar from that day".
+Raised by: failure cases.
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

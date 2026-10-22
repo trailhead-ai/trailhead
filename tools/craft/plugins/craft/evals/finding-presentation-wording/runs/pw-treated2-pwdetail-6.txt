@@ -1,0 +1,50 @@
+The detail on the three findings from the spec review that need your decision. Checking them against the spec moved my view on the first one, so that one starts with the correction.
+
+### Would build the wrong thing, needs your decision
+
+**Members aren't told what goes back in the case (C1)**
+*Proposed outcome: fixed in the spec. On checking, I no longer think this needs your decision.*
+
+I recommend adding the list of what goes back in the case to the confirmation email. That is a one-clause change. When I checked the spec, though, it already does most of what this finding says is missing, so I'd now file it under "worth fixing, your call".
+
+The worst case as raised: a member returns a telescope without its finder cap because nobody told them the cap belongs in the case, and is then asked to replace it. The confirmation email only states the loan and its return date (AC1). But the spec also sends a reminder two days before the return date that lists the telescope, its eyepieces and the finder cap (AC5). So members are told. What's left is smaller: a member who checks the case when they collect it has no list to check against, and a reminder sent to a mistyped address never arrives. The failure-cases reviewer raised that bounce separately as worth fixing.
+
+Fix: `", and lists what goes back in the case: the telescope, its eyepieces and the finder cap"` added to the end of the confirmation email criterion (AC1), so members have the list from the day they collect the telescope.
+
+Raised by: ease of use.
+
+---
+
+**A loan ties up a whole telescope for the full dates asked (C2)**
+*Proposed outcome: fixed in the spec.*
+
+You need to decide whether members borrow a telescope by the night or for a stretch of dates. I recommend by the night, but only if you know single-night loans are common. The case for the change depends on that, and nobody has checked it.
+
+The worst case: the spec lends a telescope from a start date to a return date (AC1), one member at a time (AC2). Say a member wants the club's largest scope for one clear night. They book it for the weekend, it sits unused for the other nights, and other members wait weeks for a night it was free all along.
+
+Fix: members would book a telescope one night at a time and add more nights if they want them, so one clear night no longer holds a scope for a weekend. This rewrites the whole Borrowing section: how a member borrows a telescope (AC1), one loan per telescope at a time (AC2), and cancelling up to 48 hours ahead (AC3). It also changes the "return date" wording in recording a return (AC4) and the reminder before the return date (AC5). Caveat: the reviewer marked its own confidence as medium for the same reason I give above. If you know most loans really are for several nights, answer it with that and the spec stays as written.
+
+Raised by: right problem.
+
+---
+
+**A scope left in the cupboard shows as free with no condition note (C3)**
+*Proposed outcome: fixed in the spec.*
+
+I recommend that a returned telescope shows as "returned, not yet checked" until the loan officer records its condition, and only shows as free after that. Without this, the spec doesn't fix the scratched-mirror problem it was written to solve.
+
+The worst case: the spec has the loan officer record the condition on the return date, and the telescope shows as free from that day (AC4). A member who leaves the scope in the cupboard when the officer isn't there leaves it showing as free with no condition note. The next member finds the scratched mirror, and nobody can say who had it. That is the exact failure the Problem section opens with, and no criterion prevents it.
+
+Fix: on the loan calendar, a returned telescope would show as returned and unchecked until its condition is recorded. Replacement text for the criterion on recording a return (AC4):
+
+    **AC4.** When a telescope comes back, it shows on the club's loan calendar as returned and
+    unchecked until the loan officer records a note of its condition; it shows as free from the
+    day that note is recorded.
+
+Raised by: failure cases.
+
+---
+
+If you agree with my changed view of the confirmation-email finding (C1), the only edit it would still have is that one-clause addition. I'll re-present the recommendation with C1 moved down a level before anything is written.
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

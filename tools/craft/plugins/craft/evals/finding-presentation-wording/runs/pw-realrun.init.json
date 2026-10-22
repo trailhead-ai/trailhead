@@ -1,0 +1,67 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "model": "claude-opus-5-5",
+  "plugins": [
+    {
+      "name": "craft",
+      "source": "craft@inline",
+      "path": "<worktree>/tools/craft/plugins/craft"
+    },
+    {
+      "name": "cc-plugin-agents-md",
+      "source": "cc-plugin-agents-md@builtin",
+      "path": "builtin"
+    },
+    {
+      "name": "cc-plugin-telemetry",
+      "source": "cc-plugin-telemetry@builtin",
+      "path": "builtin"
+    },
+    {
+      "name": "cc-plugin-plugin-authoring",
+      "source": "cc-plugin-plugin-authoring@builtin",
+      "path": "builtin"
+    }
+  ],
+  "agents_craft": [
+    "craft:advocate",
+    "craft:architect",
+    "craft:assumption-prover",
+    "craft:attacker",
+    "craft:breaker",
+    "craft:builder",
+    "craft:code-reviewer",
+    "craft:consistency-auditor",
+    "craft:divergence-prober",
+    "craft:doc-finder",
+    "craft:drift-gate",
+    "craft:executor",
+    "craft:log-sifter",
+    "craft:planner",
+    "craft:premise-attacker",
+    "craft:researcher",
+    "craft:security-auditor",
+    "craft:simplifier",
+    "craft:test-runner",
+    "craft:troubleshooter"
+  ],
+  "slash_commands_craft": [
+    "craft:brainstorm",
+    "craft:consolidate",
+    "craft:consult",
+    "craft:distill",
+    "craft:drive",
+    "craft:execute",
+    "craft:gauntlet",
+    "craft:plan",
+    "craft:polish",
+    "craft:receiving-code-review",
+    "craft:refine",
+    "craft:review",
+    "craft:slice",
+    "craft:tidy-followups"
+  ],
+  "slash_commands_other_prefixed": [],
+  "permissionMode": "dontAsk"
+}
