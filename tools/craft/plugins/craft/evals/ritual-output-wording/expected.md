@@ -1630,17 +1630,14 @@ copy a step 8 label; it does carry the step 8 "Enumerated states" list. No `**Pa
 said "none".
 
 **Fence.** `lore vault ls` live listed `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced environment it
-listed only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD before the run was
-`<live-vault-commit>` and after it `<live-vault-commit>`. **It moved**, which
-the recipe counts as the task failing. The one commit between them is `<live-vault-commit>`, `lore: andromeda published 2 item(s)`,
-13:20:09 -0500, publishing two items about amend (three files: `<live-vault-record>`, `<live-vault-record>`);
-the commits just before it (`<live-vault-commit>`, `<live-vault-commit>`, `<live-vault-commit>`) are this host's own `<this-host>` publishes, so the window holds
-that single `andromeda` commit among them. The transcript contains no reference to the live
-vault path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory.
-**Ruling (controller, 2026-10-22):** the run stands. `andromeda` is a different machine; the run was on host
-`<this-host>`, whose own publishes carry that host's name in the same log. The move is that machine's publish arriving
-through sync, not a write by the session under test, which is what the HEAD check exists to catch. The close-out run's check
-therefore reads every commit in the window and fails only on a commit published from this host.
+listed only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD (`<head-before>`,
+`<head-after>`; the live vault is private, so its commit ids, record names and times are not recorded here) **moved**, which
+the recipe counts as the task failing. The one commit in the window was published from another host and arrived through
+sync; the commits just before it were this host's own publishes. The transcript contains no reference to the live vault
+path (0 hits for `local/state/lore` and `vaults/trailhead`) and the sandbox denies writes outside the run directory.
+**Ruling (controller, 2026-10-22):** the run stands. The move is another machine's publish arriving through sync, not a
+write by the session under test, which is what the HEAD check exists to catch. The close-out run's check therefore reads
+every commit in the window and fails only on a commit published from this host.
 
 **Edits to the captures after they were taken, to pass the scan.** `capture_scan.py` flagged three shapes, none a credential;
 each was rewritten in the committed files only: the run and snapshot directories under `/private/tmp` became `${RUN}` and
@@ -1662,8 +1659,8 @@ CLI, the shared `trailhead/` library), in place of `437bbe8e`. The invocation an
 `slice/SKILL.md`. Seeding is as at base B: spec `spec/holds-and-pickup` (status `ready`, with its `## Slices` ledger) and a
 `done` parent `task/the-first-hold-slice` (label `craft/slice-parent`, `**Covers:** AC1, AC3`, `**Partially covers:** AC2`).
 Fence before the run: live `lore vault ls` lists `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced
-environment it lists only `lanternrow` at the run directory. Live trailhead vault HEAD before the run:
-`<live-vault-commit>`.
+environment it lists only `lanternrow` at the run directory. Live trailhead vault HEAD before the run recorded
+(`<head-before>`).
 
 **Reading fields (written as empty rows before the run, filled from the step 8 statement afterwards)** (definitions as `Readings (by eye)`
 above). The session chooses its own slice, so `left-correct` is judged against what is left after the slice it states,
@@ -1743,24 +1740,20 @@ case-insensitive search of the body for "You will be able to", "Try it", "remain
 the step 8 "Enumerated states" list as at base B (six states). No ledger line was appended to the spec, as at base B.
 
 **Fence.** Live `lore vault ls`: `default`, `trailhead`, `lake-in-the-woods`, `levr`; inside the fenced environment it listed
-only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD before the run was
-`<live-vault-commit>` (an `andromeda` publish at 13:29:22); read straight after the session ended
-(about 13:34) it was unchanged. Read again at 13:35:47 it was `<live-vault-commit>`, and at the final read
-(about 13:38) `<live-vault-commit>`. **It moved**, by two commits in the window `<live-vault-commit>..<live-vault-commit>`:
-`<live-vault-commit> 2026-10-22 13:37:23 -0500 lore: andromeda published 1 item(s)` (another host, a sync arriving, recorded and not a
-failure) and `<live-vault-commit> 2026-10-22 13:35:22 -0500 lore: <this-host> published 1 item(s)`,
-two files (a `.json` and a `.md` for a record about unrelated work). **That subject names this host's publisher, which
-the revised recipe counts as the task failing.** Evidence bearing on whether the session wrote it, offered for the
-operator's ruling and not as an argument that the rule does not apply: the commit is stamped 13:35:22, after the session's
-last event (13:33:33) and after the unchanged read taken when it ended; the transcript holds 0 references to
-`local/state/lore` and `vaults/trailhead`; the sandbox denies writes outside the run directory; and the commit adds a record
-about a different piece of work, which is what another session on this host publishing through the same publisher would
-produce. The prior commits on this host in the minutes before the run (`<live-vault-commit>` to `<live-vault-commit>`) are the same pattern.
+only `lanternrow` at the run directory, checked before the run. The live trailhead vault's HEAD read straight after the
+session ended was unchanged from before it. Read again about two and four minutes later, it had **moved** by two commits:
+one published from another host (a sync arriving, recorded and not a failure) and one published from this host, about two
+minutes after the session's last event, adding a record about unrelated work. **That subject names this host's publisher,
+which the revised recipe counts as the task failing.** Evidence bearing on whether the session wrote it: the commit landed
+after the session's last event and after the unchanged read taken when it ended; the transcript holds 0 references to
+`local/state/lore` and `vaults/trailhead`; the sandbox denies writes outside the run directory; and the record is about a
+different piece of work, which is what another session on this host publishing would produce. The live vault is private,
+so its commit ids, record names and times are not recorded here.
 **Ruling (controller, 2026-10-22):** the fence holds. The HEAD check exists to catch a write by the session under test, so
-its window is the session's lifetime, and HEAD read unchanged when the session ended. `<live-vault-commit>` landed after the
-sandboxed process had exited, with `LORE_PUBLISH_DISABLE=1` in its environment, and carries a record about other work; it is
-another session on this host publishing. The recipe's "after" read was taken too late to separate the two; a later run
-should take it at the session's exit.
+its window is the session's lifetime, and HEAD read unchanged when the session ended. The commit landed after the
+sandboxed process had exited, with `LORE_PUBLISH_DISABLE=1` in its environment; it is another session on this host
+publishing. The recipe's "after" read was taken too late to separate the two; a later run should take it at the session's
+exit.
 
 **Edits to the captures after they were taken, to pass the scan.** As at base B: the run and snapshot directories under
 `/private/tmp` became `${RUN}` and `${SNAP}` (and `${SNAP}/tools/craft/plugins/craft` became `${CLAUDE_PLUGIN_ROOT}`); the 3
@@ -1768,7 +1761,8 @@ lore record revisions became `<revision-1>` to `<revision-3>`, consistently; the
 credential-scrub text the session read (`SECRET_KEY=` and two like it) gained brackets (`SECRET_KEY[=]`). The operator's
 home path was replaced by `$HOME` (the placeholder convention). `capture_scan.py` passes on the new captures
 (`test_the_committed_eval_captures_pass_the_scan` green, 20 passed). `grep -rn "$HOME\|$USER"` over
-`runs/proposal-realrun-treated.*` returns 0 hits. The raw stream-json was not kept.
+`runs/proposal-realrun-treated.*` returns 0 hits. The raw stream-json was not kept. After the security review, one per-user macOS temporary
+directory path in the transcript (a `mktemp` refusal) was replaced by `${TMPDIR}`.
 
 ### Go/no-go
 
@@ -1892,3 +1886,9 @@ Recorded after the whole-change review; no capture, table row or verdict above c
   so, and in `proposal-treated-1` and `proposal-treated-3` the value claim restates the opening. Every result above was
   measured on step 8 without that sentence. The operator chose on 2026-10-22 to ship it as measured; adding the sentence
   is a follow-up, measured as its own change.
+- **The recipe is for hand-written fixture specs only.** The security review of this change found that
+  `scripts/eval-sandbox` leaves parts of the operator's harness state under `$HOME` readable and the network open, and the
+  recipe keeps the real `HOME`/`USER` and grants `Bash`. A fixture spec carries no hostile text, so both real runs here
+  were safe; a spec from a real vault could carry an injected instruction that reads that state and sends it out. Never run
+  this recipe on a non-fixture spec until the sandbox is narrowed. The HEAD check is a tripwire for a write by the session,
+  not the containment; the containment is the sandbox's write rule.
