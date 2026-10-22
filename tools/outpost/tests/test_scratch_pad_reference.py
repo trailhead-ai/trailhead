@@ -1161,6 +1161,61 @@ def test_the_wait_line_and_the_syncs_own_line_are_readable_before_the_run_exits_
         proc.stderr.close()
 
 
+def _pump(stream):
+    import queue
+    import threading
+
+    lines: queue.Queue = queue.Queue()
+
+    def run():
+        for line in stream:
+            lines.put(line.rstrip("\n"))
+        lines.put(None)
+
+    threading.Thread(target=run, daemon=True).start()
+    return lines
+
+
+def test_the_syncs_stderr_wait_line_is_readable_before_the_run_exits(mod, vault, tmp_path):
+    release = tmp_path / "release"
+    _stub_lore(vault.bin, vault.record, err="lore: waiting for the vault write lock", hold=release)
+    proc, _ = _start_cli(vault, vault.argv())
+    errs = _pump(proc.stderr)
+    try:
+        assert _next_line(errs) == "scratch-pad: publish: lore: waiting for the vault write lock"
+        assert proc.poll() is None
+        release.write_text("go")
+        assert proc.wait(timeout=20) == 0
+        assert _next_line(errs) is None
+    finally:
+        release.write_text("go")
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        proc.stdout.close()
+        proc.stderr.close()
+
+
+def test_a_failing_sync_shows_each_of_its_stderr_lines_exactly_once_in_the_relay_form(mod, vault, capfd):
+    _stub_lore(vault.bin, vault.record, exit_code=1, err="lore: waiting for the vault write lock\nremote said no")
+
+    assert _run_main(mod, vault) == 1
+
+    err = capfd.readouterr().err.splitlines()
+    assert err.count("scratch-pad: publish: lore: waiting for the vault write lock") == 1
+    assert err.count("scratch-pad: publish: remote said no") == 1
+    assert all(line.startswith("scratch-pad: publish: ") for line in err)
+
+
+def test_a_streamed_publisher_that_fails_with_no_stderr_still_reports_its_exit_status(mod, vault, capfd):
+    def silent_failure(cmd, env, timeout):
+        return mod._stream_publisher([sys.executable, "-c", "import sys; sys.exit(3)"], env, timeout)
+
+    assert _run_main(mod, vault, publish_runner=silent_failure) == 1
+
+    assert capfd.readouterr().err.splitlines() == ["scratch-pad: publish: the publisher exited with status 3"]
+
+
 def test_a_publish_that_waits_longer_than_the_publish_timeout_is_not_killed(mod, vault, tmp_path, capfd):
     release = tmp_path / "release"
     _stub_lore(vault.bin, vault.record, hold=release)

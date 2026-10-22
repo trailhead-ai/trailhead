@@ -190,6 +190,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -476,11 +477,41 @@ def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
     )
 
 
+class _Streamed(subprocess.CompletedProcess):
+    """A finished publisher run whose stderr was already shown line by line; ``echoed`` is whether any was."""
+
+    echoed = False
+
+
 def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None):
-    """Run the publisher with its stdout passed through as written; only stderr is captured. No timer unless given."""
-    return subprocess.run(
-        list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace", timeout=timeout
-    )
+    """Run the publisher with stdout passed through as written and each non-blank stderr line shown as it arrives.
+
+    Lines are shown in the ``scratch-pad: publish:`` relay form, escaped; nothing is held back for the exit.
+    No timer unless given.
+    """
+    proc = subprocess.Popen(list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace")
+    echoed = []
+
+    def pump():
+        for line in proc.stderr:
+            if line.strip():
+                print(_line("publish", _esc(line.rstrip("\r\n"))), file=sys.stderr, flush=True)
+                echoed.append(True)
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        reader.join()
+        proc.stderr.close()
+    result = _Streamed(list(cmd), returncode, None, "")
+    result.echoed = bool(echoed)
+    return result
 
 
 def _esc(text: str) -> str:
@@ -850,6 +881,8 @@ def _cannot_start(exc: OSError) -> Refusal:
 
 
 def _publish_refused(result) -> Refusal:
+    if getattr(result, "echoed", False):
+        return Refusal([])
     reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
     return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
 
@@ -1423,8 +1456,8 @@ def publish_reference(
     """Publish the reference named by *reference_path* from *pad* into the vault at *vault_path*.
 
     Raises :class:`Refusal` for every problem; the pad is only read. The publisher is run without
-    ``--overwrite`` and without a timer, its stdout passed through as written; *publish_runner* is
-    ``(cmd, env, None) -> CompletedProcess`` with the publisher's stderr captured.
+    ``--overwrite`` and without a timer, its stdout and stderr shown as written; *publish_runner* is
+    ``(cmd, env, None) -> CompletedProcess`` whose captured stderr is shown after it returns.
     """
     env = os.environ if env is None else env
     reference = read_reference(reference_path, pad, env=env, cwd=cwd, publish_timeout=publish_timeout)
