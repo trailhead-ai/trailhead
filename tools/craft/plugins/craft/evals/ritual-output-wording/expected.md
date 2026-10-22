@@ -1755,6 +1755,11 @@ last event (13:33:33) and after the unchanged read taken when it ended; the tran
 `local/state/lore` and `vaults/trailhead`; the sandbox denies writes outside the run directory; and the commit adds a record
 about a different piece of work, which is what another session on this host publishing through the same publisher would
 produce. The prior commits on this host in the minutes before the run (`<live-vault-commit>` to `<live-vault-commit>`) are the same pattern.
+**Ruling (controller, 2026-10-22):** the fence holds. The HEAD check exists to catch a write by the session under test, so
+its window is the session's lifetime, and HEAD read unchanged when the session ended. `<live-vault-commit>` landed after the
+sandboxed process had exited, with `LORE_PUBLISH_DISABLE=1` in its environment, and carries a record about other work; it is
+another session on this host publishing. The recipe's "after" read was taken too late to separate the two; a later run
+should take it at the session's exit.
 
 **Edits to the captures after they were taken, to pass the scan.** As at base B: the run and snapshot directories under
 `/private/tmp` became `${RUN}` and `${SNAP}` (and `${SNAP}/tools/craft/plugins/craft` became `${CLAUDE_PLUGIN_ROOT}`); the 3
@@ -1771,6 +1776,11 @@ home path was replaced by `$HOME` (the placeholder convention). `capture_scan.py
 (`text-with-number`); step 9 held. Two things sit outside that verdict and are the operator's to weigh: the fence's HEAD
 rule tripped on a commit stamped after the session (above), and the step 7 reasoning paragraph before the statement
 carries one nickname of an uncovered criterion, which the registered guard does not read.
+
+**Ruling (controller, 2026-10-22):** go stands on both. The fence item is ruled above. The step 7 nicknames are not
+caused by commit P: the base-B real run's step 7 reasoning names uncovered criteria the same way ("the weekly report
+(AC10)", the "item is waiting" message (AC6), `runs/proposal-realrun-baseline.txt:339-342`), and commit P edits step 8
+only. They are recorded as a follow-up against step 7, outside this slice.
 
 ### Results at slice close, 2026-10-22
 
@@ -1801,7 +1811,7 @@ The reader (R1) and the blind subagent (R2) did not disagree on any reading of a
 | Opening addresses | neither (third person) | second person, about a desk action |
 | Statement length | 11 non-blank lines | 9 physical lines, 7 non-blank |
 | Step 9 shapes, `covers_gate.py` | held, exit 0 | held, exit 0 |
-| Live HEAD moved | yes, an `andromeda` commit (ruled a sync) | yes, a `<this-host>` commit stamped after the session ended (to be ruled) |
+| Live HEAD moved | yes, an `andromeda` commit (ruled a sync) | yes, a `<this-host>` commit stamped after the session ended (ruled another session; HEAD unchanged at session end) |
 
 Both real sessions chose a slice other than the stub's, so neither tests the stub's hold shelf slice; the change between
 them in the three readings agrees in direction with the arms' change from baseline to treated. Two sessions do not make a
