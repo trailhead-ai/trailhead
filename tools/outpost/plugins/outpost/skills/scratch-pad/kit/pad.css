@@ -43,7 +43,7 @@ button { font: inherit; color: inherit; }
 
 [hidden] { display: none !important; }
 
-#pad-font-notice {
+#pad-font-notice, #pad-cant-keep {
   margin: 0;
   padding: 0.5rem 1.5rem;
   border-bottom: 2px solid var(--ink);

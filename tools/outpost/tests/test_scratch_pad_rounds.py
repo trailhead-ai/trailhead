@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -1074,3 +1075,68 @@ def test_a_layout_only_round_added_to_a_pad_whose_round_one_has_a_flow_leaves_it
 
     assert _hashes(pads / "p" / "round-1") == r1
     assert _titles(pads / "p") == ["One", "Two"]
+
+
+ROUND_ID_LINE = re.compile(r'^window\.PAD_ROUND_ID = "[0-9a-f]{32}";$')
+
+
+def _round_id(pad_dir: Path, k: int) -> str:
+    lines = (pad_dir / f"round-{k}" / "round.js").read_text(encoding="utf-8").splitlines()
+    assert ROUND_ID_LINE.match(lines[2]), lines
+    return json.loads(lines[2].removeprefix("window.PAD_ROUND_ID = ").removesuffix(";"))
+
+
+def test_a_new_round_carries_a_hex_id_as_its_third_line_after_the_two_existing_lines(
+    skill, env, cwd, tmp_path, pads
+):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+
+    lines = (pads / "p" / "round-1" / "round.js").read_text(encoding="utf-8").splitlines()
+
+    assert len(lines) == 3
+    assert lines[0].startswith(ROUND_JS_PREFIX)
+    assert lines[1] == "window.PAD_ROUND_NUMBER = 1;"
+    assert ROUND_ID_LINE.match(lines[2])
+
+
+def test_the_same_round_under_two_names_gets_two_ids(skill, env, cwd, tmp_path, pads):
+    round_path = _round_file(tmp_path, _round("Same"))
+    for name in ("a", "b"):
+        assert _cli(skill, env, cwd, name, round_path).returncode == 0
+
+    assert _round_id(pads / "a", 1) != _round_id(pads / "b", 1)
+
+
+def test_a_pad_deleted_and_built_again_under_the_same_name_gets_a_new_id(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    first = _round_id(pads / "p", 1)
+    shutil.rmtree(pads / "p")
+
+    _new(skill, env, cwd, tmp_path, "p", "One")
+
+    assert _round_id(pads / "p", 1) != first
+
+
+def test_an_add_keeps_round_one_byte_for_byte_and_gives_round_two_its_own_id(skill, env, cwd, tmp_path, pads):
+    _new(skill, env, cwd, tmp_path, "p", "One")
+    before = _hashes(pads / "p" / "round-1")
+    first = _round_id(pads / "p", 1)
+
+    _add(skill, env, cwd, tmp_path, "p", "Two")
+
+    assert _hashes(pads / "p" / "round-1") == before
+    assert _round_id(pads / "p", 1) == first
+    assert _round_id(pads / "p", 2) != first
+
+
+def test_an_add_onto_a_round_with_no_id_line_leaves_it_alone_and_only_the_new_round_has_one(
+    skill, env, cwd, tmp_path, pads
+):
+    pad_dir = _legacy_pad(pads)
+    before = _hashes(pad_dir / "round-1")
+
+    _add(skill, env, cwd, tmp_path, "old", "New")
+
+    assert _hashes(pad_dir / "round-1") == before
+    assert "PAD_ROUND_ID" not in (pad_dir / "round-1" / "round.js").read_text(encoding="utf-8")
+    assert _round_id(pad_dir, 2)

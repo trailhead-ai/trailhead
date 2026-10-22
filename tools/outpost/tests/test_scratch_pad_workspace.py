@@ -28,6 +28,7 @@ from unittest import mock
 import pytest
 
 import trailhead.paths as trailhead_paths
+from test_scratch_pad_rounds import _round_id
 
 TOOLS = Path(__file__).parent.parent.parent
 SCRIPT_PATH = TOOLS / "outpost/plugins/outpost/skills/scratch-pad/scratch_pad.py"
@@ -1353,3 +1354,17 @@ def test_a_round_with_a_flow_option_is_published_as_a_workspace_site_with_the_fl
 
     got = _round_js_data(rig.ws / "sites" / "p" / "round-1" / "round.js")
     assert got == data
+
+
+def test_a_workspace_pad_and_an_add_both_carry_ids_and_the_add_keeps_round_ones(rig, capsys):
+    assert rig.run() == 0
+    capsys.readouterr()
+    site = rig.ws / "sites" / "p"
+    first = _round_id(site, 1)
+    before = (site / "round-1" / "round.js").read_bytes()
+
+    assert rig.add("Pricing") == 0
+
+    assert (site / "round-1" / "round.js").read_bytes() == before
+    assert _round_id(site, 1) == first
+    assert _round_id(site, 2) != first
