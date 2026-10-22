@@ -677,6 +677,8 @@ def test_long_covers_line_grades_promptly():
 # `--criteria` (the proposal sites grade against their own spec fixture).
 # A verdict is the grader's reading of a capture under the thresholds fixed before any run; where a capture read by eye
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
+# The proposal sites read the statement as the reply without its final line, against their own spec fixture.
+PROPOSAL_STATEMENT = ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)]
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
     # The summary sites are read by eye under the extension of 2026-10-20; no wording-grader check
@@ -750,31 +752,31 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "bare"),
     ],
-    # The proposal sites (extension of 2026-10-22). The statement is read as the reply without its final line.
+    # The proposal sites (extension of 2026-10-22).
     "proposal-baseline": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "bare"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "bare"),
         ("covers-field", [], "gate-shape"),
     ],
     "proposal-drive-baseline": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "gate-shape"),
     ],
     # The enabler path drafts no covers value: its final line is prose and no criterion is made green.
     "proposal-enabler-baseline": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "absent"),
     ],
     # The treated arms carry commit P; their guards bind (a miss in 2 or more of 6 is a guard miss).
     "proposal-treated": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "gate-shape"),
     ],
     "proposal-drive-treated": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "gate-shape"),
     ],
     "proposal-enabler-treated": [
-        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "absent"),
     ],
 }
@@ -810,7 +812,8 @@ CAPTURE_OVERRIDES = {
     "proposal-drive-baseline-5": {"criterion-mention": "nickname"},
     "proposal-drive-baseline-6": {"criterion-mention": "text-with-number"},
     "proposal-drive-baseline-7": {"criterion-mention": "text-with-number"},
-    # The proposal treated batch (2026-10-22): one row per capture, per check, including the ones equal to the prefix default.
+    # The proposal treated batch (2026-10-22): one row per capture, per check, including the ones equal to the prefix
+    # default.
     "proposal-treated-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
     "proposal-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
     "proposal-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
