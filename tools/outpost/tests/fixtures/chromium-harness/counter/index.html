@@ -1,0 +1,10 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+<script>
+  localStorage.setItem("c", String(Number(localStorage.getItem("c") || 0) + 1));
+  document.documentElement.setAttribute("data-pad-ready", "");
+</script>
+</body>
+</html>

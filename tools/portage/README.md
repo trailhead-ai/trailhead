@@ -28,8 +28,8 @@ Replaces the retired `/portage:open`, `/portage:update`, `/portage:monitor`, and
 
 ## Agents
 
-- `portage:updater` — mechanical push orchestrator: detect repos, preflight, push,
-  open/link sibling PRs, record the `prs.json` sidecar.
+- `portage:updater` — mechanical push orchestrator: detect repos, run the eval gate,
+  preflight, push, open/link sibling PRs, record the `prs.json` sidecar.
 - `portage:monitor` — background watch+fix+merge operator: monitors CI, triages
   failures, and merges when everything is mergeable and clean.
 - `portage:summarizer` — compact PR brief (diff + review comments) without loading
@@ -56,6 +56,24 @@ Per-group behavior is read from the `[release]` block of the group TOML:
 - `review_bot_login` — the login whose review comments count as actionable
   (default: none — CI-only).
 - `external_tracker` — an optional issue-tracker connector (default: none).
+
+## Eval gate
+
+Before `updater` pushes, `portage eval-gate` runs the eval cases that measure the prose the branch
+changed (the mapping is each corpus's `evals/eval-gate.json`). A case that scores below its bar stops
+every push and is named in the report; a gate that cannot run lets the push through, and the PR body
+carries a `## Eval gate` section giving the reason. The runner is started without the caller's API keys and tokens; see the docs below for what that does and does not guarantee about billing.
+
+Trust model: the gate runs the branch's own eval cases with the runner's `--scaffold` and `--trust-plugin`
+flags, so scaffold scripts (and repo scripts they call) run as the operator with their real home directory.
+It detects regressions on your own branches and does not defend against a hostile one, so only push
+branches you would run yourself. A branch can make the gate not run, and the PR shows that rather than
+preventing it. A corpus new on the branch is not run until its grants are reviewed.
+
+A sandbox-write canary runs first. If the runner's sandbox cannot write, the cases are skipped with
+`runner-sandbox-unwritable` rather than scored as failures. `PORTAGE_EVAL_RUNNER` (an absolute path to
+an executable) pins the runner binary the gate uses on this machine, for the canary and the cases.
+Persistent skip reasons lead the updater's report. See `plugins/portage/docs/eval-gate.md`.
 
 ## Relationship to the rest of trailhead
 

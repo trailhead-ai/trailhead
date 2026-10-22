@@ -625,15 +625,17 @@ return {
   letters, names, failure: !!document.getElementById('pad-failure'),
   cards: document.querySelectorAll('.pad-card').length,
   pressed: (await show(0), flags(0, thisOne)), dot: dot(0), shown1, lines,
+  cantKeep: seen(document.getElementById('pad-cant-keep')),
 };
 """
 
 
-@pytest.mark.parametrize("without,reply_lines", [
-    (("reply.js",), ["The reply could not be built. Answer in words in your session instead."]),
-    ((), []),
+@pytest.mark.parametrize("without,reply_lines,cant_keep", [
+    (("reply.js",), ["The reply could not be built. Answer in words in your session instead."], False),
+    (("saved.js",), [], True),
+    ((), [], False),
 ])
-def test_a_pad_whose_reply_script_did_not_load_still_draws_and_answers(tmp_path, without, reply_lines):
+def test_a_pad_whose_reply_script_did_not_load_still_draws_and_answers(tmp_path, without, reply_lines, cant_keep):
     got = _reply_probe(tmp_path, _round(2), NO_PLACEHOLDER_JS, without=without)
     assert not got["failure"]
     assert got["cards"] == 6
@@ -648,6 +650,7 @@ def test_a_pad_whose_reply_script_did_not_load_still_draws_and_answers(tmp_path,
     assert got["shown1"]
     unbuilt = [line for line in got["lines"] if line.startswith("The reply could not")]
     assert unbuilt == reply_lines
+    assert got["cantKeep"] is cant_keep
 
 
 def test_the_reply_entry_is_dashed_and_a_question_entry_is_not(tmp_path):

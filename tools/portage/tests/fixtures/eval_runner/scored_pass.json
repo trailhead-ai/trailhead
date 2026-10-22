@@ -1,0 +1,217 @@
+{
+  "_provenance": "claude 2.1.306 (claude plugin eval), run 2026-10-21 on Linux; outcome: every run scored 1, exit 0 (craft consult case, --runs 3 -j 3, opus-5-5). Trimmed: prompts, grader explanations, grader evidence and config, trace paths, suite paths removed.",
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.306",
+  "startedAt": "2026-10-21T15:55:30.620Z",
+  "durationSeconds": 142,
+  "costUsd": 2.8358241,
+  "partial": false,
+  "suite": {
+    "ablation": "none",
+    "modelOverride": "claude-opus-5-5",
+    "caseFilter": "consult-lists-a-sibling-correction-without-writing-it",
+    "threshold": 1,
+    "concurrency": 3,
+    "plugins": [
+      {
+        "name": "craft",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "consult-lists-a-sibling-correction-without-writing-it",
+      "source": "mixed",
+      "runsPerCase": 3,
+      "timeoutSeconds": 420,
+      "maxTurns": 30,
+      "graders": [
+        {
+          "name": "correction-listed-apart-with-fix",
+          "type": "llm",
+          "weight": 1
+        },
+        {
+          "name": "no-change-history",
+          "type": "regex",
+          "weight": 1
+        },
+        {
+          "name": "no-task-created",
+          "type": "file_exists",
+          "weight": 1
+        },
+        {
+          "name": "sibling-untouched",
+          "type": "regex",
+          "weight": 1
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.9651241,
+            "judgeCostUsd": 0.0206541,
+            "durationSeconds": 128,
+            "startedAt": "2026-10-21T15:55:30.672Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "correction-listed-apart-with-fix",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ]
+              },
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-task-created",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "sibling-untouched",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          },
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.9483836999999999,
+            "judgeCostUsd": 0.0206541,
+            "durationSeconds": 128,
+            "startedAt": "2026-10-21T15:55:30.672Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "correction-listed-apart-with-fix",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ]
+              },
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-task-created",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "sibling-untouched",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          },
+          {
+            "score": 1,
+            "passed": true,
+            "turns": 1,
+            "costUsd": 0.9223163000000001,
+            "judgeCostUsd": 0.009560700000000005,
+            "durationSeconds": 142,
+            "startedAt": "2026-10-21T15:55:30.672Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "correction-listed-apart-with-fix",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  true,
+                  true,
+                  true
+                ]
+              },
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "no-task-created",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "sibling-untouched",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 1,
+        "passRate": 1
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 1,
+    "casesPassed": 1,
+    "overallScore": 1,
+    "overallPassRate": 1
+  }
+}

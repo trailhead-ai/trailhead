@@ -2289,3 +2289,49 @@ class TestClaudeCodeRewriteTranscriptWorkspace:
             ClaudeCodeHarness().rewrite_transcript_workspace(
                 source, destination, old_root, tmp_path / "new-workspace"
             )
+
+
+class TestEvalRunnerHook:
+    """The ``eval_runner`` seam: None for "no knowledge", argv + allowlist env for Claude Code."""
+
+    KW = dict(plugin_dir=Path("/p"), case="c", runs=3, model="m", allow_tools=["Read"],
+              max_cost_usd=1.5, json_path=Path("/s/runs/c.json"), output_dir=Path("/s/runs/c"))
+
+    def test_base_harness_has_no_eval_runner(self):
+        assert _BareHarness().eval_runner(env={"PATH": "/bin"}, **self.KW) is None
+
+    def test_claude_code_returns_argv_and_allowlist_env(self):
+        env = {"PATH": "/bin", "HOME": "/h", "USER": "u", "LANG": "C", "LC_ALL": "C", "TERM": "x",
+               "GH_TOKEN": "t", "ANTHROPIC_API_KEY": "k", "LORE_STATE_DIR": "/l"}
+        runner = ClaudeCodeHarness().eval_runner(env=env, **self.KW)
+        assert runner.argv[:4] == ["claude", "plugin", "eval", "/p"]
+        assert runner.env == {k: env[k] for k in ("PATH", "HOME", "USER", "LANG", "LC_ALL", "TERM")}
+
+    def test_env_allowlist_omits_what_the_parent_lacks(self):
+        runner = ClaudeCodeHarness().eval_runner(env={"PATH": "/bin", "FOO": "1"}, **self.KW)
+        assert runner.env == {"PATH": "/bin"}
+
+    def test_eval_dir_names_the_directory_that_holds_the_cases(self):
+        def argv(**extra):
+            return ClaudeCodeHarness().eval_runner(env={}, **{**self.KW, **extra}).argv
+
+        named = argv(eval_dir="eval-canary")
+        assert named[named.index("--eval-dir") + 1] == "eval-canary"
+        assert "--eval-dir" not in argv()
+
+    def test_tmpdir_is_placed_in_the_child_env_and_overrides_the_parent(self):
+        env = {"PATH": "/bin", "TMPDIR": "/tmp/parent"}
+        placed = ClaudeCodeHarness().eval_runner(env=env, tmpdir=Path("/c/x"), **self.KW)
+        assert placed.env == {"PATH": "/bin", "TMPDIR": "/c/x"}
+        unplaced = ClaudeCodeHarness().eval_runner(env=env, **self.KW)
+        assert unplaced.env == {"PATH": "/bin"}
+
+    def test_base_harness_accepts_tmpdir_and_has_no_runner(self):
+        assert _BareHarness().eval_runner(env={}, tmpdir=Path("/c/x"), **self.KW) is None
+
+    def test_runs_drive_parallelism_up_to_eight(self):
+        def j(runs):
+            argv = ClaudeCodeHarness().eval_runner(env={}, **{**self.KW, "runs": runs}).argv
+            return argv[argv.index("-j") + 1]
+
+        assert (j(1), j(8), j(20)) == ("1", "8", "8")

@@ -1,0 +1,104 @@
+{
+  "_provenance": "claude 2.1.306 (claude plugin eval), run 2026-10-21 on Linux; outcome: timeout_seconds 3 exceeded; error 'timed out after 3s' but graders still ran and scored; runner exit 1. Trimmed: prompts, grader explanations, grader evidence and config, trace paths, suite paths removed.",
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.306",
+  "startedAt": "2026-10-21T15:49:02.653Z",
+  "durationSeconds": 8,
+  "costUsd": 0.0326017,
+  "partial": false,
+  "suite": {
+    "ablation": "none",
+    "modelOverride": "claude-haiku-4-5",
+    "caseFilter": "tmo",
+    "threshold": 1,
+    "concurrency": 2,
+    "plugins": [
+      {
+        "name": "probe",
+        "version": "0.0.1"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "tmo",
+      "source": "mixed",
+      "runsPerCase": 3,
+      "timeoutSeconds": 3,
+      "maxTurns": 10,
+      "graders": [
+        {
+          "name": "says",
+          "type": "llm",
+          "weight": 1
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.0164563,
+            "judgeCostUsd": 0.0017975,
+            "durationSeconds": 8,
+            "startedAt": "2026-10-21T15:49:02.672Z",
+            "error": "timed out after 3s",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "says",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ]
+              }
+            ]
+          },
+          {
+            "score": 0,
+            "passed": false,
+            "turns": 1,
+            "costUsd": 0.0161454,
+            "judgeCostUsd": 0.0014926000000000002,
+            "durationSeconds": 8,
+            "startedAt": "2026-10-21T15:49:02.672Z",
+            "error": "timed out after 3s",
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "says",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 0,
+        "passRate": 0
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 1,
+    "casesPassed": 0,
+    "overallScore": 0,
+    "overallPassRate": 0
+  }
+}

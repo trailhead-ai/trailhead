@@ -4,6 +4,8 @@
   var FONT_FAMILY = "Architects Daughter";
   var root = document.getElementById("pad");
   var notice = document.getElementById("pad-font-notice");
+  var cantKeep = document.getElementById("pad-cant-keep");
+  var NOTE_LIMIT = 10000;
 
   function el(tag, className, text) {
     var node = document.createElement(tag);
@@ -89,6 +91,7 @@
     var noteBox = el("textarea", "pad-note");
     noteBox.id = noteId;
     noteBox.rows = 3;
+    noteBox.maxLength = NOTE_LIMIT;
     noteBox.addEventListener("input", function () { act(qIndex, "note", noteBox.value); });
     view.note = noteBox;
     panel.appendChild(noteLabel);
@@ -359,6 +362,7 @@
       }
       refresh(qIndex);
       hook(qIndex);
+      keep();
     }
 
     window.PadAnswers = {
@@ -368,6 +372,45 @@
 
     var reply = buildReplyStep(data, answers);
     window.PadAnswers.onChange(reply.changed);
+
+    var keeper = null;
+    var restored = null;
+    var roundId = window.PAD_ROUND_ID;
+    if (window.PadSaved && typeof roundId === "string" && roundId) {
+      keeper = window.PadSaved.create(roundId, data.questions.map(function (question) { return question.options.length; }));
+      restored = keeper.read();
+      if (!restored.usable) keeper = null;
+    }
+
+    function keep() {
+      if (keeper && !keeper.write(answers)) cantKeep.hidden = false;
+    }
+
+    var windowAway = false;
+    window.addEventListener("blur", function (event) { if (event.target === window) windowAway = true; });
+    window.addEventListener("focus", function (event) { if (event.target === window) windowAway = false; });
+
+    function applyAnswers(list) {
+      list.forEach(function (saved, qIndex) {
+        var answer = answers[qIndex];
+        answer.pick = saved.pick;
+        answer.none = saved.none;
+        answer.not.length = 0;
+        saved.not.forEach(function (n) { answer.not.push(n); });
+        var view = views[qIndex];
+        var typing = view && view.note === document.activeElement && !windowAway;
+        answer.note = typing ? view.note.value : saved.note;
+        if (dots[qIndex]) refresh(qIndex);
+      });
+      reply.changed();
+    }
+
+    if (!keeper) {
+      cantKeep.hidden = false;
+    } else {
+      if (restored.answers) applyAnswers(restored.answers);
+      keeper.watch(applyAnswers);
+    }
 
     function setCurrent(index) {
       buttons.forEach(function (button, i) {

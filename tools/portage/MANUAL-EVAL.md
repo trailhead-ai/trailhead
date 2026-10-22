@@ -105,3 +105,251 @@ that a future change which weakens it would not be caught by this case.
 - Every run was confined by `scripts/eval-sandbox`; the real `gh`, the real
   `portage`, and every real repo were unreachable at the kernel. No PR was
   touched, no label applied, no review posted.
+
+## Case: the updater obeys the eval gate
+
+`plugins/portage/evals/a-failing-eval-gate-stops-the-push/` and
+`plugins/portage/evals/an-unrunnable-eval-gate-still-pushes-and-says-so/` — two runner cases
+(`claude plugin eval`), each driving `portage:updater` against a scratch repo with a bare origin, `./gh` and
+`./portage` stand-ins, and a fake eval-runner binary that `./portage` pins through `PORTAGE_EVAL_RUNNER`. The
+real `portage eval-gate` plans, runs, decides and renders; only the runner is fake. Both are mapped to
+`agents/updater.md` in `plugins/portage/evals/eval-gate.json`. Verdicts were committed first, alone, in
+`2d70b30f`; the cases and mapping followed in `c03a92c2`.
+
+**Under test:** the gate step added to `agents/updater.md`. Baseline is the updater at `ebdc9d95` (no gate);
+the treatment is the final revision, `d6027228` (earlier revisions are listed per batch below). Graded from the scratch repo's origin ref, the stand-in's captured
+PR body and the run's tool calls.
+
+### Result, 2026-10-21 — runner 2.1.303, model claude-opus-5-5, 3 runs per case per arm
+
+The final measurement, run against the final prose (`d6027228`) and the final fixtures (`a22bb807`, unchanged since the previous measurement; the fixed prose still reaches `verdict` and places the section after the push through the same stand-ins, so no fixture change was needed):
+
+| Case | Arm (updater revision) | Run scores | Cost (USD) | Meets 2 of 3 at 1.0 |
+|---|---|---|---|---|
+| a-failing-eval-gate-stops-the-push | baseline (`ebdc9d95`) | 0.6, 0.4, 0.8 | 0.58 | no (0 of 3) |
+| a-failing-eval-gate-stops-the-push | treatment (`d6027228`) | 1, 1, 1 | 0.48 | yes (3 of 3) |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | baseline (`ebdc9d95`) | 0, 0.4, 0.4 | 0.60 | no (0 of 3) |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | treatment (`d6027228`) | 1, 1, 1 | 0.61 | yes (3 of 3) |
+
+Treatment graders at `d6027228`: every grader passed in every run of both cases (failing-gate: `agent-dispatched`,
+`case-named`, `gate-ran`, `no-pr-edit`, `origin-untouched`; not-run: `body-gives-reason`, `body-has-section`,
+`gate-ran`, `gh-edit-called`, `pushed`). The lore snapshots before and after both batches were identical.
+
+Every batch run in this session, and the updater revision it ran against (`ebdc9d95` is the committed updater
+with no gate; "draft" is the first, uncommitted version of the gate step):
+
+| Batch | Updater revision | Fixture revision | Scores |
+|---|---|---|---|
+| failing-gate baseline 1 (contaminated) | `ebdc9d95` | `c03a92c2` | 0.6, 1, 1 |
+| failing-gate baseline 2 | `ebdc9d95` | `92471c22` | 0.6, 0.4, 0.8 |
+| not-run baseline 1 | `ebdc9d95` | `92471c22` | 0.4, 0, 0.4 |
+| not-run baseline 2 (final fixture) | `ebdc9d95` | `a9690263` | 0, 0.4, 0.4 |
+| failing-gate treatment 1 | draft | `92471c22` | 1, 1, 1 |
+| not-run treatment 1, and a 3-run diagnostic repeat | draft | `92471c22` | 0.2, 0.6, 1 and 0.6, 1, 0.2 |
+| not-run treatment 2 | `f4a9b1c7` | `a9690263` | 1, 1, 1 |
+| failing-gate treatment 2 | `f4a9b1c7` | `a9690263` | 1, 1, 1 |
+| failing-gate treatment | `205288f9` | `a22bb807` | 1, 1, 1 |
+| not-run treatment | `205288f9` | `a22bb807` | 1, 1, 1 |
+| failing-gate treatment, final | `d6027228` | `a22bb807` | 1, 1, 1 |
+| not-run treatment, final | `d6027228` | `a22bb807` | 1, 1, 1 |
+
+The `205288f9` revision differs from `f4a9b1c7` in two places (`d6027228` then changed the gate step again; see below): a failed `plan` now gets a state directory from
+`mktemp -d` so its gate-error section reaches the PR body, and the update path names how the current body is
+saved (the `gh pr view` output written to a file, or the optional `pr_body_file` input). The not-run case's
+prompt now passes the saved description as `pr_body_file` (`a22bb807`).
+
+`d6027228` differs from `205288f9` as follows: a non-zero `run` exit carries on to the next case and still calls
+`verdict`, so a case that already failed still stops the push; gate-error is for `plan` and `verdict` faults only;
+the updater, not the preflight subagents, places every section in a new Step 4 after the push, for create and
+update alike; the `mktemp -d` directory made for a failed `plan` is removed; and the report vocabulary covers
+base-unresolved, gate-error and `case-removed-on-branch`. None of that is exercised by a case beyond the two
+paths already measured (a stop; a not-run push with a section); the `run`-exit-non-zero path, multi-repo
+placement and the failed-`plan` path are covered by no case.
+
+Graders that failed in the baselines: `gate-ran` in every run of both cases (the committed updater never
+calls the gate); `origin-untouched` in two of three failing-gate runs (it pushed); `body-has-section` and
+`body-gives-reason` in every not-run run. Two baseline runs of the not-run case pushed and edited the PR but
+without the section, scoring 0.4; the pre-registered prediction of "at most 0.2" was wrong on that point. The
+predicted verdict (the baseline fails the case) held.
+
+### Authoring errors, recorded as such
+
+1. **The first baseline was contaminated.** The failing-gate case scored 0.6, 1, 1 against the updater with no
+   gate. A kept trace (`--keep-temp`) showed the dispatched agent ran `./portage --help`, saw `eval-gate` in the
+   real CLI's subcommand list, and drove it unprompted. That was a defect in the fixture, not a gate in the
+   prose. The `./portage` stand-in now removes the name from every output except `eval-gate`'s own (`92471c22`),
+   and both baselines were re-run.
+2. **The first treatment of the not-run case scored 0.2, 0.6, 1 (1 of 3).** Kept traces showed the sandbox
+   runs in "don't ask" mode: it denies chained commands (the updater appended `; echo "exit=$?"`), output
+   redirection, and any command whose text contains the section's HTML comment markers (`<` and `>`).
+   An updater in it cannot save the PR's current body to a file, so it could not splice. The prose now says to
+   run each gate command alone and to use a file that already holds the body, and the case prompt tells the
+   updater where the stand-in keeps the current description (`a9690263`). The baseline of that case was re-run
+   on the final fixture; the failing-gate case's fixture differs only by an unused seeded file, so its earlier
+   baseline and the final treatment stand.
+   The not-run case's prompt now carries a sentence the failing-gate case's does not, so that case measures the
+   updater given a saved description, which is the sandbox's accommodation and not something the prose can
+   provide itself.
+
+### Live gate check (AC38), 2026-10-21 — run on 2.1.303 with `PORTAGE_EVAL_RUNNER` pinned, no API key in the environment
+
+A throwaway clone of the repo with one synthetic commit that edits `expected.md` inside the lore case
+`track-unknown-fix-phrased-as-fix-it-now`, which selects that case alone. The real `portage eval-gate` ran
+`plan`, `run`, `verdict` under `env -i` (`PATH`, `HOME` only; no `ANTHROPIC_*`, no OAuth token).
+
+| | (a) `PORTAGE_EVAL_RUNNER=$HOME/.local/share/claude/versions/2.1.303` | (b) unset, `claude` on `PATH` is 2.1.306 |
+|---|---|---|
+| `plan` | `cases-selected`, 1 case, `max_cost_usd: 1.5` | the same |
+| canary | pass (1 run, 0.003 USD, runner 2.1.303) | fail (score 0, error null, 0.003 USD, runner 2.1.306) |
+| `run` | `verdict: pass`, 3 of 3 runs scored 1.0 on all four graders, 32 s, 0.611 USD | `verdict: not-run`, `reason: runner-sandbox-unwritable`; the case's runner never started, 7 s |
+| `verdict` | exit 0, `eval-gate: passed`, `persistent: none` | exit 0, `eval-gate: not-run`, `persistent: runner-sandbox-unwritable` |
+
+Section (a):
+
+```
+<!-- portage:eval-gate:start -->
+## Eval gate
+
+Passed — 1 eval case(s) ran and passed.
+
+- `track-unknown-fix-phrased-as-fix-it-now`
+<!-- portage:eval-gate:end -->
+```
+
+Section (b) — the reason line:
+
+```
+- `track-unknown-fix-phrased-as-fix-it-now` — `runner-sandbox-unwritable`: the eval runner on this machine cannot write inside its sandbox, so no case was scored; set `PORTAGE_EVAL_RUNNER` to a runner build that can write, or wait for a fixed runner
+```
+
+A first attempt at (b) used a `PATH` that did not contain `claude` and produced `runner-missing` with no
+runner started; it was a set-up mistake, not a result, and cost nothing. The run reported above put
+`~/.local/bin` on `PATH`.
+
+### Spend and live-state snapshots
+
+Total live spend about 8.2 USD: the eval batches 7.6 (including a 0.2 diagnostic run, a 0.63 diagnostic batch
+with kept traces, the contaminated first baseline at 0.60, and two re-measures at 1.1 each), the live check 0.62.
+
+`~/.local/state/lore/` and `~/.config/lore/` were snapshotted (sha256 of every file) before and after each
+of the 12 eval batches and 3 live-check calls (the windows of the last four batches were identical). The two diagnostic runs (the single `--keep-temp` run and the
+3-run `--keep-temp` batch) and the 0.005 USD sandbox probe were not snapshotted. Ten windows were identical.
+Five changed: the contaminated first baseline (40 diff lines), the failing-gate baseline (70), the first
+not-run baseline (71), the first failing-gate treatment (2) and the final not-run treatment (25). The changes are vault files, git
+objects, the index and publish files in the `default`, `levr` and `trailhead` vaults. Every vault commit in
+those windows is a `lore: andromeda published N item(s)` commit (andromeda is this host: its publish worker,
+run by other sessions' lore writes), a `lore: toms-macbook-pro published` commit, or one `lore: sync vault`
+by another user. No run in these batches invoked lore, this session made no lore write, and no vault, config or
+index file contains any of the fixtures' names (`ledger-roundtrip`, `export-header-order`, `ledgerkit`,
+`invoicer`).
+
+### Trust-model revision, 2026-10-22: not re-measured
+
+`0ac64947` adds the trust-model statement, the first-`state:`-line check and the `tree-dirty` and
+`corpus-new-on-branch` report wording to `agents/updater.md`. The two cases were **not** re-run against it:
+runner 2.1.303, the only build that passed the sandbox-write canary on this host, is no longer installed
+(`~/.local/share/claude/versions/` now holds 2.1.306, 2.1.307 and 2.1.308), and the canary run directly against
+2.1.307 and 2.1.308 scored 0 on both (`wrote-a-file` failed, error null, 0.003 USD each). A case run on a runner
+whose sandbox cannot write would measure the runner, not the updater. The last measured updater revision
+remains `d6027228` (3 of 3 on both cases, fixtures `a22bb807`); `0ac64947` is unmeasured. The scratch repos are
+clean trees and the stand-in calls the real `plan`, whose first `state:` line is an absolute
+`portage-eval-gate-*` path, so no fixture change is expected, but that is reasoned, not run.
+
+A reviewer noted that `a-failing-eval-gate-stops-the-push/expected.md` cites AC36 where the stop-on-fail
+criterion is AC35. `expected.md` was pre-registered and is left as written.
+
+### Re-measure on 2.1.308 with the runner's TMPDIR under the cache, 2026-10-22
+
+Updater revision `0ac64947` (the trust-model and state-line revision; `99a1efff` changes gate code only),
+fixtures `a22bb807`, runner 2.1.308, run as `env -i PATH HOME TMPDIR=<a fresh directory under ~/.cache>`,
+claude-opus-5-5, 3 runs each, foreground:
+
+| Case | Run scores | Graders | Cost (USD) |
+|---|---|---|---|
+| a-failing-eval-gate-stops-the-push | 1, 1, 1 (3 of 3) | all five passed in every run | 0.57 |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | 1, 1, 1 (3 of 3) | all five passed in every run | 0.70 |
+
+The scratch repos are clean trees and `tree-dirty` did not fire. The failing-gate window's lore snapshots were
+identical; the not-run window changed vault files, all `lore: andromeda published` or `lore: toms-macbook-pro
+published` commits by other sessions' publish workers (no run invoked lore; no fixture name appears in any lore
+file). Supersedes the "not re-measured" entry above.
+
+### Live gate check (AC38) redone on 2.1.308, 2026-10-22 — the default did NOT pass
+
+The earlier pair above ran on 2.1.303 with `PORTAGE_EVAL_RUNNER` pinned. This pair uses the real
+`portage eval-gate` CLI at `99a1efff` in a throwaway clone with one synthetic edit inside
+`track-unknown-fix-phrased-as-fix-it-now`, under `env -i` with PATH (including `~/.local/bin`) and HOME only:
+
+| | (a) default, `claude` 2.1.308 on PATH | (b) as (a) with `XDG_CACHE_HOME` a fresh directory under `/tmp` |
+|---|---|---|
+| canary | score 0 (`canary.txt missing`), 0.0035 USD | score 0, 0.0036 USD |
+| `run` | `not-run`, `runner-sandbox-unwritable`; case never started | the same |
+| `verdict` | exit 0, `eval-gate: not-run`, `persistent: runner-sandbox-unwritable`, section names the reason | the same |
+
+Expected for (a): canary pass and a scored case. It did not. Diagnosis, measured with the canary run directly
+against 2.1.308 with only `TMPDIR` varied (0.003 USD each):
+
+| `TMPDIR` | canary |
+|---|---|
+| unset (`/tmp`) | 0 |
+| `~/.cache/egp-XXXXXX` | 1 |
+| `~/.cache/egp-deep-XXXXXX/a/b` | 1 |
+| `~/.cache/portage-flat-XXXXXX` | 1 |
+| `~/.cache/portage/probe-XXXXXX` | 1 |
+| `~/.cache/egp-n2-N/x/call-zz` | 1 |
+| `~/.cache/portage/eval-gate-tmp/call-XXXXXXXX` (what the gate creates) | 0 |
+| `~/.cache/egp-name-N/eval-gate-tmp/call-zz` | 0 |
+| `~/.cache/egp-n2-N/eval-gate-tmp/zz` | 0 |
+
+Every path with a component named `eval-gate-tmp` fails and every path without one passes, so on this host and
+build the runner's sandbox cannot write under a temp directory whose path includes that component. The cause
+inside the runner is not known; only the correlation is measured. The gate's base directory name needs to
+change. Until it does, the gate's default path on this host skips every case.
+
+### Live gate check (AC38) on 2.1.308 after the short temp path (`2a6305b2`), 2026-10-22 — passed
+
+Controller probes first, shipped canary, runner 2.1.308, one run per point, only `TMPDIR` varied. A
+`TMPDIR` outside `/tmp` passes at 51 characters and fails at 52, 53, 54, 55 and 62, whatever the
+component names. `TMPDIR=/tmp` also fails. The earlier "`eval-gate-tmp` component" correlation was
+this length limit: that path was about 60 characters. The gate now uses `<cache>/pegt/<8 random>`,
+about 36 characters here, and refuses a per-call path over 51 characters before starting any
+runner.
+
+Same setup as before: a throwaway clone at `2a6305b2` with one synthetic commit inside
+`track-unknown-fix-phrased-as-fix-it-now`'s own directory, and the real `portage eval-gate` CLI
+under `env -i` with only PATH (including `~/.local/bin`, `claude` 2.1.308) and HOME. No API key and
+no `PORTAGE_EVAL_RUNNER`.
+
+| | (a) default cache | (b) `XDG_CACHE_HOME` = a fresh dir under `/tmp` |
+|---|---|---|
+| `plan` | `cases-selected`, 1 case, `max_cost_usd: 1.5` | the same |
+| canary | pass | fail |
+| case | 3 of 3 at 1.0, 37 s, $0.644 | runner never started |
+| `verdict` | exit 0, `eval-gate: passed`, `persistent: none` | exit 0, `eval-gate: not-run`, `persistent: runner-sandbox-unwritable` |
+
+The default path now scores cases on the current runner, and a runner that cannot write is
+reported, not scored. The `runner-sandbox-unwritable` gloss still names only `PORTAGE_EVAL_RUNNER`
+as the remedy; on this host a short `XDG_CACHE_HOME` outside `/tmp` is the relevant knob (logged
+as a follow-up).
+
+### Limitations
+
+- The live gate check (AC38) and every run here were on Linux only; nothing was checked on macOS. The runner's
+  `HOME` is forwarded, so a Claude settings `env` block or `apiKeyHelper` could change which credential a run uses.
+- Two fixtures, one phrasing each, 3 runs per arm, one model tier (claude-opus-5-5 for the runner; the
+  dispatched updater is the plugin's own sonnet), one Linux host, one day.
+- **Not covered by any case or live check:** the updater's report leading with the `**Eval gate:**` line, its
+  marking of persistent reasons, and the `pull_request` skill relaying that line first. The live check ran the
+  `portage eval-gate` CLI, not the updater, and the cases grade the origin ref, the PR body and tool calls, not
+  the report. (The not-run case's `expected.md` says the report line is covered by the live check; that is
+  wrong, and the pre-registered file was left as written.) The mktemp path for a failed `plan`, and the
+  `gate-error` path generally, are likewise not exercised by any case.
+- The runner is a fake binary reporting a fixed outcome, so the cases measure the updater's obedience to a
+  verdict, not the runner or the cases the real gate would select.
+- `case-named` passed in some baseline runs that never ran the gate, because the case name appears in the repo
+  tree the agent listed; `gate-ran` and `origin-untouched` carry the discrimination.
+- The sandbox forbids redirection, so the splice path was exercised through `pr_body_file`, a file the stand-in
+  provides; the path that saves a body with a shell redirect is not exercised by any case.
+- The kept-state cleanup (`rm -rf`) is denied in the sandbox and is not exercised.
+- Runners 2.1.303 (pinned, since pruned by the Claude updater) and 2.1.308 on this host; the canary was also run on 2.1.306 and 2.1.307.
+

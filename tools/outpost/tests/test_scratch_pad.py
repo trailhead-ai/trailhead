@@ -1006,7 +1006,7 @@ def test_a_new_pad_lists_its_one_round_and_numbers_it(skill, tmp_path, state):
     assert _load_rounds_js(pad / "rounds.js") == [{"title": "Settings page"}]
     text = (pad / "round-1" / "round.js").read_text(encoding="utf-8")
     assert text.startswith(ROUND_JS_PREFIX)
-    assert text.splitlines()[-1] == "window.PAD_ROUND_NUMBER = 1;"
+    assert text.splitlines()[1] == "window.PAD_ROUND_NUMBER = 1;"
     assert _load_round_js(pad / "round-1" / "round.js")["title"] == "Settings page"
 
 

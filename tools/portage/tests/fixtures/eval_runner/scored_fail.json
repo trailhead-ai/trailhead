@@ -1,0 +1,217 @@
+{
+  "_provenance": "claude 2.1.306 (claude plugin eval), run 2026-10-21 on Linux; outcome: every run scored 0.5, error null, exit 1 (lore case, below threshold 1.0). Trimmed: prompts, grader explanations, grader evidence and config, trace paths, suite paths removed.",
+  "schemaVersion": 1,
+  "claudeVersion": "2.1.306",
+  "startedAt": "2026-10-21T16:09:02.745Z",
+  "durationSeconds": 32,
+  "costUsd": 0.6205159,
+  "partial": false,
+  "suite": {
+    "ablation": "none",
+    "modelOverride": "claude-opus-5-5",
+    "caseFilter": "track-unknown-fix-phrased-as-fix-it-now",
+    "threshold": 1,
+    "concurrency": 3,
+    "plugins": [
+      {
+        "name": "lore",
+        "version": "0.1.0"
+      }
+    ]
+  },
+  "cases": [
+    {
+      "name": "track-unknown-fix-phrased-as-fix-it-now",
+      "source": "mixed",
+      "runsPerCase": 3,
+      "timeoutSeconds": 300,
+      "maxTurns": 20,
+      "graders": [
+        {
+          "name": "no-change-history",
+          "type": "regex",
+          "weight": 1
+        },
+        {
+          "name": "original-figure-kept",
+          "type": "regex",
+          "weight": 1
+        },
+        {
+          "name": "task-created",
+          "type": "file_exists",
+          "weight": 1
+        },
+        {
+          "name": "task-names-record-and-decider",
+          "type": "llm",
+          "weight": 1
+        }
+      ],
+      "arms": {
+        "with": [
+          {
+            "score": 0.5,
+            "passed": false,
+            "turns": 5,
+            "costUsd": 0.2058338,
+            "judgeCostUsd": 0.011916000000000001,
+            "durationSeconds": 28,
+            "startedAt": "2026-10-21T16:09:03.060Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "original-figure-kept",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-created",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-names-record-and-decider",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ]
+              }
+            ]
+          },
+          {
+            "score": 0.5,
+            "passed": false,
+            "turns": 5,
+            "costUsd": 0.20892150000000004,
+            "judgeCostUsd": 0.0099459,
+            "durationSeconds": 26,
+            "startedAt": "2026-10-21T16:09:03.061Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "original-figure-kept",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-created",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-names-record-and-decider",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ]
+              }
+            ]
+          },
+          {
+            "score": 0.5,
+            "passed": false,
+            "turns": 5,
+            "costUsd": 0.20576060000000002,
+            "judgeCostUsd": 0.007932600000000001,
+            "durationSeconds": 32,
+            "startedAt": "2026-10-21T16:09:03.061Z",
+            "error": null,
+            "skippedPaidGraders": false,
+            "graders": [
+              {
+                "name": "no-change-history",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "original-figure-kept",
+                "passed": true,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-created",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true
+              },
+              {
+                "name": "task-names-record-and-decider",
+                "passed": false,
+                "weight": 1,
+                "explanation": "<removed>",
+                "withOnly": false,
+                "scored": true,
+                "judgeVotes": [
+                  false,
+                  false,
+                  false
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "aggregates": {
+        "score": 0.5,
+        "passRate": 0
+      }
+    }
+  ],
+  "aggregates": {
+    "casesTotal": 1,
+    "casesPassed": 0,
+    "overallScore": 0.5,
+    "overallPassRate": 0
+  }
+}
