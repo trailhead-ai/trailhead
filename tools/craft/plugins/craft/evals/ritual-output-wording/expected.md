@@ -1366,3 +1366,106 @@ unmeasured.
 
 **Protocol frozen.** The readings, guards, bars and end states above are frozen as of the pilots; the baseline batch is
 run against this registration, and a change after a treated or shipped-state output has been seen is a dated amendment.
+
+## Baseline, 2026-10-22 — the proposal baseline batches captured, graded and read; no reading is met without the edit
+
+Run against the frozen registration above, unchanged. Each run was its own `claude -p` process by the `## Dispatch`
+command (`--setting-sources project`, the arm by `--append-system-prompt`, `--allowedTools "Read"`, fixtures copied to a
+fresh empty directory under `/tmp` with `FIXTURES_DIR` replaced, the process started from a second empty directory),
+one run after another. All 15 captures exited 0 with empty stderr; no run was excluded. Captures: runs 1 (pilot) to 7 of
+each baseline arm and one enabler capture. Runs 2 to 4 are the registered three; the 2-1 split on `left` (below) re-ran
+each arm to six, runs 5 to 7. The tally below counts runs 2 to 7 (six per arm); the pilot is shown for completeness and
+is not in the tally. Whether the pilot is counted does not change any verdict (stated per reading).
+
+Two disclosed departures from the run rules: the last two dispatches of the first wave (`proposal-drive-baseline-4`
+and `proposal-enabler-baseline-1`) were issued in one tool step and may have overlapped in time; each had its own
+directories and its own process. A first attempt at `proposal-baseline-2` failed before any `claude` process started
+(a wrong prompt-file argument in the runner); its three empty files were deleted and the number was used for the first
+real dispatch, so no model run was discarded.
+
+### Per-capture table
+
+Readings: in-session reader (R1) and a blind subagent (R2) given only the registered readings, derivation rule,
+protocol text, the spec and stub fixtures, and the captures renamed. Both gave the same value on every reading of every
+capture, so one value is shown; the disagreements are listed after the table. Guards are `wording_grader.py`:
+`criterion-mention` over the statement (`--drop-value-line`), then `covers-field`. Lines: physical lines, blanks included.
+
+| Capture | Site | `opens` | `try-it` | `left` | `left-correct` | Remainder form | Opening addresses | Lines | `criterion-mention` | `covers-field` |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `proposal-baseline-1` (pilot) | P | missing | missing | present | wrong | listed | operator | 19 | bare | gate-shape |
+| `proposal-baseline-2` | P | missing | missing | present | correct | listed | operator | 22 | nickname | gate-shape |
+| `proposal-baseline-3` | P | missing | missing | missing | n/a | none | operator | 15 | text-with-number | gate-shape |
+| `proposal-baseline-4` | P | missing | missing | present | correct | listed | operator | 23 | nickname | gate-shape |
+| `proposal-baseline-5` | P | missing | missing | present | wrong | none (only "the rest remain candidates") | operator | 17 | nickname | gate-shape |
+| `proposal-baseline-6` | P | missing | missing | missing | n/a | none | neither | 15 | bare | gate-shape |
+| `proposal-baseline-7` | P | missing | missing | present | wrong | listed (counts AC5, AC6) | operator | 18 | bare | gate-shape |
+| `proposal-drive-baseline-1` (pilot) | PD | missing | missing | missing | n/a | none | operator | 15 | text-with-number | gate-shape |
+| `proposal-drive-baseline-2` | PD | missing | missing | missing | n/a | none | operator | 15 | text-with-number | gate-shape |
+| `proposal-drive-baseline-3` | PD | missing | missing | missing | n/a | none | operator | 15 | text-with-number | gate-shape |
+| `proposal-drive-baseline-4` | PD | missing | missing | present | wrong | listed (AC8 to AC10 as one label) | operator | 20 | nickname | gate-shape |
+| `proposal-drive-baseline-5` | PD | missing | missing | missing | n/a | none | operator | 17 | nickname | gate-shape |
+| `proposal-drive-baseline-6` | PD | missing | missing | present | wrong | none (only "the other criteria still open") | operator | 17 | text-with-number | gate-shape |
+| `proposal-drive-baseline-7` | PD | missing | missing | missing | n/a | none | operator | 15 | text-with-number | gate-shape |
+| `proposal-enabler-baseline-1` | enabler | missing | missing | missing | n/a | none | operator | 17 | text-with-number | absent |
+
+"Opening addresses" is `operator` when the first paragraph speaks to the person deciding ("I", "you"), `neither` when
+it only names the slice; no capture addresses the spec's consumer. No remainder was counted by section; the five
+that list one list criteria by their own text in AC order.
+
+Disagreements between the two readers on the by-eye readings: none. On observed items the two differed only in how the
+two vague remainders (`proposal-baseline-5`, `proposal-drive-baseline-6`) were labelled, which is not a verdict.
+Borderline calls both readers flagged: those two captures as `left` present (read as present, `wrong`; reading them
+`missing` would not change any count of passes); `proposal-drive-baseline-4` as `wrong` (its remainder has the right
+six criteria but gives AC8 to AC10 as one label and AC2 as prose; a `correct` reading would make PD `left` 1 of 6, still
+not a clean majority); `proposal-baseline-2` and `-4` as `correct` (the six criteria listed by text in AC order, AC2
+named as the part-done exception, not grouped under section headings).
+
+### Counts, derived from the table above (runs 2 to 7 per site; `left` pass = `left` present and `left-correct` correct)
+
+| Reading | P pass | PD pass | Pilot-included (P / PD) |
+|---|---|---|---|
+| `opens` = `leads` | 0 of 6 | 0 of 6 | 0 of 7 / 0 of 7 |
+| `try-it` = `present` | 0 of 6 | 0 of 6 | 0 of 7 / 0 of 7 |
+| `left` present | 4 of 6 (runs 2, 4, 5, 7) | 2 of 6 (runs 4, 6) | 5 of 7 / 2 of 7 |
+| `left` + `left-correct` pass | 2 of 6 (runs 2, 4) | 0 of 6 | 2 of 7 / 0 of 7 |
+
+Guards (observed at a baseline, not bars): `covers-field` is `gate-shape` in 14 of 14 slice-site captures (7 P, 7 PD)
+and `absent` in the enabler capture. `criterion-mention` over P runs 2 to 7: nickname 3, bare 2, text-with-number 1; over PD runs 2 to 7:
+text-with-number 4, nickname 2. These are not bars at a baseline. Line counts, runs 2 to 7: P 15 to 23, PD 15 to 20.
+
+Splits (registered rule, runs 2 to 4): `left` + `left-correct` split 2-1 at P (runs 2 and 4 pass, run 3 does not); at PD
+the pass was 0 of 3 but `left` alone split 1-2 (run 4 present); `opens` and `try-it` were 0 of 3 at both sites. The
+2-1 split triggered the re-run of both arms to six. No guard is a bar at a baseline, so no guard miss triggered one.
+
+### Headroom verdict per reading (rule: a clean-majority pass, 3 of 3 or 5 to 6 of 6, at both sub-sites)
+
+| Reading | P | PD | Verdict |
+|---|---|---|---|
+| `opens` | 0 of 6 | 0 of 6 | not met without the edit; its part of commit P is kept |
+| `try-it` | 0 of 6 | 0 of 6 | not met without the edit; its part of commit P is kept |
+| `left` with `left-correct` | 2 of 6 | 0 of 6 | not met at either sub-site (2 of 6 is not 5 or 6); its part of commit P is kept |
+
+None of the three is met, so the all-three-met stop does not apply and commit P, with all three parts, goes ahead.
+Counting the pilot does not change a verdict.
+
+### What the table shows, and what it does not
+
+- Per capture, the statement gives the value claim in the stub's system terms under a `Value claim:` label (or a similar
+  label such as "why it matters") in all 14 slice-site captures, and none opens with what a person will be able to do; none gives
+  a way to try the result. Sentences about the ritual's next step (for example `proposal-baseline-6`'s "you can run `/craft:plan`") were read
+  as not a way to try the result, as registered.
+- `left` is the only part that appears unprompted, and it appears in different shapes: a full list of six correct
+  criteria (`proposal-baseline-2`, `-4`), a list that still counts the slice's own AC5 and AC6 (`proposal-baseline-1`,
+  `-7`), a vague "the rest" (`proposal-baseline-5`, `proposal-drive-baseline-6`), and a list with AC8 to AC10 collapsed
+  (`proposal-drive-baseline-4`). Per capture, the two wrong-by-counting-own-criteria captures are the two that state the
+  remainder by echoing the gate's "remaining candidates" line, which is the only per-capture comparison available here.
+  Any wider cause (that the gate tokens in the stub invite the miscount) is a hypothesis, not tested: no treated arm
+  or ablation was run.
+- PD shows less `left` than P (2 of 6 present against 4 of 6), a difference of 2 captures on six runs per arm; the
+  table does not say whether the driver's extra procedure causes it.
+- The enabler capture (observed only) carries no value claim, says so, and writes no covers value; it has no remainder.
+
+### End state taken
+
+Captures, rows and this section only. No arm, fixture, earlier table row, `rules.md`, `slice/SKILL.md` or
+`drive/SKILL.md` was changed. Not run: any treated arm, any paired control, any real `/craft:slice` session.

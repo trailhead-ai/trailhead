@@ -1,0 +1,22 @@
+**The hold shelf slice** is the next slice for the Lantern Row holds and pickup spec (`spec/holds-and-pickup`). It is the smallest slice that clears the value floor. The parent task hasn't been written yet. Please confirm or reject it before that happens.
+
+**Value claim:** When an item with a queued hold comes back, the system sets it aside for the first borrower in that queue. That borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf.
+
+**Visual surface:** None. This slice changes what the system does when an item is returned and which message goes out. It adds or changes no screen, so no enumerated states apply.
+
+**Fully green after this slice:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Partially green after this slice:** None. This slice doesn't make any criterion only partly green. Separately, the five-item limit, where a sixth hold is refused with a message saying why (AC2), is still only partly covered by the earlier first hold slice. This slice doesn't change that.
+
+**Remaining after this slice:**
+- Cancelling a hold before it is filled, with the next hold moving up (AC4).
+- A hold lapsing after seven days uncollected (AC7).
+- The desk screen listing waiting holds when a card is scanned (AC8).
+- Checkout clearing or refusing against a hold (AC9).
+- The weekly holds report (AC10).
+- The rest of that five-item limit (AC2).
+
+If you accept this, I'll write the parent task `task/the-hold-shelf-slice` at `in-progress`, linked to the spec.
+AC5, AC6

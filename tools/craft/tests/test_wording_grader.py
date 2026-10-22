@@ -759,6 +759,11 @@ CAPTURE_EXPECTATIONS = {
         ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
         ("covers-field", [], "gate-shape"),
     ],
+    # The enabler path drafts no covers value: its final line is prose and no criterion is made green.
+    "proposal-enabler-baseline": [
+        ("criterion-mention", ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)], "text-with-number"),
+        ("covers-field", [], "absent"),
+    ],
 }
 
 # A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
@@ -779,6 +784,19 @@ CAPTURE_OVERRIDES = {
     "fourth-noritual-4": {"criterion-mention": "nickname"},
     "fourth-noritual-5": {"criterion-mention": "nickname"},
     "fourth-noritual-6": {"criterion-mention": "bare"},
+    # The proposal baseline batch (2026-10-22): one row per capture, including the ones equal to the prefix default.
+    "proposal-baseline-2": {"criterion-mention": "nickname"},
+    "proposal-baseline-3": {"criterion-mention": "text-with-number"},
+    "proposal-baseline-4": {"criterion-mention": "nickname"},
+    "proposal-baseline-5": {"criterion-mention": "nickname"},
+    "proposal-baseline-6": {"criterion-mention": "bare"},
+    "proposal-baseline-7": {"criterion-mention": "bare"},
+    "proposal-drive-baseline-2": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-3": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-4": {"criterion-mention": "nickname"},
+    "proposal-drive-baseline-5": {"criterion-mention": "nickname"},
+    "proposal-drive-baseline-6": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-7": {"criterion-mention": "text-with-number"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
