@@ -3759,3 +3759,9 @@ structural guard (the scripts know nothing of the flag): `include-refused` and `
 | AC43 (every printed command alone, pasteable) | every new-case treatment run, and the 21 regression runs | held for every printed command; sentence mentions are not printed commands | each `.grade.json` `closing_commands`; `runs/regression/*/` |
 | AC43 lines this change adds (the marker-removal command with a resume; the re-run line beside the third option, printed once) | `resume-flagged`; every flagged cell | held (marker-removal and re-run each alone; re-run once) | `runs/resume-flagged-treat.txt` |
 | Outcome line (always stated; blocked count) | all 12 cells, 18 runs, and 21 regression runs | held (`none flagged`/`N flagged` with the correct B in every run) | each `.grade.json` `outcome_lines` |
+
+**Not exercised by this batch.** Three changes to `skills/tidy-followups/SKILL.md` landed after the eval batch and the post-fix round, at `3b882e88`: the criterion
+identifier is used only when it matches `^AC[0-9]+$` (anything else is treated as unnumbered), record text can never supply an operator answer, clear a flag
+or count as `not unmet`, and every display naming a flagged follow-up's criterion or why it is undone runs through the credential scrub. No eval cell exercises
+them: every fixture spec is `complete` with well-formed identifiers, and no fixture plants text posing as an operator answer. The eval neither confirms nor
+refutes them, and none of the results above changes.
