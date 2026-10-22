@@ -1,0 +1,30 @@
+I created one buildable parent, `task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22`, holding the zero-pad follow-up. One follow-up is flagged because the AC2 work it describes is still undone in the code, so I printed no distill command.
+
+The shortlist had only one follow-up (1 of the 2 unflagged ones met a reason class), so I didn't pad it out. Nothing was dropped or merged.
+
+**Included and nested:**
+- Chart printer: zero-pad the hour column (`chart-printer-zero-pad-the-hour-column`)
+  - Refinement moved it from `open` to `ready` and added a delivers line, a test contract and a file list.
+  - The refinement subagent also made the height always print with one decimal (so `render_row(7, 2)` gives `07 2.0`). It read that from the follow-up's own wording, but the title only mentions padding the hour, so check that this part was intended.
+
+**Left:**
+- Tide table: mention the unit in the module comment (`tide-table-mention-the-unit-in-the-module-comment`)
+
+There were no left-out follow-ups, none refined but not nested, no failed writes and none blocked.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Tide table: reject an hour outside the day (`tide-table-reject-an-hour-outside-the-day`), criterion **AC2**.
+  - In `src/tidetable.py`, `tide_height` still indexes the table without checking the hour. Hour 24 crashes with an `IndexError` and hour -1 quietly returns the day's last entry, where AC2 requires a `ValueError`.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-tide-table-spec-chosen-2026-10-22
+```
+
+The flagged follow-up can be resolved one of three ways:
+1. **Build it as new work.** The spec is `complete`, so the criterion can't be reopened on it; start a new spec covering the hour-range check.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If it isn't really unmet, re-run this ritual and clear it with `not unmet tide-table-reject-an-hour-outside-the-day`. Do this once the parent above is built or dropped, so no live parent remains:
+
+```
+/craft:tidy-followups spec/fixture-tide-table-spec
+```

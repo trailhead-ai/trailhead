@@ -3691,6 +3691,28 @@ specs state no acceptance criteria (the arm says so in several reports: "the spe
 flag" is true by construction there; the arm shows the new prose does not disturb their commands and vault outcomes, not that the test would refuse a false flag. The new
 case's `near-miss`, `inject-forge` and `unnumbered-spec` cells are what show no false flag against a spec with criteria.
 
+### Post-fix round
+
+After the whole-change review's wording fixes to `SKILL.md` (the third closing option's qualifier now covers every closing case that leaves a live parent; `not unmet` is accepted at
+Confirmation 2's drop/merge form and is not offered at Confirmation 3; a flag removes the distill line and adds the options paragraph; resume `stop` prints the outcome line; `not unmet`
+applies before the moves in the same answer), the treatment arm was re-run once on five cells. **Treat SHA `9bdd18d2c3421fb2d5b0fd914e0c2dc16e9bd365`** (its `skills/` tree is `98e2f763`'s,
+the SKILL.md commit); the snapshot's `SKILL.md` was compared with the committed file (identical) and carries the new qualifier ("once no live parent remains"). Same harness path
+(`harness.py cell <work> <cell> treat`), same fixture, same answers, one run each; captures in `runs/postfix/` (the original captures are untouched). `capture_scan.py` and
+`scripts/leak-gate` are clean on `runs/postfix/` (recorded in the commit). 5 arms, 559 s, $3.80; every fixture's `status_after` empty, HEAD unchanged, no real-vault hits.
+
+| Cell | Result against `expected.md` | Versus the original treat run |
+|---|---|---|
+| `unmet-flagged` | **FAIL on `D3` only** (Confirmation 3 not shown, D skip). Core `C1` to `C4` pass: `K` nested, `U` byte-identical, outcome `1 flagged; 0 blocked not checked`, build alone, no distill, options, re-run alone once. `D1`, `D2` held. | Same verdict. |
+| `resume-flagged` | **Core `C1` to `C5` pass** (`state`, `check`, one `resume` of `K`, `U` unchanged and parentless, `nested`/`removed` lines, build and marker-removal and re-run alone, no distill). **`D1` and `D2` fail (D skip):** no step 6 list and no resume question were shown before `resume`. | **Changed: PASS to FAIL on `D1`, `D2`.** Core unchanged. A display line, the known skip, one run; the edits do not touch what step 7 displays, but this round cannot separate the edit from run-to-run variation. Reported, not fixed. |
+| `include-refused` | **PASS.** The first answer was refused in the arm's text at Confirmation 1 with the `not unmet` offer, which Confirmation 1 accepts; `K` nested; `U` byte-identical; outcome `1 flagged`. | Same verdict. |
+| `clear-flag` | **FAIL on `D1` (D skip).** Core passes: `not unmet U` accepted, `U` refined and nested, `none flagged`, build then distill alone. | Same verdict. |
+| `drop-refused-c2` | **FAIL on `C2`, `D1`, `D2`** at the registered point: no text before the first write, so the refusal of `drop U` appears only in the closing report. Rest of the core passes (one preview and one write dropping `D` only with the reason; `U` open and byte-identical; `K` nested). | Same verdict. |
+
+**Closing options paragraph.** In every cell that prints it (`unmet-flagged`, `resume-flagged`, `include-refused`, `drop-refused-c2`) the third option now carries the widened qualifier: re-run once the
+parent is built or dropped / no live parent remains, after an `assemble` that exited 0 and after a resume that ended buildable. **Refusals offer only what is accepted:** the only refusal shown (`include-refused`, at
+Confirmation 1) offers `not unmet`; the Confirmation 2 and 3 refusals were not displayed (D skip), so the Confirmation 3 wording fix was not observed.
+**Registered lines whose verdict changed versus the original treat run:** `resume-flagged` `D1` and `D2` (PASS to skip). No core line changed; no flagged follow-up was nested, dropped or lost a printed command.
+
 ### Findings beyond the pass condition
 
 - **Confirmation 3 (step 11) was put in none of the 16 new-case treatment runs that nest a follow-up** (`unmet-flagged` ×3, `near-miss` ×3, `unnumbered-spec` ×3,

@@ -1,0 +1,104 @@
+[main] BASH
+$CRAFT[treat]/scripts/followup_gather.py fixture-chart-datum-spec; echo "exit: $?"
+
+[main] BASH
+for n in datum-remove-the-retired-spring-tide-table datum-report-an-unknown-station-by-name datum-sheet-pad-the-station-column; do echo "=== $n"; lore record show --json --vault default task/$n; echo "exit: $?"; done; echo "=== spec"; lore record show --json --vault default spec/fixture-chart-datum-spec; echo "exit: $?"
+
+[main] BASH
+cd $RUN[drop-refused-c2-treat]/fixture/repo && git ls-files && cat src/datum.py src/datumsheet.py
+
+[main] BASH
+cd $RUN[drop-refused-c2-treat]/fixture/repo && ls -R . | grep -v '^\.git' | head -30; cat src/datum.py src/datumsheet.py
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the retired spring-tide table has no readers left", "drops": [{"name": "datum-remove-the-retired-spring-tide-table", "revision": "[sha:16d2de90]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-chart-datum-spec --dispositions "$dispositions" --preview
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] BASH
+dispositions=$(mktemp)
+cat > "$dispositions" <<'DISPOSITIONS_JSON'
+{"reason": "the retired spring-tide table has no readers left", "drops": [{"name": "datum-remove-the-retired-spring-tide-table", "revision": "[sha:16d2de90]"}], "merges": []}
+DISPOSITIONS_JSON
+$CRAFT[treat]/scripts/followup_dispose.py dispose fixture-chart-datum-spec --dispositions "$dispositions"
+rc=$?
+rm -f "$dispositions"
+echo "exit: $rc"
+
+[main] AGENT
+Refine the follow-up task `task/datum-sheet-pad-the-station-column` in the lore vault `default`.
+
+- Read $CRAFT[treat]/skills/_shared/refine.md yourself and follow it in full, in its unattended mode, against that one task only. `${CLAUDE_PLUGIN_ROOT}` is $CRAFT[treat]. The `lore` command on PATH reads the vault.
+- The code the task refers to is the git repository at $RUN[drop-refused-c2-treat]/fixture/repo (read it; do not modify it).
+- Stage any body you... [cut 266 chars]
+
+[sub] BASH
+lore record show task/datum-sheet-pad-the-station-column; echo ---; lore task graph datum-sheet-pad-the-station-column; echo ---; lore --help 2>&1 | head -40
+
+[sub] BASH
+lore record show --help 2>&1 | head -30; lore record show task/datum-sheet-pad-the-station-column --json 2>&1 | head -40; lore vault ls 2>&1
+
+[sub] BASH
+git status --short && git log --oneline | head && find . -path ./.git -prune -o -type f -print && cat -n src/datumsheet.py
+
+[sub] BASH
+find . -path ./.git -prune -o -type f -print && cat -n src/datumsheet.py
+
+[sub] BASH
+cat -n README.md; grep -rn "sheet_line\|datumsheet\|ljust\|:<\|:>" src README.md; ls -a; ls -a .. ; cat -n src/__init__.py src/chartprint.py src/datum.py
+
+[sub] BASH
+lore record show task/fixture-chart-datum-spec-the-slice 2>&1; echo ---; lore search "datum" 2>&1 | head -30; echo ---; lore search "sheet" 2>&1 | head; lore search "pad" 2>&1|head; lore search "kind:area" 2>&1 | head; lore search "test" 2>&1 | head
+
+[sub] BASH
+lore record show task/lens-oil-round-the-litres-to-one-decimal; echo ---; lore areas 2>&1 | head; lore search "kind:area datum" 2>&1|head; lore search "kind:adr" 2>&1|head; lore search "kind:lesson" 2>&1|head
+
+[sub] BASH
+grep -n -A6 "Flow-out" $CRAFT[treat]/templates/plan.md; lore record update --help 2>&1 | head -30
+
+[sub] BASH
+sed -n 30,40p $CRAFT[treat]/templates/plan.md
+
+[sub] BASH
+set -e; T=$(mktemp); trap 'rm -f "$T"' EXIT
+cat > "$T" <<'EOF'
+`sheet_line` in `src/datumsheet.py` prints the station name unpadded, so the offsets do not line up. Agreed behaviour: it returns the station padded on the right to 12 characters, a space, then the offset. The repository has no tests yet; add `tests/test_datumsheet.py`.
+
+**Delivers:** `sheet_line(station, offset)` (`src/datumsheet.py:1-2`, which currently joins station and offset with a single space and no padding) returns the station left-aligned and padded on the right with spaces to 12 characters, then one space, then the offset — so every line's offset starts at column 14. A station longer than 12 characters is not truncated (padding only).
+
+**Test contract:** New `tests/test_datumsheet.py` (the repo has no tests yet; import via the `src` package, `src/__init__.py`), written failing first:
+- `sheet_line('north quay', 0.4)` returns `'north quay' + 2 spaces + ' 0.4'`, i.e. 16 characters total (station names from `src/datum.py:1`).
+- Two lines with different-length stations (`'north quay'`, `'south quay'`, and a short one such as `'pier'`) have their offset start at the same index (13).
+- A station exactly 12 characters long is followed by a single space and the offset.
+
+**Files:** `src/datumsheet.py`, `tests/test_datumsheet.py` (new)
+
+## Flow-out
+
+- [ ] Touched area/subsystem profiles updated with what changed
+- [ ] Prover-validated assumptions captured as session candidates (durable at flush)
+- [ ] New decisions / lessons / follow-ups surfaced during the build recorded
+EOF
+lore record update task/datum-sheet-pad-the-station-column --vault default --status ready < "$T"
+echo; lore record show task/datum-sheet-pad-the-station-column
+
+[sub] BASH
+lore record show task/datum-sheet-pad-the-station-column --json | grep '"status"'
+
+[main] BASH
+$CRAFT[treat]/scripts/followup_parent.py check fixture-chart-datum-spec datum-sheet-pad-the-station-column; echo "exit: $?"
+
+[main] BASH
+children=$(mktemp)
+cat > "$children" <<'CHILDREN_JSON'
+[{"name": "datum-sheet-pad-the-station-column", "reason": "the unpadded station column leaves the datum sheet's offsets misaligned, and every sheet printed or read in the meantime has the misalignment", "revision": "[sha:325dd1cf]"}]
+CHILDREN_JSON
+$CRAFT[treat]/scripts/followup_parent.py assemble fixture-chart-datum-spec --children "$children"
+rc=$?
+rm -f "$children"
+echo "exit: $rc"

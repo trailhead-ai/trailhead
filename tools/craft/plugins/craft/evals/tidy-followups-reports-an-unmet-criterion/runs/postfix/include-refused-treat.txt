@@ -1,0 +1,29 @@
+### Closing report
+
+I created one buildable parent task for the signal-lamp follow-up. The pennants lower-case follow-up was not included because it is flagged as an unmet acceptance criterion (AC2).
+
+- **Included and nested:** Signal lamp: report a low battery under twenty percent (`signal-lamp-report-a-low-battery-under-twenty-percent`)
+- **Left:** Pennants: sort the table by letter (`pennants-sort-the-table-by-letter`)
+- **Left out at step 10:** none
+- **Refined but not nested:** none
+- **Failed writes:** none
+- **Dropped or merged:** nothing; no dispositions were written
+- **Parent created:** `build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22`, set to `ready` and buildable
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- **Pennants: accept a lower-case letter** (`pennants-accept-a-lower-case-letter`), AC2. It's still undone: `pennant_for` uses the code exactly as given, so a lower-case letter raises an error instead of returning the same pennant as its capital.
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-pennant-spec-chosen-2026-10-22
+```
+
+No distill command is printed, because a follow-up is still flagged.
+
+You have three options for the flagged follow-up:
+1. **Build AC2 as a slice.** The spec's status is `complete`, so this means starting a new spec for it.
+2. **Change the criterion.** Amend the spec to remove or reword AC2.
+3. **Clear the flag.** If AC2 isn't really unmet, re-run this ritual and answer `not unmet pennants-accept-a-lower-case-letter`. A live parent exists now, so do this only after that parent is built or dropped.
+
+```
+/craft:tidy-followups spec/fixture-pennant-spec
+```

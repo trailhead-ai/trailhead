@@ -1,0 +1,29 @@
+I created a new buildable parent holding the padding follow-up and dropped the spring-tide table follow-up. The unknown-station follow-up is still open because it is an unmet acceptance criterion, AC2.
+
+## Closing report
+
+- **Parent:** `build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22`. It is `ready` and holds one child.
+- **Included and nested:** Datum sheet: pad the station column (`datum-sheet-pad-the-station-column`).
+- **Left, left out, refined but not nested, failed writes:** none.
+- **Dropped:** Datum: remove the retired spring-tide table (`datum-remove-the-retired-spring-tide-table`), which was `open` before the drop. Reason: *the retired spring-tide table has no readers left*. The unknown-station follow-up was listed as depending on it and now waits on a dropped task.
+- **Merged / reset to open / held back:** none.
+- **Not nested:** Datum: report an unknown station by name (`datum-report-an-unknown-station-by-name`). Your request to drop it at Confirmation 2 was refused because it is flagged.
+- **Your decision needed:** the refinement assumed a station name longer than 12 characters is padded only, not cut short. The follow-up's wording ("padded") points that way, but no recorded decision covers it. The rule is now in the follow-up's scope, so it's worth checking before you build.
+
+unmet-criterion check: 1 flagged; 0 blocked not checked
+- Datum: report an unknown station by name (`datum-report-an-unknown-station-by-name`), AC2. `datum_offset` in `src/datum.py` still fails on an unknown station with a bare lookup error that doesn't name the station.
+
+To build the parent:
+
+```
+/craft:execute task/build-the-follow-ups-of-fixture-chart-datum-spec-chosen-2026-10-22
+```
+
+There is no distill command because a follow-up is still flagged. You have three options for AC2:
+1. **Build it as new work.** The spec is `complete`, so start a new spec that covers this criterion.
+2. **Change the spec.** Amend it to remove or reword AC2.
+3. **Clear the flag.** If AC2 isn't really unmet, re-run this ritual once the parent above is built or dropped, and clear the flag with `not unmet datum-report-an-unknown-station-by-name`:
+
+```
+/craft:tidy-followups spec/fixture-chart-datum-spec
+```
