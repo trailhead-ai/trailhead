@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a scratch pad: one or more rounds of layout and flow sketches.
+"""Build a scratch pad of layout and flow sketches in rounds, or publish a reference page of chosen drawings.
 
 Given ``--pad <slug>`` and ``--round <path-to-json>`` (and ``--add`` for a later round of an
 existing pad), this checks the round's
@@ -124,17 +124,17 @@ Contract
                                   ``{"title": ...}`` per round, encoded the same way
 
 * ``read_reference(reference_path, pad, ...)`` reads drawings back for a reference page; it builds and changes
-  nothing and has no command-line wiring. The reference is one JSON object: ``site`` (a slug as ``--pad``),
-  ``title`` (non-empty) and ``drawings`` (at least one ``{round, question, option}``: whole numbers from 1 and
-  a capital letter; an unknown key is refused, the same drawing twice is refused). The pad is found where
-  ``--add`` finds it, read under its lock through the add's read-back (refusals worded for a reference, not an
-  add), each named round's data decoded from ``round.js`` as data, and the lock released before it returns.
-  It returns a ``Reference(site, title, drawings)`` whose drawings are ``ChosenDrawing(round, question, letter,
-  round_title, prompt, option)`` in the order named, or raises :class:`Refusal` with every problem found.
-  Before it returns, every string bound for the page (title, site, each round title, prompt, name, cost, flow
-  and every string inside a layout, dictionary keys included) is matched against the credential-pattern
-  classes in ``_CREDENTIAL_PATTERNS`` (mirroring craft's credential-pattern scrub list); a match refuses the
-  reference naming the drawing and field, never the matched text.
+  nothing (``--reference``, below, is its command-line use). The reference is one JSON object: ``site`` (a slug as
+  ``--pad``), ``title`` (non-empty) and ``drawings`` (at least one ``{round, question, option}``: whole numbers from
+  1 and a capital letter; an unknown key is refused, the same drawing twice is refused). The pad is found where
+  ``--add`` finds it, read under its lock through the add's read-back (refusals worded for a reference, not an add),
+  each named round's data decoded from ``round.js`` as data, and the lock released before it returns. It returns a
+  ``Reference(site, title, drawings)`` whose drawings are ``ChosenDrawing(round, question, letter, round_title,
+  prompt, option)`` in the order named, or raises :class:`Refusal` with every problem found. Before it returns,
+  every string bound for the page (title, site, each round title, prompt, name, cost, flow and every string inside a
+  layout, dictionary keys included) is matched against the credential-pattern classes in ``_CREDENTIAL_PATTERNS``
+  (mirroring craft's credential-pattern scrub list); a match refuses the reference naming the drawing and field,
+  never the matched text.
 * ``--pad <slug> --reference <json> --vault-path <p> [--vault <n>]`` publishes a reference page to a lore vault,
   from inside a camp workspace or outside one. ``--reference`` cannot be used with ``--round`` or ``--add``, and
   needs ``--vault-path``; ``--vault-path`` and ``--vault`` are only valid with ``--reference``; without
@@ -148,12 +148,12 @@ Contract
   lock or a signing prompt for as long as it takes. Just before the publisher starts, stdout gets
   ``PUBLISHING_LINE`` (and is flushed); the publisher's stdout (the sync's own lines, then the link
   ``http://127.0.0.1:<port>/<vault>/<site>/``, last) is passed through as it is written, not captured. Its stderr
-  is captured: on success it is shown on stderr unchanged; on a non-zero exit each non-blank line is refused as
-  ``scratch-pad: publish: <line>`` (escaped as on the workspace path; a bare ``the publisher exited with status
-  <n>`` when it said nothing) and nothing more is printed, so a failed sync prints no link and leaves the page in
-  ``<vault>/sites/<site>`` as the publisher leaves it. A publisher that cannot be started is refused as
-  ``scratch-pad: publish: could not start the publisher: <why>``. The temp folder is removed on every path,
-  exceptions included. The pad is never changed.
+  is shown live on stderr, each non-blank line as it arrives as ``scratch-pad: publish: <line>`` (escaped as on
+  the workspace path), whatever the exit. On a non-zero exit the run is refused with no further line, except a
+  bare ``scratch-pad: publish: the publisher exited with status <n>`` when the publisher said nothing; a failed
+  sync prints no link and leaves the page in ``<vault>/sites/<site>`` as the publisher leaves it. A publisher
+  that cannot be started is refused as ``scratch-pad: publish: could not start the publisher: <why>``. The temp
+  folder is removed on every path, exceptions included. The pad is never changed.
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- and exits non-zero. No pad and no temp folder
   are left behind; a pads folder this run had to create may remain, empty.
@@ -1495,7 +1495,8 @@ def main(
     publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
 ) -> int:
     parser = argparse.ArgumentParser(
-        prog="scratch_pad.py", description="Build a scratch pad from a round of questions."
+        prog="scratch_pad.py",
+        description="Build a scratch pad from a round of questions, or publish a reference page of chosen drawings.",
     )
     parser.add_argument("--pad", help="pad name: ^[a-z0-9][a-z0-9._-]*$")
     parser.add_argument("--round", dest="round_path", help="path to the round's JSON file")

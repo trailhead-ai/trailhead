@@ -1,6 +1,6 @@
 ---
 name: scratch-pad
-description: Open a design question as a pad of hand-drawn sketches in the browser, so options can be compared as drawings instead of read as descriptions, and add a follow-up round of questions to a pad the user already has open. Use when a design question's options are visual layouts (where a control lives, how a page is arranged, which of several screens to build) or flows (the steps of a process, how data or control moves through a system, an architecture picture), or for "sketch these options", "draw the layouts", "draw the flow", "show me the options", "open a scratch pad".
+description: Open a design question as a pad of hand-drawn sketches in the browser, so options can be compared as drawings instead of read as descriptions, add a follow-up round of questions to a pad the user already has open, and publish the drawings the user names as the reference to build or keep to a shared vault as a page of its own. Use when a design question's options are visual layouts (where a control lives, how a page is arranged, which of several screens to build) or flows (the steps of a process, how data or control moves through a system, an architecture picture), or for "sketch these options", "draw the layouts", "draw the flow", "show me the options", "open a scratch pad", and when the user says a drawing is the one to build or keep ("B is the one we're building; keep it for the team").
 ---
 
 # Scratch pad
@@ -15,6 +15,10 @@ folder included) the pad is published as a site of that workspace and the script
 prints an Outpost link. Outside one the pad is built as plain files under
 Outpost's state directory and the script prints a `file://` link: that page
 opens from disk with nothing running and no network.
+
+A pad stays scratch: it is never published to a vault. Only a *reference*, a page
+of just the drawings the user names as the one to build or keep, goes to a vault,
+where the team can open it (see "Name a reference").
 
 ## When to use it
 
@@ -212,6 +216,62 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
 - On refusal the script exits non-zero and prints its reasons on stderr; no
   pad was made, or, with `--add`, nothing in the pad changed.
 
+## Name a reference
+
+A reference is a page of only the drawings the user chose, published to a lore
+vault so the team can open it. Name one only when the user says a drawing is the
+one to build or keep, and only a drawing the user has seen drawn: one on a pad
+they opened, not one that showed "Can't draw this layout" or "Can't draw this
+flow". A passing remark ("I like B", "B looks good") is never a reference: carry
+on with the design and publish nothing. When it is unclear whether they mean it,
+ask in words.
+
+Write the reference as a JSON file, anywhere you can read back:
+
+```json
+{
+  "site": "settings-header",
+  "title": "Settings page: header",
+  "drawings": [
+    {"round": 1, "question": 1, "option": "B"}
+  ]
+}
+```
+
+- `site` is the page's name in the vault and matches `^[a-z0-9][a-z0-9._-]*$`;
+  `title` is non-empty; `drawings` names at least one drawing.
+- A drawing is the round's number, the question's number in that round (both
+  counted from 1) and the option's letter, as the user saw them on the pad. Name
+  each drawing once. An unknown key is refused.
+- The page shows each named drawing with its question, name and cost, and
+  today's date. Everything on it is shared with the team: it must hold
+  no secrets, tokens or customer data.
+
+Resolve the vault exactly as the `publish-site` skill does: run
+`lore vault resolve --kind blob --json` and take its `path`, and its `vault` name
+only when that is a string; to publish into a different vault than that one, look
+it up with `lore vault ls` and take its name and path the same way.
+
+**Before running anything, ask once and wait.** Send one line naming the drawings
+(round, question and option, with the option's name), the page title and the
+vault, and ask whether to publish. Run the command only after the user answers
+yes. If they say no, or answer something else, publish nothing.
+
+```bash
+python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
+  --pad <slug> --reference <path-to-reference.json> \
+  --vault-path <path-from-resolve> [--vault <name-from-resolve, if a string>]
+```
+
+- `<slug>` is the pad the drawings are on, as it was built (inside a camp
+  workspace or outside one).
+- The command can wait on a vault lock or a signing prompt before it finishes:
+  give it a long wait (up to 10 minutes) and do not run it again meanwhile.
+- It prints a line that it is publishing, then the sync's own output, and, on
+  success, the page's link as the last line. A name that already holds a page in
+  the vault is refused, and the script takes no `--overwrite`.
+- It only reads the pad. The vault gets the page; nothing is changed on the pad.
+
 ## Report it
 
 - **Success:** relay every line printed before `pad folder:` to the user as
@@ -279,6 +339,56 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
     never one you found by looking in `sites/` yourself. A further line `scratch-pad: publish: older
     leftovers that may be partial: <paths>` lists earlier leftovers; leave them
     alone and do not restore from them.
+
+### Reporting a reference
+
+- **Success** (exit 0): hand the user the link, which is the last line printed,
+  exactly as printed, and no other. Say the final site name (it differs from
+  the one you first chose when a taken name was retried) and say in one line how
+  to take the page back: delete the site folder `<vault path>/sites/<site>`, then
+  sync that vault (`lore sync --vault <name>`, or bare `lore sync` when the vault
+  had no name); the vault's git history keeps the content. If the last line is
+  not a link, say no link was printed and give none.
+- **Site name already taken**: the refusal ends `already exists in the vault —
+  choose another site name`. Retry with a new `site`, without asking, and report
+  the name the page finally got. Never look for an `--overwrite`.
+- **Published locally, not synced**: a `scratch-pad: publish: error:` line says
+  the page was published locally but NOT synced, and no link is printed. Do not
+  rerun. Tell the user the page is not yet shared with the team and give no link;
+  offer both ways forward: sync the vault to share it, or take it back as above.
+- **Credential pattern**: a line `scratch-pad: drawings[i] (round R, question Q,
+  option L): <field> matches a credential pattern (<class>) — this is shared with
+  the team`. Say which drawing and which field it names, and never repeat the
+  text that matched. The fix is a corrected drawing: add a round to the pad
+  without it (`--add`), ask the user to open that round and name the drawing
+  again.
+- **Other refusals** (exit 1), each followed by one plain line that no reference
+  was published and why:
+  - `scratch-pad: pad "<pad>": does not exist …`, or `can't be referenced: …`:
+    the slug is not a pad here or the pad cannot be read. Fix the slug if you
+    misspelt it; otherwise tell the user.
+  - `drawings[i].round`, `.question` or `.option` out of range, `the same drawing
+    as drawings[j]`, or `holds NaN` / `Infinity` / `-Infinity`: you named a
+    drawing the pad lacks, twice, or one the page cannot carry. Fix the numbers
+    if it was a slip; for a drawing that holds a number that is not finite, add a
+    corrected round as for a credential pattern.
+  - A reference-file line (`cannot read`, `invalid JSON`, `unknown key`, `no
+    "site"`, `no "title"`, a `drawings[i]` problem): fix the file and rerun.
+  - `scratch-pad: waiting for another session's add to pad "<pad>"…` on stderr is
+    the script waiting its turn. If it ends `another session is adding a round to
+    pad "<pad>"; try again`, rerun once; if it is refused again, tell the user.
+  - `the sites folder is a symlink` or `is not a directory`: tell the user; do
+    not replace or remove it.
+  - `scratch-pad: publish: could not start the publisher: …`, `scratch-pad:
+    publish: the publisher exited with status N`, or any other `scratch-pad:
+    publish: <line>` the publisher gave (for example that the vault path is not a
+    vault): do not rerun. Tell the user what the line says and ask in words.
+    `scratch-pad: publish: lore: waiting for the vault write lock` is the sync
+    waiting its turn, not a refusal.
+- **Exit 2** (a usage message, for example `--reference needs --vault-path`): the
+  command was malformed. Fix it and rerun; nothing was published.
+- **No vault**: if the vault cannot be resolved, run nothing; tell the user that
+  no reference was published and ask which vault.
 
 After any pad that holds a flow, ask the user to paste back any "Can't draw this
 flow" message an option shows. The fix is a new round (`--add`, with its own

@@ -25,7 +25,7 @@ directory (nobody finds those) and over a Claude Artifact (that leaves the
 team's own vault). Say where you published it and hand back the URL.
 The one exception is a scratch pad (below): it goes where the scratch-pad skill
 puts it — the enclosing workspace, or a folder on disk outside one — never the
-vault.
+vault, except a reference page the user asks for, which that skill sends to the vault.
 
 **Choose the target by how long the page should live**, not by how polished it
 is. If the team needs it after this work is done, or there is no workspace to
