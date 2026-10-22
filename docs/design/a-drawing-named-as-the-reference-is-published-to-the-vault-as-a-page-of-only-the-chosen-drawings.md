@@ -44,6 +44,12 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
 
 `--reference` is its own mode: it takes no `--round` and no `--add`, and it never changes the pad.
 
+**Confirm before anything is shared.** Before running the script, the session says in one line
+which drawings (by question and option name), under what title, are going to which vault for the
+team, and waits for the user's yes. A remark like "I like the stacked one" is an answer to a
+question, not a reference; only a yes to that line runs the script. The session only names drawings
+the user has seen drawn on the pad.
+
 ## Where the drawings come from
 
 The pad is found where it lives, exactly as `--add` finds it: inside a camp workspace (a member
@@ -71,7 +77,7 @@ shared, not about markup.
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │ Settings page: the header we are building                            │
-│ Chosen on a scratch pad. Each drawing is a sketch, not a final design.│
+│ Chosen on a scratch pad, 2026-10-22. Each drawing is a sketch.       │
 │                                                                      │
 │ ┌ Header layout ── Settings page, round 1 ─────────────────────────┐ │
 │ │ B  Stacked header                                                │ │
@@ -95,8 +101,9 @@ shared, not about markup.
 - Each card is headed by the question's prompt and the round's title, then the option's letter and
   name, its cost, then the drawing. There is no "my pick" tag: on a reference every drawing is the
   choice.
-- The fixed line under the title says the page was chosen on a scratch pad and that each drawing is
-  a sketch, so a teammate does not read it as a finished design.
+- The line under the title says the page was chosen on a scratch pad, gives the date it was
+  published (written by the script at build time), and says each drawing is a sketch, so a teammate
+  can tell how current it is and does not read it as a finished design.
 - Black ink on paper, one accent colour, Architects Daughter lettering, light and dark following
   the page's own switch: the pad's look, from the pad's own stylesheet.
 - The page loads only files beside it, under the same `script-src 'self'` policy as a pad, with no
@@ -110,11 +117,25 @@ drawing is traced with the same seed it has on the pad (its question and option 
 reference draws the same strokes on every load at a given width.
 
 Publishing goes through the publish-site script with `--vault-path` (and `--vault` when given),
-never `--overwrite`. Its output (the sync's own lines, then the link) is relayed as printed, and the
-link appears only when the publisher printed one. The reference is built in an owner-only temporary
-folder outside the vault, removed on every path. Unlike a workspace publish, the script does not
-kill the publisher on a timer: the publisher's last step is `lore sync`, and stopping a sync partway
-through a commit can leave the vault's git mid-operation for every later writer.
+never `--overwrite`. The pad's lock is released once the drawings are read, before publishing, so a
+slow sync never holds up an add to the pad. The reference is built in an owner-only temporary folder
+outside the vault, removed on every path. Unlike a workspace publish, the script does not kill the
+publisher on a timer: the publisher's last step is `lore sync`, and stopping a sync partway through a
+commit can leave the vault's git mid-operation for every later writer. Because it can wait (on the
+vault's lock, or on a commit-signing prompt), the script first prints one line saying it is
+publishing to the vault and that the sync can wait on a lock or a signing prompt, then lets the
+publisher's output (the sync's own lines, then the link) through as it is written rather than
+capturing it. The link appears only when the publisher printed one. The skill tells the session to
+allow the command a long wait.
+
+## Taking a reference back
+
+A published reference is never replaced by the script, so taking one back is the publish-site
+skill's own removal: delete `<vault>/sites/<site>/`, then sync that vault. The vault's git history
+keeps what was published; removal stops the page being served and shipped, it does not erase it.
+After every publish the session tells the user, in one line, how to take the page back. A wrong
+drawing is fixed by taking the page back and publishing a new reference; text the credential check
+missed is taken back the same way, and a real credential is rotated, not merely removed.
 
 Who can open the page is decided by who shares the vault. The page adds no access check of its own,
 and holds nothing a teammate with the vault cannot already read.
@@ -150,5 +171,8 @@ untouched: a badly shaped reference; a pad that does not exist or that the read-
 round, question or letter the pad does not have; a credential-pattern match; a site name already
 taken; the publisher refusing or failing to start (its lines relayed as `scratch-pad: publish:`).
 When the publisher published but its sync failed, the publisher's own lines say the page is
-published on this machine but not synced, and there is no link: the session tells the user the
-page is not yet shared and hands back no link.
+published on this machine but not synced, and there is no link. The page is still in the local
+vault and will reach the team on the vault's next sync, by any session, unless it is taken back. The
+session tells the user the page is not yet shared, hands back no link, and gives both ways forward:
+sync the vault to share it, or take it back (delete the site folder, then sync). A retry of the same
+name is refused as taken until the folder is gone.
