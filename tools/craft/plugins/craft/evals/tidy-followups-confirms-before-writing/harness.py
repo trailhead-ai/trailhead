@@ -20,7 +20,8 @@ last showed; `{code}` is left for the driver, which fills it only from the arm's
 
 `persist` scrubs the run's stream, driver record, grade and tree diff into this case's `runs/`.
 
-The harness, scrub, and driver are `../tidy-followups-builds-one-parent/`'s, unchanged.
+The harness, scrub, and driver are `../tidy-followups-builds-one-parent/`'s; this harness passes its own
+question rule to the driver.
 """
 
 from __future__ import annotations
@@ -40,7 +41,6 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 OLD_CASE = HERE.parent / "tidy-followups-builds-one-parent"
 BASE_SHA = "23b0811b1fe9dc386d1728746b87edc3631cdb81"
-NO_PREV_CODE = "zzzz"
 
 sys.path.insert(0, str(OLD_CASE))
 sys.path.insert(0, str(HERE))
@@ -62,17 +62,8 @@ def question_near_the_end(text: str) -> bool:
     return any("?" in p for p in paragraphs[-3:])
 
 
-_read_turn = driver._read_turn
-
-
-def _read_turn_with_questions_near_the_end(lines, deadline, stream):
-    turn, why = _read_turn(lines, deadline, stream)
-    if turn is not None and not turn["asked"] and question_near_the_end(turn["assistant_text"]):
-        turn["asked"] = True
-    return turn, why
-
-
-driver._read_turn = _read_turn_with_questions_near_the_end
+def asked(text: str, last_text: str, code: str | None) -> bool:
+    return driver.strict_asked(text, last_text, code) or question_near_the_end(text)
 
 FIRST_MESSAGE = (
     "You are the agent running the /craft:tidy-followups skill. Its definition is the file {skill}. "
@@ -114,11 +105,6 @@ def arm_env(manifest: dict, shim: str, run_dir: Path, snap: Path) -> dict:
     return env
 
 
-def last_code(drive_record: dict) -> str:
-    codes = [t["code"] for t in drive_record["turns"] if t.get("code")]
-    return codes[-1] if codes else NO_PREV_CODE
-
-
 def descendants(pid: int) -> list[int]:
     table = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True).stdout.split()
     parents = dict(zip(map(int, table[0::2]), map(int, table[1::2])))
@@ -151,12 +137,12 @@ def run(args) -> None:
     meta = work / "meta"
     meta.mkdir(exist_ok=True)
     spec_cell = cell.get("spec_cell", args.cell)
-    prev_code = NO_PREV_CODE
+    prev_code = grade_confirm.NO_PREV_CODE
     if cell.get("reuse"):
         manifest_key = f"{cell['reuse']}-{arm}-r{args.n}"
         run_dir = work / "runs" / manifest_key
         manifest = json.loads((meta / f"{manifest_key}.manifest.json").read_text())
-        prev_code = last_code(json.loads((meta / f"{manifest_key}.drive.json").read_text()))
+        prev_code = grade_confirm.earlier_leg_code(json.loads((meta / f"{manifest_key}.drive.json").read_text()))
     else:
         manifest_key = key
         run_dir = work / "runs" / key
@@ -179,7 +165,7 @@ def run(args) -> None:
     done = threading.Event()
     threading.Thread(target=watchdog, args=(args.deadline, done), daemon=True).start()
     start = time.time()
-    result = driver.drive(argv, first, answers, turn_timeout=args.turn_timeout)
+    result = driver.drive(argv, first, answers, turn_timeout=args.turn_timeout, asked=asked)
     done.set()
     elapsed = time.time() - start
     after = {"vault": old.tree(fixture / "vault"), "repo": old.repo_state(Path(manifest["repo"]))}

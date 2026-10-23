@@ -16,8 +16,9 @@ Each turn is recorded as a dict:
     turn            1-based turn number
     assistant_text  the turn's top-level assistant text, in order, joined by newlines
     tool_calls      [{"name", "input"}] for the turn's top-level tool_use blocks
-    asked           the turn ended with a question (a confirmation question line, or final
-                    text ending in `?`)
+    asked           the turn ended with a question: `drive`'s `asked(text, last_text, code)`
+                    predicate, by default a confirmation question line or final text ending
+                    in `?`
     code            the confirmation code taken from the text, or None
     display_shown   a confirmation question line with its code was in the arm's text
     answer_sent     the answer sent after this turn (code filled in), or None
@@ -102,7 +103,13 @@ def _send(proc, text: str) -> None:
     proc.stdin.flush()
 
 
-def _read_turn(lines: _Lines, deadline: float, stream: list) -> tuple[dict | None, str]:
+def strict_asked(text: str, last_text: str, code: str | None) -> bool:
+    """A turn asked when it printed a confirmation question line with its code, or its last text
+    block ends in `?`."""
+    return code is not None or last_text.rstrip().endswith("?")
+
+
+def _read_turn(lines: _Lines, deadline: float, stream: list, asked=strict_asked) -> tuple[dict | None, str]:
     texts: list[str] = []
     calls: list[dict] = []
     last_text = ""
@@ -137,14 +144,14 @@ def _read_turn(lines: _Lines, deadline: float, stream: list) -> tuple[dict | Non
     return {
         "assistant_text": text,
         "tool_calls": calls,
-        "asked": code is not None or last_text.rstrip().endswith("?"),
+        "asked": asked(text, last_text, code),
         "code": code,
         "display_shown": code is not None,
     }, ""
 
 
 def drive(argv, first_message: str, answers, *, env=None, cwd=None,
-          turn_timeout: float = DEFAULT_TURN_TIMEOUT) -> DriveResult:
+          turn_timeout: float = DEFAULT_TURN_TIMEOUT, asked=strict_asked) -> DriveResult:
     result = DriveResult()
     pending = list(answers)
     proc = subprocess.Popen(
@@ -155,7 +162,7 @@ def drive(argv, first_message: str, answers, *, env=None, cwd=None,
     try:
         _send(proc, first_message)
         while True:
-            turn, why = _read_turn(lines, time.monotonic() + turn_timeout, result.stream)
+            turn, why = _read_turn(lines, time.monotonic() + turn_timeout, result.stream, asked)
             if turn is None:
                 result.ended = why
                 break

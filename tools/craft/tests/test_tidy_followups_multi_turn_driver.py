@@ -73,13 +73,13 @@ def tool_result(t):
 RESULT = {"type": "result", "subtype": "success", "result": "x"}
 
 
-def run(tmp_path, turns, answers, first="go"):
+def run(tmp_path, turns, answers, first="go", **drive_kw):
     (tmp_path / "turns.json").write_text(json.dumps(turns))
     (tmp_path / "stub.py").write_text(STUB)
     log = tmp_path / "received.jsonl"
     res = driver.drive(
         [sys.executable, tmp_path / "stub.py", tmp_path / "turns.json", log], first, answers,
-        turn_timeout=20,
+        turn_timeout=20, **drive_kw,
     )
     received = [json.loads(x) for x in log.read_text().splitlines()]
     return res, received
@@ -222,3 +222,21 @@ def test_a_hung_turn_times_out_and_is_recorded(tmp_path):
     res = driver.drive([sys.executable, tmp_path / "hang.py"], "go", ["x"], turn_timeout=0.5)
     assert res.ended == "timeout"
     assert res.unsent == ["x"]
+
+
+MID_TEXT_QUESTION = [text("Which of them?\n\nAnswer with names, or `none`."), RESULT]
+
+
+def test_a_question_before_the_final_paragraph_is_not_asked_by_default(tmp_path):
+    res, received = run(tmp_path, [MID_TEXT_QUESTION], ["none"])
+    assert res.turns[0]["asked"] is False
+    assert res.ended == "no-question"
+    assert [r["content"] for r in received] == ["go"]
+
+
+def test_a_custom_asked_predicate_decides_whether_a_turn_counts_as_asked(tmp_path):
+    turns = [MID_TEXT_QUESTION, [text("Done."), RESULT]]
+    res, received = run(tmp_path, turns, ["none"], asked=lambda text, last_text, code: "?" in text)
+    assert res.turns[0]["asked"] is True
+    assert [r["content"] for r in received] == ["go", "none"]
+    assert res.turns[1]["asked"] is False

@@ -3774,7 +3774,7 @@ refutes them, and none of the results above changes.
 `plugins/craft/evals/tidy-followups-confirms-before-writing/` holds `expected.md` (the pass condition, registered before any arm ran, with one dated amendment),
 `fixtures/make-fixture-vault.py` (the builder: eight specs and three `lore` shim environments), `cells.json` (each cell's invoking message, scripted replies,
 graded lines and end state), `harness.py` (dispatch), `grade_confirm.py` (the grader), and `runs/` (the scrubbed stream, the driver's per-turn record, the grade,
-the tree diff and a summary for each of 27 runs). Its driver and scrub are `tidy-followups-builds-one-parent/`'s (`driver.py`, `scrub.py`), unchanged.
+the tree diff and a summary for each of 27 runs). Its driver and scrub are `tidy-followups-builds-one-parent/`'s (`driver.py`, `scrub.py`); `harness.py` passes its own question rule to the driver.
 
 **Under test:** `skills/tidy-followups/SKILL.md` and the craft scripts as of `21f61765` (the confirmation code on `dispose`, `assemble`, `resume` and `drop`). **Treatment:**
 that tree, snapshotted from `c0580b24620977ad8172a1f53a7b1340767685a4` (identical in `skills/` and `scripts/` to `21f61765`; every later commit touches only `evals/` and tests) for 14 of the 18 treatment runs. The 2 `drop-and-merge` treatment runs were re-run after `36a45254` (the write report carries `included`) and `a6bb6e48` (SKILL.md reflowed), snapshotted from `c7000495d409556a1f3daf3a918418b85febb8c1`; the 2 `parent-drop` treatment runs were re-run twice, last after `749337b7` (the drop question keeps `reason?` and its code on one line), snapshotted from `749337b75379c41ae6726922f52dbdea6d6e2c31`. Each replaces the earlier pair.
