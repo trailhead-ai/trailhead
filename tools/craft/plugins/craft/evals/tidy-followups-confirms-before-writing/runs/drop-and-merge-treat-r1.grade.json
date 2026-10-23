@@ -28,7 +28,7 @@
    "id": "R3",
    "pass": true,
    "display_shown": true,
-   "detail": "code 'kptf' before the change, 'e2d7' after; write uses the new one: True"
+   "detail": "code '97xr' before the change, 'vum8' after; write uses the new one: True"
   },
   {
    "id": "S2",
@@ -38,9 +38,9 @@
   },
   {
    "id": "S3",
-   "pass": false,
+   "pass": true,
    "display_shown": true,
-   "detail": "no assemble or resume ran"
+   "detail": "delivers and files of every eligible follow-up shown verbatim before the write"
   },
   {
    "id": "M1",
@@ -50,9 +50,9 @@
   },
   {
    "id": "E",
-   "pass": false,
+   "pass": true,
    "display_shown": true,
-   "detail": "I: status open want ready; I: nested=False want True; parent: [] want one ready holding ['vents-refuse-a-temperature-reading-below-minus-fifty']"
+   "detail": "vault ends in the cell's state"
   },
   {
    "id": "G2",
@@ -70,9 +70,16 @@
  "writes": [
   {
    "turn": 5,
-   "i": 19,
+   "i": 20,
    "kind": "dispose",
-   "code": "e2d7",
+   "code": "vum8",
+   "exit": 0
+  },
+  {
+   "turn": 6,
+   "i": 30,
+   "kind": "assemble",
+   "code": "jw2m",
    "exit": 0
   }
  ],
@@ -80,30 +87,47 @@
   {
    "turn": 3,
    "i": 15,
-   "code": "kptf"
+   "code": "97xr"
   },
   {
    "turn": 4,
-   "i": 18,
-   "code": "e2d7"
+   "i": 19,
+   "code": "vum8"
+  },
+  {
+   "turn": 5,
+   "i": 29,
+   "code": "jw2m"
   }
  ],
- "agents": [],
+ "agents": [
+  22
+ ],
  "records": {
-  "fixture-harbour-tide-spec-a-finished-child": {
-   "status": "done",
-   "parent": "fixture-harbour-tide-spec-the-slice",
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "fixture-harbour-tide-spec-the-slice": {
    "status": "done",
    "parent": null,
    "labels": [
     "craft/slice-parent"
    ],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-greenhouse-vent-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-harbour-tide-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-harbour-tide-spec-the-slice",
+   "labels": [],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -140,16 +164,6 @@
    "new": false,
    "dropped_note": null
   },
-  "fixture-greenhouse-vent-spec-the-slice": {
-   "status": "done",
-   "parent": null,
-   "labels": [
-    "craft/slice-parent"
-   ],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "misters-remove-the-legacy-mister-hours": {
    "status": "dropped",
    "parent": null,
@@ -166,7 +180,31 @@
    "new": false,
    "dropped_note": null
   },
+  "soil-probe-report-moisture-as-a-whole-number": {
+   "status": "superseded",
+   "parent": null,
+   "labels": [],
+   "touched": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "trellis-say-the-unit-in-the-height-comment": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
   "vents-refuse-a-temperature-reading-below-minus-fifty": {
+   "status": "ready",
+   "parent": "build-the-follow-ups-of-fixture-greenhouse-vent-spec-chosen-2026-10-23",
+   "labels": [],
+   "touched": true,
+   "new": false,
+   "dropped_note": null
+  },
+  "beacon-reword-the-range-comment": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -192,6 +230,14 @@
    "new": false,
    "dropped_note": null
   },
+  "fog-horn-remove-the-unused-blast-sequence": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
   "lamp-remove-the-unused-rotation-table": {
    "status": "open",
    "parent": null,
@@ -208,39 +254,15 @@
    "new": false,
    "dropped_note": "Reason: the misters were taken out of the greenhouse plan"
   },
-  "soil-probe-report-moisture-as-a-whole-number": {
-   "status": "superseded",
-   "parent": null,
-   "labels": [],
-   "touched": true,
-   "new": false,
-   "dropped_note": null
-  },
-  "trellis-say-the-unit-in-the-height-comment": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "beacon-reword-the-range-comment": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "fixture-signal-flag-spec-a-finished-child": {
+  "fixture-signal-pennant-spec-a-finished-child": {
    "status": "done",
-   "parent": "fixture-signal-flag-spec-the-slice",
+   "parent": "fixture-signal-pennant-spec-the-slice",
    "labels": [],
    "touched": false,
    "new": false,
    "dropped_note": null
   },
-  "fixture-signal-flag-spec-the-slice": {
+  "fixture-signal-pennant-spec-the-slice": {
    "status": "done",
    "parent": null,
    "labels": [
@@ -250,7 +272,7 @@
    "new": false,
    "dropped_note": null
   },
-  "flags-refuse-an-unknown-flag-colour": {
+  "pennants-refuse-an-unknown-pennant-colour": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -258,10 +280,20 @@
    "new": false,
    "dropped_note": null
   },
-  "fog-horn-remove-the-unused-blast-pattern": {
+  "semaphore-refuse-an-arm-angle-outside-zero-to-one-hundred-eighty": {
    "status": "open",
    "parent": null,
    "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-kite-string-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -300,10 +332,20 @@
    "new": false,
    "dropped_note": null
   },
-  "semaphore-refuse-an-arm-angle-outside-zero-to-one-hundred-eighty": {
-   "status": "open",
-   "parent": null,
+  "fixture-bell-tower-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-bell-tower-spec-the-slice",
    "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-bell-tower-spec-the-slice": {
+   "status": "done",
+   "parent": null,
+   "labels": [
+    "craft/slice-parent"
+   ],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -312,16 +354,6 @@
    "status": "done",
    "parent": "fixture-kite-string-spec-the-slice",
    "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "fixture-kite-string-spec-the-slice": {
-   "status": "done",
-   "parent": null,
-   "labels": [
-    "craft/slice-parent"
-   ],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -384,19 +416,11 @@
    "new": false,
    "dropped_note": null
   },
-  "fixture-bell-tower-spec-a-finished-child": {
-   "status": "done",
-   "parent": "fixture-bell-tower-spec-the-slice",
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "fixture-bell-tower-spec-the-slice": {
-   "status": "done",
+  "build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12": {
+   "status": "ready",
    "parent": null,
    "labels": [
-    "craft/slice-parent"
+    "craft/followup-parent"
    ],
    "touched": false,
    "new": false,
@@ -436,19 +460,17 @@
    "new": false,
    "dropped_note": null
   },
-  "build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12": {
+  "build-the-follow-ups-of-fixture-greenhouse-vent-spec-chosen-2026-10-23": {
    "status": "ready",
    "parent": null,
    "labels": [
     "craft/followup-parent"
    ],
-   "touched": false,
-   "new": false,
+   "touched": true,
+   "new": true,
    "dropped_note": null
   }
  },
  "ended": "no-question",
- "unsent": [
-  "yes and the code {code}"
- ]
+ "unsent": []
 }

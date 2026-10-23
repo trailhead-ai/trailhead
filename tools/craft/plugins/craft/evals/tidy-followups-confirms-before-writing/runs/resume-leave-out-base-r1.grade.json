@@ -34,7 +34,7 @@
    "id": "E",
    "pass": false,
    "display_shown": true,
-   "detail": "C: nested=True want False; C: touched=True want False; parent: [('build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12', 'ready', ['bell-rope-cap-the-pull-length', 'chimes-refuse-a-negative-strike-count', 'clock-face-print-the-hour-in-two-digits'])] want one ready holding ['bell-rope-cap-the-pull-length', 'chimes-refuse-a-negative-strike-count']"
+   "detail": "C: not reported as removed from the parent's list; C: nested=True want False; C: touched=True want False; parent: [('build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12', 'ready', ['bell-rope-cap-the-pull-length', 'chimes-refuse-a-negative-strike-count', 'clock-face-print-the-hour-in-two-digits'])] want one ready holding ['bell-rope-cap-the-pull-length', 'chimes-refuse-a-negative-strike-count']"
   },
   {
    "id": "G2",

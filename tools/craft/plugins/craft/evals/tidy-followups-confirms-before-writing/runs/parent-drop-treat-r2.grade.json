@@ -40,7 +40,7 @@
  "writes": [
   {
    "turn": 4,
-   "i": 18,
+   "i": 17,
    "kind": "drop",
    "code": "66y4",
    "exit": 0
@@ -49,7 +49,7 @@
  "displays": [
   {
    "turn": 3,
-   "i": 17,
+   "i": 16,
    "code": "66y4"
   }
  ],
@@ -69,14 +69,6 @@
    "labels": [
     "craft/slice-parent"
    ],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "fixture-greenhouse-vent-spec-a-finished-child": {
-   "status": "done",
-   "parent": "fixture-greenhouse-vent-spec-the-slice",
-   "labels": [],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -115,17 +107,9 @@
    "new": false,
    "dropped_note": null
   },
-  "vents-refuse-a-temperature-reading-below-minus-fifty": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "misters-remove-the-comment-lines-beside-the-hours": {
-   "status": "open",
-   "parent": null,
+  "fixture-greenhouse-vent-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-greenhouse-vent-spec-the-slice",
    "labels": [],
    "touched": false,
    "new": false,
@@ -163,7 +147,7 @@
    "new": false,
    "dropped_note": null
   },
-  "beacon-reword-the-range-comment": {
+  "vents-refuse-a-temperature-reading-below-minus-fifty": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -189,7 +173,47 @@
    "new": false,
    "dropped_note": null
   },
-  "fixture-signal-flag-spec-the-slice": {
+  "fog-horn-remove-the-unused-blast-sequence": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "lamp-remove-the-unused-rotation-table": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "misters-remove-the-comment-lines-beside-the-hours": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "beacon-reword-the-range-comment": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-signal-pennant-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-signal-pennant-spec-the-slice",
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "fixture-signal-pennant-spec-the-slice": {
    "status": "done",
    "parent": null,
    "labels": [
@@ -199,7 +223,7 @@
    "new": false,
    "dropped_note": null
   },
-  "fog-horn-remove-the-unused-blast-pattern": {
+  "pennants-refuse-an-unknown-pennant-colour": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -207,7 +231,7 @@
    "new": false,
    "dropped_note": null
   },
-  "lamp-remove-the-unused-rotation-table": {
+  "semaphore-refuse-an-arm-angle-outside-zero-to-one-hundred-eighty": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -233,22 +257,6 @@
    "new": false,
    "dropped_note": null
   },
-  "fixture-signal-flag-spec-a-finished-child": {
-   "status": "done",
-   "parent": "fixture-signal-flag-spec-the-slice",
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "flags-refuse-an-unknown-flag-colour": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "quilts-count-the-quilts-hanging-on-the-rack": {
    "status": "open",
    "parent": null,
@@ -257,7 +265,7 @@
    "new": false,
    "dropped_note": null
   },
-  "semaphore-refuse-an-arm-angle-outside-zero-to-one-hundred-eighty": {
+  "rack-varnish-pick-a-lighter-oak": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -299,7 +307,7 @@
    "new": false,
    "dropped_note": null
   },
-  "rack-varnish-pick-a-lighter-oak": {
+  "kites-report-the-airborne-kites-as-a-share-of-all-kites": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -311,6 +319,16 @@
    "status": "ready",
    "parent": null,
    "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12": {
+   "status": "open",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -344,24 +362,6 @@
    "parent": null,
    "labels": [
     "craft/slice-parent"
-   ],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "kites-report-the-airborne-kites-as-a-share-of-all-kites": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12": {
-   "status": "open",
-   "parent": null,
-   "labels": [
-    "craft/followup-parent"
    ],
    "touched": false,
    "new": false,

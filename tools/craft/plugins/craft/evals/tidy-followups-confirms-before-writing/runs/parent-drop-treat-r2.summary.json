@@ -4,9 +4,9 @@
  "ended": "no-question",
  "turns": 4,
  "unsent": 0,
- "seconds": 51,
- "cost_usd": 0.507147,
+ "seconds": 50,
+ "cost_usd": 0.49546980000000007,
  "returncode": 0,
- "run_id": "fxrunfee3fb4c2965",
+ "run_id": "fxruncbceb81d1fa2",
  "real_vault_hits": ""
 }

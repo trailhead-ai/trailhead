@@ -1,3 +1,5 @@
+vault ADDED task/build-the-follow-ups-of-fixture-greenhouse-vent-spec-chosen-2026-10-23.json
+vault ADDED task/build-the-follow-ups-of-fixture-greenhouse-vent-spec-chosen-2026-10-23.md
 vault CHANGED task/misters-remove-the-comment-lines-beside-the-hours.json
 vault CHANGED task/misters-remove-the-comment-lines-beside-the-hours.md
 vault CHANGED task/misters-remove-the-legacy-mister-hours.json
@@ -5,3 +7,5 @@ vault CHANGED task/misters-remove-the-legacy-mister-hours.md
 vault CHANGED task/soil-probe-report-moisture-as-a-percentage.json
 vault CHANGED task/soil-probe-report-moisture-as-a-percentage.md
 vault CHANGED task/soil-probe-report-moisture-as-a-whole-number.json
+vault CHANGED task/vents-refuse-a-temperature-reading-below-minus-fifty.json
+vault CHANGED task/vents-refuse-a-temperature-reading-below-minus-fifty.md
