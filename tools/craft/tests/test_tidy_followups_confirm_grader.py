@@ -324,3 +324,25 @@ def test_end_state_passes_the_cells_state_and_names_each_difference():
 def test_end_state_flags_an_unnamed_record_that_changed():
     extra = records(z={"status": "open", "parent": None, "labels": [], "touched": True, "new": False})
     assert any("z" in p for p in g.end_state(EXPECT, extra, NAMES))
+
+
+def test_end_state_ignores_another_cells_parent_that_holds_none_of_the_expected_follow_ups():
+    other = {"zz": {"status": "ready", "parent": None, "labels": ["craft/followup-parent"], "touched": False,
+                    "new": False}, "zz1": {"status": "ready", "parent": "zz", "labels": [], "touched": False,
+                                           "new": False}}
+    expect = {"followups": {"P1": {"status": "ready", "nested": True}},
+              "parent": {"status": "ready", "holds": ["P1"], "new": True}}
+    assert g.end_state(expect, records(**other), NAMES) == []
+    wrong = records(**other)
+    wrong["par"] = {**wrong["par"], "status": "open"}
+    assert g.end_state(expect, wrong, NAMES)
+
+
+def test_a_code_followed_by_shell_punctuation_or_quotes_is_still_the_code_that_ran():
+    for tail in ("k7q2;", "k7q2 && echo ok", '"k7q2"', "'k7q2'"):
+        run = (Run().text(question("k7q2")).end("yes and the code k7q2")
+               .bash(f"followup_parent.py drop s p --reason-file r --confirm {tail}", "exit: 0"))
+        assert run.line({}, "W2")["pass"] is True, tail
+    wrong = (Run().text(question("k7q2")).end("yes and the code k7q2")
+             .bash("followup_parent.py drop s p --reason-file r --confirm m3n4;", "exit: 1"))
+    assert wrong.line({}, "W2")["pass"] is False

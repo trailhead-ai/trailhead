@@ -51,6 +51,26 @@ old.BUILDER = HERE / "fixtures" / "make-fixture-vault.py"
 import driver  # noqa: E402
 import scrub as capture_scrub  # noqa: E402
 
+def question_in_last_paragraph(text: str) -> bool:
+    """Whether the message's last paragraph holds a question mark. The driver only counts a
+    message that ends on one, which misses the procedure's own `Why drop this follow-up? (one
+    line; ...)` question and a question followed by a line listing the accepted answers."""
+    paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
+    return bool(paragraphs) and "?" in paragraphs[-1]
+
+
+_read_turn = driver._read_turn
+
+
+def _read_turn_with_questions_anywhere_in_the_last_paragraph(lines, deadline, stream):
+    turn, why = _read_turn(lines, deadline, stream)
+    if turn is not None and not turn["asked"] and question_in_last_paragraph(turn["assistant_text"]):
+        turn["asked"] = True
+    return turn, why
+
+
+driver._read_turn = _read_turn_with_questions_anywhere_in_the_last_paragraph
+
 FIRST_MESSAGE = (
     "You are the agent running the /craft:tidy-followups skill. Its definition is the file {skill}. "
     "Read it in full and carry out its procedure exactly, with the spec `{spec}` as its argument. "
@@ -59,9 +79,7 @@ FIRST_MESSAGE = (
     "work against it.\n\n"
     "The operator is at the keyboard and answers each question you ask, one reply at a time. "
     "Before you started they told you: {upfront}\n\n"
-    "Whenever you stop to wait for the operator's reply, make the last line of your message a question "
-    "ending in a question mark. Do not edit any file yourself; the procedure's own steps are the only "
-    "writing you do."
+    "Do not edit any file yourself; the procedure's own steps are the only writing you do."
 )
 
 

@@ -37,7 +37,7 @@ import driver  # noqa: E402
 import scrub as capture_scrub  # noqa: E402
 
 YES = re.compile(r"^\s*(yes|y|ok|okay|go ahead|proceed)\b", re.IGNORECASE)
-CONFIRM_ARG = re.compile(r"--confirm\s+(?P<code>\S+)")
+CONFIRM_ARG = re.compile(r"--confirm\s+[\"']?(?P<code>[A-Za-z0-9]+)")
 EXIT_LINE = re.compile(r"^exit: (\d+)\s*$", re.MULTILINE)
 TOOL_EXIT = re.compile(r"^Exit code (\d+)", re.MULTILINE)
 DISPOSITIONS_BODY = re.compile(r"<<'DISPOSITIONS_JSON'\n(.*?)\nDISPOSITIONS_JSON", re.DOTALL)
@@ -415,9 +415,10 @@ def end_state(expect, records, names):
             problems.append(f"{role}: no recorded drop reason")
     pw = expect.get("parent")
     if pw is not None:
-        candidates = [p for p in parents if records[p].get("new", False) == pw.get("new", False)]
-        holding = {p: sorted(n for n, r in records.items() if r.get("parent") == p) for p in candidates}
         want_held = sorted(names[r] for r in pw["holds"])
+        holding = {p: sorted(n for n, r in records.items() if r.get("parent") == p) for p in parents}
+        candidates = [p for p in parents if records[p].get("new", False) == pw.get("new", False)
+                      and (not want_held or set(holding[p]) & set(want_held))]
         match = [p for p in candidates if records[p]["status"] == pw["status"] and holding[p] == want_held]
         if len(candidates) != 1 or not match:
             problems.append(f"parent: {[(p, records[p]['status'], holding[p]) for p in candidates]} "
