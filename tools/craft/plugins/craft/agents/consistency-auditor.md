@@ -140,8 +140,8 @@ If a finding requires you to know something outside the document, it is not your
 
    > **Editing this item, or the compound rule in section 2?** Neither is covered by CI — the test
    > suite asserts what this file says, never what it causes. `skills/gauntlet/SKILL.md`'s Critical
-   > bar keys on this item by name, so removing or renaming it silently disarms that bar. Re-run the
-   > detection arm before trusting such a change; see `tools/craft/MANUAL-EVAL.md`.
+   > bar keys on this item by name, so removing or renaming it silently disarms that bar. No runner
+   > case or push gate measures it today; see the gauntlet's `calibration.md`.
 4. **Untestable criteria** — quote each, and name the missing observation.
 5. **Contradictions** — each as a pair: `<statement A>` (section) vs `<statement B>` (section) — why
    they can't both hold.

@@ -7,10 +7,9 @@ document says; only a run can show what it causes.
 Same role as `MANUAL-SMOKE.md`, different boundary — that file covers the plugin-system
 boundary (install, agent registration); this one covers the behavioral boundary.
 
-**The protocol — why these run by hand, how an arm is dispatched, the trust
-boundary on the instructions path, and how to read a result honestly — is in
-[`docs/eval-protocol.md`](../../docs/eval-protocol.md).** It was extracted from
-this file so the other tools' corpora follow the same rules. This file is craft's
+**The protocol — how to write and run a case with the plugin eval runner, what its
+sandbox confines, and the retained discipline for a result — is in
+[`docs/eval-protocol.md`](../../docs/eval-protocol.md).** This file is craft's
 results log.
 
 Cases live in `plugins/craft/evals/<case-name>/`.

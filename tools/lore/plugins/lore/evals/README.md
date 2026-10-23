@@ -2,27 +2,20 @@
 
 Behavioural eval cases for lore's own prose — the vault CLI, its record taxonomy, and the librarian/investigator agents.
 
-Each case is a directory here:
+Each case is a directory here, run by `claude plugin eval` against a throwaway vault the
+case seeds for itself. The generic case shape, how to write and run one, and the sandbox
+are in `docs/eval-protocol.md` — read it before adding a case. Results go in
+`tools/lore/MANUAL-EVAL.md`.
 
-```
-<case-name>/
-    expected.md      the pass condition, written BEFORE any arm is run
-    fixtures/        self-contained inputs the run is pointed at
-    arms/            optional: edited prose copies, for a treatment arm
-```
+## Runner cases and legacy cases
 
-The authoring rules, the dispatch shape, and the trust boundary on the
-instructions path are in `docs/eval-protocol.md` — read it before adding a case.
-Results go in `tools/lore/MANUAL-EVAL.md`.
+**Runner cases** carry a `case.yaml`; the layout below is what lore's seeded cases add to
+the protocol's case shape.
 
-## Two case shapes
-
-**Hand-dispatched** (`bash-write-gate`, `carve-out-does-not-generalise`): the shape
-above, run in session per `docs/eval-protocol.md`. Their `fixtures/` hold a script
-(`make-fixture-vault.sh`) and task prompts the operator dispatches by hand.
-
-**Runner cases**: run by `claude plugin eval` against a throwaway vault the case
-seeds for itself.
+**Legacy cases** (`bash-write-gate`, `carve-out-does-not-generalise`) have no
+`case.yaml`. The runner does not run them and the push gate does not gate them. They are
+listed in `_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, which is also
+where a case is removed once it is ported to a runner shape.
 
 ```
 <case-name>/

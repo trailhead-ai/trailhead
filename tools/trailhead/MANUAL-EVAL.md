@@ -8,8 +8,8 @@ Same role as `MANUAL-SMOKE.md` where that file exists, different boundary — sm
 covers the plugin-system boundary (install, agent registration); this one covers
 the behavioral boundary.
 
-**The protocol — why these run by hand, how an arm is dispatched, the trust
-boundary on the instructions path, and how to read a result honestly — is in
+**The protocol — how to write and run a case with the plugin eval runner, what its
+sandbox confines, and the retained discipline for a result — is in
 [`docs/eval-protocol.md`](../../docs/eval-protocol.md).** Read it before adding a
 case. This file is trailhead's results log only.
 
