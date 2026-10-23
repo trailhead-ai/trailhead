@@ -43,12 +43,14 @@ BASE_SHA = "23b0811b1fe9dc386d1728746b87edc3631cdb81"
 NO_PREV_CODE = "zzzz"
 
 sys.path.insert(0, str(OLD_CASE))
+sys.path.insert(0, str(HERE))
 _spec = importlib.util.spec_from_file_location("builds_one_parent_harness", OLD_CASE / "harness.py")
 old = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(old)
 old.BASE_SHA = BASE_SHA
 old.BUILDER = HERE / "fixtures" / "make-fixture-vault.py"
 import driver  # noqa: E402
+import grade_confirm  # noqa: E402
 import scrub as capture_scrub  # noqa: E402
 
 def question_near_the_end(text: str) -> bool:
@@ -182,6 +184,9 @@ def run(args) -> None:
     elapsed = time.time() - start
     after = {"vault": old.tree(fixture / "vault"), "repo": old.repo_state(Path(manifest["repo"]))}
     (meta / f"{key}.after.json").write_text(json.dumps(after, indent=1))
+    lore_env = {**manifest["env"], "LORE_BIN": env["LORE_BIN"]}
+    records = grade_confirm.read_records(lore_env, before["vault"], after["vault"])
+    (meta / f"{key}.records.json").write_text(json.dumps(records, indent=1))
     (meta / f"{key}.stream.jsonl").write_text("\n".join(result.stream) + "\n")
     record = {"cell": args.cell, "arm": arm, "manifest_key": manifest_key, "first_message": first,
               "turns": result.turns, "unsent": result.unsent, "ended": result.ended,

@@ -511,7 +511,8 @@ def main() -> int:
     env = {**manifest["env"], "LORE_BIN": str(work / f"snap-{arm}" / "tools/lore/plugins/lore/bin/lore")}
     before = json.loads((meta / f"{key}.before.json").read_text())["vault"]
     after = json.loads((meta / f"{key}.after.json").read_text())["vault"]
-    records = read_records(env, before, after)
+    saved = meta / f"{key}.records.json"
+    records = json.loads(saved.read_text()) if saved.exists() else read_records(env, before, after)
     lines = (meta / f"{key}.stream.jsonl").read_text().splitlines()
     prev_code = None
     if prev_key:
