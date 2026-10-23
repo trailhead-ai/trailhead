@@ -1,0 +1,12 @@
+{
+ "cell": "parent-drop-base-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 4,
+ "unsent": 0,
+ "seconds": 56,
+ "cost_usd": 0.4386512,
+ "returncode": 0,
+ "run_id": "fxrunc99ea11947d7",
+ "real_vault_hits": ""
+}

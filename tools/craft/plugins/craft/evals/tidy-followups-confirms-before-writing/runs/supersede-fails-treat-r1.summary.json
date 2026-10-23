@@ -1,0 +1,12 @@
+{
+ "cell": "supersede-fails-treat-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 3,
+ "unsent": 1,
+ "seconds": 69,
+ "cost_usd": 0.5182156,
+ "returncode": 0,
+ "run_id": "fxruna74f44a78052",
+ "real_vault_hits": ""
+}

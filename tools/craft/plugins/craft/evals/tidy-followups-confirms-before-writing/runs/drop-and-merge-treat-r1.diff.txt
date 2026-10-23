@@ -1,0 +1,7 @@
+vault CHANGED task/misters-remove-the-comment-lines-beside-the-hours.json
+vault CHANGED task/misters-remove-the-comment-lines-beside-the-hours.md
+vault CHANGED task/misters-remove-the-legacy-mister-hours.json
+vault CHANGED task/misters-remove-the-legacy-mister-hours.md
+vault CHANGED task/soil-probe-report-moisture-as-a-percentage.json
+vault CHANGED task/soil-probe-report-moisture-as-a-percentage.md
+vault CHANGED task/soil-probe-report-moisture-as-a-whole-number.json

@@ -1,0 +1,12 @@
+{
+ "cell": "drop-and-merge-treat-r2",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 5,
+ "unsent": 1,
+ "seconds": 85,
+ "cost_usd": 0.626992,
+ "returncode": 0,
+ "run_id": "fxrunce6a9fa5f070",
+ "real_vault_hits": ""
+}

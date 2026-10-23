@@ -1,0 +1,4 @@
+vault CHANGED task/fog-horn-remove-the-unused-blast-sequence.json
+vault CHANGED task/fog-horn-remove-the-unused-blast-sequence.md
+vault CHANGED task/lamp-remove-the-unused-rotation-table.json
+vault CHANGED task/lamp-remove-the-unused-rotation-table.md

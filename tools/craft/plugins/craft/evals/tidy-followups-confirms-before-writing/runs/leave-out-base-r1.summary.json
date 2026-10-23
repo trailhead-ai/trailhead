@@ -1,0 +1,12 @@
+{
+ "cell": "leave-out-base-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 4,
+ "unsent": 1,
+ "seconds": 182,
+ "cost_usd": 1.0526538000000003,
+ "returncode": 0,
+ "run_id": "fxruncfeca2ca97fd",
+ "real_vault_hits": ""
+}

@@ -1,0 +1,12 @@
+{
+ "cell": "leave-out-treat-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 5,
+ "unsent": 0,
+ "seconds": 261,
+ "cost_usd": 1.2105124000000003,
+ "returncode": 0,
+ "run_id": "fxrun7444a72cb4f7",
+ "real_vault_hits": ""
+}
