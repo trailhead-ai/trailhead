@@ -42,8 +42,9 @@ actually decide something. Eval cases run through the plugin eval runner,
 6. **Run the batch** with the command below, then read the verdict from the result
    JSON. See [Running a batch](#running-a-batch).
 
-A complete command, as run for the exemplar (Linux; on macOS drop the `TMPDIR`
-line, which is the [Linux-only temp-directory gotcha](#runner-gotchas)):
+A complete command, as run for the exemplar on Linux. The `TMPDIR` line is the
+[Linux temp-directory gotcha](#runner-gotchas); whether macOS needs it was not
+checked:
 
 ```sh
 export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # outside /tmp, short path
@@ -142,10 +143,11 @@ Run it in the foreground. Nothing may be left running after the call returns: no
 ## What the sandbox confines, and what it does not
 
 The runner's sandbox confines the **agent's shell tools** (the Bash tool the run
-grants). On Linux the lesson is that the agent's Bash can read little of the
-operator's home beyond the plugin directory, the run's working directory and the
-run's temporary `HOME`. The runner's help text says its sandboxing limits what a
-malicious plugin can reach "but is not a guarantee".
+grants). The lesson that found this (platform not recorded) is that the agent's
+Bash can read little of the operator's home beyond the plugin directory, the
+run's working directory and the run's temporary `HOME`. The runner's help text
+says its sandboxing limits what a malicious plugin can reach "but is not a
+guarantee".
 
 What it does not confine:
 
@@ -187,7 +189,8 @@ plugin's prose.
 
 ## Runner gotchas
 
-Each is a symptom, then the fix. The platform is marked where it matters.
+Each is a symptom, then the fix. Each is marked with the platform its source
+lesson observed it on, or "platform not recorded" where the lesson does not say.
 
 - **Every case that writes scores as a plain fail, with `error` null (Linux
   only).** On the tested Linux host the agent's sandbox cannot write when its
@@ -196,54 +199,58 @@ Each is a symptom, then the fix. The platform is marked where it matters.
   `TMPDIR=/tmp` fails. Fix: set `TMPDIR` to a directory outside `/tmp` whose path
   is at most 51 characters, as in the command above. The push gate does this for
   itself. macOS was not checked.
-- **`./lore` or `lore` exits 127 in the run (any platform).** The agent's sandbox
-  hides the operator's home, so a `lore` on `PATH` that points into a checkout
-  fails. Fix: the case brings its own `./lore` wrapper, seeded into the run
-  directory with a copy of the `trailhead/` package, grants `Bash(./lore *)`,
-  and its prompt says to run `./lore` wherever a document says `lore`. In a
-  plugin other than lore, the scaffold also copies the lore CLI into the run
-  directory, because the sandbox exposes only the plugin under test. The runner
-  pre-populates the run's `~/.gitconfig` with its own identity, so a seeder must
-  keep an existing identity and not refuse it.
-- **The grader passes but the tool path was broken.** A grader over seeded state
-  cannot tell a working tool from a broken one: the scaffold wrote the file
-  before the agent ran. Fix: before any baseline, smoke-run a new fixture with
-  one CLI **write** (`./lore record amend` or `./lore record create`), grade the
-  written result, and read the run's transcript for the command's own output.
-- **A case that drives a subagent never reaches it.** Fix: `Agent` in the case's
-  `allowed_tools`, plus the Bash grants the agent needs. A scaffold must build
-  its commits signed if the agent refuses unsigned ones: the portage updater's
-  preflight does, so its scaffolds build commits with `git hash-object` and a
-  dummy `gpgsig` header. The sandbox runs in don't-ask mode, so it denies
-  compound commands, redirects, any command containing `<!-- -->`, and reads of
-  the plugin's `evals/` directory: keep stand-in calls to single commands. If
-  the agent can see a real CLI's `--help` it may drive an undisclosed subcommand
-  unprompted and contaminate the baseline, so a stand-in must hide it.
-- **A grader on the middle of a run sees nothing.** The `llm` trace judge sees
-  only the first 12 and last 12 events once a run passes 24. Fix: for "did the
-  agent call X", use `tool_used` (`tool`, `input_match` as a JavaScript regex over
-  the tool input's JSON, `min`, `max`), which scans every call. Also,
-  `target: files` on `regex`, `file_exists` and `llm` lists files the agent
-  **created** only; to grade a seeded record that the agent modified, use a
-  `regex` with `source: file` on its exact path.
-- **An untracked `.jsonl` appears in `fixtures/` after a seeded-history case.** A
-  case that seeds a conversation with `context.history_file` leaves
-  `fixtures/<sessionId>.jsonl` beside the seed, which a `git add -A` would sweep
-  in. Fix: read what you need from it, then delete it before staging.
-- **The exit code says pass or fail.** It does not. A scored fail and every error
-  exit 1; a cost-ceiling or auth partial exits 2. Fix: read the verdict from the
-  result JSON, `cases[].arms.with[]` (`score`, `passed`, `error`, `graders[]`),
-  and count runs from that array, not from `runsPerCase`, which echoes the case's
-  own `runs`. A run's `error` overrides its graders.
-- **The runner overruns its own `timeout_seconds`.** It has taken 1083 seconds
-  against a 300 second limit, and about 6 minutes on a refused connection.
-  Fix: bound it from outside with `timeout` or a process-group kill, as in the
-  command above.
-- **A run moves onto API billing.** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
-  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` and `ANTHROPIC_BASE_URL`
-  each move a run off the login. Fix: start the runner with a clean environment
-  (`env -i` plus `PATH`, `HOME` and the rest the gate forwards) when billing
-  matters. This was verified on Linux.
+- **`./lore` or `lore` exits 127 in the run (platform not recorded).** The
+  agent's sandbox hides the operator's home, so a `lore` on `PATH` that points
+  into a checkout fails. Fix: the case brings its own `./lore` wrapper, seeded
+  into the run directory with a copy of the `trailhead/` package, grants
+  `Bash(./lore *)`, and its prompt says to run `./lore` wherever a document says
+  `lore`. In a plugin other than lore, the scaffold also copies the lore CLI
+  into the run directory, because the sandbox exposes only the plugin under
+  test. The runner pre-populates the run's `~/.gitconfig` with its own identity,
+  so a seeder must keep an existing identity and not refuse it.
+- **The grader passes but the tool path was broken (platform not recorded).** A
+  grader over seeded state cannot tell a working tool from a broken one: the
+  scaffold wrote the file before the agent ran. Fix: before any baseline,
+  smoke-run a new fixture with one CLI **write** (`./lore record amend` or
+  `./lore record create`), grade the written result, and read the run's
+  transcript for the command's own output.
+- **A case that drives a subagent never reaches it (platform not recorded).**
+  Fix: `Agent` in the case's `allowed_tools`, plus the Bash grants the agent
+  needs. A scaffold must build its commits signed if the agent refuses unsigned
+  ones: the portage updater's preflight does, so its scaffolds build commits
+  with `git hash-object` and a dummy `gpgsig` header. The sandbox runs in
+  don't-ask mode, so it denies compound commands, redirects, any command
+  containing `<!-- -->`, and reads of the plugin's `evals/` directory: keep
+  stand-in calls to single commands. If the agent can see a real CLI's `--help`
+  it may drive an undisclosed subcommand unprompted and contaminate the
+  baseline, so a stand-in must hide it.
+- **A grader on the middle of a run sees nothing (platform not recorded).** The
+  `llm` trace judge sees only the first 12 and last 12 events once a run passes
+  24. Fix: for "did the agent call X", use `tool_used` (`tool`, `input_match` as
+  a JavaScript regex over the tool input's JSON, `min`, `max`), which scans
+  every call. Also, `target: files` on `regex`, `file_exists` and `llm` lists
+  files the agent **created** only; to grade a seeded record that the agent
+  modified, use a `regex` with `source: file` on its exact path.
+- **An untracked `.jsonl` appears in `fixtures/` after a seeded-history case
+  (platform not recorded).** A case that seeds a conversation with
+  `context.history_file` leaves `fixtures/<sessionId>.jsonl` beside the seed,
+  which a `git add -A` would sweep in. Fix: read what you need from it, then
+  delete it before staging.
+- **The exit code says pass or fail (platform not recorded).** It does not. A
+  scored fail and every error exit 1; a cost-ceiling or auth partial exits 2.
+  Fix: read the verdict from the result JSON, `cases[].arms.with[]` (`score`,
+  `passed`, `error`, `graders[]`), and count runs from that array, not from
+  `runsPerCase`, which echoes the case's own `runs`. A run's `error` overrides
+  its graders.
+- **The runner overruns its own `timeout_seconds` (platform not recorded).** It
+  has taken 1083 seconds against a 300 second limit, and about 6 minutes on a
+  refused connection. Fix: bound it from outside with `timeout` or a
+  process-group kill, as in the command above.
+- **A run moves onto API billing (Linux).** `ANTHROPIC_API_KEY`,
+  `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`
+  and `ANTHROPIC_BASE_URL` each move a run off the login. Fix: start the runner
+  with a clean environment (`env -i` plus `PATH`, `HOME` and the rest the gate
+  forwards) when billing matters. This was verified on Linux.
 
 ## Credentials on macOS: the Keychain
 
