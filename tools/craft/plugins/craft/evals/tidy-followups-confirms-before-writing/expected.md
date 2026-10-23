@@ -154,3 +154,21 @@ driver's per-turn record, and the fixture vault and repo before and after, compa
 AC15 (moves before anything is written), AC16 (the complete set shown before the first write) and AC31 (scope shown before any
 nesting) against **treatment**, each with the cell, the run file and the grader line; the partial AC23 (failed drop and merge
 reports) from `drop-fails`, `supersede-fails`; the partial AC43 (command lines in the displays) from G2.
+
+## Amendment, 2026-10-23 (after probe runs of `plain-include` and `drop-and-merge`, before the graded batch)
+
+Nothing below changes a registered line or a cell's end state; it changes how the operator's side is scripted.
+
+- **The invoking message no longer states the moves.** In a probe the arm was told its moves up front and skipped
+  Confirmation 1, so every scripted reply landed one question early. The invoking message now says only that the operator
+  will say yes to every confirmation (the shortcut the code guards against); the moves, the drop reason, the changed
+  set and the left-out names are replies, as the answers table lists them. `resume-leave-out` still says to resume
+  with everything the parent lists, and the `retry-after-failure` message still quotes the earlier leg's code.
+- **The wrapper counts a question near the end of a turn as a question.** The driver ends a run when a turn's text does not
+  end on a question mark, which stopped probe runs on the procedure's own `Why drop this follow-up? (one line; ...)`
+  question and on a question followed by a note about an earlier answer. The wrapper treats a question mark in the last three
+  paragraphs as a question. An earlier try that asked the arm to end every wait on a question mark made two arms
+  append a `?` to the confirmation line, hiding the display; that request was removed.
+- **Lines added to every cell by the grader:** G1 and G3 are computed by the grader's `main` from the real-vault grep and the
+  fixture repo's state; the per-cell `lines` list in `cells.json` names the others.
+- **Fixture words:** two words the skill prose also uses (`flag`, `pattern`) were renamed in the builder before the graded batch.
