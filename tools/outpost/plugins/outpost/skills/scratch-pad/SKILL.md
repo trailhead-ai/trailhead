@@ -245,7 +245,10 @@ Write the reference as a JSON file, anywhere you can read back:
   each drawing once. An unknown key is refused.
 - The page shows each named drawing with its question, name and cost, and
   today's date. Everything on it is shared with the team: it must hold
-  no secrets, tokens or customer data.
+  no secrets, tokens or customer data. If a chosen drawing carries any, do not
+  name it: tell the user why. The script's pattern check is a backstop, not a
+  review: it misses emails, hostnames, customer names, bare passwords and
+  credentials inside URLs.
 
 Resolve the vault exactly as the `publish-site` skill does: run
 `lore vault resolve --kind blob --json` and take its `path`, and its `vault` name
@@ -253,8 +256,8 @@ only when that is a string; to publish into a different vault than that one, loo
 it up with `lore vault ls` and take its name and path the same way.
 
 **Before running anything, ask once and wait.** Send one line naming the drawings
-(round, question and option, with the option's name), the page title and the
-vault, and ask whether to publish. Run the command only after the user answers
+(round, question and option, with the option's name), the page title, the site
+name and the vault, and ask whether to publish. Run the command only after the user answers
 yes. If they say no, or answer something else, publish nothing.
 
 ```bash
@@ -350,8 +353,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   had no name); the vault's git history keeps the content. If the last line is
   not a link, say no link was printed and give none.
 - **Site name already taken**: the refusal ends `already exists in the vault —
-  choose another site name`. Retry with a new `site`, without asking, and report
-  the name the page finally got. Never look for an `--overwrite`.
+  choose another site name`. Tell the user in one line that the name is taken and
+  which new `site` you will use, then retry with it, and report the name the
+  page finally got. Never look for an `--overwrite`.
 - **Published locally, not synced**: a `scratch-pad: publish: error:` line says
   the page was published locally but NOT synced, and no link is printed. Do not
   rerun. Tell the user the page is not yet shared with the team and give no link;
