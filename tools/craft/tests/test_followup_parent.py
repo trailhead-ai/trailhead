@@ -3520,19 +3520,13 @@ def assemble_with(runner, spec_name, children, tmp_path, capsys, confirm_code):
     return cli(runner, *argv, capsys=capsys)
 
 
-def children_of(env, vault, names, text="worth doing"):
-    return [
-        {"name": n, "reason": f"{text}: {n}", "revision": shown_revision(env, vault, n)} for n in names
-    ]
-
-
 def test_check_prints_a_confirm_that_assemble_takes_to_create_and_nest(lore_env, spec, tmp_path, capsys):
     env, vault = lore_env
     names = make_children(env, vault, spec, count=2)
     code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
     assert len(code) == 4
     status, out, err = assemble_with(
-        EnvRunner(env), spec, children_of(env, vault, names), tmp_path, capsys, code
+        EnvRunner(env), spec, confirm(env, vault, names), tmp_path, capsys, code
     )
     assert status == 0, err
     assert out["buildable"] is True and sorted(out["nested"]) == sorted(names)
@@ -3547,7 +3541,7 @@ def test_assemble_with_only_one_of_two_confirmed_children_is_a_mismatch_and_crea
     code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
     before = vault_snapshot(env, vault)
     runner = EnvRunner(env)
-    status, out, err = assemble_with(runner, spec, children_of(env, vault, names[:1]), tmp_path, capsys, code)
+    status, out, err = assemble_with(runner, spec, confirm(env, vault, names[:1]), tmp_path, capsys, code)
     assert status == 1 and out is None
     assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
     assert runner.calls == [] and vault_snapshot(env, vault) == before
@@ -3560,7 +3554,7 @@ def test_assemble_without_a_code_is_confirmation_missing_and_makes_no_lore_call(
     env, vault = lore_env
     names = make_children(env, vault, spec, count=2)
     runner = EnvRunner(env)
-    status, out, err = assemble_with(runner, spec, children_of(env, vault, names), tmp_path, capsys, typed)
+    status, out, err = assemble_with(runner, spec, confirm(env, vault, names), tmp_path, capsys, typed)
     assert status == 1 and out is None
     assert reason_codes(err) == ["reason-code: confirmation-missing"]
     assert runner.calls == []
@@ -3572,7 +3566,7 @@ def test_assemble_takes_the_code_in_any_case_and_with_surrounding_space(lore_env
     names = make_children(env, vault, spec, count=1)
     code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
     status, _, err = assemble_with(
-        EnvRunner(env), spec, children_of(env, vault, names), tmp_path, capsys, f"  {code.upper()} "
+        EnvRunner(env), spec, confirm(env, vault, names), tmp_path, capsys, f"  {code.upper()} "
     )
     assert status == 0, err
 
@@ -3583,7 +3577,7 @@ def test_assemble_with_the_confirmed_code_but_one_changed_reason_is_a_mismatch_a
     env, vault = lore_env
     names = make_children(env, vault, spec, count=2)
     code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
-    children = children_of(env, vault, names)
+    children = confirm(env, vault, names)
     children[1]["reason"] = "a different reason than the one shown"
     runner = EnvRunner(env)
     status, out, err = assemble_with(runner, spec, children, tmp_path, capsys, code)
@@ -3597,7 +3591,7 @@ def test_a_reason_that_differs_only_in_what_is_sanitized_away_keeps_the_code(lor
     names = make_children(env, vault, spec, count=1)
     shown = {names[0]: "fixes the widget"}
     code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=shown)
-    children = children_of(env, vault, names)
+    children = confirm(env, vault, names)
     children[0]["reason"] = "fixes\n  the `widget`\u200b"
     status, _, err = assemble_with(EnvRunner(env), spec, children, tmp_path, capsys, code)
     assert status == 0, err

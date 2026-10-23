@@ -271,23 +271,9 @@ def load_dispositions(path: str) -> dict:
     }
 
 
-def _confirmed(dispositions: dict) -> dict:
-    """What the confirmation covers: the whole validated object."""
-    return dispositions
-
-
 def confirmation(spec: str, dispositions: dict) -> str:
     """The confirmation code over the whole validated dispositions object for `spec`."""
-    return confirm.code_for(CONFIRM_KIND, spec, _confirmed(dispositions))
-
-
-def require_confirmation(spec: str, dispositions: dict, typed: str | None) -> None:
-    """Raise `confirmation-missing` when no code was typed, `confirmation-mismatch` when it
-    is not the code `dispositions` yields. Reads nothing from the vault."""
-    if typed is None or not typed.strip():
-        raise DisposeError("confirmation-missing")
-    if not confirm.matches(CONFIRM_KIND, spec, _confirmed(dispositions), typed):
-        raise DisposeError("confirmation-mismatch")
+    return confirm.code_for(CONFIRM_KIND, spec, dispositions)
 
 
 def dependents_map(runner, names: list[str]) -> tuple[dict[str, list[dict]], dict[str, int]]:
@@ -651,7 +637,7 @@ def main(argv: list[str] | None = None, runner=None) -> int:
             if args.preview:
                 result, reason, subjects = dispose(runner, args.spec_name, dispositions, True)
             else:
-                require_confirmation(args.spec_name, dispositions, args.confirm)
+                parent.require_confirmation(CONFIRM_KIND, args.spec_name, dispositions, args.confirm)
                 if not dispositions["drops"] and not dispositions["merges"]:
                     result, reason, subjects = {"included": dispositions["included"]}, None, ()
                 else:

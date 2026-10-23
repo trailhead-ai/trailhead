@@ -507,10 +507,6 @@ def grade(stream_lines, turns, cell, records=None, prev_code=None):
     }
 
 
-def fill(text, names):
-    return re.sub(r"\{([A-Za-z0-9]+)\}", lambda m: names.get(m.group(1), m.group(0)), text)
-
-
 def lore(env, *argv):
     return subprocess.run(["lore", *argv], capture_output=True, text=True, env=env)
 
