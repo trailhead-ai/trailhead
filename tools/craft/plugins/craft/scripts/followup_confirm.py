@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Confirmation codes: proof that a confirmation was displayed before the write it gates.
+"""Confirmation codes: proof that the preview of this exact payload ran before the write it gates.
 
 A preview prints a short code; the matching write takes `--confirm <code>`, recomputes the
 code from its own input, and refuses when the code is missing or differs. The code is a
@@ -21,9 +21,10 @@ read off a screen and typed back is unambiguous. `matches` ignores case and surr
 whitespace and compares in constant time; an absent or blank `typed` never matches.
 
 Limit: the code is stateless, short and unkeyed, and the same scripts print and check it.
-It proves the confirmation was shown against the shortcut of treating an answer given up
-front as the confirmation; it is neither authorization nor a trust boundary, and it does
-not stop a caller that deliberately copies a code out of script output without showing it.
+It proves the preview of this exact payload was run, against the shortcut of treating an
+answer given up front as the confirmation; it is neither authorization nor a trust boundary,
+and it does not stop a caller that deliberately copies a code out of script output without
+showing it.
 
 The module imports neither `followup_parent` nor `followup_dispose`, so both can use it.
 """
@@ -59,7 +60,12 @@ def code_for(kind: str, spec: str, payload) -> str:
 
 
 def matches(kind: str, spec: str, payload, typed: str | None) -> bool:
-    """Whether `typed` is the code for `payload`; case and surrounding whitespace ignored."""
+    """Whether `typed` is the code for `payload`; case and surrounding whitespace ignored. A
+    `typed` that will not encode as UTF-8 (a surrogate-escaped byte from argv) never matches."""
     if typed is None:
         return False
-    return hmac.compare_digest(typed.strip().lower().encode("utf-8"), code_for(kind, spec, payload).encode("ascii"))
+    try:
+        candidate = typed.strip().lower().encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return hmac.compare_digest(candidate, code_for(kind, spec, payload).encode("ascii"))

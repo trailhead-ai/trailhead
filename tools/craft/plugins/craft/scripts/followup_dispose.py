@@ -69,7 +69,7 @@ object and the spec: reason, drops with revisions, merges with revisions and int
 `confirmation-missing`, with a code the same file does not yield `confirmation-mismatch`
 (case and surrounding whitespace in the typed code are ignored). Both are exit 1 with the
 vault unchanged, and the check runs right after the file is validated, before any `lore`
-call. The code proves the confirmation was displayed; it is not authorization.
+call. The code proves the preview of this exact payload was run; it is not authorization.
 
 A write whose drops and merges are both empty writes nothing, reads no vault, and prints
 `{included: [names]}` on exit 0.

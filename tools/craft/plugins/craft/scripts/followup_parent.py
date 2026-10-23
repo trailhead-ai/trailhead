@@ -71,8 +71,9 @@ as `(name, revision)` pairs. Without `--parent` it is the code `assemble` needs;
 this set would remove from the parent's list, and is the code `resume` needs, so the two
 differ and a code minted for one never satisfies the other. A follow-up added to the list
 after `check --parent` therefore makes the code `resume` computes differ from the one shown.
-`--reasons` is a JSON object mapping each eligible name to its selection reason (anything
-else, or a missing eligible name, is `invalid-reason-file`, exit 2); the code then also covers
+`--reasons` is a JSON object mapping each eligible name to its selection reason (a file that
+is not an object, or a missing or non-string reason for an eligible name, is
+`invalid-reason-file`, exit 2; keys that name no eligible name are ignored); the code then also covers
 each reason as `assemble` renders it into the parent body (sanitized as below), so `assemble`
 refuses a reason that differs from the one shown. `--reasons` with `--parent` is `invalid-arguments`, since `resume`
 re-reads reasons from the parent. `check --parent` with no names mints the resume code over
@@ -97,7 +98,7 @@ a name failing the shape check is `invalid-followup-name`.
 revisions and sanitized reasons) before the first `lore` call, so nothing is read or
 created on a refusal. No code, or a blank one, is `confirmation-missing`; a code the file
 does not yield is `confirmation-mismatch` (both exit 1, vault unchanged). The code proves
-the confirmation was displayed; it is not authorization.
+the preview of this exact payload was run; it is not authorization.
 
 Before any write, `assemble` re-runs the eligibility check for every child, compares
 each child's current revision with the confirmed one, and looks for a live

@@ -3580,6 +3580,16 @@ def test_assemble_with_only_one_of_two_confirmed_children_is_a_mismatch_and_crea
     assert runner.calls == [] and vault_snapshot(env, vault) == before
 
 
+@pytest.mark.parametrize("typed", ["\udcff", "k7q2\udc80", "\ud800"], ids=["escaped-byte", "after-code", "high"])
+def test_a_code_that_will_not_encode_as_utf8_is_a_mismatch_not_an_internal_error(typed, tmp_path, capsys):
+    runner = Lore()
+    children = [{"name": "alpha", "reason": "worth doing", "revision": "v1"}]
+    status, out, err = assemble_with(runner, "s", children, tmp_path, capsys, typed)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.calls == []
+
+
 @pytest.mark.parametrize("typed", [None, "", "   "], ids=["absent", "empty", "blank"])
 def test_assemble_without_a_code_is_confirmation_missing_and_makes_no_lore_call(
     lore_env, spec, tmp_path, capsys, typed
