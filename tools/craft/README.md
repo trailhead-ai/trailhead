@@ -113,8 +113,9 @@ refuses a spec whose slice loop has not ended and fails rather than present a
 partial set. The operator then adjusts and confirms the chosen set, and can drop
 follow-ups under one reason or merge overlapping ones into a survivor that carries
 their intent; the drops and merges are previewed, confirmed and written by
-`scripts/followup_dispose.py` before refinement, and a write that fails is reported
-by name rather than shown as done. The ritual
+`scripts/followup_dispose.py` before refinement (`dispose --preview` prints a
+confirmation code, and the write takes it back as `dispose --confirm <code>`), and a
+write that fails is reported by name rather than shown as done. The ritual
 refines each chosen follow-up one at a time, shows each eligible one's scope for
 confirmation, and nests the confirmed ones under one new parent through
 `scripts/followup_parent.py` (`check`, then `assemble`), ending with the commands

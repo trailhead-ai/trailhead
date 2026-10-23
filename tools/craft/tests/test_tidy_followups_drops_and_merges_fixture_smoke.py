@@ -84,7 +84,11 @@ def dispose(built, cell, tmp_path, drops=(), merges=(), reason="", preview=False
     path = tmp_path / "dispositions.json"
     path.write_text(json.dumps(doc))
     argv = [DISPOSE, "dispose", built["specs"][cell], "--dispositions", path]
-    return run(env or built["env"], *argv, *(["--preview"] if preview else []))
+    if preview:
+        return run(env or built["env"], *argv, "--preview")
+    shown = run(built["env"], *argv, "--preview")
+    assert shown.returncode == 0, shown.stderr
+    return run(env or built["env"], *argv, "--confirm", json.loads(shown.stdout)["confirm"])
 
 
 @pytest.fixture(scope="module")
@@ -287,9 +291,11 @@ def test_the_grader_reads_a_real_preview_and_write_into_roles_orders_and_standal
         }
         path = tmp_path / "d.json"
         path.write_text(json.dumps(doc))
+        shown_code = None
         for i, preview in enumerate((True, False)):
-            r = run(built["env"], DISPOSE, "dispose", spec, "--dispositions", path,
-                    *(["--preview"] if preview else []))
+            flags = ["--preview"] if preview else ["--confirm", shown_code or ""]
+            r = run(built["env"], DISPOSE, "dispose", spec, "--dispositions", path, *flags)
+            shown_code = json.loads(r.stdout)["confirm"] if preview else shown_code
             events.append(_text("Why drop this follow-up? Drop, merge, include and leave as shown?"))
             events.append(_bash(f"t{i}", _command(built, "drop-several", doc, preview)))
             events.append(_result(f"t{i}", r.stdout + f"\nexit: {r.returncode}"))

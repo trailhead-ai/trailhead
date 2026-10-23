@@ -4,6 +4,7 @@ overlapping ones into a survivor.
 
 Usage:
     followup_dispose.py dispose <spec-name> --dispositions <json-file> [--preview]
+    followup_dispose.py dispose <spec-name> --dispositions <json-file> --confirm <code>
 
 `<spec-name>` is the bare name of a spec record. Every follow-up name must match
 `^[A-Za-z0-9._/-]+$`, must not start with `-` and must not contain a `..` path
@@ -13,8 +14,12 @@ before any write.
 The dispositions file is one JSON object, read through `followup_parent._read_json_file`
 (a regular, non-symlink file of at most MAX_DISPOSITIONS_FILE_BYTES):
     {reason, drops: [{name, revision?}],
-     merges: [{survivor: {name, revision}, absorbed: [{name, revision, intent}]}]}
-`merges` may be absent or empty. It is `invalid-dispositions-file` (exit 2, nothing
+     merges: [{survivor: {name, revision}, absorbed: [{name, revision, intent}]}],
+     included: [name]}
+`merges` and `included` may be absent or empty, and drops and merges may both be empty (the
+confirmation then carries only the included set). `included` names the follow-ups the
+operator kept for refinement: unique, each a well-formed name, not checked against the vault.
+It is `invalid-dispositions-file` (exit 2, nothing
 written) when the shape is wrong, a name appears twice anywhere (drops and merges
 together, a survivor among its own absorbed included), a revision is not a non-empty
 string, a merge has no absorbed follow-up or lacks a survivor/absorbed revision, an
@@ -44,7 +49,8 @@ merge the other way round. A dependent whose own name fails the shape check coun
 printed, and gets no `dependents` line of its own. A survivor may have dependents.
 
 `--preview` runs every check and writes nothing. Exit 0 prints
-    {drops: [{name, status}],
+    {confirm, included,
+     drops: [{name, status}],
      merges: [{survivor, status, reset-to-open, absorbed: [{name, status, note}],
                supersedes: [{name, by}]}],
      dependents}
@@ -54,6 +60,17 @@ the fixed label keeps any intent text from opening a line as markdown);
 `reset-to-open` is true when the survivor is `ready` and will go `open`; `supersedes` is
 the supersedes planned. `dependents` maps each dropped name to a list of `{name, vault,
 status}`.
+
+`confirm` is the 4-character code (`followup_confirm`) over the full validated dispositions
+object and the spec: reason, drops with revisions, merges with revisions and intents, and
+`included`. A write needs the code the preview printed: `dispose` without `--confirm` is
+`confirmation-missing`, with a code the same file does not yield `confirmation-mismatch`
+(case and surrounding whitespace in the typed code are ignored). Both are exit 1 with the
+vault unchanged, and the check runs right after the file is validated, before any `lore`
+call. The code proves the confirmation was displayed; it is not authorization.
+
+A write whose drops and merges are both empty writes nothing, reads no vault, and prints
+`{included: [names]}` on exit 0.
 
 Writes: every drop first, in name order, then each merge group in survivor-name order. Each
 record is re-read immediately before its write; a status or revision that differs from what
@@ -93,7 +110,8 @@ Stdout on exit 0 and on every exit 2 after a write is one JSON object:
                          re-enters it with the still-gathered absorbed follow-ups
 
 Exit codes: 0 done; 1 a refusal with the vault unchanged (`not-a-gathered-followup`,
-`child-changed`, `not-mergeable`), stderr carrying `reason-code:` and `subject:` lines; 2
+`child-changed`, `not-mergeable`, `confirmation-missing`, `confirmation-mismatch`), stderr carrying `reason-code:` (and
+`subject:` where it names follow-ups) lines; 2
 anything else, and `dispose-incomplete` when anything is in `failed` (`subject:` names the
 failed follow-ups). Nothing parsed from `lore` is ever printed. Every `lore` call is an argv
 list through the one injectable runner.
@@ -111,6 +129,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import followup_confirm as confirm  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import followup_parent as parent  # noqa: E402
 
@@ -139,10 +158,22 @@ REASON_CODES = frozenset(
         "invalid-dispositions-file",
         "dispose-incomplete",
         "not-mergeable",
+        "confirmation-missing",
+        "confirmation-mismatch",
     }
 )
 
-REFUSAL_REASONS = frozenset({"child-changed", "not-a-gathered-followup", "not-mergeable"})
+REFUSAL_REASONS = frozenset(
+    {
+        "child-changed",
+        "not-a-gathered-followup",
+        "not-mergeable",
+        "confirmation-missing",
+        "confirmation-mismatch",
+    }
+)
+
+CONFIRM_KIND = "drop-and-merge"
 
 MAX_DISPOSITIONS_FILE_BYTES = 65536
 
@@ -211,7 +242,12 @@ def load_dispositions(path: str) -> dict:
     if not isinstance(doc, dict) or not isinstance(doc.get("reason"), str):
         raise invalid
     drops, merges = doc.get("drops"), doc.get("merges", [])
+    included = doc.get("included", [])
     if not isinstance(drops, list) or not isinstance(merges, list):
+        raise invalid
+    if not isinstance(included, list) or not all(isinstance(name, str) for name in included):
+        raise invalid
+    if len(set(included)) != len(included):
         raise invalid
     cleaned = [_member(item, invalid) for item in drops]
     groups = [_merge_group(group, invalid) for group in merges]
@@ -221,7 +257,7 @@ def load_dispositions(path: str) -> dict:
         names.extend(member["name"] for member in group["absorbed"])
     if len(set(names)) != len(names):
         raise invalid
-    if not all(gather._shape_ok(name) for name in names):
+    if not all(gather._shape_ok(name) for name in names + included):
         raise DisposeError("invalid-followup-name")
     reason = parent._one_line(_strip_surrogates(doc["reason"]), parent.MAX_REASON_CHARS)
     if cleaned and not reason:
@@ -230,7 +266,27 @@ def load_dispositions(path: str) -> dict:
         "reason": reason,
         "drops": sorted(cleaned, key=lambda item: item["name"]),
         "merges": sorted(groups, key=lambda group: group["survivor"]["name"]),
+        "included": sorted(included),
     }
+
+
+def _confirmed(dispositions: dict) -> dict:
+    """What the confirmation covers: the whole validated object."""
+    return dispositions
+
+
+def confirmation(spec: str, dispositions: dict) -> str:
+    """The confirmation code over the whole validated dispositions object for `spec`."""
+    return confirm.code_for(CONFIRM_KIND, spec, _confirmed(dispositions))
+
+
+def require_confirmation(spec: str, dispositions: dict, typed: str | None) -> None:
+    """Raise `confirmation-missing` when no code was typed, `confirmation-mismatch` when it
+    is not the code `dispositions` yields. Reads nothing from the vault."""
+    if typed is None or not typed.strip():
+        raise DisposeError("confirmation-missing")
+    if not confirm.matches(CONFIRM_KIND, spec, _confirmed(dispositions), typed):
+        raise DisposeError("confirmation-mismatch")
 
 
 def dependents_map(runner, names: list[str]) -> tuple[dict[str, list[dict]], dict[str, int]]:
@@ -530,7 +586,13 @@ def dispose(runner, spec: str, dispositions: dict, preview: bool) -> tuple[dict,
     if preview:
         planned = [{"name": n, "status": baselines[n]["status"]} for n in names]
         merges = [_preview_group(group, baselines) for group in groups]
-        return {"drops": planned, "merges": merges, "dependents": {n: dependents[n] for n in names}}, None, ()
+        return {
+            "confirm": confirmation(spec, dispositions),
+            "included": dispositions["included"],
+            "drops": planned,
+            "merges": merges,
+            "dependents": {n: dependents[n] for n in names},
+        }, None, ()
 
     note = _dropped_note(dispositions["reason"])
     report: dict = {"dropped": [], "merged": [], "reset-to-open": [], "failed": [], "incomplete-merges": []}
@@ -570,6 +632,7 @@ def main(argv: list[str] | None = None, runner=None) -> int:
         run.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         run.add_argument("--dispositions", required=True, help="JSON file: {reason, drops, merges}")
         run.add_argument("--preview", action="store_true", help="run every check and write nothing")
+        run.add_argument("--confirm", help="the code the preview printed; required for a write")
         runner = runner or lore_runner
         reason, subjects = None, ()
         try:
@@ -577,7 +640,14 @@ def main(argv: list[str] | None = None, runner=None) -> int:
             if not gather._shape_ok(args.spec_name):
                 raise DisposeError("invalid-spec-name")
             dispositions = load_dispositions(args.dispositions)
-            result, reason, subjects = dispose(runner, args.spec_name, dispositions, args.preview)
+            if args.preview:
+                result, reason, subjects = dispose(runner, args.spec_name, dispositions, True)
+            else:
+                require_confirmation(args.spec_name, dispositions, args.confirm)
+                if not dispositions["drops"] and not dispositions["merges"]:
+                    result, reason, subjects = {"included": dispositions["included"]}, None, ()
+                else:
+                    result, reason, subjects = dispose(runner, args.spec_name, dispositions, False)
         except parent.ParentError as err:
             code = 1 if err.reason in REFUSAL_REASONS else 2
             return _refuse(code, err.reason, err.subjects, getattr(err, "details", ()))

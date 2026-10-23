@@ -73,10 +73,19 @@ def spec(lore_env):
     return make_spec(env, vault, "Parent spec", status="complete")
 
 
-def run_dispose(runner, spec_name, tmp_path, capsys, doc=None, preview=False, raw=None):
+def run_dispose(runner, spec_name, tmp_path, capsys, doc=None, preview=False, raw=None, confirm="auto"):
+    """Run `dispose` on `doc`. A write passes the code its own file yields unless `confirm`
+    names one (or None for no flag)."""
     path = tmp_path / "dispositions.json"
     path.write_text(raw if raw is not None else json.dumps(doc))
     argv = ["dispose", spec_name, "--dispositions", str(path)]
+    if confirm == "auto":
+        try:
+            confirm = dispose.confirmation(spec_name, dispose.load_dispositions(str(path)))
+        except dispose.DisposeError:
+            confirm = None
+    if confirm is not None and not preview:
+        argv += ["--confirm", confirm]
     code = dispose.main(argv + (["--preview"] if preview else []), runner=runner)
     out = capsys.readouterr()
     return code, (json.loads(out.out) if out.out.strip() else None), out.err
@@ -1601,3 +1610,204 @@ def test_a_follow_up_nobody_depends_on_stays_mergeable_beside_an_unshaped_unrela
     code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
     assert code == 0, err
     assert sidecar_of(env, vault, absorbed)["status"] == "superseded"
+
+
+# --- the confirmation code ---------------------------------------------------------
+
+
+def test_the_code_a_preview_prints_is_accepted_by_a_write_of_the_same_file_and_the_drops_land(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    doc = file_for(env, vault, pile[:2])
+    code, preview, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    assert code == 0, err
+    assert sidecar_of(env, vault, pile[0])["status"] == "open"
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, confirm=preview["confirm"])
+    assert code == 0, err
+    assert sorted(d["name"] for d in out["dropped"]) == pile[:2]
+    for name in pile[:2]:
+        assert sidecar_of(env, vault, name)["status"] == "dropped"
+
+
+def test_a_code_typed_in_upper_case_with_spaces_is_accepted(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    doc = file_for(env, vault, pile[:1])
+    _, preview, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    code, _, err = run_dispose(
+        EnvRunner(env), spec, tmp_path, capsys, doc, confirm=f" {preview['confirm'].upper()} "
+    )
+    assert code == 0, err
+    assert sidecar_of(env, vault, pile[0])["status"] == "dropped"
+
+
+def test_a_write_with_no_code_is_refused_confirmation_missing_and_no_write_is_attempted(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    before = vault_snapshot(env, vault)
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, pile), confirm=None)
+    assert (code, reason_of(err)) == (1, "confirmation-missing")
+    assert runner.writes() == []
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_blank_code_is_confirmation_missing(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, file_for(env, vault, pile), confirm="  ")
+    assert (code, reason_of(err)) == (1, "confirmation-missing")
+    assert runner.writes() == []
+
+
+def test_a_refused_write_makes_no_lore_call_at_all(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    doc = file_for(env, vault, pile)
+    run_dispose(runner, spec, tmp_path, capsys, doc, confirm=None)
+    run_dispose(runner, spec, tmp_path, capsys, doc, confirm="zzzz-not-it")
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("change", ["one-more-drop", "revision-moved", "reason", "included"])
+def test_a_code_from_a_different_file_is_confirmation_mismatch_and_nothing_is_written(
+    lore_env, spec, pile, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    shown = file_for(env, vault, pile[:1])
+    _, preview, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, shown, preview=True)
+    sent = file_for(env, vault, pile[:1])
+    if change == "one-more-drop":
+        sent = file_for(env, vault, pile[:2])
+    elif change == "revision-moved":
+        sent["drops"][0]["revision"] = "not-the-shown-revision"
+    elif change == "reason":
+        sent["reason"] = "a different reason"
+    else:
+        sent["included"] = [pile[1]]
+    runner = EnvRunner(env)
+    before = vault_snapshot(env, vault)
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, sent, confirm=preview["confirm"])
+    assert (code, reason_of(err)) == (1, "confirmation-mismatch")
+    assert runner.writes() == []
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_code_for_one_spec_does_not_confirm_the_same_file_under_another_spec(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    other = make_spec(env, vault, "Other spec", status="complete")
+    doc = file_for(env, vault, pile[:1])
+    _, preview, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    code, _, err = run_dispose(EnvRunner(env), other, tmp_path, capsys, doc, confirm=preview["confirm"])
+    assert (code, reason_of(err)) == (1, "confirmation-mismatch")
+
+
+def test_the_preview_code_covers_the_included_list(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    doc = file_for(env, vault, pile[:1])
+    with_included = {**doc, "included": [pile[1]]}
+    _, plain, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    _, shown, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, with_included, preview=True)
+    assert shown["included"] == [pile[1]]
+    assert plain["included"] == []
+    assert shown["confirm"] != plain["confirm"]
+
+
+def test_an_empty_drops_and_merges_object_previews_with_a_code_and_a_write_with_it_writes_nothing_and_echoes_included(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    doc = {"reason": "", "drops": [], "included": [pile[1], pile[0]]}
+    runner = EnvRunner(env)
+    code, preview, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert code == 0, err
+    assert preview["drops"] == [] and preview["merges"] == []
+    assert preview["confirm"]
+    before = vault_snapshot(env, vault)
+    code, out, err = run_dispose(runner, spec, tmp_path, capsys, doc, confirm=preview["confirm"])
+    assert code == 0, err
+    assert out["included"] == sorted(pile[:2])
+    assert runner.writes() == []
+    assert vault_snapshot(env, vault) == before
+
+
+def test_a_nothing_to_do_write_without_the_code_is_still_refused(lore_env, spec, pile, tmp_path, capsys):
+    env, vault = lore_env
+    doc = {"reason": "", "drops": [], "included": [pile[0]]}
+    code, _, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, confirm=None)
+    assert (code, reason_of(err)) == (1, "confirmation-missing")
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [
+        {"reason": "", "drops": [], "included": "alpha"},
+        {"reason": "", "drops": [], "included": [3]},
+        {"reason": "", "drops": [], "included": ["a", "a"]},
+        {"reason": "", "drops": [], "merges": [{}]},
+        {"reason": "", "drops": {}},
+        {"drops": []},
+    ],
+    ids=[
+        "included-not-a-list",
+        "included-not-strings",
+        "included-repeats",
+        "empty-merge-group",
+        "drops-not-a-list",
+        "no-reason",
+    ],
+)
+def test_a_malformed_object_is_still_invalid_now_that_an_empty_one_is_accepted(
+    lore_env, spec, tmp_path, capsys, doc
+):
+    env, vault = lore_env
+    code, _, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    assert (code, reason_of(err)) == (2, "invalid-dispositions-file")
+
+
+def test_an_included_name_failing_the_shape_check_is_refused_before_any_lore_call(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    doc = {"reason": "", "drops": [], "included": ["bad name"]}
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert (code, reason_of(err)) == (2, "invalid-followup-name")
+    assert runner.calls == []
+
+
+def test_a_merge_write_needs_the_code_too(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    doc = merge_doc(env, vault, [(trio[0], [trio[1]])])
+    runner = EnvRunner(env)
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, doc, confirm=None)
+    assert (code, reason_of(err)) == (1, "confirmation-missing")
+    assert runner.writes() == []
+    _, preview, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, confirm=preview["confirm"])
+    assert code == 0, err
+    assert out["merged"][0]["survivor"] == trio[0]
+
+
+@pytest.mark.parametrize("change", ["intent", "absorbed-revision", "another-absorbed"])
+def test_a_code_from_a_merge_that_differs_in_what_it_would_write_is_confirmation_mismatch(
+    lore_env, spec, trio, tmp_path, capsys, change
+):
+    env, vault = lore_env
+    shown = merge_doc(env, vault, [(trio[0], [trio[1]])])
+    _, preview, _ = run_dispose(EnvRunner(env), spec, tmp_path, capsys, shown, preview=True)
+    sent = merge_doc(env, vault, [(trio[0], [trio[1]])])
+    absorbed = sent["merges"][0]["absorbed"]
+    if change == "intent":
+        absorbed[0]["intent"] = "a different intent"
+    elif change == "absorbed-revision":
+        absorbed[0]["revision"] = "not-the-shown-revision"
+    else:
+        sent = merge_doc(env, vault, [(trio[0], [trio[1], trio[2]])])
+    runner = EnvRunner(env)
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, sent, confirm=preview["confirm"])
+    assert (code, reason_of(err)) == (1, "confirmation-mismatch")
+    assert runner.writes() == []
