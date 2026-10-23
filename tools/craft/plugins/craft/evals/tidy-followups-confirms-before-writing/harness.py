@@ -211,6 +211,15 @@ def run(args) -> None:
     print(json.dumps(summary))
 
 
+def scrub_stream_line(line: str, roots: dict) -> str:
+    """One stream-json line with every string value scrubbed, so the line is still valid JSON."""
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return capture_scrub.scrub_text(line, **roots)
+    return json.dumps(capture_scrub.scrub_value(event, **roots), ensure_ascii=False)
+
+
 def persist(args) -> None:
     work = Path(args.work).resolve()
     key = f"{args.cell}-{args.arm}-r{args.n}"
@@ -224,7 +233,7 @@ def persist(args) -> None:
                     **driver.transcript(result, **roots)}, indent=1) + "\n")
     stream = (meta / f"{key}.stream.jsonl").read_text().splitlines()
     (out / f"{key}.stream.jsonl").write_text(
-        "\n".join(capture_scrub.scrub_text(line, **roots) for line in stream) + "\n")
+        "\n".join(scrub_stream_line(line, roots) for line in stream) + "\n")
     for suffix in ("cmd.txt", "summary.json"):
         (out / f"{key}.{suffix}").write_text((meta / f"{key}.{suffix}").read_text())
     before = json.loads((meta / f"{key}.before.json").read_text())

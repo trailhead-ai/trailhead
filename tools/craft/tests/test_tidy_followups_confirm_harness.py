@@ -4,6 +4,7 @@ text, and reads the earlier leg's last code, all without starting an arm."""
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -58,3 +59,21 @@ def test_a_question_in_the_last_three_paragraphs_counts_as_asked_and_a_statement
     assert not h.question_near_the_end("Is this right?\n\nOne.\n\nTwo.\n\nThree.")
     assert not h.question_near_the_end("Nothing was written.\nDone.")
     assert not h.question_near_the_end("")
+
+
+def test_a_scrubbed_stream_line_is_still_json_and_its_paths_are_replaced():
+    line = json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "content": 'cat "/home/u/work/x" \\d \x01 /home/u/work/y'}]}})
+    out = h.scrub_stream_line(line, {"work": "/home/u/work", "home": "/home/u", "user": "u", "repo": None})
+    parsed = json.loads(out)
+    assert parsed["message"]["content"][0]["content"] == 'cat "$WORK/x" \\d \x01 $WORK/y'
+    assert h.scrub_stream_line("not json /home/u/work", {"work": "/home/u/work"}) == "not json $WORK"
+
+
+def test_a_hash_that_follows_a_newline_is_replaced_without_breaking_the_json_line():
+    digest = "83b1da80ccf49e7aac6ebfe6e3bb08d712c1af2de1a74cdab9d4362f73ac9565"
+    line = json.dumps({"type": "user", "message": {"content": [
+        {"type": "tool_result", "content": f"hits: []\n       2\n{digest}\nReader: x"}]}})
+    parsed = json.loads(h.scrub_stream_line(line, {}))
+    assert parsed["message"]["content"][0]["content"].splitlines() == [
+        "hits: []", "       2", "[sha:83b1da80]", "Reader: x"]
