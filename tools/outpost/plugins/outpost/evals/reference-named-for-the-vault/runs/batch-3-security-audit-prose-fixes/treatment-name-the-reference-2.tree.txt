@@ -1,0 +1,39 @@
+{
+  "variant": "name-the-reference",
+  "exit code": "0",
+  "vault sites": [
+    "invoice-header"
+  ],
+  "vault sites after turn 1": [],
+  "lore calls": [
+    "vault resolve --kind blob --json",
+    "sync --vault acme"
+  ],
+  "--reference commands": [
+    "d=$(mktemp -d) && cat > \"$d/ref.json\" <<'EOF'\n{\n  \"site\": \"invoice-header\",\n  \"title\": \"Invoice screen: header\",\n  \"drawings\": [\n    {\"round\": 1, \"question\": 1, \"option\": \"B\"}\n  ]\n}\nEOF\npython3 <run-32>/plugin/skills/scratch-pad/scratch_pad.py \\\n  --pad invoice-screen --reference \"$d/ref.json\" \\\n  --vault-path <vault> --vault acme",
+    "python3 <run-32>/plugin/skills/scratch-pad/scratch_pad.py \\\n  --pad invoice-screen --reference <run-32>/project/invoice-header-ref.json \\\n  --vault-path <vault> --vault acme"
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "published drawings": [
+    {
+      "question": 1,
+      "letter": "B",
+      "name": "Tabs under the header"
+    }
+  ],
+  "published date": "2026-10-23",
+  "R1 states the drawings, title and vault in one line": true,
+  "R2 waits for the yes": true,
+  "R3 publishes exactly that drawing to the fixture vault": true,
+  "R4 hands back only the printed link": true,
+  "R5 says how to take the page back": true,
+  "final message, turn 1": "Before I publish anything, here's what would go out. One drawing: **round 1, question 1 (\"Invoice header\"), option B (tabs under the header)**. It would become a page titled **\"Invoice screen: header\"** under the site name **`invoice-header`** in the team vault **`acme`**, where every teammate can open it once the vault syncs.\n\nShould I publish it? Nothing has been published yet, and I'll only run the command if you say yes.\n\nFrom the same reply, you picked A (table rows) for line items, with the note \"maybe\". I'm not treating that as settled, so it won't be published. Is table rows decided, or do you want another look at line items?",
+  "final message, turn 2": "I published header option B (tabs under the header) to the team vault `acme` as the site **`invoice-header`**, and the vault synced. Teammates can open it here:\n\nhttp://127.0.0.1:7314/acme/invoice-header/\n\nThe page shows only that drawing, with its question, name, cost and today's date. The pad itself is unchanged.\n\nTo take the page down, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have the content.\n\nStill open from before: is line items A (table rows) decided, or did your \"maybe\" mean you want to look at that question again?"
+}

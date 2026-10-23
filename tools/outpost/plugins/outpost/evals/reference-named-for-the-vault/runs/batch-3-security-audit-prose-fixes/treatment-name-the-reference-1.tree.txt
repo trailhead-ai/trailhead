@@ -1,0 +1,43 @@
+{
+  "variant": "name-the-reference",
+  "exit code": "0",
+  "vault sites": [
+    "invoice-header"
+  ],
+  "vault sites after turn 1": [],
+  "lore calls": [
+    "vault resolve --kind blob --json",
+    "sync --vault acme"
+  ],
+  "--reference commands": [
+    "mkdir -p <run-31>/refs && cat > <run-31>/refs/invoice-header.json <<'EOF'\n{\n  \"site\": \"invoice-header\",\n  \"title\": \"Invoice screen: header\",\n  \"drawings\": [\n    {\"round\": 1, \"question\": 1, \"option\": \"B\"}\n  ]\n}\nEOF\npython3 <run-31>/plugin/skills/scratch-pad/scratch_pad.py \\\n  --pad invoice-screen --reference <run-31>/refs/invoice-header.json \\\n  --vault-path <vault> --vault acme; echo \"exit=$?\"",
+    "python3 <run-31>/plugin/skills/scratch-pad/scratch_pad.py \\\n  --pad invoice-screen --reference <run-31>/refs/invoice-header.json \\\n  --vault-path <vault> --vault acme; echo \"exit=$?\""
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Write",
+    "Read",
+    "Write",
+    "Bash"
+  ],
+  "published drawings": [
+    {
+      "question": 1,
+      "letter": "B",
+      "name": "Tabs under the header"
+    }
+  ],
+  "published date": "2026-10-23",
+  "R1 states the drawings, title and vault in one line": true,
+  "R2 waits for the yes": true,
+  "R3 publishes exactly that drawing to the fixture vault": true,
+  "R4 hands back only the printed link": true,
+  "R5 says how to take the page back": true,
+  "final message, turn 1": "Before I publish anything, I need your go-ahead.\n\nI'd publish **round 1, question 1 (\"Invoice header\"), option B, \"Tabs under the header\"** as a page titled **\"Invoice screen: header\"**, with the site name **`invoice-header`**, to the **`acme`** team vault. That drawing contains nothing sensitive, just \"Invoice 1042\", a Send button, and Details / Totals / History tabs. Publish it?\n\nThe line-items pick (A, table rows) stays on the pad and won't be on the team page. You marked it \"maybe\", so I'm not treating it as decided. Tell me if you want table rows added to the page too.",
+  "final message, turn 2": "The header pick is now published for the team: **round 1, question 1, option B, \"Tabs under the header\"**, as a page titled \"Invoice screen: header\". The script reported a successful publish and sync to the `acme` vault, under the site name **`invoice-header`**:\n\nhttp://127.0.0.1:7314/acme/invoice-header/\n\nTo take it back, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have the page.\n\nThe pad itself didn't change, and line items (A, table rows, marked \"maybe\") is still open. Is A final for line items, or do you want to rethink it?"
+}

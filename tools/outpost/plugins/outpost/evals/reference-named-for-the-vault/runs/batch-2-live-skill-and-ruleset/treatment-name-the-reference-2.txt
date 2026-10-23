@@ -1,0 +1,21 @@
+I haven't published anything yet. Here's what would go up:
+
+**Publish a reference page with round 1, question 1 (Invoice header), option B "Tabs under the header", titled "Invoice screen: header", to the team vault `acme` (site name `invoice-header`)?**
+
+The page would show just that one drawing, with its question, its name, its cost line ("Keeps the header slim; the totals move to a tab.") and today's date. Everyone on the team will be able to open it once the vault syncs. The pad itself won't change.
+
+Reply yes and I'll publish it and send you the link. Reply no, or name a different vault or title, and I'll change course.
+
+One more thing: on line items you picked A (Table rows) but wrote "maybe." Should A be the one you build too, and go on the same page? Or is that still open?
+
+--- turn 2 ---
+
+The header reference is now in the team vault `acme` as `invoice-header`. It's the page of round 1, question 1, option B, "Tabs under the header":
+
+http://127.0.0.1:7314/acme/invoice-header/
+
+The vault synced, so teammates can open it from their own Outpost. The `invoice-screen` pad hasn't changed.
+
+To take the page back, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have it.
+
+Line items are still open. Should option A (Table rows) be the one you build, given your "maybe"? If so, I can publish it as a separate reference page.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a scratch pad: one or more rounds of layout and flow sketches.
+"""Build a scratch pad of layout and flow sketches in rounds, or publish a reference page of chosen drawings.
 
 Given ``--pad <slug>`` and ``--round <path-to-json>`` (and ``--add`` for a later round of an
 existing pad), this checks the round's
@@ -123,6 +123,37 @@ Contract
                                   ``<s>`` is the ASCII JSON list of one
                                   ``{"title": ...}`` per round, encoded the same way
 
+* ``read_reference(reference_path, pad, ...)`` reads drawings back for a reference page; it builds and changes
+  nothing (``--reference``, below, is its command-line use). The reference is one JSON object: ``site`` (a slug as
+  ``--pad``), ``title`` (non-empty) and ``drawings`` (at least one ``{round, question, option}``: whole numbers from
+  1 and a capital letter; an unknown key is refused, the same drawing twice is refused). The pad is found where
+  ``--add`` finds it, read under its lock through the add's read-back (refusals worded for a reference, not an add),
+  each named round's data decoded from ``round.js`` as data, and the lock released before it returns. It returns a
+  ``Reference(site, title, drawings)`` whose drawings are ``ChosenDrawing(round, question, letter, round_title,
+  prompt, option)`` in the order named, or raises :class:`Refusal` with every problem found. Before it returns,
+  every string bound for the page (title, site, each round title, prompt, name, cost, flow and every string inside a
+  layout, dictionary keys included) is matched against the credential-pattern classes in ``_CREDENTIAL_PATTERNS``
+  (mirroring craft's credential-pattern scrub list); a match refuses the reference naming the drawing and field,
+  never the matched text.
+* ``--pad <slug> --reference <json> --vault-path <p> [--vault <n>]`` publishes a reference page to a lore vault,
+  from inside a camp workspace or outside one. ``--reference`` cannot be used with ``--round`` or ``--add``, and
+  needs ``--vault-path``; ``--vault-path`` and ``--vault`` are only valid with ``--reference``; without
+  ``--reference``, ``--pad`` and ``--round`` stay required (``--pad`` is checked first). The reference is read as
+  above (the pad's lock is released before anything is published). A ``<vault>/sites/<site>`` that already holds
+  anything, a dangling symlink included, is refused as ``scratch-pad: site "<site>": already exists in the vault
+  — choose another site name``, before the publisher runs. The page is built by ``build_reference_page`` in a
+  fresh owner-only ``scratch-pad-reference-`` temp folder outside the vault and published by the sibling
+  ``publish-site/publish_site.py``, run as ``<python> <publish_site.py> <tmp> <site> --vault-path <p>`` (plus
+  ``--vault <n>`` when given), never with ``--overwrite`` and with no timer: the publisher's sync may wait on a
+  lock or a signing prompt for as long as it takes. Just before the publisher starts, stdout gets
+  ``PUBLISHING_LINE`` (and is flushed); the publisher's stdout (the sync's own lines, then the link
+  ``http://127.0.0.1:<port>/<vault>/<site>/``, last) is passed through as it is written, not captured. Its stderr
+  is shown live on stderr, each non-blank line as it arrives as ``scratch-pad: publish: <line>`` (escaped as on
+  the workspace path), whatever the exit. On a non-zero exit the run is refused with no further line, except a
+  bare ``scratch-pad: publish: the publisher exited with status <n>`` when the publisher said nothing; a failed
+  sync prints no link and leaves the page in ``<vault>/sites/<site>`` as the publisher leaves it. A publisher
+  that cannot be started is refused as ``scratch-pad: publish: could not start the publisher: <why>``. The temp
+  folder is removed on every path, exceptions included. The pad is never changed.
 * Every refusal prints ``scratch-pad: <where>: <what>`` lines on stderr -- every
   problem found in one pass -- and exits non-zero. No pad and no temp folder
   are left behind; a pads folder this run had to create may remain, empty.
@@ -146,9 +177,11 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import datetime
 import fcntl
 import hashlib
 import json
+import math
 import os
 import re
 import secrets
@@ -157,12 +190,14 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import NamedTuple
 
 DEFAULT_KIT_DIR = Path(__file__).resolve().parent / "kit"
+DEFAULT_REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 PUBLISHER_PATH = Path(__file__).resolve().parent.parent / "publish-site" / "publish_site.py"
 PUBLISH_TIMEOUT_SECONDS = 60.0
 
@@ -174,6 +209,9 @@ _QUESTION_KEYS = ("prompt", "options")
 _OPTION_KEYS = ("name", "cost", "pick", "layout", "flow")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
+_REFERENCE_JS_PREFIX = "window.PAD_REFERENCE = JSON.parse("
+_REFERENCE_PAGE_FILES = ("index.html", "reference.css", "reference.js")
+_REFERENCE_KIT_FILES = ("pen.js", "flow.js", "pad.css", "ArchitectsDaughter-Regular.ttf", "OFL.txt")
 _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
 _PAD_FILES = ("index.html", "rounds.js")
 _LOCK_POLL_SECONDS = 0.05
@@ -181,6 +219,7 @@ _WAY_ON = "start a new pad with a different --pad name"
 _MOVE_OUT = "move it out of the pad folder and rerun --add"
 _OS_METADATA = re.compile(r"\.DS_Store|\._.*", re.DOTALL)
 _UNCONFIRMED = "note: the pad was published but the publisher did not confirm it in time"
+PUBLISHING_LINE = "publishing to the vault; the sync can wait on a lock or a signing prompt"
 
 
 def _pad_index(number: int) -> str:
@@ -251,6 +290,16 @@ def enclosing_workspace(cwd: Path, env: Mapping[str, str]) -> Path | None:
     return None
 
 
+def _resolve_cwd(cwd: Path | str | None) -> Path | None:
+    """*cwd* as a path, or the process's own working directory; ``None`` when that cannot be read."""
+    if cwd is not None:
+        return Path(cwd)
+    try:
+        return Path.cwd()
+    except OSError:
+        return None
+
+
 def _pads_root(env: Mapping[str, str]) -> Path:
     return _outpost_state_dir(env).absolute() / "pads"
 
@@ -259,12 +308,13 @@ def _reject_constant(name: str):
     raise ValueError(f"{name} is not valid JSON")
 
 
-def _read_round(round_path: Path) -> object:
-    where = _q(str(round_path))
+def _read_json(path: Path, what: str) -> object:
+    """The JSON in the *what* file at *path*, or a :class:`Refusal` naming why it cannot be read."""
+    where = _q(str(path))
     try:
-        raw = round_path.read_bytes()
+        raw = path.read_bytes()
     except OSError as exc:
-        raise Refusal([_line(where, f"cannot read the round: {exc.strerror or exc}")])
+        raise Refusal([_line(where, f"cannot read the {what}: {exc.strerror or exc}")])
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -388,15 +438,15 @@ def _check_option(option: object, where: str, problems: list[str]) -> int:
     return 1 if pick else 0
 
 
-def _check_slug(pad: str) -> list[str]:
+def _check_slug(pad: str, where: str = "--pad", noun: str = "pad") -> list[str]:
     if len(pad) > _MAX_SLUG and _SLUG.fullmatch(pad):
-        return [_line("--pad", f"the pad name is too long ({len(pad)} characters) — the limit is {_MAX_SLUG}")]
+        return [_line(where, f"the {noun} name is too long ({len(pad)} characters) — the limit is {_MAX_SLUG}")]
     if _SLUG.fullmatch(pad):
         return []
     return [
         _line(
-            "--pad",
-            f"{_q(pad)} is not a valid pad name — start with a lowercase letter or digit, then use "
+            where,
+            f"{_q(pad)} is not a valid {noun} name — start with a lowercase letter or digit, then use "
             "lowercase letters, digits, '.', '_' or '-'",
         )
     ]
@@ -439,6 +489,62 @@ def _run_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float):
     )
 
 
+class _Streamed(subprocess.CompletedProcess):
+    """A finished publisher run whose stderr was already shown line by line; ``echoed`` is whether any was."""
+
+    echoed = False
+    cut_short = False
+
+
+_STDERR_DRAIN_SECONDS = 0.5
+
+
+def _stream_publisher(
+    cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None, drain: float = _STDERR_DRAIN_SECONDS
+):
+    """Run the publisher with stdout passed through as written and each non-blank stderr line shown as it arrives.
+
+    Lines are shown in the ``scratch-pad: publish:`` relay form, escaped; nothing is held back for the exit.
+    No timer unless given. Once the publisher has exited, the rest of its stderr is waited for only briefly: a
+    descendant that inherited the pipe and outlives it does not hold the call open, and the daemon reader is left
+    to end with the pipe.
+    """
+    proc = subprocess.Popen(list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace")
+    echoed = []
+    closed = threading.Event()
+    relaying = threading.Lock()
+
+    def pump():
+        for line in proc.stderr:
+            with relaying:
+                if closed.is_set():
+                    return
+                if line.strip():
+                    print(_line("publish", _esc(line.rstrip("\r\n"))), file=sys.stderr, flush=True)
+                    echoed.append(True)
+
+    reader = threading.Thread(target=pump, daemon=True)
+    reader.start()
+    try:
+        returncode = proc.wait(timeout=timeout)
+    except BaseException:
+        proc.kill()
+        proc.wait()
+        raise
+    finally:
+        reader.join(drain)
+        cut_short = reader.is_alive()
+        if cut_short:
+            with relaying:
+                closed.set()
+        else:
+            proc.stderr.close()
+    result = _Streamed(list(cmd), returncode, None, "")
+    result.echoed = bool(echoed)
+    result.cut_short = cut_short
+    return result
+
+
 def _esc(text: str) -> str:
     return _q(text)[1:-1]
 
@@ -461,7 +567,7 @@ def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> Encoded:
     problems = _check_slug(pad)
     data = None
     try:
-        data = _read_round(round_path)
+        data = _read_json(round_path, "round")
     except Refusal as exc:
         problems.extend(exc.lines)
     else:
@@ -610,8 +716,8 @@ def _tree_problems(root: Path) -> list[str]:
     return problems
 
 
-def _round_title(round_js: Path) -> str:
-    """The title in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
+def _round_data(round_js: Path) -> object:
+    """The round in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
     with open(round_js, encoding="utf-8") as handle:
         first = handle.readline().rstrip("\n")
     if not first.startswith(_ROUND_JS_PREFIX):
@@ -619,8 +725,16 @@ def _round_title(round_js: Path) -> str:
     if not first.endswith(");"):
         raise ValueError("its first line does not end the way this script writes it")
     try:
-        title = json.loads(json.loads(first[len(_ROUND_JS_PREFIX) : -2]))["title"]
-    except (ValueError, KeyError, TypeError, RecursionError):
+        return json.loads(json.loads(first[len(_ROUND_JS_PREFIX) : -2]))
+    except (ValueError, RecursionError):
+        raise ValueError("its first line does not hold a round") from None
+
+
+def _round_title(round_js: Path) -> str:
+    """The title in a ``round.js`` first line, decoded as data; ``ValueError`` when it cannot be."""
+    try:
+        title = _round_data(round_js)["title"]
+    except (KeyError, TypeError):
         raise ValueError("its first line does not hold a round") from None
     if not isinstance(title, str):
         raise ValueError("its round has no title")
@@ -635,15 +749,15 @@ def _cannot_take(pad: str, problems: Sequence[str], strays: Sequence[str] = ()) 
     )
 
 
-def _read_pad(final: Path, pad: str) -> list[str]:
-    """The pad's round titles in order, or a :class:`Refusal` naming everything that stops a new round."""
+def _read_pad(final: Path, pad: str, refuse=_cannot_take) -> list[str]:
+    """The pad's round titles in order, or the :class:`Refusal` *refuse* builds naming every problem."""
     problems: list[str] = []
     strays: list[str] = []
     titles: list[str] = []
     try:
         mode = os.lstat(final).st_mode
     except OSError as exc:
-        raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
+        raise refuse(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
     if stat.S_ISLNK(mode):
         problems.append("the pad folder is a symlink")
     elif not stat.S_ISDIR(mode):
@@ -652,7 +766,7 @@ def _read_pad(final: Path, pad: str) -> list[str]:
         try:
             entries = sorted(os.listdir(final))
         except OSError as exc:
-            raise _cannot_take(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
+            raise refuse(pad, [f"the pad folder can't be read: {_esc(exc.strerror or str(exc))}"])
         problems.extend(_tree_problems(final))
         strays.extend(
             f"{_esc(e)} is not part of a pad this script builds"
@@ -687,7 +801,7 @@ def _read_pad(final: Path, pad: str) -> list[str]:
                 except (OSError, ValueError) as exc:
                     problems.append(f"round-{k}/round.js: {_esc(str(exc))}")
     if problems or strays:
-        raise _cannot_take(pad, problems, strays)
+        raise refuse(pad, problems, strays)
     return titles
 
 
@@ -786,7 +900,22 @@ def _require_publisher() -> None:
 
 
 def _publisher_cmd(tmp: Path, pad: str, workspace: Path, *extra: str) -> list[str]:
-    return [sys.executable, str(PUBLISHER_PATH), str(tmp), pad, "--workspace-path", str(workspace), *extra]
+    return _publisher_argv(tmp, pad, "--workspace-path", str(workspace), *extra)
+
+
+def _publisher_argv(tmp: Path, site: str, *target: str) -> list[str]:
+    return [sys.executable, str(PUBLISHER_PATH), str(tmp), site, *target]
+
+
+def _cannot_start(exc: OSError) -> Refusal:
+    return Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+
+
+def _publish_refused(result) -> Refusal:
+    if getattr(result, "echoed", False) and not getattr(result, "cut_short", False):
+        return Refusal([])
+    reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
+    return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
 
 
 def _publish(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float, final: Path, timed_out) -> Built:
@@ -794,12 +923,11 @@ def _publish(runner, cmd: Sequence[str], env: Mapping[str, str], timeout: float,
     try:
         result = runner(cmd, env, timeout)
     except OSError as exc:
-        raise Refusal([_line("publish", f"could not start the publisher: {exc.strerror or exc}")])
+        raise _cannot_start(exc)
     except subprocess.TimeoutExpired:
         return timed_out()
     if result.returncode != 0:
-        reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
-        raise Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
+        raise _publish_refused(result)
     return Built(final, result.stdout.splitlines())
 
 
@@ -900,6 +1028,362 @@ def _add_to_workspace(
     return _add_round(workspace / "sites", pad, kit_dir, encoded, publish, make_tmp)
 
 
+_REFERENCE_KEYS = ("site", "title", "drawings")
+_DRAWING_KEYS = ("round", "question", "option")
+_DRAWING_HINTS = {
+    "round": "name the round's number",
+    "question": "name the question's number in that round",
+    "option": "name the option's letter",
+}
+_LETTER = re.compile(r"[A-Z]")
+
+# Credential-pattern classes, mirroring craft's credential-pattern scrub list (the outpost plugin cannot
+# import craft). Each is tried independently, so a string can match more than one class.
+_CREDENTIAL_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
+    ("pem-private-key", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
+    (
+        "vendor-prefix",
+        re.compile(
+            r"(?i)(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}"
+            r"|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+"
+            r"|AIza[0-9A-Za-z_-]{35})(?![A-Za-z0-9])"
+        ),
+    ),
+    ("key-like", re.compile(r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]{0,64}\s*[=:]\s*\S+")),
+    ("api-key-shape", re.compile(r"(?i)api[_-]?key['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9._\-]{16,}")),
+    ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")),
+    ("high-entropy-hex", re.compile(r"(?<![A-Za-z0-9])[A-Fa-f0-9]{40,}(?![A-Za-z0-9])")),
+    ("high-entropy-base64", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9])")),
+)
+
+
+class ChosenDrawing(NamedTuple):
+    """One drawing a reference names: its place on the pad, its round's title, its question's prompt and the
+    option as the pad holds it (``name``, ``cost``, ``pick`` and a ``layout`` or ``flow``)."""
+
+    round: int
+    question: int
+    letter: str
+    round_title: str
+    prompt: str
+    option: dict
+
+
+class Reference(NamedTuple):
+    site: str
+    title: str
+    drawings: list[ChosenDrawing]
+
+
+def credential_patterns(text: str) -> list[str]:
+    """The names of the credential-pattern classes *text* matches, in a fixed order; empty when none."""
+    return [name for name, pattern in _CREDENTIAL_PATTERNS if pattern.search(text)]
+
+
+def check_reference(data: object) -> list[str]:
+    """Return a ``scratch-pad:`` line for every outer-shape problem in a reference file's *data*."""
+    if not isinstance(data, dict):
+        return [_line("reference", "must be a JSON object")]
+    problems: list[str] = []
+    _unknown_keys(data, _REFERENCE_KEYS, "reference", problems)
+    if "site" not in data:
+        problems.append(_line("site", 'no "site" — name the page'))
+    elif not isinstance(data["site"], str):
+        problems.append(_line("site", "must be a string"))
+    else:
+        problems.extend(_check_slug(data["site"], "site", "site"))
+    if "title" not in data:
+        problems.append(_line("title", 'no "title" — name the page'))
+    elif not isinstance(data["title"], str):
+        problems.append(_line("title", "must be a string"))
+    elif not data["title"].strip():
+        problems.append(_line("title", "empty — name the page"))
+    drawings = data.get("drawings")
+    if drawings is None or drawings == []:
+        problems.append(_line("drawings", "name at least one drawing"))
+    elif not isinstance(drawings, list):
+        problems.append(_line("drawings", "must be a list"))
+    else:
+        for i, drawing in enumerate(drawings):
+            _check_drawing(drawing, f"drawings[{i}]", problems)
+    return problems
+
+
+def _check_drawing(drawing: object, where: str, problems: list[str]) -> None:
+    if not isinstance(drawing, dict):
+        problems.append(_line(where, "must be an object"))
+        return
+    _unknown_keys(drawing, _DRAWING_KEYS, where, problems)
+    for key in ("round", "question"):
+        value = drawing.get(key)
+        if key not in drawing:
+            problems.append(_line(where, f'no "{key}" — {_DRAWING_HINTS[key]}'))
+        elif isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            problems.append(_line(f"{where}.{key}", "must be a whole number from 1"))
+    if "option" not in drawing:
+        problems.append(_line(where, f'no "option" — {_DRAWING_HINTS["option"]}'))
+    elif not isinstance(drawing["option"], str) or not _LETTER.fullmatch(drawing["option"]):
+        problems.append(_line(f"{where}.option", "must be one capital letter, A to Z"))
+
+
+def _cannot_reference(pad: str, problems: Sequence[str], strays: Sequence[str] = ()) -> Refusal:
+    """The read-back's refusal in a reference's wording: the reasons, with no way on for an add."""
+    return Refusal([f"scratch-pad: pad {_q(pad)} can't be referenced: {'; '.join([*problems, *strays])}"])
+
+
+def _questions_of(data: object) -> list | None:
+    """The round's list of questions when the data holds one, else ``None``; a question is checked once named."""
+    questions = data.get("questions") if isinstance(data, dict) else None
+    return questions if isinstance(questions, list) else None
+
+
+def _has_prompt_and_options(question: object) -> bool:
+    return (
+        isinstance(question, dict)
+        and isinstance(question.get("prompt"), str)
+        and isinstance(question.get("options"), list)
+    )
+
+
+def _leaves(value: object):
+    """Every scalar in decoded JSON *value*, dictionary keys included, as ``(is_key, item)``."""
+    stack = [(False, value)]
+    while stack:
+        is_key, item = stack.pop()
+        if isinstance(item, dict):
+            for key, child in item.items():
+                stack.append((False, child))
+                stack.append((True, key))
+        elif isinstance(item, list):
+            stack.extend((False, child) for child in item)
+        else:
+            yield is_key, item
+
+
+def _strings_in(value: object) -> list[tuple[bool, str]]:
+    """Every string in *value*, dictionary keys included, as ``(is_key, text)``."""
+    return [(is_key, item) for is_key, item in _leaves(value) if isinstance(item, str)]
+
+
+def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing]) -> list[str]:
+    """A line for every page-bound field that matches a credential pattern; never the matched text."""
+    problems: list[str] = []
+
+    def check(where: str, field: str, texts: Sequence[str]) -> None:
+        classes = sorted(
+            {c for text in texts for c in credential_patterns(text)},
+            key=lambda c: [n for n, _ in _CREDENTIAL_PATTERNS].index(c),
+        )
+        if classes:
+            problems.append(
+                _line(
+                    where, f"{field} matches a credential pattern ({', '.join(classes)}) — this is shared with the team"
+                )
+            )
+
+    check("title", "title", [title])
+    check("site", "site", [site])
+    for i, d in enumerate(drawings):
+        where = f"drawings[{i}] (round {d.round}, question {d.question}, option {d.letter})"
+        check(where, "round title", [d.round_title])
+        check(where, "prompt", [d.prompt])
+        for field in ("name", "cost", "flow"):
+            if field in d.option:
+                check(where, field, [t for _, t in _strings_in(d.option[field])])
+        if "layout" in d.option:
+            strings = _strings_in(d.option["layout"])
+            check(where, "layout", [t for is_key, t in strings if not is_key])
+            check(where, "layout (a key)", [t for is_key, t in strings if is_key])
+    return problems
+
+
+def _non_finite(value: object) -> str | None:
+    """The first NaN, Infinity or -Infinity held anywhere in decoded JSON *value*, as JSON writes it; else ``None``."""
+    for _, item in _leaves(value):
+        if isinstance(item, float) and not math.isfinite(item):
+            return "NaN" if math.isnan(item) else ("Infinity" if item > 0 else "-Infinity")
+    return None
+
+
+def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: Mapping[int, object]) -> tuple:
+    """Match each named drawing to the pad: ``(chosen, problems)``; every problem is named."""
+    chosen: list[ChosenDrawing] = []
+    problems: list[str] = []
+    seen: dict[tuple, int] = {}
+    for i, drawing in enumerate(drawings):
+        where = f"drawings[{i}]"
+        number, qn, letter = drawing["round"], drawing["question"], drawing["option"]
+        if number > len(titles):
+            problems.append(_line(f"{where}.round", f"{number} — the pad has {_plural(len(titles), 'round')}"))
+            continue
+        questions = _questions_of(rounds[number])
+        if questions is None:
+            problems.append(
+                _line(f"{where}.round", f"{number} — round {number}'s data does not hold a list of questions")
+            )
+            continue
+        if qn > len(questions):
+            problems.append(
+                _line(f"{where}.question", f"{qn} — round {number} has {_plural(len(questions), 'question')}")
+            )
+            continue
+        if not _has_prompt_and_options(questions[qn - 1]):
+            problems.append(
+                _line(
+                    f"{where}.question",
+                    f"{qn} — question {qn} of round {number} does not hold a prompt and a list of options",
+                )
+            )
+            continue
+        options = questions[qn - 1]["options"]
+        index = ord(letter) - ord("A")
+        if index >= len(options):
+            problems.append(
+                _line(
+                    f"{where}.option",
+                    f"{letter} — question {qn} of round {number} has {_plural(len(options), 'option')} "
+                    f"(A to {chr(64 + len(options))})",
+                )
+            )
+            continue
+        key = (number, qn, letter)
+        if key in seen:
+            problems.append(
+                _line(
+                    where, f"the same drawing as drawings[{seen[key]}] (round {number}, question {qn}, option {letter})"
+                )
+            )
+            continue
+        seen[key] = i
+        option_problems: list[str] = []
+        option_where = f"{where} (round {number}, question {qn}, option {letter})"
+        _check_option(options[index], option_where, option_problems)
+        constant = _non_finite(options[index])
+        if constant is not None:
+            message = f"holds {constant}, which is not valid JSON — a number must be finite"
+            option_problems.append(_line(option_where, message))
+        if option_problems:
+            problems.extend(option_problems)
+            continue
+        chosen.append(
+            ChosenDrawing(number, qn, letter, titles[number - 1], questions[qn - 1]["prompt"], options[index])
+        )
+    return chosen, problems
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" + ("" if count == 1 else "s")
+
+
+def read_reference(
+    reference_path: Path | str,
+    pad: str,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> Reference:
+    """Check a reference file and read the drawings it names back from *pad*; nothing is built or changed.
+
+    The pad is found where ``--add`` finds it (``<workspace>/sites/<pad>`` inside a camp workspace, otherwise
+    under Outpost's pads folder), read under its lock through the add's read-back, and each named round's
+    ``round.js`` is decoded as data, never evaluated. The lock is released before this returns. Raises
+    :class:`Refusal` (every problem found, as ``scratch-pad:`` lines) when the file, the pad, a named drawing
+    or any string bound for the page is wrong. Returns the chosen drawings in the order named.
+    """
+    env = os.environ if env is None else env
+    cwd = _resolve_cwd(cwd)
+    problems = _check_slug(pad)
+    data = None
+    try:
+        data = _read_json(Path(reference_path), "reference")
+    except Refusal as exc:
+        problems.extend(exc.lines)
+    else:
+        problems.extend(check_reference(data))
+    if problems:
+        raise Refusal(problems)
+
+    workspace = None if cwd is None else enclosing_workspace(cwd, env)
+    if workspace is not None:
+        root = workspace / "sites"
+        _require_plain_sites(root)
+    else:
+        root = _pads_root(env)
+    final = root / pad
+    rounds: dict[int, object] = {}
+    with _pad_lock(env, root, pad, 2 * publish_timeout):
+        if not os.path.lexists(final):
+            raise Refusal([_line(f"pad {_q(pad)}", "does not exist — build it first, or name the pad it is on")])
+        titles = _read_pad(final, pad, _cannot_reference)
+        for number in sorted({d["round"] for d in data["drawings"] if d["round"] <= len(titles)}):
+            rounds[number] = _round_data(final / f"round-{number}" / "round.js")
+
+    chosen, problems = _resolve_drawings(data["drawings"], titles, rounds)
+    problems.extend(_credential_problems(data["site"], data["title"], chosen))
+    if problems:
+        raise Refusal(problems)
+    return Reference(data["site"], data["title"], chosen)
+
+
+def _reference_entry(drawing: ChosenDrawing) -> dict:
+    """The fields of one chosen drawing the page needs; the option's other keys are left behind."""
+    option = drawing.option
+    entry = {
+        "question": drawing.question,
+        "letter": drawing.letter,
+        "roundTitle": drawing.round_title,
+        "prompt": drawing.prompt,
+        "name": option["name"],
+        "cost": option["cost"],
+    }
+    if "flow" in option:
+        entry["flow"] = option["flow"]
+    else:
+        entry["layout"] = option["layout"]
+    return entry
+
+
+def build_reference_page(
+    target: Path | str,
+    reference: Reference,
+    date: datetime.date | str | None = None,
+    *,
+    kit_dir: Path | str = DEFAULT_KIT_DIR,
+    reference_dir: Path | str = DEFAULT_REFERENCE_DIR,
+) -> None:
+    """Write the reference page for *reference* into the folder *target*, to be opened from disk.
+
+    *target* is created when absent and is meant to be new: files of the same names are overwritten. It gets the
+    reference page's own files, the kit's ``pen.js``, ``flow.js``, ``pad.css``, font and ``OFL.txt``, and
+    ``reference-data.js``, whose data is encoded as ``round.js`` is (ASCII JSON as a string literal handed to
+    ``JSON.parse``). Only each drawing's place, round title, prompt, name, cost and ``layout`` or ``flow`` are
+    written. *date* (a ``datetime.date`` or text; today by default) is the day the drawings are said to have
+    been chosen. Raises :class:`Refusal` when a source folder is missing or the target cannot be written.
+    """
+    target, kit_dir, reference_dir = Path(target), Path(kit_dir), Path(reference_dir)
+    for noun, folder in (("kit", kit_dir), ("reference", reference_dir)):
+        if not folder.is_dir():
+            raise Refusal([_line(noun, f"{_q(str(folder))} is not a directory — the pad {noun} is missing")])
+    day = datetime.date.today() if date is None else date
+    data = {
+        "title": reference.title,
+        "date": day.isoformat() if isinstance(day, datetime.date) else str(day),
+        "drawings": [_reference_entry(d) for d in reference.drawings],
+    }
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        for name in _REFERENCE_PAGE_FILES:
+            shutil.copyfile(reference_dir / name, target / name)
+        for name in _REFERENCE_KIT_FILES:
+            shutil.copyfile(kit_dir / name, target / name)
+        (target / "reference-data.js").write_text(
+            _REFERENCE_JS_PREFIX + _js_string_literal(data) + ");\n", encoding="utf-8"
+        )
+    except OSError as exc:
+        raise _build_failed(target, exc)
+
+
 def _build(
     round_path: Path | str,
     pad: str,
@@ -912,13 +1396,7 @@ def _build(
 ) -> Built:
     round_path, kit_dir = Path(round_path), Path(kit_dir)
     env = os.environ if env is None else env
-    if cwd is None:
-        try:
-            cwd = Path.cwd()
-        except OSError:
-            cwd = None
-    else:
-        cwd = Path(cwd)
+    cwd = _resolve_cwd(cwd)
     runner = runner or _run_publisher
     encoded = _check_and_encode(round_path, pad, kit_dir)
     workspace = None if cwd is None else enclosing_workspace(cwd, env)
@@ -991,6 +1469,50 @@ def build_pad(
     return folder / "index.html", folder
 
 
+def publish_reference(
+    reference_path: Path | str,
+    pad: str,
+    vault_path: Path | str,
+    vault: str | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    cwd: Path | str | None = None,
+    publish_runner=None,
+    publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
+) -> None:
+    """Publish the reference named by *reference_path* from *pad* into the vault at *vault_path*.
+
+    Raises :class:`Refusal` for every problem; the pad is only read. The publisher is run without
+    ``--overwrite`` and without a timer, its stdout and stderr shown as written; *publish_runner* is
+    ``(cmd, env, None) -> CompletedProcess`` whose captured stderr is shown after it returns.
+    """
+    env = os.environ if env is None else env
+    reference = read_reference(reference_path, pad, env=env, cwd=cwd, publish_timeout=publish_timeout)
+    site = reference.site
+    if os.path.lexists(Path(vault_path) / "sites" / site):
+        raise Refusal([_line(f"site {_q(site)}", "already exists in the vault — choose another site name")])
+    runner = publish_runner or _stream_publisher
+    try:
+        tmp = Path(tempfile.mkdtemp(prefix="scratch-pad-reference-"))
+    except OSError as exc:
+        raise Refusal([_line("publish", f"could not make a temp folder: {exc.strerror or exc}")])
+    try:
+        build_reference_page(tmp, reference)
+        target = ["--vault-path", str(vault_path)] + (["--vault", vault] if vault else [])
+        print(PUBLISHING_LINE)
+        sys.stdout.flush()
+        try:
+            result = runner(_publisher_argv(tmp, site, *target), env, None)
+        except OSError as exc:
+            raise _cannot_start(exc)
+        if result.returncode != 0:
+            raise _publish_refused(result)
+        if result.stderr:
+            sys.stderr.write(result.stderr)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main(
     argv: Sequence[str] | None = None,
     env: Mapping[str, str] | None = None,
@@ -1000,13 +1522,44 @@ def main(
     publish_timeout: float = PUBLISH_TIMEOUT_SECONDS,
 ) -> int:
     parser = argparse.ArgumentParser(
-        prog="scratch_pad.py", description="Build a scratch pad from a round of questions."
+        prog="scratch_pad.py",
+        description="Build a scratch pad from a round of questions, or publish a reference page of chosen drawings.",
     )
-    parser.add_argument("--pad", required=True, help="pad name: ^[a-z0-9][a-z0-9._-]*$")
-    parser.add_argument("--round", required=True, dest="round_path", help="path to the round's JSON file")
+    parser.add_argument("--pad", help="pad name: ^[a-z0-9][a-z0-9._-]*$")
+    parser.add_argument("--round", dest="round_path", help="path to the round's JSON file")
     parser.add_argument("--add", action="store_true", help="add the round to the existing pad instead of starting one")
+    parser.add_argument("--reference", help="path to a reference's JSON file: publish the chosen drawings to a vault")
+    parser.add_argument("--vault-path", help="the vault's folder (with --reference)")
+    parser.add_argument("--vault", help="the vault's configured name (with --reference)")
     args = parser.parse_args(argv)
+    if args.reference is None:
+        missing = [flag for flag, value in (("--pad", args.pad), ("--round", args.round_path)) if value is None]
+        if missing:
+            parser.error("the following arguments are required: " + ", ".join(missing))
+        for flag, value in (("--vault-path", args.vault_path), ("--vault", args.vault)):
+            if value is not None:
+                parser.error(f"{flag} is only valid with --reference")
+    else:
+        for flag, used in (("--round", args.round_path is not None), ("--add", args.add)):
+            if used:
+                parser.error(f"--reference cannot be used with {flag}")
+        if args.pad is None:
+            parser.error("the following arguments are required: --pad")
+        if args.vault_path is None:
+            parser.error("--reference needs --vault-path")
     try:
+        if args.reference is not None:
+            publish_reference(
+                args.reference,
+                args.pad,
+                args.vault_path,
+                args.vault,
+                env=env,
+                cwd=cwd,
+                publish_runner=publish_runner,
+                publish_timeout=publish_timeout,
+            )
+            return 0
         built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout, args.add)
     except Refusal as exc:
         for line in exc.lines:

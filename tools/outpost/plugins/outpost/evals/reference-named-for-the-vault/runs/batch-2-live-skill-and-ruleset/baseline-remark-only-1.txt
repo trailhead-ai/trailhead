@@ -1,0 +1,17 @@
+The invoice header is settled on **B, tabs under the header**.
+
+For the line items, I added a second round to the same pad:
+
+file://<run-29>/xdg-state/outpost/pads/invoice-screen/index.html
+
+It's the same link as before, but a tab you already have open won't show the new round, so open the link again. The new round lists the tabs header under what's been settled. It draws each line-item option below that header with a few sample items, so you can see them in place:
+
+- **A: Table rows** (still my pick). These are the densest and easiest to scan, and you can compare amounts down a column. The cost is that they get cramped on narrow screens and need another layout on mobile.
+- **B: Cards.** These have room for descriptions and an Edit button on each item, and they work at any width. But far fewer items fit on a screen, and amounts are harder to compare.
+- **C: Rows that expand.** This is a new middle option: it's as dense as a table, and tapping a row shows the card-style detail. It's one more interaction to build and test.
+
+Your "maybe" on A in round 1 is why I added C. If what holds you back from A is the lack of room for detail on each item, C may answer that.
+
+**Which way are you leaning on the line items: A, B or C?** One thing would settle it quickly: how many line items does a typical invoice have? If it's usually a handful, cards work fine. If it's often dozens, table rows or rows that expand are the better fit.
+
+You can pick on the pad and paste its "Copy reply" back here, or just answer in words.

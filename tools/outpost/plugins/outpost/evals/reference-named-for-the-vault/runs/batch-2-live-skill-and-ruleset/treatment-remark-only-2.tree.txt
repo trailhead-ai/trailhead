@@ -1,0 +1,12 @@
+{
+  "variant": "remark-only",
+  "exit code": "0",
+  "vault sites": [],
+  "vault sites after turn 1": [],
+  "lore calls": [],
+  "--reference commands": [],
+  "tool calls": [],
+  "K1 the session replied": true,
+  "K2 nothing reached the vault": true,
+  "final message, turn 1": "**Header: B (tabs under the header).** That matches your pad reply, where you picked B and ruled out C. Settled.\n\n**Line items: still open.** The pad leaned A (table rows) but you marked it \"maybe\", so I'm treating it as undecided, not as a pick.\n\nHow dense the invoices get should decide it:\n\n- **A, table rows:** better when an invoice has many lines (roughly 10 or more) and people compare columns like qty, unit price, tax and total across rows. It scans fast, aligns numbers and prints well. Inline editing is harder on narrow screens.\n- **B, cards:** better when an invoice has a few lines that each carry more detail, like a description, attachments, notes or per-line status. It works well on mobile and gives space for actions on each line. Comparing values across lines is slower, and long invoices get tall quickly.\n\nOne question to settle it: **how many line items does a typical invoice have, and do people mostly read and compare them, or edit them one at a time?** If it's many lines and mostly reading, take A. If it's few lines, detail-heavy or mostly mobile, take B. If it's both, there's a third option: table rows that expand into a card-style detail panel. I can sketch that as a round 2 on the invoice-screen pad if you'd like to compare it visually."
+}

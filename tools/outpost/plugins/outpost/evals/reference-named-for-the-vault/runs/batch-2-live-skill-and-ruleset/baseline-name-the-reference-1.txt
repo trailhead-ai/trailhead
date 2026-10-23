@@ -1,0 +1,29 @@
+I published header option B (tabs under the header) to the team's `acme` vault, and the sync succeeded:
+
+**http://127.0.0.1:7314/acme/invoice-header/**
+
+Teammates can open that link from their own local Outpost once they've pulled the vault.
+
+The page shows:
+- **The decision:** B, tabs under the header, with a wireframe. The invoice number and the Send button sit on one slim row, with Details, Totals and History tabs beneath it.
+- **The trade-off:** the header stays slim, but the amount due moves into a tab.
+- **What was ruled out:** A (totals up top) wasn't chosen, and C (shrinks on scroll) was ruled out.
+- **Still open:** line items. You leaned toward A (table rows) but marked it "maybe", so the page lists it as not settled.
+
+The scratch pad itself stays in its local folder; I didn't share the pad, only this decision page. Also, my first attempt published blank files because my shell couldn't create the temporary files it needed to write them. That version was synced too, but the republish replaced it a few seconds later, and the vault now has the real page.
+
+Do you want table rows (A) settled for the line items too, so I can mark it decided on the team page?
+
+--- turn 2 ---
+
+The team page now marks line items as decided: **A, table rows**. I republished it to the `acme` vault and the sync succeeded. It's at the same link:
+
+**http://127.0.0.1:7314/acme/invoice-header/**
+
+What changed on the page:
+- The title is now "Invoice screen: layout decisions", since it covers both choices.
+- A new line-items section shows a table-row wireframe (Item / Qty / Price) and its trade-off: dense and easy to scan, but narrow screens need a second layout.
+- It lists cards (B) as not chosen, next to the header alternatives.
+- The "Still open" section is gone, so nothing on the invoice screen is pending now.
+
+The address still ends in `invoice-header` even though the page now covers line items too. I can move it to a broader address like `invoice-screen` if you'd like, but that would break the current link for anyone who already has it.

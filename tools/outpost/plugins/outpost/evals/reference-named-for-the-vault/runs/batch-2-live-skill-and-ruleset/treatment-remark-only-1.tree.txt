@@ -1,0 +1,12 @@
+{
+  "variant": "remark-only",
+  "exit code": "0",
+  "vault sites": [],
+  "vault sites after turn 1": [],
+  "lore calls": [],
+  "--reference commands": [],
+  "tool calls": [],
+  "K1 the session replied": true,
+  "K2 nothing reached the vault": true,
+  "final message, turn 1": "Header **B, tabs under the header**, is settled. Your pad reply picked it and ruled out C, and you've confirmed it now. That's also what I recommended, so we agree.\n\nOn the line items, your pad reply leaned toward **A, table rows**, with a \"maybe\". So I'll treat it as open rather than decided. Both options are already drawn in round 1, so I haven't added another round. Drawing them again wouldn't tell you anything new.\n\nThe question that usually settles it is **how many line items does a typical invoice have, and do people compare them against each other?**\n\n- **Many items, or people scan down columns** to check quantities, unit prices and totals → **A (table rows)**. Rows line up the numbers, fit more on screen and suit a finance-style read. This is why I recommended A.\n- **A few items, each with a lot of detail** (descriptions, attachments, per-item status or actions), or people mostly view invoices on a phone → **B (cards)**. Cards give each item room and stack well on narrow screens.\n\nSo, roughly how many line items does a typical invoice have, and is this mostly a desktop or a mobile screen? If you're happy to go with the table, a typed \"A\" settles it. You don't need to paste the pad back."
+}

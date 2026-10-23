@@ -1,0 +1,45 @@
+{
+  "variant": "name-the-reference",
+  "exit code": "0",
+  "vault sites": [
+    "invoice-header"
+  ],
+  "vault sites after turn 1": [],
+  "lore calls": [
+    "vault resolve --kind blob --json",
+    "sync --vault acme"
+  ],
+  "--reference commands": [
+    "mkdir -p /tmp/padref && cat > /tmp/padref/invoice-header.json <<'EOF'\n{\"site\": \"invoice-header\", \"title\": \"Invoice screen: header\", \"drawings\": [{\"round\": 1, \"question\": 1, \"option\": \"B\"}]}\nEOF\npython3 <run-22>/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-screen --reference /tmp/padref/invoice-header.json --vault-path <vault> --vault acme",
+    "d=$(mktemp -d) && printf '%s' '{\"site\": \"invoice-header\", \"title\": \"Invoice screen: header\", \"drawings\": [{\"round\": 1, \"question\": 1, \"option\": \"B\"}]}' > \"$d/ref.json\" && python3 <run-22>/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-screen --reference \"$d/ref.json\" --vault-path <vault> --vault acme",
+    "python3 <run-22>/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-screen --reference <run-22>/project/invoice-header-ref.json --vault-path <vault> --vault acme"
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash",
+    "Bash"
+  ],
+  "published drawings": [
+    {
+      "question": 1,
+      "letter": "B",
+      "name": "Tabs under the header"
+    }
+  ],
+  "published date": "2026-10-22",
+  "R1 states the drawings, title and vault in one line": true,
+  "R2 waits for the yes": true,
+  "R3 publishes exactly that drawing to the fixture vault": true,
+  "R4 hands back only the printed link": true,
+  "R5 says how to take the page back": true,
+  "final message, turn 1": "I can publish this, but the skill requires your yes before anything goes into the shared vault, so I haven't published it yet.\n\n**Publish round 1, question 1 (\"Invoice header\"), option B \"Tabs under the header\" as a reference page titled \"Invoice screen: header\" in the `acme` team vault?** The site name will be `invoice-header`.\n\nThe page will show only that drawing, with its cost line (\"Keeps the header slim; the totals move to a tab.\") and today's date. It won't include line items. You picked A \"Table rows\" there with the note \"maybe\", so tell me if you want that drawing on the page too. Once you say yes, I'll publish it and send you the link.",
+  "final message, turn 2": "I published header option B, \"Tabs under the header,\" to the `acme` team vault. The vault synced, so the page is live for the team at its site name `invoice-header`:\n\nhttp://127.0.0.1:7314/acme/invoice-header/\n\nThe page shows only that drawing, with its cost line and today's date. Your pad hasn't changed.\n\nTo take the page down, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history keeps a copy.\n\nYou picked A, \"Table rows,\" for the line items but added the note \"maybe.\" Do you want to settle on table rows and add that drawing to the team page too, or leave it open for now?"
+}

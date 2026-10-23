@@ -1,0 +1,41 @@
+{
+  "variant": "name-the-reference",
+  "exit code": "0",
+  "vault sites": [
+    "invoice-screen-header"
+  ],
+  "vault sites after turn 1": [],
+  "lore calls": [
+    "vault resolve --kind blob --json",
+    "vault ls",
+    "sync --vault acme"
+  ],
+  "--reference commands": [
+    "python3 <run-28>/plugin/skills/scratch-pad/scratch_pad.py --pad invoice-screen --reference <run-28>/invoice-header-reference.json --vault-path <vault> --vault acme; echo \"exit $?\""
+  ],
+  "tool calls": [
+    "Skill",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Bash",
+    "Write",
+    "Bash"
+  ],
+  "published drawings": [
+    {
+      "question": 1,
+      "letter": "B",
+      "name": "Tabs under the header"
+    }
+  ],
+  "published date": "2026-10-22",
+  "R1 states the drawings, title and vault in one line": true,
+  "R2 waits for the yes": true,
+  "R3 publishes exactly that drawing to the fixture vault": true,
+  "R4 hands back only the printed link": true,
+  "R5 says how to take the page back": true,
+  "final message, turn 1": "I haven't published anything yet. Here's what's ready:\n\n**Publish round 1, question 1 (\"Invoice header\"), option B \"Tabs under the header\" as a page titled \"Invoice screen: header\" (site `invoice-screen-header`) to the team vault `acme`? Yes or no?**\n\nThe page will show only that drawing, with the trade-off it lists (a slim header, with the totals moved to a tab) and today's date. Once it's published, anyone on the team who opens the `acme` vault can see it. The invoice-screen pad itself stays as it is and is not shared.\n\nIf you say yes, I'll run this command and give you the link it prints:\n\n```\npython3 <run-28>/plugin/skills/scratch-pad/scratch_pad.py \\\n  --pad invoice-screen --reference <run-28>/invoice-header-reference.json \\\n  --vault-path <vault> --vault acme\n```\n\nThe line items question isn't part of this page. You picked A (table rows) but added the note \"maybe,\" so I'm treating it as still open. Is table rows settled, or do you want to look at it again? If it's settled, I can add it to the same page.",
+  "final message, turn 2": "The page is up as `invoice-screen-header` in the `acme` vault, and it has synced, so the team can open it now:\n\nhttp://127.0.0.1:7314/acme/invoice-screen-header/\n\nIt holds only round 1, \"Invoice header\", option B \"Tabs under the header\". Your invoice-screen pad hasn't changed.\n\nTo take the page down, delete `<vault>/sites/invoice-screen-header` and run `lore sync --vault acme`. The vault's git history will still have it.\n\nOne question is still open from before: is table rows (A) settled for the line items, or did your \"maybe\" mean you want to look at it again? If it's settled, I can publish it as a second page. The new page needs a name that isn't taken already, because this one can't be overwritten."
+}
