@@ -25,7 +25,6 @@ sys.path.insert(0, str(HERE))
 import grade_confirm  # noqa: E402
 
 REPO = HERE.parents[5]
-NO_PREV_CODE = "zzzz"
 
 
 def fixture_names() -> dict:
@@ -48,11 +47,10 @@ def regrade(key: str, names: dict, cells: dict) -> dict:
     cell = dict(cells[cell_key])
     cell["names"] = names[cell.get("spec_cell", cell_key)]
     kept = {line["id"]: line for line in stored["lines"] if line["id"] in ("G1", "G3")}
+    prev_key = grade_confirm.earlier_leg_key(key, cell_key, cell)
     prev_code = None
-    if cell_key == "retry-after-failure":
-        first = runs / (key.replace("retry-after-failure", "drop-fails") + ".transcript.json")
-        codes = [t["code"] for t in json.loads(first.read_text())["turns"] if t.get("code")]
-        prev_code = codes[-1] if codes else NO_PREV_CODE
+    if prev_key:
+        prev_code = grade_confirm.earlier_leg_code(json.loads((runs / f"{prev_key}.transcript.json").read_text()))
     lines = (runs / f"{key}.stream.jsonl").read_text().splitlines()
     fresh = grade_confirm.grade(lines, transcript["turns"], cell, records=stored["records"], prev_code=prev_code)
     fresh["lines"] = [kept["G1"], *fresh["lines"], kept["G3"]]

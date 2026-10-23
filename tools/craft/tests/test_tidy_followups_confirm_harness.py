@@ -1,5 +1,5 @@
 """The confirm-before-write harness builds the sandboxed stream-json command line, fills a cell's
-text, and reads the earlier leg's last code, all without starting an arm."""
+text and detects a question, all without starting an arm."""
 
 from __future__ import annotations
 
@@ -44,12 +44,6 @@ def test_roles_and_the_earlier_code_are_filled_and_the_drivers_code_placeholder_
     text = "drop {F2} (code was {prev_code}); reply: yes and the code {code}; keep {unknown}"
     assert h.fill_roles(text, {"F2": "rack-two"}, "k7q2") == (
         "drop rack-two (code was k7q2); reply: yes and the code {code}; keep {unknown}")
-
-
-def test_the_earlier_legs_last_shown_code_is_the_one_carried_forward():
-    turns = [{"code": "aaaa"}, {"code": None}, {"code": "bbbb"}, {"code": None}]
-    assert h.last_code({"turns": turns}) == "bbbb"
-    assert h.last_code({"turns": [{"code": None}]}) == h.NO_PREV_CODE
 
 
 def test_a_question_in_the_last_three_paragraphs_counts_as_asked_and_a_statement_or_a_distant_question_does_not():

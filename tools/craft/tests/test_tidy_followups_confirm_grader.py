@@ -417,3 +417,52 @@ def test_end_state_flags_an_agent_a_check_or_an_assemble_after_a_held_back_merge
     assert g.end_state(expect, {}, {}, items=ran(Run().call("Agent", {"prompt": "refine"}, "x")))
     assert g.end_state(expect, {}, {}, items=ran(Run().bash("followup_parent.py check spec-x a", "{}")))
     assert g.end_state(expect, {}, {}, items=ran(Run().bash("followup_parent.py assemble spec-x --confirm k7q2", "{}")))
+
+
+def test_the_earlier_legs_code_is_its_last_shown_one_or_the_no_code_sentinel():
+    turns = [{"code": "aaaa"}, {"code": None}, {"code": "bbbb"}, {"code": None}]
+    assert g.earlier_leg_code({"turns": turns}) == "bbbb"
+    assert g.earlier_leg_code({"turns": [{"code": None}, {}]}) == g.NO_PREV_CODE
+
+
+def _work_for_retry_cell(tmp_path, first_leg_turns):
+    meta = tmp_path / "meta"
+    meta.mkdir()
+    cells = json.loads((CASE / "cells.json").read_text())
+    names = {"F1": "rack-one", "F2": "rack-two"}
+    (meta / "drop-fails-treat-r1.manifest.json").write_text(json.dumps({
+        "followups": {"drop-fails": names}, "env": {}, "run_id": "no-such-run-id-anywhere", "repo": "/r"}))
+    (meta / "drop-fails-treat-r1.drive.json").write_text(json.dumps({
+        "cell": "drop-fails", "arm": "treat", "manifest_key": "drop-fails-treat-r1", "turns": first_leg_turns}))
+    (meta / "retry-after-failure-treat-r1.drive.json").write_text(json.dumps({
+        "cell": "retry-after-failure", "arm": "treat", "manifest_key": "drop-fails-treat-r1",
+        "turns": [{"code": "cccc"}]}))
+    key = "retry-after-failure-treat-r1"
+    (meta / f"{key}.before.json").write_text(json.dumps({"vault": {}, "repo": {"status": "", "head": "h"}}))
+    (meta / f"{key}.after.json").write_text(json.dumps({"vault": {}, "repo": {"status": "", "head": "h"}}))
+    (meta / f"{key}.records.json").write_text("{}")
+    (meta / f"{key}.stream.jsonl").write_text("")
+    assert "retry-after-failure" in cells
+    return key
+
+
+def _r3_detail(tmp_path, monkeypatch, capsys, *argv_tail):
+    monkeypatch.setattr("sys.argv", ["grade_confirm.py", str(tmp_path), "retry-after-failure-treat-r1", *argv_tail])
+    assert g.main() == 0
+    graded = json.loads(capsys.readouterr().out)
+    return next(line["detail"] for line in graded["lines"] if line["id"] == "R3")
+
+
+def test_main_names_the_earlier_leg_itself_and_compares_against_its_code(tmp_path, monkeypatch, capsys):
+    _work_for_retry_cell(tmp_path, [{"code": None}, {"code": "dddd"}, {"code": None}])
+    assert "'dddd'" in _r3_detail(tmp_path, monkeypatch, capsys)
+
+
+def test_main_compares_against_the_no_code_sentinel_when_the_earlier_leg_showed_none(tmp_path, monkeypatch, capsys):
+    _work_for_retry_cell(tmp_path, [{"code": None}])
+    assert f"{g.NO_PREV_CODE!r}" in _r3_detail(tmp_path, monkeypatch, capsys)
+
+
+def test_an_explicit_earlier_leg_key_still_wins(tmp_path, monkeypatch, capsys):
+    key = _work_for_retry_cell(tmp_path, [{"code": "dddd"}])
+    assert "'cccc'" in _r3_detail(tmp_path, monkeypatch, capsys, key)

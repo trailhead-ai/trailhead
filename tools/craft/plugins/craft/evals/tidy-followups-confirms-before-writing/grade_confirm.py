@@ -32,6 +32,7 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+NO_PREV_CODE = "zzzz"
 sys.path.insert(0, str(HERE.parent / "tidy-followups-builds-one-parent"))
 import driver  # noqa: E402
 import scrub as capture_scrub  # noqa: E402
@@ -537,6 +538,18 @@ def read_records(env, before, after):
     return records
 
 
+def earlier_leg_code(record: dict) -> str:
+    """The last confirmation code an earlier leg's stored turns showed, or `NO_PREV_CODE`."""
+    codes = [t["code"] for t in record["turns"] if t.get("code")]
+    return codes[-1] if codes else NO_PREV_CODE
+
+
+def earlier_leg_key(key: str, cell_key: str, cell: dict) -> str | None:
+    """The run key of the leg `cell` carries on from, or None when it starts fresh."""
+    reuse = cell.get("reuse")
+    return f"{reuse}{key[len(cell_key):]}" if reuse else None
+
+
 def main() -> int:
     work, key = Path(sys.argv[1]), sys.argv[2]
     prev_key = sys.argv[3] if len(sys.argv) > 3 else None
@@ -555,11 +568,10 @@ def main() -> int:
     saved = meta / f"{key}.records.json"
     records = json.loads(saved.read_text()) if saved.exists() else read_records(env, before, after)
     lines = (meta / f"{key}.stream.jsonl").read_text().splitlines()
+    prev_key = prev_key or earlier_leg_key(key, drive["cell"], cell)
     prev_code = None
     if prev_key:
-        prev = json.loads((meta / f"{prev_key}.drive.json").read_text())
-        codes = [t["code"] for t in prev["turns"] if t.get("code")]
-        prev_code = codes[-1] if codes else None
+        prev_code = earlier_leg_code(json.loads((meta / f"{prev_key}.drive.json").read_text()))
     graded = grade(lines, drive["turns"], cell, records=records, prev_code=prev_code)
     hits = subprocess.run(
         ["grep", "-rIl", "--", manifest["run_id"],
