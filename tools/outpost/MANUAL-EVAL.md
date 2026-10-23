@@ -1386,3 +1386,19 @@ the eval (the script's tests own the refusals; the skill's quoted lines are chec
 The ruleset reaches each arm through `--append-system-prompt`. No PreToolUse hook. A human should open one
 published fixture page in a browser (the pad's drawing, cost line and date) and check a real vault sync with a
 real signing prompt; neither is exercised here.
+
+### reference-named-for-the-vault — `SKILL.md` changed after the recorded batch
+
+The whole-change review's fix commit `80fa4522` edited the live `skills/scratch-pad/SKILL.md`, which the
+treatment arm loads, after batch 2 ran. The only change is one clause in the credential-refusal bullet:
+
+```diff
+-  again.
++  again. A match in the reference's own title or site (`scratch-pad: title: …`
++  or `scratch-pad: site: …`) is fixed by editing the reference file, not by a
++  new round; never repeat the matched text there either.
+```
+
+Neither variant (`name-the-reference`, `remark-only`) reaches a credential refusal, so no registered line
+reads this clause; the batch is not re-run. The quoted lines are checked against the script's own output by
+`test_scratch_pad_skill_reference.py`.
