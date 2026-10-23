@@ -13,12 +13,18 @@ import copy
 import importlib.util
 import json
 import os
+import queue
 import shutil
+import subprocess
+import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 
 import pytest
+
+import chromium_harness as ch
 from test_scratch_pad import _snapshot, _without_locks, _write_kit
 from test_scratch_pad_rounds import _hold, _lock_path, _try_lock
 
@@ -854,12 +860,6 @@ def test_an_add_to_a_pad_holding_a_non_finite_option_still_builds_and_the_fixed_
 
 # --- publishing the reference to the vault ------------------------------------------------------------
 
-import subprocess  # noqa: E402
-import sys  # noqa: E402
-import tempfile  # noqa: E402
-
-import chromium_harness as ch  # noqa: E402
-
 PUBLISHER = SCRIPT_PATH.parent.parent / "publish-site" / "publish_site.py"
 SERVED_SITES_PORT = 7314
 REF = _ref([_d(2, 1, "A"), _d(1, 2, "B")])
@@ -1102,9 +1102,6 @@ def test_after_the_site_folder_is_removed_the_same_rerun_publishes(mod, vault, c
 
 
 def _start_cli(vault, argv):
-    import queue
-    import threading
-
     proc = subprocess.Popen(
         [sys.executable, str(SCRIPT_PATH), *argv],
         env=vault.env,
@@ -1125,8 +1122,6 @@ def _start_cli(vault, argv):
 
 
 def _next_line(lines, seconds=20):
-    import queue
-
     try:
         return lines.get(timeout=seconds)
     except queue.Empty:
@@ -1162,9 +1157,6 @@ def test_the_wait_line_and_the_syncs_own_line_are_readable_before_the_run_exits_
 
 
 def _pump(stream):
-    import queue
-    import threading
-
     lines: queue.Queue = queue.Queue()
 
     def run():
@@ -1219,7 +1211,6 @@ def test_a_streamed_publisher_that_fails_with_no_stderr_still_reports_its_exit_s
 def test_a_publish_that_waits_longer_than_the_publish_timeout_is_not_killed(mod, vault, tmp_path, capfd):
     release = tmp_path / "release"
     _stub_lore(vault.bin, vault.record, hold=release)
-    import threading
 
     timer = threading.Timer(1.0, lambda: release.write_text("go"))
     timer.start()

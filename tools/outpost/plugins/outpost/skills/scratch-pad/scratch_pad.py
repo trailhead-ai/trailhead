@@ -289,6 +289,16 @@ def enclosing_workspace(cwd: Path, env: Mapping[str, str]) -> Path | None:
     return None
 
 
+def _resolve_cwd(cwd: Path | str | None) -> Path | None:
+    """*cwd* as a path, or the process's own working directory; ``None`` when that cannot be read."""
+    if cwd is not None:
+        return Path(cwd)
+    try:
+        return Path.cwd()
+    except OSError:
+        return None
+
+
 def _pads_root(env: Mapping[str, str]) -> Path:
     return _outpost_state_dir(env).absolute() / "pads"
 
@@ -297,10 +307,11 @@ def _reject_constant(name: str):
     raise ValueError(f"{name} is not valid JSON")
 
 
-def _read_round(round_path: Path, what: str = "round") -> object:
-    where = _q(str(round_path))
+def _read_json(path: Path, what: str) -> object:
+    """The JSON in the *what* file at *path*, or a :class:`Refusal` naming why it cannot be read."""
+    where = _q(str(path))
     try:
-        raw = round_path.read_bytes()
+        raw = path.read_bytes()
     except OSError as exc:
         raise Refusal([_line(where, f"cannot read the {what}: {exc.strerror or exc}")])
     try:
@@ -536,7 +547,7 @@ def _check_and_encode(round_path: Path, pad: str, kit_dir: Path) -> Encoded:
     problems = _check_slug(pad)
     data = None
     try:
-        data = _read_round(round_path)
+        data = _read_json(round_path, "round")
     except Refusal as exc:
         problems.extend(exc.lines)
     else:
@@ -1114,19 +1125,24 @@ def _questions_of(data: object) -> list | None:
     return questions
 
 
-def _strings_in(value: object):
-    """Every string in *value*, dictionary keys included, as ``(is_key, text)``."""
+def _leaves(value: object):
+    """Every scalar in decoded JSON *value*, dictionary keys included, as ``(is_key, item)``."""
     stack = [(False, value)]
     while stack:
         is_key, item = stack.pop()
-        if isinstance(item, str):
-            yield is_key, item
-        elif isinstance(item, dict):
+        if isinstance(item, dict):
             for key, child in item.items():
                 stack.append((False, child))
                 stack.append((True, key))
         elif isinstance(item, list):
             stack.extend((False, child) for child in item)
+        else:
+            yield is_key, item
+
+
+def _strings_in(value: object) -> list[tuple[bool, str]]:
+    """Every string in *value*, dictionary keys included, as ``(is_key, text)``."""
+    return [(is_key, item) for is_key, item in _leaves(value) if isinstance(item, str)]
 
 
 def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing]) -> list[str]:
@@ -1155,7 +1171,7 @@ def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing
             if field in d.option:
                 check(where, field, [t for _, t in _strings_in(d.option[field])])
         if "layout" in d.option:
-            strings = list(_strings_in(d.option["layout"]))
+            strings = _strings_in(d.option["layout"])
             check(where, "layout", [t for is_key, t in strings if not is_key])
             check(where, "layout (a key)", [t for is_key, t in strings if is_key])
     return problems
@@ -1163,15 +1179,9 @@ def _credential_problems(site: str, title: str, drawings: Sequence[ChosenDrawing
 
 def _non_finite(value: object) -> str | None:
     """The first NaN, Infinity or -Infinity held anywhere in decoded JSON *value*, as JSON writes it; else ``None``."""
-    stack = [value]
-    while stack:
-        item = stack.pop()
+    for _, item in _leaves(value):
         if isinstance(item, float) and not math.isfinite(item):
             return "NaN" if math.isnan(item) else ("Infinity" if item > 0 else "-Infinity")
-        if isinstance(item, dict):
-            stack.extend(item.values())
-        elif isinstance(item, list):
-            stack.extend(item)
     return None
 
 
@@ -1254,15 +1264,11 @@ def read_reference(
     or any string bound for the page is wrong. Returns the chosen drawings in the order named.
     """
     env = os.environ if env is None else env
-    if cwd is None:
-        try:
-            cwd = Path.cwd()
-        except OSError:
-            cwd = None
+    cwd = _resolve_cwd(cwd)
     problems = _check_slug(pad)
     data = None
     try:
-        data = _read_round(Path(reference_path), "reference")
+        data = _read_json(Path(reference_path), "reference")
     except Refusal as exc:
         problems.extend(exc.lines)
     else:
@@ -1270,7 +1276,7 @@ def read_reference(
     if problems:
         raise Refusal(problems)
 
-    workspace = None if cwd is None else enclosing_workspace(Path(cwd), env)
+    workspace = None if cwd is None else enclosing_workspace(cwd, env)
     if workspace is not None:
         root = workspace / "sites"
         _require_plain_sites(root)
@@ -1363,13 +1369,7 @@ def _build(
 ) -> Built:
     round_path, kit_dir = Path(round_path), Path(kit_dir)
     env = os.environ if env is None else env
-    if cwd is None:
-        try:
-            cwd = Path.cwd()
-        except OSError:
-            cwd = None
-    else:
-        cwd = Path(cwd)
+    cwd = _resolve_cwd(cwd)
     runner = runner or _run_publisher
     encoded = _check_and_encode(round_path, pad, kit_dir)
     workspace = None if cwd is None else enclosing_workspace(cwd, env)
@@ -1520,7 +1520,8 @@ def main(
             parser.error("the following arguments are required: --pad")
         if args.vault_path is None:
             parser.error("--reference needs --vault-path")
-        try:
+    try:
+        if args.reference is not None:
             publish_reference(
                 args.reference,
                 args.pad,
@@ -1531,12 +1532,7 @@ def main(
                 publish_runner=publish_runner,
                 publish_timeout=publish_timeout,
             )
-        except Refusal as exc:
-            for line in exc.lines:
-                print(line, file=sys.stderr)
-            return 1
-        return 0
-    try:
+            return 0
         built = _build(args.round_path, args.pad, DEFAULT_KIT_DIR, env, cwd, publish_runner, publish_timeout, args.add)
     except Refusal as exc:
         for line in exc.lines:

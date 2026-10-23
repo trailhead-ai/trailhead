@@ -6,6 +6,7 @@ through the probe harness, then asserts on what the page rendered and the stroke
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import json
 from pathlib import Path
@@ -362,8 +363,6 @@ def test_the_date_line_shows_the_date_the_builder_was_given_and_another_date_giv
 
 
 def test_the_builder_dates_the_page_today_when_given_no_date(tmp_path):
-    import datetime
-
     folder = tmp_path / "out"
     scratch_pad.build_reference_page(folder, _reference(_drawing()))
     got = ch.run_probe(folder, PAGE_LIB + "return document.querySelector('#ref-chosen').textContent;")
