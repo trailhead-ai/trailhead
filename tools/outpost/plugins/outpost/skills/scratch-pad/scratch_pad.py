@@ -210,6 +210,7 @@ _OPTION_KEYS = ("name", "cost", "pick", "layout", "flow")
 _ROUND_JS_PREFIX = "window.PAD_ROUND = JSON.parse("
 _ROUNDS_JS_PREFIX = "window.PAD_ROUNDS = JSON.parse("
 _REFERENCE_JS_PREFIX = "window.PAD_REFERENCE = JSON.parse("
+_REFERENCE_PAGE_FILES = ("index.html", "reference.css", "reference.js")
 _REFERENCE_KIT_FILES = ("pen.js", "flow.js", "pad.css", "ArchitectsDaughter-Regular.ttf", "OFL.txt")
 _ROUND_DIR = re.compile(r"round-([1-9][0-9]*)")
 _PAD_FILES = ("index.html", "rounds.js")
@@ -492,12 +493,15 @@ class _Streamed(subprocess.CompletedProcess):
     """A finished publisher run whose stderr was already shown line by line; ``echoed`` is whether any was."""
 
     echoed = False
+    cut_short = False
 
 
 _STDERR_DRAIN_SECONDS = 0.5
 
 
-def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None):
+def _stream_publisher(
+    cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None, drain: float = _STDERR_DRAIN_SECONDS
+):
     """Run the publisher with stdout passed through as written and each non-blank stderr line shown as it arrives.
 
     Lines are shown in the ``scratch-pad: publish:`` relay form, escaped; nothing is held back for the exit.
@@ -508,14 +512,16 @@ def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float
     proc = subprocess.Popen(list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace")
     echoed = []
     closed = threading.Event()
+    relaying = threading.Lock()
 
     def pump():
         for line in proc.stderr:
-            if closed.is_set():
-                return
-            if line.strip():
-                print(_line("publish", _esc(line.rstrip("\r\n"))), file=sys.stderr, flush=True)
-                echoed.append(True)
+            with relaying:
+                if closed.is_set():
+                    return
+                if line.strip():
+                    print(_line("publish", _esc(line.rstrip("\r\n"))), file=sys.stderr, flush=True)
+                    echoed.append(True)
 
     reader = threading.Thread(target=pump, daemon=True)
     reader.start()
@@ -526,13 +532,16 @@ def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float
         proc.wait()
         raise
     finally:
-        reader.join(_STDERR_DRAIN_SECONDS)
-        if reader.is_alive():
-            closed.set()
+        reader.join(drain)
+        cut_short = reader.is_alive()
+        if cut_short:
+            with relaying:
+                closed.set()
         else:
             proc.stderr.close()
     result = _Streamed(list(cmd), returncode, None, "")
     result.echoed = bool(echoed)
+    result.cut_short = cut_short
     return result
 
 
@@ -903,7 +912,7 @@ def _cannot_start(exc: OSError) -> Refusal:
 
 
 def _publish_refused(result) -> Refusal:
-    if getattr(result, "echoed", False):
+    if getattr(result, "echoed", False) and not getattr(result, "cut_short", False):
         return Refusal([])
     reasons = [_line("publish", _esc(line)) for line in result.stderr.splitlines() if line.strip()]
     return Refusal(reasons or [_line("publish", f"the publisher exited with status {result.returncode}")])
@@ -1035,16 +1044,16 @@ _CREDENTIAL_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
     (
         "vendor-prefix",
         re.compile(
-            r"(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}"
+            r"(?i)(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}"
             r"|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+"
-            r"|AIza[0-9A-Za-z_-]{35})\b"
+            r"|AIza[0-9A-Za-z_-]{35})(?![A-Za-z0-9])"
         ),
     ),
-    ("key-like", re.compile(r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+")),
+    ("key-like", re.compile(r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]{0,64}\s*[=:]\s*\S+")),
     ("api-key-shape", re.compile(r"(?i)api[_-]?key['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9._\-]{16,}")),
     ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")),
-    ("high-entropy-hex", re.compile(r"\b[A-Fa-f0-9]{40,}\b")),
-    ("high-entropy-base64", re.compile(r"\b[A-Za-z0-9+/]{32,}={0,2}\b")),
+    ("high-entropy-hex", re.compile(r"(?<![A-Za-z0-9])[A-Fa-f0-9]{40,}(?![A-Za-z0-9])")),
+    ("high-entropy-base64", re.compile(r"(?<![A-Za-z0-9])[A-Za-z0-9+/]{32,}={0,2}(?![A-Za-z0-9])")),
 )
 
 
@@ -1220,7 +1229,10 @@ def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: M
             continue
         if not _has_prompt_and_options(questions[qn - 1]):
             problems.append(
-                _line(f"{where}.round", f"{number} — round {number}'s data does not hold a list of questions")
+                _line(
+                    f"{where}.question",
+                    f"{qn} — question {qn} of round {number} does not hold a prompt and a list of options",
+                )
             )
             continue
         options = questions[qn - 1]["options"]
@@ -1361,9 +1373,8 @@ def build_reference_page(
     }
     try:
         target.mkdir(parents=True, exist_ok=True)
-        for source in sorted(reference_dir.iterdir()):
-            if source.is_file():
-                shutil.copyfile(source, target / source.name)
+        for name in _REFERENCE_PAGE_FILES:
+            shutil.copyfile(reference_dir / name, target / name)
         for name in _REFERENCE_KIT_FILES:
             shutil.copyfile(kit_dir / name, target / name)
         (target / "reference-data.js").write_text(

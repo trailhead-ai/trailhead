@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import importlib.util
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -129,15 +130,27 @@ def _reference(*drawings, title="What we are building"):
     return scratch_pad.Reference("the-site", title, list(drawings))
 
 
-def _build(tmp_path, reference, date=DATE, name="out"):
+def _build(tmp_path, reference, date=DATE, name="out", **kwargs):
     folder = tmp_path / name
-    scratch_pad.build_reference_page(folder, reference, date)
+    scratch_pad.build_reference_page(folder, reference, date, **kwargs)
     return folder
 
 
 def _run(tmp_path, reference, js, date=DATE, **kwargs):
     folder = _build(tmp_path, reference, date)
     return ch.run_probe(folder, PAGE_LIB + js, **kwargs)
+
+
+def test_only_the_named_page_files_are_copied_from_the_reference_source_folder(tmp_path):
+    source = tmp_path / "reference-src"
+    shutil.copytree(scratch_pad.DEFAULT_REFERENCE_DIR, source)
+    (source / ".DS_Store").write_text("junk")
+    (source / "notes.txt").write_text("stray")
+
+    got = sorted(p.name for p in _build(tmp_path, _reference(_drawing()), reference_dir=source).iterdir())
+
+    assert ".DS_Store" not in got and "notes.txt" not in got
+    assert {"index.html", "reference.css", "reference.js", "reference-data.js", "pen.js"} <= set(got)
 
 
 def test_a_reference_of_one_chosen_layout_shows_one_card_with_the_title_and_a_traced_drawing(tmp_path):

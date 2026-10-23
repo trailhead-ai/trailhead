@@ -441,16 +441,22 @@ def test_a_pad_folder_that_cannot_be_read_is_refused_in_reference_wording(mod, r
     assert lines[0].startswith('scratch-pad: pad "p" can\'t be referenced: the pad folder is a symlink')
 
 
+NOT_A_ROUND = "scratch-pad: drawings[0].round: 2 — round 2's data does not hold a list of questions"
+NOT_A_QUESTION = (
+    "scratch-pad: drawings[0].question: 1 — question 1 of round 2 does not hold a prompt and a list of options"
+)
+
+
 @pytest.mark.parametrize(
-    "questions",
+    "questions, expected",
     [
-        pytest.param(5, id="questions-not-a-list"),
-        pytest.param([7], id="question-not-an-object"),
-        pytest.param([{"prompt": 3, "options": [{}]}], id="prompt-not-a-string"),
-        pytest.param([{"prompt": "P", "options": 5}], id="options-not-a-list"),
+        pytest.param(5, NOT_A_ROUND, id="questions-not-a-list"),
+        pytest.param([7], NOT_A_QUESTION, id="question-not-an-object"),
+        pytest.param([{"prompt": 3, "options": [{}]}], NOT_A_QUESTION, id="prompt-not-a-string"),
+        pytest.param([{"prompt": "P", "options": 5}], NOT_A_QUESTION, id="options-not-a-list"),
     ],
 )
-def test_a_round_whose_data_is_not_a_round_is_refused_naming_the_round(mod, rig, tmp_path, questions):
+def test_a_round_whose_data_is_not_a_round_is_refused_naming_the_round(mod, rig, tmp_path, questions, expected):
     pad_dir = _build(mod, rig, tmp_path)
     js = pad_dir / "round-2" / "round.js"
     lines = js.read_text(encoding="utf-8").splitlines(keepends=True)
@@ -460,7 +466,7 @@ def test_a_round_whose_data_is_not_a_round_is_refused_naming_the_round(mod, rig,
 
     lines = _refusal(mod, rig, tmp_path, _ref([_d(2, 1, "A")]))
 
-    assert lines == ["scratch-pad: drawings[0].round: 2 — round 2's data does not hold a list of questions"]
+    assert lines == [expected]
 
 
 def _break_round_one(mod, rig, tmp_path, broken):
@@ -475,6 +481,16 @@ def _round_one_with_option_b_of_question_one(replacement):
     broken = copy.deepcopy(ROUND_ONE)
     broken["questions"][0]["options"][1] = replacement
     return broken
+
+
+def test_a_question_the_reference_does_not_name_may_be_malformed(mod, rig, tmp_path):
+    broken = copy.deepcopy(ROUND_ONE)
+    broken["questions"][1] = 7
+    _break_round_one(mod, rig, tmp_path, broken)
+
+    got = _read(mod, rig, tmp_path, _ref([_d(1, 1, "A")]))
+
+    assert [d.option["name"] for d in got.drawings] == ["Logo left"]
 
 
 def test_an_option_the_reference_does_not_name_may_be_malformed(mod, rig, tmp_path):
@@ -592,6 +608,44 @@ def test_each_credential_pattern_family_flags_a_positive_string(mod, text, famil
 )
 def test_each_credential_pattern_family_passes_its_near_miss(mod, text, family):
     assert family not in mod.credential_patterns(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("aws_" + AKIA, id="aws-after-underscore"),
+        pytest.param("key" + AKIA, id="aws-after-letters"),
+        pytest.param("x_gh" + "p_" + "A1" * 18, id="github-after-underscore"),
+        pytest.param("gh" + "p_" + "A1" * 18 + "_old", id="github-before-underscore"),
+    ],
+)
+def test_a_vendor_token_glued_to_other_text_by_an_underscore_or_letters_is_still_flagged(mod, text):
+    assert "vendor-prefix" in mod.credential_patterns(text)
+
+
+def test_a_vendor_prefix_inside_a_plain_word_is_not_flagged(mod):
+    assert mod.credential_patterns("MAKIAbility and ghp_andsoon") == []
+
+
+def test_a_vendor_token_one_character_too_long_is_not_flagged(mod):
+    assert "vendor-prefix" not in mod.credential_patterns(AKIA + "X")
+
+
+@pytest.mark.parametrize("glue", ["x_", "_"])
+def test_a_hex_run_glued_to_an_underscore_is_still_flagged(mod, glue):
+    assert "high-entropy-hex" in mod.credential_patterns(glue + HEX_40)
+
+
+def test_a_long_string_of_repeated_key_words_is_scanned_in_linear_time(mod):
+    text = "to" + "ken" + ("token" * 40000)
+    started = time.monotonic()
+    mod.credential_patterns(text)
+    assert time.monotonic() - started < 2.0
+
+
+def test_a_key_word_run_longer_than_the_scan_bound_with_a_value_after_it_is_still_flagged(mod):
+    text = ("token" * 40000) + "=abc"
+    assert "key-like" in mod.credential_patterns(text)
 
 
 def test_a_url_path_and_ordinary_words_match_no_family(mod):
@@ -1255,6 +1309,72 @@ def test_a_publisher_that_exits_leaves_no_wait_on_a_descendant_still_holding_its
     assert elapsed < 3.0
     assert capfd.readouterr().err.splitlines() == ["scratch-pad: publish: said before exit"]
     assert result.echoed is True
+
+
+def _kill_pidfile(pidfile):
+    if pidfile.exists():
+        try:
+            os.kill(int(pidfile.read_text()), 9)
+        except ProcessLookupError:
+            pass
+
+
+def test_no_relay_line_prints_after_the_streamed_call_returns_while_a_descendant_writes_stderr(
+    mod, tmp_path, capfd, monkeypatch
+):
+    real_line = mod._line
+
+    def slow_line(*args):
+        time.sleep(0.03)
+        return real_line(*args)
+
+    monkeypatch.setattr(mod, "_line", slow_line)
+    pidfile = tmp_path / "child.pid"
+    script = f'(while :; do echo tick >&2; done) & echo $! > "{pidfile}"; exit 0'
+    env = {"PATH": "/usr/bin:/bin", "TMPDIR": str(tmp_path)}
+    late = []
+    for _ in range(25):
+        capfd.readouterr()
+        try:
+            mod._stream_publisher(["/bin/sh", "-c", script], env, drain=0.02)
+            print("MARKER", file=sys.stderr, flush=True)
+            time.sleep(0.1)
+        finally:
+            _kill_pidfile(pidfile)
+        err = capfd.readouterr().err
+        late.append(err[err.index("MARKER") + len("MARKER") :].strip())
+    assert [tail for tail in late if tail] == []
+
+
+def test_a_failed_publish_whose_last_stderr_line_missed_the_drain_still_gives_its_exit_status(
+    mod, vault, tmp_path, capfd
+):
+    pidfile = tmp_path / "child.pid"
+    script = f'echo "early line" >&2; (sleep 5; echo "error: NOT synced" >&2) & echo $! > "{pidfile}"; exit 4'
+
+    def runner(cmd, env, timeout):
+        return mod._stream_publisher(["/bin/sh", "-c", script], env, timeout, drain=0.2)
+
+    try:
+        assert _run_main(mod, vault, publish_runner=runner) == 1
+    finally:
+        _kill_pidfile(pidfile)
+
+    assert capfd.readouterr().err.splitlines() == [
+        "scratch-pad: publish: early line",
+        "scratch-pad: publish: the publisher exited with status 4",
+    ]
+
+
+def test_a_failed_publish_whose_stderr_was_all_relayed_adds_no_second_line(mod, vault, capfd):
+    def runner(cmd, env, timeout):
+        return mod._stream_publisher(
+            [sys.executable, "-c", "import sys; print('only line', file=sys.stderr); sys.exit(4)"], env, timeout
+        )
+
+    assert _run_main(mod, vault, publish_runner=runner) == 1
+
+    assert capfd.readouterr().err.splitlines() == ["scratch-pad: publish: only line"]
 
 
 def test_a_publish_that_waits_longer_than_the_publish_timeout_is_not_killed(mod, vault, tmp_path, capfd):
