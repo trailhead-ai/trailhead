@@ -1,0 +1,17 @@
+Before I publish anything, here's what would go out. One drawing: **round 1, question 1 ("Invoice header"), option B (tabs under the header)**. It would become a page titled **"Invoice screen: header"** under the site name **`invoice-header`** in the team vault **`acme`**, where every teammate can open it once the vault syncs.
+
+Should I publish it? Nothing has been published yet, and I'll only run the command if you say yes.
+
+From the same reply, you picked A (table rows) for line items, with the note "maybe". I'm not treating that as settled, so it won't be published. Is table rows decided, or do you want another look at line items?
+
+--- turn 2 ---
+
+I published header option B (tabs under the header) to the team vault `acme` as the site **`invoice-header`**, and the vault synced. Teammates can open it here:
+
+http://127.0.0.1:7314/acme/invoice-header/
+
+The page shows only that drawing, with its question, name, cost and today's date. The pad itself is unchanged.
+
+To take the page down, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have the content.
+
+Still open from before: is line items A (table rows) decided, or did your "maybe" mean you want to look at that question again?

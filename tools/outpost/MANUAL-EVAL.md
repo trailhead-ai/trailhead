@@ -1402,3 +1402,140 @@ treatment arm loads, after batch 2 ran. The only change is one clause in the cre
 Neither variant (`name-the-reference`, `remark-only`) reaches a credential refusal, so no registered line
 reads this clause; the batch is not re-run. The quoted lines are checked against the script's own output by
 `test_scratch_pad_skill_reference.py`.
+
+### reference-named-for-the-vault — batch 3: re-run after the security-audit prose fixes
+
+**Why re-run.** The security audit of the whole change found three prose gaps: the always-on rule's
+reference exception had no gate (M1), the "no secrets" line was a statement rather than an instruction (M2),
+and the site name was never confirmed and a taken-name retry was silent (L4). The fixes (commit `9bef12af`)
+edit `rules.md` and the live `SKILL.md`, both of which the treatment arm carries, so the recorded batch 2
+(which ran against the text of commit `23630050`, before the `80fa4522` clause disclosed above) no longer
+describes the live prose. One new batch of the **treatment arm only**, both variants, 3 runs each, ran
+2026-10-23 from `run-arm.sh` per run (foreground, one at a time) inside `scripts/eval-sandbox`, exactly as
+batch 2; `expected.md`, the grader, the runner and the baseline arms are unchanged and the criteria are graded
+as registered. No baseline was re-run. **Always-loaded ruleset:** the treatment arm carries the live
+`rules.md` as amended below (`arms/system-prompt.md`, rebuilt by a test) and the live amended `SKILL.md`.
+Claude Code and model tier as in batch 2 (one tier).
+
+**Prose diff since the text batch 2 ran against** (`git diff 23630050 9bef12af` over the two files; the
+`SKILL.md` hunk in the credential-refusal bullet is the `80fa4522` change already disclosed above):
+
+```diff
+@@ -20,7 +20,9 @@ directory (nobody finds those) and over a Claude Artifact (that leaves the
+ team's own vault). Say where you published it and hand back the URL.
+ The one exception is a scratch pad (below): it goes where the scratch-pad skill
+ puts it — the enclosing workspace, or a folder on disk outside one — never the
+-vault, except a reference page the user asks for, which that skill sends to the vault.
++vault, except a reference page the user asks for: only that skill's reference command
++("Name a reference"), run after the user confirms. Never hand-publish pad files or
++drawings to a vault.
+ 
+ **Choose the target by how long the page should live**, not by how polished it
+ is. If the team needs it after this work is done, or there is no workspace to
+diff --git a/tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md b/tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md
+index 2617c764..e9f48b72 100644
+--- a/tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md
++++ b/tools/outpost/plugins/outpost/skills/scratch-pad/SKILL.md
+@@ -245,7 +245,10 @@ Write the reference as a JSON file, anywhere you can read back:
+   each drawing once. An unknown key is refused.
+ - The page shows each named drawing with its question, name and cost, and
+   today's date. Everything on it is shared with the team: it must hold
+-  no secrets, tokens or customer data.
++  no secrets, tokens or customer data. If a chosen drawing carries any, do not
++  name it: tell the user why. The script's pattern check is a backstop, not a
++  review: it misses emails, hostnames, customer names, bare passwords and
++  credentials inside URLs.
+ 
+ Resolve the vault exactly as the `publish-site` skill does: run
+ `lore vault resolve --kind blob --json` and take its `path`, and its `vault` name
+@@ -253,8 +256,8 @@ only when that is a string; to publish into a different vault than that one, loo
+ it up with `lore vault ls` and take its name and path the same way.
+ 
+ **Before running anything, ask once and wait.** Send one line naming the drawings
+-(round, question and option, with the option's name), the page title and the
+-vault, and ask whether to publish. Run the command only after the user answers
++(round, question and option, with the option's name), the page title, the site
++name and the vault, and ask whether to publish. Run the command only after the user answers
+ yes. If they say no, or answer something else, publish nothing.
+ 
+ ```bash
+@@ -350,8 +353,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
+   had no name); the vault's git history keeps the content. If the last line is
+   not a link, say no link was printed and give none.
+ - **Site name already taken**: the refusal ends `already exists in the vault —
+-  choose another site name`. Retry with a new `site`, without asking, and report
+-  the name the page finally got. Never look for an `--overwrite`.
++  choose another site name`. Tell the user in one line that the name is taken and
++  which new `site` you will use, then retry with it, and report the name the
++  page finally got. Never look for an `--overwrite`.
+ - **Published locally, not synced**: a `scratch-pad: publish: error:` line says
+   the page was published locally but NOT synced, and no link is printed. Do not
+   rerun. Tell the user the page is not yet shared with the team and give no link;
+@@ -361,7 +365,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
+   the team`. Say which drawing and which field it names, and never repeat the
+   text that matched. The fix is a corrected drawing: add a round to the pad
+   without it (`--add`), ask the user to open that round and name the drawing
+-  again.
++  again. A match in the reference's own title or site (`scratch-pad: title: …`
++  or `scratch-pad: site: …`) is fixed by editing the reference file, not by a
++  new round; never repeat the matched text there either.
+ - **Other refusals** (exit 1), each followed by one plain line that no reference
+   was published and why:
+   - `scratch-pad: pad "<pad>": does not exist …`, or `can't be referenced: …`:
+```
+
+**Batch 3 verdict - PASS against `expected.md`:** treatment meets R1-R5 in 3/3 `name-the-reference` runs and
+K1-K2 in 3/3 `remark-only` runs. The treatment arm still passes, so the prose was not tuned.
+
+| Criterion (`name-the-reference`) | Batch 3 treatment | Batch 2 treatment |
+|---|---|---|
+| R1 states the drawings, title and vault in one line | 3/3 | 3/3 |
+| R2 waits for the yes | 3/3 | 3/3 |
+| R3 publishes exactly that drawing to the fixture vault | 3/3 | 3/3 |
+| R4 hands back only the printed link | 3/3 | 3/3 |
+| R5 says how to take the page back | 3/3 | 3/3 |
+
+| Criterion (`remark-only`) | Batch 3 treatment | Batch 2 treatment |
+|---|---|---|
+| K1 the session replied | 3/3 | 3/3 |
+| K2 nothing reached the vault | 3/3 | 3/3 |
+
+Hand-read against the grader (every final message): in all three `name-the-reference` runs the first message
+named the drawing, the quoted title, the vault **and the site name** `invoice-header` and asked for a yes
+(the site name is not a registered criterion; it is the L4 change showing in the runs), published nothing
+until the yes, then ran `scratch_pad.py --reference` with a one-drawing reference, relayed the printed link,
+and gave the take-back line (delete the site folder, `lore sync --vault acme`, git history keeps it). Two runs
+(31, 33) also said they had checked the drawing for secrets or customer data before asking (run 33 in its
+first message); neither is a registered line. Run 32 ran the command twice (the first with a reference file under a
+`mktemp` directory, the second from the project folder; cause of the first not investigated; one site resulted). The three `remark-only` runs
+treated B as settled, added a round to the pad and published nothing (vault `sites/` empty, no `--reference`
+command, no `sync` line).
+
+**What this batch does not exercise.** Nothing here reaches a taken site name, a drawing carrying a secret, or a
+session that is tempted to hand-build a page: the fixture drawing is clean, the vault is empty and the stub
+`lore` syncs. M1 (the rule's gate against hand-publishing), M2 (the session declining to name a drawing that
+carries secrets) and the L4 taken-name statement are therefore **unmeasured**; this batch shows only that the
+amended prose did not regress the named-reference and remark behaviours. A human should review the three prose
+hunks above on their words.
+
+**Real-state check** (before/after batch 3, same commands as batch 2): `~/.config/{lore,camp,outpost}` file
+hashes and `~/.local/state/outpost/pads` unchanged; the `trailhead`, `default` and `levr` vaults moved HEAD
+(`lore: ... published` sync commits from this and another host, not from this batch; the arms could not read
+or write under the home directory). Captures are in `runs/batch-3-security-audit-prose-fixes/` (same shape and
+path rewriting as batch 2); `capture_scan.py` over it reports 0 credential findings.
+
+**Arms rebuilt from the amended `rules.md`, and not re-run.** Each live arm that embeds `rules.md` was rebuilt
+per its case's own rebuild rule; their only difference from before is this hunk of the scratch-pad exception:
+
+```diff
+-vault, except a reference page the user asks for, which that skill sends to the vault.
++vault, except a reference page the user asks for: only that skill's reference command
++("Name a reference"), run after the user confirms. Never hand-publish pad files or
++drawings to a vault.
+```
+
+Files: `evals/publish-routing/arms/treatment.md`, `evals/pad-on-visual-question/arms/treatment.md`,
+`evals/follow-up-round-on-an-open-pad/arms/system-prompt.md` (and this case's own
+`arms/system-prompt.md`, measured above). The recorded batches of the other three cases ran against the
+earlier text and are not re-run here. `evals/record-link-rendering/arms/treatment.md` embeds only the `## Record
+links` tail of `rules.md`, which is unchanged, so it was not rebuilt.

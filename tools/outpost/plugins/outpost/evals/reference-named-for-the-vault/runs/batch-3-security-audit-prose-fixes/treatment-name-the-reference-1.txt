@@ -1,0 +1,15 @@
+Before I publish anything, I need your go-ahead.
+
+I'd publish **round 1, question 1 ("Invoice header"), option B, "Tabs under the header"** as a page titled **"Invoice screen: header"**, with the site name **`invoice-header`**, to the **`acme`** team vault. That drawing contains nothing sensitive, just "Invoice 1042", a Send button, and Details / Totals / History tabs. Publish it?
+
+The line-items pick (A, table rows) stays on the pad and won't be on the team page. You marked it "maybe", so I'm not treating it as decided. Tell me if you want table rows added to the page too.
+
+--- turn 2 ---
+
+The header pick is now published for the team: **round 1, question 1, option B, "Tabs under the header"**, as a page titled "Invoice screen: header". The script reported a successful publish and sync to the `acme` vault, under the site name **`invoice-header`**:
+
+http://127.0.0.1:7314/acme/invoice-header/
+
+To take it back, delete `<vault>/sites/invoice-header` and run `lore sync --vault acme`. The vault's git history will still have the page.
+
+The pad itself didn't change, and line items (A, table rows, marked "maybe") is still open. Is A final for line items, or do you want to rethink it?

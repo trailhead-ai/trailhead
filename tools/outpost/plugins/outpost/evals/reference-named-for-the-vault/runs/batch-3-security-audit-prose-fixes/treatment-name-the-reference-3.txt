@@ -1,0 +1,19 @@
+I haven't published anything yet. Before anything goes to the team vault I need a yes from you. Here's what I'd publish:
+
+**Round 1, question 1 ("Invoice header"), option B, "Tabs under the header"** goes to a reference page titled **"Invoice screen: header"**, under the site name **`invoice-header`**, in the **`acme`** vault. Publish it?
+
+The page shows only that one drawing, with its question, name, cost line and today's date. I checked the drawing and it has no secrets or customer data, just "Invoice 1042", a Send button and the Details / Totals / History tabs. The reference file is ready at `<run-33>/invoice-header-reference.json`. Once you say yes, the publish command uses that file to make the page and sync the vault, and then I'll give you the link it prints. If you say no, nothing gets published.
+
+I'm leaving line items (A, table rows) off the page because your note there said "maybe". Should A go on the reference too, or is it still open?
+
+--- turn 2 ---
+
+The header drawing is now in the team vault. I published round 1, question 1, option B ("Tabs under the header") as **`invoice-header`** in the **`acme`** vault, and the vault sync went through:
+
+http://127.0.0.1:7314/acme/invoice-header/
+
+Anyone on the team can open that link from their own Outpost.
+
+To take it back, delete `<vault>/sites/invoice-header` and then run `lore sync --vault acme`. The vault's git history will still have the page.
+
+The page only shows the header. You'd marked the line items (A, table rows) "maybe", so I'm treating that as still open: should it be table rows or cards? If you decide on A, I can publish it as a separate reference page.
