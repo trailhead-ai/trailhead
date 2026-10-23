@@ -13,200 +13,318 @@ most prose testing belongs; the tool suites already do this.
 
 This document is about the second: **run the agent against a scenario and judge
 the outcome**. It is expensive, so it is reserved for the instructions that
-actually decide something.
+actually decide something. Eval cases run through the plugin eval runner,
+`claude plugin eval`, and portage's push gate runs the ones a branch touches.
 
-## Why these are run by hand
+## Write and run a case, step by step
 
-`claude plugin eval` is the automated harness these cases belong in, and it is
-**not runnable for this account**. `claude plugin eval --help` resolves and prints
-full flag documentation, but every execution path — `init`, `init --bare`, and a
-direct case run — returns `plugin eval is currently in early access` and exits.
-Enablement is per-organization with no self-service path.
+1. **Pick the prose and its plugin.** The prose must ship in a plugin
+   (`tools/<tool>/plugins/<tool>/skills/`, `agents/`). The runner loads only the
+   plugin under test. Prose outside a plugin has no route; see
+   [Limits](#limits).
+2. **Copy a runner case.** The exemplar is
+   `tools/craft/plugins/craft/evals/declined-review-correction-is-left-alone/`.
+   It is small (three graders, a prompt, a seeded fixture) and runs for well
+   under a dollar. Copy the directory to `evals/<new-case-name>/` in the same
+   corpus, rename it in `case.yaml`, and replace the prompt, the fixture and the
+   graders. A case that does not need lore needs no scaffold at all; drop
+   `context.scaffold_script` and the `fixtures/` scripts.
+3. **Write `expected.md` first**, and commit it alone before any run: what is under
+   test, the conditions, the sample and bar, the pass condition, the limitations.
+   See [Retained discipline](#retained-discipline).
+4. **Map the case to the prose it measures.** Add an entry to the corpus's
+   `eval-gate.json` listing the plugin-relative paths `expected.md` names under
+   test. A case with no entry fails the corpus hygiene suite. The mapping, the
+   bar and the verdict are described in
+   `tools/portage/plugins/portage/docs/eval-gate.md`.
+5. **Take the red baseline** on the prose as it stands before your change. See
+   [The baseline](#the-baseline).
+6. **Run the batch** with the command below, then read the verdict from the result
+   JSON. See [Running a batch](#running-a-batch).
 
-Each case is therefore authored in the shape a real eval case reuses verbatim — a
-fixture on disk plus a written expected verdict — and dispatched in session until
-the harness opens up. Nothing about the authoring changes when it does; only the
-dispatch does.
+A complete command, as run for the exemplar (Linux; on macOS drop the `TMPDIR`
+line, which is the [Linux-only temp-directory gotcha](#runner-gotchas)):
 
-## Corpus layout
+```sh
+export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # outside /tmp, short path
+out=$(mktemp -d)
+timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR \
+  -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  claude plugin eval tools/craft/plugins/craft \
+  --case 'declined-review-correction-is-left-alone' --scaffold \
+  --allow-tools 'Bash(./lore *)' 'Bash(*/scripts/maturity_bars.py *)' \
+  'Bash(:)' 'Bash(: *)' --ablation none --trust-plugin --runs 1 \
+  --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 1 \
+  --output-dir "$out" --no-publish -j 1
+```
 
-Each tool keeps its cases under its own plugin root, so they travel with the prose
-they measure:
+Run it in the foreground with a tool timeout above the run's length, give it your
+own `timeout` as above, and delete `$out` and the `TMPDIR` directory when you have
+read the result. Use `--runs 3` for a real baseline or a real check; one run is
+for finding out whether the case runs at all.
+
+## Why the runner
+
+`claude plugin eval` loads the plugin under test, runs each case's prompt in a
+sandboxed agent, scores the run with graders, and reports a score per run. Portage's
+push gate runs it for the cases that measure the prose a branch changed, and stops
+the push on a regression. What the gate selects, the per-corpus `eval-gate.json`
+mapping, the pass bar and the verdict are in
+`tools/portage/plugins/portage/docs/eval-gate.md`; this document does not restate
+them. A case that is not runner-shaped is never selected, so it guards nothing.
+
+## Case shape
 
 ```
 tools/<tool>/plugins/<tool>/evals/<case-name>/
-    expected.md      the pass condition, written BEFORE any arm is run
-    fixtures/        self-contained inputs the run is pointed at
-    arms/            optional: edited copies of prose, for a treatment arm
-tools/<tool>/MANUAL-EVAL.md   the results log for that tool's cases
+    case.yaml        schema_version "1.1", name, runs, optional context
+    prompt.md        frontmatter limits, then the task sent verbatim
+    graders/         one file per grader
+    expected.md      the pass condition, committed BEFORE any run
+    fixtures/        self-contained inputs, and a scaffold if the case needs one
+tools/<tool>/plugins/<tool>/evals/eval-gate.json   the case-to-prose mapping
+tools/<tool>/MANUAL-EVAL.md                         the results log
 ```
 
-`expected.md` is the load-bearing artifact. Writing it first is what stops a
-result being retrofitted into a pass — a verdict authored after seeing the runs
-is not evidence, and there is no way to tell the two apart later.
+- `case.yaml` holds `schema_version: "1.1"`, `name`, `runs` (1 to 50, default 3)
+  and, for a seeded case, `context: {scaffold_script: fixtures/scaffold.sh}`.
+  `model`, `max_turns`, `timeout_seconds` and `allowed_tools` go under
+  `execution:` or in the prompt frontmatter, which wins.
+- `prompt.md` frontmatter carries `allowed_tools` (read-only tools such as `Skill`,
+  `Read`, `Glob`, `Grep`, `Agent`), `max_turns` and `timeout_seconds`. `Bash`,
+  `Write` and `Edit` are removed from the session unless the operator passes them
+  with `--allow-tools`, which applies to every case in the run. The gate takes the
+  grants from the corpus's `eval-gate.json` `runner` block.
+- `graders/<name>.md` is one grader: frontmatter `type` (`regex`, `file_exists`,
+  `tool_used`, `llm`) and its options. A run's score is the fraction of graders
+  that pass.
+- `expected.md` is the load-bearing artifact. Writing it first is what stops a
+  result being retrofitted into a pass: a verdict authored after seeing the runs
+  is not evidence, and there is no way to tell the two apart later.
+- `fixtures/` is data the run reads. A scaffold script, if there is one, runs
+  before the agent in the empty run directory.
 
-## How an arm is dispatched
+The grader types, the lore seeding template and `records.json` format are in
+`tools/lore/plugins/lore/evals/README.md`; the craft lore-wrapper scaffold is in
+`tools/craft/plugins/craft/evals/README.md`. Read the one for the plugin you are
+writing in.
 
-Both arms point a **generic read-only agent** at two file paths: the prose to run
-as its operating instructions, and the fixture to run it against. The baseline arm
-points at the committed prose; the treatment arm points at the edited copy under
-`arms/`. The arms then differ in exactly one variable.
+## Running a batch
 
-**Do not dispatch `<tool>:<agent>` for the treatment arm.** That subagent type
-resolves to the live composed install, not the worktree, so it re-runs unedited
-prose and reports a false result. Editing the composed install to work around this
-is barred by Axiom 6 (never touch the developer's real install from a test).
+Use the command in the step-by-step path above. What each flag is for:
 
-### A subagent inherits the ruleset you are trying to measure
+- `--scaffold` runs each case's `scaffold_script`; without it the runner skips
+  it. The script is author-supplied bash that runs as you, so use it only on case
+  files you or your team wrote.
+- `--trust-plugin` answers the first-run trust prompt for a plugin you would run
+  yourself. It does not imply `--scaffold`, `--allow-tools` or `--mocks off`.
+- `--runs N` is runs per case, overriding `case.yaml`. `--ablation none` runs the
+  with-plugin arm only (see [The baseline](#the-baseline)). `--model` pins the
+  agent's model so a model change is not mistaken for a prose change.
+- `--allow-tools` is variadic: it takes every following value up to the next
+  flag, so put it before another flag.
+- `--case` takes one glob; given twice, only the last runs, so run one batch per
+  glob.
+- `--json <path>` writes the result document, and `--output-dir <dir>` holds the
+  aggregate result. Put both in a fresh `mktemp -d` directory and delete it
+  after copying scores out. They hold prompts and grader explanations; never
+  commit them. Without `--output-dir` the runner writes `evals/results/<ts>/`
+  inside the corpus, which the hygiene suite reads as a case with no
+  `expected.md`.
+- `--no-publish` always. Without it the runner uploads its report to claude.ai.
+- `--max-cost-usd N` stops starting new runs once the list-price estimate reaches
+  N (exit 2, partial results).
+- `-j 1` runs one agent at a time. Concurrent runs share one rate limit.
 
-Dispatching both arms as subagents **cannot measure a user-level ruleset**, which
-is what most of these cases are about. A subagent inherits `~/.claude/rules/`, so
-if the prose under test lives there, the baseline arm is already carrying it and
-both arms are the treatment arm. A probe agent told to use no tools will quote the
-ruleset back verbatim; run that probe before trusting any baseline.
+Run it in the foreground. Nothing may be left running after the call returns: no
+`nohup`, no trailing `&`, no `run_in_background`.
 
-Dispatch each arm as its own `claude` process with `--setting-sources project`,
-which drops user-level settings and rules while leaving authentication intact.
-Pass the arm's prose with `--append-system-prompt` and enumerate tools with
-`--allowedTools` — a blanket `--permission-mode bypassPermissions` is refused by
-the auto-mode classifier, correctly.
+## What the sandbox confines, and what it does not
 
-Two consequences, both of which belong in the case's limitations:
+The runner's sandbox confines the **agent's shell tools** (the Bash tool the run
+grants). On Linux the lesson is that the agent's Bash can read little of the
+operator's home beyond the plugin directory, the run's working directory and the
+run's temporary `HOME`. The runner's help text says its sandboxing limits what a
+malicious plugin can reach "but is not a guarantee".
 
-- The clean room has **no PreToolUse hook**, because hooks are installed into
-  user-level settings. For a guardrail that claims to work in harnesses without
-  hooks, that is the faithful condition; for anything else it removes a
-  protection production has.
-- Grade an `Edit`-tool write separately from a shell write. They say different
-  things about a system whose hook covers one and not the other.
+What it does not confine:
 
-### The clean room is not a sandbox
+- **Scaffold scripts** (`--scaffold`) run as you, with your real home. So do the
+  repo scripts they call, such as `tools/lore/scripts/seed-eval-vault`.
+- **`--trust-plugin`** only skips the trust prompt. It asserts that you trust the
+  plugin's code and its eval suite; it grants no isolation and removes none.
+- **Real MCP servers** (`--allow-real-servers`, `--mocks off`) run as you, outside
+  the sandbox that confines shell tools.
+- **The network.** This document has not measured network confinement for the
+  agent's shell tools, so assume the network is reachable.
+- **Whatever `--allow-tools` grants.** A grant such as `Bash(./lore *)` lets the
+  agent run that command, and what that command does is not confined by the grant.
 
-`--setting-sources project` isolates **settings, not the filesystem**. It keeps a
-user-level ruleset out of the baseline arm, and that is all it does. An arm with
-shell access can still read the developer's real repos, find the installed plugin
-cache under `~/.claude/plugins/`, and invoke the genuine CLI against live data.
+So the sandbox is a guard against an agent wandering, not a security boundary for
+a hostile branch. Run cases you or your team wrote and reviewed.
 
-Both cases written so far escaped their fixture this way. `bash-write-gate`
-mutated the developer's real lore config; `publish-routing` published into a real
-vault and pushed the commit to origin. In each case the agent behaved sensibly —
-it was handed a task it could not complete the sanctioned way, so it went and
-found the machinery that would work. A stub on `PATH` is a decoy, not a boundary.
+**For a case that drives lore, diff the real lore state around every batch.**
+Before and after, snapshot the real lore config and state (for example the files
+under `~/.config/lore/` and `~/.local/state/lore/`, with `find ... -type f -exec
+sha256sum {} +` into a file) and `diff` the two. Any change is a failed run and
+a hard stop, unless every changed path belongs to a commit another session made
+and that commit carries none of the batch's fixture titles. Escapes are silent:
+the run reports success either way.
 
-`scripts/eval-sandbox` is that boundary, and every arm with shell access runs
-inside it:
+## The baseline
 
-```
-scripts/eval-sandbox <run-dir> -- claude --setting-sources project ...
-```
+A new case is run against the prose **before** the change it guards, and it must
+go **red**. That red is recorded in the results log, the way earlier slices
+pre-registered a case and recorded its red baseline. A baseline that comes back
+green is recorded as green, and the case is then a guard rather than a detector,
+which the case's `expected.md` should say before the run.
 
-It confines the process and everything it spawns with a macOS seatbelt profile:
-writes go nowhere but the run directory, and reads under `$HOME` are denied by
-default with a narrow allow-list for what the harness itself needs to
-authenticate and run. The plugin cache, the user ruleset, and the real user
-config are closed even though the profile could reach them — those are the
-answer key, not the fixture.
+`--ablation with-without` answers a different question: it adds a no-plugin arm
+and reports the score delta, so it tells you whether the **plugin** causes the
+behaviour at all. It does not compare edited prose to committed prose, and it
+doubles the cost. Use `--ablation none` for a baseline and a re-check of one
+plugin's prose.
 
-Default-deny on the read side is the point. A blocklist naming the paths that
-leaked last time leaves every path nobody has thought of yet reachable, which is
-the same mistake as a stub on `PATH` one layer down.
+## Runner gotchas
 
-A container was the other candidate and does not work here: Claude Code reads
-its credentials from the macOS Keychain, so a container has no way to
-authenticate without an API key, which would also move these runs off the
-subscription and onto API billing.
+Each is a symptom, then the fix. The platform is marked where it matters.
 
-Two holes stay open deliberately, because closing either stops the arm rather
-than confining it — the harness's own session state under `~/.claude`, and the
-Bash tool's scratch root under `/tmp/claude-<uid>`. The auto-memory subtree is
-denied within the first, since a planted memory would be read back by a later
-real session.
+- **Every case that writes scores as a plain fail, with `error` null (Linux
+  only).** On the tested Linux host the agent's sandbox cannot write when its
+  `TMPDIR` is under `/tmp` or is longer than 51 characters, on runner 2.1.304
+  and later; lore cases score 0.5. Names are irrelevant: 51 passes, 52 fails,
+  `TMPDIR=/tmp` fails. Fix: set `TMPDIR` to a directory outside `/tmp` whose path
+  is at most 51 characters, as in the command above. The push gate does this for
+  itself. macOS was not checked.
+- **`./lore` or `lore` exits 127 in the run (any platform).** The agent's sandbox
+  hides the operator's home, so a `lore` on `PATH` that points into a checkout
+  fails. Fix: the case brings its own `./lore` wrapper, seeded into the run
+  directory with a copy of the `trailhead/` package, grants `Bash(./lore *)`,
+  and its prompt says to run `./lore` wherever a document says `lore`. In a
+  plugin other than lore, the scaffold also copies the lore CLI into the run
+  directory, because the sandbox exposes only the plugin under test. The runner
+  pre-populates the run's `~/.gitconfig` with its own identity, so a seeder must
+  keep an existing identity and not refuse it.
+- **The grader passes but the tool path was broken.** A grader over seeded state
+  cannot tell a working tool from a broken one: the scaffold wrote the file
+  before the agent ran. Fix: before any baseline, smoke-run a new fixture with
+  one CLI **write** (`./lore record amend` or `./lore record create`), grade the
+  written result, and read the run's transcript for the command's own output.
+- **A case that drives a subagent never reaches it.** Fix: `Agent` in the case's
+  `allowed_tools`, plus the Bash grants the agent needs. A scaffold must build
+  its commits signed if the agent refuses unsigned ones: the portage updater's
+  preflight does, so its scaffolds build commits with `git hash-object` and a
+  dummy `gpgsig` header. The sandbox runs in don't-ask mode, so it denies
+  compound commands, redirects, any command containing `<!-- -->`, and reads of
+  the plugin's `evals/` directory: keep stand-in calls to single commands. If
+  the agent can see a real CLI's `--help` it may drive an undisclosed subcommand
+  unprompted and contaminate the baseline, so a stand-in must hide it.
+- **A grader on the middle of a run sees nothing.** The `llm` trace judge sees
+  only the first 12 and last 12 events once a run passes 24. Fix: for "did the
+  agent call X", use `tool_used` (`tool`, `input_match` as a JavaScript regex over
+  the tool input's JSON, `min`, `max`), which scans every call. Also,
+  `target: files` on `regex`, `file_exists` and `llm` lists files the agent
+  **created** only; to grade a seeded record that the agent modified, use a
+  `regex` with `source: file` on its exact path.
+- **An untracked `.jsonl` appears in `fixtures/` after a seeded-history case.** A
+  case that seeds a conversation with `context.history_file` leaves
+  `fixtures/<sessionId>.jsonl` beside the seed, which a `git add -A` would sweep
+  in. Fix: read what you need from it, then delete it before staging.
+- **The exit code says pass or fail.** It does not. A scored fail and every error
+  exit 1; a cost-ceiling or auth partial exits 2. Fix: read the verdict from the
+  result JSON, `cases[].arms.with[]` (`score`, `passed`, `error`, `graders[]`),
+  and count runs from that array, not from `runsPerCase`, which echoes the case's
+  own `runs`. A run's `error` overrides its graders.
+- **The runner overruns its own `timeout_seconds`.** It has taken 1083 seconds
+  against a 300 second limit, and about 6 minutes on a refused connection.
+  Fix: bound it from outside with `timeout` or a process-group kill, as in the
+  command above.
+- **A run moves onto API billing.** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`,
+  `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK` and `ANTHROPIC_BASE_URL`
+  each move a run off the login. Fix: start the runner with a clean environment
+  (`env -i` plus `PATH`, `HOME` and the rest the gate forwards) when billing
+  matters. This was verified on Linux.
 
-The grading discipline below still applies, because a boundary that holds is not
-a reason to stop looking:
+## Credentials on macOS: the Keychain
 
-- **Diff the developer's real state after every batch.** `~/.config/`, the real
-  vaults, and any repo the fixture names. Escapes are silent; nothing in the run
-  output announces them, and the arm will report success either way.
-- **Grade from the fixture's filesystem, not from a log line.** A run that
-  reports a URL may have published somewhere else entirely. Both cases produced a
-  first grading pass that was wrong because it trusted captured output over the
-  tree on disk.
-- **Grade only finished runs, and make finishing observable.** A run directory
-  exists from the moment the run starts, so counting directories does not tell
-  you the batch is done — it tells you the batch has been *dispatched*. Grading
-  an in-flight run reads a half-written log as a clean one, which scores a
-  compliant arm as a refusal. Have the runner write a completion marker as its
-  last act and have the grader skip any run without one.
+On macOS, Claude Code keeps its credentials in the login Keychain, not in a
+credentials file under its config directory.
 
-- **Never point a fixture at a real vault, repo, or config**, even read-only. The
-  fixture is data; live infrastructure is not part of it.
-
-Four of the first five cases produced a wrong first grading pass, each in a
-different way, and none was visible in the run output. Assume the grader is
-wrong until its verdict and a hand-read log agree on a sample.
-
-### A fixture must let the sanctioned path succeed
-
-If a case forbids one mechanism, the fixture has to make the permitted mechanism
-actually work. A task that cannot be completed the sanctioned way does not
-measure obedience — it measures resourcefulness, and a compliant agent becomes a
-determined one. In the `bash-write-gate` case the fixture vault was deliberately
-unregistered, so agents went looking for the config that would register it, read
-the developer's real repo, and mutated the real `~/.config/lore/config.json`.
-
-Give the run a throwaway config it can succeed against (`XDG_CONFIG_HOME` and
-`XDG_STATE_HOME` under the scratch directory), and diff the developer's real
-config after any run that had shell access. Escapes are silent otherwise.
-
-**Verify that it succeeds from inside the sandbox, not from your shell.** A CLI
-that works when you test it may still fall back to a path the profile denies —
-a state directory, a cache, a lock file — and it fails that way only under
-confinement. `carve-out-does-not-generalise` staged a throwaway config, checked
-it by hand, and still had the sanctioned path broken in half the runs where it
-was the answer, because the check ran outside the jail. Run the real command
-through `scripts/eval-sandbox` against a built fixture and read its exit code
-before dispatching a batch.
-
-**The instructions-file path is a trust boundary — pin it.** The dispatcher
-resolves that path itself, and it must always name a trusted, review-gated,
-in-repo artifact — a committed agent or skill file, ideally at a stated SHA. It
-must **never** be taken from the fixture, a spec body, a lore record, a label, or
-any other value an untrusted party can write. That file becomes the agent's
-operating instructions verbatim, so a path sourced from untrusted input is
-instruction injection with extra steps. `claude plugin eval`, which this shape is
-written to be reused by, is documented as *not* an OS sandbox: network is
-unblocked and there is no path jail. The fixture path is data and may vary; the
-instructions path may not.
-
-## Reading a result honestly
+## Retained discipline
 
 These are the rules that make a recorded result worth trusting later. Each exists
 because ignoring it produced a wrong read at least once.
 
-- **Run the baseline too.** A treatment arm that scores 3/3 proves nothing without
-  a baseline, because the behaviour may already have been there. A change measured
-  only after the fact has measured nothing.
-- **More than one run per arm.** Agent behaviour varies between runs. A single run
-  is an anecdote; the failure mode that matters is usually *inconsistency*, which
-  one run cannot show.
+- **Write the expected verdict first**, and commit it before any run.
+- **More than one run.** Agent behaviour varies between runs. A single run is an
+  anecdote; the failure mode that matters is usually inconsistency, which one run
+  cannot show. The gate's bar is 2 of 3 by default.
 - **Check the fixture for contamination.** If the fixture reproduces the prose's
   own worked example, a run can score full marks by recall rather than reasoning.
-  Vary the surface cues against the answers so surface form carries no
-  information, and confirm the fixture is self-contained — no `[[wikilink]]` or
-  cross-reference that resolves to a real record.
+  Vary the surface cues against the answers, and confirm the fixture is
+  self-contained: no `[[wikilink]]` or cross-reference that resolves to a real
+  record. A fixture, a stand-in's output or a prompt must not leak its own answer
+  key.
+- **The sanctioned path must succeed.** If a case forbids one mechanism, the
+  fixture has to make the permitted one work. A task that cannot be completed the
+  sanctioned way measures resourcefulness, not obedience: an agent handed an
+  impossible task went looking for the machinery that would work, and mutated the
+  operator's real lore config. Prove the sanctioned path from inside the runner
+  with a real write (see the smoke-test gotcha above), not from your shell.
+- **Never point a fixture at a real vault, repo or config**, even read-only. The
+  fixture is data; live infrastructure is not part of it.
+- **Grade from the files a run leaves, not from its report.** A run that reports
+  a URL may have published somewhere else entirely. Read a hand-checked sample
+  of runs against the grader's verdicts before trusting the grader; assume it is
+  wrong until they agree.
 - **Record authoring errors as authoring errors.** When a run disagrees with the
   expected verdict and the run is right, that is a defect in the test material,
   not a result. Say so in the log rather than quietly repairing the fixture.
 - **State the limitations.** Number of fixtures, number of runs, and the one model
   tier they ran on. A result that does not say what it does not cover will be read
   as covering more than it does.
+- **The case and prompt files are a trust boundary.** Case and prompt files are committed,
+  review-gated repo artifacts, and the gate uses the base's `runner` block, so a
+  branch cannot widen its own grants. Never take a prompt, a grant or a path from
+  a fixture, a spec body, a lore record or any other value an untrusted party can
+  write.
+
+## Limits
+
+- **Prose outside a plugin has no route.** User rulesets (`~/.claude/rules/`),
+  `CLAUDE.md` and anything else the plugin does not ship cannot be loaded by the
+  runner, so no case can measure it and the gate cannot select one. Do not write a
+  hand-run case for it. Record the limitation in the task that changes the prose,
+  so the reader knows the change was not behaviourally measured.
+- **Cost.** The gate re-runs every touched case on every push; nothing is cached.
+  A multi-case batch costs real money, so size `--max-cost-usd` from the logged
+  cost of the corpus.
+- **A subagent inherits the user's rulesets.** Where a case drives a subagent, the
+  baseline arm may already carry a user-level ruleset; probe before trusting a
+  baseline.
+
+## Legacy hand-shaped cases
+
+A case directory with no `case.yaml` is hand-shaped: a fixture, an `expected.md`
+and, sometimes, `arms/` edited prose copies, written for an in-session run. Neither
+the runner nor the gate runs one. They are listed in
+`_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, and their fixtures
+and verdicts are kept so they can be ported. Porting one means giving it a runner
+shape (a `case.yaml`, a prompt, graders and a gate mapping) and removing it from
+the list. The list can only shrink. `scripts/eval-sandbox` stays on disk only for
+those cases' existing harness and is not a way to run anything new.
+
+The list is a hygiene check, not a security control.
 
 ## Corpus hygiene
 
-`trailhead/tests/test_eval_corpus.py` runs over every tool: each case directory
+`trailhead/tests/test_eval_corpus.py` runs over every tool. Each case directory
 must carry an `expected.md` and a non-empty `fixtures/`, and each `expected.md`
-must state what is under test and its pass condition. That is structure only — it
+must state what is under test and its pass condition. A case must also be
+runner-shaped, with a `case.yaml`, unless it is on the legacy list; a new
+hand-shaped case fails, and so does a listed case that has since been ported or
+removed. The rule fails the test suite and the pull request's CI. It does not fail
+a commit, because pre-commit does not run pytest. That is structure only: it
 cannot tell you a case is worth running, and it deliberately does not try.
 
 A tool with no cases yet is not a failure. An empty corpus is an honest report
