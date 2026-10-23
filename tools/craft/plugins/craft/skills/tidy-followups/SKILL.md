@@ -310,8 +310,9 @@ in step 5 is held back from the nest the same way, named as flagged as an unmet 
 criterion, and removed from the parent's list exactly as a left-out name is, unless the operator
 answers `not unmet <name>` at the question below, which returns it to the nest. Act on a non-zero
 exit as step 10 does, with one addition: exit 1 (`not-a-followup-parent`) is the resume table's row
-of that name, so stop on its sentence. When `unheld` is empty there is nothing to check or nest: the
-children file in the last step is the empty list.
+of that name, so stop on its sentence. When `unheld` is empty there is nothing to nest: the check
+above runs with no names only to mint the resume code, and the children file in the last step is
+the empty list.
 3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
    verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
    backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
