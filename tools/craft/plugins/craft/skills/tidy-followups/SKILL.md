@@ -444,9 +444,9 @@ unfinished children and then closes it; every step below waits for its own answe
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py drop <spec-name> <parent> --reason-file "$reason" --confirm <the code the operator typed>
    ```
 
-Remove the file afterwards, whatever the outcome. Print one progress line per child as the result
-reports it: `un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each
-in `kept`, `failed <write>: task/<name>` for each in `failed`.
+   Remove the file afterwards, whatever the outcome. Print one progress line per child as the result
+   reports it: `un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for
+   each in `kept`, `failed <write>: task/<name>` for each in `failed`.
 6. Exit 0 prints `parent`, `un-nested`, `kept`, `failed` (empty), `reset` and `dropped` (true).
    Report it, then print each `reset[].command` alone on its own line, saying it sets that un-nested
    `in-progress` child back to `ready` so a later gather sees it; print one only when it starts
