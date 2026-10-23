@@ -67,12 +67,14 @@ When several rules apply, the left-out reason is the first of: `is-a-parent`,
 
 `check` also prints `confirm`, a 4-character code (`followup_confirm`) over the eligible set
 as `(name, revision)` pairs. Without `--parent` it is the code `assemble` needs; with
-`--parent` it also covers the parent and is the code `resume` needs, so the two differ and
-a code minted for one never satisfies the other. `--reasons` is a JSON object mapping each
-eligible name to its selection reason (anything else, or a missing eligible name, is
-`invalid-reason-file`, exit 2); the code then also covers each reason as `assemble` renders
-it into the parent body (sanitized as below), so `assemble` refuses a reason that differs
-from the one shown. `--reasons` with `--parent` is `invalid-arguments`, since `resume`
+`--parent` it also covers the parent and the listed-but-unheld names a resume of exactly
+this set would remove from the parent's list, and is the code `resume` needs, so the two
+differ and a code minted for one never satisfies the other. A follow-up added to the list
+after `check --parent` therefore makes the code `resume` computes differ from the one shown.
+`--reasons` is a JSON object mapping each eligible name to its selection reason (anything
+else, or a missing eligible name, is `invalid-reason-file`, exit 2); the code then also covers
+each reason as `assemble` renders it into the parent body (sanitized as below), so `assemble`
+refuses a reason that differs from the one shown. `--reasons` with `--parent` is `invalid-arguments`, since `resume`
 re-reads reasons from the parent. `check --parent` with no names mints the resume code over
 the parent and an empty child set, for a resume whose every listed child is already held; `check`
 without `--parent` needs at least one name (`invalid-arguments`, exit 2). A name left out of the set means running
@@ -274,8 +276,10 @@ names, un-nested in the order given; `note` is the paragraph written under `## D
 
 `resume` finishes an `open` follow-up parent. It needs `--confirm`, the code `check
 --parent <parent>` printed for exactly the file's children; it is recomputed from the
-parent argument and the children file before the first `lore` call, with the refusals
-`confirmation-missing` and `confirmation-mismatch` as for `assemble`. `--children` is a JSON file holding a list,
+parent argument, the children file and the names the parent now lists but does not hold
+that the file does not nest (the names the resume removes from the list), after the
+parent is read and before anything is written, with the refusals `confirmation-missing`
+and `confirmation-mismatch` as for `assemble`. `--children` is a JSON file holding a list,
 possibly empty, of `{name, revision}`: the listed-but-unheld follow-ups the operator
 confirmed, each at the `revision` that `check` emitted (anything else, or a repeated name,
 is `invalid-children-file`; a name failing the shape check is `invalid-followup-name`).
@@ -638,6 +642,12 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
     dependency as inside the set when the child is eligible or `done`, as `resume`
     decides it, and a name that parent lists as unheld but that no longer resolves
     to a record is left out as `not-found`."""
+    return _check(runner, spec, names, parent)[0]
+
+
+def _check(runner, spec: str, names: list[str], parent: str | None) -> tuple[dict, list[str]]:
+    """(report, unheld): the structure `check_followups` returns, and the parent's
+    listed-but-unheld names from the same read of the parent (empty without `parent`)."""
     if not gather._shape_ok(spec):
         raise ParentError("invalid-spec-name")
     if not all(gather._shape_ok(n) for n in names):
@@ -648,11 +658,11 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
     vault, spec_sidecar = gather.resolve_spec(runner, spec)
 
     held: frozenset[str] = frozenset()
-    unheld: frozenset[str] = frozenset()
+    unheld: list[str] = []
     if parent is not None:
         state = parent_state(runner, spec, parent)
         held = frozenset(item["name"] for item in state["held"]) - set(names)
-        unheld = frozenset(state["unheld"])
+        unheld = list(state["unheld"])
     records: dict[str, tuple[dict, str, str]] = {}
     gone: dict[str, dict] = {}
     for name in [*names, *sorted(held)]:
@@ -664,7 +674,7 @@ def check_followups(runner, spec: str, names: list[str], parent: str | None = No
             gone[name] = _left_out(name, "not-found")
     linked = _FollowupLink(runner, vault, spec, spec_sidecar)
     accepted, left_out = _classify(runner, vault, records, held, parent, linked)
-    return _report(records, names, accepted, {**left_out, **gone})
+    return _report(records, names, accepted, {**left_out, **gone}), unheld
 
 
 def _report(records: dict, names: list[str], accepted: set[str], left_out: dict[str, dict]) -> dict:
@@ -898,11 +908,20 @@ def _nest_payload(children: list[dict], reasons: dict[str, str] | None) -> dict:
     }
 
 
-def _resume_payload(parent_name: str, children: list[dict]) -> dict:
-    """What a resume confirmation covers: the parent and each child with its revision."""
+def resume_removals(state: dict, children: list[dict]) -> list[str]:
+    """The listed-but-unheld names a resume with `children` removes from the parent's list:
+    every unheld name `state` shows that `children` does not nest, in body order."""
+    nested = {c["name"] for c in children}
+    return [n for n in state["unheld"] if n not in nested]
+
+
+def _resume_payload(parent_name: str, children: list[dict], removed: list[str]) -> dict:
+    """What a resume confirmation covers: the parent, each child with its revision, and the
+    names the resume removes from the parent's list."""
     return {
         "parent": parent_name,
         "children": [{"name": c["name"], "revision": c["revision"]} for c in children],
+        "removed": sorted(removed),
     }
 
 
@@ -916,11 +935,14 @@ def _drop_payload(state: dict, reason: str | None) -> dict:
     }
 
 
-def check_confirmation(spec: str, eligible: list[dict], parent_name: str | None, reasons: dict | None) -> str:
-    """The code `check` prints for its eligible set: the resume code with `parent_name`,
-    otherwise the nesting code (over `reasons` when given)."""
+def check_confirmation(
+    spec: str, eligible: list[dict], parent_name: str | None, reasons: dict | None, removed: list[str] = ()
+) -> str:
+    """The code `check` prints for its eligible set: the resume code with `parent_name`
+    (covering the `removed` names the resume drops from the parent's list), otherwise the
+    nesting code (over `reasons` when given)."""
     if parent_name is not None:
-        return confirm.code_for(RESUME_KIND, spec, _resume_payload(parent_name, eligible))
+        return confirm.code_for(RESUME_KIND, spec, _resume_payload(parent_name, eligible, list(removed)))
     return confirm.code_for(NEST_KIND, spec, _nest_payload(eligible, reasons))
 
 
@@ -1221,10 +1243,16 @@ def resume_parent(
     (the listed follow-ups it does not hold) and make it `ready` once every name it
     still lists is held. Raises ParentError for a refusal, before anything is written.
     Otherwise returns (report, reason-code, subjects): the code is None when the
-    parent is buildable. The confirmation code `typed` is checked before the first `lore` call."""
-    require_confirmation(RESUME_KIND, spec, _resume_payload(parent_name, children), typed)
-    names = [c["name"] for c in children]
+    parent is buildable. The confirmation code `typed` is checked after the parent is read
+    and before anything is written (a missing code is refused before the first `lore` call); it
+    covers the names removed from the list as the parent shows them now."""
+    if typed is None or not typed.strip():
+        raise ParentError("confirmation-missing")
     state, sidecar = _read_parent(runner, spec, parent_name)
+    require_confirmation(
+        RESUME_KIND, spec, _resume_payload(parent_name, children, resume_removals(state, children)), typed
+    )
+    names = [c["name"] for c in children]
     if state["status"] != "open":
         raise ParentError("parent-not-resumable", (parent_name,))
     _require_followup_shaped(parent_name, state, sidecar)
@@ -1252,7 +1280,7 @@ def resume_parent(
     remaining = [n for n in state["listed"] if n in held_names or n in names]
     if not remaining:
         raise ParentError("nothing-to-build", (parent_name,))
-    removed = [n for n in state["unheld"] if n not in names]
+    removed = resume_removals(state, children)
 
     report: dict = {"parent": parent_name, "removed": [], "nested": [], "failed": [], "buildable": False}
     reason = None
@@ -1347,10 +1375,13 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
                     raise ParentError("invalid-arguments")
                 if args.parent is None and not args.names:
                     raise ParentError("invalid-arguments")
-                result = check_followups(runner, args.spec_name, args.names, args.parent)
+                result, unheld = _check(runner, args.spec_name, args.names, args.parent)
                 eligible_names = [item["name"] for item in result["eligible"]]
                 reasons = None if args.reasons is None else load_reasons(args.reasons, eligible_names)
-                result["confirm"] = check_confirmation(args.spec_name, result["eligible"], args.parent, reasons)
+                removed = resume_removals({"unheld": unheld}, result["eligible"])
+                result["confirm"] = check_confirmation(
+                    args.spec_name, result["eligible"], args.parent, reasons, removed
+                )
             elif args.command == "state":
                 drop_reason = None if args.reason_file is None else load_reason(args.reason_file)
                 result = parent_state(runner, args.spec_name, args.parent)

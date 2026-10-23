@@ -2321,11 +2321,24 @@ def test_an_unmarked_task_is_refused_as_not_a_followup_parent_with_the_vault_unc
 # --- resume: finish an open parent --------------------------------------------------------------
 
 
+def resume_code(runner, spec_name, parent_name, children):
+    """The code `check --parent` prints for exactly these children, from the parent as it stands."""
+    removed = []
+    if isinstance(runner, EnvRunner):
+        try:
+            state = parent.parent_state(EnvRunner(runner.env), spec_name, parent_name)
+        except parent.ParentError:
+            state = None
+        if state is not None:
+            removed = parent.resume_removals(state, children)
+    return parent.check_confirmation(spec_name, children, parent_name, None, removed)
+
+
 def run_resume(runner, spec_name, parent_name, children, tmp_path, capsys, raw=None, typed="auto"):
     path = tmp_path / "resume-children.json"
     path.write_text(json.dumps(children) if raw is None else raw)
     if typed == "auto":
-        typed = parent.check_confirmation(spec_name, children, parent_name, None) if raw is None else None
+        typed = resume_code(runner, spec_name, parent_name, children) if raw is None else None
     argv = ["resume", spec_name, parent_name, "--children", str(path)] + (["--confirm", typed] if typed else [])
     code = parent.main(argv, runner=runner)
     out = capsys.readouterr()
@@ -3875,6 +3888,33 @@ def test_the_no_names_resume_code_is_specific_to_its_parent_and_to_the_children_
     _, one, _ = run_check_json(EnvRunner(env), spec, names[2], "--parent", parent_name, capsys=capsys)
     assert empty["confirm"] != parent.check_confirmation(spec, [], "another-parent", None)
     assert empty["confirm"] != one["confirm"]
+
+
+def test_the_resume_code_differs_when_the_names_the_resume_removes_from_the_list_differ():
+    children = [{"name": "kept", "revision": "r1"}]
+    none = parent.check_confirmation("s", children, "p", None, removed=[])
+    one = parent.check_confirmation("s", children, "p", None, removed=["gone-a"])
+    two = parent.check_confirmation("s", children, "p", None, removed=["gone-a", "gone-b"])
+    assert len({none, one, two}) == 3
+    assert one == parent.check_confirmation("s", children, "p", None, removed=["gone-a"])
+
+
+def test_resume_refuses_when_a_name_was_added_to_the_list_after_the_check(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=3)
+    code, checked, err = run_check_json(EnvRunner(env), spec, names[1], "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    late = make_followup(env, vault, "Added late", spec=spec)
+    listed = [{"name": n, "reason": "worth doing"} for n in [*names, late]]
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, stdin=parent.render_body(spec, listed))
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(
+        runner, spec, parent_name, revisions(env, vault, [names[1]]), tmp_path, capsys, typed=checked["confirm"]
+    )
+    assert code == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
 
 
 def test_check_without_the_parent_and_with_no_names_is_refused_as_invalid_arguments(lore_env, spec, capsys):
