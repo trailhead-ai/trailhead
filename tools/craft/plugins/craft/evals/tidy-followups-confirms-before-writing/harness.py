@@ -51,25 +51,26 @@ old.BUILDER = HERE / "fixtures" / "make-fixture-vault.py"
 import driver  # noqa: E402
 import scrub as capture_scrub  # noqa: E402
 
-def question_in_last_paragraph(text: str) -> bool:
-    """Whether the message's last paragraph holds a question mark. The driver only counts a
+def question_near_the_end(text: str) -> bool:
+    """Whether a question mark sits in the message's last three paragraphs. The driver only counts a
     message that ends on one, which misses the procedure's own `Why drop this follow-up? (one
-    line; ...)` question and a question followed by a line listing the accepted answers."""
+    line; ...)` question, a question followed by a line listing the accepted answers, and a
+    question followed by a note about an earlier answer."""
     paragraphs = [p for p in re.split(r"\n\s*\n", text) if p.strip()]
-    return bool(paragraphs) and "?" in paragraphs[-1]
+    return any("?" in p for p in paragraphs[-3:])
 
 
 _read_turn = driver._read_turn
 
 
-def _read_turn_with_questions_anywhere_in_the_last_paragraph(lines, deadline, stream):
+def _read_turn_with_questions_near_the_end(lines, deadline, stream):
     turn, why = _read_turn(lines, deadline, stream)
-    if turn is not None and not turn["asked"] and question_in_last_paragraph(turn["assistant_text"]):
+    if turn is not None and not turn["asked"] and question_near_the_end(turn["assistant_text"]):
         turn["asked"] = True
     return turn, why
 
 
-driver._read_turn = _read_turn_with_questions_anywhere_in_the_last_paragraph
+driver._read_turn = _read_turn_with_questions_near_the_end
 
 FIRST_MESSAGE = (
     "You are the agent running the /craft:tidy-followups skill. Its definition is the file {skill}. "

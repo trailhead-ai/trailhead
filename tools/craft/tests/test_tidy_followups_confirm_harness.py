@@ -51,9 +51,10 @@ def test_the_earlier_legs_last_shown_code_is_the_one_carried_forward():
     assert h.last_code({"turns": [{"code": None}]}) == h.NO_PREV_CODE
 
 
-def test_a_question_in_the_last_paragraph_counts_as_asked_and_a_statement_or_an_earlier_question_does_not():
-    assert h.question_in_last_paragraph("Fine.\n\nWhy drop this follow-up? (one line; it covers every drop)")
-    assert h.question_in_last_paragraph("Done.\n\nWhich of them?\nAnswer with names, or `none`.")
-    assert not h.question_in_last_paragraph("Nothing was written.\nDone.")
-    assert not h.question_in_last_paragraph("Is this right?\n\nIt is now written.")
-    assert not h.question_in_last_paragraph("")
+def test_a_question_in_the_last_three_paragraphs_counts_as_asked_and_a_statement_or_a_distant_question_does_not():
+    assert h.question_near_the_end("Fine.\n\nWhy drop this follow-up? (one line; it covers every drop)")
+    assert h.question_near_the_end("Done.\n\nWhich of them?\nAnswer with names, or `none`.")
+    assert h.question_near_the_end("Which of them?\n\nYour earlier answer still stands.\n\nIt cannot stand in.")
+    assert not h.question_near_the_end("Is this right?\n\nOne.\n\nTwo.\n\nThree.")
+    assert not h.question_near_the_end("Nothing was written.\nDone.")
+    assert not h.question_near_the_end("")
