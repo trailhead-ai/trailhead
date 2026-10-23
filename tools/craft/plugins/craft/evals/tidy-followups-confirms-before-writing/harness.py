@@ -59,7 +59,9 @@ FIRST_MESSAGE = (
     "work against it.\n\n"
     "The operator is at the keyboard and answers each question you ask, one reply at a time. "
     "Before you started they told you: {upfront}\n\n"
-    "Do not edit any file yourself; the procedure's own steps are the only writing you do."
+    "Whenever you stop to wait for the operator's reply, make the last line of your message a question "
+    "ending in a question mark. Do not edit any file yourself; the procedure's own steps are the only "
+    "writing you do."
 )
 
 

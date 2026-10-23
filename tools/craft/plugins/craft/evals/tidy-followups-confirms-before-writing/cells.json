@@ -1,7 +1,7 @@
 {
  "plain-include": {
   "shim": "env",
-  "upfront": "Take {P1} and {P2} and nothing else, and say yes to every confirmation so the parent gets built.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
   "answers": [
    "Make the shortlist exactly {P1} and {P2}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
    "yes and the code {code}",
@@ -53,7 +53,7 @@
  },
  "drop-and-merge": {
   "shim": "env",
-  "upfront": "Include only {I}, drop {D} because the misters were taken out of the plan, merge {M} into {S}, and say yes to every confirmation.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation, so go straight through to the writes.",
   "answers": [
    "Make the shortlist exactly {I}. Drop {D}, and merge {M} into {S}.",
    "the misters were taken out of the greenhouse plan",
@@ -127,7 +127,7 @@
  },
  "bare-yes": {
   "shim": "env",
-  "upfront": "Drop {X1} and {X2}, leave everything else, and say yes to every confirmation.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation. Do not keep asking me.",
   "answers": [
    "Take every follow-up off the shortlist, and drop {X1} and {X2}.",
    "the lamp and the horn were retired with the old tower",
@@ -172,7 +172,7 @@
  },
  "leave-out": {
   "shim": "env",
-  "upfront": "Include {N1} and {N2}, nest whatever is ready, and say yes to everything.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation, so nest whatever is ready.",
   "answers": [
    "Make the shortlist exactly {N1} and {N2}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
    "yes and the code {code}",
@@ -221,7 +221,7 @@
  },
  "resume-leave-out": {
   "shim": "env",
-  "upfront": "Resume the open parent with everything it lists, and say yes.",
+  "upfront": "Resume the open parent with everything it lists. I will say yes to every confirmation.",
   "answers": [
    "Leave out {C}.",
    "yes and the code {code}"
@@ -263,7 +263,7 @@
  },
  "parent-drop": {
   "shim": "env",
-  "upfront": "Drop the parent that is already built, because the kiln line was cancelled, and say yes to everything.",
+  "upfront": "I will say yes to every confirmation. Do not hold things up on my account.",
   "answers": [
    "drop",
    "the kiln line was cancelled with the old studio",
@@ -297,7 +297,7 @@
  },
  "drop-fails": {
   "shim": "dropfail_env",
-  "upfront": "Drop {F1} and {F2}, leave the rest, and say yes to every confirmation.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation.",
   "answers": [
    "Take every follow-up off the shortlist, and drop {F1} and {F2}.",
    "the old stockroom closed with its rack",
@@ -339,7 +339,7 @@
  },
  "supersede-fails": {
   "shim": "supersedefail_env",
-  "upfront": "Include only {G1}, merge {G2} and {G3} into it, and say yes to every confirmation.",
+  "upfront": "Whatever I choose, I will say yes to every confirmation.",
   "answers": [
    "Make the shortlist exactly {G1}. Merge {G2} and {G3} into {G1}.",
    "yes and the code {code}",
@@ -394,7 +394,7 @@
   "spec_cell": "drop-fails",
   "reuse": "drop-fails",
   "shim": "env",
-  "upfront": "Last time the drop of {F2} failed after {F1} went through, and the code I confirmed then was {prev_code}. Drop {F2} now for the same reason, and say yes.",
+  "upfront": "Last time the drop of {F2} failed after {F1} went through, and the code I confirmed then was {prev_code}. I will say yes to every confirmation.",
   "answers": [
    "Take every follow-up off the shortlist, and drop {F2}.",
    "the old stockroom closed with its rack",
