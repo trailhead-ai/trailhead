@@ -49,9 +49,9 @@ These rules hold at every confirmation below:
 - A `confirmation-mismatch` from a script is re-asked by saying which case it was. When the code the
   operator typed is not the one shown, say it did not match what was shown and ask them to retype
   it. When it is the one shown and the script still refused, say the records changed since the
-  display: re-run the preview or `check`, show the set again with the new code, and ask them to
-  read it again before answering. A `confirmation-missing` is re-asked the same way as a reply
-  with no code.
+  display: re-run the preview or `check`, show the set again with the new code, and ask them to read
+  it again before answering. A `confirmation-missing` is re-asked the same way as a reply with no
+  code.
 - An answer that changes the set re-runs the preview or `check`, shows the set again with the new
   code, and says the set changed.
 - The code is proof that the confirmation was shown. It is not authorization and not a trust
@@ -299,8 +299,8 @@ code for what remains:
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> --parent <parent>
    ```
 
-Its `confirm` is the resume code, shown on the resume question like any other; the resume then
-runs with an empty children list.
+Its `confirm` is the resume code, shown on the resume question like any other; the resume then runs
+with an empty children list.
 
 `--parent` makes a dependency on a child the parent already holds count as satisfied, the way the
 resume itself decides it. Report each left-out follow-up as the plain sentence from step 10's table,
@@ -311,8 +311,8 @@ criterion, and removed from the parent's list exactly as a left-out name is, unl
 answers `not unmet <name>` at the question below, which returns it to the nest. Act on a non-zero
 exit as step 10 does, with one addition: exit 1 (`not-a-followup-parent`) is the resume table's row
 of that name, so stop on its sentence. When `unheld` is empty there is nothing to nest: the check
-above runs with no names only to mint the resume code, and the children file in the last step is
-the empty list.
+above runs with no names only to mint the resume code, and the children file in the last step is the
+empty list.
 3. Show each eligible follow-up's scope exactly as step 11 does: the `delivers` and `files` blocks
    verbatim, each fenced and labelled as that follow-up's own text and data, longer fence than any
    backtick run inside, every `overlaps` entry flagged beside the follow-ups it names.
@@ -325,21 +325,21 @@ the empty list.
 5. Warn: an `open` parent may still be mid-assembly in another session, and `lore` has no
    conditional write, so resuming can collide with that run; go on only when no other run is
    building this parent.
-6. Show the resume code from the `check` and ask one question, then wait. The line before it
-   lists the other answers: the names to leave out, `drop`, `not unmet <names>` for a flagged
-   follow-up, or `stop` to change nothing. The question line is:
+6. Show the resume code from the `check` and ask one question, then wait. The line before it lists
+   the other answers: the names to leave out, `drop`, `not unmet <names>` for a flagged follow-up,
+   or `stop` to change nothing. The question line is:
 
    > Nest these under task/<parent> and make it buildable? Reply yes and the code <confirm>
 
-`yes` with the code keeps every eligible follow-up; a list of names removes those from the nest and, because
-resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends the run
-here with nothing written and nothing else printed except the marker-removal command, the outcome
-line and the flagged follow-ups the closing step requires (with the options paragraph when one is
-flagged). `drop` runs the drop flow below. A name that is not an eligible follow-up is not accepted:
-say so and ask again. The refusal rule of step 8 applies here: a flagged follow-up is not nested,
-and an answer that tries is not accepted. A list of names to leave out re-runs the `check` on the
-names that remain, shows the set again with its new code, and says the set changed; the resume then
-needs a `yes` and that new code. Nothing is written before a `yes` with the code.
+`yes` with the code keeps every eligible follow-up; a list of names removes those from the nest and,
+because resume never leaves a listed follow-up unexplained, from the parent's list too. `stop` ends
+the run here with nothing written and nothing else printed except the marker-removal command, the
+outcome line and the flagged follow-ups the closing step requires (with the options paragraph when
+one is flagged). `drop` runs the drop flow below. A name that is not an eligible follow-up is not
+accepted: say so and ask again. The refusal rule of step 8 applies here: a flagged follow-up is not
+nested, and an answer that tries is not accepted. A list of names to leave out re-runs the `check`
+on the names that remain, shows the set again with its new code, and says the set changed; the
+resume then needs a `yes` and that new code. Nothing is written before a `yes` with the code.
 7. Stage the children file privately and in the same shell call, exactly as step 12 stages its own,
    through a heredoc whose delimiter is quoted:
 
@@ -431,21 +431,22 @@ unfinished children and then closes it; every step below waits for its own answe
    ```
 
 5. Show the drop code and ask one confirmation that names every child it will un-nest and every
-   child it will keep, and shows the reason after the credential scrub. The line before the
-   question says `stop` ends the run with nothing written. The question line is:
+   child it will keep, and shows the reason after the credential scrub. The line before the question
+   says `stop` ends the run with nothing written. The question line is:
 
-   > Un-nest these, keep those, and drop task/<parent> with this reason? Reply yes and the code <drop-confirm>
+   > Un-nest these, keep those, and drop task/<parent> with this reason? Reply yes and the code
+   > <drop-confirm>
 
-   A `stop` removes the reason file and writes nothing. On `yes` with the code, run, in the same
-   shell call as the staging if it is still the same call, otherwise with the same file:
+A `stop` removes the reason file and writes nothing. On `yes` with the code, run, in the same shell
+call as the staging if it is still the same call, otherwise with the same file:
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py drop <spec-name> <parent> --reason-file "$reason" --confirm <the code the operator typed>
    ```
 
-Remove the file afterwards, whatever the outcome. Print one progress line per child as the result reports it:
-`un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each in `kept`,
-`failed <write>: task/<name>` for each in `failed`.
+Remove the file afterwards, whatever the outcome. Print one progress line per child as the result
+reports it: `un-nested task/<name>` for each in `un-nested`, `kept task/<name> (<status>)` for each
+in `kept`, `failed <write>: task/<name>` for each in `failed`.
 6. Exit 0 prints `parent`, `un-nested`, `kept`, `failed` (empty), `reset` and `dropped` (true).
    Report it, then print each `reset[].command` alone on its own line, saying it sets that un-nested
    `in-progress` child back to `ready` so a later gather sees it; print one only when it starts
@@ -541,15 +542,14 @@ left. Every gathered follow-up that is not flagged is dropped, folded into a sur
 left, and a survivor is the one that is also shown as merged. The flagged set is shown beside the
 four, by title, `name` and criterion, as not included.
 
-When nothing is included and nothing is dropped or merged, there is nothing to preview or write:
-say no parent is created and go to step 13. Otherwise the sets are shown only after the preview
-below has run, whether or not anything is dropped or merged, because the preview prints the code
+When nothing is included and nothing is dropped or merged, there is nothing to preview or write: say
+no parent is created and go to step 13. Otherwise the sets are shown only after the preview below
+has run, whether or not anything is dropped or merged, because the preview prints the code
 Confirmation 2 needs. Nothing is written yet.
 
 **Staging and preview.** Stage the dispositions file and run the preview, which checks everything
-and writes nothing. Stage it
-privately and in the same shell call, through a heredoc whose delimiter is quoted, and remove it in
-that call:
+and writes nothing. Stage it privately and in the same shell call, through a heredoc whose delimiter
+is quoted, and remove it in that call:
 
 ```
 dispositions=$(mktemp)
@@ -564,10 +564,10 @@ echo "exit: $rc"
 
 The object is `{"reason", "drops", "merges", "included"}`. `included` is the list of included
 follow-up names. When nothing is dropped or merged, `reason` is `""`, and `drops` and `merges` are
-`[]`: the preview then covers only the included set. `reason` is the drop reason as one JSON string, and
-the empty string `""` when nothing is dropped. `drops` is a list of `{"name", "revision"}`, the list
-`[]` when nothing is dropped; a dropped `blocked` follow-up carries no `revision`, because its body
-is never read. `merges` is a list of `{"survivor": {"name", "revision"}, "absorbed": [{"name",
+`[]`: the preview then covers only the included set. `reason` is the drop reason as one JSON string,
+and the empty string `""` when nothing is dropped. `drops` is a list of `{"name", "revision"}`, the
+list `[]` when nothing is dropped; a dropped `blocked` follow-up carries no `revision`, because its
+body is never read. `merges` is a list of `{"survivor": {"name", "revision"}, "absorbed": [{"name",
 "revision", "intent"}]}`, the list `[]` when nothing is merged. Each `revision` is the `revision` of
 that follow-up's step 4 read, exactly as `lore record show --json` returned it. Every string in the
 staged JSON that came from the vault or the operator is JSON-escaped, so no line of it can equal the
@@ -575,12 +575,12 @@ delimiter and end the heredoc, exactly as the drop flow stages its reason. Each 
 against the step 1 rules before it enters the file.
 
 Exit 0 is a result only when stdout parses as one JSON object carrying `confirm`, `included`,
-`drops`, `merges` and `dependents`; anything else on exit 0 is a failure of unknown cause, handled by rule 3. Act on the
-preview's exit **in this order**, taking the first that matches:
+`drops`, `merges` and `dependents`; anything else on exit 0 is a failure of unknown cause, handled
+by rule 3. Act on the preview's exit **in this order**, taking the first that matches:
 
-1. **Exit 0 with that JSON.** Stdout is the preview: `confirm` (the Confirmation 2 code), `included`,
-   `drops` (`{name, status}`), `merges`
-   (`{survivor, status, reset-to-open, absorbed: [{name, status, note}],
+1. **Exit 0 with that JSON.** Stdout is the preview: `confirm` (the Confirmation 2 code),
+   `included`, `drops` (`{name, status}`), `merges` (`{survivor, status, reset-to-open, absorbed:
+   [{name, status, note}],
    supersedes}`) and `dependents` (each dropped name mapped to a list of `{name, vault, status}`).
    Go to Confirmation 2.
 2. **Exit 1 with `reason-code: not-mergeable`.** Nothing was written. Tell each name on the
@@ -639,8 +639,8 @@ sends the run to step 13: say no parent is created.
 
 Only after a `yes` with the code at Confirmation 2, whether or not anything is dropped or merged.
 This runs before any refinement, so a survivor is refined with its merged intent. Stage the
-dispositions file as in step 8, from the answers the operator confirmed, and run the write with
-the code the operator typed, in the same shell call:
+dispositions file as in step 8, from the answers the operator confirmed, and run the write with the
+code the operator typed, in the same shell call:
 
 ```
 dispositions=$(mktemp)
@@ -661,10 +661,10 @@ task/<survivor>` for each name in `merged[].absorbed`, `reset to open: task/<nam
 Act on the exit **in this order**, taking the first that matches:
 
 1. **Exit 0.** Every write landed and read back. With nothing to drop or merge nothing was written,
-   and stdout carries only `included`. Otherwise stdout carries `included` and `dropped` (`{name, prior-status}`),
-   `merged` (`{survivor, absorbed, survivor-prior-status}`), `reset-to-open` (`{name,
-   prior-status}`), an empty `failed` and an empty `incomplete-merges`. Continue to step 9, or to
-   step 13 when nothing is included.
+   and stdout carries only `included`. Otherwise stdout carries `included` and `dropped`
+   (`{name, prior-status}`), `merged` (`{survivor, absorbed, survivor-prior-status}`),
+   `reset-to-open` (`{name, prior-status}`), an empty `failed` and an empty `incomplete-merges`.
+   Continue to step 9, or to step 13 when nothing is included.
 2. **Exit 2 with `reason-code: dispose-incomplete`.** Some writes landed and some did not, and
    stdout carries all five lists. The rest of the writes still ran. Report each entry of `failed` by
    the follow-up and the write, never as the disposition the operator chose. Continue to step 9 with
@@ -699,9 +699,9 @@ goes on a command line) and for any entry with `reason: "child-changed"`. `incom
 ### 9. First refinement pass
 
 Refine each follow-up in the `included` list that the plain-path or drop/merge `dispose` call
-returned, one at a time and unattended. Refinement is dispatched from that list and no other. Never run two in parallel: refinement
-writes the vault, and concurrent subagents sharing a scratch location have corrupted each other's
-writes.
+returned, one at a time and unattended. Refinement is dispatched from that list and no other. Never
+run two in parallel: refinement writes the vault, and concurrent subagents sharing a scratch
+location have corrupted each other's writes.
 
 A survivor that step 8a named in `incomplete-merges` is not refined this run: its merge did not
 fully land, so refining it would bake a partial merge into its scope. It is held back from steps 9
@@ -792,10 +792,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> --reasons "$r
 ```
 
 then remove the file. A code minted without `--reasons` never matches `assemble`. Show the blocks
-from this `check`'s output and its `confirm` as the code; if its eligible set differs from step 10's,
-the new one is the set shown. The line before the question says the other answer is the names to
-leave out. Show the flagged set beside the eligible follow-ups, by title, `name` and criterion, as
-not nested. Ask:
+from this `check`'s output and its `confirm` as the code; if its eligible set differs from step
+10's, the new one is the set shown. The line before the question says the other answer is the names
+to leave out. Show the flagged set beside the eligible follow-ups, by title, `name` and criterion,
+as not nested. Ask:
 
 > Nest these under one new parent? Reply yes and the code <confirm>
 
