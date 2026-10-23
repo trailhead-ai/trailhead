@@ -11,5 +11,6 @@ does not run it and the push gate does not gate it. It is listed in
 `_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, which is also where a
 case is removed once it is ported to a runner shape.
 
-This corpus is currently empty. That is an honest report, not a gap being hidden:
-no eval has been written for portage yet.
+The corpus's runner cases (`a-failing-eval-gate-stops-the-push`,
+`an-unrunnable-eval-gate-still-pushes-and-says-so`) are mapped to the prose they measure
+in this directory's `eval-gate.json`.

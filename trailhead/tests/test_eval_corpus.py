@@ -4,7 +4,7 @@
 an `expected.md` written before any arm runs, plus a non-empty `fixtures/` the run
 is pointed at. This suite pins that shape across every tool, so a case that would
 be unrunnable — or worse, one whose verdict was written after the fact and cannot
-be told apart from one that was not — is caught at commit time.
+be told apart from one that was not — fails the test suite and CI.
 
 **What this cannot check.** Whether a case is worth running, whether its fixture is
 contaminated by the prose's own worked example, and whether `expected.md` was

@@ -28,13 +28,16 @@ actually decide something. Eval cases run through the plugin eval runner,
    under a dollar. Copy the directory to `evals/<new-case-name>/` in the same
    corpus, rename it in `case.yaml`, and replace the prompt, the fixture and the
    graders. A case that does not need lore needs no scaffold at all; drop
-   `context.scaffold_script` and the `fixtures/` scripts.
+   `context.scaffold_script` and the `fixtures/` scripts, but `fixtures/` must stay
+   non-empty, because the corpus hygiene suite (`trailhead/tests/test_eval_corpus.py`)
+   requires it.
 3. **Write `expected.md` first**, and commit it alone before any run: what is under
    test, the conditions, the sample and bar, the pass condition, the limitations.
    See [Retained discipline](#retained-discipline).
 4. **Map the case to the prose it measures.** Add an entry to the corpus's
    `eval-gate.json` listing the plugin-relative paths `expected.md` names under
-   test. A case with no entry fails the corpus hygiene suite. The mapping, the
+   test. A case with no entry fails the portage eval-gate corpus test
+   (`tools/portage/tests/test_portage_eval_gate_corpora.py`). The mapping, the
    bar and the verdict are described in
    `tools/portage/plugins/portage/docs/eval-gate.md`.
 5. **Take the red baseline** on the prose as it stands before your change. See

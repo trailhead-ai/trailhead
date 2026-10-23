@@ -155,8 +155,9 @@ glob, which makes it the grader for a record whose name the agent picks.
 ### Running a batch
 
 ```sh
+export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # Linux only: outside /tmp, short path
 out=$(mktemp -d)
-env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   claude plugin eval tools/lore/plugins/lore --case '<glob>' --scaffold \
   --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
   --runs N --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd N \
@@ -168,7 +169,8 @@ What each flag does is in `docs/eval-protocol.md`, "Running a batch"; read its
 
 - `--json <path>` must end in `.json`. The result carries each run's `tracePath`
   but not the trace: the runner deletes the trace when the run ends. To read a
-  run's transcript, copy `/tmp/claude-eval-*/**/*.jsonl` while the run is still
+  run's transcript, copy `claude-eval-*/**/*.jsonl` from the runner's temp
+  directory (`$TMPDIR`, or `/tmp` when it is unset) while the run is still
   going.
 - Unsetting the lore and XDG overrides is belt and braces: the seeder already
   refuses an override that points outside `HOME`.
