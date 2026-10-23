@@ -4,11 +4,11 @@ one follow-up parent and those that must be left out, then nest the confirmed on
 under one new parent.
 
 Usage:
-    followup_parent.py check <spec-name> [--parent <parent>] <name>...
-    followup_parent.py assemble <spec-name> --children <json-file>
-    followup_parent.py resume <spec-name> <parent> --children <json-file>
-    followup_parent.py state <spec-name> <parent>
-    followup_parent.py drop <spec-name> <parent> --reason-file <path>
+    followup_parent.py check <spec-name> [--parent <parent>] [--reasons <json-file>] <name>...
+    followup_parent.py assemble <spec-name> --children <json-file> --confirm <code>
+    followup_parent.py resume <spec-name> <parent> --children <json-file> --confirm <code>
+    followup_parent.py state <spec-name> <parent> [--reason-file <path>]
+    followup_parent.py drop <spec-name> <parent> --reason-file <path> --confirm <code>
 
 `<spec-name>` is the bare name of a spec record and each `<name>` the bare name
 of a task record. Every name must match `^[A-Za-z0-9._/-]+$`, must not start
@@ -65,6 +65,17 @@ When several rules apply, the left-out reason is the first of: `is-a-parent`,
 `already-nested`, `routed-to-plan`, `routed-to-brainstorm`,
 `unresolved-question`, `not-ready`, `not-spec-linked`, `depends-outside`.
 
+`check` also prints `confirm`, a 4-character code (`followup_confirm`) over the eligible set
+as `(name, revision)` pairs. Without `--parent` it is the code `assemble` needs; with
+`--parent` it also covers the parent and is the code `resume` needs, so the two differ and
+a code minted for one never satisfies the other. `--reasons` is a JSON object mapping each
+eligible name to its selection reason (anything else, or a missing eligible name, is
+`invalid-reason-file`, exit 2); the code then also covers each reason as `assemble` renders
+it into the parent body (sanitized as below), so `assemble` refuses a reason that differs
+from the one shown. `--reasons` with `--parent` is `invalid-arguments`, since `resume`
+re-reads reasons from the parent. A name left out of the set means running `check` again
+on the remaining names and confirming the new code.
+
 Exit codes of `check`:
     0  the JSON object is on stdout.
     1  `--parent` names a record that is not a follow-up parent of the spec
@@ -77,6 +88,12 @@ Exit codes of `check`:
 operator saw, and the `revision` that `check` emitted and the operator confirmed.
 A file that is not that list (duplicate names included) is `invalid-children-file`;
 a name failing the shape check is `invalid-followup-name`.
+
+`assemble` needs `--confirm`: it recomputes the code from its children file (names,
+revisions and sanitized reasons) before the first `lore` call, so nothing is read or
+created on a refusal. No code, or a blank one, is `confirmation-missing`; a code the file
+does not yield is `confirmation-mismatch` (both exit 1, vault unchanged). The code proves
+the confirmation was displayed; it is not authorization.
 
 Before any write, `assemble` re-runs the eligibility check for every child, compares
 each child's current revision with the confirmed one, and looks for a live
@@ -195,6 +212,9 @@ the parent, nothing on stdout) unless the record is a task carrying
 lookup behind `followup_gather.py`'s `followup-parents`); a spec record named as the
 parent is refused the same way. Any lookup failure exits 2 with the existing reason
 codes. On exit 0 it prints one JSON object:
+- `drop-confirm`: the 4-character code `drop` needs, over the parent, each held child with
+  its status and the sanitized drop reason when `--reason-file` is given (the same file
+  `drop` is given; without it the code covers no reason and `drop` refuses it);
 - `parent`, `status`: the parent's bare name and status;
 - `listed`: the shape-checked names of the body's `### task/<name>` headings, in body
   order; `skipped` counts the headings whose name fails the shape check;
@@ -207,6 +227,10 @@ codes. On exit 0 it prints one JSON object:
 parent_name)` the `held` list, as importable functions.
 
 `drop` un-nests the unfinished children of a live follow-up parent and then drops it.
+It needs `--confirm`: after the refusals below and before the parent-status re-read and
+any write, it recomputes the code from its own fresh state read and its reason file, so a
+child whose status moved since the display, or a different reason, is
+`confirmation-mismatch`; no code is `confirmation-missing` (exit 1, nothing written).
 `--reason-file` is a regular, non-symlink file of at most MAX_REASON_FILE_BYTES holding
 one JSON string; anything else, or a reason empty once sanitized, is
 `invalid-reason-file` (exit 2, nothing written). The reason is folded to one line,
@@ -246,7 +270,10 @@ un-nest-then-drop implementation, an importable function: `drop` and `assemble`'
 concurrent-parent removal (which un-nests nothing) both run on it. `children` are bare
 names, un-nested in the order given; `note` is the paragraph written under `## Dropped`.
 
-`resume` finishes an `open` follow-up parent. `--children` is a JSON file holding a list,
+`resume` finishes an `open` follow-up parent. It needs `--confirm`, the code `check
+--parent <parent>` printed for exactly the file's children; it is recomputed from the
+parent argument and the children file before the first `lore` call, with the refusals
+`confirmation-missing` and `confirmation-mismatch` as for `assemble`. `--children` is a JSON file holding a list,
 possibly empty, of `{name, revision}`: the listed-but-unheld follow-ups the operator
 confirmed, each at the `revision` that `check` emitted (anything else, or a repeated name,
 is `invalid-children-file`; a name failing the shape check is `invalid-followup-name`).
@@ -291,7 +318,8 @@ the flip did not read back); `buildable`: true only on exit 0. A failure is `nes
 own code (`internal-error`, a `lore` failure code); running `resume` again completes it.
 
 `check_followups(runner, spec, names, parent=None)` is the same check as an importable
-function, returning the structure the JSON carries; `read_revision(runner,
+function, returning the structure the JSON carries without `confirm` (`check_confirmation`
+computes it; `drop_confirmation` computes `state`'s `drop-confirm`); `read_revision(runner,
 vault, name)` is the per-record revision read it uses.
 """
 
@@ -312,6 +340,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import followup_confirm as confirm  # noqa: E402
 import followup_gather as gather  # noqa: E402
 
 lore_runner = gather.lore_runner
@@ -351,6 +380,8 @@ REASON_CODES = frozenset(
         "nothing-to-build",
         "unlisted-child",
         "parent-not-followup-shaped",
+        "confirmation-missing",
+        "confirmation-mismatch",
     }
 )
 
@@ -367,6 +398,8 @@ REFUSAL_REASONS = frozenset(
         "nothing-to-build",
         "unlisted-child",
         "parent-not-followup-shaped",
+        "confirmation-missing",
+        "confirmation-mismatch",
     }
 )
 
@@ -397,6 +430,9 @@ _LISTING_HEADING_RE = re.compile(r"^### task/(.*?)[ \t]*$", re.MULTILINE)
 _HEADING_RE = re.compile(r"^#{1,6} ", re.MULTILINE)
 _SELECTION_REASON_RE = re.compile(r"^\*\*Selection reason:\*\*(.*?)(?:\n[ \t]*\n|\Z)", re.MULTILINE | re.DOTALL)
 MAX_STATUS_CHARS = 40
+NEST_KIND = "nest-followups"
+RESUME_KIND = "resume-followup-parent"
+DROP_KIND = "drop-followup-parent"
 MAX_REASON_FILE_BYTES = 4096
 MAX_CHILDREN_FILE_BYTES = 65536
 _MARKDOWN_ACTIVE = str.maketrans("", "", "[]<>`!")
@@ -845,10 +881,80 @@ def un_nest_and_drop(runner, vault: str, parent_name: str, children: list[str], 
     return report
 
 
-def assemble(runner, spec: str, children: list[dict], today: datetime.date) -> tuple[dict, str | None, tuple]:
+def _nest_payload(children: list[dict], reasons: dict[str, str] | None) -> dict:
+    """What a nesting confirmation covers: each child's name and confirmed revision, and,
+    when `reasons` are given, the selection reason as it is rendered into the parent body."""
+    return {
+        "children": [
+            {
+                "name": c["name"],
+                "revision": c["revision"],
+                **({} if reasons is None else {"reason": _reason_text(reasons[c["name"]])}),
+            }
+            for c in children
+        ]
+    }
+
+
+def _resume_payload(parent_name: str, children: list[dict]) -> dict:
+    """What a resume confirmation covers: the parent and each child with its revision."""
+    return {
+        "parent": parent_name,
+        "children": [{"name": c["name"], "revision": c["revision"]} for c in children],
+    }
+
+
+def _drop_payload(state: dict, reason: str | None) -> dict:
+    """What a parent-drop confirmation covers: the parent, each child it holds with its
+    status, and the sanitized drop reason."""
+    return {
+        "parent": state["parent"],
+        "held": [{"name": item["name"], "status": item["status"]} for item in state["held"]],
+        "reason": reason,
+    }
+
+
+def check_confirmation(spec: str, eligible: list[dict], parent_name: str | None, reasons: dict | None) -> str:
+    """The code `check` prints for its eligible set: the resume code with `parent_name`,
+    otherwise the nesting code (over `reasons` when given)."""
+    if parent_name is not None:
+        return confirm.code_for(RESUME_KIND, spec, _resume_payload(parent_name, eligible))
+    return confirm.code_for(NEST_KIND, spec, _nest_payload(eligible, reasons))
+
+
+def drop_confirmation(spec: str, state: dict, reason: str | None) -> str:
+    """The code `state` prints for dropping the parent it describes, over `reason`."""
+    return confirm.code_for(DROP_KIND, spec, _drop_payload(state, reason))
+
+
+def require_confirmation(kind: str, spec: str, payload: dict, typed: str | None) -> None:
+    """Raise `confirmation-missing` when no code was typed, `confirmation-mismatch` when
+    the code is not the one `payload` yields."""
+    if typed is None or not typed.strip():
+        raise ParentError("confirmation-missing")
+    if not confirm.matches(kind, spec, payload, typed):
+        raise ParentError("confirmation-mismatch")
+
+
+def load_reasons(path: str, names: list[str]) -> dict[str, str]:
+    """The reasons file: a JSON object holding a string reason for each of `names`."""
+    invalid = ParentError("invalid-reason-file")
+    doc = _read_json_file(path, MAX_CHILDREN_FILE_BYTES, invalid)
+    if not isinstance(doc, dict) or not all(isinstance(doc.get(n), str) for n in names):
+        raise invalid
+    return {n: doc[n] for n in names}
+
+
+def assemble(
+    runner, spec: str, children: list[dict], today: datetime.date, typed: str | None = None
+) -> tuple[dict, str | None, tuple]:
     """Nest the confirmed children under one new follow-up parent. Raises ParentError
-    for a refusal or a failed create, before anything is written. Otherwise returns
+    for a refusal or a failed create, before anything is written (the confirmation
+    code `typed` is checked before the first `lore` call). Otherwise returns
     (report, reason, subjects): `reason` is None when the parent is buildable."""
+    require_confirmation(
+        NEST_KIND, spec, _nest_payload(children, {c["name"]: c["reason"] for c in children}), typed
+    )
     names = [c["name"] for c in children]
     result = check_followups(runner, spec, names)
     current = {item["name"]: item["revision"] for item in result["eligible"]}
@@ -1046,7 +1152,9 @@ def load_reason(path: str) -> str:
     return reason
 
 
-def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict, str | None, tuple]:
+def drop_parent(
+    runner, spec: str, parent_name: str, reason: str, typed: str | None = None
+) -> tuple[dict, str | None, tuple]:
     """Un-nest every unfinished child of the live follow-up parent `parent_name`,
     then drop it with the sanitized `reason`. Raises ParentError for a refusal, before
     anything is written. Otherwise returns (report, reason-code, subjects): the code is
@@ -1057,6 +1165,7 @@ def drop_parent(runner, spec: str, parent_name: str, reason: str) -> tuple[dict,
     _require_followup_shaped(parent_name, state, sidecar)
     if state["unlisted"]:
         raise ParentError("unlisted-child", tuple(state["unlisted"]))
+    require_confirmation(DROP_KIND, spec, _drop_payload(state, reason), typed)
     vault, _ = gather.resolve_spec(runner, spec)
     current = _status(_read_task(runner, vault, parent_name)[0])
     if current != state["status"]:
@@ -1103,12 +1212,15 @@ def listed_reasons(body: str) -> dict[str, str]:
     return reasons
 
 
-def resume_parent(runner, spec: str, parent_name: str, children: list[dict]) -> tuple[dict, str | None, tuple]:
+def resume_parent(
+    runner, spec: str, parent_name: str, children: list[dict], typed: str | None = None
+) -> tuple[dict, str | None, tuple]:
     """Finish the `open` follow-up parent `parent_name`: nest the confirmed `children`
     (the listed follow-ups it does not hold) and make it `ready` once every name it
     still lists is held. Raises ParentError for a refusal, before anything is written.
     Otherwise returns (report, reason-code, subjects): the code is None when the
-    parent is buildable."""
+    parent is buildable. The confirmation code `typed` is checked before the first `lore` call."""
+    require_confirmation(RESUME_KIND, spec, _resume_payload(parent_name, children), typed)
     names = [c["name"] for c in children]
     state, sidecar = _read_parent(runner, spec, parent_name)
     if state["status"] != "open":
@@ -1202,49 +1314,63 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         check.add_argument(
             "--parent", help="bare name of a follow-up parent whose held children count as inside the set"
         )
+        check.add_argument(
+            "--reasons", help="JSON file: selection reason by follow-up name; the printed code then covers them"
+        )
         build = commands.add_parser("assemble", help="nest confirmed follow-ups under one new parent")
         build.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         build.add_argument("--children", required=True, help="JSON file: a list of {name, reason, revision}")
+        build.add_argument("--confirm", help="the code `check` printed; required")
         state = commands.add_parser("state", help="report what a follow-up parent lists and holds")
         state.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         state.add_argument("parent", help="bare name of the follow-up parent task")
+        state.add_argument("--reason-file", help="JSON file holding the drop reason; the drop code then covers it")
         drop = commands.add_parser("drop", help="un-nest a parent's unfinished children, then drop it")
         drop.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         drop.add_argument("parent", help="bare name of the follow-up parent task")
         drop.add_argument("--reason-file", required=True, help="JSON file holding one string: why it is dropped")
+        drop.add_argument("--confirm", help="the code `state` printed; required")
         resume = commands.add_parser("resume", help="finish an open follow-up parent")
         resume.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         resume.add_argument("parent", help="bare name of the follow-up parent task")
         resume.add_argument("--children", required=True, help="JSON file: a list of {name, revision}")
+        resume.add_argument("--confirm", help="the code `check --parent` printed; required")
         runner = runner or lore_runner
         reason = None
         subjects: tuple = ()
         try:
             args = parser.parse_args(argv)
             if args.command == "check":
+                if args.parent is not None and args.reasons is not None:
+                    raise ParentError("invalid-arguments")
                 result = check_followups(runner, args.spec_name, args.names, args.parent)
+                eligible_names = [item["name"] for item in result["eligible"]]
+                reasons = None if args.reasons is None else load_reasons(args.reasons, eligible_names)
+                result["confirm"] = check_confirmation(args.spec_name, result["eligible"], args.parent, reasons)
             elif args.command == "state":
+                drop_reason = None if args.reason_file is None else load_reason(args.reason_file)
                 result = parent_state(runner, args.spec_name, args.parent)
+                result["drop-confirm"] = drop_confirmation(args.spec_name, result, drop_reason)
             elif args.command == "resume":
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
                 if not gather._shape_ok(args.parent):
                     raise ParentError("invalid-followup-name")
                 files = load_resume_children(args.children)
-                result, reason, subjects = resume_parent(runner, args.spec_name, args.parent, files)
+                result, reason, subjects = resume_parent(runner, args.spec_name, args.parent, files, args.confirm)
             elif args.command == "drop":
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
                 if not gather._shape_ok(args.parent):
                     raise ParentError("invalid-followup-name")
                 note = load_reason(args.reason_file)
-                result, reason, subjects = drop_parent(runner, args.spec_name, args.parent, note)
+                result, reason, subjects = drop_parent(runner, args.spec_name, args.parent, note, args.confirm)
             else:
                 if not gather._shape_ok(args.spec_name):
                     raise ParentError("invalid-spec-name")
                 children = load_children(args.children)
                 result, reason, subjects = assemble(
-                    runner, args.spec_name, children, today or datetime.date.today()
+                    runner, args.spec_name, children, today or datetime.date.today(), args.confirm
                 )
         except ParentError as err:
             return _refuse(1 if err.reason in REFUSAL_REASONS else 2, err.reason, err.subjects, err.state_unknown)
