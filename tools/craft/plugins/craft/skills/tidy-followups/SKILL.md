@@ -434,11 +434,11 @@ unfinished children and then closes it; every step below waits for its own answe
    child it will keep, and shows the reason after the credential scrub. The line before the question
    says `stop` ends the run with nothing written. The question line is:
 
-   > Un-nest these, keep those, and drop task/<parent> with this reason? Reply yes and the code
-   > <drop-confirm>
+   > Un-nest these, keep those, and drop task/<parent> with this reason?\
+   > Reply yes and the code <drop-confirm>
 
-A `stop` removes the reason file and writes nothing. On `yes` with the code, run, in the same shell
-call as the staging if it is still the same call, otherwise with the same file:
+   A `stop` removes the reason file and writes nothing. On `yes` with the code, run, in the same
+   shell call as the staging if it is still the same call, otherwise with the same file:
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py drop <spec-name> <parent> --reason-file "$reason" --confirm <the code the operator typed>
