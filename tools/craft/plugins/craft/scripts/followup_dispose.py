@@ -19,9 +19,11 @@ The dispositions file is one JSON object, read through `followup_parent._read_js
 `merges` and `included` may be absent or empty, and drops and merges may both be empty (the
 confirmation then carries only the included set). `included` names the follow-ups the
 operator kept for refinement: unique, each a well-formed name, not checked against the vault.
+An included name may be a merge survivor but not a dropped or absorbed follow-up.
 It is `invalid-dispositions-file` (exit 2, nothing
 written) when the shape is wrong, a name appears twice anywhere (drops and merges
-together, a survivor among its own absorbed included), a revision is not a non-empty
+together, a survivor among its own absorbed included), an included name is also dropped or
+absorbed, a revision is not a non-empty
 string, a merge has no absorbed follow-up or lacks a survivor/absorbed revision, an
 `intent` is missing or is empty once sanitized (`followup_parent._reason_text`: one line,
 credentials redacted, markdown link/image/HTML/code characters and lone surrogates removed), or drops are
@@ -257,6 +259,11 @@ def load_dispositions(path: str) -> dict:
         names.append(group["survivor"]["name"])
         names.extend(member["name"] for member in group["absorbed"])
     if len(set(names)) != len(names):
+        raise invalid
+    removed = {item["name"] for item in cleaned}
+    for group in groups:
+        removed.update(member["name"] for member in group["absorbed"])
+    if removed & set(included):
         raise invalid
     if not all(gather._shape_ok(name) for name in names + included):
         raise DisposeError("invalid-followup-name")

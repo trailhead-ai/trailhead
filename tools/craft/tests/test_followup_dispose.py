@@ -1855,3 +1855,33 @@ def test_a_code_from_a_merge_that_differs_in_what_it_would_write_is_confirmation
     code, _, err = run_dispose(runner, spec, tmp_path, capsys, sent, confirm=preview["confirm"])
     assert (code, reason_of(err)) == (1, "confirmation-mismatch")
     assert runner.writes() == []
+
+
+def test_an_included_name_that_is_also_dropped_is_refused_before_any_lore_call(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    doc = {**file_for(env, vault, pile[:1]), "included": [pile[0]]}
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert (code, reason_of(err)) == (2, "invalid-dispositions-file")
+    assert runner.calls == []
+
+
+def test_an_included_name_that_is_also_absorbed_is_refused_before_any_lore_call(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    doc = {**merge_doc(env, vault, [(trio[0], [trio[1]])]), "included": [trio[1]]}
+    code, _, err = run_dispose(runner, spec, tmp_path, capsys, doc, preview=True)
+    assert (code, reason_of(err)) == (2, "invalid-dispositions-file")
+    assert runner.calls == []
+
+
+def test_a_merge_survivor_may_stay_included(lore_env, spec, trio, tmp_path, capsys):
+    env, vault = lore_env
+    doc = {**merge_doc(env, vault, [(trio[0], [trio[1]])]), "included": [trio[0]]}
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
+    assert code == 0, err
+    assert out["included"] == [trio[0]]
