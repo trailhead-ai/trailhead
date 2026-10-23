@@ -3777,7 +3777,7 @@ graded lines and end state), `harness.py` (dispatch), `grade_confirm.py` (the gr
 the tree diff and a summary for each of 27 runs). Its driver and scrub are `tidy-followups-builds-one-parent/`'s (`driver.py`, `scrub.py`), unchanged.
 
 **Under test:** `skills/tidy-followups/SKILL.md` and the craft scripts as of `21f61765` (the confirmation code on `dispose`, `assemble`, `resume` and `drop`). **Treatment:**
-that tree, snapshotted from `c0580b24620977ad8172a1f53a7b1340767685a4` (identical in `skills/` and `scripts/` to `21f61765`; every later commit touches only `evals/` and tests) for 14 of the 18 treatment runs. The 4 `drop-and-merge` and `parent-drop` treatment runs were re-run after `36a45254` (the write report carries `included`), `a6bb6e48` (SKILL.md reflowed) and `c7000495` (the parent-drop question is two lines), snapshotted from `c7000495d409556a1f3daf3a918418b85febb8c1`; they replace the first four.
+that tree, snapshotted from `c0580b24620977ad8172a1f53a7b1340767685a4` (identical in `skills/` and `scripts/` to `21f61765`; every later commit touches only `evals/` and tests) for 14 of the 18 treatment runs. The 2 `drop-and-merge` treatment runs were re-run after `36a45254` (the write report carries `included`) and `a6bb6e48` (SKILL.md reflowed), snapshotted from `c7000495d409556a1f3daf3a918418b85febb8c1`; the 2 `parent-drop` treatment runs were re-run twice, last after `749337b7` (the drop question keeps `reason?` and its code on one line), snapshotted from `749337b75379c41ae6726922f52dbdea6d6e2c31`. Each replaces the earlier pair.
 **Baseline:** the tree at `23b0811b1fe9dc386d1728746b87edc3631cdb81`, the merge base of this branch: the skill and scripts before any confirmation code, taken through the
 shared harness's `BASE_SHA` snapshot. **Pre-registration:** `expected.md` committed alone as `60bd4814`.
 
@@ -3827,7 +3827,7 @@ Lines are those of `expected.md`. `display shown` is whether any code-bearing qu
 | `bare-yes` | FAIL W1,W2,R1,R2,S2 (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
 | `leave-out` | FAIL W1,W2,R1,R3,S2,S3,M1 (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
 | `resume-leave-out` | FAIL W1,W2,R3,S3,E (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
-| `parent-drop` | FAIL W1,W2 (display shown: no) | **FAIL W1,W2,E (display shown: no)** | all pass (display shown: yes) |
+| `parent-drop` | FAIL W1,W2 (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
 | `drop-fails` | FAIL W1,W2,S2,M1,F1,E (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
 | `supersede-fails` | FAIL W1,W2,R1,S2,M1 (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
 | `retry-after-failure` | FAIL W1,W2,R2,R3,S2 (display shown: no) | all pass (display shown: yes) | all pass (display shown: yes) |
@@ -3837,20 +3837,19 @@ the same vault end state (`E` passes in `plain-include`, `drop-and-merge`, `bare
 `resume-leave-out` it ran `resume` in its first turn with no question at all (the operator's `leave out C` arrived too late and `C` was nested). Its `drop-fails` run asked
 four questions, never ran `dispose`, and ended with the answers spent.
 
-**Treatment: every display line passed in 17 of 18 runs.** The exception is `parent-drop` treatment r1, a real failure that the skill's new two-line question shape causes (below).
+**Treatment: every line that applies passed in all 18 runs.**
 
 **`drop-and-merge` (resolved by re-run).** In the first two treatment runs `followup_dispose.py`'s write report on the drop/merge path carried no `included` list, so the arm correctly refused to refine and `S3` and `E` failed.
 After `36a45254` the report carries `included` (real-scripts check: code missing exit 1 `confirmation-missing`, code stale exit 1 `confirmation-mismatch`, vault unchanged both times; code given exit 0 with keys
 `dropped`, `failed`, `included`, `incomplete-merges`, `merged`, `reset-to-open` and `included` equal to the one included follow-up). Both re-runs (`runs/drop-and-merge-treat-r1.grade.json`, `-r2`) pass every line: the
 included follow-up was refined after the confirmed `dispose` (`R1`), each eligible follow-up's `delivers` and `files` were shown before `assemble` (`S3`), and the vault ends with the follow-up nested under one new `ready` parent (`E`).
 
-**`parent-drop` treatment r1 fails; r2 passes.** The skill now writes the drop question as two lines joined by a hard break, with "Reply yes and the code <drop-confirm>" on the second line. `driver.QUESTION_CODE`
-needs the question mark and `the code` on one line, so a run that follows the skill's shape shows the code but is not counted as having shown it: in r1 (`runs/parent-drop-treat-r1.transcript.json`, turns 3 and 4)
-the arm ended "...with this reason?" and, on the next line, "Reply yes and the code 66y4"; `display_shown` was false, `{code}` was filled with the empty string, the reply was "yes and the code ", the arm correctly refused to
-write, asked again in the same shape, and the answers ran out. `W1`, `W2` fail (no guarded write ran) and `E` fails (the parent stayed `ready`). In r2 the arm put the question and the code on one line, matched, and the drop ran.
-The arm behaved correctly in both; the mismatch is between the skill's line shape and the driver's pattern. This is not fixed here (SKILL.md and `driver.py` are not this task's); it needs a decision on which side moves.
+**`parent-drop` (resolved by re-run).** An intermediate skill text wrote the drop question as two lines, with "Reply yes and the code <drop-confirm>" on the second. `driver.QUESTION_CODE` needs the `?` and `the code` on one line, so in
+one of two runs at that text the arm showed the code but was not counted as having shown it, sent "yes and the code " with an empty code, and the run ended with no write (it failed `W1`, `W2` and `E`; that capture is replaced). After `749337b7` the question
+keeps `reason?` and its code on one line, the same shape as the other confirmation questions. Both treatment runs (`runs/parent-drop-treat-r1.grade.json`, `-r2`) matched `QUESTION_CODE` at turn 3 (code `66y4`), the operator typed it,
+`drop` ran with it in turn 4 and exited 0, the parent ended `dropped` with its `done` child still held and its unfinished child un-nested, and every line passes.
 
-**Run-to-run differences.** One: `parent-drop` (above). In every other cell the same lines passed and failed in treatment r1 and r2, with the same turn count and the same number of displays. The
+**Run-to-run differences.** None in any graded line: the same lines passed and failed in treatment r1 and r2 of every cell, with the same turn count and the same number of displays. The
 codes differ where a refinement rewrote a body (`plain-include`'s Confirmation 3 code, `leave-out`'s Confirmation 3 codes) and match elsewhere, as the codes are deterministic for an unchanged set.
 Wall time varied (`leave-out` 143 to 261 s).
 
@@ -3866,7 +3865,7 @@ untouched. The new cells re-observe their write paths: drop and merge (`drops-an
 
 **Findings beyond the pass condition.**
 - `drop-and-merge` (above): a defect in the script's write result, found only because the arm ran the whole path under real turns; fixed in `36a45254` and re-run.
-- `parent-drop` (above): the skill's two-line drop question is not matched by the driver's `QUESTION_CODE`.
+- `parent-drop` (above): a two-line drop question, which the driver's `QUESTION_CODE` cannot match, was found and then changed to one line in `749337b7`.
 - The driver (`driver.py`, unchanged) counts a turn as a question only when its text ends on a question mark or carries a code line. The skill's own `Why drop this follow-up? (one line; ...)` question, and a
   question followed by a line of accepted answers or a note about an earlier answer, ended probe runs with replies unsent. The wrapper counts a question mark in the last three paragraphs as a question; the driver is the
   better place for that rule.
@@ -3878,7 +3877,7 @@ untouched. The new cells re-observe their write paths: drop and merge (`drops-an
 HEAD (`G3`). `capture_scan.py` exits 0 on this case's `runs/` (0 credential findings, 9 known-safe `path-or-url-shape` lines in streams) and `scripts/leak-gate` exits 0 on the case directory before the capture commit.
 The scrub is applied per JSON value in each stream line, so every stored stream line is valid JSON.
 
-**Cost and time.** The 27 graded runs: $18.72 and 2,779 s of arm time (treatment $12.87, baseline $5.84). The four superseded `drop-and-merge` and `parent-drop` runs cost about $2.35 more and are not kept.
+**Cost and time.** The 27 graded runs: $18.74 and 2,799 s of arm time (treatment $12.90, baseline $5.84). Superseded `drop-and-merge` and `parent-drop` runs are not kept.
 
 **Limitations.** Two treatment runs per cell, one baseline. The operator is scripted, so a reply is positional: an arm that asks in another order would misalign the replies (none did in the graded batch; every run
 used all its replies or ended with an unsent one the cell's last step does not reach). A code is proof of display, not authorization: nothing here shows an arm that copies a code out of script output without
