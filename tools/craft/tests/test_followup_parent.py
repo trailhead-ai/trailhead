@@ -2041,6 +2041,26 @@ def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
     assert [a[2] for a in runner.calls if is_unnest(a)] == [f"task/{n}" for n in names]
 
 
+def test_a_lone_surrogate_in_a_drop_reason_is_stripped_and_the_drop_completes(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_drop(
+        EnvRunner(env), spec, parent_name, tmp_path, capsys, reason="plans\ud800 changed"
+    )
+    assert code == 0, err
+    assert out["dropped"] is True and out["un-nested"] == names and out["failed"] == []
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+    assert dropped_section(body_of(env, vault, parent_name)).strip() == "Reason: plans changed"
+
+
+def test_a_lone_surrogate_in_a_selection_reason_is_stripped_from_the_rendered_body():
+    body = parent.render_body("s", [{"name": "a", "reason": "keep\udc80 this"}])
+    assert "**Selection reason:** keep this\n" in body
+    body.encode("utf-8")
+
+
 def test_a_done_child_stays_nested_and_an_in_progress_child_is_un_nested(
     lore_env, spec, capsys, tmp_path
 ):

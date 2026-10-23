@@ -198,12 +198,6 @@ class _Parser(argparse.ArgumentParser):
         raise DisposeError("invalid-arguments")
 
 
-def _strip_surrogates(text: str) -> str:
-    """`text` without lone UTF-16 surrogates, which `sanitize_text` lets through and which
-    no UTF-8 stream can carry to `lore`."""
-    return "".join(ch for ch in text if not 0xD800 <= ord(ch) <= 0xDFFF)
-
-
 def _member(item, invalid) -> dict:
     """`{name, revision}` of a drop or merge member: `name` a string, `revision` absent or a
     non-empty string."""
@@ -228,7 +222,7 @@ def _merge_group(group, invalid) -> dict:
         intent = item.get("intent")
         if member["revision"] is None or not isinstance(intent, str):
             raise invalid
-        member["intent"] = parent._reason_text(_strip_surrogates(intent))
+        member["intent"] = parent._reason_text(intent)
         if not member["intent"]:
             raise invalid
         members.append(member)
@@ -267,7 +261,7 @@ def load_dispositions(path: str) -> dict:
         raise invalid
     if not all(gather._shape_ok(name) for name in names + included):
         raise DisposeError("invalid-followup-name")
-    reason = parent._one_line(_strip_surrogates(doc["reason"]), parent.MAX_REASON_CHARS)
+    reason = parent._one_line(doc["reason"], parent.MAX_REASON_CHARS)
     if cleaned and not reason:
         raise invalid
     return {

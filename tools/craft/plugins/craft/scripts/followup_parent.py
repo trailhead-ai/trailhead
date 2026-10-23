@@ -507,9 +507,16 @@ def _field(body: str, label: str) -> str:
     return match.group(1) if match else ""
 
 
+def strip_surrogates(text: str) -> str:
+    """`text` without lone UTF-16 surrogates, which `sanitize_text` lets through and which
+    no UTF-8 stream can carry to `lore`."""
+    return "".join(ch for ch in text if not 0xD800 <= ord(ch) <= 0xDFFF)
+
+
 def _one_line(text: str, limit: int) -> str:
-    """`text` folded onto one line, then sanitized and cut to `limit` characters."""
-    return gather.sanitize_text(" ".join(text.split()), limit)
+    """`text` without lone surrogates, folded onto one line, then sanitized and cut to
+    `limit` characters."""
+    return gather.sanitize_text(" ".join(strip_surrogates(text).split()), limit)
 
 
 def _reason_text(reason: str) -> str:
@@ -1163,8 +1170,8 @@ def _require_followup_shaped(parent_name: str, state: dict, sidecar: dict) -> No
 
 def load_reason(path: str) -> str:
     """The drop reason: the one JSON string in the regular, non-symlink file at
-    `path`, at most MAX_REASON_FILE_BYTES long, sanitized to one line and cut to
-    MAX_REASON_CHARS. A file that is anything else, or whose reason is empty once
+    `path`, at most MAX_REASON_FILE_BYTES long, with lone surrogates removed, sanitized to
+    one line and cut to MAX_REASON_CHARS. A file that is anything else, or whose reason is empty once
     sanitized, is `invalid-reason-file`."""
     invalid = ParentError("invalid-reason-file")
     doc = _read_json_file(path, MAX_REASON_FILE_BYTES, invalid)
