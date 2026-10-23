@@ -356,3 +356,64 @@ def test_end_state_picks_the_existing_parent_that_holds_the_expected_follow_up_a
     expect = {"followups": {"P1": {"status": "ready", "nested": True}},
               "parent": {"status": "ready", "holds": ["P1"], "new": False}}
     assert g.end_state(expect, both, NAMES) == []
+
+
+def test_r2_fails_on_its_own_when_the_turn_after_a_wrong_code_does_not_show_the_confirmation_again():
+    shown_again = Run().text(question("k7q2")).end("yes and the code zzzz").text(question("k7q2")).end()
+    not_shown = Run().text(question("k7q2")).end("yes and the code zzzz").text("Got it.").end()
+    assert shown_again.line({}, "R2")["pass"] is True
+    line = not_shown.line({}, "R2")
+    assert line["pass"] is False
+    assert "the confirmation was not shown again" in line["detail"]
+
+
+RESUME_RECORDS = {
+    "par": {"status": "ready", "parent": None, "labels": ["craft/followup-parent"], "touched": True,
+            "new": False, "listed": ["a", "b"]},
+    "a": {"status": "ready", "parent": "par", "labels": [], "touched": False, "new": False},
+    "b": {"status": "ready", "parent": "par", "labels": [], "touched": True, "new": False},
+    "c": {"status": "ready", "parent": None, "labels": [], "touched": False, "new": False},
+}
+RESUME_NAMES = {"A": "a", "B": "b", "C": "c"}
+RESUME_EXPECT = {"followups": {"B": {"nested": True}, "C": {"nested": False}}, "unlisted": ["C"]}
+
+
+def test_end_state_needs_the_left_out_follow_up_gone_from_the_parents_list():
+    assert g.end_state(RESUME_EXPECT, RESUME_RECORDS, RESUME_NAMES) == []
+    still = {**RESUME_RECORDS, "par": {**RESUME_RECORDS["par"], "listed": ["a", "b", "c"]}}
+    assert "C: still listed in the parent" in g.end_state(RESUME_EXPECT, still, RESUME_NAMES)
+
+
+def test_end_state_reads_the_resume_result_when_the_parents_list_was_not_recorded():
+    bare = {k: {kk: vv for kk, vv in v.items() if kk != "listed"} for k, v in RESUME_RECORDS.items()}
+
+    def resumed(removed):
+        return g.parse_stream(
+            Run().bash("followup_parent.py resume s par --children c --confirm k7q2",
+                       json.dumps({"removed": removed, "nested": ["b"], "failed": []})).events)
+
+    assert g.end_state(RESUME_EXPECT, bare, RESUME_NAMES, items=resumed(["c"])) == []
+    assert g.end_state(RESUME_EXPECT, bare, RESUME_NAMES, items=resumed([]))
+
+
+def test_end_state_flags_a_distill_or_build_command_printed_after_a_failed_drop():
+    expect = {"followups": {}, "no_commands": ["/craft:distill", "/craft:execute"]}
+
+    def printed(text):
+        return g.parse_stream(Run().text(text).end().events)
+
+    assert g.end_state(expect, {}, {}, items=printed("Re-run:\n/craft:tidy-followups spec/x")) == []
+    assert g.end_state(expect, {}, {}, items=printed("Next:\n```\n/craft:distill spec/x\n```"))
+    assert g.end_state(expect, {}, {}, items=printed("/craft:execute task/p"))
+
+
+def test_end_state_flags_an_agent_a_check_or_an_assemble_after_a_held_back_merge():
+    expect = {"followups": {}, "no_calls": ["Agent", "check", "assemble"]}
+
+    def ran(run):
+        return g.parse_stream(run.events)
+
+    assert g.end_state(expect, {}, {}, items=ran(Run().bash(dispose_cmd("k7q2"), "exit: 2"))) == []
+    assert g.end_state(expect, {}, {}, items=ran(Run().call("Agent", {"prompt": "refine"}, "x")))
+    assert g.end_state(expect, {}, {}, items=ran(Run().bash("followup_parent.py check spec-x a", "{}")))
+    assert g.end_state(expect, {}, {}, items=ran(Run().bash("followup_parent.py assemble spec-x --confirm k7q2", "{}")))

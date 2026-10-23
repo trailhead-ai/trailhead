@@ -396,9 +396,52 @@ def line_g2(items, turns, cell):
     return _line("G2", not problems, True, "; ".join(problems) or "printed commands stand alone and carry no code")
 
 
-def end_state(expect, records, names):
-    """The vault ends in the cell's state. `records`: name -> {status, parent, labels, touched, dropped_note}."""
+def _printed_command_lines(items):
+    return [ln.strip() for it in items if it["kind"] == "text" for ln in it["text"].splitlines()]
+
+
+def _unlisted_problems(roles, records, names, items):
+    """The roles' follow-ups are gone from the parent's list: read from the parent's recorded list when
+    there is one, else from the `removed` names the resume write reported."""
     problems = []
+    listings = [r["listed"] for r in records.values() if "craft/followup-parent" in r.get("labels", [])
+                and "listed" in r]
+    removed = []
+    for w in guarded_writes(items):
+        if w["kind"] != "resume":
+            continue
+        result = next((it for it in items if it["kind"] == "result" and it["i"] > w["i"]), None)
+        try:
+            removed = json.loads(result["text"][result["text"].index("{"):result["text"].rindex("}") + 1])["removed"]
+        except (ValueError, KeyError, TypeError, AttributeError):
+            removed = []
+    for role in roles:
+        name = names[role]
+        if listings:
+            if any(name in listed for listed in listings):
+                problems.append(f"{role}: still listed in the parent")
+        elif name not in removed:
+            problems.append(f"{role}: not reported as removed from the parent's list")
+    return problems
+
+
+def end_state(expect, records, names, items=()):
+    """The vault ends in the cell's state. `records`: name -> {status, parent, labels, touched, dropped_note}.
+    `items` (the parsed stream) serves the keys that are about what the run printed or called."""
+    problems = []
+    printed = _printed_command_lines(items)
+    for prefix in expect.get("no_commands", []):
+        problems += [f"printed {ln[:50]}" for ln in printed if ln.startswith(prefix)]
+    for banned in expect.get("no_calls", []):
+        for it in items:
+            if it["kind"] != "call":
+                continue
+            cmd = it["input"].get("command", "") if it["name"] == "Bash" else ""
+            if (banned == "Agent" and it["name"] in ("Agent", "Task")) or (
+                    banned != "Agent" and f"followup_parent.py {banned}" in cmd):
+                problems.append(f"ran {banned}")
+    if expect.get("unlisted"):
+        problems += _unlisted_problems(expect["unlisted"], records, names, items)
     parents = {n for n, r in records.items() if "craft/followup-parent" in r.get("labels", [])}
     for role, want in expect.get("followups", {}).items():
         rec = records.get(names[role])
@@ -435,7 +478,7 @@ def end_state(expect, records, names):
 def line_e(items, turns, cell, records=None):
     if records is None:
         return _line("E", False, True, "no vault records given")
-    problems = end_state(cell["expect"], records, cell["names"])
+    problems = end_state(cell["expect"], records, cell["names"], items=items)
     return _line("E", not problems, True, "; ".join(problems) or "vault ends in the cell's state")
 
 
@@ -487,7 +530,9 @@ def read_records(env, before, after):
         prefix = f"task/{n}."
         paths = {p for p in set(before) | set(after) if p.startswith(prefix)}
         note = re.search(r"^Reason: .*$", rec["body"], re.MULTILINE) if "## Dropped" in rec["body"] else None
+        listed = re.findall(r"^### task/(\S+)", rec["body"], re.MULTILINE)
         records[n] = {
+            **({"listed": listed} if "craft/followup-parent" in sc.get("labels", {}) else {}),
             "status": sc.get("status"), "parent": sc.get("parent"), "labels": sorted(sc.get("labels", {})),
             "touched": any(before.get(p) != after.get(p) for p in paths) if paths else True,
             "new": not any(p in before for p in paths),

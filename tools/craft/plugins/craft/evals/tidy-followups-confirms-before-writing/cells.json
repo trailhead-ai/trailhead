@@ -258,7 +258,10 @@
      "B"
     ],
     "new": false
-   }
+   },
+   "unlisted": [
+    "C"
+   ]
   }
  },
  "parent-drop": {
@@ -334,7 +337,11 @@
      "status": "open",
      "touched": false
     }
-   }
+   },
+   "no_commands": [
+    "/craft:distill",
+    "/craft:execute"
+   ]
   }
  },
  "supersede-fails": {
@@ -387,7 +394,12 @@
      "status": "open",
      "nested": false
     }
-   }
+   },
+   "no_calls": [
+    "Agent",
+    "check",
+    "assemble"
+   ]
   }
  },
  "retry-after-failure": {
