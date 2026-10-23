@@ -108,6 +108,7 @@ Stdout on exit 0 and on every exit 2 after a write is one JSON object:
                          and, with `reason: "child-changed"`, for any write the guard skipped
     incomplete-merges    {survivor, absorbed: [names]} per group with a failure; the operator
                          re-enters it with the still-gathered absorbed follow-ups
+    included             the dispositions file's `included` names, sorted, whatever landed
 
 Exit codes: 0 done; 1 a refusal with the vault unchanged (`not-a-gathered-followup`,
 `child-changed`, `not-mergeable`, `confirmation-missing`, `confirmation-mismatch`), stderr carrying `reason-code:` (and
@@ -595,7 +596,14 @@ def dispose(runner, spec: str, dispositions: dict, preview: bool) -> tuple[dict,
         }, None, ()
 
     note = _dropped_note(dispositions["reason"])
-    report: dict = {"dropped": [], "merged": [], "reset-to-open": [], "failed": [], "incomplete-merges": []}
+    report: dict = {
+        "dropped": [],
+        "merged": [],
+        "reset-to-open": [],
+        "failed": [],
+        "incomplete-merges": [],
+        "included": dispositions["included"],
+    }
     for name in names:
         failure = _unexpected_failure(
             lambda: drop_one(runner, vault, name, baselines[name], note), failure_record(name, "drop", None)

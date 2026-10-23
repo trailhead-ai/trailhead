@@ -729,6 +729,50 @@ def test_two_overlapping_follow_ups_merged_into_a_third_carry_their_intent_and_e
     assert _lore(env, "record", "show", "--json", "--vault", vault, f"task/{bystander}") == before
 
 
+def test_a_confirmed_write_with_a_drop_returns_the_included_list_the_file_named(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    doc = {**file_for(env, vault, pile[:1]), "included": [pile[2]]}
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert out["dropped"] == [{"name": pile[0], "prior-status": "open"}]
+    assert out["included"] == [pile[2]]
+
+
+def test_a_confirmed_write_with_a_merge_returns_a_different_included_list_for_a_different_file(
+    lore_env, spec, trio, tmp_path, capsys
+):
+    env, vault = lore_env
+    survivor, one, two = trio
+    other = make_followup(env, vault, "Other", status="open", spec=spec)
+    doc = {
+        **merge_doc(env, vault, [(survivor, [(one, "intent of one"), (two, "intent of two")])]),
+        "included": [survivor, other],
+    }
+    code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc)
+    assert code == 0, err
+    assert len(out["merged"]) == 1
+    assert out["included"] == sorted([survivor, other])
+
+
+def test_an_incomplete_write_still_returns_the_included_list_the_file_named(
+    lore_env, spec, pile, tmp_path, capsys
+):
+    env, vault = lore_env
+    first, second, third = pile
+
+    def hook(argv, stdin, runner):
+        if is_drop(argv) and argv[2] == f"task/{second}":
+            return refused(argv)
+
+    doc = {**file_for(env, vault, [first, second]), "included": [third]}
+    code, out, err = run_dispose(EnvRunner(env, hook=hook), spec, tmp_path, capsys, doc)
+    assert code == 2
+    assert reason_of(err) == "dispose-incomplete"
+    assert out["included"] == [third]
+
+
 def test_a_ready_survivor_ends_open_and_is_reported_reset_while_an_open_one_is_not(
     lore_env, spec, tmp_path, capsys
 ):
