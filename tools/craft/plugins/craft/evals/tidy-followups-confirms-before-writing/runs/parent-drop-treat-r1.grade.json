@@ -8,21 +8,21 @@
   },
   {
    "id": "W1",
-   "pass": false,
-   "display_shown": false,
-   "detail": "no guarded write ran"
+   "pass": true,
+   "display_shown": true,
+   "detail": "every write follows a display of its own code"
   },
   {
    "id": "W2",
-   "pass": false,
-   "display_shown": false,
-   "detail": "no guarded write ran"
+   "pass": true,
+   "display_shown": true,
+   "detail": "every write carries a displayed code the operator typed"
   },
   {
    "id": "E",
-   "pass": false,
+   "pass": true,
    "display_shown": true,
-   "detail": "A: nested=True want False; parent: [('build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12', 'ready', ['glaze-list-the-cone-numbers-in-a-sentence', 'kiln-refuse-a-firing-time-of-zero'])] want one dropped holding ['glaze-list-the-cone-numbers-in-a-sentence']"
+   "detail": "vault ends in the cell's state"
   },
   {
    "id": "G2",
@@ -37,8 +37,22 @@
    "detail": "fixture repo clean at its starting HEAD"
   }
  ],
- "writes": [],
- "displays": [],
+ "writes": [
+  {
+   "turn": 4,
+   "i": 19,
+   "kind": "drop",
+   "code": "66y4",
+   "exit": 0
+  }
+ ],
+ "displays": [
+  {
+   "turn": 3,
+   "i": 18,
+   "code": "66y4"
+  }
+ ],
  "agents": [],
  "records": {
   "fixture-harbour-tide-spec-a-finished-child": {
@@ -109,6 +123,14 @@
    "new": false,
    "dropped_note": null
   },
+  "soil-probe-report-moisture-as-a-percentage": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
   "vents-refuse-a-temperature-reading-below-minus-fifty": {
    "status": "open",
    "parent": null,
@@ -136,14 +158,6 @@
    "dropped_note": null
   },
   "misters-remove-the-comment-lines-beside-the-hours": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "soil-probe-report-moisture-as-a-percentage": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -243,14 +257,6 @@
    "new": false,
    "dropped_note": null
   },
-  "rack-varnish-pick-a-lighter-oak": {
-   "status": "open",
-   "parent": null,
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "semaphore-refuse-an-arm-angle-outside-zero-to-one-hundred-eighty": {
    "status": "open",
    "parent": null,
@@ -293,7 +299,7 @@
    "new": false,
    "dropped_note": null
   },
-  "kites-report-the-airborne-kites-as-a-share-of-all-kites": {
+  "rack-varnish-pick-a-lighter-oak": {
    "status": "open",
    "parent": null,
    "labels": [],
@@ -309,27 +315,9 @@
    "new": false,
    "dropped_note": null
   },
-  "build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12": {
-   "status": "open",
-   "parent": null,
-   "labels": [
-    "craft/followup-parent"
-   ],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "chimes-refuse-a-negative-strike-count": {
    "status": "ready",
    "parent": "build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12",
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
-  "clock-face-print-the-hour-in-two-digits": {
-   "status": "ready",
-   "parent": null,
    "labels": [],
    "touched": false,
    "new": false,
@@ -353,9 +341,32 @@
    "new": false,
    "dropped_note": null
   },
-  "fixture-pottery-kiln-spec-a-finished-child": {
-   "status": "done",
-   "parent": "fixture-pottery-kiln-spec-the-slice",
+  "kites-report-the-airborne-kites-as-a-share-of-all-kites": {
+   "status": "open",
+   "parent": null,
+   "labels": [],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12": {
+   "listed": [
+    "chimes-refuse-a-negative-strike-count",
+    "bell-rope-cap-the-pull-length",
+    "clock-face-print-the-hour-in-two-digits"
+   ],
+   "status": "open",
+   "parent": null,
+   "labels": [
+    "craft/followup-parent"
+   ],
+   "touched": false,
+   "new": false,
+   "dropped_note": null
+  },
+  "clock-face-print-the-hour-in-two-digits": {
+   "status": "ready",
+   "parent": null,
    "labels": [],
    "touched": false,
    "new": false,
@@ -371,20 +382,24 @@
    "new": false,
    "dropped_note": null
   },
-  "kiln-refuse-a-firing-time-of-zero": {
-   "status": "ready",
-   "parent": "build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12",
-   "labels": [],
-   "touched": false,
-   "new": false,
-   "dropped_note": null
-  },
   "build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12": {
-   "status": "ready",
+   "listed": [
+    "kiln-refuse-a-firing-time-of-zero",
+    "glaze-list-the-cone-numbers-in-a-sentence"
+   ],
+   "status": "dropped",
    "parent": null,
    "labels": [
     "craft/followup-parent"
    ],
+   "touched": true,
+   "new": false,
+   "dropped_note": "Reason: the kiln line was cancelled with the old studio"
+  },
+  "fixture-pottery-kiln-spec-a-finished-child": {
+   "status": "done",
+   "parent": "fixture-pottery-kiln-spec-the-slice",
+   "labels": [],
    "touched": false,
    "new": false,
    "dropped_note": null
@@ -396,8 +411,16 @@
    "touched": false,
    "new": false,
    "dropped_note": null
+  },
+  "kiln-refuse-a-firing-time-of-zero": {
+   "status": "ready",
+   "parent": null,
+   "labels": [],
+   "touched": true,
+   "new": false,
+   "dropped_note": null
   }
  },
- "ended": "answers-exhausted",
+ "ended": "no-question",
  "unsent": []
 }

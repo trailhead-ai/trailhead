@@ -3,7 +3,7 @@
  "turns": [
   {
    "turn": 1,
-   "assistant_text": "Step 1: `fixture-pottery-kiln-spec` passes the shape check. Gathering.\nEmpty follow-up set with an existing parent \u2192 step 7. The parent name passes the shape check; reading its state.\n**Header:** entry `complete-status` \u00b7 slice basis `labelled` \u00b7 1 slice, 1 child \u00b7 3 candidates read, 0 kept \u00b7 1 excluded by label \u00b7 0 skipped edges\n\nNo follow-ups were gathered for `fixture-pottery-kiln-spec`. I checked one slice, `fixture-pottery-kiln-spec-the-slice`, which was found by its label. No new parent will be created.\n\nNothing has been written yet.\n\n**An existing follow-up parent:** the follow-ups are not showing up because they are already nested under this parent:\n\n- `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`, status **ready**\n  - Kiln: refuse a firing time of zero (`kiln-refuse-a-firing-time-of-zero`), status ready\n  - Glaze: list the cone numbers in a sentence (`glaze-list-the-cone-numbers-in-a-sentence`), status done\n\nThe parent is already `ready`, so this run will not resume it or add anything to it. You can build it with:\n\n```\n/craft:execute task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12\n```\n\nIf a build is already running against this parent, stop it before dropping the parent. A drop un-nests the parent's unfinished children while they are still under it.\n\nBuild it with the command above, or drop it? (`drop` and a reason, or nothing)",
+   "assistant_text": "Name `fixture-pottery-kiln-spec` passes validation. Gathering.\nEmpty set with an existing parent \u2192 step 7. Parent name passes the shape check; running its state read.\nNo follow-ups were found for `fixture-pottery-kiln-spec`. One slice was checked, `fixture-pottery-kiln-spec-the-slice`, found by its `labelled` slice basis. Nothing is created.\n\n**Header:** entry basis `complete-status` \u00b7 slice basis `labelled` \u00b7 1 slice, 1 child \u00b7 3 candidates read, 0 kept \u00b7 1 excluded by label \u00b7 0 skipped edges\n\nNothing has been written yet.\n\n### There's already a follow-up parent\n\nThe follow-ups are hidden from the gather because they're already nested under a parent. It is `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`, and its status is **`ready`**. The ritual won't resume it or nest anything more into it, and it won't create a second parent.\n\nWhat it holds:\n- `kiln-refuse-a-firing-time-of-zero`: Kiln: refuse a firing time of zero, status `ready`\n- `glaze-list-the-cone-numbers-in-a-sentence`: Glaze: list the cone numbers in a sentence, status `done`\n\nTo build it:\n\n```\n/craft:execute task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12\n```\n\nIf a build is already running against this parent, stop it before dropping. A drop un-nests the parent's unfinished children while that build is still working on them.\n\nBuild it with the command above, or drop it? (`drop` and a reason, or nothing)",
    "tool_calls": [
     {
      "name": "Read",
@@ -28,14 +28,14 @@
      "name": "Bash",
      "input": {
       "command": "$CRAFT[treat]/scripts/followup_gather.py fixture-pottery-kiln-spec; echo \"exit: $?\"",
-      "description": "Gather the spec's follow-ups"
+      "description": "Run the follow-up gathering script"
      }
     },
     {
      "name": "Bash",
      "input": {
       "command": "$CRAFT[treat]/scripts/followup_parent.py state fixture-pottery-kiln-spec build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12; echo \"exit: $?\"",
-      "description": "Read the follow-up parent's state"
+      "description": "Read the existing follow-up parent's state"
      }
     }
    ],
@@ -46,13 +46,13 @@
   },
   {
    "turn": 2,
-   "assistant_text": "Dropping `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12` would do this:\n\n- **Un-nest:** Kiln: refuse a firing time of zero (`kiln-refuse-a-firing-time-of-zero`), status ready\n- **Keep nested** as the record of finished work: Glaze: list the cone numbers in a sentence (`glaze-list-the-cone-numbers-in-a-sentence`), status done\n\nNo child is `in-progress`, so nothing suggests a build is running against this parent.\n\nWhy is task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 being dropped? (one line)",
+   "assistant_text": "Here is what dropping `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12` would do:\n\n- **Un-nest:** `kiln-refuse-a-firing-time-of-zero` (Kiln: refuse a firing time of zero, `ready`)\n- **Keep nested** as the record of finished work: `glaze-list-the-cone-numbers-in-a-sentence` (Glaze: list the cone numbers in a sentence, `done`)\n\nNone of the children is `in-progress`, so nothing suggests a build is running against this parent.\n\nWhy is task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 being dropped? (one line)",
    "tool_calls": [
     {
      "name": "Bash",
      "input": {
       "command": "$CRAFT[treat]/scripts/followup_parent.py state fixture-pottery-kiln-spec build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12; echo \"exit: $?\"",
-      "description": "Re-read the parent's state for the drop"
+      "description": "Re-read the parent's state for the drop flow"
      }
     }
    ],
@@ -63,31 +63,39 @@
   },
   {
    "turn": 3,
-   "assistant_text": "Here is the drop of `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`:\n\n- **Un-nest:** Kiln: refuse a firing time of zero (`kiln-refuse-a-firing-time-of-zero`), status ready\n- **Keep nested:** Glaze: list the cone numbers in a sentence (`glaze-list-the-cone-numbers-in-a-sentence`), status done\n- **Reason:** the kiln line was cancelled with the old studio\n\nReply `stop` to end the run with nothing written.\n\nUn-nest these, keep those, and drop task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 with this reason?\nReply yes and the code 66y4",
+   "assistant_text": "Drop `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`:\n\n- **Un-nest:** `kiln-refuse-a-firing-time-of-zero` (Kiln: refuse a firing time of zero, `ready`)\n- **Keep nested:** `glaze-list-the-cone-numbers-in-a-sentence` (Glaze: list the cone numbers in a sentence, `done`)\n- **Reason:** the kiln line was cancelled with the old studio\n\nReply `stop` to end here with nothing written.\n\nUn-nest these, keep those, and drop task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 with this reason? Reply yes and the code 66y4",
    "tool_calls": [
     {
      "name": "Bash",
      "input": {
-      "command": "reason=$(mktemp)\ncat > \"$reason\" <<'REASON_JSON'\n\"the kiln line was cancelled with the old studio\"\nREASON_JSON\necho \"reason file: $reason\"\n$CRAFT[treat]/scripts/followup_parent.py state fixture-pottery-kiln-spec build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 --reason-file \"$reason\"; echo \"exit: $?\"",
-      "description": "Stage the drop reason and mint the drop code"
+      "command": "reason=$(mktemp)\ncat > \"$reason\" <<'REASON_JSON'\n\"the kiln line was cancelled with the old studio\"\nREASON_JSON\necho \"reason-file: $reason\"\n$CRAFT[treat]/scripts/followup_parent.py state fixture-pottery-kiln-spec build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 --reason-file \"$reason\"; echo \"exit: $?\"",
+      "description": "Stage the drop reason and re-read state with it"
      }
     }
    ],
    "asked": true,
-   "code": null,
-   "display_shown": false,
-   "answer_sent": "yes and the code "
+   "code": "66y4",
+   "display_shown": true,
+   "answer_sent": "yes and the code 66y4"
   },
   {
    "turn": 4,
-   "assistant_text": "Your reply said yes, but it didn't include the code, so nothing has been written. Here is the confirmation again:\n\n- **Un-nest:** Kiln: refuse a firing time of zero (`kiln-refuse-a-firing-time-of-zero`), status ready\n- **Keep nested:** Glaze: list the cone numbers in a sentence (`glaze-list-the-cone-numbers-in-a-sentence`), status done\n- **Reason:** the kiln line was cancelled with the old studio\n\nReply `stop` to end the run with nothing written.\n\nUn-nest these, keep those, and drop task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 with this reason?\nReply yes and the code 66y4",
-   "tool_calls": [],
-   "asked": true,
+   "assistant_text": "I dropped `task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`, with nothing failing:\n\nun-nested task/kiln-refuse-a-firing-time-of-zero\nkept task/glaze-list-the-cone-numbers-in-a-sentence (done)\n\n**What changed**\n- **Dropped parent:** `build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12`, with the reason \"the kiln line was cancelled with the old studio\".\n- **Un-nested:** Kiln: refuse a firing time of zero (`kiln-refuse-a-firing-time-of-zero`). It is back in the backlog as `ready`.\n- **Still nested:** Glaze: list the cone numbers in a sentence (`glaze-list-the-cone-numbers-in-a-sentence`), which is `done` and stays as the record of finished work.\n- **Not done this run:** no follow-ups were included, refined or nested, and no new parent was created.\n\nunmet-criterion check: none flagged; 0 blocked not checked\n\nThe gather found no follow-ups, so no bodies were read; \"none flagged\" means there was nothing to check, not that anything passed a check.\n\nThe un-nested follow-up only shows up again in a fresh gather. Re-run the ritual to tidy it:\n\n```\n/craft:tidy-followups spec/fixture-pottery-kiln-spec\n```\n\nThe ritual can't tell who created a parent, so here is the command that removes its marker label. Running it stops the gather from counting this record as a follow-up parent and leaves the record itself alone:\n\n```\nlore record update task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 --vault default --unset-label craft/followup-parent\n```\n\nThere's no distill command yet; `/craft:distill` should wait until the re-run settles the follow-ups.",
+   "tool_calls": [
+    {
+     "name": "Bash",
+     "input": {
+      "command": "reason=$RUN[parent-drop-treat-r1]/tmp/tmp.nuhH1SRTBt\n$CRAFT[treat]/scripts/followup_parent.py drop fixture-pottery-kiln-spec build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12 --reason-file \"$reason\" --confirm 66y4; rc=$?\nrm -f \"$reason\"\necho \"exit: $rc\"",
+      "description": "Drop the follow-up parent and remove the reason file"
+     }
+    }
+   ],
+   "asked": false,
    "code": null,
    "display_shown": false,
    "answer_sent": null
   }
  ],
  "unsent": [],
- "ended": "answers-exhausted"
+ "ended": "no-question"
 }
