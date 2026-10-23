@@ -63,9 +63,12 @@ REPO_FILES = {
     "src/soil.py": "def moisture(probe):\n    return probe.raw()\n",
     "src/trellis.py": "# trellis height\nHEIGHT = 2\n",
     "src/lamp.py": "ROTATION = [0, 90, 180, 270]\n",
-    "src/horn.py": "PATTERN = [2, 1, 2]\n",
+    "src/horn.py": "SEQUENCE = [2, 1, 2]\n",
     "src/beacon.py": "# beacon range\nRANGE = 20\n",
-    "src/flags.py": "FLAGS = {'red': 1, 'blue': 2, 'white': 3}\n\n\ndef flag_for(colour):\n    return FLAGS[colour]\n",
+    "src/pennants.py": (
+        "PENNANTS = {'red': 1, 'blue': 2, 'white': 3}\n\n\n"
+        "def pennant_for(colour):\n    return PENNANTS[colour]\n"
+    ),
     "src/semaphore.py": "def set_arm(arm, angle):\n    arm.angle = angle\n",
     "src/chimes.py": "def strike(bell, count):\n    for _ in range(count):\n        bell.ring()\n",
     "src/rope.py": "def pull(rope, length):\n    rope.extend(length)\n",
@@ -119,16 +122,16 @@ CELLS = {
     "bare-yes": ("Fixture lighthouse lamp spec", [
         ("X1", "Lamp: remove the unused rotation table", "open",
          "`ROTATION` in `src/lamp.py` is read by nothing now.", None),
-        ("X2", "Fog horn: remove the unused blast pattern", "open",
-         "`PATTERN` in `src/horn.py` is read by nothing now.", None),
+        ("X2", "Fog horn: remove the unused blast sequence", "open",
+         "`SEQUENCE` in `src/horn.py` is read by nothing now.", None),
         ("K", "Beacon: reword the range comment", "open",
          "The comment in `src/beacon.py` says `beacon range` and could name the unit.", None),
     ]),
-    "leave-out": ("Fixture signal flag spec", [
-        ("N1", "Flags: refuse an unknown flag colour", "open",
-         "`flag_for` in `src/flags.py` raises a bare `KeyError` for a colour with no flag. Agreed "
+    "leave-out": ("Fixture signal pennant spec", [
+        ("N1", "Pennants: refuse an unknown pennant colour", "open",
+         "`pennant_for` in `src/pennants.py` raises a bare `KeyError` for a colour with no pennant. Agreed "
          "behaviour: raise `ValueError` naming the colour, and return the number for a known colour. "
-         "The repository has no tests yet; add `tests/test_flags.py`.", None),
+         "The repository has no tests yet; add `tests/test_pennants.py`.", None),
         ("N2", "Semaphore: refuse an arm angle outside zero to one hundred eighty", "open",
          "`set_arm` in `src/semaphore.py` sets any angle. Agreed behaviour: raise `ValueError` for an "
          "angle below 0 or above 180 and set any other angle. The repository has no tests yet; add "
