@@ -157,7 +157,7 @@ glob, which makes it the grader for a record whose name the agent picks.
 ```sh
 export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # Linux only: outside /tmp, short path
 out=$(mktemp -d)
-timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+timeout SECS env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   claude plugin eval tools/lore/plugins/lore --case '<glob>' --scaffold \
   --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
   --runs N --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd N \
@@ -167,6 +167,9 @@ timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_S
 What each flag does is in `docs/eval-protocol.md`, "Running a batch"; read its
 "Runner gotchas" before a first run. On top of that:
 
+- `timeout SECS` bounds the whole batch from outside, because the runner can
+  overrun its own `timeout_seconds`. Size it to the batch: at least the
+  matched cases times `--runs` times each case's `timeout_seconds`, plus margin.
 - `--json <path>` must end in `.json`. The result carries each run's `tracePath`
   but not the trace: the runner deletes the trace when the run ends. To read a
   run's transcript, copy `claude-eval-*/**/*.jsonl` from the runner's temp
