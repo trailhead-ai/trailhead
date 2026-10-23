@@ -13,6 +13,8 @@ import importlib.util
 import json
 from pathlib import Path
 
+import pytest
+
 CASE = Path(__file__).resolve().parents[1] / "plugins" / "craft" / "evals" / "tidy-followups-confirms-before-writing"
 _spec = importlib.util.spec_from_file_location("grade_confirm", CASE / "grade_confirm.py")
 g = importlib.util.module_from_spec(_spec)
@@ -446,9 +448,58 @@ def _work_for_retry_cell(tmp_path, first_leg_turns):
     return key
 
 
+def _g1(tmp_path, monkeypatch, capsys, roots):
+    _work_for_retry_cell(tmp_path, [{"code": None}])
+    monkeypatch.setattr("sys.argv", ["grade_confirm.py", str(tmp_path), "retry-after-failure-treat-r1"])
+    assert g.main(search_roots=[str(r) for r in roots]) == 0
+    graded = json.loads(capsys.readouterr().out)
+    return next(line for line in graded["lines"] if line["id"] == "G1")
+
+
+def test_g1_searches_the_roots_it_is_given_for_the_run_id(tmp_path, monkeypatch, capsys):
+    root = tmp_path / "vaults"
+    root.mkdir()
+    (root / "leak.md").write_text("see no-such-run-id-anywhere here")
+    line = _g1(tmp_path, monkeypatch, capsys, [root])
+    assert line["pass"] is False and "leak.md" in line["detail"]
+
+
+def test_g1_passes_when_the_run_id_is_absent_from_the_given_roots_whatever_lies_elsewhere(
+    tmp_path, monkeypatch, capsys
+):
+    searched, elsewhere = tmp_path / "searched", tmp_path / "elsewhere"
+    searched.mkdir()
+    elsewhere.mkdir()
+    (searched / "note.md").write_text("nothing relevant")
+    (elsewhere / "leak.md").write_text("no-such-run-id-anywhere")
+    assert _g1(tmp_path, monkeypatch, capsys, [searched])["pass"] is True
+
+
+def test_g1_with_no_roots_to_search_finds_nothing_rather_than_searching_the_working_directory(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "leak.md").write_text("no-such-run-id-anywhere")
+    assert _g1(tmp_path, monkeypatch, capsys, [])["pass"] is True
+
+
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        ({"LORE_STATE_DIR": "/s", "LORE_CONFIG_DIR": "/c", "XDG_STATE_HOME": "/xs", "HOME": "/h"}, ["/s", "/c"]),
+        ({"XDG_STATE_HOME": "/xs", "XDG_CONFIG_HOME": "/xc", "HOME": "/h"}, ["/xs/lore", "/xc/lore"]),
+        ({"HOME": "/h"}, ["/h/.local/state/lore", "/h/.config/lore"]),
+        ({"XDG_STATE_HOME": "rel", "XDG_CONFIG_HOME": "", "HOME": "/h"}, ["/h/.local/state/lore", "/h/.config/lore"]),
+        ({}, []),
+    ],
+)
+def test_the_default_search_roots_follow_lores_directory_precedence(env, expected):
+    assert g.lore_search_roots(env) == expected
+
+
 def _r3_detail(tmp_path, monkeypatch, capsys, *argv_tail):
     monkeypatch.setattr("sys.argv", ["grade_confirm.py", str(tmp_path), "retry-after-failure-treat-r1", *argv_tail])
-    assert g.main() == 0
+    assert g.main(search_roots=[str(tmp_path / "no-vaults")]) == 0
     graded = json.loads(capsys.readouterr().out)
     return next(line["detail"] for line in graded["lines"] if line["id"] == "R3")
 

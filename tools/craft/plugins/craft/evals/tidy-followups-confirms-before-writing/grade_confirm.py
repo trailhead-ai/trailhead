@@ -550,7 +550,33 @@ def earlier_leg_key(key: str, cell_key: str, cell: dict) -> str | None:
     return f"{reuse}{key[len(cell_key):]}" if reuse else None
 
 
-def main() -> int:
+def lore_search_roots(env=None) -> list[str]:
+    """The directories lore keeps its vaults and config in, which G1 searches for the run id.
+
+    Mirrors `trailhead/paths.py` for the `lore` app: `LORE_STATE_DIR`, else
+    `$XDG_STATE_HOME/lore`, else `$HOME/.local/state/lore`; and `LORE_CONFIG_DIR`, else
+    `$XDG_CONFIG_HOME/lore`, else `$HOME/.config/lore`. A relative value is ignored, and a
+    root that cannot be resolved because `HOME` is unset is left out."""
+    env = os.environ if env is None else env
+
+    def absolute(name):
+        value = env.get(name, "")
+        return value if value.startswith("/") else None
+
+    def root(override, xdg, tail):
+        if absolute(override):
+            return absolute(override)
+        if absolute(xdg):
+            return f"{absolute(xdg)}/lore"
+        home = absolute("HOME")
+        return f"{home}/{tail}/lore" if home else None
+
+    roots = (root("LORE_STATE_DIR", "XDG_STATE_HOME", ".local/state"),
+             root("LORE_CONFIG_DIR", "XDG_CONFIG_HOME", ".config"))
+    return [r for r in roots if r]
+
+
+def main(search_roots=None) -> int:
     work, key = Path(sys.argv[1]), sys.argv[2]
     prev_key = sys.argv[3] if len(sys.argv) > 3 else None
     meta = work / "meta"
@@ -573,10 +599,10 @@ def main() -> int:
     if prev_key:
         prev_code = earlier_leg_code(json.loads((meta / f"{prev_key}.drive.json").read_text()))
     graded = grade(lines, drive["turns"], cell, records=records, prev_code=prev_code)
+    roots = lore_search_roots() if search_roots is None else list(search_roots)
     hits = subprocess.run(
-        ["grep", "-rIl", "--", manifest["run_id"],
-         f"{os.environ['HOME']}/.local/state/lore", f"{os.environ['HOME']}/.config/lore"],
-        capture_output=True, text=True).stdout.strip()
+        ["grep", "-rIl", "--", manifest["run_id"], *roots],
+        capture_output=True, text=True).stdout.strip() if roots else ""
     graded["lines"].insert(0, _line("G1", not hits, True, hits or "run id absent from the real vaults"))
     after_repo = json.loads((meta / f"{key}.after.json").read_text())["repo"]
     before_repo = json.loads((meta / f"{key}.before.json").read_text())["repo"]
