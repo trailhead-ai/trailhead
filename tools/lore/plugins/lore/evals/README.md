@@ -154,6 +154,10 @@ glob, which makes it the grader for a record whose name the agent picks.
 
 ### Running a batch
 
+Run it only on a branch you wrote or reviewed, because `--scaffold` runs the
+case's scaffold script as you (see
+[what the sandbox does not confine](../../../../../docs/eval-protocol.md#what-the-sandbox-confines-and-what-it-does-not)).
+
 ```sh
 export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # Linux only: outside /tmp, short path
 out=$(mktemp -d)

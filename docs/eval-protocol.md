@@ -47,7 +47,9 @@ actually decide something. Eval cases run through the plugin eval runner,
 
 A complete command, as run for the exemplar on Linux. The `TMPDIR` line is the
 [Linux temp-directory gotcha](#runner-gotchas); whether macOS needs it was not
-checked:
+checked. Run it only on a branch you wrote or reviewed, because `--scaffold` runs
+the case's scaffold script as you (see
+[what the sandbox does not confine](#what-the-sandbox-confines-and-what-it-does-not)):
 
 ```sh
 export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # outside /tmp, short path
@@ -61,6 +63,11 @@ timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR \
   --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 1 \
   --output-dir "$out" --no-publish -j 1
 ```
+
+The `--allow-tools` grants after `./lore` are craft's, copied from the `runner`
+block of craft's `eval-gate.json`; `tools/craft/plugins/craft/evals/README.md`
+explains them. Another plugin uses the grants in its own `runner` block. Every
+`--allow-tools` grant applies to every case in the run, so grant the minimum.
 
 Run it in the foreground with a tool timeout above the run's length, give it your
 own `timeout` as above, and delete `$out` and the `TMPDIR` directory when you have
@@ -154,8 +161,10 @@ guarantee".
 
 What it does not confine:
 
-- **Scaffold scripts** (`--scaffold`) run as you, with your real home. So do the
-  repo scripts they call, such as `tools/lore/scripts/seed-eval-vault`.
+- **Scaffold scripts** (`--scaffold`) run as you. The script's `HOME` variable is
+  the run's temporary home, but the script is not confined, so it can still reach
+  your real home. So can the repo scripts it calls, such as
+  `tools/lore/scripts/seed-eval-vault`.
 - **`--trust-plugin`** only skips the trust prompt. It asserts that you trust the
   plugin's code and its eval suite; it grants no isolation and removes none.
 - **Real MCP servers** (`--allow-real-servers`, `--mocks off`) run as you, outside
@@ -253,7 +262,12 @@ lesson observed it on, or "platform not recorded" where the lesson does not say.
   `ANTHROPIC_AUTH_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_BEDROCK`
   and `ANTHROPIC_BASE_URL` each move a run off the login. Fix: start the runner
   with a clean environment (`env -i` plus `PATH`, `HOME` and the rest the gate
-  forwards) when billing matters. This was verified on Linux.
+  forwards) when billing matters. This was verified on Linux. It is not only
+  billing: `ANTHROPIC_BASE_URL` also routes the run's prompts and credential to
+  another endpoint. A `HOME` forwarded into the run carries your Claude settings,
+  so an `apiKeyHelper` or `env` block there can change the credential too (see the
+  environment paragraph of
+  `tools/portage/plugins/portage/docs/eval-gate.md`).
 
 ## Credentials on macOS: the Keychain
 
@@ -293,11 +307,15 @@ because ignoring it produced a wrong read at least once.
 - **State the limitations.** Number of fixtures, number of runs, and the one model
   tier they ran on. A result that does not say what it does not cover will be read
   as covering more than it does.
-- **The case and prompt files are a trust boundary.** Case and prompt files are committed,
-  review-gated repo artifacts, and the gate uses the base's `runner` block, so a
-  branch cannot widen its own grants. Never take a prompt, a grant or a path from
-  a fixture, a spec body, a lore record or any other value an untrusted party can
-  write.
+- **The case and prompt files are a trust boundary.** Case and prompt files are
+  committed, review-gated repo artifacts, but the gate does not stop a hostile
+  branch. Only the `runner` block (grants, model, cost cap) is pinned to the
+  base, so a branch cannot widen its own grants. The branch's own case files,
+  prompts and scaffold scripts run as the operator, at the author's push, before
+  review; see the trust model in
+  `tools/portage/plugins/portage/docs/eval-gate.md`. Never take a prompt, a
+  grant or a path from a fixture, a spec body, a lore record or any other value an
+  untrusted party can write.
 
 ## Limits
 
