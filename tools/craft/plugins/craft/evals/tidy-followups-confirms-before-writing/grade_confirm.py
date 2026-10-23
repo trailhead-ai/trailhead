@@ -506,7 +506,7 @@ def main() -> int:
     cell = dict(cells[drive["cell"]])
     names = manifest["followups"][cell.get("spec_cell", drive["cell"])]
     cell["names"] = names
-    arm = "base" if key.endswith("base") or "-base" in key else "treat"
+    arm = drive["arm"]
     env = {**manifest["env"], "LORE_BIN": str(work / f"snap-{arm}" / "tools/lore/plugins/lore/bin/lore")}
     before = json.loads((meta / f"{key}.before.json").read_text())["vault"]
     after = json.loads((meta / f"{key}.after.json").read_text())["vault"]
