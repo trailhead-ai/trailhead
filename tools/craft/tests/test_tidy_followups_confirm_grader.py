@@ -346,3 +346,13 @@ def test_a_code_followed_by_shell_punctuation_or_quotes_is_still_the_code_that_r
     wrong = (Run().text(question("k7q2")).end("yes and the code k7q2")
              .bash("followup_parent.py drop s p --reason-file r --confirm m3n4;", "exit: 1"))
     assert wrong.line({}, "W2")["pass"] is False
+
+
+def test_end_state_picks_the_existing_parent_that_holds_the_expected_follow_up_among_several_existing_ones():
+    both = records(zz={"status": "ready", "parent": None, "labels": ["craft/followup-parent"], "touched": False,
+                       "new": False},
+                   zz1={"status": "ready", "parent": "zz", "labels": [], "touched": False, "new": False})
+    both["par"] = {**both["par"], "new": False}
+    expect = {"followups": {"P1": {"status": "ready", "nested": True}},
+              "parent": {"status": "ready", "holds": ["P1"], "new": False}}
+    assert g.end_state(expect, both, NAMES) == []
