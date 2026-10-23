@@ -292,8 +292,15 @@ of body headings that were not valid names, reported as a count.
    ```
 
 Its `confirm` is the resume code. It is never combined with `--reasons`, which `--parent` refuses.
-When no name is left to check (`unheld` is empty, or every name was left out), `check` cannot mint
-a resume code: say so, do not run `resume`, and offer `drop` or `stop`.
+When `unheld` is empty, or every name was left out, run the check with no names and mint the resume
+code for what remains:
+
+   ```
+   ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py check <spec-name> --parent <parent>
+   ```
+
+Its `confirm` is the resume code, shown on the resume question like any other; the resume then
+runs with an empty children list.
 
 `--parent` makes a dependency on a child the parent already holds count as satisfied, the way the
 resume itself decides it. Report each left-out follow-up as the plain sentence from step 10's table,

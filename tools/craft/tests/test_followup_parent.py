@@ -3850,3 +3850,43 @@ def test_state_with_an_unreadable_reason_file_is_invalid_reason_file(lore_env, s
     )
     assert code == 2 and out is None
     assert reason_codes(err) == ["reason-code: invalid-reason-file"]
+
+
+def test_check_with_the_parent_and_no_names_mints_a_code_that_resumes_a_parent_holding_every_listed_child(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_flip(a) else None)
+    _, assembled, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    parent_name = assembled["parent"]
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+    code, checked, err = run_check_json(EnvRunner(env), spec, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert checked["eligible"] == [] and checked["left-out"] == []
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, [], tmp_path, capsys, typed=checked["confirm"]
+    )
+    assert code == 0, err
+    assert out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+
+
+def test_the_no_names_resume_code_is_specific_to_its_parent_and_to_the_children_it_covers(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=3)
+    _, empty, _ = run_check_json(EnvRunner(env), spec, "--parent", parent_name, capsys=capsys)
+    _, one, _ = run_check_json(EnvRunner(env), spec, names[2], "--parent", parent_name, capsys=capsys)
+    assert empty["confirm"] != parent.check_confirmation(spec, [], "another-parent", None)
+    assert empty["confirm"] != one["confirm"]
+
+
+def test_check_without_the_parent_and_with_no_names_is_refused_as_invalid_arguments(lore_env, spec, capsys):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    code, out, err = run_check_json(runner, spec, capsys=capsys)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-arguments"]
+    assert runner.writes() == []

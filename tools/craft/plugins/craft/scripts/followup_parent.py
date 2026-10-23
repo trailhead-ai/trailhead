@@ -73,8 +73,10 @@ eligible name to its selection reason (anything else, or a missing eligible name
 `invalid-reason-file`, exit 2); the code then also covers each reason as `assemble` renders
 it into the parent body (sanitized as below), so `assemble` refuses a reason that differs
 from the one shown. `--reasons` with `--parent` is `invalid-arguments`, since `resume`
-re-reads reasons from the parent. A name left out of the set means running `check` again
-on the remaining names and confirming the new code.
+re-reads reasons from the parent. `check --parent` with no names mints the resume code over
+the parent and an empty child set, for a resume whose every listed child is already held; `check`
+without `--parent` needs at least one name (`invalid-arguments`, exit 2). A name left out of the set means running
+`check` again on the remaining names and confirming the new code.
 
 Exit codes of `check`:
     0  the JSON object is on stdout.
@@ -1310,7 +1312,7 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
         check = commands.add_parser("check", help="sort follow-ups into eligible and left out")
         check.add_argument("spec_name", help="bare spec record name (the part after spec/)")
-        check.add_argument("names", nargs="+", help="bare task record names")
+        check.add_argument("names", nargs="*", help="bare task record names; optional only with --parent")
         check.add_argument(
             "--parent", help="bare name of a follow-up parent whose held children count as inside the set"
         )
@@ -1342,6 +1344,8 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
             args = parser.parse_args(argv)
             if args.command == "check":
                 if args.parent is not None and args.reasons is not None:
+                    raise ParentError("invalid-arguments")
+                if args.parent is None and not args.names:
                     raise ParentError("invalid-arguments")
                 result = check_followups(runner, args.spec_name, args.names, args.parent)
                 eligible_names = [item["name"] for item in result["eligible"]]
