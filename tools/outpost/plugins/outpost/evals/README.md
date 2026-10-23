@@ -9,6 +9,3 @@ the push gate does not gate them. They are listed in `_LEGACY_HAND_SHAPED` in
 ported to a runner shape. The case shape, how to write and run a runner case, and the
 sandbox are in `docs/eval-protocol.md` — read it before adding a case. Results go in
 `tools/outpost/MANUAL-EVAL.md`.
-
-Each case directory under here is one entry in this corpus; results for all of
-them are in `tools/outpost/MANUAL-EVAL.md`.

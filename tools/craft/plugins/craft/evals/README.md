@@ -17,9 +17,10 @@ case is removed once it is ported to a runner shape.
 Three cases are run by `claude plugin eval`:
 `consult-lists-a-sibling-correction-without-writing-it`,
 `accepted-review-correction-is-applied-not-parked` and
-`declined-review-correction-is-left-alone`. The case format, graders, the runner's flags
-and the live-state snapshot rule are in `tools/lore/plugins/lore/evals/README.md`;
-this section covers what a craft case needs on top.
+`declined-review-correction-is-left-alone`. The case format, the runner's flags and the
+live-state snapshot rule are in `docs/eval-protocol.md`, and the graders and lore seeding
+in `tools/lore/plugins/lore/evals/README.md`; this section covers what a craft case needs
+on top.
 
 ```
 <case-name>/
@@ -48,25 +49,18 @@ directory, as the template does. `./lore record show`, `record amend` and
 
 ### Running a batch
 
-```sh
-out=$(mktemp -d)
-env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
-  claude plugin eval tools/craft/plugins/craft --case '<case-name>' --scaffold \
-  --allow-tools 'Bash(./lore *)' 'Bash(*/scripts/maturity_bars.py *)' 'Bash(:)' 'Bash(: *)' \
-  --ablation none --trust-plugin --runs 3 --model claude-opus-5-5 \
-  --json "$out/run.json" --max-cost-usd N --output-dir "$out" --no-publish -j 1
-```
+The batch command is the one in `docs/eval-protocol.md`'s step-by-step path, which is
+already a craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from
+the costs below.
 
-- The three extra grants (`maturity_bars.py`, `:`) are for consult's calibration
-  step; without them it refuses and never dispatches the council.
+- The command's three grants beyond `./lore` (`maturity_bars.py`, `:`) are for
+  consult's calibration step; without them it refuses and never dispatches the
+  council.
 - A consult run takes about 2 minutes and about 0.75 USD (its limits are
   `allowed_tools: [Skill, Agent, Read, Glob, Grep]`, `max_turns: 30`,
   `timeout_seconds: 420`). A review-case run takes about 0.2 to 0.35 USD. The
   runner's reported `turns` is wrong when subagents run asynchronously, so size
   limits from duration and cost.
-- `--output-dir` and `--json` go in a fresh temp directory, which holds the
-  prompts and grader explanations: delete it after copying the scores out, and
-  never commit it.
 
 ### Graders
 
@@ -89,7 +83,7 @@ cases measure `skills/receiving-code-review/SKILL.md`; the consult case measures
 `skills/consult/SKILL.md` and `skills/_shared/council.md`. A case with no entry is a
 failure: add its entry when you add the case.
 
-The `runner` block holds the grants of the batch command above, the model
+The `runner` block holds the grants of that batch command, the model
 `claude-opus-5-5`, and `max_cost_usd` 3.5 per case. The cap is sized from the logged
 cost: the consult case is the dearest at about 0.75 to 0.93 USD a run, 2.4 to 2.5 USD for
 three runs (`tools/craft/MANUAL-EVAL.md`), and the review-correction cases cost 0.7 to

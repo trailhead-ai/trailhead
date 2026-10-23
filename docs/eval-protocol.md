@@ -89,8 +89,8 @@ tools/<tool>/MANUAL-EVAL.md                         the results log
 
 - `case.yaml` holds `schema_version: "1.1"`, `name`, `runs` (1 to 50, default 3)
   and, for a seeded case, `context: {scaffold_script: fixtures/scaffold.sh}`.
-  `model`, `max_turns`, `timeout_seconds` and `allowed_tools` go under
-  `execution:` or in the prompt frontmatter, which wins.
+  `model`, `max_turns` (default 10), `timeout_seconds` (default 300) and
+  `allowed_tools` go under `execution:` or in the prompt frontmatter, which wins.
 - `prompt.md` frontmatter carries `allowed_tools` (read-only tools such as `Skill`,
   `Read`, `Glob`, `Grep`, `Agent`), `max_turns` and `timeout_seconds`. `Bash`,
   `Write` and `Edit` are removed from the session unless the operator passes them
