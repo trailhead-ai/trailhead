@@ -494,17 +494,25 @@ class _Streamed(subprocess.CompletedProcess):
     echoed = False
 
 
+_STDERR_DRAIN_SECONDS = 0.5
+
+
 def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float | None = None):
     """Run the publisher with stdout passed through as written and each non-blank stderr line shown as it arrives.
 
     Lines are shown in the ``scratch-pad: publish:`` relay form, escaped; nothing is held back for the exit.
-    No timer unless given.
+    No timer unless given. Once the publisher has exited, the rest of its stderr is waited for only briefly: a
+    descendant that inherited the pipe and outlives it does not hold the call open, and the daemon reader is left
+    to end with the pipe.
     """
     proc = subprocess.Popen(list(cmd), env=dict(env), stderr=subprocess.PIPE, text=True, errors="backslashreplace")
     echoed = []
+    closed = threading.Event()
 
     def pump():
         for line in proc.stderr:
+            if closed.is_set():
+                return
             if line.strip():
                 print(_line("publish", _esc(line.rstrip("\r\n"))), file=sys.stderr, flush=True)
                 echoed.append(True)
@@ -518,8 +526,11 @@ def _stream_publisher(cmd: Sequence[str], env: Mapping[str, str], timeout: float
         proc.wait()
         raise
     finally:
-        reader.join()
-        proc.stderr.close()
+        reader.join(_STDERR_DRAIN_SECONDS)
+        if reader.is_alive():
+            closed.set()
+        else:
+            proc.stderr.close()
     result = _Streamed(list(cmd), returncode, None, "")
     result.echoed = bool(echoed)
     return result
@@ -1112,17 +1123,17 @@ def _cannot_reference(pad: str, problems: Sequence[str], strays: Sequence[str] =
 
 
 def _questions_of(data: object) -> list | None:
-    """The round's questions when the data has the shape this script writes, else ``None``."""
+    """The round's list of questions when the data holds one, else ``None``; a question is checked once named."""
     questions = data.get("questions") if isinstance(data, dict) else None
-    if not isinstance(questions, list):
-        return None
-    for question in questions:
-        if not isinstance(question, dict) or not isinstance(question.get("prompt"), str):
-            return None
-        options = question.get("options")
-        if not isinstance(options, list) or not all(isinstance(o, dict) for o in options):
-            return None
-    return questions
+    return questions if isinstance(questions, list) else None
+
+
+def _has_prompt_and_options(question: object) -> bool:
+    return (
+        isinstance(question, dict)
+        and isinstance(question.get("prompt"), str)
+        and isinstance(question.get("options"), list)
+    )
 
 
 def _leaves(value: object):
@@ -1205,6 +1216,11 @@ def _resolve_drawings(drawings: Sequence[dict], titles: Sequence[str], rounds: M
         if qn > len(questions):
             problems.append(
                 _line(f"{where}.question", f"{qn} — round {number} has {_plural(len(questions), 'question')}")
+            )
+            continue
+        if not _has_prompt_and_options(questions[qn - 1]):
+            problems.append(
+                _line(f"{where}.round", f"{number} — round {number}'s data does not hold a list of questions")
             )
             continue
         options = questions[qn - 1]["options"]

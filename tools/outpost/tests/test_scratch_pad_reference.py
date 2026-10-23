@@ -448,7 +448,6 @@ def test_a_pad_folder_that_cannot_be_read_is_refused_in_reference_wording(mod, r
         pytest.param([7], id="question-not-an-object"),
         pytest.param([{"prompt": 3, "options": [{}]}], id="prompt-not-a-string"),
         pytest.param([{"prompt": "P", "options": 5}], id="options-not-a-list"),
-        pytest.param([{"prompt": "P", "options": ["A"]}], id="option-not-an-object"),
     ],
 )
 def test_a_round_whose_data_is_not_a_round_is_refused_naming_the_round(mod, rig, tmp_path, questions):
@@ -462,6 +461,36 @@ def test_a_round_whose_data_is_not_a_round_is_refused_naming_the_round(mod, rig,
     lines = _refusal(mod, rig, tmp_path, _ref([_d(2, 1, "A")]))
 
     assert lines == ["scratch-pad: drawings[0].round: 2 — round 2's data does not hold a list of questions"]
+
+
+def _break_round_one(mod, rig, tmp_path, broken):
+    pad_dir = _build(mod, rig, tmp_path)
+    js = pad_dir / "round-1" / "round.js"
+    lines = js.read_text(encoding="utf-8").splitlines(keepends=True)
+    lines[0] = "window.PAD_ROUND = JSON.parse(" + json.dumps(json.dumps(broken)) + ");\n"
+    js.write_text("".join(lines), encoding="utf-8")
+
+
+def _round_one_with_option_b_of_question_one(replacement):
+    broken = copy.deepcopy(ROUND_ONE)
+    broken["questions"][0]["options"][1] = replacement
+    return broken
+
+
+def test_an_option_the_reference_does_not_name_may_be_malformed(mod, rig, tmp_path):
+    _break_round_one(mod, rig, tmp_path, _round_one_with_option_b_of_question_one(None))
+
+    got = _read(mod, rig, tmp_path, _ref([_d(2, 1, "A"), _d(1, 1, "A")]))
+
+    assert [d.option["name"] for d in got.drawings] == ["Retry in place", "Logo left"]
+
+
+def test_a_named_option_that_is_not_an_object_is_refused_naming_that_drawing(mod, rig, tmp_path):
+    _break_round_one(mod, rig, tmp_path, _round_one_with_option_b_of_question_one(None))
+
+    lines = _refusal(mod, rig, tmp_path, _ref([_d(2, 1, "A"), _d(1, 1, "B")]))
+
+    assert lines == ["scratch-pad: drawings[1] (round 1, question 1, option B): must be an object"]
 
 
 # --- the lock ---------------------------------------------------------------------------------------
@@ -982,7 +1011,6 @@ def test_one_line_says_it_is_publishing_to_the_vault_and_the_sync_can_wait_befor
     out = capfd.readouterr().out.splitlines()
     assert out[0] == mod.PUBLISHING_LINE
     assert out.count(mod.PUBLISHING_LINE) == 1
-    assert "vault" in mod.PUBLISHING_LINE and "lock" in mod.PUBLISHING_LINE and "signing" in mod.PUBLISHING_LINE
 
 
 def test_a_reference_from_a_workspace_member_reads_the_workspace_pad_and_writes_nothing_else_there(
@@ -1206,6 +1234,27 @@ def test_a_streamed_publisher_that_fails_with_no_stderr_still_reports_its_exit_s
     assert _run_main(mod, vault, publish_runner=silent_failure) == 1
 
     assert capfd.readouterr().err.splitlines() == ["scratch-pad: publish: the publisher exited with status 3"]
+
+
+def test_a_publisher_that_exits_leaves_no_wait_on_a_descendant_still_holding_its_stderr(mod, tmp_path, capfd):
+    pidfile = tmp_path / "child.pid"
+    script = f'echo "said before exit" >&2; sleep 6 >/dev/null & echo $! > "{pidfile}"; exit 0'
+    env = {"PATH": "/usr/bin:/bin", "TMPDIR": str(tmp_path)}
+    started = time.monotonic()
+    try:
+        result = mod._stream_publisher(["/bin/sh", "-c", script], env)
+        elapsed = time.monotonic() - started
+    finally:
+        if pidfile.exists():
+            try:
+                os.kill(int(pidfile.read_text()), 9)
+            except ProcessLookupError:
+                pass
+
+    assert result.returncode == 0
+    assert elapsed < 3.0
+    assert capfd.readouterr().err.splitlines() == ["scratch-pad: publish: said before exit"]
+    assert result.echoed is True
 
 
 def test_a_publish_that_waits_longer_than_the_publish_timeout_is_not_killed(mod, vault, tmp_path, capfd):

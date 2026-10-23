@@ -87,13 +87,13 @@ def rig(tmp_path, monkeypatch):
     return env, work, tmp_path
 
 
-def _refusal(rig, capsys, option: str, site: str = "page") -> str:
+def _refusal(rig, capsys, option: str, site: str = "page", title: str = "T") -> str:
     env, work, tmp_path = rig
     vault = tmp_path / "xdg" / "lore" / "vaults" / "acme"
     (vault / "sites" / "taken").mkdir(parents=True, exist_ok=True)
-    ref = tmp_path / f"ref-{option}-{site}.json"
+    ref = tmp_path / f"ref-{option}-{site}-{abs(hash(title))}.json"
     drawings = [{"round": 1, "question": 1, "option": option}]
-    ref.write_text(json.dumps({"site": site, "title": "T", "drawings": drawings}))
+    ref.write_text(json.dumps({"site": site, "title": title, "drawings": drawings}))
     capsys.readouterr()
     code = scratch_pad.main(["--pad", "p", "--reference", str(ref), "--vault-path", str(vault)], env, cwd=work)
     assert code == 1
@@ -111,3 +111,17 @@ def test_the_skill_quotes_the_credential_refusal_as_the_script_prints_it(rig, ca
     tail = _refusal(rig, capsys, "B").split(": ", 2)[2].split(" ", 1)[1]
     placeholder = re.sub(r"\([a-z0-9-]+(, [a-z0-9-]+)*\)", "(<class>)", tail)
     assert placeholder in skill_prose()
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [("title", {"title": "password: hunter2hunter2"}), ("site", {"site": "a" * 40})],
+)
+def test_the_skill_quotes_the_credential_refusal_for_the_title_and_the_site_as_the_script_prints_it(
+    rig, capsys, field, kwargs
+):
+    line = _refusal(rig, capsys, "A", **kwargs)
+    where = line.split(" matches a credential pattern", 1)[0].removeprefix("scratch-pad: ").split(": ")[0]
+
+    assert where == field
+    assert f"scratch-pad: {field}: " in skill_prose()

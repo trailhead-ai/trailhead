@@ -361,7 +361,9 @@ python3 ${CLAUDE_PLUGIN_ROOT}/skills/scratch-pad/scratch_pad.py \
   the team`. Say which drawing and which field it names, and never repeat the
   text that matched. The fix is a corrected drawing: add a round to the pad
   without it (`--add`), ask the user to open that round and name the drawing
-  again.
+  again. A match in the reference's own title or site (`scratch-pad: title: …`
+  or `scratch-pad: site: …`) is fixed by editing the reference file, not by a
+  new round; never repeat the matched text there either.
 - **Other refusals** (exit 1), each followed by one plain line that no reference
   was published and why:
   - `scratch-pad: pad "<pad>": does not exist …`, or `can't be referenced: …`:
