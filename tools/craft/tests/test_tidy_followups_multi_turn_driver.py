@@ -47,10 +47,11 @@ STUB = textwrap.dedent(
             break
         print(json.dumps({"type": "system", "subtype": "init", "session_id": "s"}), flush=True)
         for ev in turn:
+            if ev.get("type") == "result":
+                emitted[0] += 1
             print(json.dumps(ev), flush=True)
             if ev.get("type") == "assistant":
                 time.sleep(0.15)
-        emitted[0] += 1
     """
 )
 
