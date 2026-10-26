@@ -148,7 +148,10 @@ fallback, no GNU `readlink -f`, macOS-safe).
   its commits new SHAs, so a test pinned to one passes on its pull request and fails
   on main. When a test needs a past version of a file (an eval arm's baseline, an
   earlier implementation's output), commit that version or its output as a fixture,
-  and record which commit it came from in prose for a person to read. CI checks out
+  and record each source file's content fingerprint (`git hash-object <path>`) in
+  prose for a person to read — never a commit ID, which rebasing or squash-merging
+  changes. `git log --find-object=<fingerprint>` finds the commit if anyone needs
+  it. CI checks out
   at depth 1, so any history read fails on the pull request that adds it. A test that
   builds its own throwaway repository under `tmp_path` is unaffected.
 - Comments, docstrings, and tests must stand on their own — explain intent and
