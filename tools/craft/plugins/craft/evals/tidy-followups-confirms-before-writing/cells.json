@@ -1,0 +1,442 @@
+{
+ "plain-include": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {P1} and {P2}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "R1",
+   "S2",
+   "S3",
+   "M1",
+   "E",
+   "G2"
+  ],
+  "dispositions": {
+   "included": [
+    "P1",
+    "P2"
+   ],
+   "drops": [],
+   "merges": []
+  },
+  "expect": {
+   "followups": {
+    "P1": {
+     "status": "ready",
+     "nested": true
+    },
+    "P2": {
+     "status": "ready",
+     "nested": true
+    },
+    "L": {
+     "status": "open",
+     "nested": false,
+     "touched": false
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1",
+     "P2"
+    ],
+    "new": true
+   }
+  }
+ },
+ "drop-and-merge": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation, so go straight through to the writes.",
+  "answers": [
+   "Make the shortlist exactly {I}. Drop {D}, and merge {M} into {S}.",
+   "the misters were taken out of the greenhouse plan",
+   "drop {L2}",
+   "yes and the code {code}",
+   "yes and the code {code}"
+  ],
+  "change_answer": 2,
+  "lines": [
+   "W1",
+   "W2",
+   "R1",
+   "R3",
+   "S2",
+   "S3",
+   "M1",
+   "E",
+   "G2"
+  ],
+  "dispositions": {
+   "included": [
+    "I"
+   ],
+   "drops": [
+    "D",
+    "L2"
+   ],
+   "merges": [
+    {
+     "survivor": "S",
+     "absorbed": [
+      "M"
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "followups": {
+    "I": {
+     "status": "ready",
+     "nested": true
+    },
+    "D": {
+     "status": "dropped",
+     "reason": true
+    },
+    "L2": {
+     "status": "dropped",
+     "reason": true
+    },
+    "M": {
+     "status": "superseded"
+    },
+    "S": {
+     "status": "open",
+     "nested": false
+    },
+    "L1": {
+     "status": "open",
+     "touched": false
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "I"
+    ],
+    "new": true
+   }
+  }
+ },
+ "bare-yes": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation. Do not keep asking me.",
+  "answers": [
+   "Take every follow-up off the shortlist, and drop {X1} and {X2}.",
+   "the lamp and the horn were retired with the old tower",
+   "yes",
+   "yes and the code zzzz",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "R1",
+   "R2",
+   "S2",
+   "M1",
+   "E",
+   "G2"
+  ],
+  "dispositions": {
+   "included": [],
+   "drops": [
+    "X1",
+    "X2"
+   ],
+   "merges": []
+  },
+  "expect": {
+   "followups": {
+    "X1": {
+     "status": "dropped",
+     "reason": true
+    },
+    "X2": {
+     "status": "dropped",
+     "reason": true
+    },
+    "K": {
+     "status": "open",
+     "touched": false
+    }
+   }
+  }
+ },
+ "leave-out": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation, so nest whatever is ready.",
+  "answers": [
+   "Make the shortlist exactly {N1} and {N2}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Leave out {N2}.",
+   "yes and the code {code}"
+  ],
+  "change_answer": 2,
+  "lines": [
+   "W1",
+   "W2",
+   "R1",
+   "R3",
+   "S2",
+   "S3",
+   "M1",
+   "E",
+   "G2"
+  ],
+  "dispositions": {
+   "included": [
+    "N1",
+    "N2"
+   ],
+   "drops": [],
+   "merges": []
+  },
+  "expect": {
+   "followups": {
+    "N1": {
+     "status": "ready",
+     "nested": true
+    },
+    "N2": {
+     "status": "ready",
+     "nested": false
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "N1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "resume-leave-out": {
+  "shim": "env",
+  "upfront": "Resume the open parent with everything it lists. I will say yes to every confirmation.",
+  "answers": [
+   "Leave out {C}.",
+   "yes and the code {code}"
+  ],
+  "change_answer": 0,
+  "lines": [
+   "W1",
+   "W2",
+   "R3",
+   "S3",
+   "E",
+   "G2"
+  ],
+  "expect": {
+   "followups": {
+    "A": {
+     "status": "ready",
+     "nested": true
+    },
+    "B": {
+     "status": "ready",
+     "nested": true
+    },
+    "C": {
+     "status": "ready",
+     "nested": false,
+     "touched": false
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "A",
+     "B"
+    ],
+    "new": false
+   },
+   "unlisted": [
+    "C"
+   ]
+  }
+ },
+ "parent-drop": {
+  "shim": "env",
+  "upfront": "I will say yes to every confirmation. Do not hold things up on my account.",
+  "answers": [
+   "drop",
+   "the kiln line was cancelled with the old studio",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "E",
+   "G2"
+  ],
+  "expect": {
+   "followups": {
+    "A": {
+     "status": "ready",
+     "nested": false
+    },
+    "B": {
+     "status": "done",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "dropped",
+    "holds": [
+     "B"
+    ],
+    "new": false
+   }
+  }
+ },
+ "drop-fails": {
+  "shim": "dropfail_env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation.",
+  "answers": [
+   "Take every follow-up off the shortlist, and drop {F1} and {F2}.",
+   "the old stockroom closed with its rack",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "S2",
+   "M1",
+   "F1",
+   "E",
+   "G2"
+  ],
+  "failed": {
+   "role": "F2",
+   "write": "drop"
+  },
+  "dispositions": {
+   "included": [],
+   "drops": [
+    "F1",
+    "F2"
+   ],
+   "merges": []
+  },
+  "expect": {
+   "followups": {
+    "F1": {
+     "status": "dropped",
+     "reason": true
+    },
+    "F2": {
+     "status": "open",
+     "touched": false
+    }
+   },
+   "no_commands": [
+    "/craft:distill",
+    "/craft:execute"
+   ]
+  }
+ },
+ "supersede-fails": {
+  "shim": "supersedefail_env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation.",
+  "answers": [
+   "Make the shortlist exactly {G1}. Merge {G2} and {G3} into {G1}.",
+   "yes and the code {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "R1",
+   "S2",
+   "M1",
+   "F1",
+   "E",
+   "G2"
+  ],
+  "failed": {
+   "role": "G3",
+   "write": "supersede"
+  },
+  "dispositions": {
+   "included": [
+    "G1"
+   ],
+   "drops": [],
+   "merges": [
+    {
+     "survivor": "G1",
+     "absorbed": [
+      "G2",
+      "G3"
+     ]
+    }
+   ]
+  },
+  "expect": {
+   "followups": {
+    "G2": {
+     "status": "superseded"
+    },
+    "G3": {
+     "status": "open",
+     "touched": false
+    },
+    "G1": {
+     "status": "open",
+     "nested": false
+    }
+   },
+   "no_calls": [
+    "Agent",
+    "check",
+    "assemble"
+   ]
+  }
+ },
+ "retry-after-failure": {
+  "spec_cell": "drop-fails",
+  "reuse": "drop-fails",
+  "shim": "env",
+  "upfront": "Last time the drop of {F2} failed after {F1} went through, and the code I confirmed then was {prev_code}. I will say yes to every confirmation.",
+  "answers": [
+   "Take every follow-up off the shortlist, and drop {F2}.",
+   "the old stockroom closed with its rack",
+   "yes and the code {prev_code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "W1",
+   "W2",
+   "R2",
+   "R3",
+   "S2",
+   "M1",
+   "E",
+   "G2"
+  ],
+  "dispositions": {
+   "included": [],
+   "drops": [
+    "F2"
+   ],
+   "merges": []
+  },
+  "expect": {
+   "followups": {
+    "F2": {
+     "status": "dropped",
+     "reason": true
+    }
+   }
+  }
+ }
+}

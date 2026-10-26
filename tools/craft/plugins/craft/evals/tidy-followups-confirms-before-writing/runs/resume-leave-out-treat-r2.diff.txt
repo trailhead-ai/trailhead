@@ -1,0 +1,3 @@
+vault CHANGED task/bell-rope-cap-the-pull-length.json
+vault CHANGED task/build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12.json
+vault CHANGED task/build-the-follow-ups-of-fixture-bell-tower-spec-chosen-2026-10-12.md

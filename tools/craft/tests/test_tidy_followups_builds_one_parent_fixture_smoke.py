@@ -133,7 +133,13 @@ def make_ready_and_confirm(built, spec_key, roles):
 def assemble(built, env_key, spec_key, children, tmp_path):
     path = tmp_path / "children.json"
     path.write_text(json.dumps(children))
-    return run(built[env_key], PARENT, "assemble", built["specs"][spec_key], "--children", path)
+    reasons = tmp_path / "reasons.json"
+    reasons.write_text(json.dumps({c["name"]: c["reason"] for c in children}))
+    spec = built["specs"][spec_key]
+    checked = run(built["env"], PARENT, "check", spec, *[c["name"] for c in children], "--reasons", reasons)
+    assert checked.returncode == 0, checked.stderr
+    code = json.loads(checked.stdout)["confirm"]
+    return run(built[env_key], PARENT, "assemble", spec, "--children", path, "--confirm", code)
 
 
 def test_assembly_under_the_plain_env_nests_every_child(tmp_path):

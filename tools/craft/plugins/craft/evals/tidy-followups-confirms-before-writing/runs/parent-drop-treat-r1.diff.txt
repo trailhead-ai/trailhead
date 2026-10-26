@@ -1,0 +1,3 @@
+vault CHANGED task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12.json
+vault CHANGED task/build-the-follow-ups-of-fixture-pottery-kiln-spec-chosen-2026-10-12.md
+vault CHANGED task/kiln-refuse-a-firing-time-of-zero.json

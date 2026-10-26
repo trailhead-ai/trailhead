@@ -14,6 +14,7 @@ automatically.
 from __future__ import annotations
 
 import importlib.util
+import re
 from pathlib import Path
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -33,6 +34,11 @@ DISPOSE_SCRIPT = CRAFT / "scripts" / "followup_dispose.py"
 _dspec = importlib.util.spec_from_file_location("followup_dispose_for_reason_codes", DISPOSE_SCRIPT)
 dispose = importlib.util.module_from_spec(_dspec)
 _dspec.loader.exec_module(dispose)
+
+CONFIRM_SCRIPT = CRAFT / "scripts" / "followup_confirm.py"
+_cspec = importlib.util.spec_from_file_location("followup_confirm_for_reason_codes", CONFIRM_SCRIPT)
+confirm = importlib.util.module_from_spec(_cspec)
+_cspec.loader.exec_module(confirm)
 
 
 def test_skill_names_every_reason_code_the_script_emits():  # inert-gate: allow code-vs-document consistency seam
@@ -58,3 +64,10 @@ def test_skill_names_every_left_out_reason_check_can_report():  # inert-gate: al
     text = SKILL.read_text(encoding="utf-8")
     missing = sorted(code for code in parent.LEFT_OUT_REASONS if code not in text)
     assert not missing, f"tidy-followups/SKILL.md never names left-out reason(s): {missing}"
+
+
+def test_skill_shape_rule_names_the_codes_length_and_alphabet():  # inert-gate: allow code-vs-document consistency seam
+    text = " ".join(SKILL.read_text(encoding="utf-8").split())
+    rule = re.search(r"exactly (\d+) characters, each one of `([^`]+)`", text)
+    assert rule, "tidy-followups/SKILL.md has no shape rule naming the code's length and characters"
+    assert (int(rule.group(1)), rule.group(2)) == (confirm.CODE_LENGTH, confirm.ALPHABET)

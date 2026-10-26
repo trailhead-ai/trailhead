@@ -610,7 +610,9 @@ def test_check_followups_returns_the_structure_the_json_emits(capsys):
     assert result["left-out"] == [{"name": "bad", "reason": "not-ready"}]
     code, out, _ = run_main(runner, "check", "s", "good", "bad", capsys=capsys)
     assert code == 0
-    assert json.loads(out) == result
+    shown = json.loads(out)
+    assert shown.pop("confirm") == parent.check_confirmation("s", result["eligible"], None, None)
+    assert shown == result
 
 
 def test_read_revision_returns_the_revision_lore_reports():
@@ -725,10 +727,18 @@ def confirm(env, vault, names):
     ]
 
 
-def run_assemble(tmp_path, runner, spec, children, capsys, today=DAY):
+def nest_code(spec_name, children):
+    """The code `check --reasons` prints for exactly these children."""
+    reasons = {c["name"]: c["reason"] for c in children}
+    return parent.check_confirmation(spec_name, children, None, reasons)
+
+
+def run_assemble(tmp_path, runner, spec, children, capsys, today=DAY, typed="auto"):
     path = tmp_path / "children.json"
     path.write_text(json.dumps(children))
-    code = parent.main(["assemble", spec, "--children", str(path)], runner=runner, today=today)
+    typed = nest_code(spec, children) if typed == "auto" else typed
+    argv = ["assemble", spec, "--children", str(path)] + (["--confirm", typed] if typed else [])
+    code = parent.main(argv, runner=runner, today=today)
     out = capsys.readouterr()
     return code, (json.loads(out.out) if out.out.strip() else None), out.err
 
@@ -798,10 +808,19 @@ def test_the_default_runner_assembles_through_the_cli_as_a_subprocess(  # inert-
 ):
     env, vault = lore_env
     names = make_children(env, vault, spec, count=2)
+    children = confirm(env, vault, names)
     path = tmp_path / "children.json"
-    path.write_text(json.dumps(confirm(env, vault, names)))
+    path.write_text(json.dumps(children))
+    reasons = tmp_path / "reasons.json"
+    reasons.write_text(json.dumps({c["name"]: c["reason"] for c in children}))
+    checked = subprocess.run(
+        [sys.executable, str(_SCRIPT), "check", spec, *names, "--reasons", str(reasons)],
+        capture_output=True, text=True, env=env,
+    )
+    assert checked.returncode == 0, checked.stderr
     r = subprocess.run(
-        [sys.executable, str(_SCRIPT), "assemble", spec, "--children", str(path)],
+        [sys.executable, str(_SCRIPT), "assemble", spec, "--children", str(path),
+         "--confirm", json.loads(checked.stdout)["confirm"]],
         capture_output=True, text=True, env=env,
     )
     assert r.returncode == 0, r.stderr
@@ -1774,7 +1793,10 @@ def test_assemble_without_its_spec_or_children_file_is_invalid_arguments(tmp_pat
 def test_an_unexpected_exception_during_assemble_exits_two_internal_error(tmp_path, capsys):
     path = tmp_path / "children.json"
     path.write_text(json.dumps([GOOD]))
-    code = parent.main(["assemble", "s", "--children", str(path)], runner=Lore(raises=RuntimeError("SECRET")))
+    code = parent.main(
+        ["assemble", "s", "--children", str(path), "--confirm", nest_code("s", [GOOD])],
+        runner=Lore(raises=RuntimeError("SECRET")),
+    )
     out = capsys.readouterr()
     assert code == 2 and out.out == ""
     assert reason_of(out.err) == "internal-error"
@@ -1833,6 +1855,9 @@ def test_state_of_an_assembled_parent_with_the_second_child_un_nested(lore_env, 
     unnest(env, vault, names[1])
     code, out, _, err = run_state(EnvRunner(env), spec, assembled["parent"], capsys)
     assert code == 0, err
+    assert out.pop("drop-confirm") == parent.drop_confirmation(
+        spec, parent.parent_state(EnvRunner(env), spec, assembled["parent"]), None
+    )
     assert out == {
         "parent": assembled["parent"],
         "status": "ready",
@@ -1957,10 +1982,24 @@ def test_held_children_returns_name_and_status_of_each_confirmed_child(lore_env,
 # --- drop: un-nest the unfinished children, then drop the parent ------------------------------
 
 
-def run_drop(runner, spec_name, parent_name, tmp_path, capsys, reason="no longer wanted", raw=None):
+def typed_drop_code(runner, spec_name, parent_name, reason_path):
+    """The code `state --reason-file` prints, read through a plain runner on the same vault."""
+    env = getattr(runner, "env", None)
+    if env is None:
+        return None
+    try:
+        state = parent.parent_state(EnvRunner(env), spec_name, parent_name)
+        return parent.drop_confirmation(spec_name, state, parent.load_reason(str(reason_path)))
+    except (parent.ParentError, parent.gather.GatherError):
+        return None
+
+
+def run_drop(runner, spec_name, parent_name, tmp_path, capsys, reason="no longer wanted", raw=None, typed="auto"):
     path = tmp_path / "reason.json"
     path.write_text(json.dumps(reason) if raw is None else raw)
-    code = parent.main(["drop", spec_name, parent_name, "--reason-file", str(path)], runner=runner)
+    argv = ["drop", spec_name, parent_name, "--reason-file", str(path)]
+    typed = typed_drop_code(runner, spec_name, parent_name, path) if typed == "auto" else typed
+    code = parent.main(argv + (["--confirm", typed] if typed not in (None, "auto") else []), runner=runner)
     out = capsys.readouterr()
     return code, (json.loads(out.out) if out.out.strip() else None), out.err
 
@@ -2000,6 +2039,26 @@ def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
     assert dropped_section(body_of(env, vault, parent_name)).strip() == "Reason: plans changed"
     assert gathered_names(env, spec) == names
     assert [a[2] for a in runner.calls if is_unnest(a)] == [f"task/{n}" for n in names]
+
+
+def test_a_lone_surrogate_in_a_drop_reason_is_stripped_and_the_drop_completes(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    code, out, err = run_drop(
+        EnvRunner(env), spec, parent_name, tmp_path, capsys, reason="plans\ud800 changed"
+    )
+    assert code == 0, err
+    assert out["dropped"] is True and out["un-nested"] == names and out["failed"] == []
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+    assert dropped_section(body_of(env, vault, parent_name)).strip() == "Reason: plans changed"
+
+
+def test_a_lone_surrogate_in_a_selection_reason_is_stripped_from_the_rendered_body():
+    body = parent.render_body("s", [{"name": "a", "reason": "keep\udc80 this"}])
+    assert "**Selection reason:** keep this\n" in body
+    body.encode("utf-8")
 
 
 def test_a_done_child_stays_nested_and_an_in_progress_child_is_un_nested(
@@ -2282,10 +2341,26 @@ def test_an_unmarked_task_is_refused_as_not_a_followup_parent_with_the_vault_unc
 # --- resume: finish an open parent --------------------------------------------------------------
 
 
-def run_resume(runner, spec_name, parent_name, children, tmp_path, capsys, raw=None):
+def resume_code(runner, spec_name, parent_name, children):
+    """The code `check --parent` prints for exactly these children, from the parent as it stands."""
+    removed = []
+    if isinstance(runner, EnvRunner):
+        try:
+            state = parent.parent_state(EnvRunner(runner.env), spec_name, parent_name)
+        except parent.ParentError:
+            state = None
+        if state is not None:
+            removed = parent.resume_removals(state, children)
+    return parent.check_confirmation(spec_name, children, parent_name, None, removed)
+
+
+def run_resume(runner, spec_name, parent_name, children, tmp_path, capsys, raw=None, typed="auto"):
     path = tmp_path / "resume-children.json"
     path.write_text(json.dumps(children) if raw is None else raw)
-    code = parent.main(["resume", spec_name, parent_name, "--children", str(path)], runner=runner)
+    if typed == "auto":
+        typed = resume_code(runner, spec_name, parent_name, children) if raw is None else None
+    argv = ["resume", spec_name, parent_name, "--children", str(path)] + (["--confirm", typed] if typed else [])
+    code = parent.main(argv, runner=runner)
     out = capsys.readouterr()
     return code, (json.loads(out.out) if out.out.strip() else None), out.err
 
@@ -3439,3 +3514,443 @@ def test_a_drop_reason_cannot_start_a_heading_or_list_under_the_dropped_section(
     assert dropped_section(body).strip() == f"Reason: {reason}"
     assert [ln for ln in body.splitlines() if ln.startswith("#")].count("## Dropped") == 1
     assert not any(ln.startswith(("## Forged", "# Forged", "- forged")) for ln in body.splitlines())
+
+
+# --- confirmation codes: proof the confirmation was shown before the write it gates -----------------
+
+
+def cli(runner, *argv, capsys):
+    code = parent.main(list(argv), runner=runner, today=DAY)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.err
+
+
+def write_json(tmp_path, name, value):
+    path = tmp_path / name
+    path.write_text(json.dumps(value))
+    return str(path)
+
+
+def printed_confirm(env, spec_name, names, tmp_path, capsys, parent_name=None, reasons=None):
+    argv = ["check", spec_name, *names]
+    if parent_name:
+        argv += ["--parent", parent_name]
+    if reasons is not None:
+        argv += ["--reasons", write_json(tmp_path, "reasons.json", reasons)]
+    code, out, err = cli(EnvRunner(env), *argv, capsys=capsys)
+    assert code == 0, err
+    return out["confirm"]
+
+
+def reasons_for(names, text="worth doing"):
+    return {n: f"{text}: {n}" for n in names}
+
+
+def assemble_with(runner, spec_name, children, tmp_path, capsys, confirm_code):
+    argv = ["assemble", spec_name, "--children", write_json(tmp_path, "children.json", children)]
+    if confirm_code is not None:
+        argv += ["--confirm", confirm_code]
+    return cli(runner, *argv, capsys=capsys)
+
+
+def test_check_prints_a_confirm_that_assemble_takes_to_create_and_nest(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
+    assert len(code) == 4
+    status, out, err = assemble_with(
+        EnvRunner(env), spec, confirm(env, vault, names), tmp_path, capsys, code
+    )
+    assert status == 0, err
+    assert out["buildable"] is True and sorted(out["nested"]) == sorted(names)
+    assert parents_of(env, vault, names) == [out["parent"]] * 2
+
+
+def test_assemble_with_only_one_of_two_confirmed_children_is_a_mismatch_and_creates_nothing(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    status, out, err = assemble_with(runner, spec, confirm(env, vault, names[:1]), tmp_path, capsys, code)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.calls == [] and vault_snapshot(env, vault) == before
+
+
+@pytest.mark.parametrize("typed", ["\udcff", "k7q2\udc80", "\ud800"], ids=["escaped-byte", "after-code", "high"])
+def test_a_code_that_will_not_encode_as_utf8_is_a_mismatch_not_an_internal_error(typed, tmp_path, capsys):
+    runner = Lore()
+    children = [{"name": "alpha", "reason": "worth doing", "revision": "v1"}]
+    status, out, err = assemble_with(runner, "s", children, tmp_path, capsys, typed)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.calls == []
+
+
+@pytest.mark.parametrize("typed", [None, "", "   "], ids=["absent", "empty", "blank"])
+def test_assemble_without_a_code_is_confirmation_missing_and_makes_no_lore_call(
+    lore_env, spec, tmp_path, capsys, typed
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    runner = EnvRunner(env)
+    status, out, err = assemble_with(runner, spec, confirm(env, vault, names), tmp_path, capsys, typed)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-missing"]
+    assert runner.calls == []
+    assert parents_of(env, vault, names) == [None] * 2
+
+
+def test_assemble_takes_the_code_in_any_case_and_with_surrounding_space(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
+    status, _, err = assemble_with(
+        EnvRunner(env), spec, confirm(env, vault, names), tmp_path, capsys, f"  {code.upper()} "
+    )
+    assert status == 0, err
+
+
+def test_assemble_with_the_confirmed_code_but_one_changed_reason_is_a_mismatch_and_creates_nothing(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
+    children = confirm(env, vault, names)
+    children[1]["reason"] = "a different reason than the one shown"
+    runner = EnvRunner(env)
+    status, out, err = assemble_with(runner, spec, children, tmp_path, capsys, code)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == [] and parents_of(env, vault, names) == [None] * 2
+
+
+def test_a_reason_that_differs_only_in_what_is_sanitized_away_keeps_the_code(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    shown = {names[0]: "fixes the widget"}
+    code = printed_confirm(env, spec, names, tmp_path, capsys, reasons=shown)
+    children = confirm(env, vault, names)
+    children[0]["reason"] = "fixes\n  the `widget`\u200b"
+    status, _, err = assemble_with(EnvRunner(env), spec, children, tmp_path, capsys, code)
+    assert status == 0, err
+
+
+def test_the_code_over_reasons_differs_from_the_code_without_them(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    with_reasons = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons_for(names))
+    without = printed_confirm(env, spec, names, tmp_path, capsys)
+    assert with_reasons != without
+
+
+def test_a_child_edited_after_the_check_changes_the_code_assemble_needs(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    reasons = reasons_for(names)
+    before = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons)
+    _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, stdin=CLEAN + "\nMore detail.\n")
+    after = printed_confirm(env, spec, names, tmp_path, capsys, reasons=reasons)
+    assert before != after
+
+
+def test_the_eligible_set_alone_changes_the_code(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    both = printed_confirm(env, spec, names, tmp_path, capsys)
+    one = printed_confirm(env, spec, names[:1], tmp_path, capsys)
+    assert both != one
+
+
+def test_check_with_a_reasons_file_missing_an_eligible_name_is_invalid_reason_file(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=2)
+    reasons = write_json(tmp_path, "reasons.json", reasons_for(names[:1]))
+    code, out, err = cli(EnvRunner(env), "check", spec, *names, "--reasons", reasons, capsys=capsys)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-reason-file"]
+
+
+def test_check_with_a_parent_and_reasons_is_invalid_arguments(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    names = make_children(env, vault, spec, count=1)
+    holder = hand_parent(env, vault, spec, names)
+    reasons = write_json(tmp_path, "reasons.json", reasons_for(names))
+    code, out, err = cli(
+        EnvRunner(env), "check", spec, *names, "--parent", holder, "--reasons", reasons, capsys=capsys
+    )
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-arguments"]
+
+
+def resume_with(runner, spec_name, parent_name, children, tmp_path, capsys, confirm_code):
+    argv = ["resume", spec_name, parent_name, "--children", write_json(tmp_path, "resume.json", children)]
+    if confirm_code is not None:
+        argv += ["--confirm", confirm_code]
+    return cli(runner, *argv, capsys=capsys)
+
+
+def test_resume_accepts_the_parent_check_code_and_refuses_the_plain_check_code(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    holder, names = interrupted(env, vault, spec, tmp_path, capsys)
+    rest = names[1:]
+    with_parent = printed_confirm(env, spec, rest, tmp_path, capsys, parent_name=holder)
+    plain = printed_confirm(env, spec, rest, tmp_path, capsys)
+    assert with_parent != plain
+    refused_runner = EnvRunner(env)
+    status, out, err = resume_with(refused_runner, spec, holder, revisions(env, vault, rest), tmp_path, capsys, plain)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert refused_runner.writes() == [] and parents_of(env, vault, names) == [holder, None, None]
+    status, out, err = resume_with(
+        EnvRunner(env), spec, holder, revisions(env, vault, rest), tmp_path, capsys, with_parent
+    )
+    assert status == 0, err
+    assert out["buildable"] is True and parents_of(env, vault, names) == [holder] * 3
+
+
+def test_the_parent_alone_changes_the_check_code_and_resume_binds_to_it(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = interrupted(env, vault, spec, tmp_path, capsys)
+    rest = names[1:]
+    other = hand_parent(env, vault, spec, [], status="open")
+    assert printed_confirm(env, spec, rest, tmp_path, capsys, parent_name=holder) != printed_confirm(
+        env, spec, rest, tmp_path, capsys, parent_name=other
+    )
+    wrong = printed_confirm(env, spec, rest, tmp_path, capsys, parent_name=other)
+    runner = EnvRunner(env)
+    status, out, err = resume_with(runner, spec, holder, revisions(env, vault, rest), tmp_path, capsys, wrong)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+
+
+def test_resume_binds_to_the_children_and_their_revisions(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = interrupted(env, vault, spec, tmp_path, capsys)
+    rest = names[1:]
+    code = printed_confirm(env, spec, rest, tmp_path, capsys, parent_name=holder)
+    runner = EnvRunner(env)
+    status, out, err = resume_with(
+        runner, spec, holder, revisions(env, vault, rest[:1]), tmp_path, capsys, code
+    )
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+    stale = revisions(env, vault, rest)
+    stale[0]["revision"] = "not-the-revision-shown"
+    status, out, err = resume_with(runner, spec, holder, stale, tmp_path, capsys, code)
+    assert status == 1 and reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+
+
+def test_resume_without_a_code_is_confirmation_missing_and_makes_no_lore_call(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    holder, names = interrupted(env, vault, spec, tmp_path, capsys)
+    runner = EnvRunner(env)
+    status, out, err = resume_with(runner, spec, holder, revisions(env, vault, names[1:]), tmp_path, capsys, None)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-missing"]
+    assert runner.calls == []
+
+
+def state_json(env, spec_name, parent_name, capsys, reason_path=None):
+    argv = ["state", spec_name, parent_name]
+    if reason_path:
+        argv += ["--reason-file", reason_path]
+    code, out, err = cli(EnvRunner(env), *argv, capsys=capsys)
+    assert code == 0, err
+    return out
+
+
+def drop_with(runner, spec_name, parent_name, reason_path, capsys, confirm_code):
+    argv = ["drop", spec_name, parent_name, "--reason-file", reason_path]
+    if confirm_code is not None:
+        argv += ["--confirm", confirm_code]
+    return cli(runner, *argv, capsys=capsys)
+
+
+def test_state_prints_a_drop_confirm_that_drop_takes_to_un_nest_and_drop(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    code = state_json(env, spec, holder, capsys, reason)["drop-confirm"]
+    assert len(code) == 4
+    status, out, err = drop_with(EnvRunner(env), spec, holder, reason, capsys, code)
+    assert status == 0, err
+    assert out["dropped"] is True and sorted(out["un-nested"]) == sorted(names)
+    assert sidecar_of(env, vault, holder)["status"] == "dropped"
+
+
+def test_drop_refuses_the_shown_code_after_a_held_child_changed_status_and_un_nests_nothing(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    code = state_json(env, spec, holder, capsys, reason)["drop-confirm"]
+    _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--status", "blocked")
+    runner = EnvRunner(env)
+    status, out, err = drop_with(runner, spec, holder, reason, capsys, code)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+    assert parents_of(env, vault, names) == [holder] * 2
+    assert sidecar_of(env, vault, holder)["status"] == "ready"
+
+
+def test_a_held_child_status_alone_changes_the_drop_confirm(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    before = state_json(env, spec, holder, capsys, reason)["drop-confirm"]
+    _lore(env, "record", "update", f"task/{names[0]}", "--vault", vault, "--status", "blocked")
+    assert state_json(env, spec, holder, capsys, reason)["drop-confirm"] != before
+
+
+def test_a_held_child_alone_changes_the_drop_confirm(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    before = state_json(env, spec, holder, capsys, reason)["drop-confirm"]
+    unnest(env, vault, names[0])
+    assert state_json(env, spec, holder, capsys, reason)["drop-confirm"] != before
+
+
+def test_the_drop_reason_alone_changes_the_drop_confirm_and_drop_binds_to_it(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    shown = write_json(tmp_path, "shown.json", "plans changed")
+    other = write_json(tmp_path, "other.json", "a different reason")
+    code = state_json(env, spec, holder, capsys, shown)["drop-confirm"]
+    assert code != state_json(env, spec, holder, capsys, other)["drop-confirm"]
+    assert code != state_json(env, spec, holder, capsys)["drop-confirm"]
+    runner = EnvRunner(env)
+    status, out, err = drop_with(runner, spec, holder, other, capsys, code)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+
+
+def test_a_drop_reason_that_differs_only_in_what_is_sanitized_away_keeps_the_drop_confirm(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    shown = write_json(tmp_path, "shown.json", "plans changed")
+    typed = write_json(tmp_path, "typed.json", "plans\n   changed​")
+    code = state_json(env, spec, holder, capsys, shown)["drop-confirm"]
+    status, _, err = drop_with(EnvRunner(env), spec, holder, typed, capsys, code)
+    assert status == 0, err
+
+
+def test_drop_without_a_code_is_confirmation_missing_and_writes_nothing(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    runner = EnvRunner(env)
+    status, out, err = drop_with(runner, spec, holder, reason, capsys, None)
+    assert status == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-missing"]
+    assert runner.writes() == []
+    assert parents_of(env, vault, names) == [holder] * 2
+
+
+def test_a_code_minted_for_one_write_does_not_satisfy_another(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, names = interrupted(env, vault, spec, tmp_path, capsys)
+    reason = write_json(tmp_path, "why.json", "plans changed")
+    drop_code = state_json(env, spec, holder, capsys, reason)["drop-confirm"]
+    runner = EnvRunner(env)
+    status, _, err = resume_with(runner, spec, holder, [], tmp_path, capsys, drop_code)
+    assert status == 1 and reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == []
+
+
+def test_state_with_an_unreadable_reason_file_is_invalid_reason_file(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    holder, _ = assembled_parent(env, vault, spec, tmp_path, capsys)
+    code, out, err = cli(
+        EnvRunner(env), "state", spec, holder, "--reason-file", str(tmp_path / "nope.json"), capsys=capsys
+    )
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-reason-file"]
+
+
+def test_check_with_the_parent_and_no_names_mints_a_code_that_resumes_a_parent_holding_every_listed_child(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    names = make_children(env, vault, spec)
+    runner = EnvRunner(env, lambda a, s, r: refused(a) if is_flip(a) else None)
+    _, assembled, _ = run_assemble(tmp_path, runner, spec, confirm(env, vault, names), capsys)
+    parent_name = assembled["parent"]
+    assert sidecar_of(env, vault, parent_name)["status"] == "open"
+    code, checked, err = run_check_json(EnvRunner(env), spec, "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    assert checked["eligible"] == [] and checked["left-out"] == []
+    code, out, err = run_resume(
+        EnvRunner(env), spec, parent_name, [], tmp_path, capsys, typed=checked["confirm"]
+    )
+    assert code == 0, err
+    assert out["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+
+
+def test_the_no_names_resume_code_is_specific_to_its_parent_and_to_the_children_it_covers(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=3)
+    _, empty, _ = run_check_json(EnvRunner(env), spec, "--parent", parent_name, capsys=capsys)
+    _, one, _ = run_check_json(EnvRunner(env), spec, names[2], "--parent", parent_name, capsys=capsys)
+    assert empty["confirm"] != parent.check_confirmation(spec, [], "another-parent", None)
+    assert empty["confirm"] != one["confirm"]
+
+
+def test_the_resume_code_differs_when_the_names_the_resume_removes_from_the_list_differ():
+    children = [{"name": "kept", "revision": "r1"}]
+    none = parent.check_confirmation("s", children, "p", None, removed=[])
+    one = parent.check_confirmation("s", children, "p", None, removed=["gone-a"])
+    two = parent.check_confirmation("s", children, "p", None, removed=["gone-a", "gone-b"])
+    assert len({none, one, two}) == 3
+    assert one == parent.check_confirmation("s", children, "p", None, removed=["gone-a"])
+
+
+def test_resume_refuses_when_a_name_was_added_to_the_list_after_the_check(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys, count=3)
+    code, checked, err = run_check_json(EnvRunner(env), spec, names[1], "--parent", parent_name, capsys=capsys)
+    assert code == 0, err
+    late = make_followup(env, vault, "Added late", spec=spec)
+    listed = [{"name": n, "reason": "worth doing"} for n in [*names, late]]
+    _lore(env, "record", "update", f"task/{parent_name}", "--vault", vault, stdin=parent.render_body(spec, listed))
+    before = vault_snapshot(env, vault)
+    runner = EnvRunner(env)
+    code, out, err = run_resume(
+        runner, spec, parent_name, revisions(env, vault, [names[1]]), tmp_path, capsys, typed=checked["confirm"]
+    )
+    assert code == 1 and out is None
+    assert reason_codes(err) == ["reason-code: confirmation-mismatch"]
+    assert runner.writes() == [] and vault_snapshot(env, vault) == before
+
+
+def test_check_without_the_parent_and_with_no_names_is_refused_as_invalid_arguments(lore_env, spec, capsys):
+    env, vault = lore_env
+    runner = EnvRunner(env)
+    code, out, err = run_check_json(runner, spec, capsys=capsys)
+    assert code == 2 and out is None
+    assert reason_codes(err) == ["reason-code: invalid-arguments"]
+    assert runner.writes() == []

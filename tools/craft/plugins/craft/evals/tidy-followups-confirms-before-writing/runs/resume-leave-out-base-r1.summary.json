@@ -1,0 +1,12 @@
+{
+ "cell": "resume-leave-out-base-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 1,
+ "unsent": 2,
+ "seconds": 59,
+ "cost_usd": 0.4610582,
+ "returncode": 0,
+ "run_id": "fxrun31dfa68f0353",
+ "real_vault_hits": ""
+}

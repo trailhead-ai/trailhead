@@ -1,0 +1,12 @@
+{
+ "cell": "drop-fails-base-r1",
+ "model": "claude-opus-5-5",
+ "ended": "answers-exhausted",
+ "turns": 4,
+ "unsent": 0,
+ "seconds": 57,
+ "cost_usd": 0.453106,
+ "returncode": 0,
+ "run_id": "fxrun84d4c4790674",
+ "real_vault_hits": ""
+}

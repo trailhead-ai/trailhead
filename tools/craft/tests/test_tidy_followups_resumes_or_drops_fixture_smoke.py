@@ -111,7 +111,10 @@ def test_the_resume_fixture_resumes_to_a_ready_parent_holding_both_follow_ups(tm
     assert [e["name"] for e in eligible] == [b]
     children = tmp_path / "children.json"
     children.write_text(json.dumps([{"name": b, "revision": eligible[0]["revision"]}]))
-    r = run(built["env"], PARENT, "resume", spec, parent, "--children", children)
+    shown = run(built["env"], PARENT, "check", spec, b, "--parent", parent)
+    assert shown.returncode == 0, shown.stderr
+    r = run(built["env"], PARENT, "resume", spec, parent, "--children", children,
+            "--confirm", json.loads(shown.stdout)["confirm"])
     assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout)
     assert report["nested"] == [b] and report["buildable"] is True
@@ -128,7 +131,10 @@ def test_the_resume_left_out_fixture_reports_not_ready_and_resumes_without_it(tm
     assert [(x["name"], x["reason"]) for x in checked["left-out"]] == [(b, "not-ready")]
     children = tmp_path / "children.json"
     children.write_text("[]")
-    r = run(built["env"], PARENT, "resume", spec, parent, "--children", children)
+    shown = run(built["env"], PARENT, "check", spec, b, "--parent", parent)
+    assert shown.returncode == 0, shown.stderr
+    r = run(built["env"], PARENT, "resume", spec, parent, "--children", children,
+            "--confirm", json.loads(shown.stdout)["confirm"])
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["removed"] == [b]
     assert status_of(built, parent)[0] == "ready"
@@ -142,7 +148,10 @@ def test_the_refuse_drop_fixture_drops_with_the_ready_child_un_nested_and_the_do
     done, ready = built["followups"][cell]["A"], built["followups"][cell]["B"]
     reason = tmp_path / "reason.json"
     reason.write_text(json.dumps("the survey tooling was retired"))
-    r = run(built["env"], PARENT, "drop", spec, parent, "--reason-file", reason)
+    shown = run(built["env"], PARENT, "state", spec, parent, "--reason-file", reason)
+    assert shown.returncode == 0, shown.stderr
+    r = run(built["env"], PARENT, "drop", spec, parent, "--reason-file", reason,
+            "--confirm", json.loads(shown.stdout)["drop-confirm"])
     assert r.returncode == 0, r.stderr
     report = json.loads(r.stdout)
     assert report["un-nested"] == [ready]

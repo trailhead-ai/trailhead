@@ -1,0 +1,2 @@
+vault CHANGED task/rack-varnish-pick-a-lighter-oak.json
+vault CHANGED task/rack-varnish-pick-a-lighter-oak.md
