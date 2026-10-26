@@ -1,0 +1,23 @@
+Here is the slice I've chosen from `spec/holds-and-pickup`, before anything is written. It is **the hold shelf slice**.
+
+**Value claim:** When an item with a hold queued against it is returned, it is set aside for the first borrower in that queue. That borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf.
+
+**Visual surface:** None. The slice changes what happens when an item comes back and which message goes out. It adds or changes no screen, so no states need listing.
+
+**Criteria this slice makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice makes only partially green:** None. Separately, the ledger already records the five-hold limit as part done: a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2). The first hold slice left it that way, and this slice doesn't touch it, so it stays a candidate.
+
+**Still open after this slice:**
+- A borrower can cancel a hold before it is filled (AC4).
+- An uncollected hold lapses after seven days (AC7).
+- The desk screen lists waiting holds when a card is scanned (AC8).
+- Checking a held item out to the wrong person is refused (AC9).
+- The weekly holds report lists every item on the hold shelf (AC10).
+- The rest of the five-hold limit (AC2).
+
+Nothing has been written yet. If you accept this slice, I'll create the parent task `task/the-hold-shelf-slice` at `in-progress`, linked to the spec, with this coverage on it. If you want a different slice, now is the time to say so.
+
+AC5, AC6

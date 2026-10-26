@@ -1,0 +1,15 @@
+The next slice I'd pick for `spec/holds-and-pickup` is **the hold shelf slice**. It's the smallest piece of work left that still delivers real value.
+
+**Why it matters:** At the moment, a returned item that someone is waiting for goes back onto the open shelf. With this slice, the item is kept aside for the first borrower in its queue. That borrower gets one message telling them the item is waiting and the date they must collect it by.
+
+**Screens:** No screen is added or changed. The slice changes what the system does when an item comes back and which message goes out. So there are no screen states to list.
+
+**Criteria this slice fully meets:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- That first borrower is sent one message saying the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice partly meets:** None.
+
+The parent task `task/the-hold-shelf-slice` hasn't been written yet. If you'd rather choose a different slice, now is the time to say so.
+
+AC5, AC6

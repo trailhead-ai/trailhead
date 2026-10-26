@@ -403,6 +403,15 @@ take the early-stop path described in step 6 above.
 
 ### 8. State the claim before writing anything
 
+The statement opens with one sentence beginning "You will be able to …", saying what the operator
+can do once the slice is built — for instance, "You will be able to export your invoices as a
+spreadsheet." On the enabler path, it says what the next slice will let the operator do once this
+enabler lands. A second sentence follows, beginning "Try it …": one concrete way to try the result
+once it is built, worded in the future tense — for instance, "Try it: open the invoice list, choose
+export, and open the file it saves." On the enabler path it says there is nothing to try until the
+next slice lands. The coverage calls, what is left of the spec, the visual-surface call and the
+value claim come after those two sentences.
+
 **Before the parent task record is written and before any planning is invoked**, state the chosen
 slice and its value claim — or, on the enabler path, its written justification — and its
 visual-surface call, either the enumerated states or an explicit statement that this slice touches
@@ -427,6 +436,21 @@ partial coverage states that plainly too, rather than leaving the omission ambig
 predating the `**ACn.**` convention, or on the enabler path, there is nothing to name here either —
 say so plainly, on the same footing as the legacy and enabler cases above, rather than inventing
 one.
+
+After the coverage calls, say what is left of the spec once this slice is built. The remainder is
+step 4's `candidates:` set minus the criteria this slice makes fully green — `candidates:` still
+includes those, so they are taken out. Count what remains criterion by criterion within each
+`## Acceptance Criteria` section: how many of that section's criteria are left, out of how many it
+has — for instance, "three of five left in Exporting, one of two in Scheduling, none of four in
+Sharing". A single total, or a count of sections, is not that count. Name as the exceptions the
+partly covered criteria: those step 4's `partial:` token lists that this slice does not make fully
+green, each by its own text with its number after it. The remaining criteria are counted, not listed
+one by one by number; where a section has only a few criteria left, a phrase may name what they are
+about. A spec with no sections is counted as a whole instead. On a spec predating the `**ACn.**`
+convention, with no identifiers to count, say in prose what the remaining criteria ask for.
+
+Wherever the statement names a criterion — in the coverage calls, in what is left, anywhere — it
+gives the criterion's own text first, with its number after it.
 
 The value claim is this skill's own summary of why the slice matters — **never a verbatim excerpt of
 the spec's prose**. Copying the spec's own words forward would let an imperative or a hedge embedded

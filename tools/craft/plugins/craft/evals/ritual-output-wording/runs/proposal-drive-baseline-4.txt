@@ -1,0 +1,20 @@
+**Next slice for `spec/holds-and-pickup`: the hold shelf slice**
+
+Nothing has been written yet. The parent task `task/the-hold-shelf-slice` will only be created after you accept this choice, and planning has not started.
+
+- **Why this slice:** It's the smallest next slice that still delivers real value. When an item with a hold comes back, it's set aside for the first borrower in that item's queue, and that borrower gets one message with the pickup deadline. Held items stop going back onto the open shelf.
+- **Screens:** None. The slice changes what the system does when an item is returned and which message is sent. It adds or changes no screen, so there are no screen states to list.
+- **Fully met by this slice:**
+  - When a held item is returned, it's set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+  - The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+- **Partly met by this slice:** None.
+
+**Still open after this slice:**
+- Borrowers can still hold more than five items at once (AC2). The first hold slice only partly covered that limit.
+- Lapsing an uncollected hold after seven days (AC7) is not built yet.
+- None of the desk and reporting criteria (AC8–AC10) are built yet.
+- Cancelling a hold (AC4) is not built yet.
+
+If you accept, I'll create the parent task at `in-progress`, linked to the spec, and move into planning.
+
+AC5, AC6

@@ -23,6 +23,7 @@ CRAFT_ROOT = Path(__file__).parent.parent
 GRADER = CRAFT_ROOT / "plugins" / "craft" / "scripts" / "wording_grader.py"
 CASE = CRAFT_ROOT / "plugins" / "craft" / "evals" / "ritual-output-wording"
 SPEC = CASE / "fixtures" / "spec.md"
+PROPOSAL_SPEC = CASE / "fixtures" / "proposal-spec.md"
 RUNS = CASE / "runs"
 EVALS = CASE.parent
 
@@ -672,9 +673,12 @@ def test_long_covers_line_grades_promptly():
 
 # Each capture prefix names its checks. An entry is (check, extra arguments, expected verdict);
 # `--drop-value-line` is how a capture that ends in the covered-criteria value is graded without that final line.
-# Every check runs with `--criteria` set to the case's spec fixture.
+# Every check runs with `--criteria` set to the case's spec fixture, unless its extra arguments name another
+# `--criteria` (the proposal sites grade against their own spec fixture).
 # A verdict is the grader's reading of a capture under the thresholds fixed before any run; where a capture read by eye
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
+# The proposal sites read the statement as the reply without its final line, against their own spec fixture.
+PROPOSAL_STATEMENT = ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)]
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
     # The summary sites are read by eye under the extension of 2026-10-20; no wording-grader check
@@ -748,9 +752,37 @@ CAPTURE_EXPECTATIONS = {
         ("reviewer-report", [], "template-shape"),
         ("criterion-mention", [], "bare"),
     ],
+    # The proposal sites (extension of 2026-10-22).
+    "proposal-baseline": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "bare"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-drive-baseline": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    # The enabler path drafts no covers value: its final line is prose and no criterion is made green.
+    "proposal-enabler-baseline": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "absent"),
+    ],
+    # The treated arms carry commit P; their guards bind (a miss in 2 or more of 6 is a guard miss).
+    "proposal-treated": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-drive-treated": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "proposal-enabler-treated": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "absent"),
+    ],
 }
 
-# A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check.
+# A capture whose verdict differs from its prefix's is listed here by stem, with the verdict per check. A batch may
+# also list every one of its captures, equal to the default or not, as its per-capture record (the proposal batches do).
 # Each entry records the grader's verdict, under the thresholds fixed before any run, and those thresholds are the ones
 # that count; read by eye, a capture may look like `text-with-number` or a combination of forms instead.
 CAPTURE_OVERRIDES = {
@@ -768,6 +800,28 @@ CAPTURE_OVERRIDES = {
     "fourth-noritual-4": {"criterion-mention": "nickname"},
     "fourth-noritual-5": {"criterion-mention": "nickname"},
     "fourth-noritual-6": {"criterion-mention": "bare"},
+    # The proposal baseline batch (2026-10-22): one row per capture, including the ones equal to the prefix default.
+    "proposal-baseline-2": {"criterion-mention": "nickname"},
+    "proposal-baseline-3": {"criterion-mention": "text-with-number"},
+    "proposal-baseline-4": {"criterion-mention": "nickname"},
+    "proposal-baseline-5": {"criterion-mention": "nickname"},
+    "proposal-baseline-6": {"criterion-mention": "bare"},
+    "proposal-baseline-7": {"criterion-mention": "bare"},
+    "proposal-drive-baseline-2": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-3": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-4": {"criterion-mention": "nickname"},
+    "proposal-drive-baseline-5": {"criterion-mention": "nickname"},
+    "proposal-drive-baseline-6": {"criterion-mention": "text-with-number"},
+    "proposal-drive-baseline-7": {"criterion-mention": "text-with-number"},
+    # The proposal treated batch (2026-10-22): one row per capture, per check, including the ones equal to the prefix
+    # default.
+    "proposal-treated-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-drive-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "proposal-enabler-treated-1": {"criterion-mention": "text-with-number", "covers-field": "absent"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
@@ -783,7 +837,8 @@ def test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to(capture):
     assert prefix in CAPTURE_EXPECTATIONS, f"{capture.name} has no mapped prefix {prefix!r}"
     for check, extra, verdict in CAPTURE_EXPECTATIONS[prefix]:
         verdict = CAPTURE_OVERRIDES.get(capture.stem, {}).get(check, verdict)
-        args = ["--check", check, "--criteria", str(SPEC), *extra]
+        criteria = [] if "--criteria" in extra else ["--criteria", str(SPEC)]
+        args = ["--check", check, *criteria, *extra]
         result = run_grader(args, capture.read_bytes())
         assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
         assert result.returncode == (0 if verdict in PASSING else 1)

@@ -1,0 +1,15 @@
+**The hold shelf slice** is the next slice I've chosen for `spec/holds-and-pickup`. It's the smallest next step that still delivers real value.
+
+**Value claim:** when a returned item has holds queued against it, the system sets it aside for the first borrower in the queue. That borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf.
+
+**Visual surface:** none. The slice changes what the system does when an item comes back and which message goes out. It adds or changes no screen, so there are no enumerated states to design.
+
+**Criteria this slice fully meets:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice partly meets:** none.
+
+Nothing has been written for this slice yet: the parent task `task/the-hold-shelf-slice` isn't created and planning hasn't started. Do you accept this slice and its claim? If you do, I'll check the coverage list against the spec, create the parent task as `in-progress` linked to the spec, and move into planning. If you reject it, nothing gets written.
+
+AC5, AC6

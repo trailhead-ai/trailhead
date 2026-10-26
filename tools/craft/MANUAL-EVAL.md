@@ -2359,6 +2359,21 @@ criterion's own text" is stricter than a reading by eye on paraphrases.
 
 **Manual re-run trigger.** A new attempt at a summary paragraph starts from a new dated extension to `expected.md`, registered before any run, with arms built from the changed `rules.md`. The `summary-baseline-*` arms are pinned at B (`d860c95a`) and are a valid baseline only while `rules.md` and `_shared/execute.md` match B; the `fourth-*` and `summary-*` treated arms carry R's paragraph, which is not shipped, so re-running them measures unshipped text.
 
+**Result, 2026-10-22 (a slice proposal opens with what you will be able to do, how to try it, and what is left): every reading passes at both sub-sites, and AC29, AC30 and AC31 close as unmeasured, pending the operator naming each at slice close.** Registered as an extension in `expected.md` before any run, with sub-sites P (slice choice at step 8) and PD (the driver running it inline); the per-capture tables, the two real runs and the guards are in that file under its `Baseline`, `Treated`, `Real run at base B` and `Real run on the branch` sections. Baseline is runs 2 to 7 per arm, treated is runs 1 to 3 per arm; the second reader agreed with the first on every reading.
+
+| Reading | P baseline | P treated | PD baseline | PD treated |
+|---|---|---|---|---|
+| AC29, `opens` = `leads` | 0 of 6 | 3 of 3 | 0 of 6 | 3 of 3 |
+| AC30, `try-it` = `present` | 0 of 6 | 3 of 3 | 0 of 6 | 3 of 3 |
+| AC31, `left` present and `left-correct` correct | 2 of 6 | 3 of 3 | 0 of 6 | 3 of 3 |
+| `criterion-mention` `text-with-number` (guard) | 1 of 6 | 3 of 3 | 4 of 6 | 3 of 3 |
+| `covers-field` `gate-shape` (guard) | 6 of 6 | 3 of 3 | 6 of 6 | 3 of 3 |
+
+- **Two real sessions** under `scripts/eval-sandbox`, one at base B and one on the branch, each choosing a slice the stub would not. Base B: `opens` `later`, `try-it` `missing`, `left` `missing`. Branch: `opens` `leads`, `try-it` `present`, `left` `present` and `left-correct` `correct` (two of four, three of three and two of three by section, with AC2 named as the exception), criterion mentions `text-with-number`, step 9 shapes held and `covers_gate.py` exited 0. The branch run is a go. The live vault's HEAD moved by a commit from this host's publisher stamped after the session had ended, with HEAD unchanged at the session's end; it was ruled another session's publish. The step 7 reasoning above the statement names uncovered criteria by nickname at base B and on the branch alike, so it is not an effect of the step 8 edit and is left as a follow-up against step 7.
+- **Enabler captures (observed only):** the baseline capture has none of the three parts; the treated capture opens with what the next slice will let you do, says there is nothing to try yet, and states the remainder by section.
+- **Opening address:** every treated opening addresses the operator ("You will be able to ..."); none addresses the spec's consumer as its subject. **Length:** treated statements run 19 to 24 physical lines against 15 to 23 at baseline; the branch real run's statement is 9. Whether that fits one screen depends on the terminal and is not claimed. **Counted by section (AC4 and AC5, observation only):** all six treated slice-site captures and the branch real run state the remainder by section; no coverage of AC4 or AC5 is claimed.
+- **Not measured:** the enabler path beyond its two captures; a legacy spec with no criterion identifiers; a spec with no sections; a real driver run; the slice's `## Outcome` report. Three runs per arm, one model tier, one Claude Code version; any cause finer than "the arm with the step 8 edit" is a hypothesis, since no ablation was run.
+
 ## Case: finding-presentation-wording
 
 `plugins/craft/evals/finding-presentation-wording/` — fixtures, arms, captures and `expected.md` carrying the pass

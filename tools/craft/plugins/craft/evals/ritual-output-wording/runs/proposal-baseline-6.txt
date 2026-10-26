@@ -1,0 +1,15 @@
+Next slice for `spec/holds-and-pickup`: **The hold shelf slice**
+
+**Value claim:** When an item with a hold queued against it is returned, it is set aside for the first borrower in that queue. That borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf. This is the smallest next slice that still delivers real value.
+
+**Visual surface:** None. The slice changes what the system does when an item comes back and which message goes out. No screen is added or changed, so no enumerated states apply.
+
+**Criteria this slice makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice makes only partially green:** None.
+
+The parent task `task/the-hold-shelf-slice` has not been written yet. If you accept this slice, I'll write it at `in-progress`, linked to the spec, with `**Covers:** AC5, AC6`. Then you can run `/craft:plan` against it. If the slice or the coverage looks wrong, say so now, before anything is written.
+
+AC5, AC6

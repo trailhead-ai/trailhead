@@ -1,0 +1,15 @@
+The next slice is **The hold shelf slice**. It's the smallest one left that still clears the value floor. Before I write the parent task record or start planning, here's what it claims. You can still reject it.
+
+**Value claim:** When an item with a hold on it comes back, it's set aside for the first borrower in that item's queue. That borrower gets one message naming the pickup deadline. Held items stop going back onto the open shelf.
+
+**Criteria this slice makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Criteria this slice makes only partially green:** none. The limit of five holds per borrower, with a sixth refused and a message saying why (AC2), is still only partly covered. That partial coverage comes from the earlier first hold slice, not this one.
+
+**Visual surface:** none. The slice changes what the system does when an item comes back and which message goes out. No screen is added or changed, so no enumerated states apply.
+
+If you accept this, I'll write it as `task/the-hold-shelf-slice` at `in-progress`, linked to `spec/holds-and-pickup`, and then move into the plan phase.
+
+**Covers:** AC5, AC6

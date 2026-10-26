@@ -1,0 +1,17 @@
+**Next slice: the shelf record slice.** No parent task has been written yet. Please confirm or reject before I create it.
+
+**Why this slice (enabler, so there's no value claim).** It doesn't deliver anything to borrowers or desk staff by itself. It adds a stored record of which shelf slot each set-aside item is in and the pickup deadline for that item. Two later slices read that record:
+- the hold shelf slice, which covers "When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf" (AC5)
+- the lapse slice, which covers "A hold not collected within seven days of that message lapses, and the item goes to the next borrower in the queue" (AC7)
+
+I'm keeping it separate rather than folding it into the hold shelf slice. Combined, one slice would hold both a change to the stored format and the behaviour that reads it, and those two couldn't be reviewed apart. The hold shelf slice comes straight after this one.
+
+**Visual surface: none.** This slice only stores a record and nothing reads it yet, so there are no screen states to list.
+
+**Criteria fully met by this slice: none.** It's an enabler, so it doesn't fully meet any acceptance criterion.
+
+**Criteria partly met by this slice: none.** It doesn't partly meet any either. The limit "A borrower can hold at most five items at once, and a sixth hold is refused with a message saying why" (AC2) is still only partly met, by the first hold slice that already closed. This slice doesn't touch it.
+
+**When you confirm,** I'll create `task/the-shelf-record-slice` at `in-progress`. It will be linked to `spec/holds-and-pickup`, carry the `craft/slice-parent` label, and hold the reason above under `**Value claim:**`. It will have no `**Covers:**` field, no `**Partially covers:**` field and no `## Enumerated states` section.
+
+None — an enabler drafts no `--covers` value, skips the covers gate, and writes no `**Covers:**` field.
