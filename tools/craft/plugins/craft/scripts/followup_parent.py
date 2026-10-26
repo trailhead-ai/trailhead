@@ -459,8 +459,26 @@ class ParentError(Exception):
 
 
 class _Parser(argparse.ArgumentParser):
+    """Raises `invalid-arguments` on a bad command line.
+
+    A parser with an optional-length positional (`check`) takes options between its positionals
+    on every Python version; Python before 3.12 otherwise rejects `check SPEC --parent=P NAME`.
+    """
+
+    _intermixing = False
+
     def error(self, message: str):
         raise ParentError("invalid-arguments")
+
+    def parse_known_args(self, args=None, namespace=None):
+        variadic = any(not a.option_strings and a.nargs == argparse.ZERO_OR_MORE for a in self._actions)
+        if not variadic or self._intermixing:
+            return super().parse_known_args(args, namespace)
+        self._intermixing = True
+        try:
+            return self.parse_known_intermixed_args(args, namespace)
+        finally:
+            self._intermixing = False
 
 
 def _left_out(name: str, reason: str, dependency: str | None = None) -> dict:
