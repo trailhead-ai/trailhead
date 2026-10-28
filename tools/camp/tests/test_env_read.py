@@ -23,7 +23,6 @@ Test contract:
 from __future__ import annotations
 
 import io
-import json
 import os
 import shlex
 import subprocess
@@ -375,7 +374,8 @@ def test_host_key_unknown_names_the_next_step():
 
 
 def test_host_key_next_step_names_the_hosts_destination():
-    inventory = read.read_remote("o", Host(ssh="me@elsewhere", camp_bin="c"), connect_timeout=7, runner=FakeRunner(KEY_UNKNOWN))
+    host = Host(ssh="me@elsewhere", camp_bin="c")
+    inventory = read.read_remote("o", host, connect_timeout=7, runner=FakeRunner(KEY_UNKNOWN))
     assert "ssh me@elsewhere once" in inventory.reason
 
 

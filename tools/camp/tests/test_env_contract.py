@@ -316,6 +316,6 @@ def test_remote_command_under_fish_hands_docker_the_local_argv(tmp_path: Path) -
     assert _received(out) == INVENTORY_ARGV[1:]
 
 
-def test_remote_command_matches_the_measured_command() -> None:  # inert-gate: allow seam smoke against the captured command
+def test_remote_command_matches_the_measured_command() -> None:  # inert-gate: allow seam smoke, captured command
     assert INVENTORY_REMOTE_COMMAND + "\n" == _fixture("env_inventory_command.txt")
     assert INVENTORY_ARGV[0] == "docker"
