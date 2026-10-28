@@ -431,13 +431,16 @@ class AttachRig:
             "REAL_PS": shutil.which("ps"),
         }
 
-    def camp(self, *args: str, timeout: float = 60.0, **environ: str) -> subprocess.CompletedProcess:
+    def camp(
+        self, *args: str, timeout: float = 60.0, cwd: "Path | None" = None, **environ: str
+    ) -> subprocess.CompletedProcess:
+        """Run ``camp <args>`` in *cwd* (default: the rig's own directory)."""
         return subprocess.run(
             [sys.executable, str(_CLI_CAMP), *args],
             capture_output=True,
             text=True,
             env={**self.environ(), **environ},
-            cwd=str(self.root),
+            cwd=str(self.root if cwd is None else cwd),
             timeout=timeout,
         )
 

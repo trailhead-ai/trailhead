@@ -77,7 +77,7 @@ class Rig:
         self.bin = self.root / "bin"
         self.bin.mkdir(parents=True)
         (self.root / "ssh").mkdir()
-        for tool in ("sh", "cat", "sleep"):
+        for tool in ("sh", "cat", "sleep", "ps"):
             (self.bin / tool).symlink_to(shutil.which(tool))
         self._script("ssh", _SSH_STUB)
         self.config_dir = tmp_path / "camp-config"
@@ -515,7 +515,7 @@ def test_bare_env_and_unknown_subcommand_print_one_usage_line(rig: Rig, args: li
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == "usage: camp env ls\n"
+    assert result.stderr == "usage: camp env ls | attach TARGET | status | detach\n"
 
 
 def test_camp_help_lists_the_verb(rig: Rig) -> None:

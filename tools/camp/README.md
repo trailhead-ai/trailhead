@@ -408,7 +408,12 @@ Exit `0` means the listing rendered, not that every host answered: an unreadable
 host is a line in the answer. Exit `1` means camp refused to list: the hosts file is
 malformed, `env_hosts` is invalid, or an argument was given (`camp env ls` takes
 none, and `--host` has no meaning here). A bare `camp env`, or any subcommand other
-than `ls` or `attach`, prints one usage line and exits `1`.
+than `ls`, `attach`, `status` or `detach`, prints one usage line naming those four and
+exits `1`.
+
+When something is attached (see below), `ls` opens with its `attached:` line, then lists
+as before; when the process table cannot be read it says
+`camp env: could not tell whether anything is attached: <why>` on stderr and lists anyway.
 
 On a Mac, `Docker is not installed` can also mean `docker` is not on the PATH a
 non-interactive ssh command gets, even though it works in your terminal.
@@ -481,6 +486,33 @@ refused connection), attach says `camp env: attach failed: ssh could not start t
 forward: <ssh's line>`. If anything goes wrong after the forward started, including an
 interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
 one, and says so if it could not.
+
+### Status and detach
+
+```
+camp env status                   # what is attached on this machine
+camp env detach                   # end it and free its ports
+```
+
+Both read only the process table, so they work from any directory and recognise an
+attachment whichever camp checkout or install made it. `status` prints one `attached:`
+line per recognised forward, or `nothing attached` (exit `0`). It does not check the
+environment's health, so an attachment whose environment has since stopped still reads
+attached until it is detached. When the table cannot be read it says
+`camp env: cannot tell what is attached: <why>` on stderr and exits `1`, rather than
+claiming nothing is attached. `detach` ends every recognised forward (asking first, then
+forcing one that has not ended within two seconds) and waits up to 3s for each of its
+ports to bind free again. If a forward cannot be ended, or a port is still held by
+something else, it says which, and by what, on stderr and exits `1`.
+
+```
+$ camp env status
+attached: perseus/levr/main on ports 39291 44659 51059; its health was not checked
+$ camp env detach
+detached perseus/levr/main; ports 39291 44659 51059 are free
+$ camp env detach
+nothing attached
+```
 
 ## Transferring a workspace
 

@@ -9,6 +9,10 @@ that nothing is attached, resolves the target, refuses a stopped or port-less en
 held standard port, starts the forward, and finds it again by its fresh attach id in the process
 table. Once the forward has been started, every way out (a failed start, a forward that is not
 found, an exception, an interrupt) ends the forward carrying that id and no other.
+
+``camp env status`` and ``camp env detach`` read only the process table: status prints one
+``attached:`` line per recognised forward, detach ends them and waits for their ports to bind
+free. ``camp env ls`` opens with the same lines.
 """
 from __future__ import annotations
 
@@ -30,11 +34,13 @@ from ..env.read import (
 from ..printable import printable_line
 from .parser import CampParser
 
-_USAGE = "usage: camp env ls"
+_USAGE = "usage: camp env ls | attach TARGET | status | detach"
 _ATTACH_USAGE = "usage: camp env attach TARGET"
 
 #: Seconds the forward may take to appear in the process table after ``ssh -f`` returned.
 SETTLE_SECONDS = 3.0
+#: Seconds detach waits for the ports of the forwards it ended to bind free again.
+PORTS_FREE_SECONDS = 3.0
 #: Seconds ``ssh -f`` may run beyond its connect timeout before the attach gives up on it.
 START_MARGIN_SECONDS = 20.0
 _KEEP_ALIVE_NOTE = "a forward whose link has died ends on its own within about 45s"
@@ -99,6 +105,12 @@ def _cmd_env_ls(args: list[str]) -> None:
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
 
+    try:
+        for found in attachments():
+            print(f"attached: {_summary_of(found)}", flush=True)
+    except (Unverifiable, Untaggable) as error:
+        print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
+
     _emit(
         f"this machine ({self_name})" if self_name else "this machine",
         read_local(),
@@ -134,6 +146,10 @@ def attached_summary(host: str, group: str, name: str, ports: "tuple[tuple[int, 
     """``<host>/<group>/<name> on ports <p> <p>; its health was not checked`` — what attach prints
     after ``attached `` and what status prints after ``attached: ``."""
     return f"{display_name(host, group, name)} on ports {display_ports(ports)}; its health was not checked"
+
+
+def _summary_of(found: Attachment) -> str:
+    return attached_summary(found.host, found.group, found.name, found.ports)
 
 
 def _refuse(message: str) -> NoReturn:
@@ -279,10 +295,69 @@ def _cmd_env_attach(args: list[str]) -> None:
     print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
 
 
+def _read_attachments() -> "list[Attachment]":
+    try:
+        return attachments()
+    except (Unverifiable, Untaggable) as error:
+        _refuse(f"cannot tell what is attached: {error}")
+
+
+def _cmd_env_status(args: list[str]) -> None:
+    CampParser(verb="env status").parse_args(args)
+    found = _read_attachments()
+    if not found:
+        print("nothing attached")
+        return
+    for each in found:
+        print(f"attached: {_summary_of(each)}")
+
+
+def _wait_for_free(port: int) -> "str | None":
+    """None once *port* binds free, else its holder after ``PORTS_FREE_SECONDS``."""
+    deadline = time.monotonic() + PORTS_FREE_SECONDS
+    while True:
+        holder = port_holder(port)
+        if holder is None or time.monotonic() >= deadline:
+            return holder
+        time.sleep(_SETTLE_POLL_SECONDS)
+
+
+def _cmd_env_detach(args: list[str]) -> None:
+    CampParser(verb="env detach").parse_args(args)
+    found = _read_attachments()
+    if not found:
+        print("nothing attached")
+        return
+    try:
+        surviving = end(found)
+    except Unverifiable as error:
+        _refuse(f"cannot end what is attached ({error}); nothing was signalled")
+    if surviving:
+        by_pid = {a.pid: a for a in found}
+        shown = ", ".join(
+            f"{display_name(by_pid[pid].host, by_pid[pid].group, by_pid[pid].name)} (pid {pid})" for pid in surviving
+        )
+        _refuse(f"could not end {shown}")
+    for each in found:
+        for standard, _ in each.ports:
+            holder = _wait_for_free(standard)
+            if holder is not None:
+                _refuse(f"port {standard} is still held by {holder}")
+    for each in found:
+        print(f"detached {display_name(each.host, each.group, each.name)}; ports {display_ports(each.ports)} are free")
+
+
 def _cmd_env_cli(args: list[str]) -> None:
-    """``camp env <subcommand>`` — ``ls`` and ``attach``; anything else prints the usage line."""
+    """``camp env <subcommand>`` — ``ls``, ``attach``, ``status`` and ``detach``; anything else
+    prints the usage line."""
     if args and args[0] == "attach":
         _cmd_env_attach(args[1:])
+        return
+    if args and args[0] == "status":
+        _cmd_env_status(args[1:])
+        return
+    if args and args[0] == "detach":
+        _cmd_env_detach(args[1:])
         return
     if not args or args[0] != "ls":
         print(_USAGE, file=sys.stderr)
