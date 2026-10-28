@@ -342,6 +342,24 @@ def test_a_hosts_file_that_cannot_be_read_refuses_without_a_traceback(
     assert "Traceback" not in result.stderr
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root reads a mode-000 file")
+def test_a_hosts_file_without_read_permission_refuses_without_a_traceback(rig: Rig) -> None:
+    hosts = rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS)
+    rig.docker(stdout=HEADER)
+    hosts.chmod(0)
+
+    try:
+        result = rig.run("env", "ls")
+    finally:
+        hosts.chmod(0o600)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("camp env: ")
+    assert str(hosts) in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_a_declared_host_not_in_env_hosts_is_never_contacted_and_is_named(rig: Rig) -> None:
     hosts = rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS)
     rig.docker(stdout=HEADER)

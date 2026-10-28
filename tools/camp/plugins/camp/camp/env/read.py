@@ -22,9 +22,11 @@ to be judged by its content: it is believed when its stdout starts with the inve
 (``camp.env.contract.parse_inventory`` then decides every record or the whole reply is
 unreadable). When stdout lacks the header, stderr names what happened, matched case-insensitively:
 
-* Docker not installed — stderr contains ``not found`` (a POSIX shell) or ``unknown command`` (fish
-  prints ``fish: Unknown command: docker``); also a local ``FileNotFoundError`` and, over ssh, the
-  transport's exit 127.
+* Docker not installed — stderr carries a shell's missing-command wording that names ``docker``:
+  ``docker: not found`` / ``docker: command not found`` (sh, dash, bash), ``command not found:
+  docker`` (zsh) or ``Unknown command: docker`` (fish); also a local ``FileNotFoundError`` and, over
+  ssh, the transport's exit 127. A ``not found`` that does not name ``docker`` (a missing Docker
+  context, say) is unreadable with that line as the reason.
 * Docker not running — stderr contains ``Cannot connect to the Docker daemon`` or
   ``failed to connect to the docker API`` (a missing socket file prints the second).
 * Exit 0 with nothing on stdout or stderr — unreadable, ``empty reply``.

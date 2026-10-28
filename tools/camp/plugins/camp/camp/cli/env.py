@@ -65,7 +65,7 @@ def _cmd_env_ls(args: list[str]) -> None:
     except HostConfigError as error:
         print(f"camp env: {error}", file=sys.stderr)
         sys.exit(1)
-    except (UnicodeDecodeError, RecursionError) as error:
+    except (OSError, UnicodeDecodeError, RecursionError) as error:
         hosts_file = _paths.config_dir("camp") / "hosts.toml"
         print(f"camp env: {hosts_file}: cannot read file — {type(error).__name__}", file=sys.stderr)
         sys.exit(1)
