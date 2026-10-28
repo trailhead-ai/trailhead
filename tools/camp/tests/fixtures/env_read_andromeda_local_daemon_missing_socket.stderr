@@ -1,0 +1,1 @@
+failed to connect to the docker API at unix:///tmp/k2-no-such.sock; check if the path is correct and if the daemon is running: dial unix /tmp/k2-no-such.sock: connect: no such file or directory

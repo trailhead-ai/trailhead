@@ -596,3 +596,125 @@ def test_interrupted_call_terminates_the_local_child_process(monkeypatch: pytest
             break
         time.sleep(0.05)
     assert gone, f"child pid {pid} is still alive after the interrupted call unwound"
+
+
+# ---------------------------------------------------------------------------
+# run_remote_command — a fixed remote command through the same ssh argv builder
+# ---------------------------------------------------------------------------
+
+
+class _BoundedFake:
+    def __init__(self, result=None, raises=None):
+        self.result, self.raises, self.calls = result, raises, []
+
+    def __call__(self, argv, execution_timeout, env, max_stdout_bytes):
+        self.calls.append((list(argv), execution_timeout, dict(env), max_stdout_bytes))
+        if self.raises is not None:
+            raise self.raises
+        return self.result
+
+
+def test_run_remote_command_sends_the_command_verbatim_through_the_hardened_argv() -> None:
+    fake = _BoundedFake(transport.RawResult(stdout="ok", stderr="", exit_code=0))
+    command = "docker ps --format 'a b'"
+
+    outcome = transport.run_remote_command(
+        _HOST, command, connect_timeout=4.0, execution_timeout=9.0, max_stdout_bytes=100, runner=fake
+    )
+
+    argv, bound, env, cap = fake.calls[0]
+    assert argv == [
+        "ssh", "-T",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "ConnectTimeout=4",
+        "-o", "ForwardAgent=no",
+        "-o", "ForwardX11=no",
+        "-o", "ClearAllForwardings=yes",
+        "-o", "PermitLocalCommand=no",
+        "-o", "RequestTTY=no",
+        "-o", "Tunnel=no",
+        "--", "andromeda", command,
+    ]
+    assert (bound, cap, env["LC_ALL"]) == (9.0, 100, "C")
+    assert outcome == transport.Answered(stdout="ok", stderr="", exit_code=0)
+
+
+def test_run_remote_command_does_not_involve_camp_bin() -> None:
+    fake = _BoundedFake(transport.RawResult(stdout="", stderr="", exit_code=0))
+    transport.run_remote_command(
+        _HOST, "true", connect_timeout=4.0, execution_timeout=9.0, max_stdout_bytes=100, runner=fake
+    )
+    assert _HOST.camp_bin not in fake.calls[0][0]
+
+
+def test_run_remote_command_reuses_the_classifier() -> None:
+    for exit_code, expected in ((127, transport.CampNotResolvable), (1, transport.RemoteRefusal)):
+        fake = _BoundedFake(transport.RawResult(stdout="", stderr="x", exit_code=exit_code))
+        outcome = transport.run_remote_command(
+            _HOST, "true", connect_timeout=4.0, execution_timeout=9.0, max_stdout_bytes=100, runner=fake
+        )
+        assert isinstance(outcome, expected)
+
+
+def test_run_remote_command_timeout_is_stopped_responding() -> None:
+    fake = _BoundedFake(raises=subprocess.TimeoutExpired("ssh", 9.0))
+    outcome = transport.run_remote_command(
+        _HOST, "true", connect_timeout=4.0, execution_timeout=9.0, max_stdout_bytes=100, runner=fake
+    )
+    assert outcome == transport.StoppedResponding(execution_timeout=9.0)
+
+
+@pytest.mark.parametrize("size,too_large", [(100, False), (101, True)])
+def test_run_remote_command_stdout_past_the_cap_is_too_large(size: int, too_large: bool) -> None:
+    fake = _BoundedFake(transport.RawResult(stdout="x" * size, stderr="", exit_code=0))
+    outcome = transport.run_remote_command(
+        _HOST, "true", connect_timeout=4.0, execution_timeout=9.0, max_stdout_bytes=100, runner=fake
+    )
+    assert (outcome == transport.TooLarge(max_bytes=100)) is too_large
+
+
+def test_run_camp_argv_for_an_existing_verb_is_pinned() -> None:
+    fake = _FakeRunner(result=transport.RawResult(stdout="", stderr="", exit_code=0))
+
+    transport.run_camp(_HOST, ["transfer-receive", "a b", "--json"], connect_timeout=7.0, runner=fake)
+
+    assert fake.calls[0].argv == [
+        "ssh",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "ConnectTimeout=7",
+        "andromeda",
+        "/opt/camp/bin/camp transfer-receive 'a b' --json",
+    ]
+
+
+def test_run_camp_extra_options_stay_after_the_fixed_ones() -> None:
+    fake = _FakeRunner(result=transport.RawResult(stdout="", stderr="", exit_code=0))
+
+    transport.run_camp(
+        _HOST, ["list"], connect_timeout=7.0, runner=fake, extra_ssh_options=("UserKnownHostsFile=/x",)
+    )
+
+    assert fake.calls[0].argv[:9] == [
+        "ssh",
+        "-o", "BatchMode=yes",
+        "-o", "StrictHostKeyChecking=yes",
+        "-o", "ConnectTimeout=7",
+        "-o", "UserKnownHostsFile=/x",
+    ]
+
+
+def test_bounded_runner_returns_what_a_short_program_printed() -> None:
+    result = transport.bounded_runner(
+        [sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr); sys.exit(3)"],
+        30, {}, 1000,
+    )
+    assert result == transport.RawResult(stdout="out\n", stderr="err\n", exit_code=3)
+
+
+def test_bounded_runner_raises_timeout_expired_and_ends_the_child() -> None:
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        transport.bounded_runner([sys.executable, "-c", "import time; time.sleep(30)"], 0.5, {}, 1000)
+    assert time.monotonic() - started < 10

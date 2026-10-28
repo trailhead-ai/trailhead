@@ -72,6 +72,15 @@ by the producer's exit code. The wait on the producer once the ssh child has
 completed is itself bounded, as a backstop against a producer that keeps
 running after its output is fully drained.
 
+A fourth channel, :func:`run_remote_command`, runs a fixed command that is not a
+camp verb — the caller's own plain string, sent as is with no ``camp_bin`` in it —
+through the same :func:`_ssh_argv` with ``hardened=True``, classified by the same
+:func:`_classify`. It reads at most a caller-chosen number of stdout bytes
+(:func:`bounded_runner` stops one byte past the cap and ends the child), so a far
+side that never stops printing is :class:`TooLarge` rather than held whole in
+memory. It decides nothing from the exit code; that is the caller's reading of the
+reply.
+
 Security: the assembled remote command carries slugs, group names, session
 references, and the host's camp location. Nothing in this module logs it —
 readable by other local users on a multi-user machine.
@@ -324,15 +333,17 @@ _FETCH_HARDENING_OPTIONS = (
 
 def _ssh_argv(
     host: Host,
-    remote_argv: Sequence[str],
+    remote_command: str,
     connect_timeout: float,
     extra_ssh_options: Sequence[str] = (),
     *,
     hardened: bool = False,
 ) -> list[str]:
-    """The full ``ssh`` argv for one remote camp invocation — shared by
-    :func:`run_camp` and :func:`fetch_camp_bytes`. ``hardened`` adds ``-T``,
-    the no-forwarding options, and ``--`` before the destination."""
+    """The full ``ssh`` argv for one remote command — shared by
+    :func:`run_camp`, :func:`fetch_camp_bytes` and :func:`run_remote_command`.
+    ``remote_command`` is the single string the far side's shell runs; the
+    caller assembles it (camp callers with :func:`quote_and_join`). ``hardened``
+    adds ``-T``, the no-forwarding options, and ``--`` before the destination."""
     ssh_argv: list[str] = ["ssh"]
     if hardened:
         ssh_argv.append("-T")
@@ -341,7 +352,7 @@ def _ssh_argv(
         ssh_argv += ["-o", option]
     if hardened:
         ssh_argv.append("--")
-    ssh_argv += [host.ssh, quote_and_join(host.camp_bin, remote_argv)]
+    ssh_argv += [host.ssh, remote_command]
     return ssh_argv
 
 
@@ -361,7 +372,9 @@ def run_camp(
     ``ConnectTimeout``) — the seam tests use to point ``UserKnownHostsFile`` at
     a throwaway file; production callers pass none.
     """
-    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options)
+    ssh_argv = _ssh_argv(
+        host, quote_and_join(host.camp_bin, remote_argv), connect_timeout, extra_ssh_options
+    )
 
     env = {**os.environ, "LC_ALL": "C"}
 
@@ -398,6 +411,121 @@ def _classify(raw: RawResult) -> TransportOutcome:
         return CampNotResolvable()
 
     return RemoteRefusal(stdout=raw.stdout, stderr=raw.stderr, exit_code=raw.exit_code)
+
+
+#: The injected seam for :func:`run_remote_command` and any other bounded read:
+#: argv, execution bound, environment and a stdout cap in bytes in; a
+#: :class:`RawResult` out. A runner reads at most ``max_stdout_bytes + 1`` bytes
+#: of stdout (one past the cap is enough to know it was exceeded) and raises
+#: ``subprocess.TimeoutExpired`` when the bound passes. A program that cannot be
+#: started raises ``FileNotFoundError`` / ``OSError`` as ``Popen`` does.
+BoundedRunner = Callable[[Sequence[str], float, Mapping[str, str], int], RawResult]
+
+
+def bounded_runner(
+    argv: Sequence[str],
+    execution_timeout: float,
+    env: Mapping[str, str],
+    max_stdout_bytes: int,
+) -> RawResult:
+    """Run ``argv`` with no stdin, stopping once stdout passes ``max_stdout_bytes``
+    or ``execution_timeout`` elapses; never holds more than one chunk past the cap.
+
+    ``argv[0]`` is resolved through ``env``'s ``PATH`` when the call is made. Past
+    the cap the child is killed and the stdout returned is the first
+    ``max_stdout_bytes + 1`` bytes. On timeout the child is killed and
+    ``subprocess.TimeoutExpired`` raised.
+    """
+    process = subprocess.Popen(
+        list(argv),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=dict(env),
+    )
+    timed_out = threading.Event()
+
+    def _expire() -> None:
+        timed_out.set()
+        process.kill()
+
+    stderr_chunks: list[bytes] = []
+
+    def _drain_stderr() -> None:
+        kept = 0
+        while True:
+            chunk = process.stderr.read1(_FETCH_CHUNK_BYTES)
+            if not chunk:
+                return
+            if kept < _FETCH_STDERR_LIMIT_BYTES:
+                stderr_chunks.append(chunk[: _FETCH_STDERR_LIMIT_BYTES - kept])
+                kept += len(chunk)
+
+    timer = threading.Timer(execution_timeout, _expire)
+    stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+    stdout_chunks: list[bytes] = []
+    read = 0
+    try:
+        timer.start()
+        stderr_thread.start()
+        while read <= max_stdout_bytes:
+            chunk = process.stdout.read1(min(_FETCH_CHUNK_BYTES, max_stdout_bytes + 1 - read))
+            if not chunk:
+                break
+            stdout_chunks.append(chunk)
+            read += len(chunk)
+        if read > max_stdout_bytes:
+            process.kill()
+        returncode = process.wait()
+        stderr_thread.join(timeout=5)
+    except BaseException:
+        _kill(process)
+        raise
+    finally:
+        timer.cancel()
+        if process.poll() is None:
+            _kill(process)
+
+    if timed_out.is_set():
+        raise subprocess.TimeoutExpired(list(argv), execution_timeout)
+    return RawResult(
+        stdout=b"".join(stdout_chunks).decode("utf-8", errors="surrogateescape"),
+        stderr=b"".join(stderr_chunks).decode("utf-8", errors="surrogateescape"),
+        exit_code=returncode,
+    )
+
+
+def run_remote_command(
+    host: Host,
+    remote_command: str,
+    *,
+    connect_timeout: float,
+    execution_timeout: float,
+    max_stdout_bytes: int,
+    runner: BoundedRunner = bounded_runner,
+) -> TransportOutcome:
+    """Run ``remote_command`` — one plain string the far side's login shell runs —
+    on ``host`` and classify the outcome.
+
+    Unlike :func:`run_camp` nothing is prefixed with the host's ``camp_bin``: the
+    command is whatever the caller passes, sent as is. The ssh argv is the
+    hardened one (``-T``, no forwarding, ``--`` before the destination).
+    Outcomes: :class:`TooLarge` when stdout passes ``max_stdout_bytes`` (measured
+    in encoded bytes; the reply is never read past one byte over the cap),
+    :class:`StoppedResponding` when ``execution_timeout`` elapses, and otherwise
+    :func:`_classify`'s — the same classification every camp verb gets. The
+    ``max_stdout_bytes`` value is the caller's to choose; this function reads
+    success from no exit code.
+    """
+    ssh_argv = _ssh_argv(host, remote_command, connect_timeout, hardened=True)
+    env = {**os.environ, "LC_ALL": "C"}
+    try:
+        raw = runner(ssh_argv, execution_timeout, env, max_stdout_bytes)
+    except subprocess.TimeoutExpired:
+        return StoppedResponding(execution_timeout=execution_timeout)
+    if len(raw.stdout.encode("utf-8", errors="surrogateescape")) > max_stdout_bytes:
+        return TooLarge(max_bytes=max_stdout_bytes)
+    return _classify(raw)
 
 
 # -----------------------------------------------------------------------
@@ -639,7 +767,13 @@ def fetch_camp_bytes(
     child's stderr as text (a :class:`RemoteRefusal` carries an empty
     ``stdout`` — the bytes went to ``out``).
     """
-    ssh_argv = _ssh_argv(host, remote_argv, connect_timeout, extra_ssh_options, hardened=True)
+    ssh_argv = _ssh_argv(
+        host,
+        quote_and_join(host.camp_bin, remote_argv),
+        connect_timeout,
+        extra_ssh_options,
+        hardened=True,
+    )
     env = {**os.environ, "LC_ALL": "C"}
     process = spawner(ssh_argv, env)
 
