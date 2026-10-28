@@ -19,3 +19,19 @@ UNMEASURED (no capture exists; tests use the planned exit code with the measured
   - OpenSSH exit 127 for a missing docker command
   - OpenSSH exit 1 propagating a daemon failure
   - a genuinely stopped Docker Desktop on macOS
+
+env_inventory_ports_* are byte-exact `{{json .Ports}}` renderings, line 1 a running container, line 2 the same container created but stopped.
+Command: docker ps -a --filter name=<probe> --format '{{json .Ports}}'
+Container: alpine, -p 127.0.0.1:28080-28081:8080-8081 -p 127.0.0.1:28090:9090 -p 127.0.0.1:28095:9095/udp
+  env_inventory_ports_docker_desktop_4_97_0.txt          perseus, Docker Desktop 4.97.0, server 29.9.2 (running via `docker run -d --rm`, stopped via `docker create`)
+  env_inventory_ports_docker_engine_29_8_0_linux.txt     andromeda, Docker Engine 29.8.0 (same two commands)
+
+env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@perseus)
+  andromeda Linux, OpenSSH_9.6p1 Ubuntu-3ubuntu13.20, OpenSSL 3.0.13; destination perseus over Tailscale SSH.
+  Namespace camp-env-k2probe (never camp-env). The Tag value is a probe tag, the uid is the real local uid.
+  env_forward_ps_linux_openssh_9_6.txt              the `ps -axwwo pid=,uid=,command=` line of the backgrounded forward (full argv kept; "-o Tag=..." appears as two argv words, "-L" spec as one)
+  env_forward_bind_failure_linux_openssh_9_6.txt    local bind failure with ExitOnForwardFailure=yes: exit 255, stderr verbatim, nothing left running
+  Also measured, no fixture: with ssh -f the backgrounded child holds fds 0,1,2 on /dev/null (not the caller's pipes), so a subprocess.run
+  with stdout/stderr=PIPE returned in 0.04s (no hang); stderr after backgrounding is lost. Traffic through the forward to a perseus loopback listener returned HTTP 200.
+UNMEASURED
+  - the Mac ssh (OpenSSH_10.5p1) behaviour for -f / bind failure / ps line: perseus has no sshd on port 22 (Tailscale SSH only), so a loopback ssh -f from perseus is refused
