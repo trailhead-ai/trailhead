@@ -345,6 +345,18 @@ def test_end_with_nothing_to_end_returns_nothing() -> None:
     assert attachment.end([], runner=_table()) == []
 
 
+def test_end_signals_nothing_when_the_table_cannot_be_read(child) -> None:
+    made = child("term")
+
+    def runner(argv):
+        raise OSError("no ps here")
+
+    with pytest.raises(Unverifiable):
+        attachment.end([made.attachment], runner=runner, grace=0.2)
+    time.sleep(0.3)
+    assert made.proc.poll() is None
+
+
 def test_end_does_not_signal_a_pid_that_is_not_an_attachment_at_the_first_read(child) -> None:
     made = child("term")
     reused = made.row(command="python3 -m http.server")
