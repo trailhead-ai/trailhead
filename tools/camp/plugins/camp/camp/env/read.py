@@ -15,7 +15,10 @@ for anything the machine or the network does. ``kind`` is one of
 How a reply is classified
 -------------------------
 Success is never read from an exit status: an ssh server on a Mac may report 0 whatever the remote
-command did. A reply is believed when its stdout starts with the inventory header
+command did. Failure is read from one status only: ssh's own exit 255 (a connection that failed or
+dropped mid-reply) is never believed, even when stdout carries the header and records; the reason
+is stderr's first line, else ``ssh exited 255 without a reason``. Any other status leaves the reply
+to be judged by its content: it is believed when its stdout starts with the inventory header
 (``camp.env.contract.parse_inventory`` then decides every record or the whole reply is
 unreadable). When stdout lacks the header, stderr names what happened, matched case-insensitively:
 
@@ -165,7 +168,7 @@ def read_remote(
     )
     destination = host.ssh
     if isinstance(outcome, (transport.Answered, transport.RemoteRefusal)):
-        if outcome.exit_code == 255 and not has_inventory_header(outcome.stdout):
+        if outcome.exit_code == 255:
             return _unreadable(_first_line(outcome.stderr) or "ssh exited 255 without a reason")
         return _from_reply(outcome.stdout, outcome.stderr, outcome.exit_code)
     if isinstance(outcome, transport.CampNotResolvable):

@@ -74,6 +74,9 @@ _STATIC_RESERVED = frozenset(
         #
         # Read-only group listing.
         "groups",
+        # Dev environments on this machine and on opted-in hosts (dispatched
+        # pre-group-resolve in cli/dispatch.py).
+        "env",
         # What this host answers about itself, for the transfer preflight's
         # sending side.
         "transfer-probe",
@@ -501,6 +504,8 @@ def cmd_help(args: list[str]) -> None:
         "Setup:\n"
         "  camp group <name> [options]       Wire hooks and author a group config\n"
         "  camp groups [--json]              List every configured group (any cwd)\n"
+        "  camp env ls                       List dev environments on this machine and\n"
+        "                                    on the hosts env_hosts names (any cwd)\n"
         "\n"
         "Workspace commands:\n"
         "  camp list [--json]                List all worktrees (alias: ls)\n"

@@ -425,8 +425,29 @@ def test_the_destination_in_a_reason_is_reduced_too():
     assert inventory.reason == "the host key is not pinned; run ssh me@x[2J once to pin it"
 
 
-def test_an_exit_255_that_carries_a_valid_reply_is_still_believed():
-    assert remote(raw(REPLY, exit_code=255)).environments == EXPECTED
+def test_an_exit_255_that_carries_a_complete_valid_reply_is_unreadable():
+    assert_unreadable(remote(raw(REPLY, exit_code=255)), "ssh exited 255 without a reason")
+
+
+def test_an_exit_255_with_a_partial_reply_is_unreadable_with_the_stderr_line():
+    # Constructed example: OpenSSH's standard wording for a drop, not a measured capture.
+    first_record_only = REPLY.splitlines(keepends=True)[:2]
+    dropped = raw(
+        "".join(first_record_only),
+        stderr="Connection to perseus closed by remote host.\n",
+        exit_code=255,
+    )
+    assert_unreadable(remote(dropped), "Connection to perseus closed by remote host.")
+
+
+def test_an_exit_255_with_records_and_empty_stderr_uses_the_fallback_reason():
+    assert_unreadable(
+        remote(raw(REPLY, stderr="", exit_code=255)), "ssh exited 255 without a reason"
+    )
+
+
+def test_a_complete_reply_on_a_non_255_failure_exit_is_still_believed():
+    assert remote(raw(REPLY, exit_code=1)).environments == EXPECTED
 
 
 def test_a_ten_thousand_character_line_is_cut_to_two_hundred():

@@ -550,6 +550,15 @@ def main() -> None:
         _cmd_groups_cli(argv[1:])
         return
 
+    # 'env' lists dev environments; like 'groups' it is dispatched before group
+    # resolution, never needs a resolved group, and --host has no meaning for it
+    # (opted-in machines come from env_hosts, not a flag).
+    if first == "env":
+        _refuse_host_flag_if_present(first, argv[1:])
+        from .env import _cmd_env_cli
+        _cmd_env_cli(argv[1:])
+        return
+
     # 'transfer-probe' answers what THIS host is, for the transfer preflight's
     # sending side — dispatched here, before group resolution, for the same
     # reason 'groups' is: "the named group is not configured here" is a valid,
