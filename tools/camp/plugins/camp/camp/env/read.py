@@ -109,12 +109,16 @@ def _first_line(text: str) -> str:
     return ""
 
 
+def _parsed(stdout: str) -> MachineInventory:
+    try:
+        return MachineInventory(ENVIRONMENTS, tuple(parse_inventory(stdout)))
+    except Unreadable as error:
+        return _unreadable(str(error))
+
+
 def _from_reply(stdout: str, stderr: str, exit_code: int) -> MachineInventory:
     if has_inventory_header(stdout):
-        try:
-            return MachineInventory(ENVIRONMENTS, tuple(parse_inventory(stdout)))
-        except Unreadable as error:
-            return _unreadable(str(error))
+        return _parsed(stdout)
     lowered = stderr.lower()
     if any(phrase in lowered for phrase in _NOT_RUNNING_PHRASES):
         return MachineInventory(DOCKER_NOT_RUNNING)
@@ -127,11 +131,8 @@ def _from_reply(stdout: str, stderr: str, exit_code: int) -> MachineInventory:
         if exit_code == 0:
             return _unreadable("empty reply")
         return _unreadable(f"docker exited {exit_code} without a reason")
-    try:
-        parse_inventory(stdout)
-    except Unreadable as error:
-        return _unreadable(str(error))
-    return _unreadable("reply not understood")
+    # No header here, so the parser refuses the reply and its reason names that.
+    return _parsed(stdout)
 
 
 def read_local(*, runner: transport.BoundedRunner = transport.bounded_runner) -> MachineInventory:

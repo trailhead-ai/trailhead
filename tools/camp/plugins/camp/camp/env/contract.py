@@ -118,8 +118,6 @@ def _decode_record(line: str) -> list[str] | None:
     fields: list[str] = []
     pos = 0
     while True:
-        if pos >= len(line):
-            return None
         try:
             value, pos = _DECODER.raw_decode(line, pos)
         except (ValueError, RecursionError):
