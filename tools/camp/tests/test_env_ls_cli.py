@@ -360,6 +360,20 @@ def test_a_hosts_file_without_read_permission_refuses_without_a_traceback(rig: R
     assert "Traceback" not in result.stderr
 
 
+def test_a_left_out_host_name_carrying_control_characters_is_printed_without_them(rig: Rig) -> None:
+    rig.hosts_file(
+        f'[hosts."evil\\u001b[2J\\u202ename"]\nssh = "{MACBOOK}"\n'
+    )
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    last = result.stdout.splitlines()[-1]
+    assert last.startswith("not opted in: evil[2Jname (add to env_hosts in ")
+    assert "\x1b" not in result.stdout and "‮" not in result.stdout
+
+
 def test_a_declared_host_not_in_env_hosts_is_never_contacted_and_is_named(rig: Rig) -> None:
     hosts = rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS)
     rig.docker(stdout=HEADER)

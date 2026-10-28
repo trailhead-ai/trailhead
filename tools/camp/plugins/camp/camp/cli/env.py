@@ -13,6 +13,7 @@ from ..env.read import (
     ENVIRONMENTS,
     MachineInventory,
 )
+from ..printable import printable_line
 from .parser import CampParser
 
 _USAGE = "usage: camp env ls"
@@ -83,7 +84,10 @@ def _cmd_env_ls(args: list[str]) -> None:
     if left_out:
         hosts_file = _paths.config_dir("camp") / "hosts.toml"
         print(
-            f"not opted in: {', '.join(left_out)} (add to env_hosts in {hosts_file})",
+            # Host-table keys are not charset-checked by the loader, so they pass the
+            # same printable-only reduction as far-side text before reaching the terminal.
+            f"not opted in: {', '.join(printable_line(name) for name in left_out)} "
+            f"(add to env_hosts in {printable_line(str(hosts_file), limit=4096)})",
             flush=True,
         )
 
