@@ -7,7 +7,8 @@ verb, one new hosts-file setting, and one contract a project's containers follow
 camp env ls          # this machine, then every opted-in host, in the order the setting names them
 ```
 
-`camp env ls` takes no arguments in this slice. It ignores the current camp group: an environment
+`camp env ls` takes no arguments in this slice. A bare `camp env`, or a subcommand other than `ls`,
+prints one usage line naming `ls` and exits 1. It ignores the current camp group: an environment
 belongs to whichever group its labels name, and the listing spans every group on every machine it
 reads. Naming one host explicitly, and reading hosts concurrently, come later; until then hosts are
 read one after another, each bounded on its own.
@@ -70,12 +71,17 @@ asks for every container carrying both contract labels. Its table-format output 
 a header line, and each container's fields are JSON-encoded, so a label value carrying a `|` or a
 newline cannot break a record apart or forge a second one.
 
-A remote reply is untrusted text. The ssh server on a Mac may report exit 0 whatever the remote
+A remote reply is untrusted text, and the read stops taking it after 1 MiB; a larger reply makes the
+host unreadable (`reply too large`). The ssh server on a Mac may report exit 0 whatever the remote
 command returned, so camp never decides from the exit code. The reply is believed only when stdout
-starts with the header and every line after it parses as one record. Anything else makes the host
-unreadable; a partial list is never shown. Only ssh's stdout is parsed. Stderr is consulted only to
-name the reason a read failed. Before any of it reaches the terminal, every control character
-(newline included) is removed and the result is truncated to one line.
+starts with the header and every line after it parses as one record, each field a JSON string.
+Anything else, including any field that is not a string and any parse error at all, makes the host
+unreadable; a partial list is never shown. One gap is named, not closed: the reply carries no end
+marker, so a stream cut cleanly between two records would read as a shorter list. A connection that
+drops is ssh's own failure and is caught; the gap is a far side that truncates its own output. Only ssh's stdout is parsed. Stderr is consulted only to
+name the reason a read failed. Before any of it reaches the terminal it is reduced to printable characters on one line: control and
+format characters (newline, tab, bidirectional overrides and zero-width characters included) and any
+byte that did not decode are removed, and the result is cut to 200 characters.
 
 Each read is bounded: a host that has not answered within 30 seconds is abandoned and shown as
 timed out. The bound covers the connection and Docker's answer together.
@@ -94,8 +100,10 @@ not opted in: toms-macbook-pro
 This machine comes first, headed `this machine` with its `self_name` in parentheses when one is
 declared. The opted-in hosts follow, in the order `env_hosts` names them. Under each heading is one
 line per environment: group, name, and `running` or `stopped`. The group and name columns are
-aligned across the whole listing. Every Docker state other than running reads as stopped.
+aligned within each machine's block. Every Docker state other than running reads as stopped.
 Environments are sorted by group, then name, so two runs can be compared line by line.
+Each block is printed as soon as that machine's read finishes, this machine's first, so a slow or
+dead host at the end of the list never hides the answers already in hand.
 
 The exit status is 0 whenever the listing renders, whatever any host said. A host that could not be
 read is a line in the answer, not a failure of the command, which is how camp's other all-hosts
@@ -119,9 +127,9 @@ there is no count and no summary line.
 ## State — many environments across hosts
 
 Every machine gets its own block, this machine first, then the hosts in `env_hosts` order, whatever
-order they answered in. Within a block, lines are sorted by group, then name. The group and name
-columns are aligned across all blocks, so one environment's state can be read straight down the
-page.
+order they answered in. Within a block, lines are sorted by group, then name, with the group and name columns aligned. Each
+block appears as its read finishes, so the listing builds down the page rather than arriving all at
+once after the slowest host.
 
 ## State — host unreadable
 
@@ -130,8 +138,9 @@ The read did not produce a believable answer. Either the transport classified a 
 header, a record that did not parse, or a field outside the identifier rule.
 
 The heading is followed by `  unreadable: <reason>`. The reason names the cause in the operator's
-terms, for example `unreachable (Could not resolve hostname)`, `the host key is not pinned`, or
-`the reply does not start with the inventory header`. Text from the far side, such as ssh's or
+terms and, where there is one, the next step: for example `unreachable (Could not resolve
+hostname)`, `the host key is not pinned; run ssh <destination> once to pin it`, `ssh credentials
+were refused`, or `the reply does not start with the inventory header`. Text from the far side, such as ssh's or
 Docker's own error line, appears only with control characters removed and cut to one line. The host
 is never shown as having no environments, and no environment from a reply that failed validation is
 shown.
@@ -150,13 +159,16 @@ could not be reached. Docker Desktop on a Mac whose user is not logged in is the
 the second.
 
 The heading is followed by `  Docker is not installed` or `  Docker is not running`. Neither is
-shown as unreadable: nothing runs there, so there is nothing to be uncertain about. A Docker failure
+shown as unreadable: nothing runs there, so there is nothing to be uncertain about. On a Mac,
+`Docker is not installed` can also mean `docker` is not on the PATH a non-interactive ssh command
+gets; the README says so. A Docker failure
 that is neither of these, such as a permission error on the socket, is unreadable with Docker's own
 line as the reason.
 
 ## State — declared hosts not opted in
 
 Hosts declared in the hosts file but absent from `env_hosts` (other than this machine) are named on
-one closing line, `not opted in: <name>, <name>`, in declaration order. They were not contacted. The
+one closing line, `not opted in: <name>, <name> (add to env_hosts in <hosts file path>)`, in
+declaration order. They were not contacted. The
 line makes a host left out by configuration visibly left out, rather than silently absent. With no
 such hosts the line is not printed.
