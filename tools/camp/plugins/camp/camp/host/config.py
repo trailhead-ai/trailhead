@@ -9,6 +9,8 @@ group-config tree.
 Schema:
   self_name = "<name>"       # optional; this host's own declared name
   connect_timeout = <seconds>  # optional; overrides the transport's ConnectTimeout
+  env_hosts = ["<name>", ...]  # optional; hosts `camp env ls` reads, each a
+                               # declared [hosts.<name>] or self_name
   [hosts.<name>]
   ssh = "<ssh destination>"   # optional; defaults to the table key <name>
   camp_bin = "<path or bare command>"  # optional; defaults to "camp"
@@ -26,6 +28,10 @@ host's own table. Nothing validates the document's top level beyond the
 keys this module itself recognizes, so an older camp that predates this key
 tolerates a file that carries it, exactly as it already tolerates
 ``self_name``.
+
+``env_hosts`` is a third reserved top-level setting, read only by
+`env_host_names`: `load_hosts` never looks at it, so a mistake in it cannot
+break any other verb, and an older camp tolerates a file that carries it.
 """
 from __future__ import annotations
 
@@ -300,3 +306,80 @@ def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
         )
 
     return float(value)
+
+
+def env_host_names(env: dict[str, str] | None = None) -> list[str]:
+    """Return the host names ``camp env`` reads, in the setting's own order.
+
+    Reads the reserved top-level list ``env_hosts`` from
+    ``config_dir("camp")/hosts.toml``. No file, or a file with no
+    ``env_hosts`` key, returns ``[]``. Each entry must be a string in camp's
+    host-name charset, must name a declared ``[hosts.<name>]`` table or equal
+    ``self_name``, and may appear only once.
+
+    Args:
+        env: Override os.environ for path resolution (for hermetic tests).
+             Defaults to os.environ.
+
+    Raises:
+        HostConfigError: If hosts.toml cannot be read, is malformed TOML, or
+            ``env_hosts`` is present but not a list of unique, valid, declared
+            names. The message names the file and the offending entry.
+    """
+    import trailhead.paths as _paths
+
+    path = _paths.config_dir("camp", env=env) / "hosts.toml"
+
+    if not path.is_file():
+        return []
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HostConfigError(f"{path}: cannot read file — {e}") from e
+
+    try:
+        raw: dict[str, Any] = tomllib.loads(text)
+    except (tomllib.TOMLDecodeError, RecursionError) as e:
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+
+    if "env_hosts" not in raw:
+        return []
+
+    entries = raw["env_hosts"]
+    if not isinstance(entries, list):
+        raise HostConfigError(
+            f"{path}: field 'env_hosts' must be a list of host names, got "
+            f"{type(entries).__name__}"
+        )
+
+    hosts_raw = raw.get("hosts")
+    declared = set(hosts_raw) if isinstance(hosts_raw, dict) else set()
+    self_name = raw.get("self_name")
+    if isinstance(self_name, str):
+        declared.add(self_name)
+
+    names: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} must be a string, "
+                f"got {type(entry).__name__}"
+            )
+        if not _VALID_HOST_NAME_RE.match(entry):
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} must start with a "
+                "lowercase letter or digit and contain only lowercase letters, "
+                "digits, and hyphens (^[a-z0-9][a-z0-9-]*$)"
+            )
+        if entry in names:
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' lists {entry!r} more than once"
+            )
+        if entry not in declared:
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} is neither a "
+                "declared [hosts.<name>] table nor this machine's self_name"
+            )
+        names.append(entry)
+    return names

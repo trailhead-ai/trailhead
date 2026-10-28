@@ -223,6 +223,21 @@ collide with a declared peer:
 self_name = "sunrise"
 ```
 
+`camp env ls` reads only the hosts a top-level `env_hosts` list names, in that
+order, plus this machine. Each name must be a `[hosts.<name>]` table in the
+same file, or this machine's own `self_name`; an undeclared name, or one
+listed twice, is refused naming the file and the entry. Only `camp env` reads
+the key, so a mistake in it never breaks another verb:
+
+```toml
+self_name = "sunrise"
+env_hosts = ["andromeda"]
+
+[hosts.andromeda]
+ssh = "andromeda.lan"
+camp_bin = "/home/tom/.local/state/trailhead/bin/camp"
+```
+
 Every machine `camp transfer` runs between must declare its **own**,
 **different** `self_name` — nothing here checks that for you. A machine
 that never declares one is a supported "not yet participating" state, not
