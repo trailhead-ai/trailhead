@@ -408,7 +408,7 @@ Exit `0` means the listing rendered, not that every host answered: an unreadable
 host is a line in the answer. Exit `1` means camp refused to list: the hosts file is
 malformed, `env_hosts` is invalid, or an argument was given (`camp env ls` takes
 none, and `--host` has no meaning here). A bare `camp env`, or any subcommand other
-than `ls`, prints one usage line and exits `1`.
+than `ls` or `attach`, prints one usage line and exits `1`.
 
 On a Mac, `Docker is not installed` can also mean `docker` is not on the PATH a
 non-interactive ssh command gets, even though it works in your terminal.
@@ -431,6 +431,56 @@ Anything else on any container carrying both labels, a skipped one included (a
 port published on all interfaces, on an IPv6 address, over udp, as a range, or
 outside that span), makes the whole machine `unreadable`, and the reason names the
 line and the defect, not the value.
+
+## Attaching an environment
+
+```
+camp env attach NAME              # a bare name, resolved across this machine and every opted-in host
+camp env attach HOST/NAME         # that host only, opted in or not
+camp env attach HOST/GROUP/NAME   # that host, that group
+```
+
+Puts one remote environment on this machine's localhost. An environment publishes each
+of its ports on its own machine's loopback; its **standard ports** are the container
+side of those mappings (`127.0.0.1:18080->8080/tcp` is reached here at
+`localhost:8080`). Attaching starts one background `ssh` forward that holds every
+standard port on 127.0.0.1 and carries it to the published port on the host:
+
+```
+$ camp env attach main
+attached perseus/levr/main on ports 5173 8080 8443; its health was not checked
+```
+
+The environment is named in its fully qualified form whatever form you typed, and the
+ports ascend. Camp does not check the environment's health: a running container with a
+forward in front of it can still be failing behind it. Like `ls`, attach ignores the
+current camp group. A bare name must match exactly one environment on every machine
+that could have it; a name on this machine, or `local/NAME`, is refused (attaching an
+environment on this machine is not supported yet).
+
+There is one attachment per machine, because a machine has one set of standard ports.
+Attach checks, in order: that nothing is attached (before any host is read), the target,
+that the environment is running and publishes ports, and that every standard port is
+free on 127.0.0.1 and on ::1. It then starts the forward and finds it again in the
+process table by a fresh id. Nothing is written to disk; the forward carries a
+`-o Tag=camp-env:<id>:<host>/<group>/<name>` option, and a forward whose link has died
+ends on its own within about 45 seconds. Each refusal exits `1` with one line on stderr
+and starts nothing:
+
+```
+$ camp env attach perseus/main
+camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
+$ camp env attach andromeda/old
+camp env: andromeda/levr/old is stopped; start it with its project's own tooling, then attach again
+$ camp env attach main
+camp env: port 8080 is held by python (pid 1644110); stop it, then attach again
+```
+
+If ssh cannot start the forward (a port taken between the check and ssh's start, a
+refused connection), attach says `camp env: attach failed: ssh could not start the
+forward: <ssh's line>`. If anything goes wrong after the forward started, including an
+interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
+one, and says so if it could not.
 
 ## Transferring a workspace
 

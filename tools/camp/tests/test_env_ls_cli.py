@@ -509,7 +509,7 @@ def test_ls_refuses_any_argument(rig: Rig, extra: list[str], message: str) -> No
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize("args", [[], ["attach"]])
+@pytest.mark.parametrize("args", [[], ["frobnicate"]])
 def test_bare_env_and_unknown_subcommand_print_one_usage_line(rig: Rig, args: list[str]) -> None:
     result = rig.run("env", *args)
 
