@@ -389,10 +389,10 @@ each block printed as soon as that machine has answered:
 
 ```
 this machine (andromeda)
-  levr  main          running
-  levr  ben-feature   stopped
+  levr  ben-feature  stopped
+  levr  main         running
 perseus
-  levr  main          running
+  levr  main  running
 not opted in: toms-macbook-pro (add to env_hosts in ~/.config/camp/hosts.toml)
 ```
 
