@@ -1,0 +1,4 @@
+"k1probe-esc-uni"|"created"|"grüße-日本語-😀"|"é<>&"
+"k1probe-esc-esc"|"created"|"a\u001b[31mred"|"x\u0001yz"
+"k1probe-esc-nl"|"created"|"a\nb"|"c\r\nd\te"
+"k1probe-esc-pipe"|"created"|"a|b"|"n|\"q\"|\\x"
