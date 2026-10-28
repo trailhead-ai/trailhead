@@ -35,3 +35,8 @@ env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@pers
   with stdout/stderr=PIPE returned in 0.04s (no hang); stderr after backgrounding is lost. Traffic through the forward to a perseus loopback listener returned HTTP 200.
 UNMEASURED
   - the Mac ssh (OpenSSH_10.5p1) behaviour for -f / bind failure / ps line: perseus has no sshd on port 22 (Tailscale SSH only), so a loopback ssh -f from perseus is refused
+
+env_inventory_header_* and env_inventory_command.txt, env_inventory_records.txt (five-field format, `|{{json .Ports}}` appended)
+  Derived, not re-captured: the hosts were not reachable for this change. Docker names a `table` column after the last path of its
+  template expression, so `{{json .Ports}}` adds the column `PORTS` to the four measured ones. The records file gains a `""` fifth
+  field because its containers (k1probe-*) published no ports.
