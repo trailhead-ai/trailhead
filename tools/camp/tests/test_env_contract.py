@@ -2,7 +2,9 @@
 
 Replies are fed as text and the parsed result (or the `Unreadable` reason) is
 asserted. Fixture replies under ``fixtures/env_inventory_*.txt`` are real
-captures from Docker 29.x on Linux, never hand-typed.
+captures, never hand-typed: ``*_docker_engine_29_8_0_linux`` is the header from
+Docker Engine 29.8.0 on Linux, ``*_docker_desktop_4_97_0`` the header from Docker
+Desktop 4.97.0 (server 29.9.2) on macOS.
 """
 
 from __future__ import annotations
@@ -53,14 +55,14 @@ def _ok(group: str = "levr", name: str = "main", state: str = "running") -> str:
 
 
 def test_header_only_reply_is_no_environments() -> None:
-    assert parse_inventory(_fixture("env_inventory_header_docker_29_8_0_linux.txt")) == []
+    assert parse_inventory(_fixture("env_inventory_header_docker_engine_29_8_0_linux.txt")) == []
 
 
 @pytest.mark.parametrize(
     "fixture",
     [
-        "env_inventory_header_docker_29_8_0_linux.txt",
-        "env_inventory_header_docker_29_9_2_linux.txt",
+        "env_inventory_header_docker_engine_29_8_0_linux.txt",
+        "env_inventory_header_docker_desktop_4_97_0.txt",
     ],
 )
 def test_header_from_each_measured_docker_parses(fixture: str) -> None:
@@ -171,7 +173,7 @@ def test_order_of_the_reply_is_kept() -> None:
     ],
 )
 def test_wrong_field_layout_is_unreadable(line: str) -> None:
-    with pytest.raises(Unreadable):
+    with pytest.raises(Unreadable, match="line 3"):
         parse_inventory(_reply(_ok("a", "b"), line))
 
 
@@ -188,7 +190,7 @@ def test_wrong_field_layout_is_unreadable(line: str) -> None:
 )
 def test_field_that_is_not_valid_json_is_unreadable(bad: str) -> None:
     line = f'{bad}|"running"|"levr"|"main"'
-    with pytest.raises(Unreadable):
+    with pytest.raises(Unreadable, match="line 3"):
         parse_inventory(_reply(_ok("a", "b"), line))
 
 
@@ -251,6 +253,14 @@ def test_pipe_in_container_name_field_does_not_shift_fields() -> None:
 
 def test_newline_in_label_cannot_forge_a_second_record() -> None:
     forged = _record("x", "running", "levr\n" + _ok("a", "b"), "main")
+    assert "\n" not in forged
+    with pytest.raises(Unreadable):
+        parse_inventory(_reply(forged))
+
+
+def test_newline_and_quotes_in_label_that_would_split_into_two_valid_records_are_unreadable() -> None:
+    name = 'main"\n"levr-env-evil"|"running"|"levr"|"evil'
+    forged = _record("levr-env-main", "running", "levr", name)
     assert "\n" not in forged
     with pytest.raises(Unreadable):
         parse_inventory(_reply(forged))
