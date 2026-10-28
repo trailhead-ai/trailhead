@@ -66,8 +66,10 @@ attach refuses it and names the hosts file.
 An attachment is one background `ssh` forward from this machine to the environment's host, holding
 each standard port on 127.0.0.1 and carrying it to the published port on the host's own loopback.
 It is reached through the same hosts-file destination, pinned host key and non-interactive
-settings as every other camp call over ssh. It is kept alive with ssh's own keep-alives, so a
-forward whose link has died ends on its own within about 45 seconds.
+settings as every other camp call over ssh, with connection sharing turned off
+(`ControlMaster=no`, `ControlPath=none`) so a shared connection the user's own ssh config sets up
+can never take the forward over where camp cannot see it. It is kept alive with ssh's own
+keep-alives, so a forward whose link has died ends on its own within about 45 seconds.
 
 Nothing about an attachment is written to disk. camp finds it again by reading the process table:
 a process owned by this user, run as `ssh`, carrying `-N`, and carrying exactly one
@@ -81,6 +83,12 @@ any camp checkout or install, including one whose path contains whitespace.
 There is one attachment per machine, across every group, because a machine has one set of standard
 ports.
 
+Which ports an attachment binds is decided by the environment's host: the standard ports come from
+the container side of its published ports. That is the trust camp already places in a host the
+user opted in or named: whoever can start a contract-labelled container there can choose ports on
+this machine's loopback in 1024 to 65535. A port already held is refused rather than taken, and the
+success line names every port bound.
+
 ## The order attach checks things in
 
 1. Is anything already attached? The process table answers this without reading any host, so the
@@ -88,9 +96,12 @@ ports.
 2. Resolve the name, reading only the machines resolution needs.
 3. Is the environment running, and does it publish at least one port?
 4. Is every standard port free? camp tries to bind each one itself, on 127.0.0.1 and on ::1, and
-   releases it at once. A port that fails either bind is held.
+   releases it at once. A port that fails either bind as in use is held. A machine with no IPv6
+   loopback (some WSL setups) cannot bind ::1 at all, and that counts as free on ::1.
 5. Start the forward, wait for ssh to confirm every port is bound before it goes to the background,
-   and find the started forward in the process table by its `<id>`.
+   and find the started forward in the process table by its `<id>`. ssh is started with its output
+   discarded and its error text sent to a temporary file, never to a pipe camp reads: a backgrounded
+   ssh keeps the descriptors it was given, so a pipe would never reach its end.
 
 An attach that fails at step 5, or is interrupted at any point after it, ends the forward it
 started, found by its own `<id>`, and only that one. It leaves no port held.
@@ -129,8 +140,9 @@ On stderr, exit 1. The first form is a bare name: it names every machine that wa
 machine could not be asked because Docker is not installed or not running there, it says so
 (`; Docker is not running on perseus`), since that is the likeliest reason a name is missing. Where
 declared hosts were left out by `env_hosts`, it names them and the form that reads one anyway:
-`(not read: toms-macbook-pro; name one as <host>/main)`. The second form is a named host: it names
-only that host. A host form naming a host the hosts file does not declare is refused as
+`(not read: toms-macbook-pro; name one as <host>/main)`. Either form ends with
+`; run camp env ls to see what is running`. The second form is a named host: it names only that
+host. A host form naming a host the hosts file does not declare is refused as
 `camp env: no host named orion in <hosts file>; declared: andromeda, perseus`.
 
 ## State — name ambiguous
@@ -142,7 +154,7 @@ camp env: main matches more than one environment on perseus: perseus/levr/main, 
 
 On stderr, exit 1. Each match is given in the shortest form that would name it alone: `HOST/NAME`,
 or `HOST/GROUP/NAME` where one host has that name in more than one group. A match on this machine
-is listed as `local/main (this machine)`.
+is listed as `local/main (this machine; cannot be attached yet)`.
 
 ## State — opted-in host unreadable during resolution
 
@@ -175,7 +187,8 @@ camp env: port 8080 is held by a process camp cannot see (another user's, or one
 
 On stderr, exit 1. Nothing is started and nothing is held. The port is the standard port. camp
 names the holder through `lsof` when `lsof` is installed and can see it, and otherwise says it
-cannot. Being held on ::1 alone counts: a browser asking for `localhost` may try ::1 first and reach
+cannot. The holder's command name is chosen by whatever process holds the port, so it reaches the
+terminal reduced to printable characters, as far-side text does. Being held on ::1 alone counts: a browser asking for `localhost` may try ::1 first and reach
 the other process instead of the attachment.
 
 When ssh itself cannot bind a port (taken in the moment between camp's check and ssh's start), the
@@ -185,7 +198,7 @@ attach fails with ssh's own reason, and nothing is left behind:
 ## State — already attached
 
 ```
-camp env: perseus/levr/main is already attached; run camp env detach first (a forward whose link has died ends on its own within about 45s)
+camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
 ```
 
 On stderr, exit 1, before any host is read. It is the same whichever group, host or camp checkout
@@ -195,12 +208,15 @@ made the existing attachment.
 
 ```
 $ camp env status
-attached: perseus/levr/main on ports 5173 8080 8443
+attached: perseus/levr/main on ports 5173 8080 8443; its health was not checked
 ```
 
 On stdout, exit 0. Read from the live forward in the process table, never from a record of the
 last attach. When more than one forward is recognised, each gets its own line. The forward's
-health is not checked: an attachment whose environment has since stopped still reads attached.
+health is not checked, and the line says so: an attachment whose environment has since stopped or
+been rebuilt still reads attached until it is detached, and a forward whose link has died ends on
+its own within about 45 seconds. A local connection test cannot tell either case apart, because
+ssh accepts the local connection whatever the far side does.
 
 `camp env ls` opens with this same `attached:` line when something is attached, then lists as
 before. When the process table cannot be read, `ls` says
