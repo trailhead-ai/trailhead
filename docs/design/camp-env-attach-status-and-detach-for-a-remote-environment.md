@@ -57,9 +57,9 @@ A machine where Docker is not installed or not running blocks nothing: nothing r
 nothing can be missed there. A machine whose read is unreadable, this one included, blocks a bare
 name, because the name might be there.
 
-`HOST` must be a `[hosts.<name>]` table in the hosts file. A host whose declared name is anything
-but letters, digits, `.`, `_` and `-`, starting with a letter or digit, cannot carry an attachment;
-attach refuses it and names the hosts file.
+`HOST` must be a `[hosts.<name>]` table in the hosts file. `HOST`, `GROUP` and `NAME` are each
+lowercase letters, digits and `-`, starting with a letter or digit, the same rule the hosts file
+holds a host's name to; any other target is a usage error.
 
 ## How an attachment is made, and found again
 
