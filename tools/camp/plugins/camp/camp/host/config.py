@@ -9,6 +9,8 @@ group-config tree.
 Schema:
   self_name = "<name>"       # optional; this host's own declared name
   connect_timeout = <seconds>  # optional; overrides the transport's ConnectTimeout
+  env_hosts = ["<name>", ...]  # optional; hosts `camp env ls` reads, each a
+                               # declared [hosts.<name>] or self_name
   [hosts.<name>]
   ssh = "<ssh destination>"   # optional; defaults to the table key <name>
   camp_bin = "<path or bare command>"  # optional; defaults to "camp"
@@ -26,6 +28,10 @@ host's own table. Nothing validates the document's top level beyond the
 keys this module itself recognizes, so an older camp that predates this key
 tolerates a file that carries it, exactly as it already tolerates
 ``self_name``.
+
+``env_hosts`` is a third reserved top-level setting, read only by
+`env_host_names`: `load_hosts` never looks at it, so a mistake in it cannot
+break any other verb, and an older camp tolerates a file that carries it.
 """
 from __future__ import annotations
 
@@ -155,6 +161,38 @@ def _parse_host(raw: Any, *, path: Path, name: str) -> Host:
     return Host(ssh=ssh, camp_bin=camp_bin)
 
 
+def _read_top_level(env: dict[str, str] | None) -> tuple[Path, dict[str, Any]] | None:
+    """hosts.toml's path and parsed document, or None when there is no file.
+
+    Shared by the readers of the reserved top-level settings (``self_name``,
+    ``connect_timeout``, ``env_hosts``), so a file that cannot be read or
+    parsed fails each of them with the same `HostConfigError`.
+    """
+    import trailhead.paths as _paths
+
+    path = _paths.config_dir("camp", env=env) / "hosts.toml"
+
+    if not path.is_file():
+        return None
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        raise HostConfigError(f"{path}: cannot read file — {e}") from e
+
+    try:
+        return path, tomllib.loads(text)
+    except tomllib.TOMLDecodeError as e:
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+    except RecursionError as e:
+        # tomllib is pure Python and parses nested inline tables (and nested
+        # arrays) recursively, so a hosts.toml with a few thousand levels of
+        # nesting exhausts the interpreter's recursion limit instead of
+        # raising TOMLDecodeError. Scoped to this one call so it cannot also
+        # swallow a HostConfigError a caller raises.
+        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+
+
 def self_host_name(env: dict[str, str] | None = None) -> str | None:
     """Return this host's own declared name, or None if never declared.
 
@@ -182,30 +220,10 @@ def self_host_name(env: dict[str, str] | None = None) -> str | None:
             `self_name` is present but not a non-empty string in camp's
             strict identifier charset (``^[a-z0-9][a-z0-9-]*$``).
     """
-    import trailhead.paths as _paths
-
-    path = _paths.config_dir("camp", env=env) / "hosts.toml"
-
-    if not path.is_file():
+    document = _read_top_level(env)
+    if document is None:
         return None
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
-        raise HostConfigError(f"{path}: cannot read file — {e}") from e
-
-    try:
-        raw: dict[str, Any] = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
-    except RecursionError as e:
-        # tomllib is pure Python and parses nested inline tables (and nested
-        # arrays) recursively, so a hosts.toml with a few thousand levels of
-        # nesting exhausts the interpreter's recursion limit instead of
-        # raising TOMLDecodeError. Scoped to this one call (not a broader
-        # `except Exception` around the function) so it cannot also swallow
-        # the HostConfigError this function raises itself below.
-        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+    path, raw = document
 
     if "self_name" not in raw:
         return None
@@ -250,30 +268,12 @@ def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
             number — text, zero, negative, NaN, and +/-infinity all refuse
             rather than silently falling back to the default.
     """
-    import trailhead.paths as _paths
-
     from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
 
-    path = _paths.config_dir("camp", env=env) / "hosts.toml"
-
-    if not path.is_file():
+    document = _read_top_level(env)
+    if document is None:
         return DEFAULT_CONNECT_TIMEOUT_SECONDS
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as e:
-        raise HostConfigError(f"{path}: cannot read file — {e}") from e
-
-    try:
-        raw: dict[str, Any] = tomllib.loads(text)
-    except tomllib.TOMLDecodeError as e:
-        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
-    except RecursionError as e:
-        # Same rationale as self_host_name()'s identical guard above: a
-        # pathologically nested hosts.toml exhausts tomllib's recursion
-        # limit rather than raising TOMLDecodeError, and this must surface
-        # as the same HostConfigError either way.
-        raise HostConfigError(f"{path}: TOML parse error — {e}") from e
+    path, raw = document
 
     if "connect_timeout" not in raw:
         return DEFAULT_CONNECT_TIMEOUT_SECONDS
@@ -300,3 +300,68 @@ def connect_timeout_seconds(env: dict[str, str] | None = None) -> float:
         )
 
     return float(value)
+
+
+def env_host_names(env: dict[str, str] | None = None) -> list[str]:
+    """Return the host names ``camp env`` reads, in the setting's own order.
+
+    Reads the reserved top-level list ``env_hosts`` from
+    ``config_dir("camp")/hosts.toml``. No file, or a file with no
+    ``env_hosts`` key, returns ``[]``. Each entry must be a string in camp's
+    host-name charset, must name a declared ``[hosts.<name>]`` table or equal
+    ``self_name``, and may appear only once.
+
+    Args:
+        env: Override os.environ for path resolution (for hermetic tests).
+             Defaults to os.environ.
+
+    Raises:
+        HostConfigError: If hosts.toml cannot be read, is malformed TOML, or
+            ``env_hosts`` is present but not a list of unique, valid, declared
+            names. The message names the file and the offending entry.
+    """
+    document = _read_top_level(env)
+    if document is None:
+        return []
+    path, raw = document
+
+    if "env_hosts" not in raw:
+        return []
+
+    entries = raw["env_hosts"]
+    if not isinstance(entries, list):
+        raise HostConfigError(
+            f"{path}: field 'env_hosts' must be a list of host names, got "
+            f"{type(entries).__name__}"
+        )
+
+    hosts_raw = raw.get("hosts")
+    declared = set(hosts_raw) if isinstance(hosts_raw, dict) else set()
+    self_name = raw.get("self_name")
+    if isinstance(self_name, str):
+        declared.add(self_name)
+
+    names: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, str):
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} must be a string, "
+                f"got {type(entry).__name__}"
+            )
+        if not _VALID_HOST_NAME_RE.match(entry):
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} must start with a "
+                "lowercase letter or digit and contain only lowercase letters, "
+                "digits, and hyphens (^[a-z0-9][a-z0-9-]*$)"
+            )
+        if entry in names:
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' lists {entry!r} more than once"
+            )
+        if entry not in declared:
+            raise HostConfigError(
+                f"{path}: field 'env_hosts' entry {entry!r} is neither a "
+                "declared [hosts.<name>] table nor this machine's self_name"
+            )
+        names.append(entry)
+    return names

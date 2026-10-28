@@ -1,0 +1,4 @@
+fish: Unknown command: dockerk2probe
+fish: 
+dockerk2probe ps
+^~~~~~~~~~~~^

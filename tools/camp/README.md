@@ -223,6 +223,21 @@ collide with a declared peer:
 self_name = "sunrise"
 ```
 
+`camp env ls` reads only the hosts a top-level `env_hosts` list names, in that
+order, plus this machine. Each name must be a `[hosts.<name>]` table in the
+same file, or this machine's own `self_name`; an undeclared name, or one
+listed twice, is refused naming the file and the entry. Only `camp env` reads
+the key, so a mistake in it never breaks another verb:
+
+```toml
+self_name = "sunrise"
+env_hosts = ["andromeda"]
+
+[hosts.andromeda]
+ssh = "andromeda.lan"
+camp_bin = "/home/tom/.local/state/trailhead/bin/camp"
+```
+
 Every machine `camp transfer` runs between must declare its **own**,
 **different** `self_name` — nothing here checks that for you. A machine
 that never declares one is a supported "not yet participating" state, not
@@ -360,6 +375,50 @@ created under, and `<slug>` the workspace's slug. `camp remove` leaves the
 workspace's branch in each far-side member repo — `worktree-<slug>` unless the
 group's `[branch] pattern` says otherwise; deleting those is your call. The far side's login shell may not be POSIX, so keep any `ssh <destination> …`
 follow-up you compose yourself shell-neutral (no `$?`).
+
+## Listing environments
+
+```
+camp env ls
+```
+
+Lists the dev environments running on this machine and on every host `env_hosts`
+names (see [Remote hosts](#remote-hosts)), whatever group your directory resolves
+to. This machine comes first, then the hosts in the order `env_hosts` names them,
+each block printed as soon as that machine has answered:
+
+```
+this machine (andromeda)
+  levr  ben-feature  stopped
+  levr  main         running
+perseus
+  levr  main  running
+not opted in: toms-macbook-pro (add to env_hosts in ~/.config/camp/hosts.toml)
+```
+
+Each line is a group, a name and `running` or `stopped`, sorted by group then name.
+A machine that answered but runs nothing says `no environments`; one whose Docker
+is missing or stopped says `Docker is not installed` or `Docker is not running`; one
+that gave no believable answer says `unreadable: <reason>`, including
+`unreadable: no answer within 30s`. Hosts declared in `hosts.toml` but left out of
+`env_hosts` are never contacted and are named on the closing `not opted in:` line.
+A host whose name is this machine's `self_name` is this machine and is read once.
+
+Exit `0` means the listing rendered, not that every host answered: an unreadable
+host is a line in the answer. Exit `1` means camp refused to list: the hosts file is
+malformed, `env_hosts` is invalid, or an argument was given (`camp env ls` takes
+none, and `--host` has no meaning here). A bare `camp env`, or any subcommand other
+than `ls`, prints one usage line and exits `1`.
+
+On a Mac, `Docker is not installed` can also mean `docker` is not on the PATH a
+non-interactive ssh command gets, even though it works in your terminal.
+
+A project's environments appear only once its containers carry the contract: the
+labels `camp.env.group` (the group) and `camp.env.name` (the environment's name),
+and a container name of the group, then `-env-`, then the name, such as
+`levr-env-main`. Group and name are lowercase letters, digits and hyphens. A
+container that carries both labels under any other name is skipped. An existing
+container gains the labels only by being rebuilt.
 
 ## Transferring a workspace
 
