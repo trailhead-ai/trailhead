@@ -51,8 +51,8 @@ is ``tcp``, and both ports are written in ASCII digits with no leading zero and 
 or non-ASCII-digit port, or any other text makes the whole reply unreadable, the reason naming the
 line and the defect and never the value. ``Environment.ports`` holds the ``(standard, published)``
 pairs, ``standard`` being the container's port, in ascending order of standard port (then
-published); it is empty for ``""``. A container that is skipped for its name is not judged on its
-ports.
+published); it is empty for ``""``. Every labelled record is judged on its ports, including one skipped
+for its name, so a labelled helper publishing a wildcard port makes the reply unreadable too.
 
 Untrusted input
 ---------------
@@ -188,10 +188,10 @@ def parse_inventory(text: str) -> list[Environment]:
             raise Unreadable(f"line {number}: group is not a valid identifier")
         if not _is_identifier(name):
             raise Unreadable(f"line {number}: name is not a valid identifier")
-        if container != container_name(group, name):
-            continue
         ports = _parse_ports(ports_field)
         if ports is None:
             raise Unreadable(f"line {number}: ports are not loopback tcp mappings within 1024-65535")
+        if container != container_name(group, name):
+            continue
         environments.append(Environment(group, name, "running" if state == "running" else "stopped", ports))
     return environments

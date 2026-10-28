@@ -427,9 +427,10 @@ renders those as `127.0.0.1:<host port>-><container port>/tcp`, comma separated.
 A stopped container publishes nothing, and that is fine. Camp reads
 `127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp` as the pairs (container
 port, host port) `(8080, 28080)` and `(8081, 28081)`, in container-port order.
-Anything else on an environment's container (a port published on all interfaces,
-on an IPv6 address, over udp, as a range, or outside that span) makes the whole
-machine `unreadable`, and the reason names the line and the defect, not the value.
+Anything else on any container carrying both labels, a skipped one included (a
+port published on all interfaces, on an IPv6 address, over udp, as a range, or
+outside that span), makes the whole machine `unreadable`, and the reason names the
+line and the defect, not the value.
 
 ## Transferring a workspace
 

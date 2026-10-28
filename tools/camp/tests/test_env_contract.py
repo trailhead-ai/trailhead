@@ -313,9 +313,18 @@ def test_no_partial_list_when_a_later_record_has_bad_ports() -> None:
         parse_inventory(_reply(_ok("a", "b", ports="127.0.0.1:3000->3000/tcp"), _ok("c", "d", ports="0.0.0.0:1->1/tcp")))
 
 
-def test_labelled_helper_under_another_name_keeps_its_ports_unjudged() -> None:
-    helper = _record("levr-env-main-db", "running", "levr", "main", "0.0.0.0:5432->5432/tcp")
-    assert parse_inventory(_reply(_ok("a", "b"), helper)) == [Environment("a", "b", "running")]
+@pytest.mark.parametrize(
+    ("ports", "readable"),
+    [("127.0.0.1:15432->5432/tcp", True), ("0.0.0.0:5432->5432/tcp", False)],
+)
+def test_a_labelled_helper_under_another_name_is_judged_on_its_ports(ports: str, readable: bool) -> None:
+    helper = _record("levr-env-main-db", "running", "levr", "main", ports)
+    reply = _reply(_ok("a", "b"), helper)
+    if readable:
+        assert parse_inventory(reply) == [Environment("a", "b", "running")]
+    else:
+        with pytest.raises(Unreadable, match="line 3: ports"):
+            parse_inventory(reply)
 
 
 # --- unreadable records ---------------------------------------------------
