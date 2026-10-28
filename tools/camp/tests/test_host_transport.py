@@ -718,3 +718,71 @@ def test_bounded_runner_raises_timeout_expired_and_ends_the_child() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         transport.bounded_runner([sys.executable, "-c", "import time; time.sleep(30)"], 0.5, {}, 1000)
     assert time.monotonic() - started < 10
+
+
+# ---------------------------------------------------------------------------
+# local_forward_argv — the attachment's background forward, and the pin that
+# run_camp's own argv for the same host is untouched by it.
+# ---------------------------------------------------------------------------
+
+_FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
+
+
+def test_local_forward_argv_has_every_element_in_order() -> None:
+    argv = transport.local_forward_argv(
+        Host(ssh="tduffield@perseus", camp_bin="camp"),
+        ((5173, 41990), (8080, 41991)),
+        "camp-env:abc123:perseus/grp/main",
+        7.0,
+    )
+    assert argv == [
+        "ssh",
+        "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=7",
+        "-f", "-N",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+        "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "PermitLocalCommand=no",
+        "-o", "RequestTTY=no", "-o", "ControlMaster=no", "-o", "ControlPath=none",
+        "-o", "Tag=camp-env:abc123:perseus/grp/main",
+        "-L", "127.0.0.1:5173:127.0.0.1:41990",
+        "-L", "127.0.0.1:8080:127.0.0.1:41991",
+        "--", "tduffield@perseus",
+    ]
+
+
+def test_local_forward_argv_never_cancels_its_own_forwards() -> None:
+    argv = transport.local_forward_argv(_HOST, ((1025, 2000),), "t", 10.0)
+    assert "ClearAllForwardings=yes" not in argv and "ClearAllForwardings=no" not in argv
+    assert argv.index("--") < argv.index(_HOST.ssh)
+    assert argv[-1] == _HOST.ssh
+
+
+def test_local_forward_argv_takes_its_ports_and_destination_from_its_arguments() -> None:
+    other = Host(ssh="alice@box.example.com", camp_bin="camp")
+    argv = transport.local_forward_argv(other, ((3000, 4000),), "ns:i:box/g/n", 3.0)
+    assert "127.0.0.1:3000:127.0.0.1:4000" in argv
+    assert "ConnectTimeout=3" in argv
+    assert "Tag=ns:i:box/g/n" in argv
+    assert argv[-2:] == ["--", "alice@box.example.com"]
+
+
+def test_local_forward_argv_matches_the_real_captured_forward_line() -> None:
+    line = (_FIXTURES_DIR / "env_forward_ps_linux_openssh_9_6.txt").read_text().strip()
+    captured = line.split(None, 2)[2].split()
+    built = transport.local_forward_argv(
+        Host(ssh="tduffield@perseus", camp_bin="camp"),
+        ((41875, 41990),),
+        "camp-env-k2probe:fetch:perseus/grp/name",
+        10.0,
+    )
+    assert built == captured
+
+
+def test_run_camp_argv_for_a_host_is_unchanged_by_the_forward_builder() -> None:
+    fake = _FakeRunner(result=transport.RawResult(exit_code=0, stdout="", stderr=""))
+    transport.run_camp(Host(ssh="tduffield@perseus", camp_bin="camp"), ["list"], connect_timeout=7.0, runner=fake)
+    assert fake.calls[0].argv == [
+        "ssh",
+        "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", "ConnectTimeout=7",
+        "tduffield@perseus", "camp list",
+    ]

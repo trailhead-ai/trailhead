@@ -319,6 +319,44 @@ def _fixed_ssh_options(connect_timeout: float) -> list[str]:
     ]
 
 
+def local_forward_argv(
+    host: Host,
+    links: Sequence[tuple[int, int]],
+    tag: str,
+    connect_timeout: float,
+) -> list[str]:
+    """The ``ssh`` argv for an attachment's background forward.
+
+    *links* are ``(standard, published)`` pairs: each becomes one
+    ``-L 127.0.0.1:<standard>:127.0.0.1:<published>``. Built from
+    :func:`_fixed_ssh_options` plus ``-f -N``, ``ExitOnForwardFailure=yes``, the
+    keep-alive defaults, the no-forwarding/no-tty options, and connection sharing
+    turned off (``ControlMaster=no``, ``ControlPath=none``) so a shared connection
+    from the user's ssh config cannot take the forward over. ``ClearAllForwardings``
+    is deliberately absent: it would cancel the ``-L``. *tag* rides as ``-o Tag=``,
+    which is how the process table finds the forward again.
+    """
+    argv: list[str] = [
+        "ssh",
+        *_fixed_ssh_options(connect_timeout),
+        "-f", "-N",
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", f"ServerAliveInterval={DEFAULT_SERVER_ALIVE_INTERVAL_SECONDS:g}",
+        "-o", f"ServerAliveCountMax={DEFAULT_SERVER_ALIVE_COUNT_MAX}",
+        "-o", "ForwardAgent=no",
+        "-o", "ForwardX11=no",
+        "-o", "PermitLocalCommand=no",
+        "-o", "RequestTTY=no",
+        "-o", "ControlMaster=no",
+        "-o", "ControlPath=none",
+        "-o", f"Tag={tag}",
+    ]
+    for standard, published in links:
+        argv += ["-L", f"127.0.0.1:{standard}:127.0.0.1:{published}"]
+    argv += ["--", host.ssh]
+    return argv
+
+
 #: Extra ``-o`` pairs only the raw-bytes fetch carries: it needs no tty, no
 #: forwarding of any kind, and no local command, so none is left available.
 _FETCH_HARDENING_OPTIONS = (
