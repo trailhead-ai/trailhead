@@ -306,6 +306,42 @@ def test_remote_docker_missing_or_not_running(rig: Rig, stderr_fixture: str, lin
     assert "unreadable" not in result.stdout
 
 
+def test_ssh_that_cannot_start_is_unreadable_and_the_run_carries_on(rig: Rig) -> None:
+    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS)
+    rig.docker(stdout=HEADER)
+    (rig.bin / "ssh").unlink()
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert "Traceback" not in result.stderr
+    assert result.stdout.startswith("this machine\n  no environments\nperseus\n  unreadable: cannot run ssh: ")
+    assert result.stdout.endswith(
+        f"not opted in: toms-macbook-pro (add to env_hosts in {rig.config_dir / 'hosts.toml'})\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "content",
+    [b"env_hosts = [\xff\xfe]\n", b"x = " + b"[" * 5000 + b"]" * 5000 + b"\n"],
+    ids=["invalid-utf8", "deeply-nested"],
+)
+def test_a_hosts_file_that_cannot_be_read_refuses_without_a_traceback(
+    rig: Rig, content: bytes
+) -> None:
+    hosts = rig.config_dir / "hosts.toml"
+    hosts.write_bytes(content)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("camp env: ")
+    assert str(hosts) in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_a_declared_host_not_in_env_hosts_is_never_contacted_and_is_named(rig: Rig) -> None:
     hosts = rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS)
     rig.docker(stdout=HEADER)

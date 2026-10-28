@@ -206,6 +206,54 @@ def test_exit_127_is_docker_not_installed_whatever_stderr_says():
     assert remote(raw(stderr="something unrelated\n", exit_code=127)).kind == read.DOCKER_NOT_INSTALLED
 
 
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        "docker: not found\n",
+        "sh: 1: docker: not found\n",
+        "docker: command not found\n",
+        "bash: line 1: docker: command not found\n",
+        "zsh: command not found: docker\n",
+        "fish: Unknown command: docker\n",
+        "Docker: Command Not Found\n",
+    ],
+)
+def test_each_shells_missing_docker_wording_is_docker_not_installed(stderr):
+    assert remote(raw(stderr=stderr)).kind == read.DOCKER_NOT_INSTALLED
+    assert local(raw(stderr=stderr)).kind == read.DOCKER_NOT_INSTALLED
+
+
+def test_a_not_found_that_names_no_docker_is_unreadable_with_that_line():
+    # Constructed, not captured: a docker CLI complaining about a missing context.
+    line = 'context "x": context not found'
+    assert_unreadable(remote(raw(stderr=line + "\n", exit_code=1)), line)
+
+
+def test_another_missing_command_beside_a_docker_permission_error_is_not_docker_not_installed():
+    stderr = (
+        "fish: Unknown command: direnv\n"
+        "permission denied while trying to connect to the docker API\n"
+    )
+    assert remote(raw(stderr=stderr)).kind != read.DOCKER_NOT_INSTALLED
+
+
+def test_a_daemon_phrase_wins_over_a_docker_not_found_line():
+    stderr = "docker: not found\nCannot connect to the Docker daemon\n"
+    assert remote(raw(stderr=stderr)).kind == read.DOCKER_NOT_RUNNING
+
+
+@pytest.mark.parametrize(
+    ("error", "strerror"),
+    [
+        (FileNotFoundError(2, "No such file or directory"), "No such file or directory"),
+        (PermissionError(13, "Permission denied"), "Permission denied"),
+        (OSError(8, "Exec format error"), "Exec format error"),
+    ],
+)
+def test_ssh_that_cannot_start_is_unreadable_naming_why(error, strerror):
+    assert_unreadable(remote(raises=error), f"cannot run ssh: {strerror}")
+
+
 @pytest.mark.parametrize("stderr", [DAEMON_MISSING_SOCKET, DAEMON_TCP, DAEMON_NO_LISTENER])
 def test_tailscale_exit_0_empty_stdout_daemon_text_is_docker_not_running(stderr):
     inventory = remote(raw(stderr=stderr))

@@ -515,7 +515,8 @@ def run_remote_command(
     :class:`StoppedResponding` when ``execution_timeout`` elapses, and otherwise
     :func:`_classify`'s — the same classification every camp verb gets. The
     ``max_stdout_bytes`` value is the caller's to choose; this function reads
-    success from no exit code.
+    success from no exit code. An ``ssh`` that cannot start raises the ``OSError``
+    from the runner; the caller classifies it.
     """
     ssh_argv = _ssh_argv(host, remote_command, connect_timeout, hardened=True)
     env = {**os.environ, "LC_ALL": "C"}

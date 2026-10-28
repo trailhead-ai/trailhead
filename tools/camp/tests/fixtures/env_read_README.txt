@@ -13,7 +13,6 @@ Files
   env_read_perseus_tailscale_daemon_tcp.stderr              DOCKER_HOST=tcp://127.0.0.1:1, nothing listening (exit 0, empty stdout)
   env_read_perseus_tailscale_daemon_no_listener.stderr      DOCKER_HOST=unix:///dev/null, no listener (exit 0, empty stdout)
   env_read_perseus_tailscale_masked_exit.stderr             sh -c 'echo boom >&2; exit 3' (exit 0: the status is masked)
-  env_read_perseus_tailscale_no_containers.{stdout,stderr}  a working daemon with no containers under a plain `docker ps` (exit 0, both empty)
   env_read_andromeda_local_daemon_missing_socket.stderr     same command as the missing-socket row, run locally (exit 1, empty stdout)
 
 UNMEASURED (no capture exists; tests use the planned exit code with the measured Linux stderr above)

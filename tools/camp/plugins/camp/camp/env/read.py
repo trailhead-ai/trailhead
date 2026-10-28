@@ -83,7 +83,12 @@ READ_TIMEOUT_SECONDS = 30
 MAX_REPLY_BYTES = 1024 * 1024
 
 _LINE_BREAK = re.compile(r"[\r\n]+")
-_NOT_INSTALLED_PHRASES = ("not found", "unknown command")
+# Each shell words a missing command differently; all name the command. The fish form is a prefix
+# match because its capture ran a stand-in named ``dockerk2probe``.
+_NOT_INSTALLED = re.compile(
+    r"docker: (?:command )?not found|command not found: docker|unknown command: docker",
+    re.IGNORECASE,
+)
 _NOT_RUNNING_PHRASES = ("cannot connect to the docker daemon", "failed to connect to the docker api")
 
 
@@ -122,7 +127,7 @@ def _from_reply(stdout: str, stderr: str, exit_code: int) -> MachineInventory:
     lowered = stderr.lower()
     if any(phrase in lowered for phrase in _NOT_RUNNING_PHRASES):
         return MachineInventory(DOCKER_NOT_RUNNING)
-    if any(phrase in lowered for phrase in _NOT_INSTALLED_PHRASES):
+    if _NOT_INSTALLED.search(stderr):
         return MachineInventory(DOCKER_NOT_INSTALLED)
     line = _first_line(stderr)
     if line:
@@ -158,15 +163,23 @@ def read_remote(
     connect_timeout: float,
     runner: transport.BoundedRunner = transport.bounded_runner,
 ) -> MachineInventory:
-    """Read host ``name``'s environments over ssh. ``connect_timeout`` is ssh's handshake bound."""
-    outcome = transport.run_remote_command(
-        host,
-        INVENTORY_REMOTE_COMMAND,
-        connect_timeout=connect_timeout,
-        execution_timeout=READ_TIMEOUT_SECONDS,
-        max_stdout_bytes=MAX_REPLY_BYTES,
-        runner=runner,
-    )
+    """Read host ``name``'s environments over ssh. ``connect_timeout`` is ssh's handshake bound.
+
+    Never raises: an ssh that cannot start (missing, not executable) is unreadable, caught here
+    as ``read_local`` catches a docker that cannot run, so ``run_remote_command`` keeps its
+    contract for its other callers.
+    """
+    try:
+        outcome = transport.run_remote_command(
+            host,
+            INVENTORY_REMOTE_COMMAND,
+            connect_timeout=connect_timeout,
+            execution_timeout=READ_TIMEOUT_SECONDS,
+            max_stdout_bytes=MAX_REPLY_BYTES,
+            runner=runner,
+        )
+    except OSError as error:
+        return _unreadable(f"cannot run ssh: {error.strerror or error}")
     destination = host.ssh
     if isinstance(outcome, (transport.Answered, transport.RemoteRefusal)):
         if outcome.exit_code == 255:
