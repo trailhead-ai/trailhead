@@ -455,6 +455,11 @@ def test_detach_after_real_traffic_leaves_the_ports_free_and_attach_works_again_
     assert rig.attach("perseus/levr/main").returncode == 0
     for port in env.standard_ports:
         assert ask(port).startswith("main-")
+
+    detached = rig.camp("env", "detach")
+
+    assert detached.returncode == 0, detached.stderr
+    assert detached.stdout == f"detached perseus/levr/main; ports {ports_of(env)} are free\n"
     strict = socket.socket()
     try:
         strict.bind(("127.0.0.1", env.standard_ports[0]))
@@ -464,11 +469,6 @@ def test_detach_after_real_traffic_leaves_the_ports_free_and_attach_works_again_
         pytest.skip("traffic through the forward left no TIME_WAIT on this kernel")
     finally:
         strict.close()
-
-    detached = rig.camp("env", "detach")
-
-    assert detached.returncode == 0, detached.stderr
-    assert detached.stdout == f"detached perseus/levr/main; ports {ports_of(env)} are free\n"
     again = rig.attach("perseus/levr/main")
     assert again.returncode == 0, again.stderr
     assert again.stdout == f"attached perseus/levr/main on ports {ports_of(env)}; its health was not checked\n"
