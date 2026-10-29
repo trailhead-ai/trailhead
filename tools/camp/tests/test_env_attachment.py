@@ -79,6 +79,9 @@ def _good(pid: int = 100) -> Attachment:
         _GOOD_CMD.replace("-f -N", "-fN"),
         _GOOD_CMD.replace("-o BatchMode=yes", "-p22 -l bob -i /k/id -oBatchMode=yes"),
         _GOOD_CMD.replace(" -- ", " "),
+        _GOOD_CMD.replace("-f -N", "-fNT"),
+        _GOOD_CMD.replace("-f -N", "-T -N -f"),
+        _GOOD_CMD.replace("-f -N", "-12N"),
     ],
 )
 def test_recognises_an_ssh_forward_with_one_tag_option(command: str) -> None:
@@ -92,6 +95,9 @@ def test_ports_are_ordered_by_standard_port() -> None:
     assert found[0].ports == ((80, 41991), (9000, 41990))
 
 
+# N-after-destination and options-after-destination are unrecognised by design: OpenSSH resumes
+# option parsing after the destination, camp's recogniser stops there (stricter), and camp's own
+# forwards always carry `--`, so they are unaffected.
 @pytest.mark.parametrize(
     "decoy_row",
     [
@@ -123,14 +129,51 @@ def test_ports_are_ordered_by_standard_port() -> None:
         "other-uid", "grep-argv0", "grep-wearing-ssh-flags", "tag-word-in-remote-command-no-dashdash", "no-dash-N", "tag-after-dashdash-in-remote-command",
         "o-tag-after-dashdash", "two-tag-options", "other-namespace",
         "bad-group", "bad-host", "missing-name", "non-ascii-port", "argv0-sshd",
-        "tag-and-N-in-remote-command", "o-is-the-value-of-l", "N-after-destination",
-        "options-after-destination", "no-L", "unknown-option-letter", "L-without-a-value",
+        "tag-and-N-in-remote-command", "o-is-the-value-of-l", "N-after-destination-unrecognised-by-design-stricter-than-openssh",
+        "options-after-destination-unrecognised-by-design-stricter-than-openssh", "no-L", "unknown-option-letter", "L-without-a-value",
         "uppercase-host", "dotted-host",
     ],
 )
 def test_a_decoy_is_not_recognised_and_the_others_still_parse(decoy_row: str) -> None:
     found = attachment.attachments(runner=_table(decoy_row, _row(100, _GOOD_CMD)))
     assert found == [_good(100)]
+
+
+@pytest.mark.parametrize(
+    "standard, published",
+    [
+        ("9" * 5000, "41990"),
+        ("99999", "41990"),
+        ("5173", "70000"),
+        ("65536", "41990"),
+        ("0", "41990"),
+        ("5173", "0"),
+        ("05173", "41990"),
+        ("5173", "041990"),
+        ("1" * 6, "41990"),
+    ],
+    ids=["5000-digits", "above-65535", "published-above-65535", "65536", "zero", "published-zero",
+         "leading-zero", "published-leading-zero", "six-digits"],
+)
+def test_an_L_whose_ports_are_not_1_to_65535_in_five_digits_is_not_recognised_and_the_others_still_parse(
+    standard: str, published: str
+) -> None:
+    absurd = _GOOD_CMD.replace("127.0.0.1:5173:127.0.0.1:41990", f"127.0.0.1:{standard}:127.0.0.1:{published}")
+    found = attachment.attachments(runner=_table(_row(200, absurd), _row(100, _GOOD_CMD)))
+    assert found == [_good(100)]
+
+
+@pytest.mark.parametrize("standard, published", [("1", "65535"), ("65535", "1"), ("80", "41991")])
+def test_an_L_with_ports_at_the_edges_of_the_range_is_recognised(standard: str, published: str) -> None:
+    command = f"ssh -N -o Tag={_TAG} -L 127.0.0.1:{standard}:127.0.0.1:{published} -- dest"
+    found = attachment.attachments(runner=_table(_row(100, command)))
+    assert [a.ports for a in found] == [((int(standard), int(published)),)]
+
+
+@pytest.mark.parametrize("port", [70000, 65536, -1, 10**6])
+def test_a_port_outside_the_range_is_reported_as_could_not_be_checked_not_a_traceback(port: int) -> None:
+    holder = attachment.port_holder(port, lsof_runner=lambda argv: "")
+    assert holder is not None and "could not be checked" in holder
 
 
 def test_the_real_k2_forward_line_is_recognised(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -299,9 +342,9 @@ class _Child:
         script.write_text(_CHILD)
         self.port = 40000 + os.getpid() % 1000
         tag = f"{os.environ['CAMP_ENV_TAG_NAMESPACE']}:{attach_id}:perseus/grp/main"
-        env = {**os.environ, "CHILD_MODE": mode, "CHILD_MARKER": str(self.marker)}
+        env = {**os.environ, "CHILD_MODE": mode, "CHILD_MARKER": str(self.marker), "CHILD_SCRIPT": str(script)}
         self.proc = subprocess.Popen(
-            ["ssh", "-c", f"__import__('runpy').run_path('{script}')", "-N", "-o", f"Tag={tag}",
+            ["ssh", "-c", "__import__('runpy').run_path(__import__('os').environ['CHILD_SCRIPT'])", "-N", "-o", f"Tag={tag}",
              "-L", f"127.0.0.1:{self.port}:127.0.0.1:{self.port + 1}", "--", "dest"],
             executable=sys.executable, env=env, stdout=subprocess.PIPE, text=True,
         )
@@ -326,8 +369,10 @@ def child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CAMP_ENV_TAG_NAMESPACE", f"camp-env-t{uuid.uuid4().hex[:10]}")
     started: list[_Child] = []
 
-    def start(mode: str) -> _Child:
-        made = _Child(tmp_path, mode, uuid.uuid4().hex[:8])
+    def start(mode: str, directory: str = "") -> _Child:
+        root = tmp_path / directory
+        root.mkdir(exist_ok=True)
+        made = _Child(root, mode, uuid.uuid4().hex[:8])
         started.append(made)
         return made
 
@@ -337,6 +382,11 @@ def child(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             made.proc.kill()
         made.proc.wait()
         made.proc.stdout.close()
+
+
+def test_a_child_whose_script_lives_under_a_directory_with_a_space_is_still_found(child) -> None:
+    made = child("term", "a directory with spaces")
+    assert made.attachment in attachment.attachments()
 
 
 def test_the_real_table_finds_a_real_child_under_the_test_namespace(child) -> None:
@@ -541,12 +591,13 @@ def test_in_use_on_any_one_of_the_four_addresses_is_held(held_family: int, held_
         if (family, address) == (held_family, held_address):
             raise OSError(errno.EADDRINUSE, "in use")
 
-    assert attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "") == "a process camp cannot see"
+    holder = attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "", platform="darwin")
+    assert holder == "a process camp cannot see"
 
 
-def test_every_address_is_probed_with_its_family() -> None:
+def test_off_linux_every_address_is_probed_with_its_family() -> None:
     seen: list[tuple[int, str, int]] = []
-    assert attachment.port_holder(5555, bind=lambda *a: seen.append(a)) is None
+    assert attachment.port_holder(5555, bind=lambda *a: seen.append(a), platform="darwin") is None
     assert seen == [
         (socket.AF_INET, "127.0.0.1", 5555),
         (socket.AF_INET6, "::1", 5555),
@@ -561,10 +612,81 @@ def test_an_unexpected_bind_error_is_a_refusal_not_a_traceback(family: int, addr
         if (fam, addr) == (family, address):
             raise OSError(errno.EACCES, "Permission denied\x1b[31m")
 
-    holder = attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "p1\ncx\n")
+    holder = attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "p1\ncx\n", platform="darwin")
     assert holder is not None
     assert "could not be checked" in holder
     assert "Permission denied" in holder and "\x1b" not in holder
+
+
+def _recording_bind(seen: list[tuple[int, str, int]]):
+    return lambda *args: seen.append(args)
+
+
+def test_on_linux_only_the_loopback_addresses_are_probed() -> None:
+    seen: list[tuple[int, str, int]] = []
+    assert attachment.port_holder(5555, bind=_recording_bind(seen), platform="linux") is None
+    assert seen == [(socket.AF_INET, "127.0.0.1", 5555), (socket.AF_INET6, "::1", 5555)]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "freebsd14", "win32"])
+def test_off_linux_the_wildcard_addresses_are_probed_too(platform: str) -> None:
+    seen: list[tuple[int, str, int]] = []
+    assert attachment.port_holder(5555, bind=_recording_bind(seen), platform=platform) is None
+    assert {(family, address) for family, address, _ in seen} >= {(socket.AF_INET, "0.0.0.0"), (socket.AF_INET6, "::")}
+
+
+def test_a_wildcard_in_use_answer_is_ignored_on_linux_and_held_off_it() -> None:
+    def bind(family, address, port):
+        if address in ("0.0.0.0", "::"):
+            raise OSError(errno.EADDRINUSE, "in use")
+
+    assert attachment.port_holder(5555, bind=bind, platform="linux") is None
+    assert attachment.port_holder(5555, bind=bind, platform="darwin", lsof_runner=lambda argv: "") is not None
+
+
+def _own_nonloopback_ipv4() -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        try:
+            probe.connect(("192.0.2.1", 9))
+        except OSError:
+            pytest.skip("no route, so no non-loopback address of this machine to bind")
+        address = probe.getsockname()[0]
+    if address.startswith("127."):
+        pytest.skip("this machine has no non-loopback IPv4 address")
+    return address
+
+
+def test_on_linux_a_listener_on_a_specific_non_loopback_address_leaves_the_port_free(listener) -> None:
+    port = listener(_own_nonloopback_ipv4())
+    assert attachment.port_holder(port, lsof_runner=lambda argv: "", platform="linux") is None
+    with socket.socket() as ssh_like:
+        ssh_like.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        ssh_like.bind(("127.0.0.1", port))
+
+
+def test_on_linux_a_dual_stack_wildcard_listener_is_still_held_by_the_loopback_probes(listener) -> None:
+    sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+        sock.bind(("::", 0))
+    except OSError:
+        sock.close()
+        pytest.skip("no dual-stack IPv6 on this host")
+    sock.listen(1)
+    try:
+        port = sock.getsockname()[1]
+        assert attachment.port_holder(port, lsof_runner=lambda argv: "", platform="linux") == "a process camp cannot see"
+    finally:
+        sock.close()
+
+
+@pytest.mark.parametrize("address, family", [("0.0.0.0", socket.AF_INET), ("::", socket.AF_INET6)])
+def test_on_linux_a_wildcard_listener_is_held_without_the_wildcard_probes(listener, address: str, family: int) -> None:
+    try:
+        port = listener(address, family)
+    except OSError:
+        pytest.skip("no IPv6 on this host")
+    assert attachment.port_holder(port, lsof_runner=lambda argv: "", platform="linux") == "a process camp cannot see"
 
 
 def test_a_free_port_is_released_at_once() -> None:

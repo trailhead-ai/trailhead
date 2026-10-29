@@ -88,6 +88,7 @@ def test_rig_forward_shows_argv0_ssh_in_ps(rig: AttachRig) -> None:
     assert "-N" in command.split()
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc/<pid>/fd to read a process's descriptors")
 def test_rig_forward_points_descriptors_0_1_2_at_dev_null_not_what_it_inherited(rig: AttachRig) -> None:
     env = rig.environment("main")
     with tempfile.TemporaryFile() as sink:
@@ -99,6 +100,20 @@ def test_rig_forward_points_descriptors_0_1_2_at_dev_null_not_what_it_inherited(
 
     assert held == ["/dev/null"] * 3
     assert inherited != "/dev/null"
+
+
+def test_rig_works_when_its_root_directory_name_contains_a_space(tmp_path: Path) -> None:
+    spaced = AttachRig(tmp_path / "a root with spaces")
+    try:
+        env = attached_rig(spaced, "main")
+
+        done = spaced.attach("perseus/levr/main")
+
+        assert done.returncode == 0, done.stderr
+        assert [ask(p) for p in env.standard_ports] == ["main-0", "main-1", "main-2"]
+        assert spaced.camp("env", "status").stdout.startswith("attached: perseus/levr/main")
+    finally:
+        spaced.close()
 
 
 def test_rig_forward_relays_each_port_to_its_own_upstream(rig: AttachRig) -> None:
@@ -126,7 +141,9 @@ def test_attach_makes_each_standard_port_answer_with_the_upstream_and_names_the_
     assert all(port_is_free(p) for p in other.standard_ports)
 
 
-def test_a_successful_attach_returns_within_a_few_seconds(rig: AttachRig) -> None:
+def test_a_successful_attach_returns_as_soon_as_the_forward_is_up_not_when_a_timeout_runs_out(rig: AttachRig) -> None:
+    from camp.cli.env import START_MARGIN_SECONDS
+
     attached_rig(rig)
 
     started = time.monotonic()
@@ -134,7 +151,10 @@ def test_a_successful_attach_returns_within_a_few_seconds(rig: AttachRig) -> Non
     elapsed = time.monotonic() - started
 
     assert done.returncode == 0, done.stderr
-    assert elapsed < 2.5
+    # Normal is about a second. The failure this guards is attach lingering until the spawn
+    # timeout (connect timeout + START_MARGIN_SECONDS) instead of returning once the forward is
+    # up; half the margin leaves several times the normal time for a loaded machine.
+    assert elapsed < START_MARGIN_SECONDS / 2
 
 
 @pytest.mark.parametrize("target", ["main", "perseus/main", "perseus/levr/main"])
@@ -333,6 +353,55 @@ def test_an_interrupt_while_ending_a_forward_that_is_not_running_exits_130_witho
 
     assert code == 130
     assert capsys.readouterr().err.startswith("camp env: attach interrupted")
+
+
+def _unverifiable(message: str):
+    from camp.env.attachment import Unverifiable
+
+    return Unverifiable(message)
+
+
+def _raises(error: BaseException):
+    def raiser(*args, **kwargs):
+        raise error
+
+    return raiser
+
+
+@pytest.mark.parametrize(
+    "path, patches",
+    [
+        ("interrupt-during-the-attach", {"_wait_for_forward": _raises(KeyboardInterrupt())}),
+        ("unverifiable-handler", {"_wait_for_forward": _raises(_unverifiable("ps broke"))}),
+        ("exception-handler", {"_wait_for_forward": _raises(RuntimeError("boom"))}),
+        ("ssh-failed-to-start", {"_start_forward": lambda argv, timeout: "ssh could not start the forward"}),
+        ("forward-not-running", {"_wait_for_forward": lambda attach_id: None}),
+    ],
+)
+def test_an_interrupt_during_any_cleanup_exits_130_and_says_to_run_detach(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys, path: str, patches: dict
+) -> None:
+    from camp.cli import env as env_cli
+
+    attached_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_start_forward", lambda argv, timeout: None)
+    for name, replacement in patches.items():
+        monkeypatch.setattr(env_cli, name, replacement)
+    monkeypatch.setattr(env_cli, "_end_own", _raises(KeyboardInterrupt()))
+
+    try:
+        env_cli._cmd_env_attach(["perseus/levr/main"])
+    except SystemExit as exit_:
+        code = exit_.code
+    except KeyboardInterrupt:
+        pytest.fail(f"the interrupt escaped as a traceback ({path})")
+
+    assert code == 130
+    assert capsys.readouterr().err == (
+        "camp env: attach interrupted; the forward it started may still be running; run camp env detach\n"
+    )
 
 
 def test_a_forward_that_dies_just_after_backgrounding_fails_and_holds_nothing(rig: AttachRig) -> None:

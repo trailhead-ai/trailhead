@@ -5,11 +5,14 @@ A process is **recognised** as an attachment when all of these hold:
 
 - it belongs to this user (``ps`` reports the numeric uid);
 - its argv0 has the basename ``ssh`` (bare or a full path);
-- its argv parses as OpenSSH parses it: options up to the first word that is not an option (the
-  destination) or a ``--``; everything after is the remote command and is never read as an
-  option. A letter that takes an argument (``B b c D E e F I i J L l m O o P p Q R S W w``)
+- its argv parses the way OpenSSH reads its leading options, and stops at the first word that is
+  not an option (the destination) or at a ``--``; everything after is never read as an option.
+  This is deliberately stricter than OpenSSH, which resumes option parsing after the destination
+  unless a ``--`` came first (``ssh -G host -o Tag=x`` prints ``tag x``): camp's own forwards
+  always carry ``--``, so they are unaffected, and a hand-built forward with options after its
+  destination is not recognised. A letter that takes an argument (``B b c D E e F I i J L l m O o P p Q R S W w``)
   consumes the rest of its word or else the next word, so ``-l -o`` makes ``-o`` the value of
-  ``-l``; a flag letter (``4 6 A a C f G g K k M N n q s T t V v X x Y y``) takes none and may be
+  ``-l``; a flag letter (``1 2 4 6 A a C f G g K k M N n q s T t V v X x Y y``) takes none and may be
   clustered (``-fN``); any other letter makes the argv unrecognised;
 - among those options it carries ``-N``;
 - it carries exactly one ``-o Tag=<ns>:<id>:<host>/<group>/<name>`` option (also spelled
@@ -35,6 +38,7 @@ import re
 import signal
 import socket
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
@@ -51,8 +55,9 @@ KILL_GRACE_SECONDS = 2.0
 UNSEEN_HOLDER = "a process camp cannot see"
 
 _ARG_OPTIONS = frozenset("BbcDEeFIiJLlmOoPpQRSWw")
-_FLAG_OPTIONS = frozenset("46AaCfGgKkMNnqstVvXxYy")
-_FORWARD_RE = re.compile(r"127\.0\.0\.1:([0-9]+):127\.0\.0\.1:([0-9]+)")
+_FLAG_OPTIONS = frozenset("1246AaCfGgKkMNnqsTtVvXxYy")
+_FORWARD_RE = re.compile(r"127\.0\.0\.1:([1-9][0-9]{0,4}):127\.0\.0\.1:([1-9][0-9]{0,4})")
+_MAX_PORT = 65535
 _PS_ARGV = ["ps", "-axwwo", "pid=,uid=,command="]
 _POLL_SECONDS = 0.05
 
@@ -195,7 +200,10 @@ def _recognise(pid: int, command: str, namespace: str) -> Attachment | None:
         match = _FORWARD_RE.fullmatch(spec)
         if match is None:
             return None
-        ports.append((int(match.group(1)), int(match.group(2))))
+        standard, published = int(match.group(1)), int(match.group(2))
+        if standard > _MAX_PORT or published > _MAX_PORT:
+            return None
+        ports.append((standard, published))
     attach_id, host, group, name = parsed
     return Attachment(pid, host, group, name, tuple(sorted(ports)), attach_id)
 
@@ -322,22 +330,34 @@ def _default_lsof(argv: list[str]) -> str:
     return subprocess.run(argv, capture_output=True, text=True, timeout=5).stdout
 
 
-_PROBED = (
+_LOOPBACK_PROBED = (
     (socket.AF_INET, "127.0.0.1"),
     (socket.AF_INET6, "::1"),
+)
+_WILDCARD_PROBED = (
     (socket.AF_INET, "0.0.0.0"),
     (socket.AF_INET6, "::"),
 )
 
 
-def _probe(bind: Callable[[int, str, int], None], port: int) -> "tuple[bool, str | None]":
+def _probed(platform: str) -> "tuple[tuple[int, str], ...]":
+    if platform.startswith("linux"):
+        return _LOOPBACK_PROBED
+    return _LOOPBACK_PROBED + _WILDCARD_PROBED
+
+
+def _probe(
+    bind: Callable[[int, str, int], None], port: int, platform: str
+) -> "tuple[bool, str | None]":
     """``(held, unchecked)``: whether any probed address answers "in use", and, when a bind failed
     for another reason, that failure's printable text."""
     held = False
     unchecked: str | None = None
-    for family, address in _PROBED:
+    for family, address in _probed(platform):
         try:
             bind(family, address, port)
+        except OverflowError as error:
+            unchecked = unchecked or printable_line(f"{error} on {address}").strip()
         except OSError as error:
             if error.errno == errno.EADDRINUSE:
                 held = True
@@ -370,11 +390,18 @@ def port_holder(
     *,
     bind: Callable[[int, str, int], None] | None = None,
     lsof_runner: Callable[[list[str]], str] | None = None,
+    platform: str | None = None,
 ) -> str | None:
-    """None when *port* is free on 127.0.0.1, ::1, 0.0.0.0 and ::, else who holds it.
+    """None when *port* is free where ssh's ``-L 127.0.0.1:<port>`` would bind, else who holds it.
 
-    camp binds each of the four addresses itself, with SO_REUSEADDR set (IPV6_V6ONLY on the
-    IPv6 ones), as ssh does, and releases it at once. "Address in use" on any one means held; a
+    camp binds the probed addresses itself, with SO_REUSEADDR set (IPV6_V6ONLY on the IPv6
+    ones), as ssh does, and releases each at once. The probed addresses are 127.0.0.1 and ::1 on
+    Linux, and those plus 0.0.0.0 and :: everywhere else (*platform*, default ``sys.platform``, is a
+    test seam). On Linux a reuse bind of 127.0.0.1 already answers "in use" for a 0.0.0.0 holder
+    and the ::1 probe for a ``::`` holder, while a wildcard probe would also answer "in use" for a
+    listener on one specific non-loopback address (a tailnet IP, ``docker -p 192.168.1.5:8080:80``)
+    that does not stop ssh binding 127.0.0.1; on macOS a 0.0.0.0 holder does not stop a 127.0.0.1
+    reuse bind, so the wildcards are probed there. "Address in use" on any one probed address means held; a
     port whose only trace is TIME_WAIT is free, because ssh binds it too. An IPv6 bind failing
     because the machine has no IPv6 (``EADDRNOTAVAIL``, ``EAFNOSUPPORT``) counts as free on that
     family. Any other bind failure is a refusal, never an exception: the port is reported held by
@@ -386,9 +413,10 @@ def port_holder(
     The rule is measured, not assumed: ``tests/fixtures/env_port_probe_matrix.txt`` records, on
     Linux and macOS, every listener kind against all four addresses with and without
     SO_REUSEADDR, and a TIME_WAIT-only port. With SO_REUSEADDR on all four, every active listener
-    answers "in use" on at least one address and a TIME_WAIT-only port is free on all four.
+    answers "in use" on at least one address and a TIME_WAIT-only port is free on all four; on Linux
+    the two loopback addresses alone do the same for every listener that can stop ssh's bind.
     """
-    held, unchecked = _probe(bind or _default_bind, port)
+    held, unchecked = _probe(bind or _default_bind, port, sys.platform if platform is None else platform)
     if held:
         return _describe(lsof_runner or _default_lsof, port)
     if unchecked is not None:

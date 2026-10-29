@@ -180,8 +180,25 @@ def _end_own(attach_id: str) -> "tuple[bool, str | None]":
         return False, f"the forward it started could not be ended ({error}); run camp env detach"
 
 
+def _exit_interrupted(ended: bool, problem: "str | None") -> NoReturn:
+    print(
+        "camp env: attach interrupted"
+        + (f"; {problem}" if problem else "; the forward it started was ended" if ended else ""),
+        file=sys.stderr,
+    )
+    sys.exit(130)
+
+
+def _end_own_or_exit(attach_id: str) -> "tuple[bool, str | None]":
+    """``_end_own``, except that an interrupt during it exits 130, saying the forward may still be running."""
+    try:
+        return _end_own(attach_id)
+    except KeyboardInterrupt:
+        _exit_interrupted(False, "the forward it started may still be running; run camp env detach")
+
+
 def _fail_after_start(reason: str, attach_id: str) -> NoReturn:
-    _, problem = _end_own(attach_id)
+    _, problem = _end_own_or_exit(attach_id)
     _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))
 
 
@@ -294,15 +311,9 @@ def _cmd_env_attach(args: list[str]) -> None:
     except Unverifiable as error:
         _fail_after_start(f"could not tell whether the forward started ({error})", attach_id)
     except KeyboardInterrupt:
-        ended, problem = _end_own(attach_id)
-        print(
-            "camp env: attach interrupted"
-            + (f"; {problem}" if problem else "; the forward it started was ended" if ended else ""),
-            file=sys.stderr,
-        )
-        sys.exit(130)
+        _exit_interrupted(*_end_own_or_exit(attach_id))
     except Exception:
-        _end_own(attach_id)
+        _end_own_or_exit(attach_id)
         raise
     print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
 

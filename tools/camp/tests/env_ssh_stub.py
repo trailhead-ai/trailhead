@@ -12,7 +12,7 @@ The stub serves two kinds of call:
   ``-f`` it forks into the background and the foreground process exits, and the background
   process re-points its descriptors 0, 1 and 2 at /dev/null, exactly as real ``ssh -f`` does
   (measured on OpenSSH 9.6: anything it would say after backgrounding is lost). It re-executes
-  itself with argv[0] ``ssh`` so ``ps`` shows ``ssh -c <code> <args>`` (``-c`` is ssh's own
+  itself with argv[0] ``ssh`` (the script path goes through the environment, so the code word holds no whitespace) so ``ps`` shows ``ssh -c <code> <args>`` (``-c`` is ssh's own
   cipher option, so the code is the value of an option and the real options follow, as in a real
   forward's ``ssh <args>``).
 
@@ -68,6 +68,10 @@ from pathlib import Path
 
 MARK = "CAMP_ENV_STUB_REEXEC"
 INTERPRETER = "CAMP_ENV_STUB_PYTHON"
+SCRIPT = "CAMP_ENV_STUB_SCRIPT"
+#: The ``-c`` code word of the re-executed stub: constant and free of whitespace, because ``ps``
+#: prints argv space-joined and a space would split the word. The script path travels in SCRIPT.
+CODE_WORD = f"__import__('runpy').run_path(__import__('os').environ['{SCRIPT}'],run_name='__main__')"
 
 BIND_FAILURE_TAIL = "channel_setup_fwd_listener_tcpip: cannot listen to port: {port}\nCould not request local forwarding."
 
@@ -208,7 +212,8 @@ def main() -> None:
     if MARK not in os.environ:
         os.environ[MARK] = "1"
         os.environ[INTERPRETER] = sys.executable
-        os.execv(sys.executable, ["ssh", "-c", f"__import__('runpy').run_path('{Path(__file__).resolve()}',run_name='__main__')", *args])
+        os.environ[SCRIPT] = str(Path(__file__).resolve())
+        os.execv(sys.executable, ["ssh", "-c", CODE_WORD, *args])
     _forward(args)
 
 
