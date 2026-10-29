@@ -83,10 +83,15 @@ user's own config is busy, the attach fails on that port. It is kept alive with 
 keep-alives, so a forward whose link has died ends on its own within about 45 seconds.
 
 Nothing about an attachment is written to disk. camp finds it again by reading the process table:
-a process owned by this user, run as `ssh`, whose options (read as OpenSSH reads them: up to the
-destination or a `--`, an option's argument consumed with it) include `-N`, at least one `-L`, and
+a process owned by this user, run as `ssh`, whose options (read as OpenSSH reads its leading options:
+up to the destination or a `--`, an option's argument consumed with it) include `-N`, at least one `-L`, and
 exactly one `-o Tag=camp-env:<id>:<host>/<group>/<name>`. `<id>` is chosen fresh for each attach.
-The ports it holds are read from its own `-L` arguments, in ASCII digits only. A process that only
+The ports it holds are read from its own `-L` arguments, each written as one to five ASCII digits with no
+leading zero and from 1 to 65535; a forward with any other `-L` is not recognised.
+camp stops reading options at the first word that is not an option, which is deliberately stricter than
+OpenSSH: OpenSSH resumes option parsing after the destination unless a `--` came first (`ssh -G host -o Tag=x`
+prints `tag x`). camp's own forwards always carry `--`, so they are unaffected, and a hand-built forward with
+options after its destination is not recognised, by design. A process that only
 mentions the tag elsewhere in its arguments (a `grep`, an interactive ssh running a remote
 command, `ssh box pgrep -N -o Tag=...`), or that belongs to another user, is never counted, reported or ended. Because the forward
 carries nothing from camp's own install, `status` and `detach` find it from any directory and from
@@ -101,6 +106,11 @@ user opted in or named: whoever can start a contract-labelled container there ca
 this machine's loopback in 1024 to 65535. A port already held is refused rather than taken, and the
 success line names every port bound.
 
+camp assumes a single-user machine. `ssh -L` listens on 127.0.0.1, and any local user can connect to a
+loopback port, so on a machine other people can log in to, any of them can reach the attached environment's
+ports through the attaching user's ssh session. That is inherent to a forward and camp does not guard
+against it; do not attach on a shared machine.
+
 ## The order attach checks things in
 
 1. Is anything already attached? The process table answers this without reading any host, so the
@@ -108,15 +118,20 @@ success line names every port bound.
 2. Resolve the name, reading only the machines resolution needs.
 3. Is the environment running, and does it publish at least one port?
 4. Is every standard port free? camp tries to bind each one itself, with `SO_REUSEADDR` set as ssh
-   sets it, on 127.0.0.1, ::1, 0.0.0.0 and ::, and releases it at once. A port that fails any of
-   the four binds as in use is held. A port whose only trace is a closed connection in TIME_WAIT is
+   sets it, on 127.0.0.1 and ::1 (on Linux) or on 127.0.0.1, ::1, 0.0.0.0 and :: (everywhere else),
+   and releases it at once. A port that fails any of those binds as in use is held. On Linux the two
+   loopback binds already see a 0.0.0.0 holder and a `::` holder (measured), while a wildcard bind would
+   also fail for a listener on one specific non-loopback address (a tailnet IP, `docker -p 192.168.1.5:8080:80`),
+   which does not stop ssh binding 127.0.0.1; on macOS a 0.0.0.0 holder does not stop a 127.0.0.1 reuse bind,
+   so the wildcards are probed there. A port whose only trace is a closed connection in TIME_WAIT is
    free, because ssh binds it too: detach after real traffic frees its ports, and attaching again
    at once works. A machine with no IPv6 (some WSL setups) cannot bind the IPv6 addresses at all,
    and that counts as free on them. Any other bind failure (a permission error, say) is a refusal,
    not a crash: the port is reported held by a process that could not be checked, with the error.
    The rule was measured on Linux and macOS: with `SO_REUSEADDR` on all four addresses, every
    active listener, however it is bound, answers "in use" on at least one, and a TIME_WAIT-only
-   port answers free on all four.
+   port answers free on all four; on Linux the two loopback addresses alone do the same for every
+   listener that can stop ssh's bind.
 5. Start the forward, wait for ssh to confirm every port is bound before it goes to the background,
    and find the started forward in the process table by its `<id>`. ssh is started with its output
    discarded and its error text sent to a temporary file, never to a pipe camp reads: a backgrounded
@@ -208,7 +223,8 @@ On stderr, exit 1. Nothing is started and nothing is held. The port is the stand
 names the holder through `lsof` when `lsof` is installed and can see it, and otherwise says it
 cannot. The holder's command name is chosen by whatever process holds the port, so it reaches the
 terminal reduced to printable characters, as far-side text does. Being held on ::1 alone counts: a browser asking for `localhost` may try ::1 first and reach
-the other process instead of the attachment. So does a wildcard holder (0.0.0.0 or ::).
+the other process instead of the attachment. So does a wildcard holder (0.0.0.0 or ::); a listener on one specific non-loopback address does not count on Linux, because
+ssh's 127.0.0.1 bind still succeeds.
 
 When ssh itself cannot bind a port (taken in the moment between camp's check and ssh's start), the
 attach fails with ssh's own reason, and nothing is left behind:

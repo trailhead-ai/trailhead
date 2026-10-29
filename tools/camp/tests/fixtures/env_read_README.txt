@@ -46,6 +46,9 @@ env_port_probe_matrix.txt (the port probe's bind rule: SO_REUSEADDR on 127.0.0.1
   Reading it: with reuse on all four addresses every active listener answers EADDRINUSE on at least one address, and the
   TIME_WAIT-only port is free on all four; strict reads that TIME_WAIT port as EADDRINUSE on both hosts.
   Columns are `<address>:strict=<result>,reuse=<result>`, addresses separated by " | ".
+  The rule camp applies from it: Linux probes 127.0.0.1 and ::1 only (a reuse bind of 127.0.0.1 already answers EADDRINUSE
+  for a 0.0.0.0 holder and ::1 for a v6-only :: holder; a wildcard probe adds only false positives for a listener on one
+  specific non-loopback address); Darwin and any other platform probe all four.
 
 env_inventory_header_* and env_inventory_command.txt, env_inventory_records.txt (five-field format, `|{{json .Ports}}` appended)
   Header measured with the five-field command above on andromeda (Docker Engine 29.8.0) and perseus (Docker Desktop 4.97.0):

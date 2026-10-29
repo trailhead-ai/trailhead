@@ -466,10 +466,13 @@ that could have it; a name on this machine, or `local/NAME`, is refused (attachi
 environment on this machine is not supported yet).
 
 There is one attachment per machine, because a machine has one set of standard ports.
+Attach assumes a single-user machine: the forward listens on 127.0.0.1, and any local user can
+connect there and reach the environment through your ssh session (inherent to `ssh -L`), so do
+not attach on a machine other people log in to.
 Attach checks, in order: that nothing is attached (before any host is read), the target,
 that the environment is running and publishes ports, and that every standard port is
-free on 127.0.0.1, ::1, 0.0.0.0 and :: (bound with `SO_REUSEADDR`, as ssh binds, so a
-port only in TIME_WAIT is free). It then starts the forward and finds it again in the
+free on 127.0.0.1 and ::1, and off Linux on 0.0.0.0 and :: too (bound with `SO_REUSEADDR`,
+as ssh binds, so a port only in TIME_WAIT is free). It then starts the forward and finds it again in the
 process table by a fresh id. Nothing is written to disk; the forward carries a
 `-o Tag=camp-env:<id>:<host>/<group>/<name>` option, and a forward whose link has died
 ends on its own within about 45 seconds. Each refusal exits `1` with one line on stderr
