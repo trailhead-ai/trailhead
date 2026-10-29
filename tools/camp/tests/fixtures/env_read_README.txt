@@ -36,6 +36,17 @@ env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@pers
 UNMEASURED
   - the Mac ssh (OpenSSH_10.5p1) behaviour for -f / bind failure / ps line: perseus has no sshd on port 22 (Tailscale SSH only), so a loopback ssh -f from perseus is refused
 
+env_port_probe_matrix.txt (the port probe's bind rule: SO_REUSEADDR on 127.0.0.1, ::1, 0.0.0.0 and ::)
+  Measured on two hosts, one section each: andromeda (Linux 6.8.0-147-generic) and perseus (Darwin 27.2.0, macOS).
+  A throwaway Python script (not committed) bound ephemeral ports. For each listener kind (bound to 127.0.0.1, ::1,
+  0.0.0.0 or ::, with SO_REUSEADDR off and on; IPV6_V6ONLY set on the IPv6 ones) it then tried a second bind of the
+  same port on all four addresses, once without SO_REUSEADDR ("strict") and once with it ("reuse"), recording "free"
+  or the errno name. A last row measures TIME_WAIT: an SO_REUSEADDR listener on 127.0.0.1 accepted one connection,
+  closed the accepted socket and the listener first, then the client closed, leaving the port in TIME_WAIT.
+  Reading it: with reuse on all four addresses every active listener answers EADDRINUSE on at least one address, and the
+  TIME_WAIT-only port is free on all four; strict reads that TIME_WAIT port as EADDRINUSE on both hosts.
+  Columns are `<address>:strict=<result>,reuse=<result>`, addresses separated by " | ".
+
 env_inventory_header_* and env_inventory_command.txt, env_inventory_records.txt (five-field format, `|{{json .Ports}}` appended)
   Header measured with the five-field command above on andromeda (Docker Engine 29.8.0) and perseus (Docker Desktop 4.97.0):
   both print `NAMES|STATE|group|name|PORTS`. The records file gains a `""` fifth

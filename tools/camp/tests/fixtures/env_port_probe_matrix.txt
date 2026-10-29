@@ -1,0 +1,22 @@
+== andromeda
+Linux 6.8.0-147-generic
+listener 127.0.0.1 reuse=False     127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener 127.0.0.1 reuse=True      127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener ::1 reuse=False           127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+listener ::1 reuse=True            127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+listener 0.0.0.0 reuse=False       127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener 0.0.0.0 reuse=True        127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener :: reuse=False            127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+listener :: reuse=True             127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+TIME_WAIT on 127.0.0.1             127.0.0.1:strict=EADDRINUSE,reuse=free | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=free | :::strict=free,reuse=free
+== perseus
+Darwin 27.2.0
+listener 127.0.0.1 reuse=False     127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=free | :::strict=free,reuse=free
+listener 127.0.0.1 reuse=True      127.0.0.1:strict=EADDRINUSE,reuse=EADDRINUSE | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=free | :::strict=free,reuse=free
+listener ::1 reuse=False           127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=free
+listener ::1 reuse=True            127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=EADDRINUSE | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=free
+listener 0.0.0.0 reuse=False       127.0.0.1:strict=EADDRINUSE,reuse=free | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener 0.0.0.0 reuse=True        127.0.0.1:strict=EADDRINUSE,reuse=free | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=EADDRINUSE | :::strict=free,reuse=free
+listener :: reuse=False            127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=free | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+listener :: reuse=True             127.0.0.1:strict=free,reuse=free | ::1:strict=EADDRINUSE,reuse=free | 0.0.0.0:strict=free,reuse=free | :::strict=EADDRINUSE,reuse=EADDRINUSE
+TIME_WAIT on 127.0.0.1             127.0.0.1:strict=EADDRINUSE,reuse=free | ::1:strict=free,reuse=free | 0.0.0.0:strict=EADDRINUSE,reuse=free | :::strict=free,reuse=free

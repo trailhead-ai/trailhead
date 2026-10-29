@@ -12,8 +12,9 @@ The stub serves two kinds of call:
   ``-f`` it forks into the background and the foreground process exits, and the background
   process re-points its descriptors 0, 1 and 2 at /dev/null, exactly as real ``ssh -f`` does
   (measured on OpenSSH 9.6: anything it would say after backgrounding is lost). It re-executes
-  itself with argv[0] ``ssh`` so ``ps`` shows ``ssh <script> <args>`` as a real forward shows
-  ``ssh <args>``.
+  itself with argv[0] ``ssh`` so ``ps`` shows ``ssh -c <code> <args>`` (``-c`` is ssh's own
+  cipher option, so the code is the value of an option and the real options follow, as in a real
+  forward's ``ssh <args>``).
 
 ``<root>/stub.json`` (written by ``AttachRig.configure``) switches in failure modes:
 
@@ -207,7 +208,7 @@ def main() -> None:
     if MARK not in os.environ:
         os.environ[MARK] = "1"
         os.environ[INTERPRETER] = sys.executable
-        os.execv(sys.executable, ["ssh", str(Path(__file__).resolve()), *args])
+        os.execv(sys.executable, ["ssh", "-c", f"__import__('runpy').run_path('{Path(__file__).resolve()}',run_name='__main__')", *args])
     _forward(args)
 
 
@@ -273,7 +274,11 @@ class Upstream:
 
 
 def ask(port: int) -> str:
-    """Connect to 127.0.0.1:port and read until the peer closes; the client closes first."""
+    """Connect to 127.0.0.1:port and read until the peer closes.
+
+    The upstream answers and closes, the forward relays that close first, so the standard port
+    is the side that ends up in TIME_WAIT once this returns.
+    """
     with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
         chunks = []
         while True:
@@ -283,20 +288,14 @@ def ask(port: int) -> str:
             chunks.append(data)
 
 
-def can_bind(port: int, family: int = socket.AF_INET, address: str = "127.0.0.1") -> bool:
-    """True when *port* binds without SO_REUSEADDR, as camp's own port check does."""
-    sock = socket.socket(family)
-    try:
-        sock.bind((address, port))
-        return True
-    except OSError:
-        return False
-    finally:
-        sock.close()
-
-
 def port_is_free(port: int) -> bool:
-    return can_bind(port) and can_bind(port, socket.AF_INET6, "::1")
+    """True when camp's own port probe finds *port* free (the same rule, not a copy of it)."""
+    plugin = str(Path(__file__).resolve().parents[1] / "plugins" / "camp")
+    if plugin not in sys.path:
+        sys.path.insert(0, plugin)
+    from camp.env.attachment import port_holder
+
+    return port_holder(port, lsof_runner=lambda argv: "") is None
 
 
 @dataclass

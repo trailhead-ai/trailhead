@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import AttachRig, attached_rig, free_ports, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, ask, attached_rig, free_ports, port_is_free, wait_for
 
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -286,9 +286,25 @@ def test_detach_exits_1_when_a_forward_cannot_be_ended(rig: AttachRig) -> None:
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr.startswith("camp env: cannot end what is attached (ps exited ")
-    assert "Traceback" not in result.stderr
+    assert result.stderr == (
+        "camp env: cannot end what is attached (ps exited 1: ps: simulated failure); nothing was signalled\n"
+    )
     assert len(rig.tagged_pids()) == 1
+
+
+def test_detach_does_not_claim_nothing_was_signalled_when_the_table_fails_after_the_signal(rig: AttachRig) -> None:
+    attached_rig(rig)
+    assert rig.attach("perseus/levr/main").returncode == 0
+    rig.break_ps_after(int((rig.root / "ps.count").read_text()) + 2)
+
+    result = rig.camp("env", "detach")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == (
+        "camp env: cannot end what is attached (ps exited 1: ps: simulated failure);"
+        " the forward may already have ended; run camp env status\n"
+    )
 
 
 def test_detach_says_so_and_exits_1_when_the_process_table_cannot_be_read(rig: AttachRig) -> None:
@@ -432,3 +448,27 @@ def test_an_attachment_made_by_a_camp_copy_at_another_path_is_found_and_ended(  
     assert ended.stdout == f"detached perseus/levr/main; ports {ports_of(env)} are free\n"
     assert rig.tagged_pids() == []
     assert all(port_is_free(p) for p in env.standard_ports)
+
+
+def test_detach_after_real_traffic_leaves_the_ports_free_and_attach_works_again_at_once(rig: AttachRig) -> None:
+    env = attached_rig(rig)
+    assert rig.attach("perseus/levr/main").returncode == 0
+    for port in env.standard_ports:
+        assert ask(port).startswith("main-")
+    strict = socket.socket()
+    try:
+        strict.bind(("127.0.0.1", env.standard_ports[0]))
+    except OSError:
+        pass
+    else:
+        pytest.skip("traffic through the forward left no TIME_WAIT on this kernel")
+    finally:
+        strict.close()
+
+    detached = rig.camp("env", "detach")
+
+    assert detached.returncode == 0, detached.stderr
+    assert detached.stdout == f"detached perseus/levr/main; ports {ports_of(env)} are free\n"
+    again = rig.attach("perseus/levr/main")
+    assert again.returncode == 0, again.stderr
+    assert again.stdout == f"attached perseus/levr/main on ports {ports_of(env)}; its health was not checked\n"

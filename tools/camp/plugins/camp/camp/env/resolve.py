@@ -1,9 +1,12 @@
 """Resolve what ``camp env attach`` was given to one environment, or to a refusal.
 
 ``parse_target(text)`` reads ``NAME``, ``HOST/NAME`` or ``HOST/GROUP/NAME`` into a
-:class:`Target`. Group and name are camp's identifier (``[a-z0-9][a-z0-9-]*``), the host is camp's
-host-name rule. Text that is none of the three raises :class:`TargetError`; the CLI maps that to
-the ``camp env`` usage line and exit 1 (its message says which part was wrong).
+:class:`Target`. Group, name and host are each camp's identifier (``[a-z0-9][a-z0-9-]*``). Text that is none of
+the three raises :class:`TargetError`; the CLI maps that to the ``camp env`` usage line and exit 1
+(its message says which part was wrong, and for a host says what a host name may be). The hosts
+file does not hold a ``[hosts.<name>]`` key to that rule (it checks ``self_name`` and the
+``env_hosts`` entries, not the keys), so a declared host whose key falls outside it cannot be
+attached in any form, and ``env_hosts`` could not name it either.
 
 ``resolve(target, *, hosts, opted_in, self_name, read_local, read_remote)`` returns
 :class:`Resolved` (the host name and the one :class:`Environment`) or :class:`Refused`.
@@ -38,6 +41,7 @@ from .read import (
 LOCAL = "local"
 THIS_MACHINE = "this machine"
 _NOT_YET = "attaching an environment on this machine is not supported yet"
+_HOST_RULE = "the host is not a valid host name: host names must be lowercase letters, digits and -, starting with a letter or digit"
 _LS_POINTER = "run camp env ls to see what is running"
 
 
@@ -72,6 +76,8 @@ def parse_target(text: str) -> Target:
         if not part:
             raise TargetError(f"the {label} is empty")
         if not is_identifier(part):
+            if label == "host":
+                raise TargetError(_HOST_RULE)
             raise TargetError(f"the {label} is not a valid identifier")
     if len(parts) == 1:
         return Target(None, None, parts[0])
@@ -147,8 +153,9 @@ def _resolve_host(
     if _is_this_machine(host, self_name):
         return Refused(_NOT_YET)
     if host not in hosts:
-        declared = ", ".join(hosts) or "none"
-        return Refused(f"no host named {host} in {hosts_file}; declared: {declared}")
+        declared = ", ".join(printable_line(name) for name in hosts) or "none"
+        shown_file = printable_line(hosts_file, limit=4096)
+        return Refused(f"no host named {host} in {shown_file}; declared: {declared}")
     inventory = read_remote(host)
     if inventory.kind == UNREADABLE:
         return Refused(f"{host} could not be read: {_reason(inventory)}")
@@ -225,7 +232,7 @@ def _not_found_bare(
     for note in notes:
         text += f"; {note}"
     if skipped:
-        text += f" (not read: {', '.join(skipped)}; name one as <host>/{name})"
+        text += f" (not read: {', '.join(printable_line(h) for h in skipped)}; name one as <host>/{name})"
     return f"{text}; {_LS_POINTER}"
 
 

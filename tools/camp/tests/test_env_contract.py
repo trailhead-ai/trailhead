@@ -299,6 +299,22 @@ def test_a_ports_field_that_is_not_a_string_is_unreadable(ports: object) -> None
         parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
 
 
+def test_distinct_container_ports_parse() -> None:
+    parsed = parse_inventory(
+        _reply(_ok(ports="127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8081/tcp"))
+    )
+    assert parsed == [Environment("levr", "main", "running", ((8080, 18080), (8081, 18081)))]
+
+
+def test_a_repeated_container_port_makes_the_reply_unreadable_naming_the_line_not_the_value() -> None:
+    ports = "127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8080/tcp"
+    with pytest.raises(Unreadable) as info:
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+    reason = str(info.value)
+    assert "line 3" in reason and "ports" in reason
+    assert "8080" not in reason and "18080" not in reason
+
+
 def test_ports_reason_names_the_line_and_never_the_raw_value() -> None:
     secret = "0.0.0.0:31337->8080/tcp"
     with pytest.raises(Unreadable) as info:

@@ -23,7 +23,7 @@ import time
 import uuid
 from typing import NoReturn
 
-from ..env.attachment import UNSEEN_HOLDER, Attachment, Unverifiable, Untaggable, attachments, end, port_holder, tag_for
+from ..env.attachment import UNSEEN_HOLDER, Attachment, Unverifiable, UnverifiableAfterSignal, Untaggable, attachments, end, port_holder, tag_for
 from ..env.contract import Environment
 from ..env.read import (
     DOCKER_NOT_INSTALLED,
@@ -185,6 +185,18 @@ def _fail_after_start(reason: str, attach_id: str) -> NoReturn:
     _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))
 
 
+_NOISE_PREFIXES = ("** ", "Warning:", "debug")
+
+
+def _reason_line(stderr: str) -> str:
+    """The first line of ssh's stderr that is not a warning or debug line, else the first line."""
+    lines = stderr.split("\n")
+    for line in lines:
+        if line.strip() and not line.startswith(_NOISE_PREFIXES):
+            return line
+    return lines[0]
+
+
 def _start_forward(argv: list[str], timeout: float) -> "str | None":
     """Run ``ssh -f``; None when it exited 0, else why not. Its error text goes to a temporary file."""
     with tempfile.TemporaryFile() as errors:
@@ -199,7 +211,7 @@ def _start_forward(argv: list[str], timeout: float) -> "str | None":
         if done.returncode == 0:
             return None
         errors.seek(0)
-        said = printable_line(errors.read().decode("utf-8", "replace").split("\n", 1)[0]).strip()
+        said = printable_line(_reason_line(errors.read().decode("utf-8", "replace"))).strip()
         return f"ssh could not start the forward: {said or f'ssh exited {done.returncode} without a reason'}"
 
 
@@ -277,6 +289,8 @@ def _cmd_env_attach(args: list[str]) -> None:
         if started is not None:
             _fail_after_start(started, attach_id)
         found = _wait_for_forward(attach_id)
+        if found is None:
+            _fail_after_start("ssh started the forward but it is not running", attach_id)
     except Unverifiable as error:
         _fail_after_start(f"could not tell whether the forward started ({error})", attach_id)
     except KeyboardInterrupt:
@@ -290,8 +304,6 @@ def _cmd_env_attach(args: list[str]) -> None:
     except Exception:
         _end_own(attach_id)
         raise
-    if found is None:
-        _fail_after_start("ssh started the forward but it is not running", attach_id)
     print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
 
 
@@ -330,6 +342,8 @@ def _cmd_env_detach(args: list[str]) -> None:
         return
     try:
         surviving = end(found)
+    except UnverifiableAfterSignal as error:
+        _refuse(f"cannot end what is attached ({error}); the forward may already have ended; run camp env status")
     except Unverifiable as error:
         _refuse(f"cannot end what is attached ({error}); nothing was signalled")
     if surviving:

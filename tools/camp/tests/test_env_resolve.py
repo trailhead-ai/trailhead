@@ -354,3 +354,33 @@ def test_parse_target_accepts_the_three_forms(text, expected):
 def test_parse_target_rejects_malformed_text(text):
     with pytest.raises(TargetError):
         parse_target(text)
+
+
+# -- host keys are not charset-checked by the loader, so they reach messages stripped -------------
+
+
+def test_an_undeclared_host_refusal_strips_escapes_from_declared_keys_and_the_hosts_file():
+    hosts = {"\x1b[31mred": HOSTS["andromeda"], "perseus": HOSTS["perseus"]}
+    message = run("orion/main", Reads(), hosts=hosts, hosts_file="/cfg/\x1b[32mhosts.toml").message
+    assert message == "no host named orion in /cfg/[32mhosts.toml; declared: [31mred, perseus"
+
+
+def test_a_bare_name_not_found_strips_escapes_from_the_not_read_list():
+    hosts = {**HOSTS, "\x1b[31mred": HOSTS["andromeda"]}
+    reads = Reads(andromeda=envs(), perseus=envs())
+    message = run("main", reads, hosts=hosts).message
+    assert "\x1b" not in message
+    assert "not read: toms-macbook-pro, [31mred;" in message
+
+
+@pytest.mark.parametrize("text", ["Perseus/main", "per.seus/levr/main", "-perseus/main"])
+def test_a_host_that_breaks_the_host_name_rule_says_what_the_rule_is(text):
+    with pytest.raises(TargetError, match="host names must be lowercase letters, digits and -"):
+        parse_target(text)
+
+
+@pytest.mark.parametrize("text", ["Main", "perseus/Main", "perseus/Levr/main"])
+def test_a_group_or_name_that_breaks_the_rule_does_not_claim_the_host_rule(text):
+    with pytest.raises(TargetError) as info:
+        parse_target(text)
+    assert "host names must be" not in str(info.value)

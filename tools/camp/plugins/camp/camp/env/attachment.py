@@ -5,19 +5,24 @@ A process is **recognised** as an attachment when all of these hold:
 
 - it belongs to this user (``ps`` reports the numeric uid);
 - its argv0 has the basename ``ssh`` (bare or a full path);
-- it carries the word ``-N``;
-- it carries exactly one ``-o Tag=<ns>:<id>:<host>/<group>/<name>`` option (also
-  spelled ``-oTag=...``), where ``<ns>`` is the tag namespace and ``<id>`` the
-  attach id, ``<host>`` matches ``[A-Za-z0-9][A-Za-z0-9._-]*`` and group, name and
-  id match camp's identifier rule ``[a-z0-9][a-z0-9-]*``. Only words before a
-  ``--`` are options: what follows is the destination and any remote command;
-- every ``-L 127.0.0.1:<standard>:127.0.0.1:<published>`` argument has ASCII-digit
-  ports. A process whose ``-L`` has anything else is not recognised.
+- its argv parses as OpenSSH parses it: options up to the first word that is not an option (the
+  destination) or a ``--``; everything after is the remote command and is never read as an
+  option. A letter that takes an argument (``B b c D E e F I i J L l m O o P p Q R S W w``)
+  consumes the rest of its word or else the next word, so ``-l -o`` makes ``-o`` the value of
+  ``-l``; a flag letter (``4 6 A a C f G g K k M N n q s T t V v X x Y y``) takes none and may be
+  clustered (``-fN``); any other letter makes the argv unrecognised;
+- among those options it carries ``-N``;
+- it carries exactly one ``-o Tag=<ns>:<id>:<host>/<group>/<name>`` option (also spelled
+  ``-oTag=...``), where ``<ns>`` is the tag namespace and ``<id>`` the attach id, and host, group,
+  name and id each match camp's identifier rule ``[a-z0-9][a-z0-9-]*``;
+- it carries at least one ``-L``, and every ``-L 127.0.0.1:<standard>:127.0.0.1:<published>``
+  argument has ASCII-digit ports. A process whose ``-L`` has anything else is not recognised.
 
-The decoys this rejects: another user's forward; a ``grep``/``tail`` that merely
-names the tag; an ssh without ``-N`` (an interactive session); an ssh whose tag is
-a word of a remote command rather than an ``-o`` value; two tag options; another
-namespace; a malformed host, group or name.
+The decoys this rejects: another user's forward; a ``grep``/``tail`` that merely names the tag;
+an ssh without ``-N`` (an interactive session); an ssh whose tag or ``-N`` is a word of a remote
+command or follows the destination rather than being an option (``ssh box pgrep -N -o Tag=...``);
+a tag that is the value of another option (``ssh -l -o Tag=... -N box``); a tagged ``-N`` ssh
+with no ``-L``; two tag options; another namespace; a malformed host, group or name.
 
 ``CAMP_ENV_TAG_NAMESPACE`` replaces the namespace ``camp-env`` (the test seam). It
 is read on every call, and a value outside camp's identifier rule is refused.
@@ -45,7 +50,8 @@ KILL_GRACE_SECONDS = 2.0
 
 UNSEEN_HOLDER = "a process camp cannot see"
 
-_HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_ARG_OPTIONS = frozenset("BbcDEeFIiJLlmOoPpQRSWw")
+_FLAG_OPTIONS = frozenset("46AaCfGgKkMNnqstVvXxYy")
 _FORWARD_RE = re.compile(r"127\.0\.0\.1:([0-9]+):127\.0\.0\.1:([0-9]+)")
 _PS_ARGV = ["ps", "-axwwo", "pid=,uid=,command="]
 _POLL_SECONDS = 0.05
@@ -53,6 +59,10 @@ _POLL_SECONDS = 0.05
 
 class Unverifiable(Exception):
     """The process table could not be read; its message is the printable reason."""
+
+
+class UnverifiableAfterSignal(Unverifiable):
+    """The table could not be read after ``end`` had already sent a signal: the forward may have ended."""
 
 
 class Untaggable(ValueError):
@@ -84,23 +94,21 @@ def tag_for(host: str, group: str, name: str, attach_id: str) -> str:
 
     The namespace is ``camp-env`` unless ``CAMP_ENV_TAG_NAMESPACE`` is set, read at
     call time. Raises :class:`Untaggable` for a namespace, host, group, name or id
-    outside the rules above (a host with a space or a leading ``-``, for one).
+    outside the rules above (a host with an uppercase letter or a dot, for one).
     """
     namespace = _namespace()
-    if _HOST_RE.fullmatch(host) is None:
-        raise Untaggable(f"host {printable_line(host)!r} cannot be tagged")
-    for label, value in (("group", group), ("name", name), ("attach id", attach_id)):
+    for label, value in (("host", host), ("group", group), ("name", name), ("attach id", attach_id)):
         if not is_identifier(value):
             raise Untaggable(f"{label} {printable_line(value)!r} cannot be tagged")
     return f"{namespace}:{attach_id}:{host}/{group}/{name}"
 
 
 def _default_ps(argv: Sequence[str], timeout: float) -> str:
-    completed = subprocess.run(list(argv), capture_output=True, text=True, timeout=timeout)
+    completed = subprocess.run(list(argv), capture_output=True, timeout=timeout)
     if completed.returncode != 0:
-        detail = printable_line(completed.stderr.strip()) or "no message"
+        detail = printable_line(completed.stderr.decode("utf-8", "replace").strip()) or "no message"
         raise Unverifiable(f"ps exited {completed.returncode}: {detail}")
-    return completed.stdout
+    return completed.stdout.decode("utf-8", "replace")
 
 
 def _read_table(runner: Callable[[list[str]], str] | None, timeout: float) -> str:
@@ -127,41 +135,57 @@ def _parse_tag(value: str, namespace: str) -> tuple[str, str, str, str] | None:
     if len(parts) != 3:
         return None
     host, group, name = parts
-    if _HOST_RE.fullmatch(host) is None:
-        return None
-    if not all(is_identifier(v) for v in (attach_id, group, name)):
+    if not all(is_identifier(v) for v in (attach_id, host, group, name)):
         return None
     return attach_id, host, group, name
+
+
+def _options(words: list[str]) -> "tuple[bool, list[tuple[str, str]]] | None":
+    """Parse ssh's options as OpenSSH does: ``(has_N, [(letter, value) for -o and -L])``, or None
+    when the argv is not one ssh would parse (an unknown letter, an option missing its value)."""
+    has_n = False
+    taken: list[tuple[str, str]] = []
+    index = 1
+    while index < len(words):
+        word = words[index]
+        index += 1
+        if word == "--":
+            break
+        if not word.startswith("-") or word == "-":
+            break
+        position = 1
+        while position < len(word):
+            letter = word[position]
+            if letter in _ARG_OPTIONS:
+                value = word[position + 1:]
+                if not value:
+                    if index >= len(words):
+                        return None
+                    value = words[index]
+                    index += 1
+                if letter in "oL":
+                    taken.append((letter, value))
+                break
+            if letter not in _FLAG_OPTIONS:
+                return None
+            has_n = has_n or letter == "N"
+            position += 1
+    return has_n, taken
 
 
 def _recognise(pid: int, command: str, namespace: str) -> Attachment | None:
     words = command.split()
     if not words or os.path.basename(words[0]) != "ssh":
         return None
-    if "--" in words:
-        words = words[: words.index("--")]
-    if "-N" not in words:
+    parsed_options = _options(words)
+    if parsed_options is None:
         return None
-    tags: list[str] = []
-    specs: list[str] = []
-    index = 1
-    while index < len(words):
-        word = words[index]
-        if word in ("-o", "-L") and index + 1 < len(words):
-            value = words[index + 1]
-            index += 2
-        elif word.startswith(("-o", "-L")) and len(word) > 2:
-            value = word[2:]
-            index += 1
-        else:
-            index += 1
-            continue
-        if word.startswith("-o"):
-            if value.startswith("Tag="):
-                tags.append(value[len("Tag="):])
-        else:
-            specs.append(value)
-    if len(tags) != 1:
+    has_n, taken = parsed_options
+    if not has_n:
+        return None
+    tags = [value[len("Tag="):] for letter, value in taken if letter == "o" and value.startswith("Tag=")]
+    specs = [value for letter, value in taken if letter == "L"]
+    if len(tags) != 1 or not specs:
         return None
     parsed = _parse_tag(tags[0], namespace)
     if parsed is None:
@@ -248,14 +272,31 @@ def end(
     read again and a pid is signalled only when it is still a recognised attachment
     carrying the same attach id — so a pid reused by another process, or by another
     attachment, is never signalled. Returns the pids that are still recognised
-    attachments after the attempt (empty when everything ended). Raises
-    :class:`Unverifiable` when the table cannot be read; nothing is signalled then.
+    attachments after the attempt (empty when everything ended). Raises plain
+    :class:`Unverifiable` when the table cannot be read before the first signal (nothing was
+    signalled), and :class:`UnverifiableAfterSignal` when a later read fails (SIGTERM was sent,
+    so the forward may already have ended).
     """
     wanted = {a.pid: a.attach_id for a in found}
     if not wanted:
         return []
     terminated = _still_attachments(wanted, runner, uid)
     _signal(terminated, signal.SIGTERM)
+    try:
+        return _finish(wanted, terminated, runner, uid, grace)
+    except UnverifiableAfterSignal:
+        raise
+    except Unverifiable as error:
+        raise UnverifiableAfterSignal(str(error)) from None
+
+
+def _finish(
+    wanted: dict[int, str],
+    terminated: set[int],
+    runner: Callable[[list[str]], str] | None,
+    uid: int | None,
+    grace: float,
+) -> list[int]:
     deadline = time.monotonic() + grace
     while time.monotonic() < deadline and any(_alive(pid) for pid in terminated):
         time.sleep(_POLL_SECONDS)
@@ -271,6 +312,9 @@ def end(
 
 def _default_bind(family: int, address: str, port: int) -> None:
     with socket.socket(family, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
         sock.bind((address, port))
 
 
@@ -278,16 +322,30 @@ def _default_lsof(argv: list[str]) -> str:
     return subprocess.run(argv, capture_output=True, text=True, timeout=5).stdout
 
 
-def _held(bind: Callable[[int, str, int], None], family: int, address: str, port: int) -> bool:
-    try:
-        bind(family, address, port)
-    except OSError as error:
-        if error.errno == errno.EADDRINUSE:
-            return True
-        if family == socket.AF_INET6 and error.errno in (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
-            return False
-        raise
-    return False
+_PROBED = (
+    (socket.AF_INET, "127.0.0.1"),
+    (socket.AF_INET6, "::1"),
+    (socket.AF_INET, "0.0.0.0"),
+    (socket.AF_INET6, "::"),
+)
+
+
+def _probe(bind: Callable[[int, str, int], None], port: int) -> "tuple[bool, str | None]":
+    """``(held, unchecked)``: whether any probed address answers "in use", and, when a bind failed
+    for another reason, that failure's printable text."""
+    held = False
+    unchecked: str | None = None
+    for family, address in _PROBED:
+        try:
+            bind(family, address, port)
+        except OSError as error:
+            if error.errno == errno.EADDRINUSE:
+                held = True
+            elif family == socket.AF_INET6 and error.errno in (errno.EADDRNOTAVAIL, errno.EAFNOSUPPORT):
+                continue
+            elif unchecked is None:
+                unchecked = printable_line(f"{error.strerror or type(error).__name__} on {address}").strip()
+    return held, unchecked
 
 
 def _describe(lsof_runner: Callable[[list[str]], str], port: int) -> str:
@@ -313,20 +371,26 @@ def port_holder(
     bind: Callable[[int, str, int], None] | None = None,
     lsof_runner: Callable[[list[str]], str] | None = None,
 ) -> str | None:
-    """None when *port* can be bound on both 127.0.0.1 and ::1, else who holds it.
+    """None when *port* is free on 127.0.0.1, ::1, 0.0.0.0 and ::, else who holds it.
 
-    camp binds each loopback address itself, without SO_REUSEADDR, and releases it at
-    once. Only "address in use" counts as held; an ::1 bind failing because the
-    machine has no IPv6 loopback (``EADDRNOTAVAIL``, ``EAFNOSUPPORT``) counts as free
-    on ::1. A held port is described as ``<command> (pid <pid>)`` from
-    ``lsof -F pcn`` output (the command passed through ``printable_line``), or as
-    "a process camp cannot see" when lsof is absent or does not see it. *bind*
-    (family, address, port) and *lsof_runner* (argv -> stdout) are test seams.
+    camp binds each of the four addresses itself, with SO_REUSEADDR set (IPV6_V6ONLY on the
+    IPv6 ones), as ssh does, and releases it at once. "Address in use" on any one means held; a
+    port whose only trace is TIME_WAIT is free, because ssh binds it too. An IPv6 bind failing
+    because the machine has no IPv6 (``EADDRNOTAVAIL``, ``EAFNOSUPPORT``) counts as free on that
+    family. Any other bind failure is a refusal, never an exception: the port is reported held by
+    "a process that could not be checked" with the printable error text. A held port is described
+    as ``<command> (pid <pid>)`` from ``lsof -F pcn`` output (the command passed through
+    ``printable_line``), or as "a process camp cannot see" when lsof is absent or does not see it.
+    *bind* (family, address, port) and *lsof_runner* (argv -> stdout) are test seams.
+
+    The rule is measured, not assumed: ``tests/fixtures/env_port_probe_matrix.txt`` records, on
+    Linux and macOS, every listener kind against all four addresses with and without
+    SO_REUSEADDR, and a TIME_WAIT-only port. With SO_REUSEADDR on all four, every active listener
+    answers "in use" on at least one address and a TIME_WAIT-only port is free on all four.
     """
-    binder = bind or _default_bind
-    if not (
-        _held(binder, socket.AF_INET, "127.0.0.1", port)
-        or _held(binder, socket.AF_INET6, "::1", port)
-    ):
-        return None
-    return _describe(lsof_runner or _default_lsof, port)
+    held, unchecked = _probe(bind or _default_bind, port)
+    if held:
+        return _describe(lsof_runner or _default_lsof, port)
+    if unchecked is not None:
+        return f"a process that could not be checked ({unchecked})"
+    return None

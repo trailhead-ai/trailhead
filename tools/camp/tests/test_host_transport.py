@@ -750,13 +750,6 @@ def test_local_forward_argv_has_every_element_in_order() -> None:
     ]
 
 
-def test_local_forward_argv_never_cancels_its_own_forwards() -> None:
-    argv = transport.local_forward_argv(_HOST, ((1025, 2000),), "t", 10.0)
-    assert "ClearAllForwardings=yes" not in argv and "ClearAllForwardings=no" not in argv
-    assert argv.index("--") < argv.index(_HOST.ssh)
-    assert argv[-1] == _HOST.ssh
-
-
 def test_local_forward_argv_takes_its_ports_and_destination_from_its_arguments() -> None:
     other = Host(ssh="alice@box.example.com", camp_bin="camp")
     argv = transport.local_forward_argv(other, ((3000, 4000),), "ns:i:box/g/n", 3.0)

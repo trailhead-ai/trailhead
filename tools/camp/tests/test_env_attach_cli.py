@@ -35,8 +35,9 @@ _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from .env_ssh_stub import AttachRig, ask, attached_rig, can_bind, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, ask, attached_rig, port_is_free, wait_for
 
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 USAGE = "usage: camp env attach TARGET\n"
 
 
@@ -264,6 +265,74 @@ def test_ssh_that_cannot_start_fails_with_the_sanitised_line_and_holds_nothing(r
         " [31mssh: connect to host perseus port 22: Connection refused\n"
     )
     assert_nothing_held(rig, env)
+
+
+_PQ_WARNING = (
+    "** WARNING: connection is not using a post-quantum key exchange algorithm.\n"
+    "** This session may be vulnerable to \"store now, decrypt later\" attacks.\n"
+    "** The server may need to be upgraded. See https://openssh.com/pq.html\n"
+)
+
+
+@pytest.mark.parametrize(
+    "preamble",
+    [_PQ_WARNING, "Warning: Permanently added 'perseus' to the list of known hosts.\n", "debug1: Reading configuration data\n"],
+    ids=["post-quantum-block", "warning", "debug"],
+)
+def test_the_reason_skips_ssh_warning_and_debug_lines(rig: AttachRig, preamble: str) -> None:
+    env = attached_rig(rig)
+    failure = (_FIXTURES / "env_forward_bind_failure_linux_openssh_9_6.txt").read_text()
+    bind_line = failure.split("stderr:\n", 1)[1].splitlines()[0]
+    rig.configure(fail_start=preamble + bind_line + "\nCould not request local forwarding.")
+
+    done = rig.attach("perseus/levr/main")
+
+    assert done.returncode == 1
+    assert done.stderr == f"camp env: attach failed: ssh could not start the forward: {bind_line}\n"
+    assert_nothing_held(rig, env)
+
+
+def test_the_reason_falls_back_to_the_first_line_when_every_line_is_a_warning(rig: AttachRig) -> None:
+    attached_rig(rig)
+    rig.configure(fail_start="Warning: one\nWarning: two")
+
+    done = rig.attach("perseus/levr/main")
+
+    assert done.stderr == "camp env: attach failed: ssh could not start the forward: Warning: one\n"
+
+
+def test_an_interrupt_while_ending_a_forward_that_is_not_running_exits_130_without_a_traceback(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    attached_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real = env_cli.attachments
+    calls: list[int] = []
+
+    def attachments_once_interrupted():
+        calls.append(1)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real()
+
+    monkeypatch.setattr(env_cli, "attachments", attachments_once_interrupted)
+    monkeypatch.setattr(env_cli, "_start_forward", lambda argv, timeout: None)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", lambda attach_id: None)
+
+    try:
+        env_cli._cmd_env_attach(["perseus/levr/main"])
+    except SystemExit as exit_:
+        code = exit_.code
+    except KeyboardInterrupt:
+        pytest.fail("the interrupt escaped as a traceback")
+    else:
+        code = 0
+
+    assert code == 130
+    assert capsys.readouterr().err.startswith("camp env: attach interrupted")
 
 
 def test_a_forward_that_dies_just_after_backgrounding_fails_and_holds_nothing(rig: AttachRig) -> None:

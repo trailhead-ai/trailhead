@@ -51,7 +51,10 @@ is ``tcp``, and both ports are written in ASCII digits with no leading zero and 
 or non-ASCII-digit port, or any other text makes the whole reply unreadable, the reason naming the
 line and the defect and never the value. ``Environment.ports`` holds the ``(standard, published)``
 pairs, ``standard`` being the container's port, in ascending order of standard port (then
-published); it is empty for ``""``. Every labelled record is judged on its ports, including one skipped
+published); it is empty for ``""``. A container port published twice in one record
+(``127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8080/tcp``) is a contract defect, not two pairs:
+one standard port is one port to hold, so the whole reply is unreadable, the reason naming the
+line and not the value. Every labelled record is judged on its ports, including one skipped
 for its name, so a labelled helper publishing a wildcard port makes the reply unreadable too.
 
 Untrusted input
@@ -169,6 +172,8 @@ def _parse_ports(field: str) -> tuple[tuple[int, int], ...] | None:
         if not (_PORT_MIN <= published <= _PORT_MAX and _PORT_MIN <= standard <= _PORT_MAX):
             return None
         pairs.append((standard, published))
+    if len({standard for standard, _ in pairs}) != len(pairs):
+        return None
     return tuple(sorted(pairs))
 
 
@@ -191,7 +196,7 @@ def parse_inventory(text: str) -> list[Environment]:
             raise Unreadable(f"line {number}: name is not a valid identifier")
         ports = _parse_ports(ports_field)
         if ports is None:
-            raise Unreadable(f"line {number}: ports are not loopback tcp mappings within 1024-65535")
+            raise Unreadable(f"line {number}: ports are not distinct loopback tcp mappings within 1024-65535")
         if container != container_name(group, name):
             continue
         environments.append(Environment(group, name, "running" if state == "running" else "stopped", ports))

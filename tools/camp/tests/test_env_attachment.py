@@ -76,6 +76,9 @@ def _good(pid: int = 100) -> Attachment:
         _GOOD_CMD.replace("ssh ", "/usr/bin/ssh ", 1),
         _GOOD_CMD.replace("-o Tag=", "-oTag="),
         _GOOD_CMD.replace("-L 127.0.0.1:5173", "-L127.0.0.1:5173"),
+        _GOOD_CMD.replace("-f -N", "-fN"),
+        _GOOD_CMD.replace("-o BatchMode=yes", "-p22 -l bob -i /k/id -oBatchMode=yes"),
+        _GOOD_CMD.replace(" -- ", " "),
     ],
 )
 def test_recognises_an_ssh_forward_with_one_tag_option(command: str) -> None:
@@ -106,11 +109,23 @@ def test_ports_are_ordered_by_standard_port() -> None:
         _row(200, _GOOD_CMD.replace("perseus/grp/main", "perseus/grp")),
         _row(200, _GOOD_CMD.replace("5173", "٣١٧٣")),
         _row(200, _GOOD_CMD.replace("ssh ", "sshd ", 1)),
+        _row(200, f"ssh tduffield@perseus pgrep -N -o Tag={_TAG} -L 127.0.0.1:5173:127.0.0.1:41990"),
+        _row(200, f"ssh -l -o Tag={_TAG} -N -L 127.0.0.1:5173:127.0.0.1:41990 box"),
+        _row(200, f"ssh -o Tag={_TAG} -L 127.0.0.1:5173:127.0.0.1:41990 box -N"),
+        _row(200, f"ssh -N box -o Tag={_TAG} -L 127.0.0.1:5173:127.0.0.1:41990"),
+        _row(200, f"ssh -f -N -o Tag={_TAG} -- user@perseus"),
+        _row(200, f"ssh -f -N -o Tag={_TAG} -Z -L 127.0.0.1:5173:127.0.0.1:41990 -- user@perseus"),
+        _row(200, f"ssh -f -N -o Tag={_TAG} -L"),
+        _row(200, _GOOD_CMD.replace(f"{_NS}:abc123:perseus/grp/main", f"{_NS}:abc123:Perseus/grp/main")),
+        _row(200, _GOOD_CMD.replace(f"{_NS}:abc123:perseus/grp/main", f"{_NS}:abc123:perseus.local/grp/main")),
     ],
     ids=[
         "other-uid", "grep-argv0", "grep-wearing-ssh-flags", "tag-word-in-remote-command-no-dashdash", "no-dash-N", "tag-after-dashdash-in-remote-command",
         "o-tag-after-dashdash", "two-tag-options", "other-namespace",
         "bad-group", "bad-host", "missing-name", "non-ascii-port", "argv0-sshd",
+        "tag-and-N-in-remote-command", "o-is-the-value-of-l", "N-after-destination",
+        "options-after-destination", "no-L", "unknown-option-letter", "L-without-a-value",
+        "uppercase-host", "dotted-host",
     ],
 )
 def test_a_decoy_is_not_recognised_and_the_others_still_parse(decoy_row: str) -> None:
@@ -189,7 +204,7 @@ def test_a_runner_that_cannot_run_raises_unverifiable() -> None:
         attachment.attachments(runner=runner)
 
 
-def test_a_working_ps_lists_the_real_table_without_error() -> None:
+def test_a_working_ps_lists_the_real_table_without_error() -> None:  # inert-gate: allow real ps parses on this platform
     assert isinstance(attachment.attachments(), list)
 
 
@@ -202,6 +217,24 @@ def test_tag_for_roundtrips_through_recognition() -> None:
     row = _row(7, f"ssh -N -o Tag={tag} -L 127.0.0.1:81:127.0.0.1:9 -- h")
     found = attachment.attachments(runner=_table(row))
     assert [(a.host, a.group, a.name, a.attach_id) for a in found] == [("perseus", "grp", "main", "abc123")]
+
+
+@pytest.mark.parametrize("host", ["Perseus", "perseus.local", "-perseus", "per seus", ""])
+def test_tag_for_refuses_a_host_outside_the_identifier_rule(host: str) -> None:
+    with pytest.raises(Untaggable):
+        attachment.tag_for(host, "grp", "main", "abc123")
+
+
+def test_an_undecodable_row_from_another_process_does_not_hide_the_real_attachment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = _row(100, _GOOD_CMD, uid=os.getuid())
+    _path_with(
+        tmp_path,
+        monkeypatch,
+        "sys.stdout.buffer.write(b'  900  0 /bin/odd \\xff\\xfe arg\\n' + " + repr(good.encode()) + " + b'\\n')",
+    )
+    assert attachment.attachments(uid=os.getuid()) == [_good(100)]
 
 
 def test_default_namespace_is_camp_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -231,8 +264,8 @@ def test_a_host_that_cannot_be_tagged_is_refused(host: str) -> None:
         attachment.tag_for(host, "g", "n", "i1")
 
 
-def test_a_host_with_dots_and_dashes_can_be_tagged() -> None:
-    assert attachment.tag_for("my-box.example.com", "g", "n", "i1").endswith(":my-box.example.com/g/n")
+def test_a_host_with_dashes_can_be_tagged() -> None:
+    assert attachment.tag_for("my-box", "g", "n", "i1").endswith(":my-box/g/n")
 
 
 @pytest.mark.parametrize("group,name,attach_id", [("G", "n", "i"), ("g", "n n", "i"), ("g", "n", "a:b"), ("g", "n", "")])
@@ -268,7 +301,7 @@ class _Child:
         tag = f"{os.environ['CAMP_ENV_TAG_NAMESPACE']}:{attach_id}:perseus/grp/main"
         env = {**os.environ, "CHILD_MODE": mode, "CHILD_MARKER": str(self.marker)}
         self.proc = subprocess.Popen(
-            ["ssh", str(script), "-N", "-o", f"Tag={tag}",
+            ["ssh", "-c", f"__import__('runpy').run_path('{script}')", "-N", "-o", f"Tag={tag}",
              "-L", f"127.0.0.1:{self.port}:127.0.0.1:{self.port + 1}", "--", "dest"],
             executable=sys.executable, env=env, stdout=subprocess.PIPE, text=True,
         )
@@ -384,6 +417,35 @@ def test_end_does_not_kill_a_pid_that_changed_identity_between_sigterm_and_sigki
     assert made.proc.poll() is None
 
 
+def test_a_table_that_fails_before_any_signal_is_plain_unverifiable_and_signals_nothing(child) -> None:
+    made = child("term")
+
+    def runner(argv):
+        raise Unverifiable("ps exited 1: simulated")
+
+    with pytest.raises(Unverifiable) as raised:
+        attachment.end([made.attachment], runner=runner, grace=0.2)
+    assert not isinstance(raised.value, attachment.UnverifiableAfterSignal)
+    time.sleep(0.2)
+    assert made.proc.poll() is None
+
+
+def test_a_table_that_fails_after_the_first_signal_says_so(child) -> None:
+    made = child("term")
+    reads = []
+
+    def runner(argv):
+        reads.append(argv)
+        if len(reads) > 1:
+            raise Unverifiable("ps exited 1: simulated")
+        return made.row() + "\n"
+
+    with pytest.raises(attachment.UnverifiableAfterSignal):
+        attachment.end([made.attachment], runner=runner, grace=2.0)
+    made.reaper.join(5)
+    assert made.proc.returncode == -signal.SIGTERM
+
+
 def test_end_does_not_term_a_pid_now_carrying_a_different_attach_id(child) -> None:
     made = child("term")
     other = made.row(attach_id="otherid")
@@ -427,7 +489,7 @@ def test_a_free_port_has_no_holder() -> None:
     assert attachment.port_holder(_free_port()) is None
 
 
-def test_a_port_in_time_wait_is_held_because_the_probe_never_reuses_the_address() -> None:
+def _time_wait_port() -> int:
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("127.0.0.1", 0))
@@ -438,6 +500,11 @@ def test_a_port_in_time_wait_is_held_because_the_probe_never_reuses_the_address(
     accepted.close()
     client.close()
     server.close()
+    return port
+
+
+def test_a_port_in_time_wait_is_free_because_the_probe_binds_with_so_reuseaddr() -> None:
+    port = _time_wait_port()
     control = socket.socket()
     try:
         control.bind(("127.0.0.1", port))
@@ -447,7 +514,57 @@ def test_a_port_in_time_wait_is_held_because_the_probe_never_reuses_the_address(
         pytest.skip("this kernel lets a plain bind take a TIME_WAIT port")
     finally:
         control.close()
+    assert attachment.port_holder(port, lsof_runner=lambda argv: "") is None
+
+
+@pytest.mark.parametrize("address", ["0.0.0.0", "::"])
+def test_a_wildcard_listener_holds_the_port(listener, address: str) -> None:
+    family = socket.AF_INET if address == "0.0.0.0" else socket.AF_INET6
+    try:
+        port = listener(address, family)
+    except OSError:
+        pytest.skip("no IPv6 on this host")
     assert attachment.port_holder(port, lsof_runner=lambda argv: "") == "a process camp cannot see"
+
+
+@pytest.mark.parametrize(
+    "held_family, held_address",
+    [
+        (socket.AF_INET, "127.0.0.1"),
+        (socket.AF_INET6, "::1"),
+        (socket.AF_INET, "0.0.0.0"),
+        (socket.AF_INET6, "::"),
+    ],
+)
+def test_in_use_on_any_one_of_the_four_addresses_is_held(held_family: int, held_address: str) -> None:
+    def bind(family, address, port):
+        if (family, address) == (held_family, held_address):
+            raise OSError(errno.EADDRINUSE, "in use")
+
+    assert attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "") == "a process camp cannot see"
+
+
+def test_every_address_is_probed_with_its_family() -> None:
+    seen: list[tuple[int, str, int]] = []
+    assert attachment.port_holder(5555, bind=lambda *a: seen.append(a)) is None
+    assert seen == [
+        (socket.AF_INET, "127.0.0.1", 5555),
+        (socket.AF_INET6, "::1", 5555),
+        (socket.AF_INET, "0.0.0.0", 5555),
+        (socket.AF_INET6, "::", 5555),
+    ]
+
+
+@pytest.mark.parametrize("family, address", [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")])
+def test_an_unexpected_bind_error_is_a_refusal_not_a_traceback(family: int, address: str) -> None:
+    def bind(fam, addr, port):
+        if (fam, addr) == (family, address):
+            raise OSError(errno.EACCES, "Permission denied\x1b[31m")
+
+    holder = attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "p1\ncx\n")
+    assert holder is not None
+    assert "could not be checked" in holder
+    assert "Permission denied" in holder and "\x1b" not in holder
 
 
 def test_a_free_port_is_released_at_once() -> None:
