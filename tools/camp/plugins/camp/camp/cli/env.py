@@ -350,16 +350,14 @@ def _cmd_env_detach(args: list[str]) -> None:
 def _cmd_env_cli(args: list[str]) -> None:
     """``camp env <subcommand>`` — ``ls``, ``attach``, ``status`` and ``detach``; anything else
     prints the usage line."""
-    if args and args[0] == "attach":
-        _cmd_env_attach(args[1:])
-        return
-    if args and args[0] == "status":
-        _cmd_env_status(args[1:])
-        return
-    if args and args[0] == "detach":
-        _cmd_env_detach(args[1:])
-        return
-    if not args or args[0] != "ls":
+    subcommands = {
+        "ls": _cmd_env_ls,
+        "attach": _cmd_env_attach,
+        "status": _cmd_env_status,
+        "detach": _cmd_env_detach,
+    }
+    run = subcommands.get(args[0]) if args else None
+    if run is None:
         print(_USAGE, file=sys.stderr)
         sys.exit(1)
-    _cmd_env_ls(args[1:])
+    run(args[1:])

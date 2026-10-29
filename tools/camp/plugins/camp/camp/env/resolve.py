@@ -21,13 +21,12 @@ CLI adds it. Every reason that came from a machine passes through ``printable_li
 """
 from __future__ import annotations
 
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ..host.config import Host
 from ..printable import printable_line
-from .contract import Environment
+from .contract import Environment, is_identifier
 from .read import (
     DOCKER_NOT_INSTALLED,
     DOCKER_NOT_RUNNING,
@@ -36,7 +35,6 @@ from .read import (
     MachineInventory,
 )
 
-_IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 LOCAL = "local"
 THIS_MACHINE = "this machine"
 _NOT_YET = "attaching an environment on this machine is not supported yet"
@@ -65,10 +63,6 @@ class Refused:
     message: str
 
 
-def _valid(part: str) -> bool:
-    return _IDENTIFIER_RE.fullmatch(part) is not None
-
-
 def parse_target(text: str) -> Target:
     """Parse ``NAME``, ``HOST/NAME`` or ``HOST/GROUP/NAME``; raise :class:`TargetError` otherwise."""
     parts = text.split("/")
@@ -77,7 +71,7 @@ def parse_target(text: str) -> Target:
     for label, part in zip(_labels(len(parts)), parts):
         if not part:
             raise TargetError(f"the {label} is empty")
-        if not _valid(part):
+        if not is_identifier(part):
             raise TargetError(f"the {label} is not a valid identifier")
     if len(parts) == 1:
         return Target(None, None, parts[0])

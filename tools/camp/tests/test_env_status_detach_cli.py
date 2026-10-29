@@ -32,7 +32,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import AttachRig, free_ports, port_is_free
+from .env_ssh_stub import AttachRig, attached_rig, free_ports, port_is_free, wait_for
 
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -61,28 +61,12 @@ def procs():
             proc.wait()
 
 
-def attached_rig(rig: AttachRig, name: str = "main", **kw):
-    env = rig.environment(name, **kw)
-    rig.declare_hosts("perseus")
-    rig.host_inventory("perseus", env)
-    return env
-
-
 def ports_of(env) -> str:
     return " ".join(str(p) for p in env.standard_ports)
 
 
 def status_line(env) -> str:
     return f"attached: perseus/{env.group}/{env.name} on ports {ports_of(env)}; its health was not checked\n"
-
-
-def wait_for(predicate, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(0.05)
-    raise AssertionError("condition not reached")
 
 
 def alive(pid: int) -> bool:

@@ -44,6 +44,7 @@ Using the rig from another test file::
         done = rig.attach("perseus/levr/main")         # `camp env attach ...`; CompletedProcess
         done = rig.camp("env", "status")               # any camp argv, same environment
 
+``attached_rig(rig)`` makes those three configuring calls for one environment on ``perseus``.
 ``rig.forwards()`` lists the argument lists of forwards started, ``rig.inventory_reads()`` the
 destinations read, ``rig.tagged_pids()`` the live processes carrying this rig's namespace.
 """
@@ -499,6 +500,23 @@ class AttachRig:
                 pass
         for close in self._closers:
             close()
+
+
+def attached_rig(rig: AttachRig, name: str = "main", host: str = "perseus", **kw) -> RigEnvironment:
+    """A running environment *name* that *host* (declared and opted in) answers an inventory read with."""
+    env = rig.environment(name, **kw)
+    rig.declare_hosts(host)
+    rig.host_inventory(host, env)
+    return env
+
+
+def wait_for(predicate, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(0.05)
+    raise AssertionError("condition not reached")
 
 
 def _process_table() -> list[tuple[int, str]]:

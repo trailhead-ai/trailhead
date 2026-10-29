@@ -35,7 +35,7 @@ _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from .env_ssh_stub import AttachRig, ask, can_bind, port_is_free
+from .env_ssh_stub import AttachRig, ask, attached_rig, can_bind, port_is_free, wait_for
 
 USAGE = "usage: camp env attach TARGET\n"
 
@@ -49,25 +49,9 @@ def rig(tmp_path: Path):
         r.close()
 
 
-def attached_rig(rig: AttachRig, name: str = "main", host: str = "perseus", **kw):
-    env = rig.environment(name, **kw)
-    rig.declare_hosts(host)
-    rig.host_inventory(host, env)
-    return env
-
-
 def success_line(host: str, env, ) -> str:
     ports = " ".join(str(p) for p in env.standard_ports)
     return f"attached {host}/{env.group}/{env.name} on ports {ports}; its health was not checked\n"
-
-
-def wait_for(predicate, timeout: float = 10.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(0.05)
-    raise AssertionError("condition not reached")
 
 
 def assert_nothing_held(rig: AttachRig, env) -> None:

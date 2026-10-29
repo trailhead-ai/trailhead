@@ -35,6 +35,7 @@ from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from ..printable import printable_line
+from .contract import is_identifier
 
 DEFAULT_NAMESPACE = "camp-env"
 NAMESPACE_ENV = "CAMP_ENV_TAG_NAMESPACE"
@@ -44,7 +45,6 @@ KILL_GRACE_SECONDS = 2.0
 
 UNSEEN_HOLDER = "a process camp cannot see"
 
-_IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 _HOST_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _FORWARD_RE = re.compile(r"127\.0\.0\.1:([0-9]+):127\.0\.0\.1:([0-9]+)")
 _PS_ARGV = ["ps", "-axwwo", "pid=,uid=,command="]
@@ -74,7 +74,7 @@ class Attachment:
 
 def _namespace() -> str:
     namespace = os.environ.get(NAMESPACE_ENV, DEFAULT_NAMESPACE)
-    if _IDENTIFIER_RE.fullmatch(namespace) is None:
+    if not is_identifier(namespace):
         raise Untaggable(f"{NAMESPACE_ENV} is not a valid tag namespace: {printable_line(namespace)!r}")
     return namespace
 
@@ -90,7 +90,7 @@ def tag_for(host: str, group: str, name: str, attach_id: str) -> str:
     if _HOST_RE.fullmatch(host) is None:
         raise Untaggable(f"host {printable_line(host)!r} cannot be tagged")
     for label, value in (("group", group), ("name", name), ("attach id", attach_id)):
-        if _IDENTIFIER_RE.fullmatch(value) is None:
+        if not is_identifier(value):
             raise Untaggable(f"{label} {printable_line(value)!r} cannot be tagged")
     return f"{namespace}:{attach_id}:{host}/{group}/{name}"
 
@@ -129,7 +129,7 @@ def _parse_tag(value: str, namespace: str) -> tuple[str, str, str, str] | None:
     host, group, name = parts
     if _HOST_RE.fullmatch(host) is None:
         return None
-    if not all(_IDENTIFIER_RE.fullmatch(v) for v in (attach_id, group, name)):
+    if not all(is_identifier(v) for v in (attach_id, group, name)):
         return None
     return attach_id, host, group, name
 

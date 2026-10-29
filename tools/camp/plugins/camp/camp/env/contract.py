@@ -152,7 +152,8 @@ def _decode_record(line: str) -> list[str] | None:
         pos += 1
 
 
-def _is_identifier(value: str) -> bool:
+def is_identifier(value: str) -> bool:
+    """True when *value* is camp's identifier, ``[a-z0-9][a-z0-9-]*``."""
     return _IDENTIFIER_RE.fullmatch(value) is not None
 
 
@@ -184,9 +185,9 @@ def parse_inventory(text: str) -> list[Environment]:
         if fields is None:
             raise Unreadable(f"line {number}: not five JSON strings separated by '|'")
         container, state, group, name, ports_field = fields
-        if not _is_identifier(group):
+        if not is_identifier(group):
             raise Unreadable(f"line {number}: group is not a valid identifier")
-        if not _is_identifier(name):
+        if not is_identifier(name):
             raise Unreadable(f"line {number}: name is not a valid identifier")
         ports = _parse_ports(ports_field)
         if ports is None:
