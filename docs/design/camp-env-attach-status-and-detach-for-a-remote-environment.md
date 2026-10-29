@@ -40,7 +40,10 @@ The inventory read now asks Docker for each container's published ports too. The
 only when every record's ports validate: each entry loopback, TCP, and both ports in 1024 to 65535,
 written in ASCII digits. A record publishing anything else (a wildcard or IPv6 address, UDP, a
 privileged port) makes the whole machine unreadable, naming the line, as any other bad record
-does. A stopped container publishes nothing, and that is valid.
+does. A record publishing the same container port twice
+(`127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8080/tcp`) is a contract defect too, since one
+standard port is one port to hold: the machine is unreadable, naming the line and not the value.
+A stopped container publishes nothing, and that is valid.
 
 `camp env ls` does not show ports. The listing reads them only so that one read serves both verbs.
 
@@ -58,8 +61,12 @@ nothing can be missed there. A machine whose read is unreadable, this one includ
 name, because the name might be there.
 
 `HOST` must be a `[hosts.<name>]` table in the hosts file. `HOST`, `GROUP` and `NAME` are each
-lowercase letters, digits and `-`, starting with a letter or digit, the same rule the hosts file
-holds a host's name to; any other target is a usage error.
+lowercase letters, digits and `-`, starting with a letter or digit; any other target is a usage
+error, and one whose host part breaks the rule says that host names must be lowercase letters,
+digits and `-`. The hosts file does not hold the keys of its `[hosts.<name>]` tables to that rule
+(it checks `self_name` and the `env_hosts` entries, not the keys, and loading does not change
+that), so a declared host whose key falls outside it cannot be attached in any form, and
+`env_hosts` could not name it either.
 
 ## How an attachment is made, and found again
 
@@ -68,15 +75,20 @@ each standard port on 127.0.0.1 and carrying it to the published port on the hos
 It is reached through the same hosts-file destination, pinned host key and non-interactive
 settings as every other camp call over ssh, with connection sharing turned off
 (`ControlMaster=no`, `ControlPath=none`) so a shared connection the user's own ssh config sets up
-can never take the forward over where camp cannot see it. It is kept alive with ssh's own
+can never take the forward over where camp cannot see it. Forwards in the user's own ssh config
+for that host (`LocalForward`, `RemoteForward`, `DynamicForward`) are not cancelled, because
+`ClearAllForwardings` would cancel camp's `-L` too: they ride along with the attachment. The
+success line and `status` name only the environment's ports, and if a port of a forward from the
+user's own config is busy, the attach fails on that port. It is kept alive with ssh's own
 keep-alives, so a forward whose link has died ends on its own within about 45 seconds.
 
 Nothing about an attachment is written to disk. camp finds it again by reading the process table:
-a process owned by this user, run as `ssh`, carrying `-N`, and carrying exactly one
-`-o Tag=camp-env:<id>:<host>/<group>/<name>` option. `<id>` is chosen fresh for each attach. The
-ports it holds are read from its own `-L` arguments, in ASCII digits only. A process that only
+a process owned by this user, run as `ssh`, whose options (read as OpenSSH reads them: up to the
+destination or a `--`, an option's argument consumed with it) include `-N`, at least one `-L`, and
+exactly one `-o Tag=camp-env:<id>:<host>/<group>/<name>`. `<id>` is chosen fresh for each attach.
+The ports it holds are read from its own `-L` arguments, in ASCII digits only. A process that only
 mentions the tag elsewhere in its arguments (a `grep`, an interactive ssh running a remote
-command), or that belongs to another user, is never counted, reported or ended. Because the forward
+command, `ssh box pgrep -N -o Tag=...`), or that belongs to another user, is never counted, reported or ended. Because the forward
 carries nothing from camp's own install, `status` and `detach` find it from any directory and from
 any camp checkout or install, including one whose path contains whitespace.
 
@@ -95,9 +107,16 @@ success line names every port bound.
    refusal is immediate.
 2. Resolve the name, reading only the machines resolution needs.
 3. Is the environment running, and does it publish at least one port?
-4. Is every standard port free? camp tries to bind each one itself, on 127.0.0.1 and on ::1, and
-   releases it at once. A port that fails either bind as in use is held. A machine with no IPv6
-   loopback (some WSL setups) cannot bind ::1 at all, and that counts as free on ::1.
+4. Is every standard port free? camp tries to bind each one itself, with `SO_REUSEADDR` set as ssh
+   sets it, on 127.0.0.1, ::1, 0.0.0.0 and ::, and releases it at once. A port that fails any of
+   the four binds as in use is held. A port whose only trace is a closed connection in TIME_WAIT is
+   free, because ssh binds it too: detach after real traffic frees its ports, and attaching again
+   at once works. A machine with no IPv6 (some WSL setups) cannot bind the IPv6 addresses at all,
+   and that counts as free on them. Any other bind failure (a permission error, say) is a refusal,
+   not a crash: the port is reported held by a process that could not be checked, with the error.
+   The rule was measured on Linux and macOS: with `SO_REUSEADDR` on all four addresses, every
+   active listener, however it is bound, answers "in use" on at least one, and a TIME_WAIT-only
+   port answers free on all four.
 5. Start the forward, wait for ssh to confirm every port is bound before it goes to the background,
    and find the started forward in the process table by its `<id>`. ssh is started with its output
    discarded and its error text sent to a temporary file, never to a pipe camp reads: a backgrounded
@@ -189,7 +208,7 @@ On stderr, exit 1. Nothing is started and nothing is held. The port is the stand
 names the holder through `lsof` when `lsof` is installed and can see it, and otherwise says it
 cannot. The holder's command name is chosen by whatever process holds the port, so it reaches the
 terminal reduced to printable characters, as far-side text does. Being held on ::1 alone counts: a browser asking for `localhost` may try ::1 first and reach
-the other process instead of the attachment.
+the other process instead of the attachment. So does a wildcard holder (0.0.0.0 or ::).
 
 When ssh itself cannot bind a port (taken in the moment between camp's check and ssh's start), the
 attach fails with ssh's own reason, and nothing is left behind:
@@ -242,7 +261,10 @@ detached perseus/levr/main; ports 5173 8080 8443 are free
 
 On stdout, exit 0. camp ends every recognised forward, asking first and then forcing one that does
 not end within two seconds, and confirms its ports are free again. When a forward cannot be ended,
-or a port is still held afterwards, detach says which, and by what, and exits 1.
+or a port is still held afterwards, detach says which, and by what, and exits 1. When the process
+table cannot be read before anything was signalled, it says nothing was signalled; when that
+happens after the first signal, it says the forward may already have ended and to run
+`camp env status`.
 
 ## State — detach: none attached
 

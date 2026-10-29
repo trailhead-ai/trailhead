@@ -434,8 +434,8 @@ A stopped container publishes nothing, and that is fine. Camp reads
 port, host port) `(8080, 28080)` and `(8081, 28081)`, in container-port order.
 Anything else on any container carrying both labels, a skipped one included (a
 port published on all interfaces, on an IPv6 address, over udp, as a range, or
-outside that span), makes the whole machine `unreadable`, and the reason names the
-line and the defect, not the value.
+outside that span, or the same container port published twice in one record), makes the
+whole machine `unreadable`, and the reason names the line and the defect, not the value.
 
 ## Attaching an environment
 
@@ -457,7 +457,9 @@ attached perseus/levr/main on ports 5173 8080 8443; its health was not checked
 ```
 
 The environment is named in its fully qualified form whatever form you typed, and the
-ports ascend. Camp does not check the environment's health: a running container with a
+ports ascend. The line names only the environment's ports: a forward from your own ssh
+config for that host (`LocalForward`, `RemoteForward`, `DynamicForward`) rides along with
+the attachment, and if one of its ports is busy, attach fails on that port. Camp does not check the environment's health: a running container with a
 forward in front of it can still be failing behind it. Like `ls`, attach ignores the
 current camp group. A bare name must match exactly one environment on every machine
 that could have it; a name on this machine, or `local/NAME`, is refused (attaching an
@@ -466,7 +468,8 @@ environment on this machine is not supported yet).
 There is one attachment per machine, because a machine has one set of standard ports.
 Attach checks, in order: that nothing is attached (before any host is read), the target,
 that the environment is running and publishes ports, and that every standard port is
-free on 127.0.0.1 and on ::1. It then starts the forward and finds it again in the
+free on 127.0.0.1, ::1, 0.0.0.0 and :: (bound with `SO_REUSEADDR`, as ssh binds, so a
+port only in TIME_WAIT is free). It then starts the forward and finds it again in the
 process table by a fresh id. Nothing is written to disk; the forward carries a
 `-o Tag=camp-env:<id>:<host>/<group>/<name>` option, and a forward whose link has died
 ends on its own within about 45 seconds. Each refusal exits `1` with one line on stderr
@@ -503,7 +506,8 @@ attached until it is detached. When the table cannot be read it says
 claiming nothing is attached. `detach` ends every recognised forward (asking first, then
 forcing one that has not ended within two seconds) and waits up to 3s for each of its
 ports to bind free again. If a forward cannot be ended, or a port is still held by
-something else, it says which, and by what, on stderr and exits `1`.
+something else, it says which, and by what, on stderr and exits `1`. If the process table
+cannot be read it says whether anything was signalled first.
 
 ```
 $ camp env status
