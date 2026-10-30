@@ -47,8 +47,8 @@ def _reply(*lines: str) -> str:
     return "\n".join([HEADER, *lines]) + "\n"
 
 
-def _ok(group: str = "levr", name: str = "main", state: str = "running") -> str:
-    return _record(f"{group}-env-{name}", state, group, name)
+def _ok(group: str = "levr", name: str = "main", state: str = "running", ports: object = "") -> str:
+    return _record(f"{group}-env-{name}", state, group, name, ports)
 
 
 # --- header ---------------------------------------------------------------
@@ -77,9 +77,10 @@ def test_header_from_each_measured_docker_parses(fixture: str) -> None:
         "",
         "\n",
         "NAMES|STATE|group\n",
-        "names|state|group|name\n",
-        " NAMES|STATE|group|name\n",
-        '"levr-env-main"|"running"|"levr"|"main"\n',
+        "NAMES|STATE|group|name\n",
+        "names|state|group|name|ports\n",
+        " NAMES|STATE|group|name|PORTS\n",
+        '"levr-env-main"|"running"|"levr"|"main"|""\n',
         "Error response from daemon: boom\n",
     ],
 )
@@ -126,7 +127,7 @@ def test_record_named_for_its_own_labels_yields_one_environment() -> None:
 def test_labelled_record_under_another_name_is_skipped_beside_good_ones(container: str) -> None:
     reply = _reply(
         _ok("a", "one"),
-        _record(container, "running", "levr", "main"),
+        _record(container, "running", "levr", "main", ""),
         _ok("b", "two", "exited"),
     )
     assert parse_inventory(reply) == [
@@ -157,6 +158,195 @@ def test_order_of_the_reply_is_kept() -> None:
     assert [(e.group, e.name) for e in envs] == [("b", "z"), ("a", "y")]
 
 
+# --- published ports ------------------------------------------------------
+
+
+def _ports_of(ports: object) -> tuple[tuple[int, int], ...]:
+    [env] = parse_inventory(_reply(_ok(ports=ports)))
+    return env.ports
+
+
+def test_one_loopback_tcp_mapping_is_a_standard_published_pair() -> None:
+    assert _ports_of("127.0.0.1:28080->8080/tcp") == ((8080, 28080),)
+
+
+def test_several_mappings_are_ordered_by_standard_port_not_reply_order() -> None:
+    reply = "127.0.0.1:28090->9090/tcp, 127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp"
+    assert _ports_of(reply) == ((8080, 28080), (8081, 28081), (9090, 28090))
+
+
+def test_standard_port_is_the_container_side_and_orders_numerically() -> None:
+    assert _ports_of("127.0.0.1:1024->65535/tcp, 127.0.0.1:65535->1024/tcp, 127.0.0.1:2000->10000/tcp") == (
+        (1024, 65535),
+        (10000, 2000),
+        (65535, 1024),
+    )
+
+
+def test_stopped_container_with_no_ports_is_still_listed() -> None:
+    envs = parse_inventory(
+        _reply(_ok("a", "one", "exited", ""), _ok("b", "two", "running", "127.0.0.1:3000->3000/tcp"))
+    )
+    assert [(e.name, e.state, e.ports) for e in envs] == [
+        ("one", "stopped", ()),
+        ("two", "running", ((3000, 3000),)),
+    ]
+
+
+def test_environment_built_without_ports_has_none() -> None:
+    assert Environment("levr", "main", "running").ports == ()
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "env_inventory_ports_docker_engine_29_8_0_linux.txt",
+        "env_inventory_ports_docker_desktop_4_97_0.txt",
+    ],
+)
+def test_real_captured_tcp_entries_parse(fixture: str) -> None:
+    running = json.loads(_fixture(fixture).splitlines()[0])
+    tcp_only = ", ".join(e for e in running.split(", ") if e.endswith("/tcp"))
+    assert tcp_only
+    assert _ports_of(tcp_only) == ((8080, 28080), (8081, 28081), (9090, 28090))
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "env_inventory_ports_docker_engine_29_8_0_linux.txt",
+        "env_inventory_ports_docker_desktop_4_97_0.txt",
+    ],
+)
+def test_real_captured_running_line_with_a_udp_entry_is_unreadable(fixture: str) -> None:
+    running = json.loads(_fixture(fixture).splitlines()[0])
+    with pytest.raises(Unreadable, match="line 2"):
+        parse_inventory(_reply(_ok(ports=running)))
+
+
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "env_inventory_ports_docker_engine_29_8_0_linux.txt",
+        "env_inventory_ports_docker_desktop_4_97_0.txt",
+    ],
+)
+def test_real_captured_stopped_line_is_no_ports(fixture: str) -> None:
+    stopped = json.loads(_fixture(fixture).splitlines()[1])
+    assert _ports_of(stopped) == ()
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        "0.0.0.0:28080->8080/tcp",
+        "127.0.0.1:28080->8080/tcp, 0.0.0.0:28081->8081/tcp",
+        "[::1]:28080->8080/tcp",
+        "[::]:28080->8080/tcp",
+        "127.0.0.1:28080->8080/udp",
+        "127.0.0.1:28080->8080/tcp, 127.0.0.1:28081->8081/udp",
+        "127.0.0.1:28080->8080/sctp",
+        "127.0.0.2:28080->8080/tcp",
+        "127.0.0.1:28080-28081->8080-8081/tcp",
+        "8080/tcp",
+        "127.0.0.1:28080->8080",
+        "127.0.0.1:28080->8080/tcp,127.0.0.1:28081->8081/tcp",
+        "127.0.0.1:28080->8080/tcp, ",
+        " 127.0.0.1:28080->8080/tcp",
+        "127.0.0.1:28080->8080/tcp\n",
+        ", ",
+    ],
+)
+def test_a_mapping_that_is_not_loopback_tcp_makes_the_reply_unreadable(ports: str) -> None:
+    with pytest.raises(Unreadable, match="line 3.*ports"):
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        "127.0.0.1:28080->1023/tcp",
+        "127.0.0.1:1023->8080/tcp",
+        "127.0.0.1:28080->65536/tcp",
+        "127.0.0.1:65536->8080/tcp",
+        "127.0.0.1:28080->0/tcp",
+        "127.0.0.1:0->8080/tcp",
+        "127.0.0.1:28080->80/tcp",
+        "127.0.0.1:123456->8080/tcp",
+        "127.0.0.1:28080->08080/tcp",
+    ],
+)
+def test_a_port_outside_1024_to_65535_on_either_side_is_unreadable(ports: str) -> None:
+    with pytest.raises(Unreadable, match="line 3.*ports"):
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+
+
+@pytest.mark.parametrize(
+    "ports",
+    [
+        "127.0.0.1:2808\u00b2->8080/tcp",
+        "127.0.0.1:28080->808\u00b2/tcp",
+        "127.0.0.1:2\u0668\u0660\u0668\u0660->8080/tcp",
+        "127.0.0.1:28080->8\uff10\uff18\uff10/tcp",
+    ],
+)
+def test_a_non_ascii_digit_in_a_port_is_unreadable(ports: str) -> None:
+    with pytest.raises(Unreadable, match="line 3.*ports"):
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+
+
+@pytest.mark.parametrize("ports", [None, 28080, ["127.0.0.1:28080->8080/tcp"], {"a": 1}, True])
+def test_a_ports_field_that_is_not_a_string_is_unreadable(ports: object) -> None:
+    with pytest.raises(Unreadable, match="line 3"):
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+
+
+def test_distinct_container_ports_parse() -> None:
+    parsed = parse_inventory(
+        _reply(_ok(ports="127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8081/tcp"))
+    )
+    assert parsed == [Environment("levr", "main", "running", ((8080, 18080), (8081, 18081)))]
+
+
+def test_a_repeated_container_port_makes_the_reply_unreadable_naming_the_line_not_the_value() -> None:
+    ports = "127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8080/tcp"
+    with pytest.raises(Unreadable) as info:
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=ports)))
+    reason = str(info.value)
+    assert "line 3" in reason and "ports" in reason
+    assert "8080" not in reason and "18080" not in reason
+
+
+def test_ports_reason_names_the_line_and_never_the_raw_value() -> None:
+    secret = "0.0.0.0:31337->8080/tcp"
+    with pytest.raises(Unreadable) as info:
+        parse_inventory(_reply(_ok("a", "b"), _ok(ports=secret)))
+    reason = str(info.value)
+    assert "line 3" in reason and "31337" not in reason and "0.0.0.0" not in reason
+    assert reason.isprintable()
+
+
+def test_no_partial_list_when_a_later_record_has_bad_ports() -> None:
+    with pytest.raises(Unreadable):
+        parse_inventory(
+            _reply(_ok("a", "b", ports="127.0.0.1:3000->3000/tcp"), _ok("c", "d", ports="0.0.0.0:1->1/tcp"))
+        )
+
+
+@pytest.mark.parametrize(
+    ("ports", "readable"),
+    [("127.0.0.1:15432->5432/tcp", True), ("0.0.0.0:5432->5432/tcp", False)],
+)
+def test_a_labelled_helper_under_another_name_is_judged_on_its_ports(ports: str, readable: bool) -> None:
+    helper = _record("levr-env-main-db", "running", "levr", "main", ports)
+    reply = _reply(_ok("a", "b"), helper)
+    if readable:
+        assert parse_inventory(reply) == [Environment("a", "b", "running")]
+    else:
+        with pytest.raises(Unreadable, match="line 3: ports"):
+            parse_inventory(reply)
+
+
 # --- unreadable records ---------------------------------------------------
 
 
@@ -164,12 +354,13 @@ def test_order_of_the_reply_is_kept() -> None:
     "line",
     [
         '"levr-env-main"|"running"|"levr"',
-        '"levr-env-main"|"running"|"levr"|"main"|"extra"',
+        '"levr-env-main"|"running"|"levr"|"main"',
+        '"levr-env-main"|"running"|"levr"|"main"|""|""',
         "",
         "|",
-        '"levr-env-main"|"running"|"levr"|"main"|',
-        '"levr-env-main"|"running"|"levr"|"main" ',
-        '"levr-env-main" |"running"|"levr"|"main"',
+        '"levr-env-main"|"running"|"levr"|"main"|""|',
+        '"levr-env-main"|"running"|"levr"|"main"|"" ',
+        '"levr-env-main" |"running"|"levr"|"main"|""',
     ],
 )
 def test_wrong_field_layout_is_unreadable(line: str) -> None:
@@ -189,7 +380,7 @@ def test_wrong_field_layout_is_unreadable(line: str) -> None:
     ],
 )
 def test_field_that_is_not_valid_json_is_unreadable(bad: str) -> None:
-    line = f'{bad}|"running"|"levr"|"main"'
+    line = f'{bad}|"running"|"levr"|"main"|""'
     with pytest.raises(Unreadable, match="line 3"):
         parse_inventory(_reply(_ok("a", "b"), line))
 
@@ -198,9 +389,9 @@ def test_field_that_is_not_valid_json_is_unreadable(bad: str) -> None:
     "bad",
     ["1", "-0.5", "null", "true", "{}", '{"a":1}', "[]", '["levr"]', "[" * 100000 + "]" * 100000, "NaN"],
 )
-@pytest.mark.parametrize("position", [0, 1, 2, 3])
+@pytest.mark.parametrize("position", [0, 1, 2, 3, 4])
 def test_field_that_is_json_but_not_a_string_is_unreadable(bad: str, position: int) -> None:
-    fields = ['"levr-env-main"', '"running"', '"levr"', '"main"']
+    fields = ['"levr-env-main"', '"running"', '"levr"', '"main"', '""']
     fields[position] = bad
     with pytest.raises(Unreadable):
         parse_inventory(_reply(_ok("a", "b"), "|".join(fields)))
@@ -217,13 +408,13 @@ def test_label_outside_the_charset_is_unreadable(value: str, which: str) -> None
         group = value
     else:
         name = value
-    line = _record(f"{group}-env-{name}", "running", group, name)
+    line = _record(f"{group}-env-{name}", "running", group, name, "")
     with pytest.raises(Unreadable, match=which):
         parse_inventory(_reply(_ok("a", "b"), line))
 
 
 def test_charset_failure_is_unreadable_even_under_a_non_matching_name() -> None:
-    line = _record("helper", "running", "Levr", "main")
+    line = _record("helper", "running", "Levr", "main", "")
     with pytest.raises(Unreadable):
         parse_inventory(_reply(line))
 
@@ -241,18 +432,18 @@ def test_real_label_escaping_captures_are_unreadable(line_no: int) -> None:
 
 
 def test_pipe_inside_a_json_string_does_not_shift_fields() -> None:
-    line = _record("levr-env-main", "running", "levr|main", "x")
+    line = _record("levr-env-main", "running", "levr|main", "x", "")
     with pytest.raises(Unreadable, match="group"):
         parse_inventory(_reply(line))
 
 
 def test_pipe_in_container_name_field_does_not_shift_fields() -> None:
-    line = _record("levr-env-main|running|levr|main", "running", "levr", "main")
+    line = _record("levr-env-main|running|levr|main", "running", "levr", "main", "")
     assert parse_inventory(_reply(line)) == []
 
 
 def test_newline_in_label_cannot_forge_a_second_record() -> None:
-    forged = _record("x", "running", "levr\n" + _ok("a", "b"), "main")
+    forged = _record("x", "running", "levr\n" + _ok("a", "b"), "main", "")
     assert "\n" not in forged
     with pytest.raises(Unreadable):
         parse_inventory(_reply(forged))
@@ -260,7 +451,7 @@ def test_newline_in_label_cannot_forge_a_second_record() -> None:
 
 def test_newline_and_quotes_in_label_that_would_split_into_two_valid_records_are_unreadable() -> None:
     name = 'main"\n"levr-env-evil"|"running"|"levr"|"evil'
-    forged = _record("levr-env-main", "running", "levr", name)
+    forged = _record("levr-env-main", "running", "levr", name, "")
     assert "\n" not in forged
     with pytest.raises(Unreadable):
         parse_inventory(_reply(forged))
@@ -268,12 +459,12 @@ def test_newline_and_quotes_in_label_that_would_split_into_two_valid_records_are
 
 def test_raw_newline_splitting_a_record_is_unreadable() -> None:
     with pytest.raises(Unreadable):
-        parse_inventory(HEADER + '\n"levr-env-main"|"running"|"levr"|\n"main"\n')
+        parse_inventory(HEADER + '\n"levr-env-main"|"running"|"levr"|\n"main"|""\n')
 
 
 def test_unreadable_reason_is_one_line() -> None:
     with pytest.raises(Unreadable) as info:
-        parse_inventory(_reply(_record("x", "running", "Le\nvr\x1b[31m", "main")))
+        parse_inventory(_reply(_record("x", "running", "Le\nvr\x1b[31m", "main", "")))
     reason = str(info.value)
     assert reason and reason.isprintable() and "\n" not in reason
 

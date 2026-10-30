@@ -19,3 +19,38 @@ UNMEASURED (no capture exists; tests use the planned exit code with the measured
   - OpenSSH exit 127 for a missing docker command
   - OpenSSH exit 1 propagating a daemon failure
   - a genuinely stopped Docker Desktop on macOS
+
+env_inventory_ports_* are byte-exact `{{json .Ports}}` renderings, line 1 a running container, line 2 the same container created but stopped.
+Command: docker ps -a --filter name=<probe> --format '{{json .Ports}}'
+Container: alpine, -p 127.0.0.1:28080-28081:8080-8081 -p 127.0.0.1:28090:9090 -p 127.0.0.1:28095:9095/udp
+  env_inventory_ports_docker_desktop_4_97_0.txt          perseus, Docker Desktop 4.97.0, server 29.9.2 (running via `docker run -d --rm`, stopped via `docker create`)
+  env_inventory_ports_docker_engine_29_8_0_linux.txt     andromeda, Docker Engine 29.8.0 (same two commands)
+
+env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@perseus)
+  andromeda Linux, OpenSSH_9.6p1 Ubuntu-3ubuntu13.20, OpenSSL 3.0.13; destination perseus over Tailscale SSH.
+  Namespace camp-env-k2probe (never camp-env). The Tag value is a probe tag, the uid is the real local uid.
+  env_forward_ps_linux_openssh_9_6.txt              the `ps -axwwo pid=,uid=,command=` line of the backgrounded forward (full argv kept; "-o Tag=..." appears as two argv words, "-L" spec as one)
+  env_forward_bind_failure_linux_openssh_9_6.txt    local bind failure with ExitOnForwardFailure=yes: exit 255, stderr verbatim, nothing left running
+  Also measured, no fixture: with ssh -f the backgrounded child holds fds 0,1,2 on /dev/null (not the caller's pipes), so a subprocess.run
+  with stdout/stderr=PIPE returned in 0.04s (no hang); stderr after backgrounding is lost. Traffic through the forward to a perseus loopback listener returned HTTP 200.
+UNMEASURED
+  - the Mac ssh (OpenSSH_10.5p1) behaviour for -f / bind failure / ps line: perseus has no sshd on port 22 (Tailscale SSH only), so a loopback ssh -f from perseus is refused
+
+env_port_probe_matrix.txt (the port probe's bind rule: SO_REUSEADDR on 127.0.0.1, ::1, 0.0.0.0 and ::)
+  Measured on two hosts, one section each: andromeda (Linux 6.8.0-147-generic) and perseus (Darwin 27.2.0, macOS).
+  A throwaway Python script (not committed) bound ephemeral ports. For each listener kind (bound to 127.0.0.1, ::1,
+  0.0.0.0 or ::, with SO_REUSEADDR off and on; IPV6_V6ONLY set on the IPv6 ones) it then tried a second bind of the
+  same port on all four addresses, once without SO_REUSEADDR ("strict") and once with it ("reuse"), recording "free"
+  or the errno name. A last row measures TIME_WAIT: an SO_REUSEADDR listener on 127.0.0.1 accepted one connection,
+  closed the accepted socket and the listener first, then the client closed, leaving the port in TIME_WAIT.
+  Reading it: with reuse on all four addresses every active listener answers EADDRINUSE on at least one address, and the
+  TIME_WAIT-only port is free on all four; strict reads that TIME_WAIT port as EADDRINUSE on both hosts.
+  Columns are `<address>:strict=<result>,reuse=<result>`, addresses separated by " | ".
+  The rule camp applies from it: Linux probes 127.0.0.1 and ::1 only (a reuse bind of 127.0.0.1 already answers EADDRINUSE
+  for a 0.0.0.0 holder and ::1 for a v6-only :: holder; a wildcard probe adds only false positives for a listener on one
+  specific non-loopback address); Darwin and any other platform probe all four.
+
+env_inventory_header_* and env_inventory_command.txt, env_inventory_records.txt (five-field format, `|{{json .Ports}}` appended)
+  Header measured with the five-field command above on andromeda (Docker Engine 29.8.0) and perseus (Docker Desktop 4.97.0):
+  both print `NAMES|STATE|group|name|PORTS`. The records file gains a `""` fifth
+  field because its containers (k1probe-*) published no ports.

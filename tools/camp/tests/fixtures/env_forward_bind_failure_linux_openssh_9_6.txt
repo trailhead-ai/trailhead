@@ -1,0 +1,10 @@
+command: ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 -f -N -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o ForwardAgent=no -o ForwardX11=no -o PermitLocalCommand=no -o RequestTTY=no -o ControlMaster=no -o ControlPath=none -o Tag=camp-env-k2probe:bindfail2:perseus/grp/name -L 127.0.0.1:41871:127.0.0.1:41999 -L 127.0.0.1:41872:127.0.0.1:41999 -- tduffield@perseus
+state: 127.0.0.1:41871 free, 127.0.0.1:41872 held by a local listener
+exit: 255
+stdout: (empty)
+stderr:
+bind [127.0.0.1]:41872: Address already in use
+channel_setup_fwd_listener_tcpip: cannot listen to port: 41872
+Could not request local forwarding.
+after: no ssh child left; 127.0.0.1:41871 free again
+(the single -L variant, only 41872 held, printed the identical three stderr lines and exited 255)

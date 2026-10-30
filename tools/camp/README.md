@@ -408,7 +408,12 @@ Exit `0` means the listing rendered, not that every host answered: an unreadable
 host is a line in the answer. Exit `1` means camp refused to list: the hosts file is
 malformed, `env_hosts` is invalid, or an argument was given (`camp env ls` takes
 none, and `--host` has no meaning here). A bare `camp env`, or any subcommand other
-than `ls`, prints one usage line and exits `1`.
+than `ls`, `attach`, `status` or `detach`, prints one usage line naming those four and
+exits `1`.
+
+When something is attached (see below), `ls` opens with its `attached:` line, then lists
+as before; when the process table cannot be read it says
+`camp env: could not tell whether anything is attached: <why>` on stderr and lists anyway.
 
 On a Mac, `Docker is not installed` can also mean `docker` is not on the PATH a
 non-interactive ssh command gets, even though it works in your terminal.
@@ -419,6 +424,102 @@ and a container name of the group, then `-env-`, then the name, such as
 `levr-env-main`. Group and name are lowercase letters, digits and hyphens. A
 container that carries both labels under any other name is skipped. An existing
 container gains the labels only by being rebuilt.
+
+Camp also reads each environment's published ports from Docker. A running
+environment's container may publish ports only on the loopback address, over tcp,
+with both the host port and the container port between 1024 and 65535: Docker
+renders those as `127.0.0.1:<host port>-><container port>/tcp`, comma separated.
+A stopped container publishes nothing, and that is fine. Camp reads
+`127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp` as the pairs (container
+port, host port) `(8080, 28080)` and `(8081, 28081)`, in container-port order.
+Anything else on any container carrying both labels, a skipped one included (a
+port published on all interfaces, on an IPv6 address, over udp, as a range, or
+outside that span, or the same container port published twice in one record), makes the
+whole machine `unreadable`, and the reason names the line and the defect, not the value.
+
+## Attaching an environment
+
+```
+camp env attach NAME              # a bare name, resolved across this machine and every opted-in host
+camp env attach HOST/NAME         # that host only, opted in or not
+camp env attach HOST/GROUP/NAME   # that host, that group
+```
+
+Puts one remote environment on this machine's localhost. An environment publishes each
+of its ports on its own machine's loopback; its **standard ports** are the container
+side of those mappings (`127.0.0.1:18080->8080/tcp` is reached here at
+`localhost:8080`). Attaching starts one background `ssh` forward that holds every
+standard port on 127.0.0.1 and carries it to the published port on the host:
+
+```
+$ camp env attach main
+attached perseus/levr/main on ports 5173 8080 8443; its health was not checked
+```
+
+The environment is named in its fully qualified form whatever form you typed, and the
+ports ascend. The line names only the environment's ports: a forward from your own ssh
+config for that host (`LocalForward`, `RemoteForward`, `DynamicForward`) rides along with
+the attachment, and if one of its ports is busy, attach fails on that port. Camp does not check the environment's health: a running container with a
+forward in front of it can still be failing behind it. Like `ls`, attach ignores the
+current camp group. A bare name must match exactly one environment on every machine
+that could have it; a name on this machine, or `local/NAME`, is refused (attaching an
+environment on this machine is not supported yet).
+
+There is one attachment per machine, because a machine has one set of standard ports.
+Attach assumes a single-user machine: the forward listens on 127.0.0.1, and any local user can
+connect there and reach the environment through your ssh session (inherent to `ssh -L`), so do
+not attach on a machine other people log in to.
+Attach checks, in order: that nothing is attached (before any host is read), the target,
+that the environment is running and publishes ports, and that every standard port is
+free on 127.0.0.1 and ::1, and off Linux on 0.0.0.0 and :: too (bound with `SO_REUSEADDR`,
+as ssh binds, so a port only in TIME_WAIT is free). It then starts the forward and finds it again in the
+process table by a fresh id. Nothing is written to disk; the forward carries a
+`-o Tag=camp-env:<id>:<host>/<group>/<name>` option, and a forward whose link has died
+ends on its own within about 45 seconds. Each refusal exits `1` with one line on stderr
+and starts nothing:
+
+```
+$ camp env attach perseus/main
+camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
+$ camp env attach andromeda/old
+camp env: andromeda/levr/old is stopped; start it with its project's own tooling, then attach again
+$ camp env attach main
+camp env: port 8080 is held by python (pid 1644110); stop it, then attach again
+```
+
+If ssh cannot start the forward (a port taken between the check and ssh's start, a
+refused connection), attach says `camp env: attach failed: ssh could not start the
+forward: <ssh's line>`. If anything goes wrong after the forward started, including an
+interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
+one, and says so if it could not.
+
+### Status and detach
+
+```
+camp env status                   # what is attached on this machine
+camp env detach                   # end it and free its ports
+```
+
+Both read only the process table, so they work from any directory and recognise an
+attachment whichever camp checkout or install made it. `status` prints one `attached:`
+line per recognised forward, or `nothing attached` (exit `0`). It does not check the
+environment's health, so an attachment whose environment has since stopped still reads
+attached until it is detached. When the table cannot be read it says
+`camp env: cannot tell what is attached: <why>` on stderr and exits `1`, rather than
+claiming nothing is attached. `detach` ends every recognised forward (asking first, then
+forcing one that has not ended within two seconds) and waits up to 3s for each of its
+ports to bind free again. If a forward cannot be ended, or a port is still held by
+something else, it says which, and by what, on stderr and exits `1`. If the process table
+cannot be read it says whether anything was signalled first.
+
+```
+$ camp env status
+attached: perseus/levr/main on ports 39291 44659 51059; its health was not checked
+$ camp env detach
+detached perseus/levr/main; ports 39291 44659 51059 are free
+$ camp env detach
+nothing attached
+```
 
 ## Transferring a workspace
 

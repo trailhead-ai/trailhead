@@ -27,8 +27,8 @@ sequence and can neither span nor forge a line.
 Reading a reply
 ---------------
 ``parse_inventory`` believes a reply only when its first line is ``INVENTORY_HEADER`` and every
-following line decodes as exactly four JSON strings separated by ``|`` (container name, state,
-group, name). Anything else raises ``Unreadable`` carrying a one-line, printable reason; a partial
+following line decodes as exactly five JSON strings separated by ``|`` (container name, state,
+group, name, published ports). Anything else raises ``Unreadable`` carrying a one-line, printable reason; a partial
 list is never returned. ``has_inventory_header`` lets a caller classify a reply as "has the header
 or not" before parsing.
 
@@ -38,6 +38,24 @@ field by field with ``json.JSONDecoder.raw_decode``, each decoded value required
 therefore stays one field and then fails the identifier charset. DEL (0x7f) and non-ASCII
 characters arrive unescaped and also fail the charset. Every Docker state other than ``running``
 (created, exited, paused, restarting, dead, removing) reads as ``stopped``.
+
+Published ports
+---------------
+The fifth field is Docker's ``.Ports`` rendering: ``""`` for a container that is not running, else
+one entry per published port, ``127.0.0.1:<published>-><standard>/tcp``, separated by ``", "``.
+Docker Desktop and Docker Engine render it identically (one entry per port, no ranges, no IPv6
+twin for a ``127.0.0.1`` binding). The reply is believed only when every entry of an
+environment's field is exactly that shape: the host is the loopback ``127.0.0.1``, the protocol
+is ``tcp``, and both ports are written in ASCII digits with no leading zero and lie in
+1024..65535. A wildcard, IPv6 or other-address binding, a ``udp`` entry, a range, an out-of-range
+or non-ASCII-digit port, or any other text makes the whole reply unreadable, the reason naming the
+line and the defect and never the value. ``Environment.ports`` holds the ``(standard, published)``
+pairs, ``standard`` being the container's port, in ascending order of standard port (then
+published); it is empty for ``""``. A container port published twice in one record
+(``127.0.0.1:18080->8080/tcp, 127.0.0.1:18081->8080/tcp``) is a contract defect, not two pairs:
+one standard port is one port to hold, so the whole reply is unreadable, the reason naming the
+line and not the value. Every labelled record is judged on its ports, including one skipped
+for its name, so a labelled helper publishing a wildcard port makes the reply unreadable too.
 
 Untrusted input
 ---------------
@@ -64,7 +82,7 @@ from typing import Literal
 LABEL_GROUP = "camp.env.group"
 LABEL_NAME = "camp.env.name"
 
-INVENTORY_HEADER = "NAMES|STATE|group|name"
+INVENTORY_HEADER = "NAMES|STATE|group|name|PORTS"
 
 _FORMAT = "table " + "|".join(
     [
@@ -72,6 +90,7 @@ _FORMAT = "table " + "|".join(
         "{{json .State}}",
         f'{{{{json (.Label "{LABEL_GROUP}")}}}}',
         f'{{{{json (.Label "{LABEL_NAME}")}}}}',
+        "{{json .Ports}}",
     ]
 )
 
@@ -91,7 +110,10 @@ INVENTORY_REMOTE_COMMAND: str = shlex.join(INVENTORY_ARGV)
 
 _IDENTIFIER_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 _DECODER = json.JSONDecoder()
-_FIELD_COUNT = 4
+_FIELD_COUNT = 5
+_PORT = r"[1-9][0-9]{3,4}"
+_PORT_ENTRY_RE = re.compile(rf"127\.0\.0\.1:({_PORT})->({_PORT})/tcp", re.ASCII)
+_PORT_MIN, _PORT_MAX = 1024, 65535
 
 
 class Unreadable(Exception):
@@ -103,6 +125,7 @@ class Environment:
     group: str
     name: str
     state: Literal["running", "stopped"]
+    ports: tuple[tuple[int, int], ...] = ()
 
 
 def container_name(group: str, name: str) -> str:
@@ -132,8 +155,26 @@ def _decode_record(line: str) -> list[str] | None:
         pos += 1
 
 
-def _is_identifier(value: str) -> bool:
+def is_identifier(value: str) -> bool:
+    """True when *value* is camp's identifier, ``[a-z0-9][a-z0-9-]*``."""
     return _IDENTIFIER_RE.fullmatch(value) is not None
+
+
+def _parse_ports(field: str) -> tuple[tuple[int, int], ...] | None:
+    if field == "":
+        return ()
+    pairs: list[tuple[int, int]] = []
+    for entry in field.split(", "):
+        match = _PORT_ENTRY_RE.fullmatch(entry)
+        if match is None:
+            return None
+        published, standard = int(match[1]), int(match[2])
+        if not (_PORT_MIN <= published <= _PORT_MAX and _PORT_MIN <= standard <= _PORT_MAX):
+            return None
+        pairs.append((standard, published))
+    if len({standard for standard, _ in pairs}) != len(pairs):
+        return None
+    return tuple(sorted(pairs))
 
 
 def parse_inventory(text: str) -> list[Environment]:
@@ -147,13 +188,16 @@ def parse_inventory(text: str) -> list[Environment]:
     for number, line in enumerate(lines, start=2):
         fields = _decode_record(line)
         if fields is None:
-            raise Unreadable(f"line {number}: not four JSON strings separated by '|'")
-        container, state, group, name = fields
-        if not _is_identifier(group):
+            raise Unreadable(f"line {number}: not five JSON strings separated by '|'")
+        container, state, group, name, ports_field = fields
+        if not is_identifier(group):
             raise Unreadable(f"line {number}: group is not a valid identifier")
-        if not _is_identifier(name):
+        if not is_identifier(name):
             raise Unreadable(f"line {number}: name is not a valid identifier")
+        ports = _parse_ports(ports_field)
+        if ports is None:
+            raise Unreadable(f"line {number}: ports are not distinct loopback tcp mappings within 1024-65535")
         if container != container_name(group, name):
             continue
-        environments.append(Environment(group, name, "running" if state == "running" else "stopped"))
+        environments.append(Environment(group, name, "running" if state == "running" else "stopped", ports))
     return environments

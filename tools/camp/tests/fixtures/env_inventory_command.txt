@@ -1,1 +1,1 @@
-docker ps -a --filter label=camp.env.group --filter label=camp.env.name --format 'table {{json .Names}}|{{json .State}}|{{json (.Label "camp.env.group")}}|{{json (.Label "camp.env.name")}}'
+docker ps -a --filter label=camp.env.group --filter label=camp.env.name --format 'table {{json .Names}}|{{json .State}}|{{json (.Label "camp.env.group")}}|{{json (.Label "camp.env.name")}}|{{json .Ports}}'

@@ -1,6 +1,6 @@
-NAMES|STATE|group|name
-"k1probe-env-restart"|"created"|"k1probe"|"restart"
-"k1probe-env-paused"|"paused"|"k1probe"|"paused"
-"k1probe-env-exited"|"exited"|"k1probe"|"exited"
-"k1probe-env-run"|"running"|"k1probe"|"run"
-"k1probe-env-main"|"created"|"k1probe"|"main"
+NAMES|STATE|group|name|PORTS
+"k1probe-env-restart"|"created"|"k1probe"|"restart"|""
+"k1probe-env-paused"|"paused"|"k1probe"|"paused"|""
+"k1probe-env-exited"|"exited"|"k1probe"|"exited"|""
+"k1probe-env-run"|"running"|"k1probe"|"run"|""
+"k1probe-env-main"|"created"|"k1probe"|"main"|""

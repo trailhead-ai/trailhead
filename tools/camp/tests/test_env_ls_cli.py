@@ -62,10 +62,10 @@ exit 0
 """
 
 
-def _records(*rows: tuple[str, str, str]) -> str:
-    """An inventory reply: (group, name, docker state) per container."""
+def _records(*rows: tuple[str, ...]) -> str:
+    """An inventory reply: (group, name, docker state[, published ports]) per container."""
     return HEADER + "".join(
-        f'"{g}-env-{n}"|"{s}"|"{g}"|"{n}"\n' for g, n, s in rows
+        f'"{g}-env-{n}"|"{s}"|"{g}"|"{n}"|"{rest[0] if rest else ""}"\n' for g, n, s, *rest in rows
     )
 
 
@@ -77,7 +77,7 @@ class Rig:
         self.bin = self.root / "bin"
         self.bin.mkdir(parents=True)
         (self.root / "ssh").mkdir()
-        for tool in ("sh", "cat", "sleep"):
+        for tool in ("sh", "cat", "sleep", "ps"):
             (self.bin / tool).symlink_to(shutil.which(tool))
         self._script("ssh", _SSH_STUB)
         self.config_dir = tmp_path / "camp-config"
@@ -173,6 +173,34 @@ def test_one_environment_locally_with_no_hosts(rig: Rig) -> None:
     assert result.stdout == "this machine\n  levr  main  running\n"
 
 
+def test_published_ports_do_not_change_what_ls_prints(rig: Rig) -> None:
+    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.docker(
+        stdout=_records(
+            ("levr", "main", "running", "127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp"),
+            ("levr", "ben", "exited", ""),
+        )
+    )
+    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running", "127.0.0.1:3000->3000/tcp")))
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "this machine\n  levr  ben   stopped\n  levr  main  running\nperseus\n  levr  main  running\n"
+    )
+
+
+def test_ports_that_are_not_loopback_tcp_make_that_machine_unreadable_without_the_value(rig: Rig) -> None:
+    rig.docker(stdout=_records(("levr", "main", "running", "0.0.0.0:31337->8080/tcp")))
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("this machine\n  unreadable: ")
+    assert "31337" not in result.stdout and "levr" not in result.stdout.split("unreadable")[1]
+
+
 def test_heading_names_this_machine_when_self_name_is_declared(rig: Rig) -> None:
     rig.hosts_file('self_name = "andromeda"\n')
     rig.docker(stdout=_records(("levr", "main", "running")))
@@ -237,7 +265,7 @@ def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> N
 def test_reply_without_the_header_is_unreadable_and_exits_zero(rig: Rig) -> None:
     rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
     rig.docker(stdout=_records(("levr", "main", "running")))
-    rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"\n')
+    rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"|""\n')
 
     result = rig.run("env", "ls")
 
@@ -481,13 +509,13 @@ def test_ls_refuses_any_argument(rig: Rig, extra: list[str], message: str) -> No
     assert "Traceback" not in result.stderr
 
 
-@pytest.mark.parametrize("args", [[], ["attach"]])
+@pytest.mark.parametrize("args", [[], ["frobnicate"]])
 def test_bare_env_and_unknown_subcommand_print_one_usage_line(rig: Rig, args: list[str]) -> None:
     result = rig.run("env", *args)
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == "usage: camp env ls\n"
+    assert result.stderr == "usage: camp env ls | attach TARGET | status | detach\n"
 
 
 def test_camp_help_lists_the_verb(rig: Rig) -> None:

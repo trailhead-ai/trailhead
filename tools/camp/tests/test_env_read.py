@@ -51,10 +51,10 @@ HOST = Host(ssh="tduffield@perseus", camp_bin="camp")
 
 REPLY = (
     f"{INVENTORY_HEADER}\n"
-    '"proj-env-dev"|"running"|"proj"|"dev"\n'
-    '"proj-env-qa"|"exited"|"proj"|"qa"\n'
+    '"proj-env-dev"|"running"|"proj"|"dev"|"127.0.0.1:28080->8080/tcp"\n'
+    '"proj-env-qa"|"exited"|"proj"|"qa"|""\n'
 )
-EXPECTED = (Environment("proj", "dev", "running"), Environment("proj", "qa", "stopped"))
+EXPECTED = (Environment("proj", "dev", "running", ((8080, 28080),)), Environment("proj", "qa", "stopped"))
 
 
 def _fixture(name: str) -> str:
@@ -295,13 +295,13 @@ def test_remote_stdout_without_header_and_no_stderr_is_unreadable_with_the_parse
 
 
 def test_a_failing_parse_is_unreadable_with_the_parsers_reason_and_no_environments():
-    bad = INVENTORY_HEADER + '\n"proj-env-dev"|"running"|"proj"|"dev"\nnot a record\n'
+    bad = INVENTORY_HEADER + '\n"proj-env-dev"|"running"|"proj"|"dev"|""\nnot a record\n'
     inventory = remote(raw(bad))
-    assert_unreadable(inventory, "line 3: not four JSON strings separated by '|'")
+    assert_unreadable(inventory, "line 3: not five JSON strings separated by '|'")
 
 
 def test_a_label_outside_the_charset_makes_the_whole_reply_unreadable():
-    bad = INVENTORY_HEADER + '\n"a-env-b"|"running"|"a"|"b"\n"x-env-Y"|"running"|"x"|"Y"\n'
+    bad = INVENTORY_HEADER + '\n"a-env-b"|"running"|"a"|"b"|""\n"x-env-Y"|"running"|"x"|"Y"|""\n'
     inventory = remote(raw(bad))
     assert_unreadable(inventory, "line 3: name is not a valid identifier")
 
@@ -520,7 +520,7 @@ def _stub(directory: Path, name: str, body: str) -> None:
 
 
 def test_default_local_runner_runs_docker_from_path(tmp_path, monkeypatch):
-    _stub(tmp_path, "docker", f"printf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"running\"|\"s\"|\"a\"'\n")
+    _stub(tmp_path, "docker", f"printf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"running\"|\"s\"|\"a\"|\"\"'\n")
     monkeypatch.setenv("PATH", str(tmp_path))
     assert read.read_local().environments == (Environment("s", "a", "running"),)
 
@@ -535,7 +535,8 @@ def test_default_remote_runner_runs_ssh_from_path(tmp_path, monkeypatch):
     _stub(
         tmp_path,
         "ssh",
-        f"printf '%s\\n' \"$@\" > {log}\nprintf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"exited\"|\"s\"|\"a\"'\n",
+        f"printf '%s\\n' \"$@\" > {log}\n"
+        f"printf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"exited\"|\"s\"|\"a\"|\"\"'\n",
     )
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     inventory = read.read_remote("perseus", HOST, connect_timeout=7.0)
