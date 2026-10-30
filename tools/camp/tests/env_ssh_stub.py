@@ -12,7 +12,8 @@ The stub serves two kinds of call:
   ``-f`` it forks into the background and the foreground process exits, and the background
   process re-points its descriptors 0, 1 and 2 at /dev/null, exactly as real ``ssh -f`` does
   (measured on OpenSSH 9.6: anything it would say after backgrounding is lost). It re-executes
-  itself with argv[0] ``ssh`` (the script path goes through the environment, so the code word holds no whitespace) so ``ps`` shows ``ssh -c <code> <args>`` (``-c`` is ssh's own
+  itself with argv[0] ``ssh`` (the script path goes through the environment, so the code word holds no
+  whitespace) so ``ps`` shows ``ssh -c <code> <args>`` (``-c`` is ssh's own
   cipher option, so the code is the value of an option and the real options follow, as in a real
   forward's ``ssh <args>``).
 
@@ -73,7 +74,9 @@ SCRIPT = "CAMP_ENV_STUB_SCRIPT"
 #: prints argv space-joined and a space would split the word. The script path travels in SCRIPT.
 CODE_WORD = f"__import__('runpy').run_path(__import__('os').environ['{SCRIPT}'],run_name='__main__')"
 
-BIND_FAILURE_TAIL = "channel_setup_fwd_listener_tcpip: cannot listen to port: {port}\nCould not request local forwarding."
+BIND_FAILURE_TAIL = (
+    "channel_setup_fwd_listener_tcpip: cannot listen to port: {port}\nCould not request local forwarding."
+)
 
 
 # --- the stub ssh ------------------------------------------------------------------------------
@@ -166,21 +169,30 @@ def _forward(args: list[str]) -> None:
 
     cfg = _config()
     if cfg.get("fail_start"):
-        message = cfg["fail_start"] if isinstance(cfg["fail_start"], str) else "ssh: connect to host: Connection refused"
+        fail_start = cfg["fail_start"]
+        message = fail_start if isinstance(fail_start, str) else "ssh: connect to host: Connection refused"
         _die(255, message)
 
     listeners: dict[socket.socket, tuple[str, int]] = {}
     for index, spec in enumerate(forwards):
         bind_address, local_port, target_address, target_port = spec.split(":")
         if cfg.get("bind_first_then_fail") and index == 1:
-            _die(255, f"bind [{bind_address}]:{local_port}: Address already in use\n" + BIND_FAILURE_TAIL.format(port=local_port))
+            _die(
+                255,
+                f"bind [{bind_address}]:{local_port}: Address already in use\n"
+                + BIND_FAILURE_TAIL.format(port=local_port),
+            )
         sock = socket.socket()
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((bind_address, int(local_port)))
         except OSError:
             if options.get("ExitOnForwardFailure") == "yes":
-                _die(255, f"bind [{bind_address}]:{local_port}: Address already in use\n" + BIND_FAILURE_TAIL.format(port=local_port))
+                _die(
+                    255,
+                    f"bind [{bind_address}]:{local_port}: Address already in use\n"
+                    + BIND_FAILURE_TAIL.format(port=local_port),
+                )
             continue
         sock.listen()
         listeners[sock] = (target_address, int(target_port))

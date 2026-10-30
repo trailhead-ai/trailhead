@@ -35,7 +35,7 @@ _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from .env_ssh_stub import AttachRig, ask, attached_rig, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, ask, attached_rig, port_is_free, wait_for  # noqa: E402
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 USAGE = "usage: camp env attach TARGET\n"
@@ -296,7 +296,11 @@ _PQ_WARNING = (
 
 @pytest.mark.parametrize(
     "preamble",
-    [_PQ_WARNING, "Warning: Permanently added 'perseus' to the list of known hosts.\n", "debug1: Reading configuration data\n"],
+    [
+        _PQ_WARNING,
+        "Warning: Permanently added 'perseus' to the list of known hosts.\n",
+        "debug1: Reading configuration data\n",
+    ],
     ids=["post-quantum-block", "warning", "debug"],
 )
 def test_the_reason_skips_ssh_warning_and_debug_lines(rig: AttachRig, preamble: str) -> None:

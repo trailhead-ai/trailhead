@@ -41,7 +41,10 @@ from .read import (
 LOCAL = "local"
 THIS_MACHINE = "this machine"
 _NOT_YET = "attaching an environment on this machine is not supported yet"
-_HOST_RULE = "the host is not a valid host name: host names must be lowercase letters, digits and -, starting with a letter or digit"
+_HOST_RULE = (
+    "the host is not a valid host name: host names must be lowercase letters, digits and -, "
+    "starting with a letter or digit"
+)
 _LS_POINTER = "run camp env ls to see what is running"
 
 

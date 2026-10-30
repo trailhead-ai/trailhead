@@ -184,7 +184,9 @@ def test_standard_port_is_the_container_side_and_orders_numerically() -> None:
 
 
 def test_stopped_container_with_no_ports_is_still_listed() -> None:
-    envs = parse_inventory(_reply(_ok("a", "one", "exited", ""), _ok("b", "two", "running", "127.0.0.1:3000->3000/tcp")))
+    envs = parse_inventory(
+        _reply(_ok("a", "one", "exited", ""), _ok("b", "two", "running", "127.0.0.1:3000->3000/tcp"))
+    )
     assert [(e.name, e.state, e.ports) for e in envs] == [
         ("one", "stopped", ()),
         ("two", "running", ((3000, 3000),)),
@@ -326,7 +328,9 @@ def test_ports_reason_names_the_line_and_never_the_raw_value() -> None:
 
 def test_no_partial_list_when_a_later_record_has_bad_ports() -> None:
     with pytest.raises(Unreadable):
-        parse_inventory(_reply(_ok("a", "b", ports="127.0.0.1:3000->3000/tcp"), _ok("c", "d", ports="0.0.0.0:1->1/tcp")))
+        parse_inventory(
+            _reply(_ok("a", "b", ports="127.0.0.1:3000->3000/tcp"), _ok("c", "d", ports="0.0.0.0:1->1/tcp"))
+        )
 
 
 @pytest.mark.parametrize(

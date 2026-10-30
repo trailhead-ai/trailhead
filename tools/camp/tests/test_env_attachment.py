@@ -126,11 +126,14 @@ def test_ports_are_ordered_by_standard_port() -> None:
         _row(200, _GOOD_CMD.replace(f"{_NS}:abc123:perseus/grp/main", f"{_NS}:abc123:perseus.local/grp/main")),
     ],
     ids=[
-        "other-uid", "grep-argv0", "grep-wearing-ssh-flags", "tag-word-in-remote-command-no-dashdash", "no-dash-N", "tag-after-dashdash-in-remote-command",
+        "other-uid", "grep-argv0", "grep-wearing-ssh-flags", "tag-word-in-remote-command-no-dashdash",
+        "no-dash-N", "tag-after-dashdash-in-remote-command",
         "o-tag-after-dashdash", "two-tag-options", "other-namespace",
         "bad-group", "bad-host", "missing-name", "non-ascii-port", "argv0-sshd",
-        "tag-and-N-in-remote-command", "o-is-the-value-of-l", "N-after-destination-unrecognised-by-design-stricter-than-openssh",
-        "options-after-destination-unrecognised-by-design-stricter-than-openssh", "no-L", "unknown-option-letter", "L-without-a-value",
+        "tag-and-N-in-remote-command", "o-is-the-value-of-l",
+        "N-after-destination-unrecognised-by-design-stricter-than-openssh",
+        "options-after-destination-unrecognised-by-design-stricter-than-openssh",
+        "no-L", "unknown-option-letter", "L-without-a-value",
         "uppercase-host", "dotted-host",
     ],
 )
@@ -311,7 +314,9 @@ def test_a_host_with_dashes_can_be_tagged() -> None:
     assert attachment.tag_for("my-box", "g", "n", "i1").endswith(":my-box/g/n")
 
 
-@pytest.mark.parametrize("group,name,attach_id", [("G", "n", "i"), ("g", "n n", "i"), ("g", "n", "a:b"), ("g", "n", "")])
+@pytest.mark.parametrize(
+    "group,name,attach_id", [("G", "n", "i"), ("g", "n n", "i"), ("g", "n", "a:b"), ("g", "n", "")]
+)
 def test_a_bad_group_name_or_id_is_refused(group: str, name: str, attach_id: str) -> None:
     with pytest.raises(Untaggable):
         attachment.tag_for("h", group, name, attach_id)
@@ -344,7 +349,8 @@ class _Child:
         tag = f"{os.environ['CAMP_ENV_TAG_NAMESPACE']}:{attach_id}:perseus/grp/main"
         env = {**os.environ, "CHILD_MODE": mode, "CHILD_MARKER": str(self.marker), "CHILD_SCRIPT": str(script)}
         self.proc = subprocess.Popen(
-            ["ssh", "-c", "__import__('runpy').run_path(__import__('os').environ['CHILD_SCRIPT'])", "-N", "-o", f"Tag={tag}",
+            ["ssh", "-c", "__import__('runpy').run_path(__import__('os').environ['CHILD_SCRIPT'])",
+             "-N", "-o", f"Tag={tag}",
              "-L", f"127.0.0.1:{self.port}:127.0.0.1:{self.port + 1}", "--", "dest"],
             executable=sys.executable, env=env, stdout=subprocess.PIPE, text=True,
         )
@@ -361,7 +367,8 @@ class _Child:
 
     def row(self, command: str | None = None, attach_id: str | None = None) -> str:
         tag = f"{os.environ['CAMP_ENV_TAG_NAMESPACE']}:{attach_id or self.attach_id}:perseus/grp/main"
-        return _row(self.proc.pid, command or f"ssh -N -o Tag={tag} -L 127.0.0.1:{self.port}:127.0.0.1:{self.port + 1} -- dest")
+        forward = f"127.0.0.1:{self.port}:127.0.0.1:{self.port + 1}"
+        return _row(self.proc.pid, command or f"ssh -N -o Tag={tag} -L {forward} -- dest")
 
 
 @pytest.fixture
@@ -606,7 +613,9 @@ def test_off_linux_every_address_is_probed_with_its_family() -> None:
     ]
 
 
-@pytest.mark.parametrize("family, address", [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")])
+@pytest.mark.parametrize(
+    "family, address", [(socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::"), (socket.AF_INET, "0.0.0.0")]
+)
 def test_an_unexpected_bind_error_is_a_refusal_not_a_traceback(family: int, address: str) -> None:
     def bind(fam, addr, port):
         if (fam, addr) == (family, address):
@@ -675,7 +684,8 @@ def test_on_linux_a_dual_stack_wildcard_listener_is_still_held_by_the_loopback_p
     sock.listen(1)
     try:
         port = sock.getsockname()[1]
-        assert attachment.port_holder(port, lsof_runner=lambda argv: "", platform="linux") == "a process camp cannot see"
+        holder = attachment.port_holder(port, lsof_runner=lambda argv: "", platform="linux")
+        assert holder == "a process camp cannot see"
     finally:
         sock.close()
 
@@ -706,14 +716,22 @@ def test_a_port_held_on_127_0_0_1_is_named_by_command_and_pid(listener) -> None:
 
 
 def test_a_holder_is_described_from_lsof_field_output() -> None:
-    fake = lambda argv: "p4242\ncsshd\nn127.0.0.1:2222\n"
-    bound = lambda family, address, port: (_ for _ in ()).throw(OSError(errno.EADDRINUSE, "in use"))
+    def fake(argv):
+        return "p4242\ncsshd\nn127.0.0.1:2222\n"
+
+    def bound(family, address, port):
+        raise OSError(errno.EADDRINUSE, "in use")
+
     assert attachment.port_holder(2222, bind=bound, lsof_runner=fake) == "sshd (pid 4242)"
 
 
 def test_a_holder_command_with_an_escape_sequence_is_described_with_it_removed() -> None:
-    fake = lambda argv: "p4242\nc\x1b[31mevil\x1b[0m\nn127.0.0.1:2222\n"
-    bound = lambda family, address, port: (_ for _ in ()).throw(OSError(errno.EADDRINUSE, "in use"))
+    def fake(argv):
+        return "p4242\nc\x1b[31mevil\x1b[0m\nn127.0.0.1:2222\n"
+
+    def bound(family, address, port):
+        raise OSError(errno.EADDRINUSE, "in use")
+
     holder = attachment.port_holder(2222, bind=bound, lsof_runner=fake)
     assert "\x1b" not in holder and "evil" in holder and "4242" in holder
 
@@ -727,7 +745,9 @@ def test_a_port_held_only_on_ipv6_loopback_is_held(listener, tmp_path: Path, mon
     assert attachment.port_holder(port) == "a process camp cannot see"
 
 
-def test_with_lsof_absent_a_held_port_is_a_process_camp_cannot_see(listener, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_with_lsof_absent_a_held_port_is_a_process_camp_cannot_see(
+    listener, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     port = listener()
     _no_lsof(tmp_path, monkeypatch)
     assert attachment.port_holder(port) == "a process camp cannot see"

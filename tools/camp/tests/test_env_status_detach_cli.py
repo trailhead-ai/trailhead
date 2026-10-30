@@ -426,7 +426,7 @@ def test_ls_warns_on_stderr_and_still_lists_when_the_process_table_cannot_be_rea
 # --- wiring ---------------------------------------------------------------------------------------
 
 
-def test_an_attachment_made_by_a_camp_copy_at_another_path_is_found_and_ended(  # inert-gate: allow wiring smoke, the forward's argv carries no camp path so there is no input to vary
+def test_an_attachment_made_by_a_camp_copy_at_another_path_is_found_and_ended(  # inert-gate: allow seam smoke
     rig: AttachRig, tmp_path: Path
 ) -> None:
     env = attached_rig(rig)
@@ -436,7 +436,8 @@ def test_an_attachment_made_by_a_camp_copy_at_another_path_is_found_and_ended(  
 
     made = subprocess.run(
         [sys.executable, str(other_cli), "env", "attach", "perseus/levr/main"],
-        capture_output=True, text=True, env={**rig.environ(), "TRAILHEAD_ROOT": str(_REPO_ROOT)}, cwd=str(home), timeout=60,
+        capture_output=True, text=True, cwd=str(home), timeout=60,
+        env={**rig.environ(), "TRAILHEAD_ROOT": str(_REPO_ROOT)},
     )
     assert made.returncode == 0, made.stderr
 

@@ -535,7 +535,8 @@ def test_default_remote_runner_runs_ssh_from_path(tmp_path, monkeypatch):
     _stub(
         tmp_path,
         "ssh",
-        f"printf '%s\\n' \"$@\" > {log}\nprintf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"exited\"|\"s\"|\"a\"|\"\"'\n",
+        f"printf '%s\\n' \"$@\" > {log}\n"
+        f"printf '%s\\n' '{INVENTORY_HEADER}' '\"s-env-a\"|\"exited\"|\"s\"|\"a\"|\"\"'\n",
     )
     monkeypatch.setenv("PATH", f"{tmp_path}:/usr/bin:/bin")
     inventory = read.read_remote("perseus", HOST, connect_timeout=7.0)

@@ -23,7 +23,17 @@ import time
 import uuid
 from typing import NoReturn
 
-from ..env.attachment import UNSEEN_HOLDER, Attachment, Unverifiable, UnverifiableAfterSignal, Untaggable, attachments, end, port_holder, tag_for
+from ..env.attachment import (
+    UNSEEN_HOLDER,
+    Attachment,
+    Unverifiable,
+    UnverifiableAfterSignal,
+    Untaggable,
+    attachments,
+    end,
+    port_holder,
+    tag_for,
+)
 from ..env.contract import Environment
 from ..env.read import (
     DOCKER_NOT_INSTALLED,
