@@ -38,9 +38,9 @@
   },
   {
    "id": "F1",
-   "pass": true,
+   "pass": false,
    "display_shown": true,
-   "detail": "refinement of task/tide-cache-expire-stale-readings-refinement-fails is named, the shim fired, and no refinement followed a failed answer"
+   "detail": "the re-run line is missing or not alone on its line"
   },
   {
    "id": "P1",
