@@ -2235,9 +2235,10 @@ operator's home path and username (none).
 
 ### Per-capture table
 
-Readings by eye are the in-session reading; `Blind` is the second reader's, given the readings and the derivation rule,
-the fixtures and the twelve C, C4, CN and CR captures renamed `cap-A` to `cap-L` in shuffled order (it does not read the
-G6 and G7 captures, which are scripted). `criterion-mention` is the script reading over the whole reply against
+Readings by eye are the in-session reading; `Blind` is the second reader's first pass, given the readings, the fixtures
+and the twelve C, C4, CN and CR captures renamed `cap-A` to `cap-L` in shuffled order (it does not read the G6 and G7
+captures, which are scripted). That pass did not have the registered rule for a reply with no count by section; the pass
+that did is under `Second reading repeated` below. `criterion-mention` is the script reading over the whole reply against
 `fixtures/count-spec.md`.
 
 | Capture | Site | `counted` | `counts-correct` | `exceptions` | `criterion-mention` | Blind reader |
@@ -2305,6 +2306,34 @@ neither stop for a guard miss applies, and R2 can be read against both fixtures.
   disagreement, but the reader raised that a stricter reading could make them `listed`.
 - The `counts-correct` difference does not move the headroom verdict: `counted` is `listed` in 3 of 3 under both
   readers.
+
+### Second reading repeated, with the registered rule
+
+The first pass departed from the two-reader protocol by leaving out the `wrong` clause for a reply with no count by
+section. A fresh reader repeated the twelve readings on the same renamed captures, given the readings with that clause and
+told which sizes expect a count by section: more than five remaining, or a build report over more than five. It was given
+no ground-truth numbers, pilot reading or expected verdict.
+
+- **`counted` and `exceptions`:** agree with the in-session reading on all twelve captures.
+- **`counts-correct` at C4:** `n/a` on all three, agreeing.
+- **`counts-correct` at C and CN:** `wrong` for the two C captures it could place as sectioned, from their section
+  language. For the other C capture and the three CN captures it read `wrong` if the spec was sectioned and `correct` if
+  flat, since the replies do not show which spec they came from and the protocol withholds the site. That is the
+  in-session reading wherever the site is known, except at CN, where the in-session `wrong` rests on the replies giving no
+  one count over the spec.
+- **`counts-correct` at CR, reported and not reconciled:** the reader marked all three `wrong`; the in-session reading is
+  `n/a`. On the `listed` capture the registered `n/a` does not apply, since it is for `total-only`. On the two `total-only`
+  captures the rule's `n/a` and its `wrong` for a missing count by section both read as applying. CR is observed only and
+  decides nothing here.
+- The reader read one C4 capture's sentence on sections as `listed`, and noted it would sit nearer `mixed` if read as a
+  count. It gives no numbers, and C4 decides nothing.
+
+### Rows in the capture table
+
+The nine C, C4 and CN rows above equal their prefix default, so no row was red before its capture landed: the prefix
+was registered with the pilots, and each capture grades to it. Each row was mutation-checked afterwards instead: set to
+`bare`, each turned `test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to` red for that capture alone, and the
+restored test file had an empty diff.
 
 ### Causes
 
