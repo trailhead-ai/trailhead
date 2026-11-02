@@ -9,8 +9,8 @@ graded by the two scripts that read it: placed under `## Slices` of the count sp
 --parent-coverage` must exit 0 and `candidate_set.py` must report all seven `covered:`. Both are needed, because the
 ledger gate passes a line whose covers token was dropped and the candidate set then offers the finished criteria again.
 
-The helpers here are what the eval's later tasks call to grade the G6 and G7 captures. The committed captures are
-registered in the two tables below; a capture in `runs/` that is not registered fails.
+The committed G6 and G7 captures are registered in the two tables below; a capture in `runs/` that is not registered
+fails.
 """
 
 from __future__ import annotations
@@ -189,11 +189,7 @@ G6_CAPTURES.update({f"count-g6-fifth-slice-{n}": True for n in (1, 2, 3)})
 
 
 def _captures(site: str) -> list[str]:
-    return sorted(
-        p.stem
-        for p in RUNS.glob(f"count-{site}-*.txt")
-        if re.fullmatch(rf"count-{site}-.+-\d+\.txt", p.name) and not p.name.endswith(".stderr.txt")
-    )
+    return sorted(p.stem for p in RUNS.glob(f"count-{site}-*.txt") if not p.name.endswith(".stderr.txt"))
 
 
 def test_every_g7_capture_in_runs_is_registered():
