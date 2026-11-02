@@ -177,12 +177,12 @@ def test_a_value_naming_an_identifier_the_spec_does_not_declare_fails_the_check(
     assert not covers_value_names_the_seven(COVERS_VALUE + ", AC13")
 
 
-# --- the committed pilot captures ---------------------------------------------------------------
+# --- the committed captures at base B (the pilot and the batch) -----------------------------------------------------
 
 # G7 captures by stem: True when the ledger line passes both readers. G6 captures by stem: True when the value passes
 # the covers check. A capture in runs/ with the prefix and no entry here fails the registration test.
-G7_CAPTURES: dict[str, bool] = {"count-g7-proposal-treated-1": True}
-G6_CAPTURES: dict[str, bool] = {"count-g6-proposal-treated-1": True}
+G7_CAPTURES: dict[str, bool] = {f"count-g7-proposal-treated-{n}": True for n in (1, 2, 3, 4)}
+G6_CAPTURES: dict[str, bool] = {f"count-g6-proposal-treated-{n}": True for n in (1, 2, 3, 4)}
 
 
 def _captures(site: str) -> list[str]:

@@ -2220,3 +2220,94 @@ operator's home path and username (none).
 **Protocol frozen.** The readings, guards, bars, end states and capture names above are frozen as of the pilots; the
 baseline batches are run against this registration, and a change after an R2-arm output has been seen is a dated
 amendment.
+
+## Baseline, 2026-11-02 — the count baseline batches at base B captured, graded and read; the baseline has headroom at C
+
+Run against the frozen registration above, with no change to a fixture, an arm, the registration or `rules.md`. Each
+site ran three new dispatches at B, `-2` to `-4`, each its own `claude -p` process by the dispatch form above (arm by
+`--append-system-prompt`, and by `--append-system-prompt-file` for `summary-baseline-build`), sequential and in the
+foreground, each exiting 0 with an empty stderr file; each pair of temporary directories was removed by name. The
+registration does not say a pilot counts as a graded run, so the pilots (`-1`) are not counted below; they are listed
+beside each site only to show they read the same way. A 2-1 split on a verdict would have been re-run to six; none
+occurred, so every site stands at three. Arms: C, C4 and CN on `third-noritual`; CR on `summary-baseline-build`; G6 and
+G7 on `proposal-treated`. Every capture went through `scripts/capture_scan.py` (clean) and was checked by hand for the
+operator's home path and username (none).
+
+### Per-capture table
+
+Readings by eye are the in-session reading; `Blind` is the second reader's, given the readings and the derivation rule,
+the fixtures and the twelve C, C4, CN and CR captures renamed `cap-A` to `cap-L` in shuffled order (it does not read the
+G6 and G7 captures, which are scripted). `criterion-mention` is the script reading over the whole reply against
+`fixtures/count-spec.md`.
+
+| Capture | Site | `counted` | `counts-correct` | `exceptions` | `criterion-mention` | Blind reader |
+|---|---|---|---|---|---|---|
+| `count-c-third-noritual-2` | C | listed (by state: 3, 1, 1, 7, items named) | wrong | both | text-with-number | listed, both; counts-correct differs (below) |
+| `count-c-third-noritual-3` | C | listed (same) | wrong | both | text-with-number | as above |
+| `count-c-third-noritual-4` | C | listed (same) | wrong | both | text-with-number | as above |
+| `count-c4-third-noritual-2` | C4 | listed (8 done, 4 not started, each by its text and number) | n/a | n/a | text-with-number | listed; counts-correct differs (below) |
+| `count-c4-third-noritual-3` | C4 | listed (same) | n/a | n/a | text-with-number | as above |
+| `count-c4-third-noritual-4` | C4 | listed (same; one prose sentence on sections, no counts) | n/a | n/a | text-with-number | as above |
+| `count-cn-third-noritual-2` | CN | listed (by state, as C) | wrong | both | text-with-number | listed, both; counts-correct differs (below) |
+| `count-cn-third-noritual-3` | CN | listed (same) | wrong | both | text-with-number | as above |
+| `count-cn-third-noritual-4` | CN | listed (same) | wrong | both | text-with-number | as above |
+| `count-cr-summary-baseline-build-2` | CR | listed (names the 7 observed) | n/a | one (AC8) | text-with-number | listed, one |
+| `count-cr-summary-baseline-build-3` | CR | total-only (covered 8, observed 7, missing 1) | n/a | one (AC8) | bare (observed) | total-only, one |
+| `count-cr-summary-baseline-build-4` | CR | total-only | n/a | one (AC8) | text-with-number (observed) | total-only, one |
+| `count-g6-proposal-treated-2` | G6 | `covers-field` gate-shape; `covers_value_names_the_seven` true | | | text-with-number over the statement (observed) | not read |
+| `count-g6-proposal-treated-3` | G6 | as above | | | as above | not read |
+| `count-g6-proposal-treated-4` | G6 | as above | | | as above | not read |
+| `count-g7-proposal-treated-2` | G7 | `grade_ledger_line` passes: gate exit 0, seven `covered:` | | | | not read |
+| `count-g7-proposal-treated-3` | G7 | as above | | | | not read |
+| `count-g7-proposal-treated-4` | G7 | as above | | | | not read |
+
+Pilots, not counted: C, CN, C4, CR, G6 and G7 `-1` read as in the Pilots table above (C and CN listed by state and
+wrong; C4 listed; CR total-only; G6 and G7 pass).
+
+### Counts, derived from the table
+
+| Site | Reading | Count of 3 |
+|---|---|---|
+| C | `by-section` / `listed` | 0 / 3 |
+| C | `correct` / `wrong` | 0 / 3 |
+| C | `exceptions` `both` | 3 / 3 |
+| C | `criterion-mention` `text-with-number` | 3 / 3 |
+| C4 | `listed`, each by its text with the number | 3 / 3 |
+| CN | one count over the spec, both exceptions (the expected reading) | 0 / 3 (all listed by state, `wrong`; exceptions `both` 3 / 3) |
+| CR | `total-only` / `listed` | 2 / 1; `exceptions` `one` 3 / 3 |
+| G6 | `covers-field` `gate-shape` and `covers_value_names_the_seven` | 3 / 3 |
+| G7 | `grade_ledger_line` passes | 3 / 3 |
+
+### Headroom verdict, against its registered rule
+
+The rule: the baseline is not majority `by-section` and `both`. At B, C is `by-section` in 0 of 3 captures (and `both`
+in 3 of 3), so it is not majority `by-section` and `both`. **The baseline has headroom at C; the stop for an
+all-met baseline does not apply.** G6 and G7 were clean on every run at B (3 of 3 each, 4 of 4 with the pilot), so
+neither stop for a guard miss applies, and R2 can be read against both fixtures.
+
+### What each observed site read as at B, for the treated task
+
+- **C4:** each criterion by its own text with its number, nothing counted: the expected reading.
+- **CN:** listed by state, not one count over the spec; the expected reading is not met at B (all three `wrong`, both
+  exceptions named).
+- **CR:** total-only in two captures, a listing of the seven observed in one; the one exception (AC8) named by its
+  text with its number in all three. Not counted by section.
+
+### Disagreements between the two readers (reported, not reconciled)
+
+- **`counts-correct` on a listed reply.** The in-session reading is `wrong` at C and CN, following the registered
+  rule ("`wrong` otherwise, including a reply with no count by section where the site expects one"); the blind reader
+  marked these `correct` because the by-state counts they do give match the fixture, and flagged the rule as
+  ambiguous. The blind reader was not given the rule's reading for a listed reply, and it could not tell from the
+  captures whether the sectioned or the flat spec was in play. It marked C4's by-state counts `correct` where the
+  in-session reading is `n/a`. `counted` and `exceptions` agree on all twelve captures.
+- The blind reader read CR-3 and CR-4 as `total-only` though each names AC8; the in-session reading is the same, so no
+  disagreement, but the reader raised that a stricter reading could make them `listed`.
+- The `counts-correct` difference does not move the headroom verdict: `counted` is `listed` in 3 of 3 under both
+  readers.
+
+### Causes
+
+None is claimed. That the captures group by state and not by section, and the CR captures give totals, is observed; why
+is not tested here (a hypothesis only: with no counting instruction in `rules.md` at B, nothing steers the grouping
+toward the spec's sections). No per-capture ablation was run.

@@ -834,6 +834,17 @@ CAPTURE_OVERRIDES = {
     "proposal-drive-treated-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
     "proposal-drive-treated-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
     "proposal-enabler-treated-1": {"criterion-mention": "text-with-number", "covers-field": "absent"},
+    # The count baseline batch at base B (2026-11-02): one row per graded capture of C, C4 and CN, equal to the prefix
+    # default; G6 and G7 are registered in the ledger guard, CR is read by eye.
+    "count-c-third-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-c-third-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-c-third-noritual-4": {"criterion-mention": "text-with-number"},
+    "count-c4-third-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-c4-third-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-c4-third-noritual-4": {"criterion-mention": "text-with-number"},
+    "count-cn-third-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-cn-third-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-cn-third-noritual-4": {"criterion-mention": "text-with-number"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

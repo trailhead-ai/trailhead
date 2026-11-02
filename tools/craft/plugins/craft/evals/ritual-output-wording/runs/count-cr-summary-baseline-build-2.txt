@@ -1,0 +1,26 @@
+**`task/the-trustee-tables-slice` is not closed.** The observation gate refused it, so the parent stays `in-progress` and Phase 6 is not ticked. No evidence is recorded that "Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8)".
+
+- **simplify:** no changes
+- **correctness:** SHIP, 0 findings
+- **security:** skipped — no trigger
+- **state-coverage:** parent 3, doc 3, missing 0
+- **criterion-observations:** covered 8, observed 7, missing 1 (gate exit 1)
+- **push:** 1 repo pushed
+- **metrics:** 4 tasks, 8 dispatches (2.0/task), 51m wall clock, 1 lesson written, 0 lessons consumed
+
+**Criteria with an observation (7 of the 8 covered):**
+- Each training day has twelve places, and a thirteenth booking is refused with a message saying the day is full (AC2).
+- A member who cancels at least a week ahead is refunded in full, whether they paid by card or by cheque (AC3).
+- A booked member is sent one reminder the evening before, saying where to meet and when the day starts (AC4).
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up the metres built, by site and by year (AC6).
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+
+**To finish:** the spreadsheet download needs real evidence recorded as an observation line in the parent's `## Criterion observations` section. Once that's there, re-running execute resumes at Phase 6 and retries the close. If there is no such evidence yet, that work is still outstanding, and the parent should stay `in-progress` until it's done.
+
+No PR was opened, and that call is yours. The work is pushed, but the slice is not done until that spreadsheet download is observed. Run this when you're ready:
+
+```
+/portage:pull_request
+```

@@ -1,0 +1,22 @@
+The spec is two-thirds done: 8 of the 12 acceptance criteria are finished and the other 4 haven't been started, going by the end-of-week-8 status note.
+
+**Done**
+- A member can book a place from the events page, up to the evening before (AC1).
+- Each day has twelve places, and a thirteenth booking is refused with a message saying the day is full (AC2).
+- A member who cancels at least a week ahead is refunded in full, by card or cheque (AC3).
+- A booked member gets one reminder the evening before, saying where to meet and when the day starts (AC4).
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up metres built, by site and by year (AC6).
+- The booking confirmation tells the member which boots and gloves to bring (AC10).
+- A member who has attended can download a certificate showing the training days they completed (AC12).
+
+**Not started**
+- The refunds table, showing each refund paid with the amount and date (AC7).
+- Downloading each of the tables as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page, showing all the tables together with the year at the top (AC9).
+- Recording an injury reported on the day, with the insurer's form filled in from the booking (AC11).
+
+**Worth knowing**
+- **Testing:** the note only says booking was tested with test members and the two tables were checked against the 2024 days. The boots and gloves message and the certificates are just described as in, so I'd treat those two as done but unconfirmed. The note also doesn't say the certificate shows the days completed.
+- **Trustee reports:** this is where most of the remaining work sits. The spreadsheet download and summary page both cover all the tables, so neither can be finished until the refunds table exists.
+- **The spec file:** it still says "Status: ready" and its Slices section is empty, so it doesn't show any of this progress.
