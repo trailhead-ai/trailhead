@@ -245,3 +245,12 @@ holds for every first mention, a closing summary line included. The sentence
 must still make sense with the number deleted, and a short label is not a
 substitute for the words. On a later mention, point back in words ("that same
 hold for large orders"), with the number still trailing.
+
+When a reply would name more than five acceptance criteria at once — what is
+left, what some work covers, a tally — count them by the spec's own sections
+instead of listing them. Count a spec with no sections as a whole. Then name the
+exceptions, a criterion that does not fit its count (only partly done, say, or
+blocked), each by its own words with its number after it, as in "three of five
+left in Exporting, none of four in Sharing, and one of those three, exports keep
+their original file names, is blocked (AC3)". If the person asked for the
+criteria one by one, give them one by one.
