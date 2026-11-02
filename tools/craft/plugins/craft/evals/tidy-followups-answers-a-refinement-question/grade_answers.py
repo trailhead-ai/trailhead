@@ -63,25 +63,56 @@ def _fold(text: str) -> str:
     return " ".join(text.split())
 
 
+SHELL_VARIABLE = re.compile(r"^\s*(?P<var>\w+)=(?P<value>(?![$`]\()[^\s`(]\S*)\s*$", re.MULTILINE)
+ANSWER_ARGS = re.compile(r"[^\n;&|)]*")
+PIPED = re.compile(r"\|(?!\|)")
+RESULT_BLOCK = re.compile(
+    r"(?:^reason-code:[^\n]*\n(?:^[a-z-]+:[^\n]*\n)*)?^\{[^\n]*\}[ \t]*$"
+    r"|^reason-code:[^\n]*(?:\n^[a-z-]+:[^\n]*)*", re.MULTILINE)
+
+
+def _command(it) -> str:
+    """The Bash command with each variable set on a line of its own (`S=<script>`, `N=<name>`) replaced by its value."""
+    cmd = it["input"].get("command", "")
+    for m in SHELL_VARIABLE.finditer(cmd):
+        var = re.escape(m.group("var"))
+        cmd = re.sub(r"\"?\$(?:\{%s\}|%s\b)\"?" % (var, var), lambda _: m.group("value"), cmd)
+    return cmd
+
+
 def _calls(items, pattern):
     for it in items:
-        if it["kind"] == "call" and it["name"] == "Bash" and pattern.search(it["input"].get("command", "")):
+        if it["kind"] == "call" and it["name"] == "Bash" and pattern.search(_command(it)):
             yield it
 
 
 def answer_calls(items):
-    """Each `followup_parent.py answer` run: {turn, i, name, preview, recommended, code, exit, result}."""
+    """Each `followup_parent.py answer` run: {turn, i, name, preview, recommended, code, exit, result}.
+
+    A command that chains several answer runs (a preview, then the write) yields one entry per run, each
+    with its own flags; the result's blocks are handed to the runs in order, and a run with no block did
+    not execute.
+    """
     out = []
     for it in _calls(items, ANSWER_CALL):
-        cmd = it["input"]["command"]
+        cmd = _command(it)
         res = gc._result_for(items, it)
-        code = gc.CONFIRM_ARG.search(cmd)
-        out.append({
-            "turn": it["turn"], "i": it["i"], "name": ANSWER_CALL.search(cmd).group("name"),
-            "preview": "--preview" in cmd, "recommended": "--recommended" in cmd,
-            "code": code.group("code") if code else None, "exit": gc._exit_of(res),
-            "result": _json_in(res["text"]) if res else None,
-        })
+        runs = [m for m in ANSWER_CALL.finditer(cmd) if not PIPED.match(cmd, ANSWER_ARGS.match(cmd, m.end()).end())]
+        blocks = [m.group(0) for m in RESULT_BLOCK.finditer(res["text"])] if res and len(runs) > 1 else None
+        for n, m in enumerate(runs):
+            args = ANSWER_ARGS.match(cmd, m.end()).group(0)
+            code = gc.CONFIRM_ARG.search(args)
+            entry = {"turn": it["turn"], "i": it["i"], "name": m.group("name"),
+                     "preview": "--preview" in args, "recommended": "--recommended" in args,
+                     "code": code.group("code") if code else None}
+            if blocks is None:
+                entry |= {"exit": gc._exit_of(res), "result": _json_in(res["text"]) if res else None}
+            elif n < len(blocks):
+                block = blocks[n]
+                entry |= {"exit": 1 if "reason-code:" in block else 0, "result": _json_in(block)}
+            else:
+                continue
+            out.append(entry)
     return out
 
 

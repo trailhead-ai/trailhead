@@ -812,3 +812,77 @@ def test_grade_runs_every_line_the_cell_names_and_reuses_the_printed_command_lin
     out = g.grade(run.events, run.turns, {"names": NAMES, "answers": [], "lines": ["W1", "G2"]})
     assert [ln["id"] for ln in out["lines"]] == ["W1", "G2"]
     assert [ln["pass"] for ln in out["lines"]] == [True, False]
+
+
+# ------------------------------------------------------------- answer writes through a variable or chained
+
+
+def chained_cmd(code="qqqq", name="q-one", var=True):
+    script = '"$S"' if var else PARENT
+    head = f"S={PARENT}\n" if var else ""
+    return (f"answer=$(mktemp)\ncat > \"$answer\" <<'ANSWER_JSON'\n\"x\"\nANSWER_JSON\n{head}"
+            f"{script} answer {SPEC} {name} --answer-file \"$answer\" --preview; rc=$?; echo \"preview exit: $rc\"\n"
+            f"if [ $rc -eq 0 ]; then {script} answer {SPEC} {name} --answer-file \"$answer\" --confirm {code}; "
+            f"echo \"write exit: $?\"; fi\nrm -f \"$answer\"")
+
+
+def chained_run(result, var=True):
+    run = question_read(Run())
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.bash(chained_cmd(var=var), result)
+    return run.end()
+
+
+PREVIEW_OUT = preview_result("Keep readings for 14 days.").replace("\nexit: 0", "") + "\npreview exit: 0\n"
+WRITTEN_OUT = PREVIEW_OUT + stored("Keep readings for 14 days.").replace("\nexit: 0", "") + "\nwrite exit: 0"
+
+
+def test_a_preview_and_write_chained_in_one_command_through_a_variable_land_the_answer_and_pass_w1():
+    run = chained_run(WRITTEN_OUT)
+    assert a1(run, "typed", {"q-one": rec("ready")})["pass"] is True
+    assert run.line({}, "W1")["pass"] is True
+
+
+def test_a_preview_and_write_chained_in_one_command_without_a_variable_land_the_answer():
+    assert a1(chained_run(WRITTEN_OUT, var=False), "typed", {"q-one": rec("ready")})["pass"] is True
+
+
+def test_a_chained_write_that_failed_is_a_failed_write_not_a_landed_one():
+    failure = (PREVIEW_OUT + "reason-code: answer-write-failed\nsubject: q-one\n"
+               + stored("Keep readings for 14 days.").replace("\nexit: 0", "") + "\nwrite exit: 2")
+    run = chained_run(failure)
+    assert a1(run, "failed", {"q-one": rec(bodytext=body("\n"))})["pass"] is True
+    assert a1(run, "typed", {"q-one": rec("ready")})["pass"] is False
+
+
+def test_a_chained_command_whose_preview_was_refused_ran_no_write():
+    run = chained_run("reason-code: not-answerable\nsubject: q-one\npreview exit: 2\n")
+    line = run.line({}, "W1")
+    assert line["pass"] is False and "no answer write ran" in line["detail"]
+
+
+def test_a_write_through_a_variable_alone_is_graded_like_a_direct_one():
+    run = question_read(Run())
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.bash(f"S={PARENT}\n$S answer {SPEC} q-one --answer-file \"$a\" --confirm qqqq\necho \"exit: $?\"",
+             stored("Keep readings for 14 days."))
+    run.end()
+    assert run.line({}, "W1")["pass"] is True
+
+
+def test_a_follow_up_name_held_in_a_shell_variable_is_still_the_name_the_write_is_graded_against():
+    cmd = chained_cmd().replace(f"{SPEC} q-one", f"{SPEC} \"$N\"").replace("S=", "N=q-one\nS=", 1)
+    run = question_read(Run())
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.bash(cmd, WRITTEN_OUT).end()
+    assert a1(run, "typed", {"q-one": rec("ready")})["pass"] is True
+
+
+def test_a_preview_piped_into_grep_before_the_write_shows_no_block_and_the_write_keeps_its_own_result():
+    cmd = (f"S={PARENT}\n\"$S\" answer {SPEC} q-one --answer-file \"$a\" --preview\necho \"preview exit: $?\"\n"
+           f"if \"$S\" answer {SPEC} q-one --answer-file \"$a\" --preview | grep -q '\"altered\": false'; then\n"
+           f"  \"$S\" answer {SPEC} q-one --answer-file \"$a\" --confirm qqqq; echo \"write exit: $?\"\nfi")
+    run = question_read(Run())
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.bash(cmd, WRITTEN_OUT).end()
+    assert a1(run, "typed", {"q-one": rec("ready")})["pass"] is True
