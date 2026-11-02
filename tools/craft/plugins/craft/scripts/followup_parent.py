@@ -855,13 +855,13 @@ def answer_followup(
         if not recommended:
             raise ParentError("not-answerable", (name,))
         raw = f"{RECOMMENDED_PREFIX}{recommended}"
+    at = _answer_span(body)
+    if at is None:
+        raise ParentError("not-answerable", (name,))
     text, altered = _stored_answer(raw)
     if preview:
         return {"name": name, "answer": text, "altered": altered}, None, (name,)
     require_confirmation(ANSWER_KIND, spec, answer_payload(name, revision), typed)
-    at = _answer_span(body)
-    if at is None:
-        raise ParentError("not-answerable", (name,))
     line = f"**Answer:** {text}"
     lines = body.split("\n")
     new_body = "\n".join([*lines[:at], line, *lines[at:]])

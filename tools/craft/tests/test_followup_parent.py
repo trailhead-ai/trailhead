@@ -4538,6 +4538,23 @@ def test_an_unresolved_section_with_an_unclosed_fence_is_refused(lore_env, spec,
     assert snapshot(env, vault, name) == frozen
 
 
+@pytest.mark.parametrize(
+    "tail, refused", [("\n```\nstill open\n", True), ("\n```\nclosed\n```\n", False)], ids=["unclosed", "closed"]
+)
+def test_preview_agrees_with_the_write_on_a_fence_after_the_section(lore_env, spec, tmp_path, tail, refused):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + tail)
+    frozen = snapshot(env, vault, name)
+    r = run_answer(env, spec, name, "--answer-file", answer_file(tmp_path, "x"), "--preview")
+    if refused:
+        assert r.returncode == 1 and r.stdout == ""
+        assert "reason-code: not-answerable" in r.stderr
+    else:
+        assert r.returncode == 0
+        assert json.loads(r.stdout) == {"name": name, "answer": "x", "altered": False}
+    assert snapshot(env, vault, name) == frozen
+
+
 def test_a_multi_line_answer_lands_on_one_line_and_starts_no_heading_or_field(lore_env, spec, tmp_path):
     env, vault = lore_env
     before = unresolved()
