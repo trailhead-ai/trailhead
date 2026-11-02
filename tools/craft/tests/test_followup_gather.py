@@ -1186,3 +1186,14 @@ def test_a_failed_lookup_of_a_follow_up_parent_exits_two_with_no_stdout(capsys):
     assert code == 2
     assert out == ""
     assert reason_of(err) == "lore-failed"
+
+
+def test_sanitize_text_redacts_a_token_after_a_backslash_u_sequence():
+    token = "A" * 28
+    out = gather.sanitize_text("C:\\uAb12" + token + " tail", 500)
+    assert token not in out and "[REDACTED]" in out
+
+
+def test_sanitize_text_redacts_a_token_after_a_control_looking_escape():
+    out = gather.sanitize_text("\\u0000/opt/homebrew/Cellar/python@3 tail", 500)
+    assert "[REDACTED]" in out

@@ -429,6 +429,47 @@ def test_the_same_characters_without_a_backslash_are_not_an_escape(tmp_path):
     assert result.returncode == 1, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        'session\\u003d' + "A" * 30,
+        '\\u0022' + "A" * 30 + '\\u0022',
+        '\\uAb12' + "A" * 28,
+    ],
+)
+def test_an_escape_that_is_not_a_control_character_does_not_shorten_a_token(tmp_path, line):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"' + line + '"}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert ":high-entropy-base64:" in result.stdout
+
+
+def test_an_escaped_backslash_before_u_is_not_an_escape(tmp_path):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"\\\\u0000' + "A" * 27 + '"}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert ":high-entropy-base64:" in result.stdout
+
+
+def test_an_odd_run_of_backslashes_before_u_is_an_escape(tmp_path):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"\\\\\\u0000/opt/homebrew/Cellar/python@3"}\n')
+    result = _run(f)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scan_text_applies_the_escape_rule_only_to_a_json_stream():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("capture_scan_for_scan_text", SCANNER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = "C:\\uAb12" + "A" * 28
+    assert any(f.cls == "high-entropy-base64" for f in mod.scan_text(text))
+    esc = "\\u0000/opt/homebrew/Cellar/python@3"
+    assert any(f.cls == "high-entropy-base64" for f in mod.scan_text(esc))
+    assert mod.scan_text(esc, json_stream=True) == []
+
+
 # ---- CI enforcement: the committed capture batch is scanned ----------------
 
 
