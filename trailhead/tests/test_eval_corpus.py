@@ -48,6 +48,7 @@ _LEGACY_HAND_SHAPED = frozenset(
         "craft:ritual-output-wording",
         "craft:scrub-citation-vs-inline",
         "craft:tidy-followups-builds-one-parent",
+        "craft:tidy-followups-confirms-before-writing",
         "craft:tidy-followups-drops-and-merges",
         "craft:tidy-followups-presents-a-finished-spec",
         "craft:tidy-followups-reports-an-unmet-criterion",
@@ -61,6 +62,7 @@ _LEGACY_HAND_SHAPED = frozenset(
         "outpost:pad-on-visual-question",
         "outpost:publish-routing",
         "outpost:record-link-rendering",
+        "outpost:reference-named-for-the-vault",
         "portage:approval-is-human-only",
     }
 )
