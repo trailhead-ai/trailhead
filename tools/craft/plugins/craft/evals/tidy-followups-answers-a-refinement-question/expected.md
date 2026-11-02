@@ -326,3 +326,43 @@ for a waiting follow-up. It is graded inside F1 (a `rerun` key on the cell's `fa
 line of its own. `altered` is re-run on its registered lines, unchanged. Nothing else is amended: no registered text, no other
 cell, no other line. The first batch's captures of these cells predate the prose and are expected to fail the new expectation;
 they are reported as the old text and are not graded against it as a regression.
+
+### Results of the second batch
+
+Six treatment arms of `altered`, `answer-write-fails` and `refinement-fails` (two each; captures `-r3` and `-r4` beside the first
+batch's `-r1` and `-r2`) on a fresh snapshot of the skill at content fingerprint `e5985667a07c56d8c1b97948b8ebf79d34a3086d`, the same sandboxed rig, Claude Code 2.1.316, model
+`claude-opus-5-5`, up to four at a time. The final grader read every persisted run of the case from the arms' own records.
+
+| Cell | r3 | r4 |
+|---|---|---|
+| `altered` | pass | pass |
+| `answer-write-fails` (F1 now includes the re-run line) | pass | pass |
+| `refinement-fails` (F1 now includes the re-run line) | pass | pass |
+
+6 of 6 pass every registered line, the new expectation included: after a failed write the closing report printed the re-run line
+alone on its own line, with a sentence on the live parent. `refinement-fails` r3 first graded as failing Q1 ("no question read
+returned" the follow-up); the arm had read the question as `P=<script>; $P question ...` on one line and the grader expanded only a
+variable set on a line of its own. That was a grader defect, found by reading the stream, and was fixed red first; the arm was not
+re-run. **Cost and time:** 12.18 USD and 1,970 s of arm time, about 14 minutes of wall clock.
+
+**Verdicts that moved against the table of the first batch**, all from the final grader and none from a new arm:
+- `refinement-fails` r1 and r2: F1 passes → fails. These ran on the old text and their closing reports print no re-run line; the
+  new expectation did not exist when they ran. They are reported as the old text and not as a regression of the new one.
+- `answer-write-fails` r1 and r2 (old text) already printed the re-run line and still pass.
+- `refinement-fails` r3 is new and moved only from the defect above.
+- No other verdict of the 34 first-batch runs moved: the six real left-out reports of the first batch still pass L1 under the
+  stricter grader (the follow-up's own name and title no longer count as a reason; an unindented list under a Nested label is
+  read as nested).
+
+**What the measurement does and does not cover.**
+- The first batch measured an earlier text of the skill. The prose edits since sit on branches only these three cells take; the
+  other eleven cells were measured on the earlier text and not re-run, so **cells not re-run were not measured on the shipped
+  text.** The `not-answerable` and `unclosed-fence` rows need an over-long recommended answer or an unclosed fence, and no
+  fixture builds either; they are not measured by any arm.
+- The first batch's `43c2ec1187041e6327c7351501dd08d41defe9e4` is not the shipped file: its line breaks were reflowed and prose edits
+  followed, so the word-for-word equivalence stated in the earlier note holds for the reflow only, not for the shipped skill.
+- L1's reason line need not concern the follow-up beyond naming no other follow-up of the cell, which is loose; it can fail (a line
+  without the reason fails, as does one that gives it only through the follow-up's own name or title), and the six real reports
+  carry the reason.
+- A1's "may carry one" clause (a replaced section may still hold an Answer line that starts with the typed text) covers a state P1
+  still fails for an unanswered follow-up: a surviving Answer means the refinement never finished. No run reaches it.

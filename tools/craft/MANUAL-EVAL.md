@@ -3919,7 +3919,7 @@ results and the results themselves), `fixtures/make-fixture-vault.py` (the build
 
 **Under test:** `skills/tidy-followups/SKILL.md` at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4` and the craft scripts of the same tree: step 10a, which puts a question refinement could not resolve to the
 operator in the same run, writes the answer behind its code and refines that follow-up again, and the re-run line step 13 adds. **Baseline:** the skill at `41578631128fad1bdfec7a91c52af0270c93452a`, whose scripts have no
-`question` or `answer`. The shipped skill's fingerprint is `8c48bb5e5a3c1f69e2febd1f7dd332d749afbc19`: the same 13,571 words as the measured text, reflowed to the column budget after the batch, so no arm was re-run.
+`question` or `answer`. The shipped skill is at `e5985667a07c56d8c1b97948b8ebf79d34a3086d`, which is not the measured text: the batch's text was reflowed to the column budget, three prose edits followed (the `not-answerable` row, the staged-file removal at the sanitized-text re-ask, the re-run line after a failed `answer of` or `refinement of` write) and an `unclosed-fence` row was added. The first batch measured `43c2ec1187041e6327c7351501dd08d41defe9e4` in all 14 cells; a second batch measured the shipped text in `altered`, `answer-write-fails` and `refinement-fails` only, the cells that take an edited branch. The other 11 cells were not measured on the shipped text.
 
 **Dispatch.** As the confirm case: `git archive` snapshots under a `mktemp -d` outside `$HOME`, a fixture built inside the run dir, `scripts/eval-sandbox`, a stream-json `claude` process fed one scripted reply per turn
 (`{code}` filled only from a code-bearing question line in the arm's own text), tools `Bash,Read,Glob,Grep,Agent` so the second pass can dispatch its refinement subagents. Claude Code 2.1.316, 2026-11-02. **Model:** none
@@ -3978,3 +3978,19 @@ One word in two captured record bodies was replaced by a placeholder for a machi
 
 **Cost and time.** 34 arms, 63.86 USD and 10,625 s of arm time: treatment 55.47 USD and 9,426 s (28 arms), baseline 5.74 USD and 835 s (4), regression 2.66 USD and 364 s (2). The 32 pooled arms took about 48 minutes of
 wall clock. The captures are 23 MB, about 0.68 MB a run against 0.33 MB a run in the confirm case: each run carries the second refinement's subagent stream as well.
+
+### Second batch, on the shipped skill text
+
+`altered`, `answer-write-fails` and `refinement-fails`, treatment, two runs each (captures `-r3` and `-r4` in `runs/`, beside the first batch's `-r1` and `-r2`; the first batch's captures are untouched), on a fresh snapshot, the same rig and model.
+The expectation that the closing report prints the re-run line alone on its own line after a failed write was registered, in its own commit, before any of these arms ran, and is graded inside F1.
+
+| Cell | r3 | r4 |
+|---|---|---|
+| `altered` | pass | pass |
+| `answer-write-fails` | pass | pass |
+| `refinement-fails` | pass | pass |
+
+6 of 6 pass every registered line. `refinement-fails` r3 first failed Q1 because the grader missed a question read made as `P=<script>; $P question ...` on one line; fixed red first, not re-run. 12.18 USD, 1,970 s of arm time.
+Verdicts that moved against the first table, all from the final grader: `refinement-fails` r1 and r2 (old text) now fail F1, as their reports print no re-run line (reported as the old text); nothing else moved, and the
+six first-batch left-out reports still pass the stricter L1. The captures are now 27 MB over 40 runs. Cells not re-run were not measured on the shipped text; the `not-answerable` and `unclosed-fence` rows are measured by no arm,
+as no fixture builds an over-long recommended answer or an unclosed fence. See `expected.md` for the disclosures on L1's reason line and A1's "may carry one" clause.
