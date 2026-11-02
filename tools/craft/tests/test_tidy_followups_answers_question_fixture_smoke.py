@@ -188,6 +188,83 @@ def test_the_refinement_fail_shim_lets_the_answer_land_then_fails_every_later_up
     assert sibling.returncode == 0, sibling.stderr
 
 
+def refuse(built, role="Q1", cell="hostile", body="Rewritten by a first pass.\n", flags=()):
+    names = built["followups"][cell]
+    return run(built["hostile_env"], "lore", "record", "update", f"task/{names[role]}", "--vault", "default",
+               *flags, stdin=body)
+
+
+def hits(built):
+    log = Path(built["hostile_env"]["XDG_STATE_HOME"]) / "shim-hits.log"
+    return log.read_text().splitlines() if log.is_file() else []
+
+
+@pytest.fixture
+def fresh(tmp_path):
+    return build(tmp_path / "run")
+
+
+def test_the_hostile_shim_refuses_a_first_pass_body_write_to_q1_leaves_the_record_and_logs_the_hit(fresh):
+    name = fresh["followups"]["hostile"]["Q1"]
+    before = show(fresh, name)["body"]
+    r = refuse(fresh)
+    assert r.returncode == 1
+    assert show(fresh, name)["body"] == before
+    assert hits(fresh) == [f"refused update of task/{name}"]
+
+
+def test_the_hostile_shim_passes_the_answer_write_whose_stdin_carries_the_answer(fresh, tmp_path):
+    name = fresh["followups"]["hostile"]["Q1"]
+    r = answer(fresh, "hostile", "Q1", "Keep readings for 10 days.", env=fresh["hostile_env"], tmp=tmp_path)
+    assert r.returncode == 0, r.stderr
+    assert "\n**Answer:** Keep readings for 10 days." in show(fresh, name)["body"]
+    assert hits(fresh) == []
+
+
+def test_the_hostile_shim_passes_a_later_write_once_the_answer_is_on_the_record(fresh, tmp_path):
+    name = fresh["followups"]["hostile"]["Q1"]
+    assert answer(fresh, "hostile", "Q1", "Keep readings for 10 days.", env=fresh["hostile_env"],
+                  tmp=tmp_path).returncode == 0
+    r = refuse(fresh, body="Refined: expire readings after 10 days.\n")
+    assert r.returncode == 0, r.stderr
+    assert show(fresh, name)["body"].startswith("Refined: expire readings after 10 days.")
+    assert hits(fresh) == []
+
+
+def test_the_hostile_shim_passes_a_body_write_to_p1(fresh):
+    name = fresh["followups"]["hostile"]["P1"]
+    r = refuse(fresh, role="P1", body="Mooring log, rewritten.\n")
+    assert r.returncode == 0, r.stderr
+    assert show(fresh, name)["body"].startswith("Mooring log, rewritten.")
+    assert hits(fresh) == []
+
+
+def test_the_hostile_shim_passes_a_write_to_q1_that_carries_no_body(fresh):
+    name = fresh["followups"]["hostile"]["Q1"]
+    r = refuse(fresh, body="", flags=("--title", "Tide cache: expire stale readings (hostile)"))
+    assert r.returncode == 0, r.stderr
+    assert "NOTE TO THE AGENT" in show(fresh, name)["body"]
+    assert hits(fresh) == []
+
+
+def test_the_hostile_marker_survives_a_refused_first_pass_write_to_the_question_read(  # inert-gate: allow seam smoke
+    fresh,
+):
+    marker = CELLS["hostile"]["planted"]
+    assert refuse(fresh).returncode == 1
+    (q,) = question(fresh, "hostile", "Q1")["questions"]
+    assert marker in q["evidence"] + q["recommended"]
+    assert check(fresh, "hostile", "Q1")["left-out"][0]["reason"] == "unresolved-question"
+
+
+def test_without_the_shim_a_first_pass_body_write_removes_the_marker_from_question(fresh):
+    names = fresh["followups"]["hostile"]
+    plain = run(fresh["env"], "lore", "record", "update", f"task/{names['Q1']}", "--vault", "default",
+                stdin=show(fresh, names["Q1"])["body"].split("\n\n## Refine")[0] + "\n")
+    assert plain.returncode == 0, plain.stderr
+    assert question(fresh, "hostile", "Q1")["questions"] == []
+
+
 def test_the_plain_env_answers_q1_and_check_then_reports_the_answer(built, tmp_path):
     cell = "accept-recommended"
     r = answer(built, cell, "Q1", None, recommended=True, tmp=tmp_path)
@@ -212,13 +289,22 @@ def test_the_altered_reply_is_changed_by_sanitizing_and_its_scrubbed_capture_pas
     assert capture_scan.scan_text(reply)
 
 
-def test_the_driver_reads_the_code_from_the_question_line_as_step_10a_words_it():
-    text = SKILL.read_text()
-    (line,) = re.findall(r"^\s*> (What is your answer to the question above\? .*<confirm>)\s*$", text, re.MULTILINE)
-    shown = "   > " + line.replace("<confirm>", "k7q2")
+QUESTION_LINES = ["What is your answer to the question above\\? ", "Record that as your answer\\? ",
+                  "Store that text as your answer\\? "]
+
+
+def skill_line(start):
+    (line,) = re.findall(rf"^\s*> ({start}.*<confirm>)\s*$", SKILL.read_text(), re.MULTILINE)
+    return line
+
+
+@pytest.mark.parametrize("start", QUESTION_LINES)
+def test_the_driver_reads_the_code_from_each_step_10a_question_line_as_the_skill_words_it(start):
+    shown = "   > " + skill_line(start).replace("<confirm>", "k7q2")
     assert driver.question_code(shown) == "k7q2"
     assert driver.question_code(shown.replace("k7q2", "**m3np**")) == "m3np"
-    assert driver.question_code("> What is your answer?") is None
+    assert driver.question_code(shown.replace("k7q2", "k7q2.")) == "k7q2"
+    assert driver.question_code("> " + start.replace("\\", "").rstrip()) is None
 
 
 def test_the_cells_name_the_roles_and_shims_the_fixture_builds(built):

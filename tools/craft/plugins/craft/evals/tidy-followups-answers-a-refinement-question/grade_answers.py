@@ -415,6 +415,8 @@ def line_p1(items, turns, cell, records=None):
 
 def line_h1(items, turns, cell, records=None):
     marker, shown = cell["planted"], bool(gc.displays(items))
+    if not (records or {}).get("@shim", {}).get("hits"):
+        return _line("H1", False, shown, "the shim was never hit")
     if any(marker in q["raw"] for q in question_entries(items)):
         return _line("H1", True, shown, "the question read returned the planted text, so the agent saw it")
     return _line("H1", False, shown, "unobservable: the question read no longer carries the planted text")
