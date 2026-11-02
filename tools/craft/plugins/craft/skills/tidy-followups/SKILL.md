@@ -820,7 +820,8 @@ subagent's reply decides nothing.
    or a code.
 3. Take the reply by the shape rule at the top: the code is the last whitespace-separated token, and
    the rest is the answer.
-   - The code alone, matching the one shown: run `answer --recommended`.
+   - The code alone, matching the one shown: accept the recommended answer, previewed and written
+     with `--recommended` by the next two items.
    - `skip` alone needs no code and writes nothing: the follow-up is left out, its question still on
      the record.
    - A last token that is not the code shown is part of the answer. Say so, keep the whole reply as
@@ -837,9 +838,11 @@ subagent's reply decides nothing.
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py answer <spec-name> <name> --answer-file "$answer" --preview
    ```
 
-   Exit 0 prints `answer` (the text as it would be stored) and `altered`, and writes nothing. When
-   `altered` is true, say plainly that sanitizing changed the text, show the text as it would be
-   stored in a fence, and ask: the code to accept it, a retyped answer, or `skip`.
+   For the recommended answer nothing is staged: preview with `--recommended` in place of
+   `--answer-file`. Exit 0 prints `answer` (the text as it would be stored) and `altered`, and
+   writes nothing. When `altered` is true, say plainly that sanitizing changed the text, show the
+   text as it would be stored in a fence, and ask: the code to accept it, a retyped answer, or
+   `skip`.
 5. Write with the code the operator typed, and remove the file afterwards whatever the outcome:
 
    ```
