@@ -2374,9 +2374,9 @@ site names.
 | `count-c4-count-noritual-1` | C4 | by-section (table, then the four named by text) | correct | n/a | text-with-number | as above (none) |
 | `count-c4-count-noritual-2` | C4 | by-section (same) | correct | n/a | nickname | as above |
 | `count-c4-count-noritual-3` | C4 | by-section (prose, the four named by text) | wrong (literal sentence; ambiguous) | n/a | text-with-number | by-section, correct (differs) |
-| `count-cn-count-noritual-1` | CN | listed (corrected; in-session at the time: `total-only`) (nine left, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs, below) |
-| `count-cn-count-noritual-2` | CN | listed (corrected; in-session at the time: `total-only`) (three done, seven not started, two named; no explicit nine) | wrong (corrected; in-session at the time: `correct`) | both | text-with-number | listed, wrong |
-| `count-cn-count-noritual-3` | CN | listed (corrected; in-session at the time: `total-only`) (nine open, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs, below) |
+| `count-cn-count-noritual-1` | CN | total-only (re-read; in-session at the time: `total-only`) (nine left, seven not started, two named; AC12 also named) | correct | both | text-with-number | listed, wrong (differs, below) |
+| `count-cn-count-noritual-2` | CN | listed (re-read, between the readings; in-session at the time: `total-only`) (three done, seven not started, two named; no explicit nine) | wrong (corrected; in-session at the time: `correct`) | both | text-with-number | listed, wrong |
+| `count-cn-count-noritual-3` | CN | total-only (re-read; in-session at the time: `total-only`) (nine open, seven not started, two named; nothing else named) | correct | both | text-with-number | listed, wrong (differs, below) |
 | `count-cr-count-build-1` | CR | by-section (3 of 3, 4 of 5 observed) | correct | one (AC8) | text-with-number (observed) | by-section, correct, one |
 | `count-cr-count-build-2` | CR | by-section | correct | one (AC8) | text-with-number (observed) | as above |
 | `count-cr-count-build-3` | CR | by-section (plus the digest's total line) | correct | one (AC8) | text-with-number (observed) | as above |
@@ -2405,7 +2405,7 @@ Guards, script-graded:
 | C | `exceptions` `both` | 3 of 3 | 3 of 3 |
 | C | `criterion-mention` `text-with-number` | 3 of 3 | 3 of 3 |
 | C4 (observed) | each criterion by its own text, nothing counted | 0 of 3 (all three count by section and also name the four); 0 of 6 after the split run | 3 of 3 |
-| CN (observed) | `counted` `listed`; `counts-correct` `correct`; both exceptions | `listed` 3 of 3 (in-session at the time: `total-only` 3 of 3); `correct` 2 of 3 (CN-2 never states nine); both 3 of 3. Blind reader: `listed` 3 of 3, `wrong` 3 of 3. Expected reading not shown to be met | `listed` 3 of 3, `wrong` 3 of 3 |
+| CN (observed) | `counted` `total-only`; `counts-correct` `correct`; both exceptions | `total-only` 2 of 3 (CN-1, CN-3) and `listed` 1 (CN-2), in-session at the time `total-only` 3 of 3; `correct` 2 of 3 (CN-2 never states nine); both 3 of 3. Blind reader: `listed` 3 of 3, `wrong` 3 of 3. The expected reading is met in CN-1 and CN-3, which state nine | `listed` 3 of 3, `wrong` 3 of 3 |
 | CR (observed) | `by-section` / `total-only` / `listed` | 3 / 0 / 0; `exceptions` `one` 3 of 3 | 0 / 2 / 1 over three graded runs (0 / 4 / 2 over six, below); `one` 3 of 3 |
 | G1 | `text-with-number` | 5 of 6 (first three: 2 of 3, split, re-run to six) | control, same day: 5 of 6 |
 | G2 | `template-shape`; `criterion-mention` `bare` | 6 of 6; 6 of 6 | `template-shape`; majority `bare` |
@@ -2450,11 +2450,13 @@ the arm table needs no marking.
   would name more than five ... at once ... what is left, what some work covers, a tally").
 - **CN:** at B, listed by state and `wrong` (0 of 3). At R2 each reply gives overall figures (nine left, or three done,
   seven not started and two named) with both exceptions named by text and number; CN-2 never states the figure nine. In
-  session at the time the three were read `total-only` and `correct`, which was looser than the registered words:
-  `total-only` is one figure with no criteria named, and these replies give several figures and name the exceptions and
-  more. Re-read against the registered words they are `listed` on all three, and CN-2 is `wrong` since it never states
-  nine (`Corrections to the CN readings`, below). The second reader scored `listed` and `wrong` on all three. The
-  expected reading (one count over the whole spec, both exceptions named) is not shown to be met. Reported, not
+  session at the time the three were read `total-only` and `correct`. The registered words say `total-only` is a miss at
+  C "even with both exceptions named" and "At CN it is the expected reading", so naming the exceptions does not move a
+  reply off `total-only`, and `listed` (naming the criteria one by one) does not fit a reply that names two or three.
+  The replies sit between the two readings, as the second reader said. CN-1 and CN-3 state three of twelve done, nine
+  left and both exceptions by text, so they are the expected reading and `total-only`; CN-2 gives three, seven and two
+  with no nine, which the registered parenthetical (a count by state, with the items named) puts at `listed`
+  (`Corrections to the CN readings`, below). The second reader scored `listed` and `wrong` on all three. Reported, not
   reconciled; CN decides nothing.
 - **CR:** at B, total-only in two and a listing in one. At R2 all three give the observed counts by section (three of three
   in Booking and cancelling, four of five in Trustee reports) beside the digest's totals, and name AC8 by its text with its
@@ -2467,13 +2469,16 @@ the arm table needs no marking.
   two of five in Trustee reports ..." which puts the four not-started in Booking), blind `correct` (read as done counts).
   C4 is observed only.
 - **CN `counted` and `counts-correct`:** in-session at the time `total-only` and `correct`, blind `listed` and `wrong` on
-  all three. The in-session `counted` was then corrected to `listed` (it agrees with the blind reader), and CN-2's
-  `counts-correct` to `wrong`; the in-session CN-1 and CN-3 stay `correct`, where the blind reader read `wrong`. The blind
-  reader could not tell the flat spec from the sectioned one (the site label is withheld) and scored against the
-  sectioned spec, as the baseline's repeat did; it also found the replies fit neither `listed` nor `total-only` exactly.
-  Reported without choosing: the remaining difference is `counts-correct` on CN-1 and CN-3.
-- `counted` and `exceptions` otherwise agree on all twelve; the blind reader's note that the rule's definition of an
-  exception ("partly done, or blocked") does not cover a missing observation (AC8) is recorded.
+  all three. Re-read against the registered words the in-session `counted` is `total-only` on CN-1 and CN-3 and `listed`
+  on CN-2, so the blind reader's `listed` differs on CN-1 and CN-3; CN-2's `counts-correct` is `wrong` (it never states
+  nine); the in-session CN-1 and CN-3 stay `correct`, where the blind reader read `wrong`. The blind reader could not tell
+  the flat spec from the sectioned one (the site label is withheld) and scored against the sectioned spec, as the
+  baseline's repeat did; it also found the replies fit neither `listed` nor `total-only` exactly, which the position of
+  CN-1 and CN-3 between the two readings agrees with. Reported without choosing: the differences are `counted` and
+  `counts-correct` on CN-1 and CN-3.
+- `exceptions` agrees on all twelve and `counted` on ten of twelve (the two differences are CN-1 and CN-3 above); the
+  blind reader's note that the rule's definition of an exception ("partly done, or blocked") does not cover a missing
+  observation (AC8) is recorded.
 
 ### Rows in the capture tables
 
@@ -2497,7 +2502,8 @@ The registered split rule ("a 2-1 split on any verdict is re-run to six") was ap
 other verdict. This section applies it to the rest. It decides nothing: C, the guards' bars and the end state are as
 `Treated, 2026-11-02` records them, and no fixture, arm, registration or `rules.md` changed. The scan was over every
 verdict column of the `Baseline` and `Treated` per-capture tables, after the CN corrections below, for a 2-1 split among
-the three graded runs (pilots not counted). It found six:
+the three graded runs (pilots not counted). It found six, and the CN re-read below makes `counted` at CN a seventh (its
+six captures were already run for the `counts-correct` split, so no run is made for it):
 
 | Site | Verdict | Graded runs, in order | Run to |
 |---|---|---|---|
@@ -2506,11 +2512,14 @@ the three graded runs (pilots not counted). It found six:
 | C4 at R2 | `counts-correct` | `correct`, `correct`, `wrong` (-1 to -3) | -4 to -6 |
 | C4 at R2 | `criterion-mention` (observed) | `text-with-number`, `nickname`, `text-with-number` | -4 to -6 |
 | CN at R2 | `counts-correct`, once CN-2 is corrected | `correct`, `wrong`, `correct` (-1 to -3) | -4 to -6 |
-| G6 at R2 | `criterion-mention` over the statement (`--drop-value-line`; E's guards section says it is not a bar at G6) | `no-mention`, `text-with-number`, `no-mention` (-1 to -3) | -4 to -6 |
+| CN at R2 | `counted`, as re-read in the corrections below | `total-only`, `listed`, `total-only` (-1 to -3) | -4 to -6 (already run) |
+| G6 at R2 | `criterion-mention` over the statement (`--drop-value-line`; `Guards above the cut-off` in the registration says it is not a bar at G6) | `no-mention`, `text-with-number`, `no-mention` (-1 to -3) | -4 to -6 |
 
 No other column splits: C is unanimous on all four readings at both arms, every guard bar (G1 and the control already at
-six, G2, G3, G5, G6's `covers-field` and `covers_value_names_the_seven`, G7) is unanimous, and CN's `counted` is `listed`
-on all three after the correction. The G6 split was found when its statement was graded with `--drop-value-line` (it had
+six, G2, G3, G5, G6's `covers-field` and `covers_value_names_the_seven`, G7) is unanimous. CN's `counted` splits 2-1 on
+the first three once the replies are read against the registered words (it was `total-only` 3 of 3 in session and
+`listed` 3 of 3 under an earlier re-read); over six it reads `total-only` 2 and `listed` 4, which is not a clean
+majority. CN decides nothing. The G6 split was found when its statement was graded with `--drop-value-line` (it had
 not been graded that way in the treated table); it is a reading of the prose above the final line, not of a bar, and the
 operator decided it be run to six like the others.
 
@@ -2524,20 +2533,26 @@ home path and username (none).
 
 ### Corrections to the CN readings
 
-The registered words: `total-only` is one overall figure with no criteria named; a count by state or over the whole spec
-with the items named is `listed`; at CN the expected count is nine. In session at the time, CN-1 to CN-3 were read
-`total-only`, which does not fit: each names at least the two exceptions (AC6, AC11), and CN-1 and CN-2 name AC12 as
-well. The readings were redone against the registered words, the original shown beside each:
+The registered words: `total-only` is one overall figure with no criteria named, "a miss at C even with both exceptions
+named", and "At CN it is the expected reading"; `listed` is naming the criteria one by one, and "a count of items by their
+state, or by the whole spec, with the items named" is `listed`; at CN the expected count is nine. So a reply that states
+three of twelve done and nine left and names only the two exceptions is the expected reading, and a reply that names the
+criteria one by one is not it. In session at the time, CN-1 to CN-3 were read `total-only`. The replies were read again
+against the registered words, one by one, with the original beside each. Each states its figures and names the
+exceptions as the rule asks, so "no criteria named" is not a test the expected reading could fail, and none of the six
+names the criteria one by one, so the replies sit between the two readings:
 
-| Capture | In session at the time | Re-read against the registered words | Why |
+| Capture | In session at the time | Re-read against the registered words | Where it sits |
 |---|---|---|---|
-| `count-cn-count-noritual-1` | `total-only`, `correct` | `listed`, `correct` | three done and nine left, with AC6, AC11 and AC12 named; states nine |
-| `count-cn-count-noritual-2` | `total-only`, `correct` | `listed`, `wrong` | three done, seven not started, AC6, AC11 and AC12 named; never states nine |
-| `count-cn-count-noritual-3` | `total-only`, `correct` | `listed`, `correct` | nine open, seven of them not started, AC6 and AC11 named by their text; states nine |
+| `count-cn-count-noritual-1` | `total-only`, `correct` | `total-only`, `correct` | "Three of the twelve acceptance criteria are done and nine are left"; seven not started and two exceptions (AC6, AC11) by text and number; AC12 also named, as a done item with no check. The nine is stated, and 12 less 3 is 9. The expected reading, with one extra criterion named |
+| `count-cn-count-noritual-2` | `total-only`, `correct` | `listed`, `wrong` | "three of its twelve acceptance criteria are finished, seven haven't been started, and two are stuck or incomplete"; AC6, AC11 and AC12 named. Never states nine. A count by state with three items named, between the readings; `wrong` since the nine is not stated |
+| `count-cn-count-noritual-3` | `total-only`, `correct` | `total-only`, `correct` | "three of the twelve criteria are finished, and nine are still open. Seven of those nine haven't been started"; AC6 and AC11 by their text and number, and no other criterion named. The nine is stated. The expected reading exactly |
 
-The baseline CN captures (`count-cn-third-noritual-2` to `-4`) were re-read the same way: `listed` and `wrong` as
-recorded (each groups by state and none states nine), so they do not change. `exceptions` is `both` on all of them.
-The second reader's readings are untouched; it already read the three treated captures `listed` and `wrong`.
+The baseline CN captures (`count-cn-third-noritual-2` to `-4`) each name all twelve criteria one by one under the state
+headings, so they are `listed` and `wrong` as recorded and do not change. `exceptions` is `both` on all of them. The
+second reader's readings are untouched: it read the three treated captures `listed` and `wrong`, and found they fit
+neither reading exactly. Where the in-session reading now differs from it (`counted` on CN-1 and CN-3) the difference is
+reported, not reconciled.
 
 ### Per-capture table of the new captures
 
@@ -2552,9 +2567,9 @@ G6 is scripted and was not read by the second reader.
 | `count-c4-count-noritual-4` | C4 | by-section (table, then the four named by text) | correct | n/a | text-with-number | by-section, correct, none |
 | `count-c4-count-noritual-5` | C4 | by-section (bullets per section, then the four named) | correct | n/a | nickname | by-section, correct, none |
 | `count-c4-count-noritual-6` | C4 | by-section (same) | correct | n/a | text-with-number | by-section, correct, none |
-| `count-cn-count-noritual-4` | CN | listed (by state; AC6, AC11, AC12 named; no nine) | wrong | both | text-with-number | listed, wrong if sectioned and correct if flat (could not tell), both |
-| `count-cn-count-noritual-5` | CN | listed (same) | wrong | both | text-with-number | as above |
-| `count-cn-count-noritual-6` | CN | listed (same) | wrong | both | text-with-number | as above |
+| `count-cn-count-noritual-4` | CN | listed (between the readings: by state, one partly done, one blocked, seven not started; AC6, AC11 and AC12 named; no nine) | wrong | both | text-with-number | listed, wrong if sectioned and correct if flat (could not tell), both |
+| `count-cn-count-noritual-5` | CN | listed (between the readings: three done, two started or held up, seven untouched; AC6, AC11 and AC12 named; no nine) | wrong | both | text-with-number | as above |
+| `count-cn-count-noritual-6` | CN | listed (between the readings: three done, seven not started, the other two named; AC6 and AC11 named, AC12 not by number; no nine) | wrong | both | text-with-number | as above |
 | `count-cr-summary-baseline-build-5` | CR | total-only (covered 8, observed 7, missing 1) | n/a | one (AC8) | text-with-number (observed) | total-only, wrong (n/a as the alternative), one |
 | `count-cr-summary-baseline-build-6` | CR | total-only | n/a | one (AC8) | bare (observed) | total-only, wrong (n/a as the alternative), one |
 | `count-cr-summary-baseline-build-7` | CR | listed (names the seven observed) | n/a | one (AC8) | bare (observed) | listed, wrong, one |
@@ -2571,19 +2586,21 @@ G6 is scripted and was not read by the second reader.
 | C4 at R2 | `counts-correct` `correct` / `wrong` | 2 / 1 | 5 / 1 (clean) |
 | C4 at R2 | `criterion-mention` `text-with-number` / `nickname` (observed) | 2 / 1 | 4 / 2 |
 | C4 at R2 | expected reading (each criterion by its own text, nothing counted) | 0 of 3 | 0 of 6 |
-| CN at R2 | `counted` `listed` (corrected) | 3 of 3 | 6 of 6 |
+| CN at R2 | `counted` `total-only` / `listed` (re-read against the registered words) | 2 / 1 (CN-1, CN-3 `total-only`) | 2 / 4 |
 | CN at R2 | `counts-correct` `correct` / `wrong` (corrected) | 2 / 1 | 2 / 4 (CN-1, CN-3 correct) |
 | CN at R2 | `exceptions` `both`; `criterion-mention` `text-with-number` | 3 of 3; 3 of 3 | 6 of 6; 6 of 6 |
-| CN at R2 | expected reading (one count over the whole spec, both exceptions named) | not shown | not shown: `counted` is `listed` in six of six |
+| CN at R2 | expected reading (one count over the whole spec, both exceptions named) | 2 of 3 (CN-1, CN-3) | 2 of 6: CN-1 and CN-3 state nine; the other four give figures by state and never state nine |
 | G6 at R2 | `covers-field` `gate-shape`; `covers_value_names_the_seven` | 3 of 3; 3 of 3 | 6 of 6; 6 of 6 |
 | G6 at R2 | `criterion-mention` over the statement, `--drop-value-line` (observed) | `no-mention` 2, `text-with-number` 1 | `no-mention` 5, `text-with-number` 1 |
 | G6 at B | same | `text-with-number` 3 of 3 | not split, so not re-run |
 
 Only C4's `counts-correct` reaches a clean majority at six. The others stay unsettled at six (CR's `counted` 4 of 6, CR's
-`criterion-mention` 3 and 3, C4's `criterion-mention` 4 of 6, CN's `counts-correct` 2 of 6), and no bar reads any of them.
-The G6 statement at R2 moved from the seven named criteria at B (`text-with-number` 3 of 3) to a count in five of six
-captures (for example "four of four in Booking and cancelling, none of five in Trustee reports ..."), which is R2
-acting as intended on the one ritual statement measured above the cut-off; since it is not a bar, "Fully covered" being a
+`criterion-mention` 3 and 3, C4's `criterion-mention` 4 of 6, CN's `counts-correct` 2 of 6, CN's `counted` 2 and 4), and no bar reads any of them.
+The G6 statement at R2 moved from the seven named criteria at B (`text-with-number` 3 of 3) to a count of the covered
+seven in six of six captures (for example "Fully covered: seven criteria, which is five of five in Trustee reports and
+two of two in Kit and injuries"), which is R2 acting as intended on the one ritual statement measured above the cut-off.
+The `criterion-mention` reading over the statement is `no-mention` in five of six; capture -2 reads `text-with-number`
+only because its what-is-left clause names AC12 by its text and number. Since it is not a bar, "Fully covered" being a
 count and not seven named criteria is recorded here and in the results and decides nothing.
 
 ### Disagreements between the two readers on the new captures (reported, not reconciled)
@@ -2637,8 +2654,8 @@ readings and the renamed captures; where they differ the difference is stated, n
 
 C passes on each reading under both readers; the baseline had headroom (0 of 3 `by-section`). The blind reader agreed
 with the in-session reading on `counted` and `exceptions` for all twelve baseline captures of C, C4, CN and CR, and on
-all twelve treated ones once the in-session CN reading is corrected from `total-only` to `listed` (it was read
-`total-only` at the time, which the registered words do not support). It differed on `counts-correct` where stated below.
+ten of the twelve treated ones; it differs on `counted` at CN-1 and CN-3 (in-session `total-only` once re-read against the
+registered words, blind `listed`). It differed on `counts-correct` where stated below.
 
 ### What each guard showed at R2
 
@@ -2656,7 +2673,8 @@ Every guard holds, G6 and G7 included, so R2 is kept; `rules.md` was not changed
 **The one ritual statement measured above the cut-off.** G6's reply is the slice statement of a seven-criterion slice,
 and R2 acts at that size. Graded with `--drop-value-line`, `criterion-mention` (not a bar at G6) read `text-with-number`
 3 of 3 at B and, at R2, `no-mention` in five of six and `text-with-number` in one (the first three were a 2-1 split, run
-to six). "Fully covered" moved from naming the seven criteria to counting them, for example "seven criteria, which is five
+to six; the one is capture -2, whose what-is-left clause names AC12 by text and number, while "Fully covered" counts the
+covered seven in all six). "Fully covered" moved from naming the seven criteria to counting them, for example "seven criteria, which is five
 of five in Trustee reports and two of two in Kit and injuries". That is R2 doing what it says; it is not a miss, and the
 bars on G6 (`gate-shape` and `covers_value_names_the_seven`) hold on all six.
 
@@ -2672,7 +2690,7 @@ decides nothing.
 | Site | At B | At R2 | Expected reading met at R2 |
 |---|---|---|---|
 | C4 (four remaining, no exception) | each criterion named by its own text with its number, nothing counted: 3 of 3 `listed`, `counts-correct` `n/a` | `by-section` 6 of 6 (three, then three more), and the four also named by text; `counts-correct` `correct` 5, `wrong` 1 (C4-3, in-session; the blind reader read it `correct`); `criterion-mention` `text-with-number` 4, `nickname` 2 | no: 0 of 6 |
-| CN (spec with no sections) | `listed` by state, `wrong`, both exceptions: 0 of 3 for the expected reading | `listed` 6 of 6 (in-session at the time `total-only` on the first three, corrected); `counts-correct` `correct` 2 of 6 (CN-1, CN-3; CN-2 never states nine, and the three more did not either); both exceptions 6 of 6; blind reader `listed` on the first three and on the three more, and `wrong` on the first three | not shown to be met: no capture is one figure with no criteria named, and `counts-correct` is `correct` in 2 of 6 |
+| CN (spec with no sections) | `listed` by state, `wrong`, both exceptions: 0 of 3 for the expected reading | `total-only` 2 and `listed` 4 of six: CN-1 and CN-3 state three of twelve done, nine left and both exceptions by text, and the other four give figures by state and never state nine (in session at the time `total-only` on the first three); `counts-correct` `correct` 2 of 6 (CN-1, CN-3); both exceptions 6 of 6; blind reader `listed` on the first three and on the three more, and `wrong` on the first three | met in 2 of 6 (CN-1, CN-3); not met in the four that never state nine |
 | CR (execute report, the one exception AC8) | `listed` 2, `total-only` 4 (six, after the split run); `exceptions` `one` 6 of 6 | `by-section` 3 of 3 (counts in the two sections beside the digest's totals); `exceptions` `one` 3 of 3; `counts-correct` `correct` 3 of 3 in-session | counted, yes |
 
 ### Limits
@@ -2684,20 +2702,27 @@ decides nothing.
   five criteria at once and R2 firing fits its words; no ablation separates that from another cause, so it stays a
   hypothesis. The threshold of five is not shown to leave four remaining alone. Recorded as a follow-up against R2's
   threshold wording.
-- **CN's expected reading is not shown to be met.** The in-session reading was `total-only` at the time, which the
-  registered words do not support (one figure with no criteria named): re-read against them the replies are `listed` in
-  six of six, and `counts-correct` is `correct` in 2 of 6 (CN-2 and the three more never state nine). The second reader
-  read `listed` and `wrong` on the first three; it also could not tell the flat spec from the sectioned one, since the
-  site is withheld. Recorded as a follow-up against R2's sentence about specs with no sections ("Count a spec with no
-  sections as a whole"), as the registration says to do when the treated CN arm does not read as one count with both
-  exceptions named. CN decides nothing; it is reported, not reconciled.
-- **G2 never exercised R2 at the size where it acts, and the registration overstates what it measures.** G2's prompt cites
-  one criterion (stated under `Guards above the cut-off`). The G2 captures cite 5 to 7 distinct criteria across their
-  findings (six advocate and reviewer captures: 6, 6, 6, 6, 5 and 7), at most 3 on any one line, all `bare` (6 of 6).
-  That is reassuring but it is not a tally: no reply counts the criteria it cites, and the most on one line is three. The registration's accepted-risk
-  paragraph says G2 "measures whether that still holds with R2 loaded"; the reviewer template's counter-instruction is not
-  shown to hold against a reply that would name more than five at once, since none of the replies did. That paragraph is
-  registration text and stays as written; this is the correction.
+- **CN's expected reading is met in two of six.** CN-1 and CN-3 state three of twelve done, nine left and both
+  exceptions by text and number (AC6, AC11), which is what "Count a spec with no sections as a whole" asks for. The other
+  four (CN-2, CN-4, CN-5, CN-6) give figures by state and never state nine: "three finished, seven not started, two
+  stuck", "three done, one partly done, one blocked, seven not started" and the like. That is not one count over the whole
+  spec. The registered words fit none of the six exactly (`total-only` at CN is the expected reading even with the
+  exceptions named, and `listed` is naming the criteria one by one, which none does), so the replies sit between the two;
+  `counted` reads `total-only` 2 and `listed` 4, a 2-1 split on the first three and not a clean majority at six, with the
+  six captures already run. The second reader read `listed` and `wrong` on the first three and could not tell the flat spec
+  from the sectioned one, since the site is withheld. Recorded as a follow-up against R2's sentence about specs with no
+  sections ("Count a spec with no sections as a whole") on the four captures that never state nine, as the registration
+  says to do when the treated CN arm does not read as one count with both exceptions named. CN decides nothing; it is
+  reported, not reconciled.
+- **G2's replies were not a tally, so G2 did not exercise R2's trigger as C4 does.** G2's prompt cites one criterion
+  (stated under `Guards above the cut-off`). The G2 captures cite 5 to 7 distinct criteria across their findings (six
+  advocate and reviewer captures: 6, 6, 6, 6, 5 and 7; five of the six cite 6 or 7), at most 3 on any one line, all `bare`
+  (6 of 6). Two meanings of "at once" are in use here. The C4 limit counts identifiers across the whole reply (the C4
+  captures at B name twelve, so they are over five). The G2 limit asks whether a reply tallies the criteria it names (what is left, what some
+  work covers), and across-findings citations are not that: no G2 reply counts the criteria it cites, and the most on one
+  line is three. The registration's accepted-risk paragraph says G2 "measures whether that still holds with R2 loaded";
+  the reviewer template's counter-instruction is not shown to hold against a reply that tallies more than five, since none
+  of the G2 replies tallied anything. That paragraph is registration text and stays as written; this is the correction.
 - **`counts-correct` at CR was ambiguous at B.** The registered `n/a` is for `total-only`; on a `listed` reply it does not
   apply, and on a `total-only` reply the rule's `n/a` and its `wrong` for a missing count by section both read as
   applying. The second reader marked all three baseline CR captures `wrong`, the in-session reading `n/a`. It did not bite
@@ -2721,10 +2746,14 @@ decides nothing.
   was re-run (G1 and the control, then CR at B and C4, CN and G6 at R2).
 - Arms reach the model by `--append-system-prompt` (or `--append-system-prompt-file` for the build arms), not by the
   harness's own rules loading.
-- **The cut-off is not observed under five, or at exactly six.** C4's four remaining is not a reply under the cut-off: all
-  four C4 captures at B name all twelve identifiers, so R2 firing at C4 fits its words (more than five named at once), and
-  no site measures a reply that names five or fewer. The C and CN sites sit at nine remaining. Whether R2 leaves a reply
-  under the cut-off alone is a known unknown and stays open.
+- **The cut-off is not observed at five or six.** C4's four remaining is not a reply under the cut-off: all four C4
+  captures at B name all twelve identifiers, so R2 firing at C4 fits its words (more than five named at once). The same
+  count puts G1 above the cut-off: every G1 reply at R2 names all seven identifiers (AC1 to AC7), and it passes because the
+  prompt asks for each criterion in a line, which R2's one-by-one clause leaves alone. The G3 and G5 replies do name
+  fewer: the G3 replies name two criteria by text (AC3, AC4) and describe the five left by topic, and the G5 replies name
+  AC5 and AC6 by text and AC2 as the one exception, three in all. So R2 leaves a reply with two or three criteria named
+  alone in six of six, but those sites were not built to test the cut-off, and no site was built to put a reply at exactly five or six. The C
+  and CN sites sit at nine remaining. Whether R2 leaves a reply near the cut-off alone is a known unknown and stays open.
 - **Unmeasured ritual surfaces:** the spec review's summary and saved detail, and distill. Slice choice's step 4 prints
   the gate's `candidates:` and `partial:` tokens as identifier lists, and whether that contradicts R2 is a follow-up.
 - **Accepted risk, owned by the operator.** R2 loads into every dispatched agent. Past the reliability reviewer and the

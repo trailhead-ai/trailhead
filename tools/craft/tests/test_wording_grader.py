@@ -872,7 +872,8 @@ CAPTURE_OVERRIDES = {
     "count-cn-third-noritual-3": {"criterion-mention": "text-with-number"},
     "count-cn-third-noritual-4": {"criterion-mention": "text-with-number"},
     # The count treated batch at R2 and its guards (2026-11-02): one row per graded capture, per check, including the
-    # ones equal to the prefix default. G7 is registered in the ledger guard, CR is read by eye.
+    # ones equal to the prefix default, except count-g6-fifth-slice-4 to -6, which have no row and fall to the prefix
+    # default. G7 is registered in the ledger guard, CR is read by eye.
     "count-c-count-noritual-1": {"criterion-mention": "text-with-number"},
     "count-c-count-noritual-2": {"criterion-mention": "text-with-number"},
     "count-c-count-noritual-3": {"criterion-mention": "text-with-number"},
