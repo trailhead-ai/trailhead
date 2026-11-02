@@ -2499,8 +2499,9 @@ readings and the renamed captures; where they differ the difference is stated, n
 | `criterion-mention` is `text-with-number` | 3 of 3 | 3 of 3 | clean majority |
 
 C passes on each reading under both readers; the baseline had headroom (0 of 3 `by-section`). The blind reader agreed
-with the in-session reading on `counted` and `exceptions` for all twelve baseline and all twelve treated captures of
-C, C4, CN and CR; it differed on `counts-correct` where stated below.
+with the in-session reading on `counted` and `exceptions` for all twelve baseline captures of C, C4, CN and CR, and on
+nine of the twelve treated ones: on the three treated CN captures it read `listed` where the in-session reading is
+`total-only`. It differed on `counts-correct` where stated below.
 
 ### What each guard showed at R2
 
