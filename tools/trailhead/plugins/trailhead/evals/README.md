@@ -2,18 +2,9 @@
 
 Behavioural eval cases for trailhead's own prose.
 
-Each case is a directory here:
-
-```
-<case-name>/
-    expected.md      the pass condition, written BEFORE any arm is run
-    fixtures/        self-contained inputs the run is pointed at
-    arms/            optional: edited prose copies, for a treatment arm
-```
-
-The authoring rules, the dispatch shape, and the trust boundary on the
-instructions path are in `docs/eval-protocol.md` — read it before adding a case.
-Results go in `tools/trailhead/MANUAL-EVAL.md`.
+A case here would be a directory run by `claude plugin eval`. The case shape and how to
+write and run one are in `docs/eval-protocol.md`. Results would go in
+`tools/trailhead/MANUAL-EVAL.md`.
 
 **This corpus stays empty, and that is structural rather than pending.** A
 behavioural eval measures what prose causes an agent to do, and this plugin

@@ -8,8 +8,8 @@ Same role as `MANUAL-SMOKE.md` where that file exists, different boundary — sm
 covers the plugin-system boundary (install, agent registration); this one covers
 the behavioral boundary.
 
-**The protocol — why these run by hand, how an arm is dispatched, the trust
-boundary on the instructions path, and how to read a result honestly — is in
+**The protocol — how to write and run a case with the plugin eval runner, what its
+sandbox confines, and the retained discipline for a result — is in
 [`docs/eval-protocol.md`](../../docs/eval-protocol.md).** Read it before adding a
 case. This file is outpost's results log only.
 
@@ -671,8 +671,8 @@ This is the second containment escape in two cases, and the first one to reach a
 shared remote. **Until these cases run under real isolation — a container, or a
 scrubbed `PATH` and `HOME` with the plugin cache out of reach — every run with
 shell access must be treated as capable of touching live infrastructure, and the
-developer's real vaults and config diffed afterwards.** Recorded in
-`docs/eval-protocol.md`.
+developer's real vaults and config diffed afterwards.** What the runner's sandbox
+confines is in `docs/eval-protocol.md` ("What the sandbox confines, and what it does not").
 
 ### Limitations
 
