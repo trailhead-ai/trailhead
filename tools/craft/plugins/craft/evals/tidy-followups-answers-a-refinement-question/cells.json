@@ -462,7 +462,8 @@
   },
   "failed_write": {
    "role": "Q1",
-   "write": "answer"
+   "write": "answer",
+   "rerun": true
   },
   "expect": {
    "followups": {
@@ -515,7 +516,8 @@
   },
   "failed_write": {
    "role": "Q1",
-   "write": "refinement"
+   "write": "refinement",
+   "rerun": true
   },
   "expect": {
    "followups": {

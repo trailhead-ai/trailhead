@@ -303,3 +303,26 @@ Split on whitespace, the two versions hold the same 13,571 words in the same ord
 stream, and a Homebrew path in `refinement-fails-treat-r1`, where the regex took in a JSON `\u0000` escape to reach its length. No
 capture was edited for this. The scanner now reports the field names as `stream-field-name`, matched as exact literals, and measures
 a run without the escape in front of it; it exits 0 on this case's `runs/`.
+
+## Note, 2026-11-02: registered before the second batch
+
+Registered before any arm of the second batch ran, and committed alone. The first batch measured the skill at
+`43c2ec1187041e6327c7351501dd08d41defe9e4`. The shipped skill has since had prose edits, and a second batch re-measures the
+cells they can reach on the then-current file (its fingerprint is recorded with the results):
+
+- the `not-answerable` row: a recommended answer too long to show whole cannot be accepted by the code alone;
+- at the sanitized-text re-ask, a `skip` or a retype removes the staged answer file;
+- step 13's re-run line now also covers a follow-up left out by a failed `answer of` or `refinement of` write;
+- a new `unclosed-fence` row in the `question` table.
+
+Only three cells take a branch those edits touch, and only these are re-run: `altered` (the sanitized-text re-ask),
+`answer-write-fails` and `refinement-fails` (the re-run line after a failed write). The `not-answerable` and `unclosed-fence`
+rows need an over-long recommended answer or an unclosed fence, which no fixture builds, so they are not measured. The other
+eleven cells reach none of the edited text and are not re-run; they were not measured on the shipped text.
+
+**The new expectation.** In `answer-write-fails` and `refinement-fails`, the closing report prints the re-run line
+(`/craft:tidy-followups spec/<name>`) alone on its own line, with a word on the live parent near it, read by the check L1 uses
+for a waiting follow-up. It is graded inside F1 (a `rerun` key on the cell's `failed_write`), the smaller change, and not as a
+line of its own. `altered` is re-run on its registered lines, unchanged. Nothing else is amended: no registered text, no other
+cell, no other line. The first batch's captures of these cells predate the prose and are expected to fail the new expectation;
+they are reported as the old text and are not graded against it as a regression.
