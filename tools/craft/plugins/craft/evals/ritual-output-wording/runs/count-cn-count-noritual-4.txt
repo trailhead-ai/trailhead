@@ -1,0 +1,7 @@
+Three of the twelve acceptance criteria are done, one is partly done, one is blocked and seven haven't been started.
+
+- **Partly done:** the wall-length table adds up the metres built by year, but not yet by site as well (AC6). The yearly totals were checked against the 2024 days.
+- **Blocked:** recording an injury reported on the day, with the insurer's form filled in from the booking, can't go ahead because the insurer hasn't sent their form (AC11).
+- **Done, but no check reported:** a member who has attended can download a certificate showing the training days they completed (AC12). The note says this is in, but unlike the other two finished criteria, it doesn't mention any testing, so I'd treat it as less certain.
+
+The seven untouched criteria include the core booking limit and refunds, plus most of the reporting tables, so most of the work is still ahead at the end of week 5. The insurer's form is the only outside dependency.

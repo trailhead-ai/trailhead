@@ -1,0 +1,8 @@
+Three of the twelve acceptance criteria are done and seven haven't been started. The other two are the exceptions:
+
+- **Partly done:** the wall-length table adds up the metres built, by site and by year (AC6). The yearly totals work and were checked against the 2024 days, but they aren't split by site yet.
+- **Blocked:** an injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). This can't go ahead until the insurer sends their form.
+
+The note says how two of the three finished items were checked, but gives no check for the certificates, so that one rests on its word alone.
+
+The spec's Slices section is also empty, so none of the remaining work has been split up yet.
