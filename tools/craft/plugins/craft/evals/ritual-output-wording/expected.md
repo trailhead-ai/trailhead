@@ -2383,7 +2383,7 @@ Guards, script-graded:
 |---|---|---|---|
 | `count-g1-count-noritual-1` | G1 | `criterion-mention` | nickname |
 | `count-g1-count-noritual-2`, `-3`, `-4`, `-5`, `-6` | G1 | `criterion-mention` | text-with-number (each) |
-| `count-control-third-noritual-1`, `-3` | control | `criterion-mention` | text-with-number |
+| `count-control-third-noritual-1`, `-3`, `-4`, `-5`, `-6` | control | `criterion-mention` | text-with-number (each) |
 | `count-control-third-noritual-2` | control | `criterion-mention` | bare |
 | `count-g2-fifth-reviewer-1`, `-2`, `-3` | G2 | `reviewer-report`; `criterion-mention` | template-shape; bare (each) |
 | `count-g2-fifth-advocate-1`, `-2`, `-3` | G2 | `reviewer-report`; `criterion-mention` | template-shape; bare (each) |
@@ -2423,10 +2423,10 @@ Guards, script-graded:
 - **G5**, same bar on the proposal fixture: 3 of 3 and 3 of 3. **Holds.**
 - **G6**, every run: `covers-field` `gate-shape` and `covers_value_names_the_seven` on all three. **Holds.**
 - **G7**, every run: `grade_ledger_line` passes on all three. **Holds.**
-- **Same-day control**, observed only: three runs of `third-noritual` on the G1 prompt read text-with-number, bare,
-  text-with-number. It split 2-1 as well; the split rule is not applied to it, since it decides nothing, so it stays at
-  three. Read beside G1: the base arm also missed once in three on the day, so G1's first-three miss is not shown to be an
-  effect of R2 (one dispatch each; this is noise-sized evidence, not a test). G1's bar is unchanged.
+- **Same-day control**, observed only: the first three runs of `third-noritual` on the G1 prompt read text-with-number,
+  bare, text-with-number, a 2-1 split, so it was run to six under the split rule: text-with-number 5 of 6. Read beside G1,
+  also 5 of 6, the base arm and the R2 arm each missed once in six on the day, so G1's miss is not shown to be an effect of
+  R2 (six runs each is noise-sized evidence, not a test). G1's bar is unchanged.
 
 ### End state taken
 
@@ -2436,13 +2436,16 @@ the arm table needs no marking.
 ### Observed sites beside their baseline
 
 - **C4:** at B each criterion was named by its own text and not counted (3 of 3). At R2 all three count by section
-  and also name the four remaining by text. The threshold of five was meant to leave four remaining alone; the replies
-  counted anyway, on the eight done, which is over five. Observed only; recorded as a follow-up against R2's threshold
-  wording ("a reply would name more than five ... at once ... what is left, what some work covers, a tally").
+  and also name the four remaining by text. The threshold of five was meant to leave four remaining alone, and the replies
+  counted anyway. A hypothesis, with no ablation behind it: they counted the eight done, which is over five. Observed
+  only; recorded as a follow-up against R2's threshold wording ("a reply would name more than five ... at once ... what is
+  left, what some work covers, a tally").
 - **CN:** at B, listed by state and `wrong` (0 of 3). At R2 each reply gives one overall count (nine left, or three done,
   seven not started and two named) with both exceptions named by text and number, which is the expected reading; CN-2
   never states the figure nine. The CN sentence in R2 ("Count a spec with no sections as a whole") read as expected on
-  all three.
+  all three in session. This reading is looser than the registered words: `total-only` is one figure with no criteria
+  named, and these replies give several figures and name the exceptions and more, which the second reader scored as
+  `listed` and `wrong` on all three. Reported, not reconciled; CN decides nothing.
 - **CR:** at B, total-only in two and a listing in one. At R2 all three give the observed counts by section (three of three
   in Booking and cancelling, four of five in Trustee reports) beside the digest's totals, and name AC8 by its text with its
   number. The known wording gap in `counts-correct` at CR (ambiguous for `total-only`, silent for `listed`) did not bite
