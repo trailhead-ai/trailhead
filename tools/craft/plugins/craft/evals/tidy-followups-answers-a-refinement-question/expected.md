@@ -295,8 +295,9 @@ one at a time; the other 32 ran four at a time in about 48 minutes of wall clock
 
 ## Note, 2026-11-02: the skill's line breaks changed after the batch
 
-The batch measured the skill at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4`. The shipped file's fingerprint is
-`8c48bb5e5a3c1f69e2febd1f7dd332d749afbc19`: `wrap_prose.py` reflowed it to the repository's column budget and nothing else changed.
+The batch measured the skill at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4`. `wrap_prose.py` then reflowed it to
+the repository's column budget, giving `8c48bb5e5a3c1f69e2febd1f7dd332d749afbc19`, and nothing else changed in that step; the words
+changed later, as the note on the second batch below says.
 Split on whitespace, the two versions hold the same 13,571 words in the same order, so no arm was re-run.
 
 `capture_scan.py` first failed these captures on three tokens, none a credential: two usage field names in Claude Code 2.1.316's
