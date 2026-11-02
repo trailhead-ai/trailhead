@@ -985,3 +985,51 @@ def test_p1_fails_an_unanswered_follow_up_whose_delivered_scope_lost_the_answers
     assert p1(p1_records(**kept), expect)["pass"] is True
     line = p1(p1_records(**lost), expect)
     assert line["pass"] is False and "scope lacks" in line["detail"]
+
+
+# ------------------------------------------------- L1: the follow-up's own name and title give no reason
+
+
+REAL = "dock-plan-rework-the-berth-allocation-end-to-end-routed"
+TITLE = "Dock plan: rework the berth allocation end to end (routed)"
+ROUTED_CELL = {"names": {"R1": REAL, "P1": "p-one"}, "left_out": {"R1": {"reason": "routed-to-plan"}}}
+
+
+def routed_report(*lines):
+    run = Run().bash(check_cmd(), json.dumps({"followups": [{"name": REAL, "title": TITLE, "status": "open"}]}))
+    run.text("\n".join(lines) + "\n").end(asked=False)
+    return run.line(ROUTED_CELL, "L1")
+
+
+def test_l1_routed_fails_when_the_line_gives_no_reason_beyond_the_follow_ups_own_name():
+    line = routed_report(f"- Left out: `{REAL}`. It failed for an unknown reason.")
+    assert line["pass"] is False and "reason" in line["detail"]
+
+
+def test_l1_routed_fails_when_the_line_gives_no_reason_beyond_the_follow_ups_own_title():
+    line = routed_report(f"- Left out: {TITLE}, `{REAL}`. It failed for an unknown reason.")
+    assert line["pass"] is False and "reason" in line["detail"]
+
+
+def test_l1_routed_passes_when_the_line_gives_the_reason_in_its_own_words():
+    line = routed_report(f"- Left out: {TITLE}, `{REAL}`. Refinement routed it to planning.")
+    assert line["pass"] is True, line["detail"]
+
+
+# ------------------------------------------------- L1: an unindented list under a Nested label
+
+
+def test_l1_fails_when_the_follow_up_is_in_an_unindented_list_under_a_nested_label():
+    line = report(f"- Left out: Tide cache `q-one`: {REASON}", "- **Nested:**", "- `q-one`", "- `p-one`")
+    assert line["pass"] is False and "nested" in line["detail"]
+
+
+def test_l1_passes_when_a_bullet_with_its_own_bold_label_follows_the_nested_label():
+    line = report(f"- Left out: Tide cache `q-one`: {REASON}", "- **Nested:**", "- `p-one`",
+                  "- **Refined but not nested:** `q-one`")
+    assert line["pass"] is True, line["detail"]
+
+
+def test_l1_passes_when_a_bullet_follows_a_nested_label_that_already_carries_its_content():
+    line = report("- **Nested:** `p-one`", f"- Left out: Tide cache `q-one`: {REASON}")
+    assert line["pass"] is True, line["detail"]

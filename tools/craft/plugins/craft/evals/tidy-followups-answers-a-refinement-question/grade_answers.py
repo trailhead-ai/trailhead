@@ -346,18 +346,49 @@ NESTED_LABEL = re.compile(r"^(?P<indent>\s*)[-*]?\s*\**\s*Nested\b", re.IGNORECA
 
 
 def _nested_lines(lines):
-    """The lines reported under a label that begins with Nested: the label's own line and its indented sub-items."""
-    out, depth = [], None
+    """The lines reported under a label that begins with Nested: the label's own line, its indented sub-items and,
+    when the label carries no content of its own, the list items that follow it until one carries its own bold label."""
+    out, depth, bare = [], None, False
     for ln in lines:
         m = NESTED_LABEL.match(ln)
         if m:
-            depth = len(m.group("indent"))
+            depth, bare = len(m.group("indent")), not re.sub(r"[\s*:_`-]", "", ln[m.end():])
             out.append(ln)
-        elif depth is not None and ln.strip() and len(ln) - len(ln.lstrip()) > depth:
+        elif depth is None or not ln.strip():
+            continue
+        elif len(ln) - len(ln.lstrip()) > depth:
             out.append(ln)
-        elif ln.strip():
+        elif bare and re.match(r"\s*[-*]\s", ln) and not re.match(r"\s*[-*]\s+\*\*[^*]+\*\*", ln):
+            out.append(ln)
+        else:
             depth = None
     return out
+
+
+def _titles(items, name):
+    """Every title a tool result gave the follow-up."""
+    found = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("name") == name and isinstance(node.get("title"), str):
+                found.append(node["title"])
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    for it in items:
+        if it["kind"] == "result":
+            walk(_json_in(it["text"]))
+    return found
+
+
+def _without(line, name, titles):
+    for gone in (*titles, name):
+        line = re.sub(re.escape(gone), " ", line, flags=re.IGNORECASE)
+    return line
 
 
 def line_l1(items, turns, cell, records=None):
@@ -370,7 +401,8 @@ def line_l1(items, turns, cell, records=None):
         if not any(_names(ln, name) for ln in lines):
             problems.append(f"{role}: the closing report does not name task/{name}")
             continue
-        if not any(all(p.search(ln) for p in REASON_SENTENCES[spec["reason"]])
+        titles = _titles(items, name)
+        if not any(all(p.search(_without(ln, name, titles)) for p in REASON_SENTENCES[spec["reason"]])
                    and not any(_names(ln, o) for o in others) for ln in lines):
             problems.append(f"{role}: no one line gives the reason {spec['reason']} without naming another follow-up")
         if any(_names(ln, name) for ln in _nested_lines(lines)):
