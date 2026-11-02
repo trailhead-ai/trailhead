@@ -50,6 +50,11 @@ ARMS = {
     # are unchanged from the baselines.
     "proposal-treated.md",
     "proposal-drive-treated.md",
+    "count-noritual.md",
+    "fifth-reviewer.md",
+    "fifth-advocate.md",
+    "fifth-slice.md",
+    "count-build.md",
 }
 
 

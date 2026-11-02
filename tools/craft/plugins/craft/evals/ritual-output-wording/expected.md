@@ -2006,11 +2006,11 @@ the delivery with that precedent), not because they exceed 131072 on this host; 
 | `third-noritual` | C, C4, CN at B; same-day control at G1 | none | `rules.md` at B | 13304 (existing) | argument | existing |
 | `proposal-treated` | G6, G7 at B | `skills/slice/SKILL.md` | `rules.md` at B | 59315 (existing) | argument | existing |
 | `summary-baseline-build` | CR at B | `skills/execute/SKILL.md`, `skills/_shared/execute.md` | `rules.md` at B | 113252 (existing) | file | existing |
-| `count-noritual` | C, C4, CN, G1 at R2 | none | `rules.md` at R2 | 13900 | argument | later task (arms) |
-| `fifth-reviewer` | G2 at R2 | `agents/breaker.md` | `rules.md` at R2 | 19578 | argument | later task (arms) |
-| `fifth-advocate` | G2 at R2 | `agents/advocate.md` | `rules.md` at R2 | 19965 | argument | later task (arms) |
-| `fifth-slice` | G3, G5, G6, G7 at R2 | `skills/slice/SKILL.md` | `rules.md` at R2 | 59911 | argument | later task (arms) |
-| `count-build` | CR at R2 | `skills/execute/SKILL.md`, `skills/_shared/execute.md` | `rules.md` at R2 | 113848 | file | later task (arms) |
+| `count-noritual` | C, C4, CN, G1 at R2 | none | `rules.md` at R2 (`81162064b031`) | 13900 (measured) | argument | built |
+| `fifth-reviewer` | G2 at R2 | `agents/breaker.md` | `rules.md` at R2 (`81162064b031`) | 19578 (measured) | argument | built |
+| `fifth-advocate` | G2 at R2 | `agents/advocate.md` | `rules.md` at R2 (`81162064b031`) | 19965 (measured) | argument | built |
+| `fifth-slice` | G3, G5, G6, G7 at R2 | `skills/slice/SKILL.md` | `rules.md` at R2 (`81162064b031`) | 59911 (measured) | argument | built |
+| `count-build` | CR at R2 | `skills/execute/SKILL.md`, `skills/_shared/execute.md` | `rules.md` at R2 (`81162064b031`) | 113848 (measured) | file | built |
 
 The five R2 rows are filled in by the arms task: its bytes, its form and its comparison with the B row beside it. G1's
 B side is `third-noritual` on `fixtures/prompt-noritual.md`; G2's B side is `third-reviewer` and `third-advocate`
