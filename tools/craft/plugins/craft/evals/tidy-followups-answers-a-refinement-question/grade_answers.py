@@ -391,6 +391,16 @@ def _without(line, name, titles):
     return line
 
 
+def _rerun_problems(lines):
+    stripped = [ln.strip().strip("`").strip() for ln in lines]
+    at = next((n for n, ln in enumerate(stripped) if RERUN_LINE.match(ln)), None)
+    if at is None:
+        return ["the re-run line is missing or not alone on its line"]
+    if not re.search(r"(?i)parent", " ".join(lines[max(0, at - 3):at + 4])):
+        return ["the re-run line gives no word on the live parent"]
+    return []
+
+
 def line_l1(items, turns, cell, records=None):
     report = closing_report(items)
     lines = report.splitlines()
@@ -409,12 +419,7 @@ def line_l1(items, turns, cell, records=None):
             problems.append(f"{role}: the closing report lists it as nested")
         rerun_needed |= spec["reason"] == "waiting"
     if rerun_needed and not problems:
-        stripped = [ln.strip().strip("`").strip() for ln in lines]
-        at = next((n for n, ln in enumerate(stripped) if RERUN_LINE.match(ln)), None)
-        if at is None:
-            problems.append("the re-run line is missing or not alone on its line")
-        elif not re.search(r"(?i)parent", " ".join(lines[max(0, at - 3):at + 4])):
-            problems.append("the re-run line gives no word on the live parent")
+        problems += _rerun_problems(lines)
     return _line("L1", not problems, True, "; ".join(problems) or
                  "every left-out follow-up is named with its reason, and the re-run line stands alone")
 
@@ -434,6 +439,8 @@ def line_f1(items, turns, cell, records=None):
             late = [d for d in dispatches(items) if d["i"] > failed[-1]["i"] and f"task/{name}" in _prompt(d)]
             if late:
                 return _line("F1", False, True, f"a refinement was dispatched for task/{name} after its answer failed")
+    if spec.get("rerun") and (problems := _rerun_problems(closing_report(items).splitlines())):
+        return _line("F1", False, True, "; ".join(problems))
     return _line("F1", True, True, f"{phrase} is named, the shim fired, and no refinement followed a failed answer")
 
 

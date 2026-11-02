@@ -634,6 +634,36 @@ def test_f1_refinement_does_not_ask_for_the_no_dispatch_rule():
     assert f1(run, write="refinement")["pass"] is True
 
 
+def f1_rerun(report_tail, rerun=True, write="answer", phrase="answer of task/q-one"):
+    run = failed_write_run()
+    closing(run, f"Failed write: {phrase}\n{report_tail}")
+    cell = {"failed_write": {"role": "Q1", "write": write, "rerun": rerun}}
+    return run.line(cell, "F1", records={"@shim": {"hits": ["failed update of task/q-one"]}, "q-one": rec()})
+
+
+def test_f1_rerun_passes_when_the_rerun_line_stands_alone_with_a_word_on_the_live_parent():
+    assert f1_rerun(PARENT_NOTE)["pass"] is True
+
+
+def test_f1_rerun_fails_when_the_rerun_line_is_missing():
+    line = f1_rerun("Nothing more to do.\n")
+    assert line["pass"] is False and "re-run" in line["detail"]
+
+
+def test_f1_rerun_fails_when_the_rerun_line_shares_its_line_with_prose():
+    line = f1_rerun(PARENT_NOTE.replace(RERUN, f"Run {RERUN} later."))
+    assert line["pass"] is False and "re-run" in line["detail"]
+
+
+def test_f1_rerun_fails_when_the_rerun_line_gives_no_word_on_the_live_parent():
+    line = f1_rerun(f"{RERUN}\n")
+    assert line["pass"] is False and "parent" in line["detail"]
+
+
+def test_f1_asks_for_no_rerun_line_unless_the_cell_registers_one():
+    assert f1_rerun("Nothing more to do.\n", rerun=False)["pass"] is True
+
+
 # ---------------------------------------------------------------- R1: refined again with the answer
 
 
