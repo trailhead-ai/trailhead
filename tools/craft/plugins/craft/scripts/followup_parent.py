@@ -114,7 +114,8 @@ nothing. Exit 0 prints one JSON object:
   heading at the start of a line outside fenced code blocks; a section after an unclosed
   fence is inside it), `two-sections` (more than one such heading), `already-answered` (the
   section holds an `**Answer:**` label at the start of a line outside fences) and
-  `no-question` (no non-empty `**Question:**`). The first that applies, in that order.
+  `no-question` (no non-empty `**Question:**`) and `unclosed-fence` (a fence that never closes,
+  so `answer` could not place its line). The first that applies, in that order.
 `ask_verdict(sidecar, body, linked)` is the single function that decides it for `question` and
 `answer` (`None` when askable; `linked` is a zero-argument callable answering the
 spec-membership test). Exit codes and refusals are those of `check`'s reads: a bad name is
@@ -125,16 +126,17 @@ a `lore` failure is exit 2 with its reason code and nothing on stdout.
 writes the operator's answer into the follow-up's `## Refine — unresolved` section as the line
 `**Answer:** <text>`. Exactly one source, else `invalid-arguments` before any `lore` call.
 `--answer-file` is a regular, non-symlink file holding one JSON string of at most 4096 bytes
-(UTF-8) that is not blank; anything else is `invalid-answer-file` (exit 2, nothing read from the
+(UTF-8) that is not blank once sanitized; anything else is `invalid-answer-file` (exit 2, nothing read from the
 vault or written). `--recommended` takes the section's `**Recommended answer:**` and stores
-`Accepted the recommended answer: <text>`; a section with none is `not-answerable`. The text is
+`Accepted the recommended answer: <text>`; a section with none, or one whose text `question` showed
+cut or altered, is `not-answerable`. The text is
 folded onto one line, sanitized and credential-redacted, never cut; `altered` is true when
 sanitizing (not whitespace folding) changed it. Exit codes:
     0  stdout `{name, revision, answer, altered}`: the post-write revision and the text as stored
        (with `--preview`: `{name, answer, altered}`, nothing written, no code needed);
     1  a refusal, vault unchanged, stdout empty, one `reason-code:` line: `not-answerable`
-       (`ask_verdict` finds the follow-up unaskable, `--recommended` has no text, or the section
-       sits in a fence that never closes), `confirmation-missing`, or `confirmation-mismatch`
+       (`ask_verdict` finds the follow-up unaskable, `--recommended` has no text, or the stored
+       text is not what `question` showed for the field), `confirmation-missing`, or `confirmation-mismatch`
        (`--confirm` is not the code `question` prints for the record's current revision);
     2  `invalid-answer-file`, a name or `lore` failure as for `question`, or
        `answer-write-failed`: the single full-body `lore record update` failed, could not be run
@@ -418,6 +420,7 @@ ASK_REASONS = frozenset(
         "not-spec-linked",
         "already-nested",
         "routed",
+        "unclosed-fence",
     }
 )
 
@@ -744,6 +747,8 @@ def ask_verdict(sidecar: dict, body: str, linked) -> str | None:
         return "already-answered"
     if not sections[0].get("Question", "").strip():
         return "no-question"
+    if _answer_span(body) is None:
+        return "unclosed-fence"
     return None
 
 
@@ -825,7 +830,7 @@ def load_answer(path: str) -> str:
         size = len(doc.encode("utf-8"))
     except UnicodeEncodeError:
         raise invalid from None
-    if size > MAX_ANSWER_BYTES or not _folded(doc):
+    if size > MAX_ANSWER_BYTES or not _stored_answer(doc)[0].strip():
         raise invalid
     return doc
 
@@ -866,6 +871,10 @@ def answer_followup(
     if at is None:
         raise ParentError("not-answerable", (name,))
     text, altered = _stored_answer(raw)
+    if "file" not in source:
+        shown = _one_line(_refine_sections(body)[0].get("Recommended answer", ""), MAX_FIELD_CHARS)
+        if text != f"{RECOMMENDED_PREFIX}{shown}":
+            raise ParentError("not-answerable", (name,))
     if preview:
         return {"name": name, "answer": text, "altered": altered}, None, (name,)
     require_confirmation(ANSWER_KIND, spec, answer_payload(name, revision), typed)
@@ -895,7 +904,7 @@ def _static_verdict(sidecar: dict, body: str, expected_parent: str | None, linke
         return "already-nested"
     if ROUTE_LABEL in labels:
         return ROUTE_REASONS.get(labels[ROUTE_LABEL], "not-ready")
-    if _UNRESOLVED_RE.search(body):
+    if _refine_sections(body):
         return "unresolved-question"
     if sidecar["status"] != "ready":
         return "not-ready"

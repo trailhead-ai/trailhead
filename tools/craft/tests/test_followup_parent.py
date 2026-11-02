@@ -4864,3 +4864,88 @@ def test_a_write_that_could_not_be_run_with_the_record_unreadable_afterwards_has
 
     code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
     _expect_write_failed(code, out, err, name, None)
+
+
+# --- review fixes: what the operator was shown, empty answers, fences ---------------------
+
+
+def _bound_text(extra=0):
+    base = ("abcd " * 400)[:-1] + "e"
+    assert len(base) == parent.MAX_FIELD_CHARS
+    return base + "f" * extra
+
+
+def test_recommended_at_the_display_bound_is_stored_whole(lore_env, spec):
+    env, vault = lore_env
+    text = _bound_text()
+    name = _askable(env, vault, spec, body=unresolved(recommended=text))
+    shown = question_ok(env, spec, name)["questions"][0]["recommended"]
+    assert shown == text
+    result = answer_ok(env, spec, name, "--recommended", "--confirm", answer_code(env, spec, name))
+    assert result["answer"] == f"Accepted the recommended answer: {shown}"
+    assert result["altered"] is False
+
+
+@pytest.mark.parametrize("mode", ["preview", "write"])
+def test_recommended_one_character_over_the_bound_is_not_answerable_and_writes_nothing(lore_env, spec, mode):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=_bound_text(1)))
+    frozen = snapshot(env, vault, name)
+    tail = ["--preview"] if mode == "preview" else ["--confirm", current_code(env, vault, spec, name)]
+    r = run_answer(env, spec, name, "--recommended", *tail)
+    assert r.returncode == 1 and r.stdout == ""
+    assert "reason-code: not-answerable" in r.stderr
+    assert snapshot(env, vault, name) == frozen
+
+
+def test_a_typed_answer_to_a_record_with_an_over_long_recommendation_still_works(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=_bound_text(50)))
+    answer_text_ok(env, vault, spec, name, tmp_path)
+    assert f"**Answer:** {ANSWER_TEXT}" in body_of(env, vault, name).split("\n")
+
+
+@pytest.mark.parametrize("value", ["​", "\u0000", " ​ \u0000 "])
+def test_an_answer_that_sanitizes_to_nothing_is_invalid_in_preview_and_write(lore_env, spec, tmp_path, capsys, value):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    frozen = snapshot(env, vault, name)
+    for extra in (["--preview"], ["--confirm", current_code(env, vault, spec, name)]):
+        runner = EnvRunner(env)
+        argv = ["answer", spec, name, "--answer-file", answer_file(tmp_path, value)] + extra
+        assert parent.main(argv, runner=runner) == 2
+        out = capsys.readouterr()
+        assert reason_of(out.err) == "invalid-answer-file" and out.out == ""
+        assert runner.writes() == []
+    assert snapshot(env, vault, name) == frozen
+
+
+FENCED_UNRESOLVED = CLEAN + "\n```\n## Refine — unresolved\n\n**Question:** fake?\n```\n"
+
+
+def test_check_does_not_treat_a_heading_only_inside_a_fence_as_unresolved(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Fenced", status="ready", body=FENCED_UNRESOLVED, spec=spec)
+    result = check_ok(env, spec, name)
+    assert name not in left_out(result)
+    assert name in eligible(result)
+
+
+def test_check_still_leaves_out_a_real_section_beside_a_fenced_one(lore_env, spec):
+    env, vault = lore_env
+    body = FENCED_UNRESOLVED + unresolved()[len(CLEAN):]
+    name = make_followup(env, vault, "Both", status="open", body=body, spec=spec)
+    assert left_out(check_ok(env, spec, name))[name]["reason"] == "unresolved-question"
+
+
+def test_a_section_with_a_fence_that_never_closes_is_unaskable_up_front(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + "\n```\nnever closed\n")
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "unclosed-fence"}
+
+
+def test_the_same_section_with_its_fence_closed_is_askable(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + "\n```\nclosed\n```\n")
+    result = question_ok(env, spec, name)
+    assert result["unaskable"] == [] and [q["name"] for q in result["questions"]] == [name]
