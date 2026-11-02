@@ -1,0 +1,6 @@
+The spec is about a quarter done: three of its twelve acceptance criteria are finished, seven haven't been started, and two are stuck or incomplete.
+
+- **Partly done:** the wall-length table adds up the metres built by year, but it doesn't split them by site yet (AC6).
+- **Blocked:** recording an injury reported on the day, with the insurer's form filled in from the booking, can't go ahead until the insurer sends the form (AC11).
+
+The note gives no check for one of the three finished criteria, so it's reported as done but not shown to be tested: a member who has attended can download a certificate showing the training days they completed (AC12).

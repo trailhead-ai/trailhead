@@ -1,0 +1,18 @@
+**The run is not closed: `task/the-trustee-tables-slice` stays `in-progress`.** The observation gate refused the close with exit 1, so Phase 6 is left unticked. No observation is recorded for "Each of the tables can be downloaded as a spreadsheet for the trustees' meeting" (AC8).
+
+- **simplify:** no changes
+- **correctness:** SHIP, 0 findings
+- **security:** skipped — no trigger
+- **state-coverage:** parent 3, doc 3, missing 0
+- **criterion-observations:** covered 8, observed 7, missing 1 (that same spreadsheet download, AC8)
+- **push:** 1 repo pushed
+- **metrics:** 4 tasks, 8 dispatches (2.0/task), 51m wall clock, 1 lesson written, 0 lessons consumed
+- **measurement tally:** 0 Critical/Important correctness findings, so none to classify as local-to-one-task or cross-task
+
+To finish, get real evidence that the spreadsheet download works and append its line to `## Criterion observations`. Then re-run execute against this task; it re-enters at Phase 6 and closes the parent once the gate passes. If the evidence is a manual check, the close will also ask you to confirm you carried it out.
+
+No PR was opened — that call is yours. Run this when you're ready:
+
+```
+/portage:pull_request
+```

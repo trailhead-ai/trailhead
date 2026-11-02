@@ -1,0 +1,13 @@
+Six of the seven acceptance criteria still have work left. Only AC2, the late fee, looks finished: the per-category rate and the replacement-price cap are both in, and the cap was tried on a rare atlas.
+
+**Partly done**
+- **A borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over (AC1):** the flag works, but it was only seen the morning after, so the one-minute timing still has to be measured, and fixed if it misses.
+- **A borrower owing more than ten pounds in late fees cannot check out further items until the balance is cleared or a librarian overrides (AC3):** the block and clearing on payment work, but the note doesn't mention the librarian override as a way past the block. I'm counting that as not done, since override recording hasn't started.
+- **A borrower receives one reminder three days before a due date and one on the day after, and no other automatic messages about the same loan (AC6):** the three-days-before message still has to be built, and the limit of no other automatic messages still has to be confirmed, as the note doesn't cover it.
+
+**Not started**
+- **A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4):** all of it is left: capturing who and why, and showing it in the history.
+- **Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5):** all of it is left, including the after-closing case.
+- **The monthly fees report lists each category's total charged and total waived, and the two totals reconcile with the per-borrower ledgers (AC7):** all of it is left: the report itself and the reconciliation against the ledgers.
+
+This comes only from the status note; I didn't check any code or the system itself.

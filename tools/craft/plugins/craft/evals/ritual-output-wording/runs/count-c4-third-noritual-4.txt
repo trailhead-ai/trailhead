@@ -1,0 +1,22 @@
+Eight of the 12 acceptance criteria are done and four haven't been started, so it's about two-thirds of the way through. Booking and cancelling is finished, while trustee reports and kit and injuries are each partly done. The spec has no criteria outstanding on certificates.
+
+**Done, according to the note:**
+- A member can book from the events page up to the evening before (AC1).
+- A thirteenth booking is refused with a message saying the day is full (AC2).
+- A member who cancels at least a week ahead is refunded in full, by card or cheque (AC3).
+- A booked member gets one reminder the evening before, saying where to meet and when the day starts (AC4).
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up the metres built, by site and by year (AC6).
+- The booking confirmation says which boots and gloves to bring (AC10).
+- A member who has attended can download a certificate showing the training days they completed (AC12).
+
+**Not started:**
+- The refunds table showing each refund paid, with the amount and the date (AC7).
+- Downloading each table as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page showing all the tables together, with the year at the top (AC9).
+- Recording an injury reported on the day, with the insurer's form filled in from the booking (AC11).
+
+**Caveats:**
+- **Unverified items:** the note says only the booking work and the two tables were checked. It doesn't claim any check on the boots and gloves confirmation (AC10) or certificates (AC12), so those two are reported as done but not confirmed. The certificates line is just "Certificates are in", which doesn't show that the download works.
+- **Order of work:** the spreadsheet download and summary page both cover all the tables, so the refunds table should come first. The injury recording is separate and can go ahead at any time.
+- **Spec gap:** the Slices section is empty even though the spec is marked "ready", so the remaining work hasn't been split into slices.

@@ -1,0 +1,16 @@
+Eight of the twelve acceptance criteria are done and four are left, going by the end-of-week-8 status note. Nothing is reported as in progress.
+
+- **Booking and cancelling:** all four done, and checked with test members.
+- **Trustee reports:** two of five done, and those two were checked against the 2024 days.
+- **Kit and injuries:** one of two done.
+- **Certificates:** the only criterion is done, with one caveat below.
+
+The four not started are:
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11).
+
+The caveat is that I've counted certificates as done on the strength of "Certificates are in", which is all the note says. It doesn't confirm that a member who has attended can download a certificate showing the training days they completed (AC12), or say that anyone checked it.
+
+The spec's Slices section is also empty, so the remaining work isn't broken down yet, even though the spec is marked ready.

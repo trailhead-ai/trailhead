@@ -1,0 +1,11 @@
+## Findings
+- [Critical] After-closing returns keep accruing fees (violates AC5): Plan notes stamp a return scanned after closing with the next morning's date, so the 00:05 job still treats the item as on loan. A borrower who returns it at 21:00 pays another day, and that charge can push them past ten pounds, so they are refused at the desk next morning for an item they had already returned. Suggested: stamp the actual scan time, or have the job and fee calculator treat any after-closing scan as returned that day.
+- [Critical] No way to clear a balance (AC3): The plan blocks borrowers until "the balance is cleared", but no task records a payment or waiver at the desk, and online payment is a non-goal. A borrower who pays cash stays blocked, so every future checkout needs an override. Suggested: add a desk task that records payment or waiver in the borrower's ledger and updates the balance immediately.
+- [Important] No reminder task (AC6): Borrowers first learn of a fee or block when refused at the desk. Suggested: add the two reminders, sent once per loan.
+- [Important] Override note lacks identity (AC4): A typed reason on a note does not record who granted the override, and it may not appear in the borrower's history. Suggested: capture the logged-in librarian automatically and write a structured history entry.
+- [Important] Overdue flag arrives late (AC1): The 00:05 job misses the one-minute limit, though this only shows if the desk is open at midnight. Suggested: run at rollover, or derive overdue status from the due date at screen load.
+- [Important] No report or waiver data (AC7): No task produces the report, and "total waived" has no source. Suggested: add a report task, built on the ledger above.
+- [Minor] Balance has no breakdown: Task 4 shows only a total, so a librarian cannot explain a disputed charge item by item.
+
+## Confidence
+High — findings come directly from the plan and spec text, though closing hours and desk software are unknown.

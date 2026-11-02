@@ -1,0 +1,22 @@
+You will be able to download the year's attendance, wall-length and refund tables, see them together on the annual summary page, and record an injury with the insurer's form already filled in, while members' booking confirmations tell them what to bring. Try it: once this is built, open the annual summary page, download the refunds table as a spreadsheet, then book a test place and read what the confirmation tells you to bring.
+
+**The chosen slice:** "The year-end slice".
+
+**What this slice makes fully green (seven criteria):**
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up the metres built, by site and by year (AC6).
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+- The booking confirmation tells the member which boots and gloves to bring on the day (AC10).
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11).
+
+**What this slice makes only partly green:** nothing.
+
+**What is left of the spec once this is built:** four of four left in Booking and cancelling, none of five in Trustee reports, none of two in Kit and injuries, and one of one in Certificates. What remains is booking and cancelling itself, plus members' certificates. No criterion is left partly covered.
+
+**Visual surface:** this slice touches nothing visual beyond the summary page the trustees already see, so no enumerated states apply.
+
+**Value claim:** the trustees get the year's attendance, wall length and refunds as tables they can download and a summary page that shows them together, and a member's booking confirmation tells them what to bring and what happens if they are hurt, so the trustees' meeting no longer waits on hand-built figures.
+
+AC5, AC6, AC7, AC8, AC9, AC10, AC11

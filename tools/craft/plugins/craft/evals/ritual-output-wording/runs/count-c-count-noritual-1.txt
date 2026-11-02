@@ -1,0 +1,13 @@
+Three of the twelve acceptance criteria are done, as of the end-of-week-5 status note. Most of what's left is the trustee reports.
+
+- **Booking and cancelling:** one of four done, three left.
+- **Trustee reports:** none of five done.
+- **Kit and injuries:** one of two done.
+- **Certificates:** the only one is done.
+
+Two of the unfinished criteria need a closer look:
+
+- **Partly done:** the wall-length table adds up the metres built, by site and by year (AC6). The yearly totals work and were checked against the 2024 days, but they aren't split by site yet.
+- **Blocked:** an injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). This can't go ahead until the insurer sends their form, so it depends on chasing them, not on build work.
+
+The other seven of the nine unfinished criteria haven't been started.

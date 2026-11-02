@@ -1,0 +1,23 @@
+Of the 12 acceptance criteria, 3 are done, 1 is partly done, 1 is blocked and 7 haven't been started, so the work is about a quarter finished after five weeks.
+
+**Done (3)**
+- A member can book a place on a training day from the trust's events page, up to the evening before (AC1). This was tested by booking a test member onto next month's day.
+- The booking confirmation tells the member which boots and gloves to bring on the day (AC10). This was checked with test bookings.
+- A member who has attended can download a certificate showing the training days they completed (AC12). The note says this is in, but unlike the other two it doesn't mention any check, so I'm counting it as done on the note's word.
+
+**Partly done (1)**
+- The wall-length table adds up the metres built, by site and by year (AC6). The yearly totals work and were checked against the 2024 days, but there's no split by site yet.
+
+**Blocked (1)**
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). This can't go ahead until the insurer sends their form, so it depends on them, not on the team.
+
+**Not started (7)**
+- Each training day has twelve places, and a thirteenth booking is refused with a message saying the day is full (AC2).
+- A member who cancels at least a week ahead is refunded in full, whether they paid by card or by cheque (AC3).
+- A booked member is sent one reminder the evening before, saying where to meet and when the day starts (AC4).
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+
+The biggest live risk is that twelve-place limit (AC2): booking is already working, so nothing stops a day being overbooked until the limit is in. The spec's Slices section is also still empty, so there's no planned order for the remaining work.

@@ -1,0 +1,16 @@
+The spec is two-thirds done: 8 of the 12 criteria are met and the other 4 haven't been started.
+
+- **Booking and cancelling:** all four done and checked with test members.
+- **Trustee reports:** two of five done, both checked against the 2024 days.
+- **Kit and injuries:** one of two done.
+- **Certificates:** the only criterion here is done.
+
+Still to start:
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11).
+
+The spreadsheet download and the annual summary page both cover all the tables, so they can't be finished until the refunds table exists.
+
+The note doesn't mention any checks on the booking confirmation's boots and gloves advice (AC10) or on certificates (AC12). I've counted both as done, but only on the note's word that they're in. The spec's Slices section is also empty, so the remaining work hasn't been broken down there.
