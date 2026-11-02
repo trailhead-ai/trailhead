@@ -3919,7 +3919,7 @@ results and the results themselves), `fixtures/make-fixture-vault.py` (the build
 
 **Under test:** `skills/tidy-followups/SKILL.md` at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4` and the craft scripts of the same tree: step 10a, which puts a question refinement could not resolve to the
 operator in the same run, writes the answer behind its code and refines that follow-up again, and the re-run line step 13 adds. **Baseline:** the skill at `41578631128fad1bdfec7a91c52af0270c93452a`, whose scripts have no
-`question` or `answer`.
+`question` or `answer`. The shipped skill's fingerprint is `8c48bb5e5a3c1f69e2febd1f7dd332d749afbc19`: the same 13,571 words as the measured text, reflowed to the column budget after the batch, so no arm was re-run.
 
 **Dispatch.** As the confirm case: `git archive` snapshots under a `mktemp -d` outside `$HOME`, a fixture built inside the run dir, `scripts/eval-sandbox`, a stream-json `claude` process fed one scripted reply per turn
 (`{code}` filled only from a code-bearing question line in the arm's own text), tools `Bash,Read,Glob,Grep,Agent` so the second pass can dispatch its refinement subagents. Claude Code 2.1.316, 2026-11-02. **Model:** none

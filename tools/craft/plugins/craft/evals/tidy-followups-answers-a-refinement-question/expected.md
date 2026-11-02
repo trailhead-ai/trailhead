@@ -292,3 +292,14 @@ by a placeholder for a machine-local denylist, and no graded line reads it.
 **Cost and time.** 34 arms, 63.86 USD and 10,625 s of arm time: treatment 55.47 USD and 9,426 s (28 arms), baseline 5.74 USD
 and 835 s, regression 2.66 USD and 364 s. The two shake-out arms (`answered-a`, `hostile`; 4.44 USD, about 700 s) ran
 one at a time; the other 32 ran four at a time in about 48 minutes of wall clock (59.42 USD).
+
+## Note, 2026-11-02: the skill's line breaks changed after the batch
+
+The batch measured the skill at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4`. The shipped file's fingerprint is
+`8c48bb5e5a3c1f69e2febd1f7dd332d749afbc19`: `wrap_prose.py` reflowed it to the repository's column budget and nothing else changed.
+Split on whitespace, the two versions hold the same 13,571 words in the same order, so no arm was re-run.
+
+`capture_scan.py` first failed these captures on three tokens, none a credential: two usage field names in Claude Code 2.1.316's
+stream, and a Homebrew path in `refinement-fails-treat-r1`, where the regex took in a JSON `\u0000` escape to reach its length. No
+capture was edited for this. The scanner now reports the field names as `stream-field-name`, matched as exact literals, and measures
+a run without the escape in front of it; it exits 0 on this case's `runs/`.
