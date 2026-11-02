@@ -2022,9 +2022,9 @@ B side is `third-noritual` on `fixtures/prompt-noritual.md`; G2's B side is `thi
 As `## Dispatch` above: each run is its own `claude -p` process, fixtures copied to a fresh empty directory under
 `/tmp` with `FIXTURES_DIR` (and `SPECFILE`, `NOTEFILE`) replaced, the process started from a second empty directory,
 `--setting-sources project`, the arm by `--append-system-prompt` (or `--append-system-prompt-file` for the two build
-arms), `--allowedTools "Read"`, stdin from `/dev/null`, no `--model` flag, sequential and in the foreground. This case
-has no real-run recipe and does not use `scripts/eval-sandbox`. Each run's two temporary directories are recorded at
-creation and removed by name afterwards.
+arms), `--allowedTools "Read"`, stdin from `/dev/null`, no `--model` flag, sequential and in the foreground. This extension
+has no real run, so it does not use the `Real-run recipe` above or `scripts/eval-sandbox`. Each run's two temporary
+directories are recorded at creation and removed by name afterwards.
 
 ### Readings (by eye), fixed before any batch
 
@@ -2090,8 +2090,7 @@ miss columns bind the R2 arms, and at a B arm the guards are observed and record
 - **Pass at C:** a clean majority of `by-section`, of `correct`, of `both`, and of a passing `criterion-mention`.
 - **Headroom:** the baseline (`third-noritual` at C) is not majority `by-section` and `both`. If it is, R2 is not
   committed and the slice stops for the operator.
-- **Split rule:** a 2-1 split on any verdict is re-run to six. 5 or 6 of 6 is clean. A guard miss in any of the first three
-  runs of an R2 arm also triggers the run to six.
+- **Split rule:** a 2-1 split on any verdict is re-run to six. 5 or 6 of 6 is clean.
 - **Two-reader protocol.** Each by-eye reading is taken twice: in session, and by a subagent given only the readings and
   the derivation rule above, the fixtures and the captures renamed `cap-A`, `cap-B`, ... so it cannot tell the arm or the
   site (the mapping is kept by the caller). The second reader is not given the ground-truth numbers, any pilot reading,
