@@ -261,9 +261,11 @@ runs.
 - *A follow-up that still cannot be made ready, or is routed, is left out* (AC28): L1 6 of 6 as amended (`skip`,
   `routed`, `still-unresolved`, two runs each: named, one line with the reason, not reported nested, and for the waiting
   follow-ups the re-run line alone on its line), P1 for the parent holding the right set.
-- *Every failed write is reported naming the follow-up and the write* (AC23): F1 4 of 4 (`answer of task/<name>` in
+- *Every failed write is reported naming the follow-up and the write* (AC23): F1 4 of 4 as first graded (`answer of task/<name>` in
   `answer-write-fails`, `refinement of task/<name>` in `refinement-fails`; the shim was hit; no re-refinement after a failed
-  answer).
+  answer). That reading is stale: F1 later gained the re-run line (see the second batch), and `refinement-fails` r1 and r2 now fail
+  it, so F1 holds in 2 of 4 first-batch runs and in all 4 second-batch runs (`answer-write-fails` and `refinement-fails`, r3 and
+  r4).
 - *Every command the ritual prints stands alone on its own line and is pasteable unedited* (AC43), for the one re-run line this
   slice adds: G2 28 of 28. The re-run line was printed alone, in its own fence, with a sentence on the live parent, in every
   run that left a follow-up waiting.
@@ -316,10 +318,12 @@ cells they can reach on the then-current file (its fingerprint is recorded with 
 - step 13's re-run line now also covers a follow-up left out by a failed `answer of` or `refinement of` write;
 - a new `unclosed-fence` row in the `question` table.
 
-Only three cells take a branch those edits touch, and only these are re-run: `altered` (the sanitized-text re-ask),
-`answer-write-fails` and `refinement-fails` (the re-run line after a failed write). The `not-answerable` and `unclosed-fence`
-rows need an over-long recommended answer or an unclosed fence, which no fixture builds, so they are not measured. The other
-eleven cells reach none of the edited text and are not re-run; they were not measured on the shipped text.
+Only three cells reach text those edits touch, and only these are re-run: `altered` (the sanitized-text re-ask),
+`answer-write-fails` and `refinement-fails` (the re-run line after a failed write). Reaching the text is not measuring every
+edit in it: the `altered` arms answer the re-ask with the code, so the removal of the staged answer file on a `skip` or a retype
+is measured by no arm. The `not-answerable` and `unclosed-fence` rows need an over-long recommended answer or an unclosed fence,
+which no fixture builds, so they are not measured either. The other eleven cells reach none of the edited text and are not
+re-run; they were not measured on the shipped text.
 
 **The new expectation.** In `answer-write-fails` and `refinement-fails`, the closing report prints the re-run line
 (`/craft:tidy-followups spec/<name>`) alone on its own line, with a word on the live parent near it, read by the check L1 uses
@@ -356,10 +360,18 @@ re-run. **Cost and time:** 12.18 USD and 1,970 s of arm time, about 14 minutes o
   read as nested).
 
 **What the measurement does and does not cover.**
-- The first batch measured an earlier text of the skill. The prose edits since sit on branches only these three cells take; the
+- The first batch measured an earlier text of the skill. The prose edits since sit on branches only these three cells reach, and
+  of those edits only the re-run line is measured by an arm: the `altered` arms answer the re-ask with the code, so the staged
+  answer file's removal on a `skip` or a retype is measured by no arm, as are `not-answerable` and `unclosed-fence`. The
   other eleven cells were measured on the earlier text and not re-run, so **cells not re-run were not measured on the shipped
   text.** The `not-answerable` and `unclosed-fence` rows need an over-long recommended answer or an unclosed fence, and no
   fixture builds either; they are not measured by any arm.
+- The craft scripts were not frozen with the skill text. The script fixes made after the first batch (the display-equality
+  refusal in `answer --recommended`, the fence handling in `check`) post-date it, so the 11 cells not re-run ran the older
+  `answer --recommended` and `check`; `accept-recommended` was not re-run although its write path gained the display-equality
+  refusal. The fixes of the last pass (an unclosed fence hiding a section from `check`, a recommended answer or a question that
+  sanitizes to nothing) post-date the second batch as well. The scripts' own tests pin all of them; no arm measured them. No arm
+  is re-run for this: the skill's words are unchanged and these are deterministic script behaviours.
 - The first batch's `43c2ec1187041e6327c7351501dd08d41defe9e4` is not the shipped file: its line breaks were reflowed and prose edits
   followed, so the word-for-word equivalence stated in the earlier note holds for the reflow only, not for the shipped skill.
 - L1's reason line need not concern the follow-up beyond naming no other follow-up of the cell, which is loose; it can fail (a line
