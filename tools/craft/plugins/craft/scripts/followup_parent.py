@@ -6,6 +6,7 @@ under one new parent.
 Usage:
     followup_parent.py check <spec-name> [--parent <parent>] [--reasons <json-file>] <name>...
     followup_parent.py question <spec-name> <name>...
+    followup_parent.py answer <spec-name> <name> (--answer-file <path> | --recommended) [--preview] [--confirm <code>]
     followup_parent.py assemble <spec-name> --children <json-file> --confirm <code>
     followup_parent.py resume <spec-name> <parent> --children <json-file> --confirm <code>
     followup_parent.py state <spec-name> <parent> [--reason-file <path>]
@@ -121,6 +122,30 @@ so a write that answers the question reuses it unchanged. Exit codes and refusal
 `check`'s reads: a bad name is `invalid-followup-name` before `lore` is called, an unresolvable
 name is `followup-not-found`, a `lore` failure is exit 2 with its reason code and nothing on
 stdout.
+
+`answer <spec-name> <name> (--answer-file <path> | --recommended) [--preview] [--confirm <code>]`
+writes the operator's answer into the follow-up's `## Refine — unresolved` section as the line
+`**Answer:** <text>`. Exactly one source, else `invalid-arguments` before any `lore` call.
+`--answer-file` is a regular, non-symlink file holding one JSON string of at most 4096 bytes
+(UTF-8) that is not blank; anything else is `invalid-answer-file` (exit 2, nothing read from the
+vault or written). `--recommended` takes the section's `**Recommended answer:**` and stores
+`Accepted the recommended answer: <text>`; a section with none is `not-answerable`. The text is
+folded onto one line, sanitized and credential-redacted, never cut; `altered` is true when
+sanitizing (not whitespace folding) changed it. Exit codes:
+    0  stdout `{name, revision, answer, altered}`: the post-write revision and the text as stored
+       (with `--preview`: `{name, answer, altered}`, nothing written, no code needed);
+    1  a refusal, vault unchanged, stdout empty, one `reason-code:` line: `not-answerable`
+       (`ask_verdict` finds the follow-up unaskable, `--recommended` has no text, or the section
+       sits in a fence that never closes), `confirmation-missing`, or `confirmation-mismatch`
+       (`--confirm` is not the code `question` prints for the record's current revision);
+    2  `invalid-answer-file`, a name or `lore` failure as for `question`, or
+       `answer-write-failed`: the single full-body `lore record update` failed, could not be run
+       or timed out, or the read-back does not show the line. Stdout is then `{name, revision,
+       answer, altered, failed: [{name, write: "answer"}]}`, `revision` the record's current one
+       or null when it could not be read.
+The line goes last in the section: before the first heading after it outside a fenced code block,
+or at the end of the body. Nothing else in the body changes. `answer_followup` is the importable
+function; it shares `ask_verdict` with `question`.
 
 `assemble` takes `--children`, a JSON file holding a non-empty list of
 `{name, reason, revision}`: the follow-up's bare name, the selection reason the
@@ -436,6 +461,9 @@ REASON_CODES = ASK_REASONS | frozenset(
         "parent-not-followup-shaped",
         "confirmation-missing",
         "confirmation-mismatch",
+        "invalid-answer-file",
+        "not-answerable",
+        "answer-write-failed",
     }
 )
 
@@ -454,6 +482,7 @@ REFUSAL_REASONS = frozenset(
         "parent-not-followup-shaped",
         "confirmation-missing",
         "confirmation-mismatch",
+        "not-answerable",
     }
 )
 
@@ -489,6 +518,9 @@ RESUME_KIND = "resume-followup-parent"
 DROP_KIND = "drop-followup-parent"
 ANSWER_KIND = "answer-refinement-question"
 MAX_REASON_FILE_BYTES = 4096
+MAX_ANSWER_BYTES = 4096
+MAX_ANSWER_FILE_BYTES = 6 * MAX_ANSWER_BYTES + 2
+RECOMMENDED_PREFIX = "Accepted the recommended answer: "
 MAX_CHILDREN_FILE_BYTES = 65536
 _MARKDOWN_ACTIVE = str.maketrans("", "", "[]<>`!")
 UNFINISHED_STATUSES = frozenset({"open", "ready", "in-progress", "blocked"})
@@ -746,6 +778,106 @@ def question_followups(runner, spec: str, names: list[str]) -> dict:
             }
         )
     return {"questions": questions, "unaskable": unaskable}
+
+
+def _answer_span(body: str) -> int | None:
+    """The index, in `body.split("\n")`, where the `**Answer:**` line of the one
+    `## Refine — unresolved` section goes: the first heading line after it outside fenced code
+    blocks, otherwise the end of the body (before its final newline). None when the section is
+    inside a fence that never closes."""
+    lines = body.split("\n")
+    fence: str | None = None
+    inside = False
+    for index, line in enumerate(lines):
+        if fence is not None:
+            stripped = line.strip()
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+                fence = None
+            continue
+        opener = _FENCE_RE.match(line)
+        if opener:
+            fence = opener.group(1)
+        elif _UNRESOLVED_RE.match(line):
+            inside = True
+        elif inside and _HEADING_LINE_RE.match(line):
+            return index
+    if fence is not None:
+        return None
+    return len(lines) - 1 if lines[-1] == "" else len(lines)
+
+
+def load_answer(path: str) -> str:
+    """The operator's answer: the one JSON string in the regular, non-symlink file at `path`,
+    at most MAX_ANSWER_BYTES long once encoded as UTF-8. Anything else, or an answer empty
+    once folded to one line, is `invalid-answer-file`."""
+    invalid = ParentError("invalid-answer-file")
+    doc = _read_json_file(path, MAX_ANSWER_FILE_BYTES, invalid)
+    if not isinstance(doc, str):
+        raise invalid
+    try:
+        size = len(doc.encode("utf-8"))
+    except UnicodeEncodeError:
+        raise invalid from None
+    if size > MAX_ANSWER_BYTES or not " ".join(strip_surrogates(doc).split()):
+        raise invalid
+    return doc
+
+
+def _stored_answer(raw: str) -> tuple[str, bool]:
+    """(the text as stored, whether sanitizing changed it): `raw` folded onto one line, control
+    and invisible characters stripped and credential spans redacted, never cut. Folding
+    whitespace alone is not a change."""
+    folded = " ".join(strip_surrogates(raw).split())
+    stored = gather.sanitize_text(folded, len(folded))
+    return stored, stored != folded
+
+
+def answer_followup(
+    runner, spec: str, name: str, source: dict, preview: bool, typed: str | None
+) -> tuple[dict, str | None, tuple]:
+    """Write the operator's answer into the `## Refine — unresolved` section of follow-up
+    `name` as `**Answer:** <text>`, or with `preview` only report the text as it would be
+    stored. `source` is `{"file": path}` or `{"recommended": True}`. Raises ParentError for a
+    refusal, before anything is written. Otherwise returns (report, reason-code, subjects): the
+    code is None when the line was written and read back."""
+    if not gather._shape_ok(spec):
+        raise ParentError("invalid-spec-name")
+    if not gather._shape_ok(name):
+        raise ParentError("invalid-followup-name")
+    raw = load_answer(source["file"]) if "file" in source else None
+    vault, spec_sidecar = gather.resolve_spec(runner, spec)
+    sidecar, body, revision = _read_task(runner, vault, name)
+    linked = _FollowupLink(runner, vault, spec, spec_sidecar)
+    if ask_verdict(sidecar, body, lambda: linked(name, sidecar)) is not None:
+        raise ParentError("not-answerable", (name,))
+    if raw is None:
+        recommended = " ".join(strip_surrogates(_refine_sections(body)[0].get("Recommended answer", "")).split())
+        if not recommended:
+            raise ParentError("not-answerable", (name,))
+        raw = f"{RECOMMENDED_PREFIX}{recommended}"
+    text, altered = _stored_answer(raw)
+    if preview:
+        return {"name": name, "answer": text, "altered": altered}, None, (name,)
+    require_confirmation(ANSWER_KIND, spec, answer_payload(name, revision), typed)
+    at = _answer_span(body)
+    if at is None:
+        raise ParentError("not-answerable", (name,))
+    line = f"**Answer:** {text}"
+    lines = body.split("\n")
+    new_body = "\n".join([*lines[:at], line, *lines[at:]])
+    report: dict = {"name": name, "revision": None, "answer": text, "altered": altered}
+    done = _write(runner, _update(vault, name), stdin=new_body)
+    landed = False
+    try:
+        _, stored, current = _read_task(runner, vault, name)
+        report["revision"] = current
+        landed = done is not None and done.returncode == 0 and line in stored.split("\n")
+    except (ParentError, gather.GatherError):
+        pass
+    if landed:
+        return report, None, (name,)
+    report["failed"] = [{"name": name, "write": "answer"}]
+    return report, "answer-write-failed", (name,)
 
 
 def _static_verdict(sidecar: dict, body: str, expected_parent: str | None, linked) -> str | None:
@@ -1549,6 +1681,13 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
         ask = commands.add_parser("question", help="read the refinement questions of follow-ups")
         ask.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         ask.add_argument("names", nargs="+", help="bare task record names")
+        reply = commands.add_parser("answer", help="write the operator's answer into a follow-up's record")
+        reply.add_argument("spec_name", help="bare spec record name (the part after spec/)")
+        reply.add_argument("name", help="bare task record name")
+        reply.add_argument("--answer-file", help="JSON file holding the answer as one string")
+        reply.add_argument("--recommended", action="store_true", help="accept the section's recommended answer")
+        reply.add_argument("--preview", action="store_true", help="print the text as it would be stored; write nothing")
+        reply.add_argument("--confirm", help="the code `question` printed; required unless --preview")
         resume = commands.add_parser("resume", help="finish an open follow-up parent")
         resume.add_argument("spec_name", help="bare spec record name (the part after spec/)")
         resume.add_argument("parent", help="bare name of the follow-up parent task")
@@ -1573,6 +1712,13 @@ def main(argv: list[str] | None = None, runner=None, today: datetime.date | None
                 )
             elif args.command == "question":
                 result = question_followups(runner, args.spec_name, args.names)
+            elif args.command == "answer":
+                if (args.answer_file is None) == (not args.recommended):
+                    raise ParentError("invalid-arguments")
+                source = {"recommended": True} if args.recommended else {"file": args.answer_file}
+                result, reason, subjects = answer_followup(
+                    runner, args.spec_name, args.name, source, args.preview, args.confirm
+                )
             elif args.command == "state":
                 drop_reason = None if args.reason_file is None else load_reason(args.reason_file)
                 result = parent_state(runner, args.spec_name, args.parent)

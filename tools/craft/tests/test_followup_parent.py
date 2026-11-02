@@ -4298,3 +4298,552 @@ def test_check_omits_answered_for_every_other_reason_even_when_the_body_has_an_a
     env, vault = lore_env
     name = make_followup(env, vault, "Other", status="open", body=unresolved(answer="Left."), spec=spec, **kwargs)
     assert left_out(check_ok(env, spec, name))[name] == {"name": name, "reason": reason}
+
+
+# --- answer: writing the operator's answer into the record -------------------------------------
+
+ANSWER_TEXT = "Go left, and keep the old path."
+CREDENTIAL = "AKIAIOSFODNN7EXAMPLE"
+
+
+def answer_file(tmp_path, value, raw=None, name="answer.json"):
+    path = tmp_path / name
+    path.write_text(raw if raw is not None else json.dumps(value))
+    return str(path)
+
+
+def answer_code(env, spec_name, name):
+    return question_ok(env, spec_name, name)["questions"][0]["confirm"]
+
+
+def current_code(env, vault, spec_name, name):
+    """The code for the record as it is now, whether or not `question` would still ask."""
+    return parent.confirm.code_for(
+        parent.ANSWER_KIND, spec_name, parent.answer_payload(name, shown_revision(env, vault, name))
+    )
+
+
+def run_answer(env, spec_name, name, *args):
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), "answer", spec_name, name, *args],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def answer_ok(env, spec_name, name, *args):
+    r = run_answer(env, spec_name, name, *args)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def snapshot(env, vault, name):
+    return _lore(env, "record", "show", "--json", "--vault", vault, f"task/{name}")
+
+
+def without_line(body, line):
+    lines = body.split("\n")
+    lines.remove(line)
+    return "\n".join(lines)
+
+
+def answer_main(runner, tmp_path, capsys, spec_name, name, value=ANSWER_TEXT, typed=None, extra=(), raw=None):
+    argv = ["answer", spec_name, name, "--answer-file", answer_file(tmp_path, value, raw)]
+    if typed is not None:
+        argv += ["--confirm", typed]
+    code = parent.main(argv + list(extra), runner=runner)
+    out = capsys.readouterr()
+    return code, (json.loads(out.out) if out.out.strip() else None), out.err
+
+
+def answer_text_ok(env, vault, spec_name, name, tmp_path, text=ANSWER_TEXT):
+    code = answer_code(env, spec_name, name)
+    return answer_ok(env, spec_name, name, "--answer-file", answer_file(tmp_path, text), "--confirm", code)
+
+
+def test_answering_a_question_writes_one_line_inside_the_section_and_changes_nothing_else(
+    lore_env, spec, tmp_path
+):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + "\n## Later\n\nUnrelated tail.\n")
+    before_body, before_sidecar = body_of(env, vault, name), sidecar_of(env, vault, name)
+    code = answer_code(env, spec, name)
+    result = answer_ok(env, spec, name, "--answer-file", answer_file(tmp_path, ANSWER_TEXT), "--confirm", code)
+    after_body = body_of(env, vault, name)
+    line = f"**Answer:** {ANSWER_TEXT}"
+    assert without_line(after_body, line) == before_body
+    assert parent._refine_sections(after_body)[0]["Answer"].strip() == ANSWER_TEXT
+    assert after_body.index(line) < after_body.index("## Later")
+    after_sidecar = sidecar_of(env, vault, name)
+    assert after_sidecar.pop("updated-at") != before_sidecar.pop("updated-at")
+    assert after_sidecar == before_sidecar
+    assert result == {
+        "name": name, "revision": shown_revision(env, vault, name), "answer": ANSWER_TEXT, "altered": False,
+    }
+
+
+def test_the_returned_revision_is_the_post_write_one(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    old = shown_revision(env, vault, name)
+    result = answer_ok(
+        env, spec, name, "--answer-file", answer_file(tmp_path, ANSWER_TEXT), "--confirm", answer_code(env, spec, name)
+    )
+    assert result["revision"] != old
+    assert result["revision"] == shown_revision(env, vault, name)
+
+
+def test_check_reports_the_answered_follow_up_as_an_answered_unresolved_question(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    assert "answered" not in left_out(check_ok(env, spec, name))[name]
+    answer_ok(
+        env, spec, name, "--answer-file", answer_file(tmp_path, ANSWER_TEXT), "--confirm", answer_code(env, spec, name)
+    )
+    assert left_out(check_ok(env, spec, name))[name] == {
+        "name": name, "reason": "unresolved-question", "answered": True,
+    }
+
+
+@pytest.mark.parametrize("with_code", [False, True])
+def test_preview_prints_the_text_a_write_then_stores_and_touches_nothing(lore_env, spec, tmp_path, with_code):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    frozen = snapshot(env, vault, name)
+    path = answer_file(tmp_path, "Line one\n\nline  two")
+    extra = ["--confirm", answer_code(env, spec, name)] if with_code else []
+    preview = answer_ok(env, spec, name, "--answer-file", path, "--preview", *extra)
+    assert preview == {"name": name, "answer": "Line one line two", "altered": False}
+    assert snapshot(env, vault, name) == frozen
+    written = answer_ok(env, spec, name, "--answer-file", path, "--confirm", answer_code(env, spec, name))
+    assert written["answer"] == preview["answer"]
+
+
+def test_preview_altered_follows_the_input(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    clean = answer_ok(env, spec, name, "--answer-file", answer_file(tmp_path, "Use the left path."), "--preview")
+    dirty = answer_ok(
+        env, spec, name, "--answer-file", answer_file(tmp_path, f"Rotate {CREDENTIAL} first."), "--preview"
+    )
+    assert clean["altered"] is False
+    assert dirty["altered"] is True
+    assert CREDENTIAL not in dirty["answer"]
+
+
+def test_preview_still_refuses_an_unanswerable_record(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=CLEAN)
+    r = run_answer(env, spec, name, "--answer-file", answer_file(tmp_path, "x"), "--preview")
+    assert r.returncode == 1 and r.stdout == ""
+    assert "reason-code: not-answerable" in r.stderr
+
+
+@pytest.mark.parametrize("recommended", ["Go left.", "Take the right fork; then retry twice."])
+def test_recommended_stores_the_sections_own_text_behind_the_accepted_wording(lore_env, spec, recommended):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=recommended))
+    result = answer_ok(env, spec, name, "--recommended", "--confirm", answer_code(env, spec, name))
+    stored = f"Accepted the recommended answer: {recommended}"
+    assert result["answer"] == stored
+    assert result["altered"] is False
+    assert f"**Answer:** {stored}" in body_of(env, vault, name).split("\n")
+
+
+def test_recommended_preview_shows_the_accepted_wording(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended="Go left."))
+    assert answer_ok(env, spec, name, "--recommended", "--preview") == {
+        "name": name, "answer": "Accepted the recommended answer: Go left.", "altered": False,
+    }
+
+
+@pytest.mark.parametrize("recommended", [None, ""])
+def test_recommended_with_no_recommended_text_is_not_answerable(lore_env, spec, recommended):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=recommended))
+    frozen = snapshot(env, vault, name)
+    r = run_answer(env, spec, name, "--recommended", "--confirm", current_code(env, vault, spec, name))
+    assert r.returncode == 1 and r.stdout == ""
+    assert "reason-code: not-answerable" in r.stderr
+    assert snapshot(env, vault, name) == frozen
+
+
+def test_both_sources_or_neither_is_invalid_arguments_before_any_lore_call(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    path = answer_file(tmp_path, "x")
+    for argv in (
+        ["answer", spec, name, "--confirm", "c"],
+        ["answer", spec, name, "--answer-file", path, "--recommended", "--confirm", "c"],
+    ):
+        runner = EnvRunner(env)
+        assert parent.main(argv, runner=runner) == 2
+        out = capsys.readouterr()
+        assert reason_of(out.err) == "invalid-arguments" and out.out == ""
+        assert runner.calls == []
+
+
+def test_a_section_after_a_fenced_heading_gets_the_line_in_the_real_section(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    body = CLEAN + "\n```\n## Refine — unresolved\n\n**Question:** fake?\n```\n" + unresolved()[len(CLEAN):]
+    name = _askable(env, vault, spec, body=body)
+    answer_text_ok(env, vault, spec, name, tmp_path)
+    lines = body_of(env, vault, name).split("\n")
+    answer_at = lines.index(f"**Answer:** {ANSWER_TEXT}")
+    real_heading = len(lines) - 1 - lines[::-1].index("## Refine — unresolved")
+    assert answer_at > real_heading
+    assert without_line("\n".join(lines), f"**Answer:** {ANSWER_TEXT}") == body
+
+
+def test_a_fenced_heading_inside_the_section_does_not_end_it(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    body = unresolved() + "\n```\n## Not a heading\n```\n\n## Real next\n\nTail.\n"
+    name = _askable(env, vault, spec, body=body)
+    answer_text_ok(env, vault, spec, name, tmp_path)
+    lines = body_of(env, vault, name).split("\n")
+    answer_at = lines.index(f"**Answer:** {ANSWER_TEXT}")
+    assert answer_at > lines.index("## Not a heading")
+    assert answer_at < lines.index("## Real next")
+
+
+def test_a_section_followed_by_another_heading_gets_the_line_inside_the_section(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + "\n## Notes\n\nSome notes.\n")
+    answer_text_ok(env, vault, spec, name, tmp_path)
+    lines = body_of(env, vault, name).split("\n")
+    assert lines.index(f"**Answer:** {ANSWER_TEXT}") < lines.index("## Notes")
+
+
+@pytest.mark.parametrize("tail", ["", "\n"])
+def test_a_section_at_the_end_of_the_body_gets_the_line_last_with_the_ending_kept(lore_env, spec, tmp_path, tail):
+    env, vault = lore_env
+    body = unresolved().rstrip("\n") + tail
+    name = _askable(env, vault, spec, body=body)
+    answer_text_ok(env, vault, spec, name, tmp_path)
+    after = body_of(env, vault, name)
+    assert without_line(after, f"**Answer:** {ANSWER_TEXT}") == body
+    assert after.endswith("\n") == body.endswith("\n")
+    assert parent._refine_sections(after)[0]["Answer"].strip() == ANSWER_TEXT
+
+
+def test_an_unresolved_section_with_an_unclosed_fence_is_refused(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + "\n```\nstill open\n")
+    frozen = snapshot(env, vault, name)
+    r = run_answer(
+        env, spec, name, "--answer-file", answer_file(tmp_path, "x"), "--confirm", current_code(env, vault, spec, name)
+    )
+    assert r.returncode == 1 and r.stdout == ""
+    assert "reason-code: not-answerable" in r.stderr
+    assert snapshot(env, vault, name) == frozen
+
+
+def test_a_multi_line_answer_lands_on_one_line_and_starts_no_heading_or_field(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    before = unresolved()
+    name = _askable(env, vault, spec, body=before)
+    hostile = "first\n## Heading\n**Question:** hijack\n```\nlast"
+    result = answer_ok(
+        env, spec, name, "--answer-file", answer_file(tmp_path, hostile), "--confirm", answer_code(env, spec, name)
+    )
+    after = body_of(env, vault, name)
+    assert result["answer"] == "first ## Heading **Question:** hijack ``` last"
+    assert result["altered"] is False
+    assert without_line(after, f"**Answer:** {result['answer']}") == before
+    section = parent._refine_sections(after)
+    assert len(section) == 1
+    assert section[0]["Question"].strip() == "Which way?"
+    assert [ln for ln in after.split("\n") if ln.startswith("#")] == ["## Refine — unresolved"]
+
+
+def test_a_credential_in_the_answer_is_redacted_and_altered_is_true(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    result = answer_ok(
+        env, spec, name,
+        "--answer-file", answer_file(tmp_path, f"Rotate {CREDENTIAL} now."), "--confirm", answer_code(env, spec, name),
+    )
+    assert result["altered"] is True
+    assert CREDENTIAL not in result["answer"] and CREDENTIAL not in body_of(env, vault, name)
+    assert f"**Answer:** {result['answer']}" in body_of(env, vault, name).split("\n")
+
+
+def test_an_answer_of_four_kib_is_written_whole(lore_env, spec, tmp_path):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    text = sentence(4096)
+    result = answer_text_ok(env, vault, spec, name, tmp_path, text)
+    assert result["answer"] == text and result["altered"] is False
+    assert f"**Answer:** {text}" in body_of(env, vault, name).split("\n")
+
+
+@pytest.mark.parametrize(
+    "value,raw",
+    [
+        (sentence(4097), None),
+        ("", None),
+        ("   \n ", None),
+        (123, None),
+        (["a"], None),
+        (None, None),
+        (None, "not json"),
+        (None, ""),
+    ],
+)
+def test_a_bad_answer_file_is_invalid_and_nothing_is_read_or_written(lore_env, spec, tmp_path, capsys, value, raw):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    runner = EnvRunner(env)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name, value=value, typed="c", raw=raw)
+    assert code == 2 and out is None
+    assert reason_of(err) == "invalid-answer-file"
+    assert runner.calls == []
+
+
+def test_a_missing_answer_file_is_invalid(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    runner = EnvRunner(env)
+    code = parent.main(
+        ["answer", spec, name, "--answer-file", str(tmp_path / "absent.json"), "--confirm", "c"], runner=runner
+    )
+    out = capsys.readouterr()
+    assert code == 2 and out.out == "" and reason_of(out.err) == "invalid-answer-file"
+    assert runner.calls == []
+
+
+def test_a_directory_and_a_symlink_are_not_answer_files(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    real = answer_file(tmp_path, "ok")
+    link = tmp_path / "link.json"
+    link.symlink_to(real)
+    for path in (str(tmp_path), str(link)):
+        runner = EnvRunner(env)
+        code = parent.main(["answer", spec, name, "--answer-file", path, "--confirm", "c"], runner=runner)
+        out = capsys.readouterr()
+        assert code == 2 and reason_of(out.err) == "invalid-answer-file"
+        assert runner.calls == []
+
+
+def test_no_code_is_confirmation_missing_and_nothing_is_written(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    frozen = snapshot(env, vault, name)
+    runner = EnvRunner(env)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name)
+    assert code == 1 and out is None
+    assert reason_of(err) == "confirmation-missing"
+    assert runner.writes() == [] and snapshot(env, vault, name) == frozen
+
+
+def test_a_wrong_code_is_confirmation_mismatch_and_nothing_is_written(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    other = _askable(env, vault, spec, body=unresolved(question="Different?"))
+    frozen = snapshot(env, vault, name)
+    runner = EnvRunner(env)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name, typed=answer_code(env, spec, other))
+    assert code == 1 and out is None
+    assert reason_of(err) == "confirmation-mismatch"
+    assert runner.writes() == [] and snapshot(env, vault, name) == frozen
+
+
+def test_a_code_minted_before_the_record_changed_is_confirmation_mismatch(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    stale = answer_code(env, spec, name)
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, stdin=unresolved(question="Changed under you?"))
+    frozen = snapshot(env, vault, name)
+    runner = EnvRunner(env)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name, typed=stale)
+    assert code == 1 and out is None
+    assert reason_of(err) == "confirmation-mismatch"
+    assert runner.writes() == [] and snapshot(env, vault, name) == frozen
+
+
+def _answered_once(env, vault, spec_name):
+    return _askable(env, vault, spec_name, body=unresolved(answer="Left."))
+
+
+NOT_ANSWERABLE = {
+    "no-question": lambda env, vault, spec_name: _askable(env, vault, spec_name, body=unresolved(question="")),
+    "not-unresolved": lambda env, vault, spec_name: _askable(env, vault, spec_name, body=CLEAN),
+    "two-sections": lambda env, vault, spec_name: _askable(
+        env, vault, spec_name, body=unresolved() + unresolved(question="Another?")[len(CLEAN):]
+    ),
+    "already-answered": _answered_once,
+    "blocked": lambda env, vault, spec_name: _askable(env, vault, spec_name, status="blocked"),
+    "not-spec-linked": lambda env, vault, spec_name: _askable(env, vault, spec_name, spec=None),
+    "already-nested": lambda env, vault, spec_name: _askable(
+        env, vault, spec_name, parent=make_followup(env, vault, "Holder", status="open", spec=spec_name)
+    ),
+    "routed": lambda env, vault, spec_name: _askable(env, vault, spec_name, labels=["route=plan"]),
+}
+
+
+@pytest.mark.parametrize("condition", sorted(NOT_ANSWERABLE))
+def test_each_unaskable_condition_refuses_with_a_valid_code_and_the_vault_unchanged(
+    lore_env, spec, tmp_path, capsys, condition
+):
+    env, vault = lore_env
+    name = NOT_ANSWERABLE[condition](env, vault, spec)
+    frozen = snapshot(env, vault, name)
+    runner = EnvRunner(env)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name, typed=current_code(env, vault, spec, name))
+    assert code == 1 and out is None
+    assert reason_of(err) == "not-answerable"
+    assert runner.writes() == [] and snapshot(env, vault, name) == frozen
+
+
+def test_answering_twice_refuses_the_second_answer_and_keeps_the_first(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    answer_text_ok(env, vault, spec, name, tmp_path, "First.")
+    frozen = snapshot(env, vault, name)
+    runner = EnvRunner(env)
+    typed = current_code(env, vault, spec, name)
+    code, out, err = answer_main(runner, tmp_path, capsys, spec, name, value="Second.", typed=typed)
+    assert code == 1 and reason_of(err) == "not-answerable"
+    assert snapshot(env, vault, name) == frozen
+
+
+@pytest.mark.parametrize("bad", ["has space", "a$(touch x)", "../x", "a;b"])
+def test_answer_refuses_a_bad_name_before_any_lore_call(bad, tmp_path, capsys):
+    runner = Lore()
+    code, out, err = answer_main(runner, tmp_path, capsys, "s", bad, typed="c")
+    assert code == 2 and out is None
+    assert reason_of(err) == "invalid-followup-name"
+    assert runner.calls == []
+
+
+def test_answer_refuses_a_bad_spec_name_before_any_lore_call(tmp_path, capsys):
+    runner = Lore()
+    code, out, err = answer_main(runner, tmp_path, capsys, "bad name", "f", typed="c")
+    assert code == 2 and out is None
+    assert reason_of(err) == "invalid-spec-name"
+    assert runner.calls == []
+
+
+def test_answering_an_unknown_follow_up_is_followup_not_found(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    code, out, err = answer_main(EnvRunner(env), tmp_path, capsys, spec, "no-such-task", typed="c")
+    assert code == 2 and out is None
+    assert reason_of(err) == "followup-not-found"
+
+
+# --- answer: write failures ------------------------------------------------------------------
+
+
+def _is_update(argv):
+    return argv[:2] == ["record", "update"]
+
+
+def _success(argv):
+    return subprocess.CompletedProcess(argv, 0, f"{argv[2]}\n", "")
+
+
+def _expect_write_failed(code, out, err, name, revision):
+    assert code == 2
+    assert reason_of(err) == "answer-write-failed"
+    assert out == {
+        "name": name, "revision": revision, "answer": ANSWER_TEXT, "altered": False,
+        "failed": [{"name": name, "write": "answer"}],
+    }
+
+
+def test_a_refused_write_is_answer_write_failed_with_the_record_unchanged(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+    revision, frozen = shown_revision(env, vault, name), snapshot(env, vault, name)
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            return subprocess.CompletedProcess(argv, 1, f"{argv[2]}\n", "lore: injected failure")
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    _expect_write_failed(code, out, err, name, revision)
+    assert snapshot(env, vault, name) == frozen
+
+
+def test_a_write_that_reports_failure_is_a_failure_even_when_the_line_landed(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            runner.real(argv, stdin)
+            return subprocess.CompletedProcess(argv, 1, f"{argv[2]}\n", "lore: late failure")
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    assert code == 2 and reason_of(err) == "answer-write-failed"
+    assert out["failed"] == [{"name": name, "write": "answer"}]
+    assert out["revision"] == shown_revision(env, vault, name)
+
+
+def test_a_write_that_reports_success_but_did_not_land_is_answer_write_failed(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+    revision = shown_revision(env, vault, name)
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            return _success(argv)
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    _expect_write_failed(code, out, err, name, revision)
+
+
+def test_a_read_back_without_the_line_is_answer_write_failed(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            runner.real(argv, stdin)
+            stripped = stdin.replace(f"**Answer:** {ANSWER_TEXT}\n", "")
+            runner.real(argv, stripped)
+            return _success(argv)
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    assert code == 2 and reason_of(err) == "answer-write-failed"
+    assert out["failed"] == [{"name": name, "write": "answer"}]
+    assert out["revision"] == shown_revision(env, vault, name)
+    assert f"**Answer:** {ANSWER_TEXT}" not in body_of(env, vault, name)
+
+
+def test_a_timed_out_write_is_answer_write_failed(lore_env, spec, tmp_path, capsys):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+    revision = shown_revision(env, vault, name)
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            raise subprocess.TimeoutExpired(argv, 1)
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    _expect_write_failed(code, out, err, name, revision)
+
+
+def test_a_write_that_could_not_be_run_with_the_record_unreadable_afterwards_has_a_null_revision(
+    lore_env, spec, tmp_path, capsys
+):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    code_typed = answer_code(env, spec, name)
+    gone = {"after": False}
+
+    def hook(argv, stdin, runner):
+        if _is_update(argv):
+            gone["after"] = True
+            raise FileNotFoundError("lore")
+        if gone["after"] and argv[:3] == ["record", "show", "--json"]:
+            return subprocess.CompletedProcess(argv, 1, "", "lore: injected failure")
+
+    code, out, err = answer_main(EnvRunner(env, hook), tmp_path, capsys, spec, name, typed=code_typed)
+    _expect_write_failed(code, out, err, name, None)
