@@ -24,6 +24,7 @@ GRADER = CRAFT_ROOT / "plugins" / "craft" / "scripts" / "wording_grader.py"
 CASE = CRAFT_ROOT / "plugins" / "craft" / "evals" / "ritual-output-wording"
 SPEC = CASE / "fixtures" / "spec.md"
 PROPOSAL_SPEC = CASE / "fixtures" / "proposal-spec.md"
+COUNT_SPEC = CASE / "fixtures" / "count-spec.md"
 RUNS = CASE / "runs"
 EVALS = CASE.parent
 
@@ -679,6 +680,10 @@ def test_long_covers_line_grades_promptly():
 # differs, CAPTURE_OVERRIDES records the grader's verdict.
 # The proposal sites read the statement as the reply without its final line, against their own spec fixture.
 PROPOSAL_STATEMENT = ["--drop-value-line", "--criteria", str(PROPOSAL_SPEC)]
+# The counting sites (extension of 2026-11-02) grade against the count spec. `criterion-mention` reads the whole
+# reply at C, C4 and CN; G6's statement is not a bar for it, so only G6's final line is graded. G7's final line is
+# graded by `test_ritual_output_wording_ledger_guard.py`, and CR is read by eye.
+COUNT_WHOLE_REPLY = ["--criteria", str(COUNT_SPEC)]
 CAPTURE_EXPECTATIONS = {
     "baseline-noritual": [("criterion-mention", [], "bare")],
     # The summary sites are read by eye under the extension of 2026-10-20; no wording-grader check
@@ -766,6 +771,13 @@ CAPTURE_EXPECTATIONS = {
         ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
         ("covers-field", [], "absent"),
     ],
+    # The counting sites at base B (extension of 2026-11-02), one pilot capture per fixture.
+    "count-c-third-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-cn-third-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-c4-third-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-g6-proposal-treated": [("covers-field", [], "gate-shape")],
+    "count-g7-proposal-treated": [],
+    "count-cr-summary-baseline-build": [],
     # The treated arms carry commit P; their guards bind (a miss in 2 or more of 6 is a guard miss).
     "proposal-treated": [
         ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),

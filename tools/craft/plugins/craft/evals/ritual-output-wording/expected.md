@@ -1892,3 +1892,332 @@ Recorded after the whole-change review; no capture, table row or verdict above c
   were safe; a spec from a real vault could carry an injected instruction that reads that state and sends it out. Never run
   this recipe on a non-fixture spec until the sandbox is narrowed. The HEAD check is a tripwire for a write by the session,
   not the containment; the containment is the sandbox's write rule.
+
+## Extension, 2026-11-02 — lists of acceptance criteria read as counts by the spec's own sections, with the exceptions named: site C, observed sites C4, CN and CR, guards G1, G2, G3, G5, G6 and G7 and the same-day control, registered before any batch
+
+Committed before any batch of a new arm; the six pilot captures recorded at the end are the only runs taken so far.
+Nothing above this heading is rewritten; the grammar, verdict words, run rules, floor and exclusion rules, no-mention
+rule and capture naming above apply unchanged to every arm named here except where this section adds a reading or a
+rule of its own. The previous extension's `Result`, `Baseline` and `Treated` sections stand.
+
+**What is under test.** One later prose edit, **R2**, a paragraph appended to `## Output wording` in
+`tools/craft/plugins/craft/rules.md` after the criterion paragraph, and nowhere else (no ritual skill, no agent
+definition). The claim that follows from it: a reply that would name more than five acceptance criteria at once
+counts them by the spec's own sections and names each exception by its own words with its number after it (AC4 and
+AC5 of the spec), while a reviewer's report to its caller, the slice statement's covered-criteria value and the
+criterion-mention behaviour stay as they are. R2 does not exist yet; this section registers the baseline, the readings,
+the guards, the bars and the end states, and no arm that carries R2 is created until R2 is.
+
+**Base.** B is the main branch the task branch was cut from. Its measured sources, by content fingerprint
+(`git hash-object`, first twelve characters): `rules.md` `57ed5637f674`, `skills/slice/SKILL.md` `32f7faf16d40`,
+`skills/execute/SKILL.md` `bffe525c2e0d`, `skills/_shared/execute.md` `92afd6900a5d`, `skills/_shared/council.md`
+`36b96b929463`, `agents/breaker.md` `938b40fd7fa9`, `agents/advocate.md` `08d7536b12ab`. All seven were re-checked
+against the working tree before the fixtures were written and match. A build that branches from a later main checks
+them first and stops if one has moved. Three existing arms are byte-identical to their sources at B, checked with
+`cmp` against the concatenated sources: `third-noritual` (`rules.md` alone), `proposal-treated` (`skills/slice/SKILL.md`,
+a newline, `rules.md`), and `summary-baseline-build` (113252 bytes, the execute skill, `_shared/execute.md` and
+`rules.md`, joined by single newlines). Every earlier arm stays frozen.
+
+**R2, verbatim.** The plan's draft, frozen here before any run; it changes after this only by a new dated extension the
+operator authorizes.
+
+> When a reply would name more than five acceptance criteria at once — what is left, what some work covers, a tally —
+> count them by the spec's own sections instead of listing them. Count a spec with no sections as a whole. Then name
+> the exceptions, a criterion that does not fit its count (only partly done, say, or blocked), each by its own words
+> with its number after it, as in "three of five left in Exporting, none of four in Sharing, and one of those three,
+> exports keep their original file names, is blocked (AC3)". If the person asked for the criteria one by one, give
+> them one by one.
+
+The threshold of five is a calibration choice, flagged to the operator rather than derived: G1's prompt has four
+criteria remaining and asks for them one by one, so it sits under the threshold and keeps measuring the criterion
+paragraph, while site C has nine remaining. The cut-off is not observed at exactly six.
+
+### Fixtures (new files; every existing fixture is untouched)
+
+Hand-written in a domain no existing fixture and no rule text uses: a dry-stone-walling trust, `spec/waller-training-days`
+in vault `pennine`, the invented slice `the year-end slice`. None contains a credential-shaped value or an expected
+verdict. In every prompt, `FIXTURES_DIR` stands for the directory holding a copy of `fixtures/`; the runner replaces it
+before the run, as `## Dispatch` above. The three site prompts share one file, and the runner also replaces `SPECFILE`
+and `NOTEFILE` with the site's two fixture files (the table below).
+
+- `fixtures/count-spec.md` — the spec for C, C4, G6, G7 and CR. Twelve one-line criteria of similar length, `AC1` to
+  `AC12`, as `- **AC<n>.**` bullets under four `###` sections of `## Acceptance Criteria`: Booking and cancelling
+  (AC1 to AC4), Trustee reports (AC5 to AC9), Kit and injuries (AC10, AC11) and Certificates (AC12); and an empty
+  `## Slices` section. Two of the sections, Trustee reports and Kit and injuries, hold seven criteria between them
+  (AC5 to AC11): the slice of G6 and G7. It is the file the grader takes as `--criteria` for every count capture, and
+  the file the ledger-guard helper places a ledger line into.
+- `fixtures/count-spec-flat.md` — the same twelve criteria with no `###` headings, for CN.
+- `fixtures/count-status-note.md` — C: nine criteria remaining, spread so each section's count differs, with two
+  exceptions planted. The note is written by feature, never as a count and never with a section name.
+- `fixtures/count-status-note-flat.md` — CN: the same state, in one flat run of prose with no reference to sections.
+- `fixtures/count-status-note-four.md` — C4: four criteria remaining, no exception.
+- `fixtures/prompt-count.md` — one prompt shared by C, C4 and CN: "Where does the spec stand? Reply to me directly, as
+  you would in conversation." It asks for no list, mentions no counting, and names no exception.
+- `fixtures/count-slice-run.md` and `fixtures/prompt-count-slice.md` — G6: a stub of slice step 8 in the form of
+  `fixtures/proposal-slice-run.md`, with a slice that makes AC5 to AC11 fully green; the prompt asks for the response at
+  step 8 and, on a final separate line, the covered-criteria value.
+- `fixtures/count-ledger-run.md` and `fixtures/prompt-count-ledger.md` — G7: a stub of slice step 4's reconcile with
+  that slice's parent done, carrying a `**Covers:**` of the seven, a value claim and a close date, and no ledger line yet.
+  The whole reply is the line to append, so its final line is that line.
+- `fixtures/count-build-run.md` and `fixtures/prompt-count-build.md` — CR: a stub of the execute ritual at the
+  Completion report, in the form of `fixtures/summary-build-run.md`, whose parent covers eight criteria of the count
+  spec (AC2 to AC9, two sections) with one of them (AC8) left without an observation.
+
+**Ground truth, derived from the fixtures.**
+
+| Site | Criteria remaining | Per section | Exceptions |
+|---|---|---|---|
+| C | 9 of 12: AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC11 | Booking and cancelling 3 of 4; Trustee reports 5 of 5; Kit and injuries 1 of 2; Certificates 0 of 1 | AC6, the wall-length table (only partly done: by year, not by site), inside a section that is otherwise untouched; AC11, recording an injury (blocked: the insurer's form has not arrived), inside a section that is otherwise done |
+| C4 | 4 of 12: AC7, AC8, AC9, AC11 | Booking and cancelling 0 of 4; Trustee reports 3 of 5; Kit and injuries 1 of 2; Certificates 0 of 1 | none |
+| CN | 9 of 12, as C | none: the spec has no sections, so one count over the whole spec | AC6 and AC11, as C |
+| CR | 8 covered, 7 observed | Booking and cancelling 3 of 3 observed; Trustee reports 4 of 5 observed | AC8, the spreadsheet download of the tables, unobserved |
+
+At C the staging means every item in the note changes a verdict: the booking line sets AC1 done and the rest of its
+section open; the wall-length table sets AC6 as an exception and not a plain open item; the insurer's form sets AC11 as
+an exception; certificates set the fourth section at none left; the confirmation sets AC10 done. The numbers are
+recorded here for the reader of this file; the second reader is given the derivation rule, not these numbers.
+
+### Sites
+
+| Site | What the session is doing | Spec | Note | Prompt |
+|---|---|---|---|---|
+| C | No ritual loaded. Asked where the spec stands. Carries the claim. | `count-spec.md` | `count-status-note.md` | `prompt-count.md` |
+| C4 (observed) | As C, four remaining and no exception. Expected reading: each criterion named by its own text and not counted. | `count-spec.md` | `count-status-note-four.md` | `prompt-count.md` |
+| CN (observed) | As C on a spec with no sections. Expected reading: one count over the whole spec, both exceptions named. | `count-spec-flat.md` | `count-status-note-flat.md` | `prompt-count.md` |
+| CR (observed) | The execute ritual is loaded, stubbed at the Completion report. | `count-spec.md` | `count-build-run.md` | `prompt-count-build.md` |
+| G6 | The slice skill is loaded, stubbed at step 8; the response, then the covered-criteria value on a final line. | `count-spec.md` | `count-slice-run.md` | `prompt-count-slice.md` |
+| G7 | The slice skill is loaded, stubbed at step 4's append; the reply is the ledger line. | `count-spec.md` | `count-ledger-run.md` | `prompt-count-ledger.md` |
+
+C4 and CN are observed, deciding nothing; if the treated CN arm does not read as one count with both exceptions named,
+the result records a follow-up against R2's sentence about specs with no sections. CR is read by `counted` and
+`exceptions`, and is the one ritual surface measured for a report that reaches the operator.
+
+### Arms
+
+An arm byte-identical to an existing arm is that arm, never a second copy. The two sides differ by R2 alone. Sizes are
+computed from the B sources, a newline between sources, the rules file last, plus R2's paragraph and its blank line
+(596 bytes), and are measured again when each arm is built. `getconf ARG_MAX` is 1048576 on this host; the Linux
+per-argument limit (`MAX_ARG_STRLEN`) is 131072. Every arm is under it. `count-build` and its baseline go by
+`--append-system-prompt-file`, as the S2 arms of the summaries extension did and for the same reason (byte-identity of
+the delivery with that precedent), not because they exceed 131072 on this host; every other arm goes by argument.
+
+| Arm | Site | Sources | Rules file | Size (bytes) | Form | Added by |
+|---|---|---|---|---|---|---|
+| `third-noritual` | C, C4, CN at B; same-day control at G1 | none | `rules.md` at B | 13304 (existing) | argument | existing |
+| `proposal-treated` | G6, G7 at B | `skills/slice/SKILL.md` | `rules.md` at B | 59315 (existing) | argument | existing |
+| `summary-baseline-build` | CR at B | `skills/execute/SKILL.md`, `skills/_shared/execute.md` | `rules.md` at B | 113252 (existing) | file | existing |
+| `count-noritual` | C, C4, CN, G1 at R2 | none | `rules.md` at R2 | 13900 | argument | later task (arms) |
+| `fifth-reviewer` | G2 at R2 | `agents/breaker.md` | `rules.md` at R2 | 19578 | argument | later task (arms) |
+| `fifth-advocate` | G2 at R2 | `agents/advocate.md` | `rules.md` at R2 | 19965 | argument | later task (arms) |
+| `fifth-slice` | G3, G5, G6, G7 at R2 | `skills/slice/SKILL.md` | `rules.md` at R2 | 59911 | argument | later task (arms) |
+| `count-build` | CR at R2 | `skills/execute/SKILL.md`, `skills/_shared/execute.md` | `rules.md` at R2 | 113848 | file | later task (arms) |
+
+The five R2 rows are filled in by the arms task: its bytes, its form and its comparison with the B row beside it. G1's
+B side is `third-noritual` on `fixtures/prompt-noritual.md`; G2's B side is `third-reviewer` and `third-advocate`
+(`criterion-mention` majority `bare`, `template-shape`); G3's and G5's B side is `proposal-treated`, on
+`fixtures/prompt-slice.md` and `fixtures/prompt-proposal.md`.
+
+### Dispatch
+
+As `## Dispatch` above: each run is its own `claude -p` process, fixtures copied to a fresh empty directory under
+`/tmp` with `FIXTURES_DIR` (and `SPECFILE`, `NOTEFILE`) replaced, the process started from a second empty directory,
+`--setting-sources project`, the arm by `--append-system-prompt` (or `--append-system-prompt-file` for the two build
+arms), `--allowedTools "Read"`, stdin from `/dev/null`, no `--model` flag, sequential and in the foreground. This case
+has no real-run recipe and does not use `scripts/eval-sandbox`. Each run's two temporary directories are recorded at
+creation and removed by name afterwards.
+
+### Readings (by eye), fixed before any batch
+
+Per capture, over the whole reply, read separately.
+
+- `counted`: `by-section` when the reply gives, for each of the spec's own sections, how many criteria are left (or
+  covered, or observed) in it; `listed` when it names the criteria one by one with no count by section (a count of items
+  by their state, or by the whole spec, with the items named, is `listed`); `total-only` when it gives one overall figure
+  and does not name the criteria; `mixed` when some sections are counted and others are listed.
+- `counts-correct`: `correct` when every count matches the ground truth above (at CN, the one count over the spec: nine);
+  `wrong` otherwise, including a reply with no count by section where the site expects one; `n/a` where `counted` is
+  `total-only` and the figure is the only claim and it is right.
+- `exceptions`: `both`, `one` or `none`. An exception counts only when it is named by its own text with its number after
+  it. At CR there is one exception and the reading is `one` or `none`.
+- `total-only` is a miss at C even with both exceptions named, since a single overall count is not a count by section.
+  At CN it is the expected reading.
+- Disagreements between the two readers are reported, not reconciled.
+
+**Script reading at C, C4 and CN: `criterion-mention`** over the whole reply, `--criteria fixtures/count-spec.md`
+(the flat spec carries the same bullets). A counted reply should mention numbers only for exceptions, and those by their
+text.
+
+| Verdict word | Counts as |
+|---|---|
+| `text-with-number` | pass |
+| `no-mention` | pass |
+| `bare` | miss |
+| `nickname` | miss |
+
+At C4 and CN the reading is observed, not a bar.
+
+### Guards at R2, scripted, bars from earlier results
+
+Every verdict word each check can return is listed in the tables of the previous extensions and above; the pass and
+miss columns bind the R2 arms, and at a B arm the guards are observed and recorded.
+
+- **G1**, no-ritual criterion, on `fixtures/prompt-noritual.md`: `criterion-mention` clean majority `text-with-number`.
+- **G2**, reliability reviewer and advocate on the template prompts: every run `template-shape`, and `criterion-mention`
+  majority equal to baseline (`bare`).
+- **G3**, the slice statement on `fixtures/prompt-slice.md`: `covers-field` every run `gate-shape`, and
+  `criterion-mention` over the statement (`--drop-value-line`) clean majority `text-with-number`.
+- **G5**, the slice proposal at P with R2 on `fixtures/prompt-proposal.md`: `covers-field` every run `gate-shape`, and
+  `criterion-mention` clean majority `text-with-number`. Step 8 counts what is left at any size, while R2 counts only past
+  five, so this checks that the two do not pull apart.
+- **Guards above the cut-off.** G1, G3 and G5 sit under five criteria and G2's prompt cites one, so none of them loads R2
+  at the size where it acts. G6 and G7 run on the count spec, on `fifth-slice`, with a slice covering all seven criteria
+  of two sections. Each also runs at B on `proposal-treated`, so a miss can be read as the rule's and not the fixture's.
+  Every run must pass, on both sides. R2 may count the prose above the value, so `criterion-mention` is not a bar at G6.
+  - **G6, the covered-criteria value.** `covers-field` `gate-shape` over the final line (the wording grader), and
+    `covers_gate.py` over the count spec accepts the value and it names exactly AC5 to AC11. The check is
+    `covers_value_names_the_seven` in `tools/craft/tests/test_ritual_output_wording_ledger_guard.py`.
+  - **G7, the ledger line.** The capture's last non-blank line is placed under `## Slices` of the count spec;
+    `ledger_gate.py --parent-coverage` must exit 0 and `candidate_set.py` must report all seven `covered:`. Both are
+    needed, because the ledger gate passes a line whose covers token was dropped, and `candidate_set.py` then offers those
+    criteria again with no error. The check is `grade_ledger_line` in the same file, which later tasks call to grade the
+    G7 captures.
+- **Same-day control, observed only:** three runs of `third-noritual` on the G1 prompt in the same batch as the R2 arms.
+  It decides nothing. It exists because the summaries attempt could not tell whether its G1 miss was noise or effect,
+  having had no same-day run at base.
+
+### Bars, headroom, pass and end states
+
+- **Pass at C:** a clean majority of `by-section`, of `correct`, of `both`, and of a passing `criterion-mention`.
+- **Headroom:** the baseline (`third-noritual` at C) is not majority `by-section` and `both`. If it is, R2 is not
+  committed and the slice stops for the operator.
+- **Split rule:** a 2-1 split on any verdict is re-run to six. 5 or 6 of 6 is clean. A guard miss in any of the first three
+  runs of an R2 arm also triggers the run to six.
+- **Two-reader protocol.** Each by-eye reading is taken twice: in session, and by a subagent given only the readings and
+  the derivation rule above, the fixtures and the captures renamed `cap-A`, `cap-B`, ... so it cannot tell the arm or the
+  site (the mapping is kept by the caller). The second reader is not given the ground-truth numbers, any pilot reading,
+  or any expected verdict.
+- **End states.**
+  - C passes and every guard holds: R2 is kept.
+  - C fails, or any guard misses its bar, G6 and G7 included: R2 is reverted on the branch and the slice stops for the
+    operator. There is no rewording without a new authorized extension.
+  - All of C met at baseline, or G6 or G7 misses at B: no R2 is committed, and the slice stops.
+  - A guard miss first gets the same-day control read against it; the control decides nothing.
+- **How it closes.** AC4 and AC5 are not on the spec's list of criteria a script must decide. They close as unmeasured on
+  the operator naming them at slice close, with the by-eye tables as evidence.
+
+### Capture naming
+
+One prefix per site and arm: `count-<site>-<arm>`, then `-<n>` counting dispatches from 1 and never reused, as `###
+Capture naming` above. A run's three files are `<prefix>-<n>.txt`, `.stderr.txt` and `.exit`. Captures are registered in
+`tools/craft/tests/test_wording_grader.py`'s capture table; G6 and G7 captures are also registered in
+`tools/craft/tests/test_ritual_output_wording_ledger_guard.py`, which fails on a capture of those prefixes it does not know.
+
+| Prefix | Site, arm | Checks |
+|---|---|---|
+| `count-c-third-noritual-<n>`, `count-c4-third-noritual-<n>`, `count-cn-third-noritual-<n>` | C, C4, CN at B | `criterion-mention` over the whole reply; readings by eye |
+| `count-c-count-noritual-<n>`, `count-c4-count-noritual-<n>`, `count-cn-count-noritual-<n>` | C, C4, CN at R2 | as above |
+| `count-g1-count-noritual-<n>` | G1 at R2 | `criterion-mention` against `fixtures/spec.md` |
+| `count-control-third-noritual-<n>` | same-day control (G1 prompt, B arm) | as G1; observed only |
+| `count-g2-fifth-reviewer-<n>`, `count-g2-fifth-advocate-<n>` | G2 at R2 | `reviewer-report`; `criterion-mention` |
+| `count-g3-fifth-slice-<n>`, `count-g5-fifth-slice-<n>` | G3, G5 at R2 | `covers-field`; `criterion-mention` over the statement |
+| `count-g6-proposal-treated-<n>`, `count-g6-fifth-slice-<n>` | G6 at B, at R2 | `covers-field`; `covers_value_names_the_seven` |
+| `count-g7-proposal-treated-<n>`, `count-g7-fifth-slice-<n>` | G7 at B, at R2 | `grade_ledger_line` |
+| `count-cr-summary-baseline-build-<n>`, `count-cr-count-build-<n>` | CR at B, at R2 | readings by eye |
+
+### Fixture vocabulary leak check
+
+Run against R2's verbatim paragraph above before any pilot. Method: the words of four or more letters in R2, minus a
+short list of function words, folded by stripping a trailing `ing`, `ed`, `es` or `s`; the same fold applied to every
+word of each new fixture file; a fixture word whose fold matches is a hit.
+
+```python
+import re,sys,glob
+R2='''When a reply would name more than five acceptance criteria at once — what is left, what some work covers, a tally — count them by the spec's own sections instead of listing them. Count a spec with no sections as a whole. Then name the exceptions, a criterion that does not fit its count (only partly done, say, or blocked), each by its own words with its number after it, as in "three of five left in Exporting, none of four in Sharing, and one of those three, exports keep their original file names, is blocked (AC3)". If the person asked for the criteria one by one, give them one by one.'''
+stop=set("when that this what some them then does with each into from they have been were will would your their there which about than also only more most such those these other being must make give once".split())
+fold=lambda w: re.sub(r"(ing|ed|es|s)$","",w)
+rw={}
+for w in re.findall(r"[a-z]{4,}",R2.lower()):
+    if w not in stop: rw.setdefault(fold(w),w)
+files=sorted(glob.glob("count-*.md")+glob.glob("prompt-count*.md"))
+for f in files:
+    words=re.findall(r"[a-z]{4,}",open(f).read().lower())
+    hits=sorted({w for w in words if fold(w) in rw})
+    print(f, hits)
+```
+
+Its output, run from `fixtures/` after the last fixture edit:
+
+```
+count-build-run.md ['after', 'covered', 'covers', 'done', 'listed', 'shared', 'spec']
+count-ledger-run.md ['after', 'covers', 'done', 'file', 'named', 'none', 'reply', 'section', 'spec', 'whole']
+count-slice-run.md ['acceptance', 'covered', 'criteria', 'criterion', 'file', 'named', 'none', 'spec']
+count-spec-flat.md ['acceptance', 'criteria', 'spec']
+count-spec.md ['acceptance', 'criteria', 'spec']
+count-status-note-flat.md []
+count-status-note-four.md []
+count-status-note.md []
+prompt-count-build.md ['count', 'criteria', 'file', 'spec']
+prompt-count-ledger.md ['count', 'file', 'spec']
+prompt-count-slice.md ['after', 'count', 'covered', 'covers', 'criteria', 'file', 'spec']
+prompt-count.md ['reply', 'spec']
+```
+
+The hits are of three kinds. The status notes have none, and the spec's hits (`acceptance`, `criteria`, `spec`) are the
+words the task itself is about. The stubs' hits (`covers`, `covered`, `done`, `named`, `none`, `section`, `five`,
+`whole`, `after`, `file`, `reply`) are the ritual's own vocabulary, shared with the existing stubs of the earlier
+extensions, and none is the counting-by-section shape. In the prompts, `count` is the substring of the path
+`count-...md`; in `count-build-run.md`, `shared` and `listed` come from the sentences copied from `summary-build-run.md`
+("the shared `_shared/execute.md` procedure", "listed below").
+Before the last edit the notes and the spec carried `lists`, `listing`, `three`, `none of`, `naming`, `number` and
+`working`, which echo R2's own words ("listing", "none of four", "three of five", "number after it"); they were reworded
+(`lists` to `shows` or `tells`, `three days` to `a week`, `none of it started` to `not started`) and the check re-run.
+The leak check forces no change to R2's worked example: its domain (exporting, sharing, file names) shares no word with
+the fixtures, so the paragraph stands as quoted.
+
+### Unmeasured surfaces and accepted risk
+
+- The spec review's summary and saved detail, and distill, may list many criteria and are not measured.
+- Slice choice's step 4 prints the gate's `candidates:` and `partial:` tokens to the operator as identifier lists
+  (`skills/slice/SKILL.md`, step 4). It is a diagnostics echo of a script's output; whether it contradicts R2 is
+  recorded as a follow-up, and editing it is a measured ritual edit to a skill with live arm copies.
+- **Accepted risk, owned by the operator.** R2 loads into every dispatched agent. Past the reliability reviewer and the
+  advocate, the dispatched agents are not measured: the executor, the drift check, the code reviewer and the security
+  auditor. A rule leaking into one of their reports needs that agent to cite more than five criteria at once, which
+  nothing here shows happening. The reviewer template's own counter-instruction (`skills/_shared/council.md`) already
+  tells a reviewer that the wording section does not apply to its report; G2 measures whether that still holds with R2
+  loaded.
+- One model tier (the process default), one Claude Code version (2.1.316), three runs per arm.
+
+### Pilots, 2026-11-02 — one capture per new fixture at B, before the protocol is frozen
+
+Each was dispatched by the real path above, one at a time in the foreground, each exiting 0 with an empty stderr file,
+and each pair of temporary directories removed by name afterwards. Read in session only; the second reader runs on the
+batch, not the pilots. Every capture went through `scripts/capture_scan.py` (clean) and was checked by hand for the
+operator's home path and username (none).
+
+| Capture | Site | `counted` | `counts-correct` | `exceptions` | `criterion-mention` | Other |
+|---|---|---|---|---|---|---|
+| `count-c-third-noritual-1` | C | listed (grouped by state: 3 done, 1 partly, 1 blocked, 7 not started) | wrong | both, AC6 and AC11 by their text with the number | text-with-number | not by section |
+| `count-cn-third-noritual-1` | CN | listed (same grouping) | wrong | both | text-with-number | |
+| `count-c4-third-noritual-1` | C4 | listed, each by its own text with the number | n/a | n/a (none planted) | text-with-number | the expected reading |
+| `count-g6-proposal-treated-1` | G6 at B | `covers-field` `gate-shape`; `covers_value_names_the_seven` true | | | text-with-number (observed) | the statement counts what is left by section |
+| `count-g7-proposal-treated-1` | G7 at B | `grade_ledger_line` passes: gate exit 0, seven `covered:` | | | | |
+| `count-cr-summary-baseline-build-1` | CR at B | total-only (`covered 8, observed 7, missing 1`) | n/a | one, AC8 by its text with the number | text-with-number (observed) | |
+
+- **The fixture stages the exceptions so a session notices them unprompted (Known Unknown).** Yes, on one capture per
+  site: both the C and CN pilots named the partly done wall-length table and the blocked injury recording by their own
+  words with their numbers, without being asked. Neither was misread as done. No fixture was revised.
+- **The staging does not steer the shape.** Neither note nor prompt contains a count by section, and the pilots at B
+  read as `listed`, grouped by state, not by section: the baseline has headroom at C on one capture. The C4 pilot read as
+  the expected reading (each criterion by its own text), and the CN pilot listed rather than gave one count, so CN's
+  expected reading is not met at B either.
+- **The G6 and G7 stubs produce the seven-criterion value and line at B (Known Unknown).** Yes, on one capture each. G6's
+  final line was `AC5, AC6, AC7, AC8, AC9, AC10, AC11` and passed both checks; G7's whole reply was one ledger line with
+  `covers AC5, AC6, AC7, AC8, AC9, AC10, AC11` and passed both readers. No fixture was revised. One capture per fixture is
+  the limit of this evidence.
+- **CR.** The stub's observation-gate refusal reached the report as a missing identifier, named by its own text with its
+  number, and `criterion-observations` as a total; the close was not claimed. The report is not counted by section at B.
+
+**Protocol frozen.** The readings, guards, bars, end states and capture names above are frozen as of the pilots; the
+baseline batches are run against this registration, and a change after an R2-arm output has been seen is a dated
+amendment.
