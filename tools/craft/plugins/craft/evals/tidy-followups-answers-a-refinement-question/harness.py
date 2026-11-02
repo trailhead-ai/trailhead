@@ -13,7 +13,7 @@ package (`lore` imports it), without `evals/`. The base arm is the skill without
 
 `run` allows a whole run `--deadline` seconds (default 1500) and one turn `--turn-timeout` (default 700). It builds
 a fresh fixture inside `runs/<cell>-<arm>-r<N>/` (the arm's jail), starts the arm as a stream-json `claude` process
-under `scripts/eval-sandbox` with `ALLOWED` tools (which include `Agent`, so the second pass can dispatch its
+under `scripts/eval-sandbox` with `old.ALLOWED` tools (which include `Agent`, so the second pass can dispatch its
 refinement subagents) and hands it to `driver.drive` with the cell's up-front message and replies. `meta/` receives
 the manifest, the vault and repo trees before and after, the whole stream, the driver's per-turn record and a
 summary. `persist` scrubs the stream, the driver record and the tree diff into this case's `runs/` and stores the
@@ -50,7 +50,6 @@ old.BASE_SHA = BASE_SHA
 old.BUILDER = HERE / "fixtures" / "make-fixture-vault.py"
 conf.HERE = HERE
 conf.grade_confirm = grade_answers
-ALLOWED = old.ALLOWED
 
 
 def git_blob_id(data: bytes) -> str:

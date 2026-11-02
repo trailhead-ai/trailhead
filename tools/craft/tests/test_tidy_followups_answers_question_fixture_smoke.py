@@ -130,8 +130,12 @@ def test_the_hostile_cell_plants_its_marker_in_what_the_question_read_returns_an
             assert marker not in json.dumps(other)
 
 
+def lore_update(env, name, *flags, stdin=None):
+    return run(env, "lore", "record", "update", f"task/{name}", "--vault", "default", *flags, stdin=stdin)
+
+
 def update(built, name, *flags, stdin=None):
-    r = run(built["env"], "lore", "record", "update", f"task/{name}", "--vault", "default", *flags, stdin=stdin)
+    r = lore_update(built["env"], name, *flags, stdin=stdin)
     assert r.returncode == 0, r.stderr
 
 
@@ -152,8 +156,7 @@ def test_the_answer_fail_shim_fails_only_the_write_carrying_the_answer_and_logs_
     names = built["followups"]["answer-write-fails"]
     env = built["answerfail_env"]
     log = Path(env["XDG_STATE_HOME"]) / "shim-hits.log"
-    other = run(env, "lore", "record", "update", f"task/{names['Q1']}", "--vault", "default", "--title",
-                "Tide cache: expire stale readings (answer-write-fails)")
+    other = lore_update(env, names["Q1"], "--title", "Tide cache: expire stale readings (answer-write-fails)")
     assert other.returncode == 0, other.stderr
     assert not log.exists()
     r = answer(built, "answer-write-fails", "Q1", "Keep readings for 14 days.", env=env, tmp=tmp_path)
@@ -179,19 +182,17 @@ def test_the_refinement_fail_shim_lets_the_answer_land_then_fails_every_later_up
     assert not log.exists() or names["Q1"] not in log.read_text()
     body = show(built, names["Q1"])["body"]
     assert "\n**Answer:** Keep readings for 14 days." in body
-    again = run(env, "lore", "record", "update", f"task/{names['Q1']}", "--vault", "default", "--status", "ready")
+    again = lore_update(env, names["Q1"], "--status", "ready")
     assert again.returncode == 1
     assert log.read_text().count(f"task/{names['Q1']}") == 1
     assert show(built, names["Q1"])["sidecar"]["status"] == "open"
-    sibling = run(env, "lore", "record", "update", f"task/{built['followups']['refinement-fails']['P1']}",
-                  "--vault", "default", "--status", "open")
+    sibling = lore_update(env, names["P1"], "--status", "open")
     assert sibling.returncode == 0, sibling.stderr
 
 
 def refuse(built, role="Q1", cell="hostile", body="Rewritten by a first pass.\n", flags=()):
     names = built["followups"][cell]
-    return run(built["hostile_env"], "lore", "record", "update", f"task/{names[role]}", "--vault", "default",
-               *flags, stdin=body)
+    return lore_update(built["hostile_env"], names[role], *flags, stdin=body)
 
 
 def hits(built):
@@ -259,8 +260,8 @@ def test_the_hostile_marker_survives_a_refused_first_pass_write_to_the_question_
 
 def test_without_the_shim_a_first_pass_body_write_removes_the_marker_from_question(fresh):
     names = fresh["followups"]["hostile"]
-    plain = run(fresh["env"], "lore", "record", "update", f"task/{names['Q1']}", "--vault", "default",
-                stdin=show(fresh, names["Q1"])["body"].split("\n\n## Refine")[0] + "\n")
+    first_pass_body = show(fresh, names["Q1"])["body"].split("\n\n## Refine")[0] + "\n"
+    plain = lore_update(fresh["env"], names["Q1"], stdin=first_pass_body)
     assert plain.returncode == 0, plain.stderr
     assert question(fresh, "hostile", "Q1")["questions"] == []
 
@@ -319,7 +320,7 @@ def test_the_arm_command_line_allows_the_agent_tool_the_second_pass_dispatches( 
     tmp_path,
 ):
     argv = harness.conf.build_argv(sandbox="s", run_dir=tmp_path, env={"PATH": "/x"}, home="/h", user="u",
-                                   claude="c", allowed=harness.ALLOWED)
+                                   claude="c", allowed=harness.old.ALLOWED)
     assert "Agent" in argv[argv.index("--allowedTools") + 1].split(",")
 
 

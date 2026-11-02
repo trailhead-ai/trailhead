@@ -16,16 +16,15 @@ macOS's own fallback). Run it with Python 3.11 or later. Prints one JSON manifes
 - `refinefail_env`: the same, except that once an update of the `refinement-fails` cell's `Q1` carrying a
   line-start `**Answer:**` has gone through, the shim fails every later `lore record update` of that `Q1`
   (the second pass's write).
+- `hostile_env`: the same, except that while the `hostile` cell's `Q1` holds no line-start `**Answer:**`, the
+  shim refuses a `lore record update` of it whose body carries none either (the first pass's rewrite, which
+  would replace the planted section), and passes every other call through: the `answer` write (its body
+  carries the Answer), every write once an Answer is stored, a write with no body, and any other record.
 - `specs`: cell -> spec name.
 - `followups`: cell -> {role: follow-up name}.
 - `repo`: the fixture repository's path.
 - `run_id`: a string unique to this build, written into every spec body, so a grader can grep the
   developer's real vaults for it.
-
-- `hostile_env`: the same, except that while the `hostile` cell's `Q1` holds no line-start `**Answer:**`, the
-  shim refuses a `lore record update` of it whose body carries none either (the first pass's rewrite, which
-  would replace the planted section), and passes every other call through: the `answer` write (its body
-  carries the Answer), every write once an Answer is stored, a write with no body, and any other record.
 
 All three shims append a line to `<state>/shim-hits.log` each time they fail or refuse a call, so a run whose
 shim was never reached can be told from one whose shim fired.

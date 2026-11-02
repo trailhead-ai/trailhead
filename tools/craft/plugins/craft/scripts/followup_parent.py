@@ -106,8 +106,7 @@ nothing. Exit 0 prints one JSON object:
   MAX_FIELD_CHARS. A field ends at the next `**Label:**` line or the next heading outside a
   fenced code block, so nothing after the section leaks in. `confirm` is the code
   `followup_confirm` gives under ANSWER_KIND for the payload `{name, revision}`
-  (`answer_payload`), so a later write that takes `--confirm` checks it with
-  `require_confirmation`;
+  (`answer_payload`), the code `answer --confirm` checks with `require_confirmation`;
 - `unaskable`: `{name, reason}` per follow-up that cannot be asked, sorted by name, `reason`
   one of ASK_REASONS: `already-nested` (it has a `parent`), `routed` (any `route` label),
   `blocked` (its status is not `open` or `ready`), `not-spec-linked` (not a follow-up of the
@@ -116,12 +115,11 @@ nothing. Exit 0 prints one JSON object:
   fence is inside it), `two-sections` (more than one such heading), `already-answered` (the
   section holds an `**Answer:**` label at the start of a line outside fences) and
   `no-question` (no non-empty `**Question:**`). The first that applies, in that order.
-`ask_verdict(sidecar, body, linked)` is the single function that decides it (`None` when
-askable; `linked` is a zero-argument callable answering the spec-membership test), importable
-so a write that answers the question reuses it unchanged. Exit codes and refusals are those of
-`check`'s reads: a bad name is `invalid-followup-name` before `lore` is called, an unresolvable
-name is `followup-not-found`, a `lore` failure is exit 2 with its reason code and nothing on
-stdout.
+`ask_verdict(sidecar, body, linked)` is the single function that decides it for `question` and
+`answer` (`None` when askable; `linked` is a zero-argument callable answering the
+spec-membership test). Exit codes and refusals are those of `check`'s reads: a bad name is
+`invalid-followup-name` before `lore` is called, an unresolvable name is `followup-not-found`,
+a `lore` failure is exit 2 with its reason code and nothing on stdout.
 
 `answer <spec-name> <name> (--answer-file <path> | --recommended) [--preview] [--confirm <code>]`
 writes the operator's answer into the follow-up's `## Refine — unresolved` section as the line
@@ -144,8 +142,7 @@ sanitizing (not whitespace folding) changed it. Exit codes:
        answer, altered, failed: [{name, write: "answer"}]}`, `revision` the record's current one
        or null when it could not be read.
 The line goes last in the section: before the first heading after it outside a fenced code block,
-or at the end of the body. Nothing else in the body changes. `answer_followup` is the importable
-function; it shares `ask_verdict` with `question`.
+or at the end of the body. Nothing else in the body changes.
 
 `assemble` takes `--children`, a JSON file holding a non-empty list of
 `{name, reason, revision}`: the follow-up's bare name, the selection reason the
@@ -614,10 +611,15 @@ def strip_surrogates(text: str) -> str:
     return "".join(ch for ch in text if not 0xD800 <= ord(ch) <= 0xDFFF)
 
 
+def _folded(text: str) -> str:
+    """`text` without lone surrogates, its whitespace folded onto one line."""
+    return " ".join(strip_surrogates(text).split())
+
+
 def _one_line(text: str, limit: int) -> str:
     """`text` without lone surrogates, folded onto one line, then sanitized and cut to
     `limit` characters."""
-    return gather.sanitize_text(" ".join(strip_surrogates(text).split()), limit)
+    return gather.sanitize_text(_folded(text), limit)
 
 
 def _reason_text(reason: str) -> str:
@@ -676,6 +678,13 @@ _LABEL_RE = re.compile(r"^\*\*([^*\n]+):\*\*(.*)$")
 _HEADING_LINE_RE = re.compile(r"^#{1,6} ")
 
 
+def _closes_fence(line: str, fence: str) -> bool:
+    """Whether `line` closes the block `fence` opened: only that fence's character, at least
+    as many of it."""
+    stripped = line.strip()
+    return bool(stripped) and set(stripped) == {fence[0]} and len(stripped) >= len(fence)
+
+
 def _refine_sections(body: str) -> list[dict[str, str]]:
     """The fields of each `## Refine — unresolved` section of `body`, label to text (newlines
     kept). Headings and `**Label:**` lines count only at the start of a line outside fenced
@@ -688,8 +697,7 @@ def _refine_sections(body: str) -> list[dict[str, str]]:
     for line in body.split("\n"):
         opener = _FENCE_RE.match(line)
         if fence is not None:
-            stripped = line.strip()
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+            if _closes_fence(line, fence):
                 fence = None
             if current is not None and label is not None:
                 current[label].append(line)
@@ -790,8 +798,7 @@ def _answer_span(body: str) -> int | None:
     inside = False
     for index, line in enumerate(lines):
         if fence is not None:
-            stripped = line.strip()
-            if stripped and set(stripped) == {fence[0]} and len(stripped) >= len(fence):
+            if _closes_fence(line, fence):
                 fence = None
             continue
         opener = _FENCE_RE.match(line)
@@ -818,7 +825,7 @@ def load_answer(path: str) -> str:
         size = len(doc.encode("utf-8"))
     except UnicodeEncodeError:
         raise invalid from None
-    if size > MAX_ANSWER_BYTES or not " ".join(strip_surrogates(doc).split()):
+    if size > MAX_ANSWER_BYTES or not _folded(doc):
         raise invalid
     return doc
 
@@ -827,7 +834,7 @@ def _stored_answer(raw: str) -> tuple[str, bool]:
     """(the text as stored, whether sanitizing changed it): `raw` folded onto one line, control
     and invisible characters stripped and credential spans redacted, never cut. Folding
     whitespace alone is not a change."""
-    folded = " ".join(strip_surrogates(raw).split())
+    folded = _folded(raw)
     stored = gather.sanitize_text(folded, len(folded))
     return stored, stored != folded
 
@@ -851,7 +858,7 @@ def answer_followup(
     if ask_verdict(sidecar, body, lambda: linked(name, sidecar)) is not None:
         raise ParentError("not-answerable", (name,))
     if raw is None:
-        recommended = " ".join(strip_surrogates(_refine_sections(body)[0].get("Recommended answer", "")).split())
+        recommended = _folded(_refine_sections(body)[0].get("Recommended answer", ""))
         if not recommended:
             raise ParentError("not-answerable", (name,))
         raw = f"{RECOMMENDED_PREFIX}{recommended}"

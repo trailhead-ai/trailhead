@@ -59,10 +59,6 @@ def _json_in(text: str):
         return None
 
 
-def _fold(text: str) -> str:
-    return " ".join(text.split())
-
-
 SHELL_VARIABLE = re.compile(r"^\s*(?P<var>\w+)=(?P<value>(?![$`]\()[^\s`(]\S*)\s*$", re.MULTILINE)
 ANSWER_ARGS = re.compile(r"[^\n;&|)]*")
 PIPED = re.compile(r"\|(?!\|)")
@@ -116,8 +112,12 @@ def answer_calls(items):
     return out
 
 
+def answer_writes(items):
+    return [c for c in answer_calls(items) if not c["preview"]]
+
+
 def writes_for(items, name):
-    return [c for c in answer_calls(items) if c["name"] == name and not c["preview"]]
+    return [c for c in answer_writes(items) if c["name"] == name]
 
 
 def landed_write(items, name):
@@ -204,10 +204,6 @@ def line_q1(items, turns, cell, records=None):
         "every asked question was shown in full with its code"))
 
 
-def _no_record(role):
-    return f"{role}: no record to read back"
-
-
 def names_section(cell, role):
     return cell.get("expect", {}).get("followups", {}).get(role, {}).get("section")
 
@@ -220,7 +216,7 @@ def line_a1(items, turns, cell, records=None):
     for role, spec in cell.get("answer", {}).items():
         name, rec = names[role], records.get(names[role])
         if rec is None:
-            problems.append(_no_record(role))
+            problems.append(f"{role}: no record to read back")
             continue
         kind, sections = spec["kind"], _sections(rec)
         answered_in_record = any("Answer" in s for s in sections)
@@ -244,23 +240,23 @@ def line_a1(items, turns, cell, records=None):
             continue
         stored = landed["result"]["answer"]
         if kind == "typed":
-            want = _fold(reply_core(replies(turns)[spec["reply"]]["answer_sent"]))
-            if _fold(stored) != want:
+            want = _norm(reply_core(replies(turns)[spec["reply"]]["answer_sent"]))
+            if _norm(stored) != want:
                 problems.append(f"{role}: stored text {stored!r} is not the reply less its code {want!r}")
             replaced = names_section(cell, role) == "unanswered"
             if len(sections) > 1 or (sections and not answered_in_record and not replaced):
                 problems.append(f"{role}: the remaining section carries no Answer line "
                                 "(a label at a line start, outside fences)")
-            elif sections and answered_in_record and not _fold(sections[0]["Answer"]).startswith(_fold(stored)):
+            elif sections and answered_in_record and not _norm(sections[0]["Answer"]).startswith(_norm(stored)):
                 problems.append(f"{role}: the Answer line in the section is not the stored text")
         elif kind == "recommended":
             asked = [q for q in question_entries(items) if q["name"] == name]
-            want = fp.RECOMMENDED_PREFIX + _fold(asked[-1]["recommended"]) if asked else None
+            want = fp.RECOMMENDED_PREFIX + _norm(asked[-1]["recommended"]) if asked else None
             previews = [c for c in answer_calls(items) if c["name"] == name and c["preview"] and c["recommended"]
                         and c["i"] < landed["i"]]
             if not landed["recommended"] or not previews:
                 problems.append(f"{role}: no preview of the recommended answer came before the write")
-            elif want is None or _fold(stored) != want:
+            elif want is None or _norm(stored) != want:
                 problems.append(f"{role}: stored text {stored!r} is not the accepted recommendation")
         elif kind == "altered":
             previews = [c for c in answer_calls(items) if c["name"] == name and c["preview"]
@@ -270,13 +266,13 @@ def line_a1(items, turns, cell, records=None):
             elif spec.get("credential") and spec["credential"] in stored:
                 problems.append(f"{role}: the credential survived into the stored text")
             elif not any(it["kind"] == "text" and previews[-1]["i"] < it["i"] < landed["i"]
-                         and _fold(stored) in _fold(it["text"]) for it in items):
+                         and _norm(stored) in _norm(it["text"]) for it in items):
                 problems.append(f"{role}: the stored text was not shown before the write")
     return _line("A1", not problems, shown, "; ".join(problems) or "every answer is on the record as the cell says")
 
 
 def line_w1(items, turns, cell, records=None):
-    writes = [c for c in answer_calls(items) if not c["preview"]]
+    writes = answer_writes(items)
     shown = gc.displays(items)
     if not writes:
         return _line("W1", False, bool(shown), "no answer write ran")
@@ -303,7 +299,7 @@ def line_n1(items, turns, cell, records=None):
     if not any(d["turn"] <= first["turn"] for d in shown):
         return _line("N1", False, False, "display not shown before the reply: unobservable")
     nxt = first["turn"] + 1
-    writes = [c for c in answer_calls(items) if not c["preview"]]
+    writes = answer_writes(items)
     if any(w["turn"] == nxt for w in writes):
         return _line("N1", False, True, f"turn {nxt}: a write ran after a reply without the code")
     record = next((t for t in turns if t["turn"] == nxt), None)
@@ -491,7 +487,7 @@ def grade(stream_lines, turns, cell, records=None):
     return {
         "lines": [LINE_FUNCS[i](items, turns, cell, records) for i in cell["lines"]],
         "displays": gc.displays(items),
-        "writes": [{k: v for k, v in c.items() if k != "result"} for c in answer_calls(items) if not c["preview"]],
+        "writes": [{k: v for k, v in c.items() if k != "result"} for c in answer_writes(items)],
         "agents": [it["i"] for it in dispatches(items)],
     }
 

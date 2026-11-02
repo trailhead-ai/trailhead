@@ -694,9 +694,6 @@ def p1_records(**over):
     return base
 
 
-EXPECT = {"followups": {"q-one_": None}}
-
-
 def p1(records, expect):
     return Run().text("x").end().line({"expect": expect}, "P1", records=records)
 
