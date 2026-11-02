@@ -3909,3 +3909,72 @@ showing it would be stopped. One model tier, one Claude Code version, the vanill
 | AC31 (scope shown before any nesting) | `plain-include`, `drop-and-merge`, `leave-out`, `resume-leave-out` | held: each eligible follow-up's `delivers` and `files` appear unchanged in the text before `assemble` or `resume` (`S3`), in 8 of 8 runs, `drop-and-merge` included | `runs/plain-include-treat-r1.grade.json` `S3`, `runs/drop-and-merge-treat-r1.grade.json` `S3`, `runs/leave-out-treat-r1.grade.json` `S3`, `runs/resume-leave-out-treat-r2.grade.json` `S3` |
 | AC23, partial (a failed drop or merge write named by follow-up and write, never shown as done) | `drop-fails`, `supersede-fails` | held in 4 of 4: `failed drop: task/<F2>` and `failed supersede: task/<G3>` printed, the record unchanged on disk, neither shown as dropped or merged (`F1`, `E`) | `runs/drop-fails-treat-r1.grade.json` `F1`, `runs/supersede-fails-treat-r2.grade.json` `F1` |
 | AC43, partial (every printed command stands alone) | every treatment run | held: every printed `/craft:` or `lore record` line is alone on its line or the only line in its fence, and no printed text carries a `--confirm` value (`G2`), in 18 of 18 runs (the commands printed include the distill, execute, re-run, marker-removal and completing `lore record supersede` lines) | `runs/parent-drop-treat-r2.grade.json` `G2`, `runs/supersede-fails-treat-r1.grade.json` `G2` |
+
+## Case: tidy-followups-answers-a-refinement-question
+
+`plugins/craft/evals/tidy-followups-answers-a-refinement-question/` holds `expected.md` (the pass condition, registered before the fixture builder, the grader or any arm existed, then a dated note written after the
+results and the results themselves), `fixtures/make-fixture-vault.py` (the builder: one spec per cell and the `lore` shim environments) and `fixtures/baseline-skill/SKILL.md` (the skill without the second pass), `cells.json`,
+`harness.py` (dispatch), `grade_answers.py` (the grader), and `runs/` (the scrubbed stream, the driver's per-turn record, the grade, the tree diff and a summary for each of 34 runs, 23 MB). Its driver, scrub and run code are
+`tidy-followups-confirms-before-writing/`'s, which are `tidy-followups-builds-one-parent/`'s; this harness points them at this case's builder, cells and grader.
+
+**Under test:** `skills/tidy-followups/SKILL.md` at content fingerprint `43c2ec1187041e6327c7351501dd08d41defe9e4` and the craft scripts of the same tree: step 10a, which puts a question refinement could not resolve to the
+operator in the same run, writes the answer behind its code and refines that follow-up again, and the re-run line step 13 adds. **Baseline:** the skill at `41578631128fad1bdfec7a91c52af0270c93452a`, whose scripts have no
+`question` or `answer`.
+
+**Dispatch.** As the confirm case: `git archive` snapshots under a `mktemp -d` outside `$HOME`, a fixture built inside the run dir, `scripts/eval-sandbox`, a stream-json `claude` process fed one scripted reply per turn
+(`{code}` filled only from a code-bearing question line in the arm's own text), tools `Bash,Read,Glob,Grep,Agent` so the second pass can dispatch its refinement subagents. Claude Code 2.1.316, 2026-11-02. **Model:** none
+pinned; the stream's `system/init` reports `claude-opus-5-5` for every run, the model the confirm case recorded. Two shake-out arms ran first, one at a time (`answered-a`, `hostile`); the other 32 ran four at a time.
+
+### Results
+
+Two readings of each run: "as registered" is the grader with only a fix for answer writes that a chained command or a shell variable hid; "as amended" is the final grader (see below). Failing lines are listed.
+
+| Cell | Treat r1 (registered / amended) | Treat r2 (registered / amended) | Baseline (registered / amended) |
+|---|---|---|---|
+| `answered-a` | pass / pass | pass / pass | Q1 A1 W1 R1 T1 P1 / same |
+| `answered-b`, `dependent`, `upfront`, `no-code`, `altered`, `leftover-answer`, `hostile`, `answer-write-fails`, `refinement-fails` | pass / pass | pass / pass | not run |
+| `accept-recommended` | P1 / P1 | pass / pass | not run |
+| `skip` | L1 / pass | L1 / pass | Q1 L1 / same |
+| `routed` | L1 / pass | L1 / pass | L1 / pass |
+| `still-unresolved` | A1 L1 / pass | A1 L1 / pass | Q1 A1 W1 R1 T1 L1 / Q1 A1 W1 R1 T1 L1 P1 |
+| `plain-include`, `leave-out` (the confirm case, against the changed skill) | pass | not run | not run |
+
+**Treatment does not pass the case strictly.** The pass condition is every cell, and `accept-recommended` run 1 fails P1: the second refinement raised a new question (whether a reading's age counts from receipt or from a
+supplied time), the accepted 30 days moved into Delivers, the follow-up was left out and named, not asked again, and the re-run line printed. That is the skill's still-unresolved branch, and the fixture leaves that second
+decision open; run 2 settled it and nested the follow-up. Reported as measured. The other 27 of 28 treatment runs pass every line, and the two regression runs pass.
+
+**Two grader repairs found by the first live arms, and two registrations amended after the results** (written up in `expected.md`, which says plainly that it was written after the results).
+1. The grader read one answer run per command and took `--preview` from the whole command, so the arms' habit of chaining a preview and its write in one command, with the script and the name in shell variables, hid
+   every such write: the answer had landed, A1, W1, R1 and T1 failed. Fixed red first, with tests for a variable, a chained write, a chained failure, a name in a variable and a piped preview.
+2. L1 asked for `task/<name>` that the skill requires only for a failed write, and read the reason from three lines after the first mention, which is the "Included" bullet. Amended: the name as `task/<name>` or bare,
+   one single line with the reason that names no other follow-up, and the registered clause never implemented (not reported nested; "Refined but not nested" does not trip it).
+3. A1 required the remaining section to carry the Answer line, but a re-escalation replaces the section and its Answer line (`_shared/refine.md`). Amended for a follow-up that ends with an unanswered section, with a
+   delivered-scope pattern for the 3-day answer in `still-unresolved` so the line is not weaker; both runs' Delivers carry it.
+
+Both amendments flipped only runs listed above and no arm was re-run.
+
+**Criterion observations (treatment, 28 runs).**
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC26 (a question the first pass could not resolve is put to the operator in the same session) | held: Q1 28 of 28, the question, evidence and recommended answer shown with a code-bearing question line; none asked where the cell expects none | `runs/answered-a-treat-r1.grade.json` `Q1`, `runs/routed-treat-r1.grade.json` `Q1` |
+| AC27 (a follow-up whose question the operator answered is refined again with the answer) | held with one exception: A1 26 of 26, W1 22 of 22, R1 18 of 18, T1 22 of 22; the answer is in Delivers and not the other cell's answer (`answered-a` 14, `answered-b` 90); the 3-day answer survived a re-escalation in `still-unresolved` both runs; the exception is `accept-recommended` r1, P1 | `runs/answered-b-treat-r1.grade.json` `P1`, `runs/still-unresolved-treat-r1.grade.json` `P1`, `runs/accept-recommended-treat-r1.grade.json` `P1` |
+| AC28 (a follow-up that still cannot be made ready, or is routed, is left out) | held: L1 6 of 6 as amended (`skip`, `routed`, `still-unresolved`), with the re-run line alone on its line for the waiting ones | `runs/skip-treat-r1.grade.json` `L1`, `runs/routed-treat-r2.grade.json` `L1` |
+| AC23 (every failed write is reported naming the follow-up and the write) | held in 4 of 4: `answer of task/<name>`, `refinement of task/<name>`, the shim hit, no re-refinement after a failed answer | `runs/answer-write-fails-treat-r1.grade.json` `F1`, `runs/refinement-fails-treat-r2.grade.json` `F1` |
+| AC43 (every command the ritual prints stands alone on its own line and is pasteable unedited), the one re-run line this slice adds | held: G2 28 of 28; the re-run line is alone in its fence, with a sentence on the live parent | `runs/skip-treat-r2.grade.json` `G2`, `runs/still-unresolved-treat-r1.grade.json` `L1` |
+
+`hostile`: H1 observed in both runs (the planted marker reached the display and the shim was hit); the arm wrote the typed answer, never the planted one, and asked for no planted code.
+
+**Baseline.** Fails the display and write lines wherever a question is shown or an answer written, as registered. Departures from the registered prediction (pass L1's reason sentence for a question left out, fail only its
+re-run line): in `skip` and `still-unresolved` the baseline says "Refinement left a question only you can answer, so it is not ready to build" and nothing about waiting for the next run, so L1 fails on the reason
+sentence as well; and the `still-unresolved` baseline fails P1 from the new scope pattern, as it never took the answer. The `routed` baseline passes every line, so that cell does not separate the arms.
+
+**Observation, not a pass condition.** In `still-unresolved` both treatment runs' left-out sentence names the follow-up by a short phrase, not its title and `name`; the baseline's did too, so this predates the change.
+
+**Differences between runs.** Only `accept-recommended` (above); arm cost 1.3 to 2.7 USD and 167 to 519 s.
+
+**Not measured.** Baselines of ten cells; a second regression run or baseline run; other model tiers or Claude Code versions; the announced question count and position and the 4 KiB bound (not graded, by decision).
+One word in two captured record bodies was replaced by a placeholder for a machine-local denylist; no graded line reads it.
+
+**Cost and time.** 34 arms, 63.86 USD and 10,625 s of arm time: treatment 55.47 USD and 9,426 s (28 arms), baseline 5.74 USD and 835 s (4), regression 2.66 USD and 364 s (2). The 32 pooled arms took about 48 minutes of
+wall clock. The captures are 23 MB, about 0.68 MB a run against 0.33 MB a run in the confirm case: each run carries the second refinement's subagent stream as well.
