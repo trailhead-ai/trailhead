@@ -1,0 +1,12 @@
+{
+ "cell": "no-code-treat-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 6,
+ "unsent": 0,
+ "seconds": 380,
+ "cost_usd": 2.0596584000000004,
+ "returncode": 0,
+ "run_id": "fxrune935cd0dc4b4",
+ "real_vault_hits": ""
+}

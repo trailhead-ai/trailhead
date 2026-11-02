@@ -1,0 +1,6 @@
+vault CHANGED task/berth-fees-charge-a-late-fee-once-the-grace-period-is-over-still-unresolved.json
+vault CHANGED task/berth-fees-charge-a-late-fee-once-the-grace-period-is-over-still-unresolved.md
+vault ADDED task/build-the-follow-ups-of-fixture-berth-fee-spec-chosen-2026-11-02.json
+vault ADDED task/build-the-follow-ups-of-fixture-berth-fee-spec-chosen-2026-11-02.md
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-still-unresolved.json
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-still-unresolved.md

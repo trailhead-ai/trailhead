@@ -1,0 +1,12 @@
+{
+ "cell": "routed-base-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 4,
+ "unsent": 0,
+ "seconds": 167,
+ "cost_usd": 1.2220358,
+ "returncode": 0,
+ "run_id": "fxruneb53ec0def88",
+ "real_vault_hits": ""
+}
