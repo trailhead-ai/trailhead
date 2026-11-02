@@ -1,0 +1,13 @@
+## Findings
+- [Critical] No way to clear a balance: AC3 unblocks on "cleared", but no task records a desk payment or waiver, and online payment is a non-goal. Once a borrower passes £10, the balance never falls, so every later checkout needs an override, and even the AC7 waived total has no source. Suggested: add a librarian task to record payments and waivers, written to the ledger and shown on the desk screen.
+- [Critical] First-run backfill undefined: the plan doesn't say how loans already past due are treated. The first nightly run could back-charge them, and borrowers would be refused at the desk with no warning or explanation. Suggested: define a fee start date for existing loans and dry-run the list of affected borrowers before enabling the guard.
+- [Important] Capped overflow, otherwise Critical: stamping after-closing returns with the next morning's date contradicts AC5. The borrower pays an extra day for an item already returned, which can tip them over £10 and block them. Suggested: stamp the actual scan time.
+- [Important] AC1 unmet: a 00:05 job can't show overdue within one minute of rollover. Suggested: derive the flag from the due date at screen load.
+- [Important] AC4 unmet: the note stores the reason but not who granted the override, and history display isn't planned. Suggested: add a structured override record that appears in history.
+- [Important] AC6 has no task: the first a borrower hears of a problem may be a refused checkout. Suggested: add the reminder task.
+- [Important] AC7 has no task: staff get no monthly report. Suggested: add the report task, built on the ledger.
+- [Important] Refusal content unspecified: the librarian needs the balance, the items behind it and the override action on one screen. Suggested: specify the refusal state, including when no reason is typed.
+- [Minor] Fee precision: "exceeds ten pounds" means exactly £10.00 passes, so the refusal message should state the threshold.
+
+## Confidence
+High on plan/spec gaps, read directly from both files; no product code was available for precedent.

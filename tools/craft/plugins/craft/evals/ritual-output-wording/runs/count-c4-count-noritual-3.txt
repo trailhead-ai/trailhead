@@ -1,0 +1,10 @@
+The spec is eight of twelve done, with four not started: all four in Booking and cancelling, two of five in Trustee reports, one of two in Kit and injuries, and the one in Certificates.
+
+The four still to do are:
+
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11).
+
+The note says booking was checked with test members and the two finished tables were checked against the 2024 days. It gives no check for the boots and gloves message or for certificates, only that they're in, so those two are done on the note's word alone.

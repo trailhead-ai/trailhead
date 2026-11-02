@@ -1,0 +1,13 @@
+## Findings
+- [Critical] No task has a test contract: a fee boundary or date-rollover bug can ship with nothing to catch it, such as a charge at the replacement-price cap or a balance of exactly £10 (AC3 says "more than"). Suggested: give each task failing-first tests that vary the input: cap either side, balance £10.00/£10.01, a return before and after closing, and running the job twice.
+- [Critical] Nightly job failure is invisible and the job isn't stated to be idempotent: if a run crashes or is skipped, flags and fees silently go stale, and the desk shows wrong balances; a retry double-charges. Suggested: derive fees from dates via a ledger keyed on (loan, fee date), record each run, and alert on a missed or failed run.
+- [Important] Capped overflow, mapped Critical: the first run charges all existing past-due loans with no dry run, backfill rule or rollback, so it could wrongly block borrowers overnight. Suggested: add a preview report, a fee start date and a reversal path.
+- [Important] Capped overflow, deterministic: stamping after-closing returns with the next morning's date lets the 00:05 job charge another day, violating AC5. Suggested: record the actual scan time and use it to stop the fee.
+- [Important] A 00:05 job can't meet the one-minute limit in AC1, and a batch overrun widens the gap. Suggested: derive overdue status from the due date at read time.
+- [Important] The nightly and return-time fee runs can race and charge twice. Suggested: use the same ledger uniqueness key.
+- [Important] The override note doesn't reliably capture who granted it (AC4). Suggested: use a structured record with the authenticated librarian's identity.
+- [Important] AC6 and AC7 have no tasks, and AC7's reconciliation needs a ledger and waiver records the plan lacks. Suggested: add tasks.
+- [Minor] Local-time scheduling can skip or repeat 00:05 only if a DST change falls in that window; verify the site's timezone.
+
+## Confidence
+Medium: the findings come directly from the plan and spec text, but no code exists to check against.

@@ -1,0 +1,13 @@
+You will be able to download the year's attendance, wall-length and refunds tables as spreadsheets and see them together on the annual summary page, and members will be told what to bring and have any injury on the day recorded, with the insurer's form filled in from their booking. Try it: open the annual summary page, check that the year is at the top and all three tables are there, then download one table and open the spreadsheet it saves.
+
+**The next slice is "The year-end slice".** It is the smallest next step that still gives the trustees and members something useful.
+
+- **Fully covered:** all seven criteria in two sections, the five of five in Trustee reports and the two of two in Kit and injuries.
+- **Partly covered:** none. Every criterion this slice touches will be finished.
+- **Left after this slice:** four of four in Booking and cancelling, none of five in Trustee reports, none of two in Kit and injuries, and one of one in Certificates, which is that a member who has attended can download a certificate showing the training days they completed (AC12). No criterion is left partly covered.
+- **Visual surface:** this slice touches nothing beyond the summary page the trustees already see, so no enumerated states apply.
+- **Value claim:** the trustees get the year's attendance, wall length and refunds as tables they can download and a summary page that shows them together, and a member's booking confirmation tells them what to bring and what happens if they are hurt, so the trustees' meeting no longer waits on hand-built figures.
+
+The parent task `task/the-year-end-slice` has not been written yet, so this is the point to reject or change the slice.
+
+AC5, AC6, AC7, AC8, AC9, AC10, AC11

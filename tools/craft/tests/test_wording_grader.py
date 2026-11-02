@@ -778,6 +778,32 @@ CAPTURE_EXPECTATIONS = {
     "count-g6-proposal-treated": [("covers-field", [], "gate-shape")],
     "count-g7-proposal-treated": [],
     "count-cr-summary-baseline-build": [],
+    # The counting sites at R2 (extension of 2026-11-02): the treated arms and the guards. The control and the
+    # observed sites decide nothing; their rows record what the grader reads.
+    "count-c-count-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-cn-count-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-c4-count-noritual": [("criterion-mention", COUNT_WHOLE_REPLY, "text-with-number")],
+    "count-g1-count-noritual": [("criterion-mention", [], "text-with-number")],
+    "count-control-third-noritual": [("criterion-mention", [], "text-with-number")],
+    "count-g2-fifth-reviewer": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "count-g2-fifth-advocate": [
+        ("reviewer-report", [], "template-shape"),
+        ("criterion-mention", [], "bare"),
+    ],
+    "count-g3-fifth-slice": [
+        ("criterion-mention", ["--drop-value-line"], "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "count-g5-fifth-slice": [
+        ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
+        ("covers-field", [], "gate-shape"),
+    ],
+    "count-g6-fifth-slice": [("covers-field", [], "gate-shape")],
+    "count-g7-fifth-slice": [],
+    "count-cr-count-build": [],
     # The treated arms carry commit P; their guards bind (a miss in 2 or more of 6 is a guard miss).
     "proposal-treated": [
         ("criterion-mention", PROPOSAL_STATEMENT, "text-with-number"),
@@ -845,6 +871,41 @@ CAPTURE_OVERRIDES = {
     "count-cn-third-noritual-2": {"criterion-mention": "text-with-number"},
     "count-cn-third-noritual-3": {"criterion-mention": "text-with-number"},
     "count-cn-third-noritual-4": {"criterion-mention": "text-with-number"},
+    # The count treated batch at R2 and its guards (2026-11-02): one row per graded capture, per check, including the
+    # ones equal to the prefix default. G7 is registered in the ledger guard, CR is read by eye.
+    "count-c-count-noritual-1": {"criterion-mention": "text-with-number"},
+    "count-c-count-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-c-count-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-c4-count-noritual-1": {"criterion-mention": "text-with-number"},
+    "count-c4-count-noritual-2": {"criterion-mention": "nickname"},
+    "count-c4-count-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-cn-count-noritual-1": {"criterion-mention": "text-with-number"},
+    "count-cn-count-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-cn-count-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-g1-count-noritual-1": {"criterion-mention": "nickname"},
+    "count-g1-count-noritual-2": {"criterion-mention": "text-with-number"},
+    "count-g1-count-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-g1-count-noritual-4": {"criterion-mention": "text-with-number"},
+    "count-g1-count-noritual-5": {"criterion-mention": "text-with-number"},
+    "count-g1-count-noritual-6": {"criterion-mention": "text-with-number"},
+    "count-control-third-noritual-1": {"criterion-mention": "text-with-number"},
+    "count-control-third-noritual-2": {"criterion-mention": "bare"},
+    "count-control-third-noritual-3": {"criterion-mention": "text-with-number"},
+    "count-g2-fifth-reviewer-1": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g2-fifth-reviewer-2": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g2-fifth-reviewer-3": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g2-fifth-advocate-1": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g2-fifth-advocate-2": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g2-fifth-advocate-3": {"reviewer-report": "template-shape", "criterion-mention": "bare"},
+    "count-g3-fifth-slice-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g3-fifth-slice-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g3-fifth-slice-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g5-fifth-slice-1": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g5-fifth-slice-2": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g5-fifth-slice-3": {"criterion-mention": "text-with-number", "covers-field": "gate-shape"},
+    "count-g6-fifth-slice-1": {"covers-field": "gate-shape"},
+    "count-g6-fifth-slice-2": {"covers-field": "gate-shape"},
+    "count-g6-fifth-slice-3": {"covers-field": "gate-shape"},
 }
 
 CAPTURES = sorted(p for p in RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))

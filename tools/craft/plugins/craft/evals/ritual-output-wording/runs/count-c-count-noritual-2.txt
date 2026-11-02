@@ -1,0 +1,11 @@
+Three of the twelve acceptance criteria are done, based on the week 5 status note; I haven't checked the build itself.
+
+- **Booking and cancelling:** one of four done, three not started.
+- **Trustee reports:** none of five done. One is partly built and the other four haven't been started.
+- **Kit and injuries:** one of two done, and the other is blocked.
+- **Certificates:** the only criterion here is done.
+
+Two criteria don't fit those counts:
+
+- **Partly built:** the wall-length table adds up the metres built by site and by year (AC6). It totals by year, checked against the 2024 days, but doesn't split by site yet.
+- **Blocked:** an injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). This can't go ahead until the insurer sends their form, so it's the one item waiting on someone outside the project.

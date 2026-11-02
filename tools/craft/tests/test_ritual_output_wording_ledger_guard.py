@@ -183,6 +183,9 @@ def test_a_value_naming_an_identifier_the_spec_does_not_declare_fails_the_check(
 # the covers check. A capture in runs/ with the prefix and no entry here fails the registration test.
 G7_CAPTURES: dict[str, bool] = {f"count-g7-proposal-treated-{n}": True for n in (1, 2, 3, 4)}
 G6_CAPTURES: dict[str, bool] = {f"count-g6-proposal-treated-{n}": True for n in (1, 2, 3, 4)}
+# The same two sites at R2 on `fifth-slice` (extension of 2026-11-02), three graded dispatches each.
+G7_CAPTURES.update({f"count-g7-fifth-slice-{n}": True for n in (1, 2, 3)})
+G6_CAPTURES.update({f"count-g6-fifth-slice-{n}": True for n in (1, 2, 3)})
 
 
 def _captures(site: str) -> list[str]:

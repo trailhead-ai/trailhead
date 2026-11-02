@@ -1,0 +1,19 @@
+You will be able to lift a fee block for a borrower who is stuck at the desk, and the override will be recorded with who granted it and why.
+
+Try it: once this is built, take a borrower owing more than ten pounds and try to check out an item, which will be refused. Then override the block as a librarian with a reason, complete the checkout, and open the borrower's history to see the override listed.
+
+**Chosen slice:** The override slice, the smallest next slice above the value floor.
+
+**Value claim:** A fee block stops being a dead end for the borrower. A librarian can lift it on the spot, and there is a record of who did so and why.
+
+**Fully covered:**
+- A borrower owing more than ten pounds in late fees cannot check out further items until the balance is cleared or a librarian overrides (AC3).
+- A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4).
+
+**Partly covered:** None. This slice makes no criterion only partially green.
+
+**What is left:** The spec has no sections, so I'm counting it as a whole: at most five of seven criteria remain once this slice is built. I don't have the earlier slices' coverage in front of me, so the real number may be lower. The five concern showing overdue status on the desk screen, charging the daily fee, stopping the fee on return, reminder messages and the monthly fees report. No criterion is known to be partly covered.
+
+**Visual surface:** The slice touches nothing beyond the desk screen an earlier slice already covered, so no enumerated states apply.
+
+**Covers:** AC3, AC4

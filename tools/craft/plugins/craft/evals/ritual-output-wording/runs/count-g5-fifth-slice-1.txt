@@ -1,0 +1,15 @@
+You will be able to take back an item that has a hold on it and have it set aside for the first borrower in its queue, with that borrower sent one message naming the pickup deadline. Try it: place a hold on an item that is out on loan, return the item, then check that it shows as on the hold shelf and that the first borrower received one message with the deadline.
+
+**Makes fully green:**
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Makes partially green:** none. This slice claims no partial coverage.
+
+**Left of the spec once this is built:** two of four left in Placing a hold, one of three in Filling a hold, and three of three in Collecting at the desk. One of the two in Placing a hold is already partly covered: a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2).
+
+**Visual surface:** none. The slice changes what the system does when an item comes back and which message goes out. No screen is added or changed, so no enumerated states apply.
+
+**Value claim:** a returned item with a hold queued against it is set aside for the first borrower in that queue, and that borrower is sent one message naming the pickup deadline, so held items stop going back onto the open shelf.
+
+AC5, AC6

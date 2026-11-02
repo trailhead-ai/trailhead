@@ -1,0 +1,8 @@
+Three of the twelve acceptance criteria are done, and nine are still open.
+
+- **Booking and cancelling:** one of four done, three left.
+- **Trustee reports:** none of five done. One of those is partly built: the wall-length table adds up the metres built by year, but doesn't split them by site yet (AC6).
+- **Kit and injuries:** one of two done. The other is blocked: an injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). It can't go ahead until the insurer sends their form.
+- **Certificates:** the only criterion here is done, though the note doesn't mention any check, unlike the other finished items.
+
+The biggest gap is the trustee reports, where four of the five haven't been started.
