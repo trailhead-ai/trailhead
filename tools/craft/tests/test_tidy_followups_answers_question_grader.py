@@ -1063,3 +1063,18 @@ def test_l1_passes_when_a_bullet_with_its_own_bold_label_follows_the_nested_labe
 def test_l1_passes_when_a_bullet_follows_a_nested_label_that_already_carries_its_content():
     line = report("- **Nested:** `p-one`", f"- Left out: Tide cache `q-one`: {REASON}")
     assert line["pass"] is True, line["detail"]
+
+
+def test_a_script_variable_set_on_the_same_line_as_the_question_read_is_still_a_question_read():
+    out = json.dumps({"questions": [Q], "unaskable": []}) + "\nexit: 0"
+    run = Run().bash(f"P={PARENT}; $P question {SPEC} q-one; echo \"exit: $?\"", out)
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    assert run.line({"asked": ["Q1"]}, "Q1")["pass"] is True
+
+
+def test_a_script_variable_set_on_the_same_line_as_an_answer_write_still_lands_the_answer():
+    run = question_read(Run())
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.bash(f"P={PARENT}; $P answer {SPEC} q-one --answer-file \"$a\" --confirm qqqq; echo \"exit: $?\"",
+             stored("Keep readings for 14 days.")).end()
+    assert run.line({}, "W1")["pass"] is True

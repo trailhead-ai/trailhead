@@ -59,7 +59,7 @@ def _json_in(text: str):
         return None
 
 
-SHELL_VARIABLE = re.compile(r"^\s*(?P<var>\w+)=(?P<value>(?![$`]\()[^\s`(]\S*)\s*$", re.MULTILINE)
+SHELL_VARIABLE = re.compile(r"^\s*(?P<var>\w+)=(?P<value>(?![$`]\()[^\s;`(][^\s;]*)\s*(?:;|$)", re.MULTILINE)
 ANSWER_ARGS = re.compile(r"[^\n;&|)]*")
 PIPED = re.compile(r"\|(?!\|)")
 RESULT_BLOCK = re.compile(
