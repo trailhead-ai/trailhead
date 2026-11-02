@@ -805,6 +805,7 @@ sentence for its `reason`:
 | `not-spec-linked` | It is not a follow-up of this spec, so it is left out. |
 | `already-nested` | It already sits under another parent, so it is left out. |
 | `routed` | Refinement routed it elsewhere, and route outcomes are not asked; it is left out. |
+| `unclosed-fence` | Its refinement section sits in a code fence that never closes, so an answer could not be placed; it is left out. |
 
 Exit 2 is a failure: stop, report its `reason-code:` by the table in item 6 or the gather table, and
 go to step 13.
@@ -849,7 +850,11 @@ nothing. When `altered` is true, say plainly that sanitizing changed the text, s
 would be stored in a fence, say that a retyped answer or `skip` is also open, and ask on one line:
 
    > Store that text as your answer? Reply yes and the code <confirm>
-5. Write with the code the operator typed, and remove the file afterwards whatever the outcome:
+
+A `skip`, or a retype, here removes the staged file, which may hold what sanitizing flagged; a
+retype stages a fresh one.
+5. Write with the code the operator typed, and remove the file afterwards whatever the outcome (a
+   `skip` or a retype at the re-ask in item 4 has already removed it):
 
    ```
    ${CLAUDE_PLUGIN_ROOT}/scripts/followup_parent.py answer <spec-name> <name> --answer-file "$answer" --confirm <the code, as taken under the shape rule>
@@ -862,7 +867,7 @@ re-refinement. When `altered` is true, say so plainly.
 
 | `reason-code` | What happened, whose side, what to do |
 |---|---|
-| `not-answerable` | The record cannot take an answer now (its question moved or was answered since it was shown, or it has no recommended answer to accept); the vault's. Nothing was written. The follow-up is left out. |
+| `not-answerable` | The record cannot take an answer now (its question moved or was answered since it was shown, or it has no recommended answer to accept, or the recommended answer was too long to show whole, so the code cannot accept it); the vault's. Nothing was written. The follow-up is left out, and the operator can retype an answer on a later run. |
 | `invalid-answer-file` | The staged answer was not one non-empty JSON string of at most 4 KiB; this ritual's or the operator's. Nothing was written. Say the answer could not be used, re-stage it and ask the same question again; an over-long answer is shortened by the operator, never cut for them. |
 | `answer-write-failed` | The answer write, or its read-back, failed; `lore`'s or the vault's. Report it as the failed write `answer of task/<name>`, and that follow-up is left out and not refined. |
 | `confirmation-missing` | No code was passed; this ritual's. Nothing was written. Ask again. Never retry with a code the operator did not type. |
@@ -1050,9 +1055,11 @@ unsettled:
 ```
 
 When a follow-up is left out waiting on a question, whether skipped, unasked or ended on a new one,
-the re-run line is printed alone on its own line, once even when a case below prints it too, with a
-sentence saying to run it once any live parent is built or dropped, since a re-run meets that parent
-first. It removes no distill command and changes no other case.
+or left out by a failed write, `answer of task/<name>` or `refinement of task/<name>`, whose
+question or Answer is still on the record so a re-run resumes it, the re-run line is printed alone
+on its own line, once even when a case below prints it too, with a sentence saying to run it once
+any live parent is built or dropped, since a re-run meets that parent first. It removes no distill
+command and changes no other case.
 
 The case that matches still decides the other commands; a parent that ended `buildable` still gets
 its build command. When any follow-up is still flagged, **no distill command is printed in any case
