@@ -3954,3 +3954,347 @@ def test_check_without_the_parent_and_with_no_names_is_refused_as_invalid_argume
     assert code == 2 and out is None
     assert reason_codes(err) == ["reason-code: invalid-arguments"]
     assert runner.writes() == []
+
+
+# --- question: reading a refinement question ------------------------------------------------
+
+
+def unresolved(question="Which way?", evidence="Read src/a.py; both paths work.", recommended="Go left.", answer=None):
+    lines = ["", "## Refine — unresolved", ""]
+    if question is not None:
+        lines += [f"**Question:** {question}", ""]
+    if evidence is not None:
+        lines += [f"**Evidence gathered:** {evidence}", ""]
+    if recommended is not None:
+        lines += [f"**Recommended answer:** {recommended}", ""]
+    if answer is not None:
+        lines += [f"**Answer:** {answer}", ""]
+    return CLEAN + "\n".join(lines)
+
+
+def run_question(env, spec, *names):
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), "question", spec, *names],
+        capture_output=True, text=True, env=env,
+    )
+
+
+def question_ok(env, spec, *names):
+    r = run_question(env, spec, *names)
+    assert r.returncode == 0, r.stderr
+    return json.loads(r.stdout)
+
+
+def unaskable_of(result):
+    return {item["name"]: item["reason"] for item in result["unaskable"]}
+
+
+def test_a_section_with_all_three_fields_yields_one_question_entry(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Asked", status="open", body=unresolved(), spec=spec)
+    result = question_ok(env, spec, name)
+    revision = shown_revision(env, vault, name)
+    assert result["unaskable"] == []
+    assert result["questions"] == [
+        {
+            "name": name,
+            "title": "Asked",
+            "revision": revision,
+            "question": "Which way?",
+            "evidence": "Read src/a.py; both paths work.",
+            "recommended": "Go left.",
+            "confirm": parent.confirm.code_for(parent.ANSWER_KIND, spec, {"name": name, "revision": revision}),
+        }
+    ]
+
+
+@pytest.mark.parametrize("status", ["open", "ready"])
+def test_an_open_or_ready_follow_up_with_a_question_is_askable(lore_env, spec, status):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Either", status=status, body=unresolved(), spec=spec)
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+def test_a_missing_evidence_or_recommendation_comes_back_empty_not_absent(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(
+        env, vault, "Bare", status="open", body=unresolved(evidence=None, recommended=None), spec=spec
+    )
+    entry = question_ok(env, spec, name)["questions"][0]
+    assert (entry["question"], entry["evidence"], entry["recommended"]) == ("Which way?", "", "")
+
+
+def test_two_revisions_of_a_record_give_different_codes_and_one_revision_the_same_code(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Moving", status="open", body=unresolved(), spec=spec)
+    first = question_ok(env, spec, name)["questions"][0]
+    again = question_ok(env, spec, name)["questions"][0]
+    _lore(env, "record", "update", f"task/{name}", "--vault", vault, stdin=unresolved(evidence="Changed."))
+    changed = question_ok(env, spec, name)["questions"][0]
+    assert first["confirm"] == again["confirm"]
+    assert changed["revision"] != first["revision"]
+    assert changed["confirm"] != first["confirm"]
+
+
+def test_the_code_binds_the_name_as_well_as_the_revision(lore_env, spec):
+    env, vault = lore_env
+    a = make_followup(env, vault, "Twin a", status="open", body=unresolved(), spec=spec)
+    b = make_followup(env, vault, "Twin b", status="open", body=unresolved(), spec=spec)
+    entries = {q["name"]: q for q in question_ok(env, spec, a, b)["questions"]}
+    assert entries[a]["revision"] == entries[b]["revision"]
+    assert entries[a]["confirm"] != entries[b]["confirm"]
+
+
+def test_questions_are_sorted_by_name_and_unaskable_carries_only_name_and_reason(lore_env, spec):
+    env, vault = lore_env
+    z = make_followup(env, vault, "Zed", status="open", body=unresolved(), spec=spec)
+    a = make_followup(env, vault, "Aye", status="open", body=unresolved(), spec=spec)
+    plain = make_followup(env, vault, "Plain", spec=spec)
+    result = question_ok(env, spec, z, plain, a)
+    assert [q["name"] for q in result["questions"]] == sorted([z, a])
+    assert result["unaskable"] == [{"name": plain, "reason": "not-unresolved"}]
+
+
+FENCE_SECTION = "\n```\n## Refine — unresolved\n\n**Question:** hidden?\n```\n"
+
+
+def test_a_heading_inside_a_fence_does_not_count(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Fenced", status="open", body=CLEAN + FENCE_SECTION, spec=spec)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-unresolved"}
+
+
+def test_a_fenced_heading_beside_a_real_section_does_not_make_two(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Fence plus real", status="open", body=unresolved() + FENCE_SECTION, spec=spec)
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+def test_a_section_after_an_unclosed_fence_is_not_unresolved(lore_env, spec):
+    env, vault = lore_env
+    body = CLEAN + "\n```\ncode never closed\n" + unresolved()
+    name = make_followup(env, vault, "Unclosed", status="open", body=body, spec=spec)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-unresolved"}
+
+
+def test_a_credential_shaped_span_in_a_field_is_redacted(lore_env, spec):
+    env, vault = lore_env
+    body = unresolved(question="Rotate AKIAIOSFODNN7EXAMPLE?", evidence="Key AKIAIOSFODNN7EXAMPLE seen.",
+                      recommended="Use AKIAIOSFODNN7EXAMPLE.")
+    name = make_followup(env, vault, "Leaky", status="open", body=body, spec=spec)
+    r = run_question(env, spec, name)
+    assert r.returncode == 0, r.stderr
+    assert "AKIAIOSFODNN7EXAMPLE" not in r.stdout
+    entry = json.loads(r.stdout)["questions"][0]
+    assert entry["question"].startswith("Rotate ") and entry["question"].endswith("?")
+
+
+def test_a_newline_in_a_field_is_folded_to_one_line(lore_env, spec):
+    env, vault = lore_env
+    body = unresolved(question="First line\nsecond line", evidence="a\n\nb", recommended="x\ny")
+    name = make_followup(env, vault, "Folded", status="open", body=body, spec=spec)
+    entry = question_ok(env, spec, name)["questions"][0]
+    assert entry["question"] == "First line second line"
+    assert entry["evidence"] == "a b"
+    assert entry["recommended"] == "x y"
+
+
+@pytest.mark.parametrize("heading", ["## Notes", "# Top", "### Deep"])
+def test_a_heading_shaped_line_after_the_fields_does_not_leak_into_the_last_field(lore_env, spec, heading):
+    env, vault = lore_env
+    body = unresolved() + f"\n{heading}\n\nLEAKED-TAIL text\n"
+    name = make_followup(env, vault, "Tailed", status="open", body=body, spec=spec)
+    entry = question_ok(env, spec, name)["questions"][0]
+    assert entry["recommended"] == "Go left."
+    assert "LEAKED-TAIL" not in json.dumps(entry)
+
+
+def test_a_long_field_and_title_are_bounded(capsys):
+    doc = task_doc(status="open", body=unresolved(evidence=sentence(5000)), title="T" * 1000)
+    code, out, _ = run_main(Lore(tasks={"task/f": doc}), "question", "s", "f", capsys=capsys)
+    assert code == 0
+    entry = json.loads(out)["questions"][0]
+    assert len(entry["evidence"]) <= parent.MAX_FIELD_CHARS + 1
+    assert entry["evidence"].endswith("…")
+    assert len(entry["title"]) <= parent.gather.MAX_TITLE_CHARS + 1
+
+
+def test_a_label_paraphrased_mid_line_is_not_an_answer(lore_env, spec):
+    env, vault = lore_env
+    body = unresolved(evidence="Looked at src/a.py.\nAn earlier **Answer:** chose left, but that no longer holds.")
+    name = make_followup(env, vault, "Paraphrase", status="open", body=body, spec=spec)
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+def test_a_fenced_answer_label_is_not_an_answer(lore_env, spec):
+    env, vault = lore_env
+    body = unresolved() + "\n```\n**Answer:** pasted\n```\n"
+    name = make_followup(env, vault, "Fenced answer", status="open", body=body, spec=spec)
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+# one test per unaskable reason: each varies only the property that decides it
+
+def _askable(env, vault, spec_name, **overrides):
+    kwargs = {"status": "open", "body": unresolved(), "spec": spec_name, **overrides}
+    return make_followup(env, vault, "Subject", **kwargs)
+
+
+def test_unaskable_no_question_for_an_empty_question_field(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(question=""))
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "no-question"}
+
+
+def test_unaskable_no_question_for_a_missing_question_field(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(question=None))
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "no-question"}
+
+
+def test_unaskable_not_unresolved_for_a_body_without_the_section(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=CLEAN)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-unresolved"}
+
+
+def test_unaskable_two_sections(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved() + unresolved(question="Another?")[len(CLEAN):])
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "two-sections"}
+
+
+def test_unaskable_already_answered(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(answer="Left."))
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "already-answered"}
+
+
+@pytest.mark.parametrize("status", ["blocked", "done", "in-progress"])
+def test_unaskable_blocked_for_a_status_other_than_open_or_ready(lore_env, spec, status):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, status=status)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "blocked"}
+
+
+def test_unaskable_not_spec_linked(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, spec=None)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-spec-linked"}
+
+
+def test_unaskable_already_nested(lore_env, spec):
+    env, vault = lore_env
+    holder = make_followup(env, vault, "Holder", status="open", spec=spec)
+    name = _askable(env, vault, spec, parent=holder)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "already-nested"}
+
+
+@pytest.mark.parametrize("route", ["plan", "brainstorm"])
+def test_unaskable_routed(lore_env, spec, route):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, labels=[f"route={route}"])
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "routed"}
+
+
+def test_the_verdict_function_is_the_one_both_question_and_answer_call(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    runner = EnvRunner(env)
+    vault_name, spec_sidecar = parent.gather.resolve_spec(runner, spec)
+    sidecar, body, _ = parent._read_task(runner, vault_name, name)
+    linked = parent._FollowupLink(runner, vault_name, spec, spec_sidecar)
+    assert parent.ask_verdict(sidecar, body, lambda: linked(name, sidecar)) is None
+    assert parent.ask_verdict(sidecar, unresolved(answer="x"), lambda: True) == "already-answered"
+
+
+# --- question: failure paths ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "runner,reason",
+    [
+        (Lore(show_rc=3, show_stderr="SECRET-vault-text"), "lore-failed"),
+        (Lore(show_stdout="not json SECRET-vault-text"), "lore-output-not-json"),
+        (Lore(raises=FileNotFoundError("lore")), "lore-missing"),
+        (Lore(raises=subprocess.TimeoutExpired(["lore"], 1)), "lore-timeout"),
+        (Lore(tasks={}), "followup-not-found"),
+    ],
+)
+def test_question_exits_two_with_the_reason_and_nothing_on_stdout(runner, reason, capsys):
+    code, out, err = run_main(runner, "question", "s", "f", capsys=capsys)
+    assert code == 2
+    assert out == ""
+    assert reason_of(err) == reason
+    assert "SECRET" not in err
+
+
+@pytest.mark.parametrize("bad", ["has space", "a$(touch x)", "../x", "a;b", "-rf"])
+def test_question_refuses_a_bad_name_before_any_lore_call(bad, capsys):
+    runner = Lore()
+    code, out, err = run_main(runner, "question", "s", "--", bad, capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == "invalid-followup-name"
+    assert runner.calls == []
+
+
+def test_question_refuses_a_bad_spec_name_before_any_lore_call(capsys):
+    runner = Lore()
+    code, out, err = run_main(runner, "question", "bad name", "f", capsys=capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == "invalid-spec-name"
+    assert runner.calls == []
+
+
+def test_question_writes_nothing(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    runner = EnvRunner(env)
+    code = parent.main(["question", spec, name], runner=runner)
+    assert code == 0
+    assert runner.writes() == []
+
+
+# --- check: answered ------------------------------------------------------------------------
+
+
+def test_check_reports_answered_for_a_section_holding_an_answer(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Answered", status="open", body=unresolved(answer="Left."), spec=spec)
+    assert left_out(check_ok(env, spec, name))[name] == {
+        "name": name, "reason": "unresolved-question", "answered": True,
+    }
+
+
+def test_check_omits_answered_for_a_section_without_an_answer(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Pending", status="open", body=unresolved(), spec=spec)
+    assert left_out(check_ok(env, spec, name))[name] == {"name": name, "reason": "unresolved-question"}
+
+
+def test_check_does_not_read_a_mid_line_or_fenced_label_as_an_answer(lore_env, spec):
+    env, vault = lore_env
+    mid = make_followup(
+        env, vault, "Mid", status="open", body=unresolved(evidence="Seen.\nOld **Answer:** was left."), spec=spec
+    )
+    fenced = make_followup(
+        env, vault, "Fenced", status="open", body=unresolved() + "\n```\n**Answer:** x\n```\n", spec=spec
+    )
+    result = left_out(check_ok(env, spec, mid, fenced))
+    assert "answered" not in result[mid] and "answered" not in result[fenced]
+
+
+@pytest.mark.parametrize(
+    "kwargs,reason",
+    [
+        ({"labels": ["route=plan"]}, "routed-to-plan"),
+        ({"labels": ["route=brainstorm"]}, "routed-to-brainstorm"),
+        ({"labels": ["craft/followup-parent"]}, "is-a-parent"),
+    ],
+)
+def test_check_omits_answered_for_every_other_reason_even_when_the_body_has_an_answer(
+    lore_env, spec, kwargs, reason
+):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Other", status="open", body=unresolved(answer="Left."), spec=spec, **kwargs)
+    assert left_out(check_ok(env, spec, name))[name] == {"name": name, "reason": reason}
