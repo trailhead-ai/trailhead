@@ -2479,3 +2479,116 @@ default alone turns nothing red). No miss is hidden by an override: the G1 nickn
 None is claimed beyond what the tables show. That the replies count by section at C is observed with R2 in the system
 prompt and not at B. The same-day control gives one other-arm reading; no per-capture ablation was run, so any reason
 for G1's first-three split is a hypothesis.
+
+## Results at slice close, 2026-11-02 — R2 (`rules.md` fingerprint `81162064b031`) is kept: C passes, every guard holds; the observed sites and the limits
+
+This section records the results and closes nothing new. No eval was run to write it. Every count below is taken from the
+per-capture tables of `Baseline, 2026-11-02` and `Treated, 2026-11-02` above, including `Second reading repeated, with
+the registered rule`, and was re-derived from their rows with a script (rows counted, not typed). Base B is the
+fingerprints named in the registration. Baseline is three graded runs per site at B (pilots not counted); treated is three
+per site at R2, G1 and the control six. The two readers are the in-session reading and a subagent given only the
+readings and the renamed captures; where they differ the difference is stated, not reconciled.
+
+### What C showed, reading by reading
+
+| Reading at C (the claim) | B (`third-noritual`) | R2 (`count-noritual`) | Bar |
+|---|---|---|---|
+| `counted` is `by-section` | 0 of 3 (all `listed`, grouped by state) | 3 of 3 | clean majority |
+| `counts-correct` is `correct` | 0 of 3 (`wrong`) | 3 of 3 | clean majority |
+| `exceptions` is `both` | 3 of 3 | 3 of 3 | clean majority |
+| `criterion-mention` is `text-with-number` | 3 of 3 | 3 of 3 | clean majority |
+
+C passes on each reading under both readers; the baseline had headroom (0 of 3 `by-section`). The blind reader agreed
+with the in-session reading on `counted` and `exceptions` for all twelve baseline and all twelve treated captures of
+C, C4, CN and CR; it differed on `counts-correct` where stated below.
+
+### What each guard showed at R2
+
+| Guard | Bar | R2 | Beside it |
+|---|---|---|---|
+| G1, `criterion-mention` on the no-ritual prompt | clean majority `text-with-number` | 5 of 6 (one `nickname`; the first three were 2 of 3, a split, re-run to six) | control 5 of 6 |
+| G2, reviewer and advocate on the template prompts | every run `template-shape`; `criterion-mention` majority `bare` | 6 of 6; 6 of 6 | baseline majority `bare` |
+| G3, slice statement | `gate-shape` every run; `text-with-number` clean majority | 3 of 3; 3 of 3 | |
+| G5, slice proposal | `gate-shape` every run; `text-with-number` clean majority | 3 of 3; 3 of 3 | |
+| G6, covered-criteria value, seven criteria | every run `gate-shape` and `covers_value_names_the_seven` | 3 of 3 | B 4 of 4 |
+| G7, ledger line, seven criteria | every run `grade_ledger_line` passes | 3 of 3 | B 4 of 4 |
+
+Every guard holds, G6 and G7 included, so R2 is kept; `rules.md` was not changed and no revert was made.
+
+### The same-day control beside G1
+
+`third-noritual` on the G1 prompt, same batch: `text-with-number` 5 of 6 (one `bare`; the first three split 2 of 3).
+G1 at R2 is also 5 of 6 (one `nickname`). The base arm and the R2 arm each missed once in six on the day, so G1's miss is
+not shown to be an effect of R2. Six runs each is noise-sized evidence, not a test of the difference, and the control
+decides nothing.
+
+### The observed sites, each beside its reading at B
+
+| Site | At B | At R2 | Expected reading met at R2 |
+|---|---|---|---|
+| C4 (four remaining, no exception) | each criterion named by its own text with its number, nothing counted: 3 of 3 `listed`, `counts-correct` `n/a` | `by-section` 3 of 3, and the four also named by text; `counts-correct` `correct` 2, `wrong` 1 (C4-3, in-session; the blind reader read it `correct`); `criterion-mention` `text-with-number` 2, `nickname` 1 | no: 0 of 3 |
+| CN (spec with no sections) | `listed` by state, `wrong`, both exceptions: 0 of 3 for the expected reading | in-session `total-only` and `correct` 3 of 3, both exceptions 3 of 3; blind reader `listed` and `wrong` 3 of 3 | 3 of 3 in-session; 0 of 3 for the blind reader |
+| CR (execute report, the one exception AC8) | `listed` 1, `total-only` 2; `exceptions` `one` 3 of 3 | `by-section` 3 of 3 (counts in the two sections beside the digest's totals); `exceptions` `one` 3 of 3; `counts-correct` `correct` 3 of 3 in-session | counted, yes |
+
+### Limits
+
+- **C4 does not show the threshold holding below five.** At R2 the C4 replies counted by section and named the four
+  remaining, where the expected reading was the four named one by one with no count. The stated reason is a hypothesis
+  with no ablation behind it: they counted the eight done, which is over five. The threshold of five is not shown to
+  leave four remaining alone. Recorded as a follow-up against R2's threshold wording.
+- **CN's expected reading rests on the in-session reading and is looser than the registered words.** The second reader
+  scored `listed` and `wrong` on all three, and the replies give several figures and name more than the exceptions, which
+  is not one figure with no criteria named. The blind reader also could not tell the flat spec from the sectioned one,
+  since the site is withheld. CN decides nothing; it is reported, not reconciled.
+- **`counts-correct` at CR was ambiguous at B.** The registered `n/a` is for `total-only`; on a `listed` reply it does not
+  apply, and on a `total-only` reply the rule's `n/a` and its `wrong` for a missing count by section both read as
+  applying. The second reader marked all three baseline CR captures `wrong`, the in-session reading `n/a`. It did not bite
+  at R2, where no capture is either.
+- **The exception definition does not cover a missing observation.** R2's "only partly done, say, or blocked" does not
+  name AC8's case; the replies named it by its own text with its number anyway.
+- **The capture-table rows were not all red first.** The nine C, C4 and CN baseline rows and the three extended control
+  rows equal their prefix default, so they were mutation-checked afterwards instead of shown red before the capture:
+  set to `bare`, each turned `test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to` red for that capture
+  alone, and the restored file had an empty diff. The treated rows that differ from their default (the C4 `nickname`, the
+  G1 `nickname`, the first control `bare`) were red on their real verdict first.
+- **The baseline's first second-reader pass omitted a rule** (the `wrong` clause for a reply with no count by section)
+  and was repeated with it; the table above uses the repeat.
+- **No cause is claimed beyond the tables.** That the replies count by section at C with R2 loaded and not at B is
+  observed; why is a hypothesis, and no per-capture ablation was run.
+- One model tier (the process default), one Claude Code version (2.1.316), three runs per arm and six where a 2-1 split
+  was re-run.
+- Arms reach the model by `--append-system-prompt` (or `--append-system-prompt-file` for the build arms), not by the
+  harness's own rules loading.
+- The cut-off is not observed at exactly six; the sites sit at four remaining and nine.
+- **Unmeasured ritual surfaces:** the spec review's summary and saved detail, and distill. Slice choice's step 4 prints
+  the gate's `candidates:` and `partial:` tokens as identifier lists, and whether that contradicts R2 is a follow-up.
+- **Accepted risk, owned by the operator** (the parent's Delta design item 4). R2 loads into every dispatched agent.
+  Past the reliability reviewer and the advocate, the dispatched agents are not measured: the executor, the drift check,
+  the code reviewer and the security auditor. A rule leaking into one of their reports needs that agent to cite more than
+  five criteria at once, which nothing here shows happening.
+
+### Slice close
+
+AC4 and AC5 of the spec are not on the list of criteria a script must decide. They close as manual checks, unmeasured
+until the operator names them at slice close, with the by-eye tables above as the evidence. Their entries in the parent
+task's `## Criterion observations`, and the follow-ups named in the limits above, are written by the controller and are
+not written here.
+
+### Manual re-run trigger
+
+There is no recurring runner. A new attempt starts from a new dated extension to this file, registered before any run,
+with arms built from the changed `rules.md`. Re-run when any of these happens:
+
+- a gate refuses a covered-criteria value or a ledger line (`covers_gate.py` or `ledger_gate.py --parent-coverage`);
+- a ledger line has lost its covers token: the ledger gate passes it and `candidate_set.py` offers those criteria again
+  with no error, so look for finished criteria reappearing as candidates;
+- real sessions disagree with these counts: a long list of criteria that is not counted by section, or a counted reply
+  that drops its exceptions.
+
+Arms to re-run: `count-noritual` (C, C4, CN, G1), `fifth-reviewer` and `fifth-advocate` (G2), `fifth-slice` (G3, G5, G6,
+G7) and `count-build` (CR), with `third-noritual` on the G1 prompt as the same-day control. Fixtures: `count-spec.md`,
+`count-spec-flat.md`, the `count-status-note*.md` notes, the `count-*-run.md` stubs and the `prompt-count*.md` prompts, with `prompt-noritual.md`,
+`prompt-slice.md` and `prompt-proposal.md` for the guards. The `count-*` and `fifth-*` arms carry R2's paragraph and
+stay a valid comparison only while `rules.md` matches `81162064b031` for the R2 paragraph and the B sources still match
+the fingerprints in the registration; the B arms (`third-noritual`, `proposal-treated`, `summary-baseline-build`) stay a
+baseline only while those sources match B.
