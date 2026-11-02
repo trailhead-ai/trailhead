@@ -111,11 +111,12 @@ nothing. Exit 0 prints one JSON object:
   one of ASK_REASONS: `already-nested` (it has a `parent`), `routed` (any `route` label),
   `blocked` (its status is not `open` or `ready`), `not-spec-linked` (not a follow-up of the
   spec by the membership test `check` uses), `not-unresolved` (no `## Refine — unresolved`
-  heading at the start of a line outside fenced code blocks; a section after an unclosed
-  fence is inside it), `two-sections` (more than one such heading), `already-answered` (the
-  section holds an `**Answer:**` label at the start of a line outside fences) and
-  `no-question` (no non-empty `**Question:**`) and `unclosed-fence` (a fence that never closes,
-  so `answer` could not place its line). The first that applies, in that order.
+  heading at the start of a line outside fenced code blocks, and none inside a fence left
+  open; a heading inside a fence never closed is `unclosed-fence`), `two-sections` (more than
+  one such heading), `already-answered` (the section holds an `**Answer:**` label at the start
+  of a line outside fences) and `no-question` (no `**Question:**` with text left once
+  displayed as `question` shows it) and `unclosed-fence` (a fence that never closes, so
+  `answer` could not place its line). The first that applies, in that order.
 `ask_verdict(sidecar, body, linked)` is the single function that decides it for `question` and
 `answer` (`None` when askable; `linked` is a zero-argument callable answering the
 spec-membership test). Exit codes and refusals are those of `check`'s reads: a bad name is
@@ -676,7 +677,7 @@ class _FollowupLink:
         return name in self._named or gather._names_any(sidecar, self._spec, self._anchors)
 
 
-_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}(?=[^`]*$)|~{3,})")
 _LABEL_RE = re.compile(r"^\*\*([^*\n]+):\*\*(.*)$")
 _HEADING_LINE_RE = re.compile(r"^#{1,6} ")
 
@@ -686,6 +687,26 @@ def _closes_fence(line: str, fence: str) -> bool:
     as many of it."""
     stripped = line.strip()
     return bool(stripped) and set(stripped) == {fence[0]} and len(stripped) >= len(fence)
+
+
+def _fence_open_at_end(body: str) -> bool:
+    """Whether a fenced code block opened in `body` is still open at its end."""
+    fence: str | None = None
+    for line in body.split("\n"):
+        if fence is not None:
+            if _closes_fence(line, fence):
+                fence = None
+            continue
+        opener = _FENCE_RE.match(line)
+        if opener:
+            fence = opener.group(1)
+    return fence is not None
+
+
+def _hidden_by_open_fence(body: str) -> bool:
+    """Whether `body` has a `## Refine — unresolved` heading that only a fence never closed
+    keeps `_refine_sections` from finding."""
+    return not _refine_sections(body) and bool(_UNRESOLVED_RE.search(body)) and _fence_open_at_end(body)
 
 
 def _refine_sections(body: str) -> list[dict[str, str]]:
@@ -740,12 +761,12 @@ def ask_verdict(sidecar: dict, body: str, linked) -> str | None:
         return "not-spec-linked"
     sections = _refine_sections(body)
     if not sections:
-        return "not-unresolved"
+        return "unclosed-fence" if _hidden_by_open_fence(body) else "not-unresolved"
     if len(sections) > 1:
         return "two-sections"
     if "Answer" in sections[0]:
         return "already-answered"
-    if not sections[0].get("Question", "").strip():
+    if not _one_line(sections[0].get("Question", ""), MAX_FIELD_CHARS).strip():
         return "no-question"
     if _answer_span(body) is None:
         return "unclosed-fence"
@@ -863,10 +884,10 @@ def answer_followup(
     if ask_verdict(sidecar, body, lambda: linked(name, sidecar)) is not None:
         raise ParentError("not-answerable", (name,))
     if raw is None:
-        recommended = _folded(_refine_sections(body)[0].get("Recommended answer", ""))
-        if not recommended:
+        field = _refine_sections(body)[0].get("Recommended answer", "")
+        if not _one_line(field, MAX_FIELD_CHARS).strip():
             raise ParentError("not-answerable", (name,))
-        raw = f"{RECOMMENDED_PREFIX}{recommended}"
+        raw = f"{RECOMMENDED_PREFIX}{_folded(field)}"
     at = _answer_span(body)
     if at is None:
         raise ParentError("not-answerable", (name,))
@@ -904,7 +925,7 @@ def _static_verdict(sidecar: dict, body: str, expected_parent: str | None, linke
         return "already-nested"
     if ROUTE_LABEL in labels:
         return ROUTE_REASONS.get(labels[ROUTE_LABEL], "not-ready")
-    if _refine_sections(body):
+    if _refine_sections(body) or _hidden_by_open_fence(body):
         return "unresolved-question"
     if sidecar["status"] != "ready":
         return "not-ready"

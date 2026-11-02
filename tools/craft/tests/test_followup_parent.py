@@ -4070,11 +4070,11 @@ def test_a_fenced_heading_beside_a_real_section_does_not_make_two(lore_env, spec
     assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
 
 
-def test_a_section_after_an_unclosed_fence_is_not_unresolved(lore_env, spec):
+def test_a_section_after_an_unclosed_fence_is_unaskable_as_unclosed_fence(lore_env, spec):
     env, vault = lore_env
     body = CLEAN + "\n```\ncode never closed\n" + unresolved()
     name = make_followup(env, vault, "Unclosed", status="open", body=body, spec=spec)
-    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-unresolved"}
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "unclosed-fence"}
 
 
 def test_a_credential_shaped_span_in_a_field_is_redacted(lore_env, spec):
@@ -4949,3 +4949,89 @@ def test_the_same_section_with_its_fence_closed_is_askable(lore_env, spec):
     name = _askable(env, vault, spec, body=unresolved() + "\n```\nclosed\n```\n")
     result = question_ok(env, spec, name)
     assert result["unaskable"] == [] and [q["name"] for q in result["questions"]] == [name]
+
+
+UNCLOSED_BEFORE_SECTION = CLEAN + "\n```\ncode never closed\n" + unresolved()[len(CLEAN):]
+INLINE_TICKS_BEFORE_SECTION = CLEAN + "\n```inline``` is how to quote\n" + unresolved()[len(CLEAN):]
+
+
+@pytest.mark.parametrize("status", ["ready", "open"])
+def test_check_leaves_out_a_section_hidden_by_an_unclosed_fence(lore_env, spec, status):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Hidden", status=status, body=UNCLOSED_BEFORE_SECTION, spec=spec)
+    result = check_ok(env, spec, name)
+    assert name not in eligible(result)
+    assert left_out(result)[name]["reason"] == "unresolved-question"
+
+
+def test_a_line_of_inline_backticks_is_not_a_fence_for_check_or_question(lore_env, spec):
+    env, vault = lore_env
+    name = make_followup(env, vault, "Inline", status="open", body=INLINE_TICKS_BEFORE_SECTION, spec=spec)
+    assert left_out(check_ok(env, spec, name))[name]["reason"] == "unresolved-question"
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+def test_a_tilde_fence_may_carry_backticks_in_its_info_string(lore_env, spec):
+    env, vault = lore_env
+    body = CLEAN + "\n~~~ `lang`\n## Refine — unresolved\n\n**Question:** hidden?\n~~~\n"
+    name = make_followup(env, vault, "Tilde", status="open", body=body, spec=spec)
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "not-unresolved"}
+
+
+def test_an_unrelated_closed_fence_beside_a_real_section_changes_nothing(lore_env, spec):
+    env, vault = lore_env
+    body = unresolved() + "\n```\nclosed\n```\n"
+    name = make_followup(env, vault, "Closed beside", status="ready", body=body, spec=spec)
+    assert left_out(check_ok(env, spec, name))[name]["reason"] == "unresolved-question"
+    assert [q["name"] for q in question_ok(env, spec, name)["questions"]] == [name]
+
+
+def test_check_keeps_a_fenced_heading_eligible_beside_a_later_closed_fence(lore_env, spec):
+    env, vault = lore_env
+    body = FENCED_UNRESOLVED + "\n```\nx\n```\n"
+    name = make_followup(env, vault, "Fenced twice", status="ready", body=body, spec=spec)
+    assert name in eligible(check_ok(env, spec, name))
+
+
+@pytest.mark.parametrize("value", ["\u200b", "\u0000", " \u200b\u0000 "])
+def test_recommended_that_sanitizes_to_nothing_is_not_answerable_in_preview_and_write(lore_env, spec, value):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=value))
+    frozen = snapshot(env, vault, name)
+    assert question_ok(env, spec, name)["questions"][0]["recommended"].strip() == ""
+    for extra in (["--preview"], ["--confirm", current_code(env, vault, spec, name)]):
+        r = run_answer(env, spec, name, "--recommended", *extra)
+        assert r.returncode == 1 and r.stdout == ""
+        assert "reason-code: not-answerable" in r.stderr
+    assert snapshot(env, vault, name) == frozen
+
+
+@pytest.mark.parametrize("value", ["\u200b", "\u0000", " \u200b\u0000 "])
+def test_a_question_that_sanitizes_to_nothing_is_no_question(lore_env, spec, value):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(question=value))
+    assert unaskable_of(question_ok(env, spec, name)) == {name: "no-question"}
+
+
+def test_a_question_with_visible_text_beside_invisible_text_is_still_asked(lore_env, spec):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(question="\u200bWhich?"))
+    assert question_ok(env, spec, name)["questions"][0]["question"] == "Which?"
+
+
+# repair: pins existing behaviour, written after the code
+@pytest.mark.parametrize(
+    "recommended, altered",
+    [(f"Rotate {CREDENTIAL} first.", True), ("Go\n  left,\n\tthen   stop.", False)],
+    ids=["credential", "whitespace-folding"],
+)
+def test_recommended_stored_text_equals_the_shown_text_behind_the_prefix(lore_env, spec, recommended, altered):
+    env, vault = lore_env
+    name = _askable(env, vault, spec, body=unresolved(recommended=recommended))
+    shown = question_ok(env, spec, name)["questions"][0]["recommended"]
+    result = answer_ok(env, spec, name, "--recommended", "--preview")
+    assert result["answer"] == f"Accepted the recommended answer: {shown}"
+    assert result["altered"] is altered
+    written = answer_ok(env, spec, name, "--recommended", "--confirm", current_code(env, vault, spec, name))
+    assert written["answer"] == result["answer"]
+    assert f"**Answer:** {result['answer']}" in body_of(env, vault, name).split("\n")
