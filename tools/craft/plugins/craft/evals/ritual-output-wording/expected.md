@@ -2228,8 +2228,9 @@ site ran three new dispatches at B, `-2` to `-4`, each its own `claude -p` proce
 `--append-system-prompt`, and by `--append-system-prompt-file` for `summary-baseline-build`), sequential and in the
 foreground, each exiting 0 with an empty stderr file; each pair of temporary directories was removed by name. The
 registration does not say a pilot counts as a graded run, so the pilots (`-1`) are not counted below; they are listed
-beside each site only to show they read the same way. A 2-1 split on a verdict would have been re-run to six; none
-occurred, so every site stands at three. Arms: C, C4 and CN on `third-noritual`; CR on `summary-baseline-build`; G6 and
+beside each site only to show they read the same way. A 2-1 split on a verdict is re-run to six. One occurred, at CR on `counted`
+(`listed`, `total-only`, `total-only`) and on `criterion-mention` (`text-with-number`, `bare`, `text-with-number`); CR was
+run to six under `Splits run to six, 2026-11-02` below, and every other site stands at three. Arms: C, C4 and CN on `third-noritual`; CR on `summary-baseline-build`; G6 and
 G7 on `proposal-treated`. Every capture went through `scripts/capture_scan.py` (clean) and was checked by hand for the
 operator's home path and username (none).
 
@@ -2275,7 +2276,7 @@ wrong; C4 listed; CR total-only; G6 and G7 pass).
 | C | `criterion-mention` `text-with-number` | 3 / 3 |
 | C4 | `listed`, each by its text with the number | 3 / 3 |
 | CN | one count over the spec, both exceptions (the expected reading) | 0 / 3 (all listed by state, `wrong`; exceptions `both` 3 / 3) |
-| CR | `total-only` / `listed` | 2 / 1; `exceptions` `one` 3 / 3 |
+| CR | `total-only` / `listed` | 2 / 1 over the three graded runs (4 / 2 over six, below); `exceptions` `one` 3 / 3 |
 | G6 | `covers-field` `gate-shape` and `covers_value_names_the_seven` | 3 / 3 |
 | G7 | `grade_ledger_line` passes | 3 / 3 |
 
@@ -2292,7 +2293,8 @@ neither stop for a guard miss applies, and R2 can be read against both fixtures.
 - **CN:** listed by state, not one count over the spec; the expected reading is not met at B (all three `wrong`, both
   exceptions named).
 - **CR:** total-only in two captures, a listing of the seven observed in one; the one exception (AC8) named by its
-  text with its number in all three. Not counted by section.
+  text with its number in all three. Not counted by section. Run to six below: `total-only` in four of six, `listed` in
+  two.
 
 ### Disagreements between the two readers (reported, not reconciled)
 
@@ -2356,7 +2358,9 @@ by hand for the operator's home path and username (none).
 
 ### Per-capture table
 
-Readings by eye are the in-session reading, written down before the second reader was dispatched. `Blind` is the second
+Readings by eye are the in-session reading, written down before the second reader was dispatched; the three CN rows were
+corrected afterwards against the registered words (see `Corrections to the CN readings` under `Splits run to six`
+below), and the reading in session at the time is shown beside each correction. `Blind` is the second
 reader (a fresh subagent given the registered readings with the `wrong` clause and the sizes that expect a count by
 section, the fixtures, and the twelve C, C4, CN and CR captures renamed `cap-A` to `cap-L` in shuffled order; no ground
 truth, pilot reading, expected verdict or site label). `criterion-mention` is the script reading against the spec the
@@ -2370,9 +2374,9 @@ site names.
 | `count-c4-count-noritual-1` | C4 | by-section (table, then the four named by text) | correct | n/a | text-with-number | as above (none) |
 | `count-c4-count-noritual-2` | C4 | by-section (same) | correct | n/a | nickname | as above |
 | `count-c4-count-noritual-3` | C4 | by-section (prose, the four named by text) | wrong (literal sentence; ambiguous) | n/a | text-with-number | by-section, correct (differs) |
-| `count-cn-count-noritual-1` | CN | total-only (nine left, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs, below) |
-| `count-cn-count-noritual-2` | CN | total-only (three done, seven not started, two named; no explicit nine) | correct | both | text-with-number | listed, wrong (differs) |
-| `count-cn-count-noritual-3` | CN | total-only (nine open, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs) |
+| `count-cn-count-noritual-1` | CN | listed (corrected; in-session at the time: `total-only`) (nine left, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs, below) |
+| `count-cn-count-noritual-2` | CN | listed (corrected; in-session at the time: `total-only`) (three done, seven not started, two named; no explicit nine) | wrong (corrected; in-session at the time: `correct`) | both | text-with-number | listed, wrong |
+| `count-cn-count-noritual-3` | CN | listed (corrected; in-session at the time: `total-only`) (nine open, seven not started, two named) | correct | both | text-with-number | listed, wrong (differs, below) |
 | `count-cr-count-build-1` | CR | by-section (3 of 3, 4 of 5 observed) | correct | one (AC8) | text-with-number (observed) | by-section, correct, one |
 | `count-cr-count-build-2` | CR | by-section | correct | one (AC8) | text-with-number (observed) | as above |
 | `count-cr-count-build-3` | CR | by-section (plus the digest's total line) | correct | one (AC8) | text-with-number (observed) | as above |
@@ -2400,15 +2404,15 @@ Guards, script-graded:
 | C | `correct` | 3 of 3 | 0 of 3 |
 | C | `exceptions` `both` | 3 of 3 | 3 of 3 |
 | C | `criterion-mention` `text-with-number` | 3 of 3 | 3 of 3 |
-| C4 (observed) | each criterion by its own text, nothing counted | 0 of 3 (all three count by section and also name the four) | 3 of 3 |
-| CN (observed) | one count over the spec, both exceptions | 3 of 3 in-session; 0 of 3 for the blind reader | 0 of 3 |
-| CR (observed) | `by-section` / `total-only` / `listed` | 3 / 0 / 0; `exceptions` `one` 3 of 3 | 0 / 2 / 1; `one` 3 of 3 |
-| G1 | `text-with-number` | 5 of 6 (first three: 2 of 3, split, re-run to six) | control, same day: 2 of 3 |
+| C4 (observed) | each criterion by its own text, nothing counted | 0 of 3 (all three count by section and also name the four); 0 of 6 after the split run | 3 of 3 |
+| CN (observed) | `counted` `listed`; `counts-correct` `correct`; both exceptions | `listed` 3 of 3 (in-session at the time: `total-only` 3 of 3); `correct` 2 of 3 (CN-2 never states nine); both 3 of 3. Blind reader: `listed` 3 of 3, `wrong` 3 of 3. Expected reading not shown to be met | `listed` 3 of 3, `wrong` 3 of 3 |
+| CR (observed) | `by-section` / `total-only` / `listed` | 3 / 0 / 0; `exceptions` `one` 3 of 3 | 0 / 2 / 1 over three graded runs (0 / 4 / 2 over six, below); `one` 3 of 3 |
+| G1 | `text-with-number` | 5 of 6 (first three: 2 of 3, split, re-run to six) | control, same day: 5 of 6 |
 | G2 | `template-shape`; `criterion-mention` `bare` | 6 of 6; 6 of 6 | `template-shape`; majority `bare` |
 | G3 | `gate-shape`; `text-with-number` | 3 of 3; 3 of 3 | |
 | G5 | `gate-shape`; `text-with-number` | 3 of 3; 3 of 3 | |
-| G6 | `gate-shape` and `covers_value_names_the_seven` | 3 of 3 | 4 of 4 |
-| G7 | `grade_ledger_line` passes | 3 of 3 | 4 of 4 |
+| G6 | `gate-shape` and `covers_value_names_the_seven` | 3 of 3 (6 of 6 after the split run below) | 3 of 3 |
+| G7 | `grade_ledger_line` passes | 3 of 3 | 3 of 3 |
 
 ### Pass conditions and bars, each re-read against its registered rule
 
@@ -2421,7 +2425,10 @@ Guards, script-graded:
 - **G3**, "`covers-field` every run `gate-shape`, and `criterion-mention` clean majority `text-with-number`": 3 of 3 and
   3 of 3. **Holds.**
 - **G5**, same bar on the proposal fixture: 3 of 3 and 3 of 3. **Holds.**
-- **G6**, every run: `covers-field` `gate-shape` and `covers_value_names_the_seven` on all three. **Holds.**
+- **G6**, every run: `covers-field` `gate-shape` and `covers_value_names_the_seven` on all three, and on all six after the
+  split run below. **Holds.** The statement's `criterion-mention` (`--drop-value-line`, not a bar) split 2-1 on the first
+  three and read `no-mention` in five of six, `text-with-number` in one, against `text-with-number` three of three at B;
+  see `Splits run to six, 2026-11-02`.
 - **G7**, every run: `grade_ledger_line` passes on all three. **Holds.**
 - **Same-day control**, observed only: the first three runs of `third-noritual` on the G1 prompt read text-with-number,
   bare, text-with-number, a 2-1 split, so it was run to six under the split rule: text-with-number 5 of 6. Read beside G1,
@@ -2436,16 +2443,19 @@ the arm table needs no marking.
 ### Observed sites beside their baseline
 
 - **C4:** at B each criterion was named by its own text and not counted (3 of 3). At R2 all three count by section
-  and also name the four remaining by text. The threshold of five was meant to leave four remaining alone, and the replies
-  counted anyway. A hypothesis, with no ablation behind it: they counted the eight done, which is over five. Observed
-  only; recorded as a follow-up against R2's threshold wording ("a reply would name more than five ... at once ... what is
-  left, what some work covers, a tally").
-- **CN:** at B, listed by state and `wrong` (0 of 3). At R2 each reply gives one overall count (nine left, or three done,
-  seven not started and two named) with both exceptions named by text and number, which is the expected reading; CN-2
-  never states the figure nine. The CN sentence in R2 ("Count a spec with no sections as a whole") read as expected on
-  all three in session. This reading is looser than the registered words: `total-only` is one figure with no criteria
-  named, and these replies give several figures and name the exceptions and more, which the second reader scored as
-  `listed` and `wrong` on all three. Reported, not reconciled; CN decides nothing.
+  and also name the four remaining by text (all six, after the split run below). The threshold of five was meant to leave
+  four remaining alone, and the replies counted anyway. A hypothesis, with no ablation behind it: they counted the eight
+  done, which is over five; all four baseline captures of C4 name all twelve identifiers, so R2's "name more than five
+  ... at once" fits its own words there. Observed only; recorded as a follow-up against R2's threshold wording ("a reply
+  would name more than five ... at once ... what is left, what some work covers, a tally").
+- **CN:** at B, listed by state and `wrong` (0 of 3). At R2 each reply gives overall figures (nine left, or three done,
+  seven not started and two named) with both exceptions named by text and number; CN-2 never states the figure nine. In
+  session at the time the three were read `total-only` and `correct`, which was looser than the registered words:
+  `total-only` is one figure with no criteria named, and these replies give several figures and name the exceptions and
+  more. Re-read against the registered words they are `listed` on all three, and CN-2 is `wrong` since it never states
+  nine (`Corrections to the CN readings`, below). The second reader scored `listed` and `wrong` on all three. The
+  expected reading (one count over the whole spec, both exceptions named) is not shown to be met. Reported, not
+  reconciled; CN decides nothing.
 - **CR:** at B, total-only in two and a listing in one. At R2 all three give the observed counts by section (three of three
   in Booking and cancelling, four of five in Trustee reports) beside the digest's totals, and name AC8 by its text with its
   number. The known wording gap in `counts-correct` at CR (ambiguous for `total-only`, silent for `listed`) did not bite
@@ -2456,11 +2466,12 @@ the arm table needs no marking.
 - **C4-3 `counts-correct`:** in-session `wrong` (the sentence reads "four not started: all four in Booking and cancelling,
   two of five in Trustee reports ..." which puts the four not-started in Booking), blind `correct` (read as done counts).
   C4 is observed only.
-- **CN `counted` and `counts-correct`:** in-session `total-only` and `correct`; blind `listed` and `wrong` on all three.
-  The blind reader could not tell the flat spec from the sectioned one (the site label is withheld) and scored against
-  the sectioned spec, as the baseline's repeat did; it also found the replies fit neither `listed` nor `total-only`
-  exactly. This is the same mechanism as the baseline's disagreement, and I report it without choosing: on the flat spec
-  the in-session reading is the registered expected reading, on the sectioned spec the blind reading is.
+- **CN `counted` and `counts-correct`:** in-session at the time `total-only` and `correct`, blind `listed` and `wrong` on
+  all three. The in-session `counted` was then corrected to `listed` (it agrees with the blind reader), and CN-2's
+  `counts-correct` to `wrong`; the in-session CN-1 and CN-3 stay `correct`, where the blind reader read `wrong`. The blind
+  reader could not tell the flat spec from the sectioned one (the site label is withheld) and scored against the
+  sectioned spec, as the baseline's repeat did; it also found the replies fit neither `listed` nor `total-only` exactly.
+  Reported without choosing: the remaining difference is `counts-correct` on CN-1 and CN-3.
 - `counted` and `exceptions` otherwise agree on all twelve; the blind reader's note that the rule's definition of an
   exception ("partly done, or blocked") does not cover a missing observation (AC8) is recorded.
 
@@ -2480,13 +2491,139 @@ None is claimed beyond what the tables show. That the replies count by section a
 prompt and not at B. The same-day control gives one other-arm reading; no per-capture ablation was run, so any reason
 for G1's first-three split is a hypothesis.
 
+## Splits run to six, 2026-11-02 — every 2-1 split in the baseline and treated tables run to six; observed only
+
+The registered split rule ("a 2-1 split on any verdict is re-run to six") was applied to G1 and the control and to no
+other verdict. This section applies it to the rest. It decides nothing: C, the guards' bars and the end state are as
+`Treated, 2026-11-02` records them, and no fixture, arm, registration or `rules.md` changed. The scan was over every
+verdict column of the `Baseline` and `Treated` per-capture tables, after the CN corrections below, for a 2-1 split among
+the three graded runs (pilots not counted). It found six:
+
+| Site | Verdict | Graded runs, in order | Run to |
+|---|---|---|---|
+| CR at B | `counted` | `listed`, `total-only`, `total-only` (-2 to -4) | -5 to -7 |
+| CR at B | `criterion-mention` (observed) | `text-with-number`, `bare`, `text-with-number` | -5 to -7 |
+| C4 at R2 | `counts-correct` | `correct`, `correct`, `wrong` (-1 to -3) | -4 to -6 |
+| C4 at R2 | `criterion-mention` (observed) | `text-with-number`, `nickname`, `text-with-number` | -4 to -6 |
+| CN at R2 | `counts-correct`, once CN-2 is corrected | `correct`, `wrong`, `correct` (-1 to -3) | -4 to -6 |
+| G6 at R2 | `criterion-mention` over the statement (`--drop-value-line`; E's guards section says it is not a bar at G6) | `no-mention`, `text-with-number`, `no-mention` (-1 to -3) | -4 to -6 |
+
+No other column splits: C is unanimous on all four readings at both arms, every guard bar (G1 and the control already at
+six, G2, G3, G5, G6's `covers-field` and `covers_value_names_the_seven`, G7) is unanimous, and CN's `counted` is `listed`
+on all three after the correction. The G6 split was found when its statement was graded with `--drop-value-line` (it had
+not been graded that way in the treated table); it is a reading of the prose above the final line, not of a bar, and the
+operator decided it be run to six like the others.
+
+**Dispatch.** As `### Dispatch` above, with the same arms: C4 and CN on `count-noritual`, G6 on `fifth-slice`
+(`fixtures/prompt-count-slice.md`), CR on `summary-baseline-build` by `--append-system-prompt-file`. Each run exited 0
+with an empty stderr file, in the foreground and one at a time; each pair of temporary directories was removed by name.
+One dispatch of G6 was started with the wrong arm (`count-noritual`), before its capture was read or graded; its three
+files were removed and the number was used by the correct dispatch, so `count-g6-fifth-slice-4` is a `fifth-slice` run.
+Every new capture went through `scripts/capture_scan.py` (clean, no findings) and was checked by hand for the operator's
+home path and username (none).
+
+### Corrections to the CN readings
+
+The registered words: `total-only` is one overall figure with no criteria named; a count by state or over the whole spec
+with the items named is `listed`; at CN the expected count is nine. In session at the time, CN-1 to CN-3 were read
+`total-only`, which does not fit: each names at least the two exceptions (AC6, AC11), and CN-1 and CN-2 name AC12 as
+well. The readings were redone against the registered words, the original shown beside each:
+
+| Capture | In session at the time | Re-read against the registered words | Why |
+|---|---|---|---|
+| `count-cn-count-noritual-1` | `total-only`, `correct` | `listed`, `correct` | three done and nine left, with AC6, AC11 and AC12 named; states nine |
+| `count-cn-count-noritual-2` | `total-only`, `correct` | `listed`, `wrong` | three done, seven not started, AC6, AC11 and AC12 named; never states nine |
+| `count-cn-count-noritual-3` | `total-only`, `correct` | `listed`, `correct` | nine open, seven of them not started, AC6 and AC11 named by their text; states nine |
+
+The baseline CN captures (`count-cn-third-noritual-2` to `-4`) were re-read the same way: `listed` and `wrong` as
+recorded (each groups by state and none states nine), so they do not change. `exceptions` is `both` on all of them.
+The second reader's readings are untouched; it already read the three treated captures `listed` and `wrong`.
+
+### Per-capture table of the new captures
+
+In-session readings were written down before the second reader was dispatched. `Blind` is a fresh subagent given the
+registered readings with the `wrong` clause, told that a count by section is expected where more than five criteria
+remain or a build report covers more than five, the fixtures renamed neutrally (`spec-one`, `note-two`, ...), and the nine
+captures renamed `cap-A` to `cap-I` in shuffled order; no ground truth, pilot reading, expected verdict or site label.
+G6 is scripted and was not read by the second reader.
+
+| Capture | Site | `counted` | `counts-correct` | `exceptions` | `criterion-mention` | Blind reader |
+|---|---|---|---|---|---|---|
+| `count-c4-count-noritual-4` | C4 | by-section (table, then the four named by text) | correct | n/a | text-with-number | by-section, correct, none |
+| `count-c4-count-noritual-5` | C4 | by-section (bullets per section, then the four named) | correct | n/a | nickname | by-section, correct, none |
+| `count-c4-count-noritual-6` | C4 | by-section (same) | correct | n/a | text-with-number | by-section, correct, none |
+| `count-cn-count-noritual-4` | CN | listed (by state; AC6, AC11, AC12 named; no nine) | wrong | both | text-with-number | listed, wrong if sectioned and correct if flat (could not tell), both |
+| `count-cn-count-noritual-5` | CN | listed (same) | wrong | both | text-with-number | as above |
+| `count-cn-count-noritual-6` | CN | listed (same) | wrong | both | text-with-number | as above |
+| `count-cr-summary-baseline-build-5` | CR | total-only (covered 8, observed 7, missing 1) | n/a | one (AC8) | text-with-number (observed) | total-only, wrong (n/a as the alternative), one |
+| `count-cr-summary-baseline-build-6` | CR | total-only | n/a | one (AC8) | bare (observed) | total-only, wrong (n/a as the alternative), one |
+| `count-cr-summary-baseline-build-7` | CR | listed (names the seven observed) | n/a | one (AC8) | bare (observed) | listed, wrong, one |
+| `count-g6-fifth-slice-4`, `-5`, `-6` | G6 | `covers-field` `gate-shape`; `covers_value_names_the_seven` true (each) | | | no-mention (each, `--drop-value-line`, observed) | not read |
+
+### Counts over six, derived from the tables
+
+| Site | Reading | First three | Six |
+|---|---|---|---|
+| CR at B | `counted` `total-only` / `listed` | 2 / 1 | 4 / 2 |
+| CR at B | `exceptions` `one` | 3 of 3 | 6 of 6 |
+| CR at B | `criterion-mention` `text-with-number` / `bare` (observed) | 2 / 1 | 3 / 3 |
+| C4 at R2 | `counted` `by-section` | 3 of 3 | 6 of 6 |
+| C4 at R2 | `counts-correct` `correct` / `wrong` | 2 / 1 | 5 / 1 (clean) |
+| C4 at R2 | `criterion-mention` `text-with-number` / `nickname` (observed) | 2 / 1 | 4 / 2 |
+| C4 at R2 | expected reading (each criterion by its own text, nothing counted) | 0 of 3 | 0 of 6 |
+| CN at R2 | `counted` `listed` (corrected) | 3 of 3 | 6 of 6 |
+| CN at R2 | `counts-correct` `correct` / `wrong` (corrected) | 2 / 1 | 2 / 4 (CN-1, CN-3 correct) |
+| CN at R2 | `exceptions` `both`; `criterion-mention` `text-with-number` | 3 of 3; 3 of 3 | 6 of 6; 6 of 6 |
+| CN at R2 | expected reading (one count over the whole spec, both exceptions named) | not shown | not shown: `counted` is `listed` in six of six |
+| G6 at R2 | `covers-field` `gate-shape`; `covers_value_names_the_seven` | 3 of 3; 3 of 3 | 6 of 6; 6 of 6 |
+| G6 at R2 | `criterion-mention` over the statement, `--drop-value-line` (observed) | `no-mention` 2, `text-with-number` 1 | `no-mention` 5, `text-with-number` 1 |
+| G6 at B | same | `text-with-number` 3 of 3 | not split, so not re-run |
+
+Only C4's `counts-correct` reaches a clean majority at six. The others stay unsettled at six (CR's `counted` 4 of 6, CR's
+`criterion-mention` 3 and 3, C4's `criterion-mention` 4 of 6, CN's `counts-correct` 2 of 6), and no bar reads any of them.
+The G6 statement at R2 moved from the seven named criteria at B (`text-with-number` 3 of 3) to a count in five of six
+captures (for example "four of four in Booking and cancelling, none of five in Trustee reports ..."), which is R2
+acting as intended on the one ritual statement measured above the cut-off; since it is not a bar, "Fully covered" being a
+count and not seven named criteria is recorded here and in the results and decides nothing.
+
+### Disagreements between the two readers on the new captures (reported, not reconciled)
+
+- **`counts-correct` at CR:** in-session `n/a` on all three; blind `wrong` (with `n/a` as the alternative on the two
+  `total-only`). The same difference as the baseline and treated sections record: the registered `n/a` is for a
+  `total-only` figure that is the only claim, and the `wrong` clause covers a build report over five with no count by
+  section. CR-7 is `listed`, where `n/a` does not apply by the registered words and the in-session `n/a` is not supported
+  by them either; recorded, not changed, since CR decides nothing.
+- **`counts-correct` at CN:** in-session `wrong` on the three (no nine stated); blind reader could not tell the flat spec
+  from the sectioned one and read `wrong` if sectioned and `correct` if flat. Same mechanism as before.
+- `counted` and `exceptions` agree on all nine. For C4 the in-session `n/a` and the blind reader's `none` are the same
+  claim.
+
+### Rows in the capture tables
+
+Five of the six new `test_wording_grader.py` rows (C4-4, C4-6, CN-4 to CN-6) equal their prefix default, so they could
+not be red before their capture landed. The sixth, `count-c4-count-noritual-5` (`nickname`), was red on its real verdict
+first. The three new G6 stems were red first on `test_every_g6_capture_in_runs_is_registered`. Mutation checks: each of
+the six new rows set to `bare`, with the module's cached `.pyc` deleted before each, turned
+`test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to` red for that capture alone (the failing assertion is the
+verdict comparison, `criterion-mention: bare` expected against the grader's real word), and the restored file had an empty
+diff; the G6 stem `-6` registered `False` turned `test_a_g6_capture_grades_to_its_registered_verdict[count-g6-fifth-slice-6]`
+red. Every one of the 47 `count-*` rows that equal their prefix default (all the rows of the earlier batches included)
+was also set to a wrong word at once and each went red for its own capture and no other, so those rows bind the
+verdict.
+
+### Causes
+
+None claimed. Why G6's statement counts at R2 and names criteria at B is the rule's presence in one arm and not the
+other, observed and not ablated; why the C4 and CN replies vary is a hypothesis only.
+
 ## Results at slice close, 2026-11-02 — R2 (`rules.md` fingerprint `81162064b031`) is kept: C passes, every guard holds; the observed sites and the limits
 
 This section records the results and closes nothing new. No eval was run to write it. Every count below is taken from the
-per-capture tables of `Baseline, 2026-11-02` and `Treated, 2026-11-02` above, including `Second reading repeated, with
-the registered rule`, and was re-derived from their rows with a script (rows counted, not typed). Base B is the
+per-capture tables of `Baseline, 2026-11-02`, `Treated, 2026-11-02` and `Splits run to six, 2026-11-02` above, including
+`Second reading repeated, with the registered rule`, and was re-derived from their rows with a script (rows counted, not typed). Base B is the
 fingerprints named in the registration. Baseline is three graded runs per site at B (pilots not counted); treated is three
-per site at R2, G1 and the control six. The two readers are the in-session reading and a subagent given only the
+per site at R2, G1 and the control six, and six for each 2-1 split run to six under `Splits run to six` (CR at B; C4, CN
+and G6 at R2). The two readers are the in-session reading and a subagent given only the
 readings and the renamed captures; where they differ the difference is stated, not reconciled.
 
 ### What C showed, reading by reading
@@ -2500,8 +2637,8 @@ readings and the renamed captures; where they differ the difference is stated, n
 
 C passes on each reading under both readers; the baseline had headroom (0 of 3 `by-section`). The blind reader agreed
 with the in-session reading on `counted` and `exceptions` for all twelve baseline captures of C, C4, CN and CR, and on
-nine of the twelve treated ones: on the three treated CN captures it read `listed` where the in-session reading is
-`total-only`. It differed on `counts-correct` where stated below.
+all twelve treated ones once the in-session CN reading is corrected from `total-only` to `listed` (it was read
+`total-only` at the time, which the registered words do not support). It differed on `counts-correct` where stated below.
 
 ### What each guard showed at R2
 
@@ -2511,10 +2648,17 @@ nine of the twelve treated ones: on the three treated CN captures it read `liste
 | G2, reviewer and advocate on the template prompts | every run `template-shape`; `criterion-mention` majority `bare` | 6 of 6; 6 of 6 | baseline majority `bare` |
 | G3, slice statement | `gate-shape` every run; `text-with-number` clean majority | 3 of 3; 3 of 3 | |
 | G5, slice proposal | `gate-shape` every run; `text-with-number` clean majority | 3 of 3; 3 of 3 | |
-| G6, covered-criteria value, seven criteria | every run `gate-shape` and `covers_value_names_the_seven` | 3 of 3 | B 4 of 4 |
-| G7, ledger line, seven criteria | every run `grade_ledger_line` passes | 3 of 3 | B 4 of 4 |
+| G6, covered-criteria value, seven criteria | every run `gate-shape` and `covers_value_names_the_seven` | 6 of 6 (the first three, then three more under the split run) | B 3 of 3 |
+| G7, ledger line, seven criteria | every run `grade_ledger_line` passes | 3 of 3 | B 3 of 3 |
 
 Every guard holds, G6 and G7 included, so R2 is kept; `rules.md` was not changed and no revert was made.
+
+**The one ritual statement measured above the cut-off.** G6's reply is the slice statement of a seven-criterion slice,
+and R2 acts at that size. Graded with `--drop-value-line`, `criterion-mention` (not a bar at G6) read `text-with-number`
+3 of 3 at B and, at R2, `no-mention` in five of six and `text-with-number` in one (the first three were a 2-1 split, run
+to six). "Fully covered" moved from naming the seven criteria to counting them, for example "seven criteria, which is five
+of five in Trustee reports and two of two in Kit and injuries". That is R2 doing what it says; it is not a miss, and the
+bars on G6 (`gate-shape` and `covers_value_names_the_seven`) hold on all six.
 
 ### The same-day control beside G1
 
@@ -2527,46 +2671,67 @@ decides nothing.
 
 | Site | At B | At R2 | Expected reading met at R2 |
 |---|---|---|---|
-| C4 (four remaining, no exception) | each criterion named by its own text with its number, nothing counted: 3 of 3 `listed`, `counts-correct` `n/a` | `by-section` 3 of 3, and the four also named by text; `counts-correct` `correct` 2, `wrong` 1 (C4-3, in-session; the blind reader read it `correct`); `criterion-mention` `text-with-number` 2, `nickname` 1 | no: 0 of 3 |
-| CN (spec with no sections) | `listed` by state, `wrong`, both exceptions: 0 of 3 for the expected reading | in-session `total-only` and `correct` 3 of 3, both exceptions 3 of 3; blind reader `listed` and `wrong` 3 of 3 | 3 of 3 in-session; 0 of 3 for the blind reader |
-| CR (execute report, the one exception AC8) | `listed` 1, `total-only` 2; `exceptions` `one` 3 of 3 | `by-section` 3 of 3 (counts in the two sections beside the digest's totals); `exceptions` `one` 3 of 3; `counts-correct` `correct` 3 of 3 in-session | counted, yes |
+| C4 (four remaining, no exception) | each criterion named by its own text with its number, nothing counted: 3 of 3 `listed`, `counts-correct` `n/a` | `by-section` 6 of 6 (three, then three more), and the four also named by text; `counts-correct` `correct` 5, `wrong` 1 (C4-3, in-session; the blind reader read it `correct`); `criterion-mention` `text-with-number` 4, `nickname` 2 | no: 0 of 6 |
+| CN (spec with no sections) | `listed` by state, `wrong`, both exceptions: 0 of 3 for the expected reading | `listed` 6 of 6 (in-session at the time `total-only` on the first three, corrected); `counts-correct` `correct` 2 of 6 (CN-1, CN-3; CN-2 never states nine, and the three more did not either); both exceptions 6 of 6; blind reader `listed` on the first three and on the three more, and `wrong` on the first three | not shown to be met: no capture is one figure with no criteria named, and `counts-correct` is `correct` in 2 of 6 |
+| CR (execute report, the one exception AC8) | `listed` 2, `total-only` 4 (six, after the split run); `exceptions` `one` 6 of 6 | `by-section` 3 of 3 (counts in the two sections beside the digest's totals); `exceptions` `one` 3 of 3; `counts-correct` `correct` 3 of 3 in-session | counted, yes |
 
 ### Limits
 
 - **C4 does not show the threshold holding below five.** At R2 the C4 replies counted by section and named the four
-  remaining, where the expected reading was the four named one by one with no count. The stated reason is a hypothesis
-  with no ablation behind it: they counted the eight done, which is over five. The threshold of five is not shown to
-  leave four remaining alone. Recorded as a follow-up against R2's threshold wording.
-- **CN's expected reading rests on the in-session reading and is looser than the registered words.** The second reader
-  scored `listed` and `wrong` on all three, and the replies give several figures and name more than the exceptions, which
-  is not one figure with no criteria named. The blind reader also could not tell the flat spec from the sectioned one,
-  since the site is withheld. CN decides nothing; it is reported, not reconciled.
+  remaining (six of six), where the expected reading was the four named one by one with no count. The stated reason is a
+  hypothesis with no ablation behind it: they counted the eight done, which is over five. The evidence for it is that all
+  four C4 captures at B (`count-c4-third-noritual-1` to `-4`) name all twelve identifiers, so a reply there names more than
+  five criteria at once and R2 firing fits its words; no ablation separates that from another cause, so it stays a
+  hypothesis. The threshold of five is not shown to leave four remaining alone. Recorded as a follow-up against R2's
+  threshold wording.
+- **CN's expected reading is not shown to be met.** The in-session reading was `total-only` at the time, which the
+  registered words do not support (one figure with no criteria named): re-read against them the replies are `listed` in
+  six of six, and `counts-correct` is `correct` in 2 of 6 (CN-2 and the three more never state nine). The second reader
+  read `listed` and `wrong` on the first three; it also could not tell the flat spec from the sectioned one, since the
+  site is withheld. Recorded as a follow-up against R2's sentence about specs with no sections ("Count a spec with no
+  sections as a whole"), as the registration says to do when the treated CN arm does not read as one count with both
+  exceptions named. CN decides nothing; it is reported, not reconciled.
+- **G2 never exercised R2 at the size where it acts, and the registration overstates what it measures.** G2's prompt cites
+  one criterion (stated under `Guards above the cut-off`). The G2 captures cite 5 to 7 distinct criteria across their
+  findings (six advocate and reviewer captures: 6, 6, 6, 6, 5 and 7), at most 3 on any one line, all `bare` (6 of 6).
+  That is reassuring but it is not a tally: no reply counts the criteria it cites, and the most on one line is three. The registration's accepted-risk
+  paragraph says G2 "measures whether that still holds with R2 loaded"; the reviewer template's counter-instruction is not
+  shown to hold against a reply that would name more than five at once, since none of the replies did. That paragraph is
+  registration text and stays as written; this is the correction.
 - **`counts-correct` at CR was ambiguous at B.** The registered `n/a` is for `total-only`; on a `listed` reply it does not
   apply, and on a `total-only` reply the rule's `n/a` and its `wrong` for a missing count by section both read as
   applying. The second reader marked all three baseline CR captures `wrong`, the in-session reading `n/a`. It did not bite
   at R2, where no capture is either.
 - **The exception definition does not cover a missing observation.** R2's "only partly done, say, or blocked" does not
   name AC8's case; the replies named it by its own text with its number anyway.
-- **The capture-table rows were not all red first.** The nine C, C4 and CN baseline rows and the three extended control
-  rows equal their prefix default, so they were mutation-checked afterwards instead of shown red before the capture:
-  set to `bare`, each turned `test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to` red for that capture
-  alone, and the restored file had an empty diff. The treated rows that differ from their default (the C4 `nickname`, the
-  G1 `nickname`, the first control `bare`) were red on their real verdict first.
+- **The capture-table rows were not all red first.** 47 `count-*` rows equal their prefix default (42 before the split
+  run, five added by it), so none of them could be red on its own verdict before its capture landed. Of the 42: 27 (the
+  first treated batch) went red only because their prefix had no mapping, which says the capture was registered and not that
+  the row binds; 9 (the baseline C, C4 and CN rows) and 3 (the extended control rows) were mutation-checked afterwards;
+  and 3 (G1's `-4` to `-6`, run to six) were neither red first nor mutation-checked until the split run. The five added by
+  the split run were mutation-checked, and so were all 47 at once afterwards: set to a wrong word, each went red
+  on `test_every_capture_grades_to_the_verdict_its_prefix_is_mapped_to` for its own capture and no other, and the
+  restored file had an empty diff. The rows that differ from their default (the C4 `nickname` twice, the G1 `nickname`,
+  the first control `bare`) were red on their real verdict first.
 - **The baseline's first second-reader pass omitted a rule** (the `wrong` clause for a reply with no count by section)
   and was repeated with it; the table above uses the repeat.
 - **No cause is claimed beyond the tables.** That the replies count by section at C with R2 loaded and not at B is
   observed; why is a hypothesis, and no per-capture ablation was run.
 - One model tier (the process default), one Claude Code version (2.1.316), three runs per arm and six where a 2-1 split
-  was re-run.
+  was re-run (G1 and the control, then CR at B and C4, CN and G6 at R2).
 - Arms reach the model by `--append-system-prompt` (or `--append-system-prompt-file` for the build arms), not by the
   harness's own rules loading.
-- The cut-off is not observed at exactly six; the sites sit at four remaining and nine.
+- **The cut-off is not observed under five, or at exactly six.** C4's four remaining is not a reply under the cut-off: all
+  four C4 captures at B name all twelve identifiers, so R2 firing at C4 fits its words (more than five named at once), and
+  no site measures a reply that names five or fewer. The C and CN sites sit at nine remaining. Whether R2 leaves a reply
+  under the cut-off alone is a known unknown and stays open.
 - **Unmeasured ritual surfaces:** the spec review's summary and saved detail, and distill. Slice choice's step 4 prints
   the gate's `candidates:` and `partial:` tokens as identifier lists, and whether that contradicts R2 is a follow-up.
-- **Accepted risk, owned by the operator** (the parent's Delta design item 4). R2 loads into every dispatched agent.
-  Past the reliability reviewer and the advocate, the dispatched agents are not measured: the executor, the drift check,
-  the code reviewer and the security auditor. A rule leaking into one of their reports needs that agent to cite more than
-  five criteria at once, which nothing here shows happening.
+- **Accepted risk, owned by the operator.** R2 loads into every dispatched agent. Past the reliability reviewer and the
+  advocate, the dispatched agents are not measured: the executor, the drift check, the code reviewer and the security
+  auditor. The risk is that a report of theirs that cites more than five criteria is counted by section where its reader
+  needs the identifiers. Nothing here measures it; the G2 captures, which come nearest, cite 5 to 7 distinct criteria
+  across findings and are not a tally (see the G2 limit above).
 
 ### Slice close
 
