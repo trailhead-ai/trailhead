@@ -208,6 +208,10 @@ def _no_record(role):
     return f"{role}: no record to read back"
 
 
+def names_section(cell, role):
+    return cell.get("expect", {}).get("followups", {}).get(role, {}).get("section")
+
+
 def line_a1(items, turns, cell, records=None):
     shown = bool(gc.displays(items))
     if records is None:
@@ -243,10 +247,11 @@ def line_a1(items, turns, cell, records=None):
             want = _fold(reply_core(replies(turns)[spec["reply"]]["answer_sent"]))
             if _fold(stored) != want:
                 problems.append(f"{role}: stored text {stored!r} is not the reply less its code {want!r}")
-            if len(sections) > 1 or (sections and not answered_in_record):
+            replaced = names_section(cell, role) == "unanswered"
+            if len(sections) > 1 or (sections and not answered_in_record and not replaced):
                 problems.append(f"{role}: the remaining section carries no Answer line "
                                 "(a label at a line start, outside fences)")
-            elif sections and not _fold(sections[0]["Answer"]).startswith(_fold(stored)):
+            elif sections and answered_in_record and not _fold(sections[0]["Answer"]).startswith(_fold(stored)):
                 problems.append(f"{role}: the Answer line in the section is not the stored text")
         elif kind == "recommended":
             asked = [q for q in question_entries(items) if q["name"] == name]
@@ -337,8 +342,26 @@ def line_t1(items, turns, cell, records=None):
                  "no question line for an answered or skipped follow-up follows its close")
 
 
-def _window(lines, i, after=2):
-    return lines[i:i + after + 1]
+def _names(line, name):
+    return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(name), line) is not None
+
+
+NESTED_LABEL = re.compile(r"^(?P<indent>\s*)[-*]?\s*\**\s*Nested\b", re.IGNORECASE)
+
+
+def _nested_lines(lines):
+    """The lines reported under a label that begins with Nested: the label's own line and its indented sub-items."""
+    out, depth = [], None
+    for ln in lines:
+        m = NESTED_LABEL.match(ln)
+        if m:
+            depth = len(m.group("indent"))
+            out.append(ln)
+        elif depth is not None and ln.strip() and len(ln) - len(ln.lstrip()) > depth:
+            out.append(ln)
+        elif ln.strip():
+            depth = None
+    return out
 
 
 def line_l1(items, turns, cell, records=None):
@@ -347,13 +370,15 @@ def line_l1(items, turns, cell, records=None):
     problems, rerun_needed = [], False
     for role, spec in cell.get("left_out", {}).items():
         name = cell["names"][role]
-        at = next((n for n, ln in enumerate(lines) if f"task/{name}" in ln), None)
-        if at is None:
+        others = [n for r, n in cell["names"].items() if r != role]
+        if not any(_names(ln, name) for ln in lines):
             problems.append(f"{role}: the closing report does not name task/{name}")
             continue
-        sentence = " ".join(_window(lines, at))
-        if not all(p.search(sentence) for p in REASON_SENTENCES[spec["reason"]]):
-            problems.append(f"{role}: the sentence does not give the reason {spec['reason']}")
+        if not any(all(p.search(ln) for p in REASON_SENTENCES[spec["reason"]])
+                   and not any(_names(ln, o) for o in others) for ln in lines):
+            problems.append(f"{role}: no one line gives the reason {spec['reason']} without naming another follow-up")
+        if any(_names(ln, name) for ln in _nested_lines(lines)):
+            problems.append(f"{role}: the closing report lists it as nested")
         rerun_needed |= spec["reason"] == "waiting"
     if rerun_needed and not problems:
         stripped = [ln.strip().strip("`").strip() for ln in lines]

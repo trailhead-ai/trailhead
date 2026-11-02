@@ -886,3 +886,105 @@ def test_a_preview_piped_into_grep_before_the_write_shows_no_block_and_the_write
     run.text(display()).end("Keep readings for 14 days. qqqq")
     run.bash(cmd, WRITTEN_OUT).end()
     assert a1(run, "typed", {"q-one": rec("ready")})["pass"] is True
+
+
+# ------------------------------------------------------------- L1 amended: the name, one reason line, not nested
+
+
+LEFT_OUT = {"left_out": {"Q1": {"reason": "waiting"}}}
+REASON = "refinement left a new question only you can answer; it waits on the record for the next run."
+PARENT_NOTE = f"Run it again once any live parent is built or dropped:\n\n{RERUN}\n"
+
+
+def report(*lines):
+    return closing(Run(), "\n".join(lines) + "\n\n" + PARENT_NOTE).line(LEFT_OUT, "L1")
+
+
+def test_l1_accepts_the_bare_name_in_place_of_task_slash_name():
+    line = report(f"- Tide cache, `q-one`: {REASON}")
+    assert line["pass"] is True, line["detail"]
+
+
+def test_l1_takes_the_reason_from_one_line_even_when_the_name_is_only_in_an_earlier_bullet():
+    line = report("- Included: Tide cache `q-one` and Mooring log `p-one`", "- Nested: the mooring log follow-up",
+                  f"- Left out: the tide cache follow-up. {REASON}")
+    assert line["pass"] is True, line["detail"]
+
+
+def test_l1_fails_when_the_reason_is_split_over_two_lines():
+    line = report("- Tide cache `q-one`: refinement left a new question only you can answer.",
+                  "  It waits on the record for the next run.")
+    assert line["pass"] is False and "reason" in line["detail"]
+
+
+def test_l1_fails_when_the_only_line_with_the_reason_names_a_sibling_follow_up():
+    line = report("- Tide cache `q-one` was left out.", f"- Mooring log `p-one`: {REASON}")
+    assert line["pass"] is False and "reason" in line["detail"]
+
+
+def test_l1_fails_when_the_follow_up_is_reported_under_a_nested_label():
+    line = report(f"- Left out: Tide cache `q-one`: {REASON}", "- **Nested:** `q-one` and `p-one`")
+    assert line["pass"] is False and "nested" in line["detail"]
+
+
+def test_l1_fails_when_the_follow_up_is_listed_under_a_nested_heading():
+    line = report(f"- Left out: Tide cache `q-one`: {REASON}", "- Nested:", "  - Tide cache `q-one`")
+    assert line["pass"] is False and "nested" in line["detail"]
+
+
+def test_l1_passes_when_the_follow_up_is_named_under_a_not_nested_label():
+    line = report(f"- Left out, refined but not nested: Tide cache `q-one`: {REASON}", "- Nested: `p-one`")
+    assert line["pass"] is True, line["detail"]
+    line = report(f"- Refined but not nested: Tide cache `q-one`. {REASON}", "- **Nested:** the mooring log follow-up")
+    assert line["pass"] is True, line["detail"]
+
+
+# ------------------------------------------------------------- A1 amended: a section a re-escalation replaced
+
+
+UNANSWERED = {"asked": ["Q1"], "answer": {"Q1": {"kind": "typed", "reply": 0}},
+              "expect": {"followups": {"Q1": {"status": "open", "nested": False, "section": "unanswered"}}}}
+
+
+def replaced(answer_line=""):
+    return {"q-one": rec("open", bodytext=body(answer_line))}
+
+
+def test_a1_typed_accepts_a_replaced_section_without_an_answer_line_when_the_cell_ends_unanswered():
+    line = good().line(UNANSWERED, "A1", records=replaced("\n"))
+    assert line["pass"] is True, line["detail"]
+
+
+def test_a1_typed_still_requires_the_answer_line_when_the_cell_does_not_end_unanswered():
+    cell = {**UNANSWERED, "expect": {"followups": {"Q1": {"status": "open", "nested": False}}}}
+    line = good().line(cell, "A1", records=replaced("\n"))
+    assert line["pass"] is False and "Answer" in line["detail"]
+
+
+def test_a1_typed_fails_a_replaced_section_whose_answer_line_is_another_text():
+    line = good().line(UNANSWERED, "A1", records=replaced("\n**Answer:** Keep readings for 90 days.\n"))
+    assert line["pass"] is False and "not the stored text" in line["detail"]
+
+
+def test_a1_typed_passes_a_replaced_section_whose_answer_line_starts_with_the_typed_text():
+    line = good().line(UNANSWERED, "A1", records=replaced("\n**Answer:** Keep readings for 14 days. Fee open.\n"))
+    assert line["pass"] is True, line["detail"]
+
+
+def test_a1_typed_still_requires_the_write_when_the_cell_ends_unanswered():
+    run = Run()
+    question_read(run)
+    run.text(display()).end("Keep readings for 14 days. qqqq")
+    run.text("nothing written").end(asked=False)
+    line = run.line(UNANSWERED, "A1", records=replaced("\n"))
+    assert line["pass"] is False and "no answer write exited 0" in line["detail"]
+
+
+def test_p1_fails_an_unanswered_follow_up_whose_delivered_scope_lost_the_answers_pattern():
+    expect = {"followups": {"Q1": {"status": "open", "nested": False, "section": "unanswered",
+                                   "scope_has": [r"(?i)\b14[- ]day"]}}}
+    kept = {"q-one": rec("open", bodytext=body("\n"))}
+    lost = {"q-one": rec("open", bodytext=body("\n").replace("14 days", "a few weeks"))}
+    assert p1(p1_records(**kept), expect)["pass"] is True
+    line = p1(p1_records(**lost), expect)
+    assert line["pass"] is False and "scope lacks" in line["detail"]

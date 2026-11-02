@@ -370,7 +370,10 @@
     "U1": {
      "status": "open",
      "nested": false,
-     "section": "unanswered"
+     "section": "unanswered",
+     "scope_has": [
+      "(?i)\\b3[- ]day"
+     ]
     },
     "P1": {
      "status": "ready",
