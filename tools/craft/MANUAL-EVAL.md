@@ -4108,3 +4108,35 @@ Re-check after the body edits (distill's pipeline sentence and the README's Dist
 **Live arm.** `evals/ritual-deliverable-names-its-record/arms/distill-rule-only.md` was rebuilt from the edited `distill/SKILL.md`. Frozen arms and earlier results in this file were left unchanged on purpose.
 
 **Not measured.** One run per case, one model tier. Each case was run twice (the first batch's scores were not read before its output directory was cleared); both runs passed. Cost: about 1.0 USD per batch.
+
+## Case: review refuses a malformed spec id (review-fix pass)
+
+Fix pass on the review closing handoff after the whole-change review. One new runner case, `review-refuses-a-malformed-spec-id`, plus re-runs of the four existing review cases. Each batch `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants as craft's `eval-gate.json` runner block. `expected.md` was committed alone before any run. The case reuses the closed-out scaffold (a real `ready` spec `export-invoices`, `craft/slice-loop=complete`); its prompt names the spec as `spec/../export-invoices`, which passes the character-class regex and fails the `..` segment rule.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| Review checks the spec id once, before it enters a command or a handoff, and refuses a malformed one without running `lore` or printing a command | held: baseline 0 of 3 on the unfixed prose; 3 of 3 after the fix | `review-refuses-a-malformed-spec-id` |
+| The four existing review cases still hold after the prose and grader edits | held: 3 of 3 each, every grader green | the four `review-hands-a-*` cases |
+
+**Baseline (unfixed prose).** 0 of 3, each run 0.33. `no-command-run-with-the-id` (`tool_used`, `Bash`, `max: 0`) and `refuses-and-prints-no-command` (`llm`) failed in every run; `no-craft-command-line` passed. The unedited prose has the agent read the spec before it states the check, so the id reached a command. Cost 0.64 USD.
+
+**After the fix, first batch.** 0 of 3, each run 0.67: the `tool_used` grader went green in all three (no Bash call carried the id), but the `llm` grader failed three correct refusals. Each refusal said the id failed the shape check, ran nothing and printed no command, and then told the operator to re-run review with the real id, giving `spec/export-invoices` as an example in prose. The grader wording ("fail on a corrected or guessed id") read that as a fail. Cost 0.59 USD.
+
+**Grader defect and edit.** The `llm` wording and the matching row of the pre-registered `expected.md` were edited after that result, to fail an id used in a *printed command* and to allow a prose suggestion of the real id. This is a post-hoc edit to a pre-registered case, made after seeing a run; the baseline was red on the `tool_used` grader independently of it. The edit was committed apart from the case.
+
+**After the fix, second batch.** 3 of 3, all three graders green in every run. Cost 0.59 USD.
+
+**Re-runs after the prose fix** (the fix also reworded the reason line, stated the running-loop branch for every non-ended status, and tightened the ended-loop `llm` graders): `review-hands-a-closed-out-spec-to-tidy-followups` 3 of 3, `review-hands-a-stopped-spec-to-tidy-followups` 3 of 3, `review-hands-a-complete-unmarked-spec-to-tidy-followups` 3 of 3, `review-hands-a-running-loop-back-to-slice` 3 of 3. Costs about 0.69 USD for each ended-loop case and 0.68 for the running case.
+
+**Ended-loop grader tightening.** The three ended-loop `llm` graders previously let a command offered inside a sentence pass (the regex is line-anchored and the wording allowed prose mentions). They now fail any `/craft:distill`, `/craft:slice` or `/craft:plan` offered to run next whether fenced, alone on a line or in a sentence, and allow a command named as not the next step; the stopped case allows the slice re-run only as the prose alternative. Checked before the re-runs by giving the new wording and a hand-written message to the judge model (`claude -p`, two votes each; this is not the runner's own judge): a correct message ending in "the next step is not `/craft:distill`" passed 2 of 2 on closed-out and complete-unmarked; a message adding "Once that is done, run `/craft:distill spec/export-invoices`" failed 2 of 2 on both; the stopped grader passed a correct message with the slice re-run in prose 2 of 2 and failed one saying "run distill; or run `/craft:slice` right away" 2 of 2. `expected.md` of those cases was not edited; its clauses still hold, the graders are stricter than the wording there.
+
+**Corrections to earlier entries in this file.**
+- The task-4 re-check ran only `review-hands-a-closed-out-spec-to-tidy-followups` of task 3's three ended-loop cases, not all three.
+- The earlier claim that no run can verify the spec-id check was wrong: a spec id with a `..` segment is a prompt value, not a seeded slug, so the case above is that run. It exercises only the `..` rule; the character class and the leading `-` are not separately exercised.
+- `portage eval-gate plan --repo .` for this branch now selects 10 cases: `clean-up-request-routes-to-tidy-followups`, `distill-request-routes-to-distill`, `fix-up-list-routes-to-polish`, `review-hands-a-closed-out-spec-to-tidy-followups`, `review-hands-a-complete-unmarked-spec-to-tidy-followups`, `review-hands-a-running-loop-back-to-slice`, `review-hands-a-stopped-spec-to-tidy-followups`, `review-refuses-a-malformed-spec-id`, `slice-spec-complete-hands-off-to-tidy-followups`, `tidy-request-routes-to-tidy-followups` (max cost 35.0 USD).
+
+**Live arm.** `ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`. No other live arm sources `review/SKILL.md` or `_shared/security.md`; `execute-rule-only.md` sources `_shared/execute.md`, not security.
+
+**Not measured.** One malformed id, one model tier, three runs; the early-stop slice/review divergence is unchanged (slice's handoff on a stopped loop is a logged follow-up). Cost: baseline 0.64, fix batches 1.18, re-runs about 2.75 USD.
