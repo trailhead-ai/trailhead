@@ -278,7 +278,7 @@ def _wait_for_forward(attach_id: str) -> "Attachment | None":
 
 
 def _cmd_env_attach(args: list[str]) -> None:
-    from ..env.read import read_local, read_remote
+    from ..env.read import ProcessSet, read_local, read_remote
     from ..env.resolve import Refused, TargetError, parse_target, resolve
     from ..host.transport import local_forward_argv
 
@@ -308,15 +308,24 @@ def _cmd_env_attach(args: list[str]) -> None:
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
     hosts_file = _hosts_file()
-    outcome = resolve(
-        target,
-        hosts=hosts,
-        opted_in=opted_in,
-        self_name=self_name,
-        read_local=read_local,
-        read_remote=lambda name: read_remote(name, hosts[name], connect_timeout=connect_timeout),
-        hosts_file=str(hosts_file),
-    )
+    processes = ProcessSet()
+    try:
+        outcome = resolve(
+            target,
+            hosts=hosts,
+            opted_in=opted_in,
+            self_name=self_name,
+            read_local=lambda: read_local(runner=processes.runner),
+            read_remote=lambda name: read_remote(
+                name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner
+            ),
+            hosts_file=str(hosts_file),
+            processes=processes,
+        )
+    except KeyboardInterrupt:
+        processes.kill()
+        print("camp env: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
     if isinstance(outcome, Refused):
         _refuse(outcome.message)
 

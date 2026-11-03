@@ -16,7 +16,11 @@ attached in any form, and ``env_hosts`` could not name it either.
 * ``read_local()`` and ``read_remote(host_name)`` each return a ``read.MachineInventory``.
   ``read_remote`` takes the declared host's name; the caller binds the host, timeout and runner.
 * A host form reads that declared host alone. A bare name reads this machine and the ``opted_in``
-  hosts other than ``self_name`` (this machine, already read), never any other declared host.
+  hosts other than ``self_name`` (this machine, already read), never any other declared host. A bare
+  name's reads run at the same time through ``read.read_concurrently``; ``processes`` is the
+  ``read.ProcessSet`` whose runner the callables use, so leaving the reads early (an interrupt) ends
+  every child they started. Machines are named in this-machine-then-``opted_in`` order whatever order
+  the reads finished in.
 * ``hosts_file`` is how an undeclared-host refusal names the hosts file; the CLI passes the path.
 
 ``Refused.message`` is the whole text, one or more lines, without the ``camp env: `` prefix: the
@@ -36,6 +40,8 @@ from .read import (
     ENVIRONMENTS,
     UNREADABLE,
     MachineInventory,
+    ProcessSet,
+    read_concurrently,
 )
 
 LOCAL = "local"
@@ -185,11 +191,14 @@ def _resolve_bare(
     self_name: str | None,
     read_local: Callable[[], MachineInventory],
     read_remote: Callable[[str], MachineInventory],
+    processes: ProcessSet | None,
 ) -> Resolved | Refused:
     name = target.name
     remote = [host for host in opted_in if host != self_name]
-    read: list[tuple[str, MachineInventory]] = [(LOCAL, read_local())]
-    read.extend((host, read_remote(host)) for host in remote)
+    reads = [(LOCAL, read_local)]
+    reads.extend((host, lambda host=host: read_remote(host)) for host in remote)
+    with read_concurrently(reads, processes) as results:
+        read = list(results)
 
     unread = [(machine, inv) for machine, inv in read if inv.kind == UNREADABLE]
     found = [(machine, _matches(inv, target)) for machine, inv in read if inv.kind == ENVIRONMENTS]
@@ -248,6 +257,7 @@ def resolve(
     read_local: Callable[[], MachineInventory],
     read_remote: Callable[[str], MachineInventory],
     hosts_file: str = "the hosts file",
+    processes: ProcessSet | None = None,
 ) -> Resolved | Refused:
     """Resolve ``target`` to one environment, reading only the machines the target needs."""
     if target.host is not None:
@@ -261,4 +271,5 @@ def resolve(
         self_name=self_name,
         read_local=read_local,
         read_remote=read_remote,
+        processes=processes,
     )

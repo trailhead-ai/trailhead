@@ -14,11 +14,15 @@ Test contract:
   have their own refusal.
 - parse_target accepts NAME, HOST/NAME and HOST/GROUP/NAME and rejects malformed parts.
 - Far-side reasons reach a message as printable text.
+- A bare name's reads run at the same time (each waits for all the others to have started), and
+  every refusal names machines in this machine, then env_hosts, order however the reads finished;
+  a read that raises refuses the bare name like any unreadable machine.
 """
 
 from __future__ import annotations
 
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -384,3 +388,128 @@ def test_a_group_or_name_that_breaks_the_rule_does_not_claim_the_host_rule(text)
     with pytest.raises(TargetError) as info:
         parse_target(text)
     assert "host names must be" not in str(info.value)
+
+
+# -- a bare name reads its machines at the same time ----------------------------------------------
+
+WAIT = 5.0
+
+
+class Concurrent:
+    """Reads that cannot finish until every one of them has started, and that finish in a set order.
+
+    ``arrivals`` records each read as it starts; ``finished`` records the order they returned in.
+    ``finish_order`` lists the machines (``local`` and hosts) in the order they must return; a read that is not allowed to return yet waits for the one before it, up to ``WAIT``.
+    """
+
+    def __init__(self, reads: Reads, finish_order=()):
+        self.reads = reads
+        self.barrier = threading.Barrier(1 + len(reads.remote), timeout=WAIT)
+        self.arrivals: list[str] = []
+        self.finished: list[str] = []
+        self.never_started: list[str] = []
+        self._lock = threading.Lock()
+        self._turns = {host: threading.Event() for host in finish_order}
+        self._order = list(finish_order)
+
+    def _arrive(self, who):
+        with self._lock:
+            self.arrivals.append(who)
+        try:
+            self.barrier.wait()
+        except threading.BrokenBarrierError:
+            with self._lock:
+                self.never_started = self.never_started or self.not_started()
+
+    def _finish(self, who):
+        if who in self._order:
+            index = self._order.index(who)
+            if index:
+                self._turns[self._order[index - 1]].wait(WAIT)
+        with self._lock:
+            self.finished.append(who)
+        if who in self._turns:
+            self._turns[who].set()
+
+    def read_local(self):
+        self._arrive("local")
+        self._finish("local")
+        return self.reads.local
+
+    def read_remote(self, name):
+        self._arrive(name)
+        self._finish(name)
+        if isinstance(self.reads.remote[name], BaseException):
+            raise self.reads.remote[name]
+        return self.reads.remote[name]
+
+    def not_started(self):
+        return sorted(({"local", *self.reads.remote}) - set(self.arrivals))
+
+
+def run_concurrent(text, gate, **kw):
+    return resolve(
+        parse_target(text),
+        hosts=HOSTS,
+        opted_in=["andromeda", "perseus"],
+        self_name=None,
+        read_local=gate.read_local,
+        read_remote=gate.read_remote,
+        **kw,
+    )
+
+
+def test_every_read_is_in_flight_before_any_returns():
+    gate = Concurrent(Reads(andromeda=envs(), perseus=envs(("levr", "main"))))
+    result = run_concurrent("main", gate)
+    assert not gate.barrier.broken, f"reads that never started while the others waited: {gate.never_started}"
+    assert result == Resolved("perseus", Environment("levr", "main", "running"))
+
+
+def test_unreadable_hosts_are_named_in_env_hosts_order_when_the_second_finishes_first():
+    reads = Reads(
+        andromeda=unreadable("ssh credentials were refused"),
+        perseus=unreadable("no answer within 30s"),
+    )
+    gate = Concurrent(reads, finish_order=("local", "perseus", "andromeda"))
+    result = run_concurrent("main", gate)
+    assert gate.finished == ["local", "perseus", "andromeda"], f"reads that never started: {gate.never_started}"
+    assert result == Refused(
+        "main cannot be resolved while andromeda could not be read (ssh credentials were refused)"
+        " and perseus could not be read (no answer within 30s);"
+        " name the host, as andromeda/main or perseus/main"
+    )
+
+
+def test_an_ambiguous_match_names_this_machine_then_env_hosts_order_whatever_order_reads_finished():
+    reads = Reads(
+        local=envs(("levr", "main")),
+        andromeda=envs(("levr", "main")),
+        perseus=envs(("acme", "main")),
+    )
+    gate = Concurrent(reads, finish_order=("local", "perseus", "andromeda"))
+    result = run_concurrent("main", gate)
+    assert gate.finished == ["local", "perseus", "andromeda"], f"reads that never started: {gate.never_started}"
+    assert result == Refused(
+        "main matches more than one environment: local/main (this machine; cannot be attached yet),"
+        " andromeda/main, perseus/main; attach one of those"
+    )
+
+
+def test_not_found_names_machines_in_env_hosts_order_whatever_order_reads_finished():
+    reads = Reads(andromeda=envs(), perseus=envs())
+    gate = Concurrent(reads, finish_order=("local", "perseus", "andromeda"))
+    result = run_concurrent("main", gate)
+    assert gate.finished == ["local", "perseus", "andromeda"], f"reads that never started: {gate.never_started}"
+    assert result.message.startswith("no environment named main on this machine, andromeda or perseus")
+
+
+def test_a_host_whose_read_raised_refuses_the_bare_name_instead_of_resolving_elsewhere():
+    reads = Reads(andromeda=RuntimeError("boom"), perseus=envs(("levr", "main")))
+    gate = Concurrent(reads, finish_order=("local", "perseus", "andromeda"))
+    result = run_concurrent("main", gate)
+    assert gate.finished == ["local", "perseus", "andromeda"], f"reads that never started: {gate.never_started}"
+    assert result == Refused(
+        "main cannot be resolved while andromeda could not be read (read failed (RuntimeError));"
+        " name the host, as perseus/main or andromeda/main"
+    )
