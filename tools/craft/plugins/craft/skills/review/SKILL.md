@@ -106,14 +106,29 @@ You: [Fix progress indicators]
 
 Review sits before tidy-followups and distill in the pipeline (brainstorm → gauntlet → (slice → plan
 → execute → review)* → tidy-followups → distill) — merging closes review's own job, not the spec's
-lifecycle. Under the loop, one review closes one slice, not the spec. Once the reviewed diff is
-merged, read the spec record (`lore record show spec/<id>`) and end with one fully-formed handoff,
-the real spec id, never a `<placeholder>`. Which one depends on whether the spec's slice loop has
-ended — it has when the spec carries `craft/slice-loop=complete` or `craft/slice-loop=stopped` (per
+lifecycle. Under the loop, one review closes one slice, not the spec.
+
+**Check the spec id first, before it enters any command or printed handoff.** The id is the one the
+change belongs to, and it is operator-supplied. Strip a leading `spec/`, then check what is left
+once: it must match `^[A-Za-z0-9._/-]+$`, must not start with `-`, and must not contain a `..` path
+segment. If it fails any of the three, refuse the handoff: say the spec id failed the shape check,
+run no `lore` command with it, and print no command. It is never substituted, quoted, or escaped in,
+and never replaced by a guessed or placeholder id.
+
+A review with no linked spec (an ad-hoc review, or a standalone task) has no handoff to print; end
+with the review verdict alone.
+
+Once the reviewed diff is merged and the id has passed the check, read the spec record
+(`lore record show spec/<id>`) and end with one fully-formed handoff, the real spec id, never a
+`<placeholder>`. Which one depends on whether the spec's slice loop has ended — it has when the spec
+carries `craft/slice-loop=complete` or `craft/slice-loop=stopped` (per
 `../_shared/status-ownership.md`), or its status is `complete`.
 
-**The slice loop is still running** (status `ready`, no slice-loop marker): hand back into
-`/craft:slice` for the spec's next pass:
+**The slice loop is still running** (it has not ended: no slice-loop marker and a status other than
+`complete`): hand back into `/craft:slice` for the spec's next pass. A `ready` spec is the usual
+case. `/craft:slice` refuses a spec that is not `ready`, so for any other status name slice's own
+remedy for it in prose (a `draft` goes to `/craft:gauntlet` first) instead of printing the fenced
+slice command:
 
 > "Review passed and the change is merged. Run this to choose the next slice."
 
@@ -126,7 +141,7 @@ spec's recorded follow-ups are weighed before it is distilled. Never `/craft:dis
 tidy-followups prints the build and distill commands once it is done:
 
 > "The slice loop for spec/streaming-export has ended. Run this to choose which of its follow-ups to
-> do now; it hands you the distill command after."
+> do now."
 
 ```
 /craft:tidy-followups spec/streaming-export
@@ -136,10 +151,6 @@ When the loop *stopped* early (`craft/slice-loop=stopped`), the handoff is the s
 tidy-followups command, plus one prose line — not a second fenced command — saying the slice ritual
 can be re-run once the blocker clears (for example: "Once the blocker is cleared, re-run
 `/craft:slice` on this spec to pick up the unmet criteria.").
-
-**Check the spec id before printing it.** It must match `^[A-Za-z0-9._/-]+$`. If it does not, refuse
-the handoff and say the spec id failed the shape check, rather than printing a command built from
-it.
 
 **This handoff is carryoutable.** `tidy-followups/SKILL.md` accepts exactly the shapes it is handed
 here — a spec carrying a completed or stopped `craft/slice-loop` marker, or one at status `complete`
