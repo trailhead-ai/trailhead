@@ -121,7 +121,7 @@ def _load_machines():
 
 def _cmd_env_ls(args: list[str]) -> None:
     from ..env.read import ProcessSet, read_concurrently, read_local, read_remote
-    from ..env.resolve import DECLARED, INVALID, THIS_MACHINE, name_host, undeclared_host_message
+    from ..env.resolve import INVALID, THIS_MACHINE, UNDECLARED, name_host, undeclared_host_message
 
     parser = CampParser(verb="env ls")
     parser.add_argument("host", nargs="*")
@@ -138,7 +138,7 @@ def _cmd_env_ls(args: list[str]) -> None:
         if only.kind == INVALID:
             print(f"camp env: {only.problem}\n{_LS_USAGE}", file=sys.stderr)
             sys.exit(1)
-        if only.kind not in (THIS_MACHINE, DECLARED):
+        if only.kind == UNDECLARED:
             _refuse(undeclared_host_message(only.name, hosts, str(_hosts_file())))
 
     try:

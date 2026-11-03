@@ -2,8 +2,7 @@
 
 Every machine answer comes from stub `docker` and `ssh` executables on a test-only PATH; the hosts
 file lives under `CAMP_CONFIG_DIR` in tmp_path. The ssh stub picks its reply by the destination
-(the token after `--`), appends every destination it is called with to a log, and records what the
-CLI's stdout file already held at that moment.
+(the token after `--`) and appends every destination it is called with to a log.
 
 - One environment locally, no hosts declared: the `this machine` heading and one line, exit 0.
 - Many: two local environments and one remote print two blocks in order, sorted, columns aligned.
@@ -89,7 +88,6 @@ done
 echo "$dest" >> "$STUB_DIR/ssh.log"
 me=$dest
 RENDEZVOUS
-if [ -n "$STUB_STDOUT_FILE" ]; then cat "$STUB_STDOUT_FILE" > "$STUB_DIR/stdout-at-call.$dest"; fi
 reply="$STUB_DIR/ssh/$dest"
 [ -f "$reply.delay" ] && sleep "$(cat "$reply.delay")"
 [ -f "$reply.sleep" ] && exec sleep "$(cat "$reply.sleep")"
@@ -176,9 +174,6 @@ class Rig:
         log = self.root / "docker.log"
         return len(log.read_text().split()) if log.exists() else 0
 
-    def stdout_at_first_call(self, destination: str) -> str:
-        return (self.root / f"stdout-at-call.{destination}").read_text()
-
     def env(self) -> dict[str, str]:
         return {
             "PATH": str(self.bin),
@@ -186,7 +181,6 @@ class Rig:
             "CAMP_CONFIG_DIR": str(self.config_dir),
             "CAMP_STATE_DIR": str(self.state_dir),
             "STUB_DIR": str(self.root),
-            "STUB_STDOUT_FILE": str(self.stdout_file),
         }
 
     def run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -208,6 +202,21 @@ def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
 
 
+def _ls_with_a_one_second_read_bound(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *args: str
+) -> str:
+    """Run `camp env ls ARGS` in this process with the read bound cut to 1 s; return its stdout."""
+    from camp.cli import dispatch
+    from camp.env import read
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls", *args])
+    dispatch.main()
+    return capsys.readouterr().out
+
+
 PERSEUS = "tduffield@perseus"
 MACBOOK = "tduffield@toms-macbook-pro"
 TWO_PEERS = f"""
@@ -217,6 +226,7 @@ ssh = "{PERSEUS}"
 [hosts.toms-macbook-pro]
 ssh = "{MACBOOK}"
 """
+ONE_HOST = 'env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
 
 
 def test_one_environment_locally_with_no_hosts(rig: Rig) -> None:
@@ -229,7 +239,7 @@ def test_one_environment_locally_with_no_hosts(rig: Rig) -> None:
 
 
 def test_published_ports_do_not_change_what_ls_prints(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(
         stdout=_records(
             ("levr", "main", "running", "127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp"),
@@ -394,23 +404,15 @@ def test_blocks_print_this_machine_then_env_hosts_order_whichever_host_answers_f
 def test_each_host_shows_its_own_outcome_when_read_together(
     rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from camp.cli import dispatch
-    from camp.env import read
-
     rig.hosts_file(_hosts("down", "stuck", "fine"))
     rig.docker(stdout=HEADER)
     rig.ssh_reply("u@down", stderr="no route to the thing\n", exit_code=255)
     rig.ssh_reply("u@stuck", sleep=10)
     rig.ssh_reply("u@fine", stdout=_records(("levr", "main", "running")))
-    rig.stdout_file.write_text("")
-    for key, value in rig.env().items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
 
-    dispatch.main()
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys)
 
-    assert capsys.readouterr().out == (
+    assert out == (
         "this machine\n  no environments\n"
         "down\n  unreadable: no route to the thing\n"
         "stuck\n  unreadable: no answer within 1s\n"
@@ -419,7 +421,7 @@ def test_each_host_shows_its_own_outcome_when_read_together(
 
 
 def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, stdout=HEADER)
 
@@ -429,7 +431,7 @@ def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> N
 
 
 def test_reply_without_the_header_is_unreadable_and_exits_zero(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=_records(("levr", "main", "running")))
     rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"|""\n')
 
@@ -445,20 +447,12 @@ def test_reply_without_the_header_is_unreadable_and_exits_zero(rig: Rig) -> None
 def test_a_host_that_outlives_the_read_bound_is_unreadable_with_the_timeout(
     rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from camp.cli import dispatch
-    from camp.env import read
-
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, sleep=10)
-    for key, value in rig.env().items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
 
-    dispatch.main()
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys)
 
-    out = capsys.readouterr().out
     assert out == "this machine\n  no environments\nperseus\n  unreadable: no answer within 1s\n"
 
 
@@ -489,7 +483,7 @@ def test_local_docker_missing_or_not_running(
     ],
 )
 def test_remote_docker_missing_or_not_running(rig: Rig, stderr_fixture: str, line: str) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, stderr=(FIXTURES / stderr_fixture).read_text())
 
@@ -677,9 +671,6 @@ def test_ls_refuses_any_argument(rig: Rig, extra: list[str], message: str) -> No
 
 # -- camp env ls HOST ------------------------------------------------------------------------------
 
-ONE_HOST = 'env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
-
-
 @pytest.mark.parametrize("opted_in", [True, False], ids=["opted-in", "not-opted-in"])
 def test_named_host_with_no_environments(rig: Rig, opted_in: bool) -> None:
     rig.hosts_file(ONE_HOST if opted_in else TWO_PEERS)
@@ -734,19 +725,12 @@ def test_named_host_unreadable(rig: Rig) -> None:
 def test_named_host_timed_out(
     rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from camp.cli import dispatch
-    from camp.env import read
-
     rig.hosts_file(TWO_PEERS)
     rig.ssh_reply(PERSEUS, sleep=10)
-    for key, value in rig.env().items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls", "perseus"])
 
-    dispatch.main()
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys, "perseus")
 
-    assert capsys.readouterr().out == "perseus\n  unreadable: no answer within 1s\n"
+    assert out == "perseus\n  unreadable: no answer within 1s\n"
 
 
 @pytest.mark.parametrize(
