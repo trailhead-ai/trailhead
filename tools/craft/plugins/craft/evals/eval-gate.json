@@ -79,6 +79,11 @@
       "measures": [
         "skills/review/SKILL.md"
       ]
+    },
+    "review-refuses-a-malformed-spec-id": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
     }
   }
 }
