@@ -89,6 +89,9 @@ PLAIN_WORDS_EDIT_REVISION = "9bae50c390aaa2f91f1a4dd3dac2eb7ea9da30ef"
 # and every other source from `PLAIN_WORDS_BASELINE_REVISION`.
 PLAIN_WORDS_EDIT2_REVISION = "c6af0ccbf4448626581cfc495ceec0c034f7fbc4"
 
+# origin/main when the third plain-words slice's task branch was cut: every base3 arm reads every source here.
+PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -319,6 +322,20 @@ ARM_SOURCES.update(
             (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
         ]
         for prefix, gauntlet_revision in PW_ROUNDS.items()
+        for site in PLAIN_WORDS_SITES
+    }
+)
+
+
+# The base3 arms are fresh at B3: all four sources, `rules.md` and `council.md` included, are read from it.
+ARM_SOURCES.update(
+    {
+        f"pw-base3-{site}.md": [
+            (RULES, PLAIN_WORDS_B3_REVISION),
+            (GAUNTLET_SKILL, PLAIN_WORDS_B3_REVISION),
+            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_B3_REVISION),
+            (COUNCIL, PLAIN_WORDS_B3_REVISION),
+        ]
         for site in PLAIN_WORDS_SITES
     }
 )

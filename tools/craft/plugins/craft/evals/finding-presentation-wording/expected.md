@@ -5103,3 +5103,35 @@ with and are not rewritten. Every existing capture in the case's `runs/` is re-g
 this section is committed, and each changed verdict is listed in a dated sub-section with its capture, its check and its
 old and new verdict. A flip on a check that closed a criterion in an earlier slice becomes one follow-up task to
 re-measure that criterion; the slice does not stop for it.
+
+### Base3 arms built (2026-11-03)
+
+The three base3 arms (`pw-base3-pwopen.md`, `pw-base3-pwdetail.md`, `pw-base3-pwsaved.md`) are composed the way every
+earlier plain-words arm is: the four sources in the order of the "Arms" table above, each as it stands at B3, joined by
+one newline. B3 is the task branch's base commit, origin/main at the cut, and the branch carried no other commit when
+the arms were composed, so the working-tree files equal B3's (checked by `git diff` of each source against B3: empty).
+The manifest entries are in `test_finding_presentation_wording_arms_contract.py` (`PLAIN_WORDS_B3_REVISION`); they
+share their sources, so the three arms are byte-identical and the sites differ by prompt alone.
+
+**Source fingerprints** (`git hash-object` of each file; the same value for the file at B3 and in the working tree):
+
+| Source | Fingerprint |
+|---|---|
+| `rules.md` | `81162064b03191116a24bbc81b216ea02eb5d6fb` |
+| `skills/gauntlet/SKILL.md` | `0ff013d7a72bb82d47be47c53b324fbd8570e975` |
+| `skills/gauntlet/dispositions.md` | `6e4ddfb110154cbf72096ec78dbd2f84c5d2a74a` |
+| `skills/_shared/council.md` | `36b96b92946374335ce487859867c65e468e0754` |
+
+**Byte counts**, `stat -f %z` on the composed arms on the macOS host that built them, against `MAX_ARG_STRLEN` (131072,
+the Linux single-argument limit) and `getconf ARG_MAX` (1048576 on this host):
+
+| Arm | Bytes | Against `MAX_ARG_STRLEN` | Against `ARG_MAX` |
+|---|---|---|---|
+| `pw-base3-pwopen.md` | 91950 | under by 39122 | under by 956626 |
+| `pw-base3-pwdetail.md` | 91950 | under by 39122 | under by 956626 |
+| `pw-base3-pwsaved.md` | 91950 | under by 39122 | under by 956626 |
+
+All three pass `--append-system-prompt` inline. The earlier baseline arms are 90862 bytes; the 1088 bytes of difference
+are the changes to the four sources since the earlier arms were frozen (the plan names the count rule in `rules.md`; no
+per-file breakdown was taken). The earlier arms' `ARG_MAX` of 2097152 was read on the Linux host that
+ran them; this host's value is the one recorded here, and the arms are under both.
