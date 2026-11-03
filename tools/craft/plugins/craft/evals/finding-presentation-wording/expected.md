@@ -5818,3 +5818,23 @@ The scoped run (`test_wording_grader.py`, `test_finding_presentation_wording_arm
 this task, with `scripts/inert-test-gate` and `scripts/leak-gate` exit 0. No verdict row was added to
 `test_wording_grader.py`: the real-run captures are `.md` and `.json` files outside the graded `runs/*.txt` set. The
 whole-suite run is the controller's, once.
+
+### Addendum to the real-run readings (2026-11-03)
+
+**The criteria files are now committed.** The script readings above grade the saved section against each review's final
+spec body. Those bodies are committed as `runs/pw-realrun3-1-final-spec.md` and `runs/pw-realrun3-2-final-spec.md`: the
+record text above its `## Gauntlet` section, as the review left it. The pre-registered command reproduces against them,
+`nickname` for run 1 and `bare` for run 2, so the ablations can be re-run from committed files.
+
+**First mentions, checked against committed text.** In run 1, all 19 quoted first mentions in the saved section appear
+word for word in its final spec, the four criteria edited after the override included. In run 2, 12 quoted first mentions
+appear word for word in its final spec. The other three, AC3, AC5 and AC6, quote the original criterion word for word from
+`fixtures/pw-realrun3-spec.md`, which is the text the finding is about before the review rewrote it.
+
+**Run 2's `bare` is a form departure as well as a grader limit.** "(AC2, original wording)" puts words inside the bracket
+beside the number. The field asks for the number after the text in round brackets, so this is a departure from the asked
+form, not only a misreading by the grader. The bracket edit alone, "(AC2, original wording)" to "(AC2)", moves the
+verdict from `bare` to `nickname`; the remaining `nickname` is the AC3 reading described above. The "Grader" limit above
+lists semicolons and renumbering; this bracket form is a third shape it reads as `bare`. By eye, AC28's reading at this
+real run stands: every criterion is first named by its whole text with its number, one of them with words added inside
+the bracket.
