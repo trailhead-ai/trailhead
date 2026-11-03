@@ -222,10 +222,10 @@ Everywhere else your own prose mentions a finding — the synthesis, a list, a n
 it by its headline, or a faithful short form, with the id in round brackets after: "apply the cache
 TTL fix (C1) and the tenant rewrite (C2)", never "apply C1 and C2", "the C1 edit" or "C1's change".
 A second mention, in the same sentence or later, points back in words with the id after ("that fix
-(C1)"), never "with C1 moved down a level". A reply you tell the operator to type is written in
-full as the reply line shows it — "answer C2: followed by what you know", the colon and the reason
-slot named in words — never a bare "answer C2", which the review itself refuses as incomplete.
-The table, the rewrite headers and the reply line keep their own forms.
+(C1)"), never "with C1 moved down a level". A reply you tell the operator to type is written in full
+as the reply line shows it — "answer C2: followed by what you know", the colon and the reason slot
+named in words — never a bare "answer C2", which the review itself refuses as incomplete. The table,
+the rewrite headers and the reply line keep their own forms.
 
 The deliverable is these four parts, in this order — all four whenever there is a Critical to
 disposition, and the same parts minus the table on a run that produced none (`dispositions.md`'s

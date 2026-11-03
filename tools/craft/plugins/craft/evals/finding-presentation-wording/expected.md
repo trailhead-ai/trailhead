@@ -5838,3 +5838,11 @@ verdict from `bare` to `nickname`; the remaining `nickname` is the AC3 reading d
 lists semicolons and renumbering; this bracket form is a third shape it reads as `bare`. By eye, AC28's reading at this
 real run stands: every criterion is first named by its whole text with its number, one of them with words added inside
 the bracket.
+
+### Shipped copy: a reflow after the measurement (2026-11-03)
+
+The repository's wrap contract found two under-filled lines in the step 5 sentence that G3 added, so `skills/gauntlet/SKILL.md`
+was reflowed with `scripts/wrap_prose.py` after every capture was taken. The shipped copy, at fingerprint
+`3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, differs from the measured copy (`09584f7a2daf22740999ff2eef4efd74a7d3f438`,
+which the `pw-treated3-*` arms carry) only in where four lines break. Its words are identical, and it is still 529 lines.
+The arms stay as measured.

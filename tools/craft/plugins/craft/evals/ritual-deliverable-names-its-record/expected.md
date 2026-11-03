@@ -1245,3 +1245,6 @@ taken on either post-edit copy.
 
 The operator ruled the other case's regression residual the same day, and the revert was undone. The live arm again
 holds `skills/gauntlet/SKILL.md` at fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`.
+
+After a whitespace-only reflow of four lines in step 5, the live arm was rebuilt again. It holds `skills/gauntlet/SKILL.md`
+at fingerprint `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, word for word the same as the previous copy.
