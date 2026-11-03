@@ -2594,9 +2594,13 @@ script verdicts on the saved detail read `nickname` and `bare` where the eye rea
 quoted criterion splits the sentence the check counts overlap in (shown by ablation in run 1), and the check reads
 numbers against its criteria file, which a renumbering review changes. Captures: `runs/pw-realrun3-<n>-turn<k>.md`,
 `runs/pw-realrun3-<n>-saved.md`, `runs/pw-realrun3-<n>.init.json` (not graded; the `.txt` capture test ignores them).
-Limits: the recipe is not a sandbox (real `HOME`, unrestricted `Bash`); each run adds one harness transcript entry under
-`~/.claude/projects`; the live vault's HEAD moved during the second run by other sessions' publishes, unattributable
-by this run; two sessions, one reader.
+Limits: the recipe is not a sandbox (real `HOME`, unrestricted `Bash`, user-level rules and connectors loaded). The
+throwaway `LORE_*` and `XDG_*` variables are only environment a session could unset. So run it only on a made-up spec,
+never on one someone else wrote, since any instruction planted in the spec reaches a session that can run any command.
+The isolation listings detect a change to the live vault or `~/.claude` after the fact; they prevent nothing, and a read
+elsewhere leaves no trace in them. Each run adds one harness transcript entry under `~/.claude/projects`, which is
+removed by hand once the derived captures are committed. The live vault's HEAD moved during the second run through
+other sessions' publishes, which this run cannot attribute. Two sessions, one reader.
 
 **Pin check.** Pin against `skills/gauntlet/SKILL.md` at fingerprint `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, the
 shipped file. The `pw-treated3-*` arms carry `09584f7a2daf22740999ff2eef4efd74a7d3f438`, the copy they measured; the two
@@ -2609,7 +2613,7 @@ and unenforced; the waiver rests with the operator.
 **Manual re-run trigger.** A change to `skills/gauntlet/SKILL.md` step 5 or 6, to `dispositions.md`, to `rules.md`'s
 count rule or to `_shared/council.md` starts from a new dated extension to `expected.md` registered before any run, with
 base and treated arms built from the changed files; the `pw-treated3-*` arms pin G3 and measure that text only. Re-run the
-two real spec reviews (reading fields registered first, a made-up spec, a throwaway vault and a throwaway lore config and
+two real spec reviews (reading fields registered first, a made-up spec and never someone else's, a throwaway vault and a throwaway lore config and
 state, `--plugin-dir`, `--setting-sources project`, turns up to the saved-section read, isolation listings before and
 after) whenever the spec review's step 5 or 6 prose changes, or when the real runs' reading of a criterion's first
 mention is in doubt.
