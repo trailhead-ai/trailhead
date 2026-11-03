@@ -2163,9 +2163,10 @@ FINDING_CAPTURE_VERDICTS.update(
                 (6, "bracketed", "plain"),
             )
         },
-        "pw-treated3-pwdetail-1": _pwdetail("plain", "none", "bracketed"),
-        **{f"pw-treated3-pwdetail-{n}": _pwdetail("plain", "plain", "bracketed") for n in (2, 4, 5, 6)},
-        "pw-treated3-pwdetail-3": _pwdetail("plain", "none", "bracketed"),
+        **{
+            f"pw-treated3-pwdetail-{n}": _pwdetail("plain", "none" if n in (1, 3) else "plain", "bracketed")
+            for n in range(1, 7)
+        },
         **{
             f"pw-treated3-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed"}
             for n in (1, 2, 3)

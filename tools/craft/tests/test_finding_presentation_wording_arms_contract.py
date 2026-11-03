@@ -309,50 +309,25 @@ ARM_SOURCES.update(
 # The plain-words sites each run the spec review's composition, which is the same four sources at each site.
 PLAIN_WORDS_SITES = ("pwopen", "pwdetail", "pwsaved")
 
-# Each plain-words round's arm prefix and the revision its arms read the two gauntlet files from; `rules.md` and
-# `council.md` are at the plain-words baseline in every round.
+# Each plain-words round's arm prefix, the revision its arms read `rules.md` and `council.md` from, and the revision
+# they read the two gauntlet files from.
 PW_ROUNDS = {
-    "pw-baseline": PLAIN_WORDS_BASELINE_REVISION,
-    "pw-treated": PLAIN_WORDS_EDIT_REVISION,
-    "pw-treated2": PLAIN_WORDS_EDIT2_REVISION,
+    "pw-baseline": (PLAIN_WORDS_BASELINE_REVISION, PLAIN_WORDS_BASELINE_REVISION),
+    "pw-treated": (PLAIN_WORDS_BASELINE_REVISION, PLAIN_WORDS_EDIT_REVISION),
+    "pw-treated2": (PLAIN_WORDS_BASELINE_REVISION, PLAIN_WORDS_EDIT2_REVISION),
+    "pw-base3": (PLAIN_WORDS_B3_REVISION, PLAIN_WORDS_B3_REVISION),
+    "pw-treated3": (PLAIN_WORDS_B3_REVISION, PLAIN_WORDS_EDIT3_REVISION),
 }
 
 ARM_SOURCES.update(
     {
         f"{prefix}-{site}.md": [
-            (RULES, PLAIN_WORDS_BASELINE_REVISION),
+            (RULES, base_revision),
             (GAUNTLET_SKILL, gauntlet_revision),
             (GAUNTLET_DISPOSITIONS, gauntlet_revision),
-            (COUNCIL, PLAIN_WORDS_BASELINE_REVISION),
+            (COUNCIL, base_revision),
         ]
-        for prefix, gauntlet_revision in PW_ROUNDS.items()
-        for site in PLAIN_WORDS_SITES
-    }
-)
-
-
-# The base3 arms are fresh at B3: all four sources, `rules.md` and `council.md` included, are read from it.
-ARM_SOURCES.update(
-    {
-        f"pw-base3-{site}.md": [
-            (RULES, PLAIN_WORDS_B3_REVISION),
-            (GAUNTLET_SKILL, PLAIN_WORDS_B3_REVISION),
-            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_B3_REVISION),
-            (COUNCIL, PLAIN_WORDS_B3_REVISION),
-        ]
-        for site in PLAIN_WORDS_SITES
-    }
-)
-
-# The treated3 arms are the base3 composition with the two gauntlet files read from the third edit.
-ARM_SOURCES.update(
-    {
-        f"pw-treated3-{site}.md": [
-            (RULES, PLAIN_WORDS_B3_REVISION),
-            (GAUNTLET_SKILL, PLAIN_WORDS_EDIT3_REVISION),
-            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT3_REVISION),
-            (COUNCIL, PLAIN_WORDS_B3_REVISION),
-        ]
+        for prefix, (base_revision, gauntlet_revision) in PW_ROUNDS.items()
         for site in PLAIN_WORDS_SITES
     }
 )
