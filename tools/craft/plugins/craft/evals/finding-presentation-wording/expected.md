@@ -5305,3 +5305,45 @@ ablation was run, so any cause would be a hypothesis. No cause is named for the 
 
 **By eye.** The registration calls for one passing capture per site read by eye at treated3, and no reading by eye at
 base3, so none is recorded here.
+
+### Treated3 arms built (2026-11-03)
+
+The three treated3 arms (`pw-treated3-pwopen.md`, `pw-treated3-pwdetail.md`, `pw-treated3-pwsaved.md`) are composed
+exactly as the base3 arms are (see "Base3 arms built" above): the four sources in the order of the "Arms" table, joined
+by one newline, with `rules.md` and `skills/_shared/council.md` as they stand at B3 and the two gauntlet files as they
+stand at the G3 commit (the third ritual edit). Recomposing the base3 arm from B3 with the same recipe was checked
+byte-for-byte equal to `pw-base3-pwopen.md` before the treated3 arms were written. The manifest entries are in
+`test_finding_presentation_wording_arms_contract.py` (`PLAIN_WORDS_EDIT3_REVISION`); they share their sources, so the
+three arms are byte-identical and the sites differ by prompt alone.
+
+**Which parts of G3 shipped.** All six. The headroom gate was read from the base3 batch: base3 met neither closing check
+(`pwdetail` `finding-id` `bracketed` 4 of 6, the misses being the colon-less "answer C2"; `pwsaved` saved-detail
+`criterion-mention` `text-with-number` 0 of 6), so nothing was dropped.
+1. Every mention of a finding carries its id, a second mention pointing back in words with the id after.
+2. A reply the session tells the operator to type is the full form with its colon and reason slot (`dispositions.md`
+   already refuses the bare form, so it is unchanged).
+3. The first mention of a criterion in the saved detail gives all of its text with the number after in round brackets.
+4. A fix line follows the same rule.
+5. The packet-limit example is replaced by one first mention with the whole text and one point-back, in a domain the
+   `pw-*` fixtures do not use, with no copyable labels.
+6. Each saved finding opens with its final outcome, not its proposed one (no script check; read by eye).
+
+**Source fingerprints** (`git hash-object`; `rules.md` and `council.md` are the B3 values, unchanged):
+
+| Source | Fingerprint |
+|---|---|
+| `rules.md` | `81162064b03191116a24bbc81b216ea02eb5d6fb` |
+| `skills/gauntlet/SKILL.md` | `15470f299102c0338c8207c719ee87f9c43fc4e4` |
+| `skills/gauntlet/dispositions.md` | `6e4ddfb110154cbf72096ec78dbd2f84c5d2a74a` |
+| `skills/_shared/council.md` | `36b96b92946374335ce487859867c65e468e0754` |
+
+**Byte counts**, `stat -f %z` on the composed arms, against `MAX_ARG_STRLEN` (131072) and `getconf ARG_MAX` (1048576 on
+this host):
+
+| Arm | Bytes | Against `MAX_ARG_STRLEN` | Against `ARG_MAX` |
+|---|---|---|---|
+| `pw-treated3-pwopen.md` | 91894 | under by 39178 | under by 956682 |
+| `pw-treated3-pwdetail.md` | 91894 | under by 39178 | under by 956682 |
+| `pw-treated3-pwsaved.md` | 91894 | under by 39178 | under by 956682 |
+
+All three pass `--append-system-prompt` inline. They are 56 bytes smaller than the base3 arms (91950).

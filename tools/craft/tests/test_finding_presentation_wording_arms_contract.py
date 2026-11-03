@@ -92,6 +92,10 @@ PLAIN_WORDS_EDIT2_REVISION = "c6af0ccbf4448626581cfc495ceec0c034f7fbc4"
 # origin/main when the third plain-words slice's task branch was cut: every base3 arm reads every source here.
 PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
 
+# The commit carrying the third plain-words ritual edit: the treated3 arms read the two gauntlet files from here and
+# every other source from `PLAIN_WORDS_B3_REVISION`.
+PLAIN_WORDS_EDIT3_REVISION = "608547202907089dbe555547e55f37bd65d464c8"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -334,6 +338,19 @@ ARM_SOURCES.update(
             (RULES, PLAIN_WORDS_B3_REVISION),
             (GAUNTLET_SKILL, PLAIN_WORDS_B3_REVISION),
             (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_B3_REVISION),
+            (COUNCIL, PLAIN_WORDS_B3_REVISION),
+        ]
+        for site in PLAIN_WORDS_SITES
+    }
+)
+
+# The treated3 arms are the base3 composition with the two gauntlet files read from the third edit.
+ARM_SOURCES.update(
+    {
+        f"pw-treated3-{site}.md": [
+            (RULES, PLAIN_WORDS_B3_REVISION),
+            (GAUNTLET_SKILL, PLAIN_WORDS_EDIT3_REVISION),
+            (GAUNTLET_DISPOSITIONS, PLAIN_WORDS_EDIT3_REVISION),
             (COUNCIL, PLAIN_WORDS_B3_REVISION),
         ]
         for site in PLAIN_WORDS_SITES
