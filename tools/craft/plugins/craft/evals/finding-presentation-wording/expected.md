@@ -5175,3 +5175,133 @@ to `plain` 2 of 3 and `internal` 1 of 3. The baseline guard reading is not rewri
 control capture in the case changes, so the slice's closed criteria (AC25, AC26) and the two partial ones (AC27, AC28)
 stand as recorded, and no follow-up task is due for a flip. `test_wording_grader.py` carries the one changed pin
 (`pw-baseline-pwopen-2` `severity-name`) and no other.
+
+### Base3 results (2026-11-03): captures, verdicts and headroom
+
+The three base3 arms were run by the dispatch the registration fixes: one foreground `claude -p` per run, run in turn,
+from a fresh copy of `fixtures/` and a fresh empty working directory, `--setting-sources project`,
+`--allowedTools "Read"`, the arm passed inline, no `--model`, a 600-second limit enforced in the command
+(`perl -e 'alarm 600; exec @ARGV'`, as the macOS host has no GNU `timeout`). Each site ran three times. In the first
+three, `pwopen` split on `finding-id` (`bracketed`, `bracketed`, `bare`), `severity-name` (`internal`, `plain`, `plain`),
+`reviewer-name` (`internal`, `plain`, `internal`) and `criterion-mention` (`bare`, `nickname`, `bare`); `pwdetail` split
+on `finding-id` (`bracketed`, `bracketed`, `bare`) and `severity-name` read `plain` in 3 of 3; `pwsaved` split on
+`criterion-mention` on the saved detail (`bare`, `nickname`, `bare`). Every site therefore re-ran the whole arm as a fresh
+batch of three (`-4` to `-6`), the way the treated2 batch did for a split in the winning word's neighbours. All 18 runs
+exited 0 with an empty stderr file; none was crashed, timed out or excluded, and none was replaced. No capture needed a
+redaction: a search of every `pw-base3-*` file for the operator's user name, `/Users/`, `/home/`, `/tmp/`, `.local` and
+machine names found 0 matches, and each capture was read by hand. Every verdict is read from the grader with the
+invocations tabled in the pre-registration (the `pwsaved` `override-mapping` reasons are those of
+`fixtures/pw-prompt-pwsaved.md`) and is registered in `test_wording_grader.py` (`FINDING_CAPTURE_VERDICTS`,
+`PW_SAVED_VERDICTS` and `PW_OPEN_CRITERION_VERDICTS`). Every count after the tables is derived from them.
+
+**Per-capture verdicts, `pwopen`** (`review-name`, `outcome-word`, `finding-id` are the closing readings carried from the
+earlier slice; the last three are guards).
+
+| Capture | `review-name` | `outcome-word` | `finding-id` | `severity-name` | `reviewer-name` | `criterion-mention` |
+|---|---|---|---|---|---|---|
+| `pw-base3-pwopen-1` | `plain` | `plain` | `bracketed` | `internal` | `internal` | `bare` |
+| `pw-base3-pwopen-2` | `plain` | `plain` | `bracketed` | `plain` | `plain` | `nickname` |
+| `pw-base3-pwopen-3` | `plain` | `plain` | `bare` | `plain` | `internal` | `bare` |
+| `pw-base3-pwopen-4` | `plain` | `plain` | `bracketed` | `internal` | `plain` | `bare` |
+| `pw-base3-pwopen-5` | `plain` | `plain` | `bracketed` | `plain` | `plain` | `bare` |
+| `pw-base3-pwopen-6` | `plain` | `plain` | `bracketed` | `plain` | `plain` | `bare` |
+
+**Per-capture verdicts, `pwdetail`** (`finding-id` is the AC27 closing check; the rest are guards).
+
+| Capture | `outcome-word` | `finding-id` | `severity-name` | `reviewer-name` |
+|---|---|---|---|---|
+| `pw-base3-pwdetail-1` | `plain` | `bracketed` | `plain` | `plain` |
+| `pw-base3-pwdetail-2` | `plain` | `bracketed` | `plain` | `plain` |
+| `pw-base3-pwdetail-3` | `plain` | `bare` | `plain` | `plain` |
+| `pw-base3-pwdetail-4` | `plain` | `bracketed` | `none` | `plain` |
+| `pw-base3-pwdetail-5` | `plain` | `bare` | `none` | `plain` |
+| `pw-base3-pwdetail-6` | `plain` | `bracketed` | `plain` | `plain` |
+
+**Per-capture verdicts, `pwsaved`** (`finding-id` on the echo and on the saved detail are the AC27 companion readings,
+`criterion-mention` on the saved detail is the AC28 closing check; `outcome-word`, `stamp-form` and `override-mapping`
+are guards).
+
+| Capture | `outcome-word` | `finding-id` (echo) | `finding-id` (saved detail) | `criterion-mention` (saved detail) | `stamp-form` | `override-mapping` |
+|---|---|---|---|---|---|---|
+| `pw-base3-pwsaved-1` | `plain` | `bracketed` | `bracketed` | `bare` | `kept` | `mapped` |
+| `pw-base3-pwsaved-2` | `plain` | `bracketed` | `bracketed` | `nickname` | `kept` | `mapped` |
+| `pw-base3-pwsaved-3` | `plain` | `bracketed` | `bracketed` | `bare` | `kept` | `mapped` |
+| `pw-base3-pwsaved-4` | `plain` | `bracketed` | `bracketed` | `bare` | `kept` | `mapped` |
+| `pw-base3-pwsaved-5` | `plain` | `bracketed` | `bracketed` | `bare` | `kept` | `mapped` |
+| `pw-base3-pwsaved-6` | `plain` | `bracketed` | `bracketed` | `bare` | `kept` | `mapped` |
+
+**By hand at `pwsaved`, as registered.** The marker bullet ("Retained review evidence") is printed first under
+`## Gauntlet`, ahead of the stamp bullet, in all 6 of 6 captures (`grep -n` of the three bullets, each present once).
+`scripts/capture_scan.py` over all 18 runs' files (`.txt`, `.stderr.txt`, `.exit`) exited 0: 0 credential findings,
+which covers each saved block. `scripts/leak-gate` exited 0.
+
+**Counts per check and site** (6 captures each; a clean majority is 5 or 6 of 6).
+
+| Site | Check | Counts | Reading against the bar |
+|---|---|---|---|
+| `pwopen` | `review-name` | `plain` 6 | clean majority |
+| `pwopen` | `outcome-word` | `plain` 6 | clean majority |
+| `pwopen` | `finding-id` | `bracketed` 5, `bare` 1 | clean majority |
+| `pwopen` | `severity-name` (guard) | `plain` 4, `internal` 2 | not a clean majority |
+| `pwopen` | `reviewer-name` (guard) | `plain` 4, `internal` 2 | not a clean majority |
+| `pwopen` | `criterion-mention` (guard) | `bare` 5, `nickname` 1, `text-with-number` 0 | not a pass (the guard has not held at any earlier arm either) |
+| `pwdetail` | `finding-id` (AC27) | `bracketed` 4, `bare` 2 | not a clean majority |
+| `pwdetail` | `outcome-word` (guard) | `plain` 6 | clean majority |
+| `pwdetail` | `severity-name` (guard) | `plain` 4, `none` 2, `internal` 0 | no miss: `none` is held, not missed, as the dated amendment states |
+| `pwdetail` | `reviewer-name` (guard) | `plain` 6 | clean majority |
+| `pwsaved` | `finding-id` (echo) | `bracketed` 6 | clean majority |
+| `pwsaved` | `finding-id` (saved detail) | `bracketed` 6 | clean majority |
+| `pwsaved` | `criterion-mention` (saved detail, AC28) | `bare` 5, `nickname` 1, `text-with-number` 0 | not a pass |
+| `pwsaved` | `outcome-word` (guard) | `plain` 6 | clean majority |
+| `pwsaved` | `stamp-form` (guard) | `kept` 6 | clean majority |
+| `pwsaved` | `override-mapping` (guard) | `mapped` 6 | clean majority |
+| `pwsaved` | marker bullet printed (by hand) | 6 of 6 | held |
+
+**Headroom reading.** "Met without the edit" is a clean-majority pass at base3; "room to show an effect" is anything
+else. A guard is read by the same word: a guard already held at base3 has no room to show an effect on the guard side and
+is carried to treated3 as a guard.
+
+| Site | Check | Reading |
+|---|---|---|
+| `pwopen` | `review-name` | met without the edit |
+| `pwopen` | `outcome-word` | met without the edit |
+| `pwopen` | `finding-id` | met without the edit (5 of 6) |
+| `pwopen` | `severity-name` (guard) | room to show an effect (4 of 6 `plain`; 2 of 6 `internal` at base3 itself) |
+| `pwopen` | `reviewer-name` (guard) | room to show an effect (4 of 6 `plain`; 2 of 6 `internal` at base3 itself) |
+| `pwopen` | `criterion-mention` (guard) | room to show an effect (0 of 6 `text-with-number`) |
+| `pwdetail` | `finding-id` (AC27) | **room to show an effect** (4 of 6 `bracketed`) |
+| `pwdetail` | `outcome-word` (guard) | met without the edit |
+| `pwdetail` | `severity-name` (guard) | met without the edit (no internal name in 6 of 6; `plain` 4, `none` 2) |
+| `pwdetail` | `reviewer-name` (guard) | met without the edit |
+| `pwsaved` | `finding-id` (echo) | met without the edit |
+| `pwsaved` | `finding-id` (saved detail) | met without the edit |
+| `pwsaved` | `criterion-mention` (saved detail, AC28) | **room to show an effect** (0 of 6 `text-with-number`) |
+| `pwsaved` | `outcome-word` (guard) | met without the edit |
+| `pwsaved` | `stamp-form` (guard) | met without the edit |
+| `pwsaved` | `override-mapping` (guard) | met without the edit |
+
+**Does base3 already meet `finding-id` `bracketed` at `pwdetail` (AC27)? No.** It reads `bracketed` in 4 of 6, which is
+not a clean majority; it has room to show an effect. This answers the plan's first Known Unknown for AC27: the part of G3
+aimed at the detail view's bare ids is not dropped by the headroom gate. The two `bare` captures
+(`pw-base3-pwdetail-3` and `-5`) each hold the colon-less quoted reply the registration's dropped third item names:
+`reply "answer C2"` (`-5` line 27) and `say so with "answer C2"` (`-3` line 21). Those are the lines the grader flagged.
+The same form's reply line at the foot of each capture (`answer C2: <what you know>`) is allowed.
+
+**Does base3 already meet saved-detail `criterion-mention` `text-with-number` at `pwsaved` (AC28)? No.** It reads
+`text-with-number` in 0 of 6 (`bare` 5, `nickname` 1); it has room to show an effect, and the part of G3 aimed at it is
+not dropped by the headroom gate.
+
+**Companion readings for the next task's gate.** `finding-id` at `pwopen` is met without the edit (5 of 6), and on the
+`pwsaved` echo and the saved detail it is met without the edit (6 of 6 each), so the part of G3 aimed only at those
+readings has no headroom at base3, except a part that removes a contradiction, which stays regardless (the registered
+exception). Only `pwdetail` `finding-id` and `pwsaved` saved-detail `criterion-mention` have room.
+
+**Guard notes.** `pwopen` `severity-name` and `reviewer-name` each missed in 2 of 6 at base3 itself, and `criterion-mention`
+at `pwopen` does not pass in any capture; these are the baseline the treated3 guard rule is read against, so a treated3
+guard miss at `pwopen` has a base3 reading to be compared with before any control is run. The per-capture lines that
+carried the `internal` readings at `pwopen` are the wording of the capture itself (for example `pw-base3-pwopen-1` line 5,
+"Two Critical claims did not survive checking"); why the arm produced those words is not established here, and no
+ablation was run, so any cause would be a hypothesis. No cause is named for the other verdicts either.
+
+**By eye.** The registration calls for one passing capture per site read by eye at treated3, and no reading by eye at
+base3, so none is recorded here.
