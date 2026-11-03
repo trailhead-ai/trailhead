@@ -1044,6 +1044,8 @@ def test_internal_severity_forms_make_a_capture_internal(text, reports):
         "A non-Critical item and a Critical-path item.",
         "Importance and Minority are different words.",
         "Minorfindings",
+        "Minorss and ImportantsX",
+        "xImportants and 3Minors",
     ],
 )
 def test_ordinary_english_and_non_matching_forms_do_not_count(text, reports):
@@ -1121,6 +1123,46 @@ def test_a_level_word_leading_a_line_before_an_open_bracket_is_a_group_label(rep
 
 def test_a_level_word_group_label_beats_a_plain_reading(reports):
     assert severity("Minor \u2014 nothing to decide", reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the Importants",
+        "The strongest of the Importants is the second.",
+        "two Criticals",
+        "I downgraded two Criticals:",
+        "The Minors are rough edges.",
+        "Both Minors and one Important remain.",
+    ],
+)
+def test_a_plural_level_name_is_internal(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The Importants are worth fixing.",
+        "The Minors need nothing, nothing to decide.",
+        "Two Criticals need your decision.",
+    ],
+)
+def test_a_plural_level_name_beats_a_plain_reading(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text, verdict",
+    [
+        ("Would cause trouble later, worth fixing, your call", "plain"),
+        ("Would cause trouble later, and it is a big one", "none"),
+        ("The minors in the club and the importants", "none"),
+        ("Importantly, Minority views and Criticality matter", "none"),
+    ],
+)
+def test_wording_with_no_level_name_reads_plain_or_none_by_its_plain_reading(text, verdict, reports):
+    assert severity(text, reports) == verdict
 
 
 @pytest.mark.parametrize(
@@ -2006,7 +2048,12 @@ def _pwdetail(outcome, severity, ident="bare"):
 # The baseline batch: three runs per site, `pwdetail` re-run to six after `outcome-word` and `severity-name` split 2-1.
 FINDING_CAPTURE_VERDICTS.update(
     {
-        **{f"pw-baseline-pwopen-{n}": _pwopen("internal", "internal", "bare", "plain", "plain") for n in (1, 2, 3)},
+        **{
+            f"pw-baseline-pwopen-{n}": _pwopen(
+                "internal", "internal", "bare", "internal" if n == 2 else "plain", "plain"
+            )
+            for n in (1, 2, 3)
+        },
         "pw-baseline-pwdetail-1": _pwdetail("none", "none"),
         "pw-baseline-pwdetail-2": _pwdetail("none", "plain"),
         "pw-baseline-pwdetail-3": _pwdetail("internal", "plain"),
