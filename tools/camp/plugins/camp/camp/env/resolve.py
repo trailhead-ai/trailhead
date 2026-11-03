@@ -23,6 +23,12 @@ attached in any form, and ``env_hosts`` could not name it either.
   the reads finished in.
 * ``hosts_file`` is how an undeclared-host refusal names the hosts file; the CLI passes the path.
 
+``name_host(text, *, hosts, self_name)`` classifies host text on its own — this machine (``local`` or
+``self_name``), a declared host, an undeclared well-formed name, or text breaking the host-name rule
+(``problem`` says which part) — and refuses nothing; the caller decides what a class means. Attach
+refuses this machine as not supported yet; ``camp env ls`` reads it. ``undeclared_host_message`` is the
+refusal both give for an undeclared name.
+
 ``Refused.message`` is the whole text, one or more lines, without the ``camp env: `` prefix: the
 CLI adds it. Every reason that came from a machine passes through ``printable_line``.
 """
@@ -46,6 +52,9 @@ from .read import (
 
 LOCAL = "local"
 THIS_MACHINE = "this machine"
+DECLARED = "declared"
+UNDECLARED = "undeclared"
+INVALID = "invalid"
 _NOT_YET = "attaching an environment on this machine is not supported yet"
 _HOST_RULE = (
     "the host is not a valid host name: host names must be lowercase letters, digits and -, "
@@ -82,17 +91,21 @@ def parse_target(text: str) -> Target:
     if len(parts) > 3:
         raise TargetError("expected NAME, HOST/NAME or HOST/GROUP/NAME")
     for label, part in zip(_labels(len(parts)), parts):
-        if not part:
-            raise TargetError(f"the {label} is empty")
-        if not is_identifier(part):
-            if label == "host":
-                raise TargetError(_HOST_RULE)
-            raise TargetError(f"the {label} is not a valid identifier")
+        _check_part(label, part)
     if len(parts) == 1:
         return Target(None, None, parts[0])
     if len(parts) == 2:
         return Target(parts[0], None, parts[1])
     return Target(parts[0], parts[1], parts[2])
+
+
+def _check_part(label: str, part: str) -> None:
+    if not part:
+        raise TargetError(f"the {label} is empty")
+    if not is_identifier(part):
+        if label == "host":
+            raise TargetError(_HOST_RULE)
+        raise TargetError(f"the {label} is not a valid identifier")
 
 
 def _labels(count: int) -> tuple[str, ...]:
@@ -145,6 +158,34 @@ def _is_this_machine(host: str, self_name: str | None) -> bool:
     return host == LOCAL or (self_name is not None and host == self_name)
 
 
+@dataclass(frozen=True)
+class NamedHost:
+    """What host text names: ``kind`` is one of ``THIS_MACHINE``, ``DECLARED``, ``UNDECLARED`` or
+    ``INVALID``; ``problem`` is the host-name rule's complaint when it is ``INVALID``."""
+
+    kind: str
+    name: str
+    problem: str = ""
+
+
+def name_host(text: str, *, hosts: Mapping[str, Host], self_name: str | None) -> NamedHost:
+    """Classify host text. It refuses nothing: each caller decides what a class means."""
+    try:
+        _check_part("host", text)
+    except TargetError as error:
+        return NamedHost(INVALID, text, str(error))
+    if _is_this_machine(text, self_name):
+        return NamedHost(THIS_MACHINE, text)
+    if text in hosts:
+        return NamedHost(DECLARED, text)
+    return NamedHost(UNDECLARED, text)
+
+
+def undeclared_host_message(host: str, hosts: Mapping[str, Host], hosts_file: str) -> str:
+    declared = ", ".join(printable_line(name) for name in hosts) or "none"
+    return f"no host named {host} in {printable_line(hosts_file, limit=4096)}; declared: {declared}"
+
+
 def _qualified(target: Target) -> str:
     return target.name if target.group is None else f"{target.group}/{target.name}"
 
@@ -159,12 +200,11 @@ def _resolve_host(
 ) -> Resolved | Refused:
     host = target.host
     assert host is not None
-    if _is_this_machine(host, self_name):
+    named = name_host(host, hosts=hosts, self_name=self_name)
+    if named.kind == THIS_MACHINE:
         return Refused(_NOT_YET)
-    if host not in hosts:
-        declared = ", ".join(printable_line(name) for name in hosts) or "none"
-        shown_file = printable_line(hosts_file, limit=4096)
-        return Refused(f"no host named {host} in {shown_file}; declared: {declared}")
+    if named.kind == UNDECLARED:
+        return Refused(undeclared_host_message(host, hosts, hosts_file))
     inventory = read_remote(host)
     if inventory.kind == UNREADABLE:
         return Refused(f"{host} could not be read: {_reason(inventory)}")

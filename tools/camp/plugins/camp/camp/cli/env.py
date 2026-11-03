@@ -7,6 +7,11 @@ group. An interrupt ends every ssh and docker the listing started, prints ``camp
 to stderr and exits 130, leaving the blocks already printed as they are; a closed stdout ends them
 too and exits quietly (status 1) at the next block it tries to write.
 
+``camp env ls HOST`` reads that one machine alone — this machine for ``local`` or ``self_name``
+(never over ssh), otherwise a declared host whether or not ``env_hosts`` names it — and prints the
+``attached:`` lines, then its block, and no ``not opted in:`` line. An undeclared name, text that
+is not a host name and a second argument are refused before anything is printed.
+
 ``camp env attach TARGET`` puts one remote environment on this machine's localhost: one background
 ``ssh`` forward holding each of the environment's standard ports on 127.0.0.1. It checks, in order,
 that nothing is attached, resolves the target, refuses a stopped or port-less environment and a
@@ -49,7 +54,8 @@ from ..env.read import (
 from ..printable import printable_line
 from .parser import CampParser
 
-_USAGE = "usage: camp env ls | attach TARGET | status | detach"
+_USAGE = "usage: camp env ls [HOST] | attach TARGET | status | detach"
+_LS_USAGE = "usage: camp env ls [HOST]"
 _ATTACH_USAGE = "usage: camp env attach TARGET"
 
 #: Seconds the forward may take to appear in the process table after ``ssh -f`` returned.
@@ -115,10 +121,25 @@ def _load_machines():
 
 def _cmd_env_ls(args: list[str]) -> None:
     from ..env.read import ProcessSet, read_concurrently, read_local, read_remote
+    from ..env.resolve import DECLARED, INVALID, THIS_MACHINE, name_host, undeclared_host_message
 
-    CampParser(verb="env ls").parse_args(args)
+    parser = CampParser(verb="env ls")
+    parser.add_argument("host", nargs="*")
+    named = parser.parse_args(args).host
+    if len(named) > 1:
+        print(_LS_USAGE, file=sys.stderr)
+        sys.exit(1)
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
+
+    only = None
+    if named:
+        only = name_host(named[0], hosts=hosts, self_name=self_name)
+        if only.kind == INVALID:
+            print(f"camp env: {only.problem}\n{_LS_USAGE}", file=sys.stderr)
+            sys.exit(1)
+        if only.kind not in (THIS_MACHINE, DECLARED):
+            _refuse(undeclared_host_message(only.name, hosts, str(_hosts_file())))
 
     try:
         for found in attachments():
@@ -127,22 +148,23 @@ def _cmd_env_ls(args: list[str]) -> None:
         print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
 
     processes = ProcessSet()
-    reads = [
-        (
-            f"this machine ({self_name})" if self_name else "this machine",
-            lambda: read_local(runner=processes.runner),
+    this_machine = (
+        f"this machine ({self_name})" if self_name else "this machine",
+        lambda: read_local(runner=processes.runner),
+    )
+
+    def remote(name: str):
+        return (
+            name,
+            lambda: read_remote(name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner),
         )
-    ]
-    for name in opted_in:
-        if name != self_name:
-            reads.append(
-                (
-                    name,
-                    lambda name=name: read_remote(
-                        name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner
-                    ),
-                )
-            )
+
+    if only is None:
+        reads = [this_machine, *(remote(name) for name in opted_in if name != self_name)]
+    elif only.kind == THIS_MACHINE:
+        reads = [this_machine]
+    else:
+        reads = [remote(only.name)]
     try:
         with read_concurrently(reads, processes) as results:
             for heading, inventory in results:
@@ -154,6 +176,8 @@ def _cmd_env_ls(args: list[str]) -> None:
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
 
+    if only is not None:
+        return
     left_out = [name for name in hosts if name != self_name and name not in opted_in]
     if left_out:
         hosts_file = _hosts_file()

@@ -379,7 +379,7 @@ follow-up you compose yourself shell-neutral (no `$?`).
 ## Listing environments
 
 ```
-camp env ls
+camp env ls [HOST]
 ```
 
 Lists the dev environments running on this machine and on every host `env_hosts`
@@ -408,8 +408,9 @@ A host whose name is this machine's `self_name` is this machine and is read once
 
 Exit `0` means the listing rendered, not that every host answered: an unreadable
 host is a line in the answer. Exit `1` means camp refused to list: the hosts file is
-malformed, `env_hosts` is invalid, or an argument was given (`camp env ls` takes
-none, and `--host` has no meaning here). A bare `camp env`, or any subcommand other
+malformed, `env_hosts` is invalid, more than one argument was given, `HOST` is not
+one camp knows or not a host name, or `--host` was used (it has no meaning here; name
+the host as the argument). A bare `camp env`, or any subcommand other
 than `ls`, `attach`, `status` or `detach`, prints one usage line naming those four and
 exits `1`.
 
@@ -418,6 +419,13 @@ reads (whether or not the signal reached them), prints `camp env: interrupted` t
 and exits `130`, with no traceback. Blocks already printed stay as they are. If the
 output is closed (`camp env ls | head -1`), camp ends the reads still running the same
 way at the next block it tries to write, then exits `1` quietly.
+
+`camp env ls HOST` lists that one machine alone, whether or not `env_hosts` names it,
+and reads no other: a declared host is read over ssh, `local` or this machine's
+`self_name` is read here (never over ssh, even with a `[hosts.<self_name>]` table), and
+the block looks the same either way, with no `not opted in:` line after it. A name that
+is not declared is refused (`camp env: no host named <host> in <file>; declared: …`), as
+is text that is not a host name, with nothing printed on stdout.
 
 When something is attached (see below), `ls` opens with its `attached:` line, then lists
 as before; when the process table cannot be read it says

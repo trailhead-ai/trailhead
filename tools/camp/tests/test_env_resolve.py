@@ -14,6 +14,9 @@ Test contract:
   have their own refusal.
 - parse_target accepts NAME, HOST/NAME and HOST/GROUP/NAME and rejects malformed parts.
 - Far-side reasons reach a message as printable text.
+- name_host classifies host text as this machine (`local`, or self_name even when declared), a declared
+  host, an undeclared well-formed name, or text breaking the host-name rule; it refuses nothing, and
+  the rule it applies is the one parse_target applies.
 - A bare name's reads run at the same time (each waits for all the others to have started), and
   every refusal names machines in this machine, then env_hosts, order however the reads finished;
   a read that raises refuses the bare name like any unreadable machine.
@@ -44,6 +47,7 @@ from camp.env.resolve import (  # noqa: E402
     Resolved,
     Target,
     TargetError,
+    name_host,
     parse_target,
     resolve,
 )
@@ -513,3 +517,38 @@ def test_a_host_whose_read_raised_refuses_the_bare_name_instead_of_resolving_els
         "main cannot be resolved while andromeda could not be read (read failed (RuntimeError));"
         " name the host, as perseus/main or andromeda/main"
     )
+
+
+# -- name_host: the class of a host named on its own ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "self_name", "kind"),
+    [
+        ("local", None, "this machine"),
+        ("local", "andromeda", "this machine"),
+        ("andromeda", "andromeda", "this machine"),
+        ("perseus", "andromeda", "declared"),
+        ("perseus", None, "declared"),
+        ("ghost", "andromeda", "undeclared"),
+        ("andromeda", None, "declared"),
+        ("Perseus", None, "invalid"),
+        ("perseus/levr", None, "invalid"),
+        ("", None, "invalid"),
+        ("per\x1b[2Jseus", None, "invalid"),
+        ("perseus\n", None, "invalid"),
+    ],
+)
+def test_name_host_classifies_the_text(text, self_name, kind):
+    assert name_host(text, hosts=HOSTS, self_name=self_name).kind == kind
+
+
+def test_name_host_keeps_the_text_it_classified():
+    assert name_host("ghost", hosts=HOSTS, self_name=None).name == "ghost"
+
+
+@pytest.mark.parametrize("text", ["Perseus", "per.seus", "-perseus", "", "a b"])
+def test_name_host_applies_the_rule_parse_target_applies_to_a_host(text):
+    with pytest.raises(TargetError) as expected:
+        parse_target(f"{text}/main")
+    assert name_host(text, hosts=HOSTS, self_name=None).problem == str(expected.value)

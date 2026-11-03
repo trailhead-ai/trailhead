@@ -19,7 +19,13 @@ CLI's stdout file already held at that moment.
 - Opt-in: a declared host absent from `env_hosts` is never contacted and is named on the
   `not opted in:` line; with every declared host opted in, no such line appears.
 - Self: `env_hosts` entry and `[hosts.*]` table named as `self_name` cause no ssh call, no second block.
-- Refusals: undeclared `env_hosts` entry, extra argument, `--host`, bare `env`, unknown subcommand.
+- Refusals: undeclared `env_hosts` entry, `--bogus`, `--host`, bare `env`, unknown subcommand.
+- Naming one host (`env ls HOST`), one test per state: no environments, one environment, many
+  environments, unreadable, timed out, Docker not running / not installed, not declared (undeclared
+  name, host-rule text, escape and newline text, each with and without something attached; nothing
+  read), is this machine (`local` and the self_name, never over ssh even with a `[hosts.<self_name>]`
+  table). A declared host outside `env_hosts` is read and no other machine is; the `attached:`
+  lines open the output and no `not opted in:` line follows; two hosts get the usage refusal.
 - Interrupt: SIGINT to the CLI's process group, and to its pid alone, mid-listing: exit 130 within a
   couple of seconds, stderr exactly `camp env: interrupted`, no traceback, the block already printed
   is still on stdout, and no stub child is left running.
@@ -43,6 +49,8 @@ from pathlib import Path
 
 import pytest
 
+from .env_ssh_stub import AttachRig, attached_rig, wait_for
+
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
@@ -65,6 +73,7 @@ fi
 _DOCKER_STUB = """#!/bin/sh
 me=docker
 """ + _RENDEZVOUS + """
+echo called >> "$STUB_DIR/docker.log"
 [ -f "$STUB_DIR/docker.stdout" ] && cat "$STUB_DIR/docker.stdout"
 [ -f "$STUB_DIR/docker.stderr" ] && cat "$STUB_DIR/docker.stderr" >&2
 [ -f "$STUB_DIR/docker.exit" ] && exit "$(cat "$STUB_DIR/docker.exit")"
@@ -161,6 +170,11 @@ class Rig:
     def ssh_calls(self) -> list[str]:
         log = self.root / "ssh.log"
         return log.read_text().split() if log.exists() else []
+
+    @property
+    def docker_calls(self) -> int:
+        log = self.root / "docker.log"
+        return len(log.read_text().split()) if log.exists() else 0
 
     def stdout_at_first_call(self, destination: str) -> str:
         return (self.root / f"stdout-at-call.{destination}").read_text()
@@ -645,7 +659,6 @@ def test_a_malformed_hosts_file_refuses(rig: Rig) -> None:
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
-        (["extra"], "camp env ls: "),
         (["--bogus"], "camp env ls: "),
         (["--host", "perseus"], "camp env: --host has no meaning here\n"),
     ],
@@ -661,13 +674,262 @@ def test_ls_refuses_any_argument(rig: Rig, extra: list[str], message: str) -> No
     assert "Traceback" not in result.stderr
 
 
+# -- camp env ls HOST ------------------------------------------------------------------------------
+
+ONE_HOST = 'env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
+
+
+@pytest.mark.parametrize("opted_in", [True, False], ids=["opted-in", "not-opted-in"])
+def test_named_host_with_no_environments(rig: Rig, opted_in: bool) -> None:
+    rig.hosts_file(ONE_HOST if opted_in else TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(PERSEUS, stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "perseus\n  no environments\n"
+
+
+def test_named_host_with_one_environment(rig: Rig) -> None:
+    rig.hosts_file(ONE_HOST)
+    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "perseus\n  levr  main  running\n"
+
+
+def test_named_host_with_many_environments(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(
+        PERSEUS,
+        stdout=_records(
+            ("levr", "main", "running"), ("alpha", "zz", "exited"), ("levr", "ben-feature", "paused")
+        ),
+    )
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "perseus\n  alpha  zz           stopped\n  levr   ben-feature  stopped\n  levr   main         running\n"
+    )
+
+
+def test_named_host_unreadable(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"|""\n')
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("perseus\n  unreadable: ")
+    assert result.stdout.count("\n") == 2
+    assert "sneaky" not in result.stdout
+
+
+def test_named_host_timed_out(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from camp.cli import dispatch
+    from camp.env import read
+
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, sleep=10)
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls", "perseus"])
+
+    dispatch.main()
+
+    assert capsys.readouterr().out == "perseus\n  unreadable: no answer within 1s\n"
+
+
+@pytest.mark.parametrize(
+    ("stderr_fixture", "line"),
+    [
+        ("env_read_perseus_tailscale_daemon_tcp.stderr", "Docker is not running"),
+        ("env_read_perseus_tailscale_unknown_command.stderr", "Docker is not installed"),
+    ],
+    ids=["without-docker-running", "without-docker-installed"],
+)
+def test_named_host_without_docker_running(rig: Rig, stderr_fixture: str, line: str) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, stderr=(FIXTURES / stderr_fixture).read_text())
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"perseus\n  {line}\n"
+
+
+def test_named_host_not_declared_is_refused_naming_the_file_and_declared_hosts_and_reads_nothing(rig: Rig) -> None:
+    hosts = rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", "ghost")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == f"camp env: no host named ghost in {hosts}; declared: perseus, toms-macbook-pro\n"
+    assert rig.ssh_calls == []
+    assert rig.docker_calls == 0
+
+
+@pytest.mark.parametrize("text", ["Perseus", "perseus/levr"])
+def test_named_host_not_declared_with_text_breaking_the_host_rule_is_refused_reading_nothing(
+    rig: Rig, text: str
+) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", text)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(
+        "camp env: the host is not a valid host name: host names must be lowercase letters, digits and -"
+    )
+    assert rig.ssh_calls == []
+    assert rig.docker_calls == 0
+
+
+@pytest.mark.parametrize("text", ["per\x1b[2Jseus", "per\nseus", "per‮seus"], ids=["escape", "newline", "bidi"])
+def test_named_host_not_declared_with_control_characters_reaches_stderr_without_them(rig: Rig, text: str) -> None:
+    rig.hosts_file(TWO_PEERS)
+
+    result = rig.run("env", "ls", text)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "host names must be" in result.stderr
+    assert "\x1b" not in result.stderr and "‮" not in result.stderr
+    assert "seus\n" not in result.stderr.replace("host names", "")
+    assert rig.ssh_calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["ghost"], ["Perseus"], ["perseus", "toms-macbook-pro"]],
+    ids=["undeclared", "host-rule", "two-hosts"],
+)
+def test_named_host_not_declared_with_an_attachment_present_still_prints_nothing_on_stdout(
+    tmp_path: Path, args: list[str]
+) -> None:
+    rig = AttachRig(tmp_path)
+    try:
+        attached_rig(rig, host="perseus")
+        rig.decoy_forward("a" * 12)
+        wait_for(lambda: rig.tagged_pids())
+        assert rig.camp("env", "ls", "perseus").stdout.startswith("attached: perseus/levr/other on ports ")
+
+        result = rig.camp("env", "ls", *args)
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr.startswith("camp env: ") or result.stderr.startswith("usage: camp env ls [HOST]")
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize(
+    ("name", "hosts", "heading"),
+    [
+        ("local", "", "this machine"),
+        ("local", 'self_name = "andromeda"\n', "this machine (andromeda)"),
+        ("andromeda", 'self_name = "andromeda"\n', "this machine (andromeda)"),
+        (
+            "andromeda",
+            'self_name = "andromeda"\n[hosts.andromeda]\nssh = "tduffield@andromeda"\n',
+            "this machine (andromeda)",
+        ),
+        (
+            "local",
+            'self_name = "andromeda"\n[hosts.andromeda]\nssh = "tduffield@andromeda"\n',
+            "this machine (andromeda)",
+        ),
+    ],
+    ids=["local", "local-with-self-name", "self-name", "self-name-declared", "local-with-self-name-declared"],
+)
+def test_named_host_is_this_machine_read_through_docker_never_ssh(
+    rig: Rig, name: str, hosts: str, heading: str
+) -> None:
+    rig.hosts_file(hosts)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+
+    result = rig.run("env", "ls", name)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{heading}\n  levr  main  running\n"
+    assert rig.ssh_calls == []
+
+
+def test_a_named_declared_host_outside_env_hosts_is_read_and_no_other_machine_is(rig: Rig) -> None:
+    rig.hosts_file('env_hosts = ["toms-macbook-pro"]\n' + TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(MACBOOK, stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.ssh_calls == [PERSEUS]
+    assert rig.docker_calls == 0
+    assert result.stdout == "perseus\n  levr  main  running\n"
+
+
+def test_named_host_listing_opens_with_the_attached_lines_and_has_no_not_opted_in_line(tmp_path: Path) -> None:
+    rig = AttachRig(tmp_path)
+    try:
+        env = attached_rig(rig, host="perseus")
+        rig.declare_hosts("perseus", "toms-macbook-pro", opted_in=())
+        rig.host_inventory("perseus", env)
+        rig.decoy_forward("b" * 12)
+        wait_for(lambda: rig.tagged_pids())
+
+        result = rig.camp("env", "ls", "perseus")
+
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        assert lines[0].startswith("attached: perseus/levr/other on ports ")
+        assert lines[1:] == ["perseus", "  levr  main  running"]
+        assert rig.inventory_reads() == ["tduffield@perseus"]
+    finally:
+        rig.close()
+
+
+def test_two_named_hosts_get_the_usage_refusal(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus", "toms-macbook-pro")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == "usage: camp env ls [HOST]\n"
+    assert rig.ssh_calls == []
+
+
+def test_named_host_is_refused_when_the_hosts_file_is_unusable(rig: Rig) -> None:
+    rig.hosts_file("this is = = not toml\n")
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("camp env: ")
+
+
 @pytest.mark.parametrize("args", [[], ["frobnicate"]])
 def test_bare_env_and_unknown_subcommand_print_one_usage_line(rig: Rig, args: list[str]) -> None:
     result = rig.run("env", *args)
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == "usage: camp env ls | attach TARGET | status | detach\n"
+    assert result.stderr == "usage: camp env ls [HOST] | attach TARGET | status | detach\n"
 
 
 def test_camp_help_lists_the_verb(rig: Rig) -> None:
