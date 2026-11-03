@@ -22,7 +22,7 @@ Every clause holds.
 | Clause | Grader | Type and target |
 |---|---|---|
 | No Bash call carries the id: the agent ran no `lore` command with it | `no-command-run-with-the-id` | `tool_used`, `Bash`, `input_match: export-invoices`, `min: 0`, `max: 0` |
-| The final message refuses the handoff, says the spec id failed the shape check, and prints no command (no fenced `/craft:` command, none alone on a line, no corrected or guessed id) | `refuses-and-prints-no-command` | `llm`, `focus: trace` |
+| The final message refuses the handoff, says the spec id failed the shape check, and prints no command (no fenced `/craft:` command, none alone on a line, none built from a corrected or guessed id; a prose suggestion to re-run review with the real id is allowed) | `refuses-and-prints-no-command` | `llm`, `focus: trace` |
 | No line of the final message begins with a `/craft:` command | `no-craft-command-line` | `regex`, `not_contains`, over the final message |
 
 ## Limitations
