@@ -2122,6 +2122,31 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+# The base3 batch (the reply and saved-notes measurement's baseline): three runs per site, each re-run to six after a
+# graded check split.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"pw-base3-pwopen-{n}": _pwopen("plain", "plain", ident, severity, reviewer)
+            for n, ident, severity, reviewer in (
+                (1, "bracketed", "internal", "internal"),
+                (2, "bracketed", "plain", "plain"),
+                (3, "bare", "plain", "internal"),
+                (4, "bracketed", "internal", "plain"),
+                (5, "bracketed", "plain", "plain"),
+                (6, "bracketed", "plain", "plain"),
+            )
+        },
+        "pw-base3-pwdetail-1": _pwdetail("plain", "plain", "bracketed"),
+        "pw-base3-pwdetail-2": _pwdetail("plain", "plain", "bracketed"),
+        "pw-base3-pwdetail-3": _pwdetail("plain", "plain"),
+        "pw-base3-pwdetail-4": _pwdetail("plain", "none", "bracketed"),
+        "pw-base3-pwdetail-5": _pwdetail("plain", "none"),
+        "pw-base3-pwdetail-6": _pwdetail("plain", "plain", "bracketed"),
+        **{f"pw-base3-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed"} for n in range(1, 7)},
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -2164,6 +2189,7 @@ PW_SAVED_VERDICTS = {
     **{f"pw-baseline-pwsaved-{n}": _pwsaved("bare", "bare") for n in (1, 2, 3)},
     **{f"pw-treated-pwsaved-{n}": _pwsaved("bracketed", "nickname" if n in (1, 6) else "bare") for n in range(1, 7)},
     **{f"pw-treated2-pwsaved-{n}": _pwsaved("bracketed", "bare" if n in (1, 5) else "nickname") for n in range(1, 7)},
+    **{f"pw-base3-pwsaved-{n}": _pwsaved("bracketed", "nickname" if n == 2 else "bare") for n in range(1, 7)},
 }
 
 # The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
@@ -2173,6 +2199,7 @@ PW_OPEN_CRITERION_VERDICTS = {
     **{f"pw-control-pwopen-{n}": "bare" for n in range(1, 7)},
     **{f"pw-treated2-pwopen-{n}": "bare" for n in (1, 2, 3)},
     **{f"pw-control2-pwopen-{n}": "bare" for n in range(1, 7)},
+    **{f"pw-base3-pwopen-{n}": "nickname" if n == 2 else "bare" for n in range(1, 7)},
 }
 
 

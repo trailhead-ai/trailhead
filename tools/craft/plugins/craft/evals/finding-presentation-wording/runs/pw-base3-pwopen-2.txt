@@ -1,0 +1,45 @@
+**The spec review (gauntlet): telescope loan desk for the Hollin Hill astronomy club**
+`maturity: production (basis: stamp)`. No concerns waived.
+
+**What the passes found.** Most findings come back to the complaint behind this spec: nobody can tell who had a telescope when its mirror was scratched. Two gaps leave that complaint open. A telescope can show as free on the loan calendar before anyone has looked at it. And the emails the loan depends on can fail without anyone finding out. The other findings are about things the spec names but never settles:
+- the promise in Objectives that a member can "see where the loan stands"
+- how a waiting-list offer is recorded and closed
+- which clock the 48-hour cancellation window runs on
+- who may cancel a loan or read a condition note
+
+**Whether it holds.** The failure-cases pass raised the strongest finding: a telescope goes back on the calendar before anyone has checked it (C1). It hits the scratched-mirror complaint directly. The same pass rated the undelivered-email problem as worth fixing. I raised it to a decision (C2), because this spec is at production maturity and nobody is told when that failure happens.
+
+Two findings went too far, and I moved both from "needs your decision" to "worth fixing, your call":
+- The ease-of-use pass said nobody tells the member about the finder cap. But the reminder sent two days before the return date (AC5) already lists the finder cap among the things that go back in the case.
+- The right-problem pass suggested lending by the night. That depends on how often members want a single night, which the spec doesn't say, and the Problem's own example is a weekend.
+
+The fact check found that the club's equipment register lists seven telescopes, not six. Nothing in the spec depends on the number. It also couldn't verify the 48-hour cancellation rule, but that came from how I sorted the claims: the rule is something the spec requires, not a claim about what the club does today.
+
+Independent passes agreed on three more findings, which makes them the strongest of the worth-fixing group:
+- Self-consistency and ease of use both found that no criterion lets a member see where a loan stands.
+- Self-consistency and buildability both found that a waiting-list offer is never recorded or closed.
+- Left-undecided and failure cases both found that the 48-hour clock isn't pinned.
+
+**What to do.** Make both fixes below in the spec now. They're already drafted, and with them in place the spec advances. Of the rest, I'd settle the "see where the loan stands" promise before planning, either by adding a criterion or by dropping the words, and correct six telescopes to seven. Both are your call.
+
+**Recommended outcome:** advance to `ready` this round, once both fixes are in the spec.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *A telescope goes back on the calendar before anyone has checked it* (C1) | fixed in the spec | *rewrite the criterion that the loan officer records the telescope as back with a condition note (AC4): the telescope shows as free only once the note is recorded, and as "not yet checked in" until then* |
+| *A confirmation or reminder sent to a mistyped address fails with nobody told* (C2) | fixed in the spec | *add a criterion that an undeliverable confirmation or reminder is shown to the loan officer, with the loan and the address that failed (AC7)* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call: 9.** In order of priority:
+1. No criterion lets a member see where a loan stands.
+2. A waiting-list offer is never recorded or closed.
+3. The 48-hour clock isn't pinned.
+4. The spec doesn't say who may cancel a loan or read condition notes.
+5. It doesn't say whether one member may hold two telescopes on the same dates.
+6. It doesn't say whether loan history is stored or worked out from events.
+7. The confirmation email doesn't list what goes back in the case (moved down, since the reminder already lists it).
+8. Lending by the night instead of by date (moved down, since it depends on guessing how members borrow).
+9. The six criteria are a bigger build than the double-booking complaint needs.
+
+**Rough edges, nothing to decide: 3.** The club has seven telescopes, not six. "Loan calendar" and "loan history" are two pages, and the spec never says what each one is. The confirmation email shows which dates a telescope is already taken.
