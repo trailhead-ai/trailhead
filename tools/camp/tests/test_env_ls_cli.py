@@ -659,6 +659,7 @@ def test_a_malformed_hosts_file_refuses(rig: Rig) -> None:
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
+        (["extra"], "camp env: no host named extra in "),
         (["--bogus"], "camp env ls: "),
         (["--host", "perseus"], "camp env: --host has no meaning here\n"),
     ],
