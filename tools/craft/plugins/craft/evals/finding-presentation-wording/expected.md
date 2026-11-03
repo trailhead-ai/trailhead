@@ -5558,3 +5558,93 @@ above. Under the ruling the revert is undone in one commit: `skills/gauntlet/SKI
 (fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`), the copy the treated3 batch measured, and the live arm is
 rebuilt from it. With the miss residual, the AC27 and AC28 treated3 readings stand as met, subject to the slice-close
 real runs. A follow-up tracks the guard rule's sensitivity, since a 1 of 6 against 2 of 6 difference can trigger a revert.
+
+## Reading fields for the two real spec reviews at slice close, fixed before either run (2026-11-03)
+
+Committed before either real run; nothing in this block is edited afterwards. Nothing above this heading is rewritten.
+Two real spec reviews are run on this branch's craft plugin (the reworded G3, `skills/gauntlet/SKILL.md` at fingerprint
+`09584f7a2daf22740999ff2eef4efd74a7d3f438`, checked before the first run), each against a made-up draft spec,
+`fixtures/pw-realrun3-spec.md`, held as a `draft` spec record in its own throwaway vault, in a session that loads only the
+branch's craft plugin (`--plugin-dir`, `--setting-sources project`). The spec has six criteria, one of them long and
+multi-sentence (the second sentence names a condition under which a message is not sent again, the third a combined
+message), and a domain that shares no vocabulary with the `pw-*` fixtures or the skill's worked example. Each run is read
+by script and by eye, once, against the fields below. It closes no criterion alone: AC27 and AC28 close or stay open on
+the treated3 batch and these runs are the check that the batch's reading survives a real, longer spec. The readings are
+of the reader-facing text, as the case's grammar reads it (logical lines outside fenced blocks); the saved section and
+the stamp keep their stored terms by design and are read only where a field names them.
+
+**The turn sequence, up to the artifact the fields read.** The review's own flow is: it presents; the operator asks;
+the operator replies with an override; the review echoes the post-override table and asks for "go"; the operator says
+"go"; the review writes one `## Gauntlet` section onto the spec. So the sequence per run is:
+
+- (a) the first prompt starts the spec review on the record, and the session's final text block of that turn is the
+  opening deliverable;
+- (b) "show me the full detail of every finding that needs my decision", read as the detail view;
+- (c) the override reply: "accept C<n> as a risk: <a reason in plain words that cites a sentence in the made-up spec>,
+  otherwise go". `C<n>` is fixed by position, before the run: the first finding shown in the opening deliverable's list
+  of findings that need a decision in run 1, the second in run 2. If the opening shows fewer than that, the first;
+  if it shows none, the override cannot be staged, which is recorded and reported, and nothing is invented;
+- (d) if the session ends turn (c) with a re-presented table awaiting "go", one bare "go" per such turn, at most two;
+- (e) the saved section is read back from the throwaway vault with `lore record show`, once the spec is `ready` and a
+  `## Gauntlet` section is on it. A run whose saved section is not on the record after (d) is reported unread, not
+  repaired.
+
+**Which text each field reads.** The opening deliverable is the final text block of turn (a). The detail view is the
+final text block of turn (b). Turn (c) and any turn (d) are read at their echoed post-override table and at the written
+section. Earlier narration blocks of a turn (before the passes return) are recorded as a separate observation and decide
+nothing.
+
+1. **Bare ids in the detail view's prose (AC27).** In the reader-facing text of turn (b), every finding id sits in round
+   brackets after words naming the finding, alone or in a list, or is the id in a complete reply form with its colon
+   ("answer C<n>:", "dispute C<n>:", "accept C<n> as a risk"). A second mention of a finding in the same sentence or later
+   points back in words with the id after. Script: `finding-id` on turn (b)'s text, `bracketed` or `bare`; by eye: list
+   each bare id with its line and say which form it takes (a "C1's change", a colon-less reply, a table cell). The same
+   check is run on turn (a) and turn (c)/(d) text and recorded, and on the saved detail with `--saved-detail`.
+2. **Criteria in the saved section (AC28), each criterion read for its first mention and its point-backs.** For every
+   criterion the saved detail names: its first mention gives all of the criterion's text with its number after in round
+   brackets, either word for word or restated whole where the text is long, and an opening-words-only mention does not
+   count; after that, a few words point back to it with the number after. A bare number, a short name standing in for the
+   first mention, and a fix line that says only "AC<n> would ..." are misses. By eye, per distinct criterion: first
+   mention `whole`, `part` or `bare`, and its point-backs `back` or `bare`. **The long criterion is read separately,
+   whole text or not, on its first mention in each run**; by eye the reader says whether each of its three sentences'
+   conditions is present in that first mention. Script: `criterion-mention --criteria fixtures/pw-realrun3-spec.md
+   --saved-detail`, `text-with-number` or `nickname` or `bare`; it is a word-overlap reading, so where script and eye
+   disagree both are recorded and the eye reading is the one the run is read by.
+3. **Outcome words (AC26).** Reader-facing text of every turn and the echoed tables: findings carry "fixed in the spec" or
+   "needs a rewrite", and an override is written in the words the review accepts as a reply; no backticked `resolved`,
+   `revise`, `accepted-as-risk`, `disputed` or `answered`, and no whole-word `resolved` or `revise` on a line holding a
+   finding id. Script: `outcome-word`, `plain`, `internal` or `none`. `internal` is recorded against AC26, which the
+   treated rounds closed; it is not a stop.
+4. **The final outcome opens each saved finding.** In the saved detail, each finding opens with its final outcome in
+   plain words, not its proposed one, and the word "proposed" does not stand in front of an outcome. The overridden
+   finding opens with the override's outcome ("accepted as a risk"), not with "fixed in the spec" or "needs a rewrite".
+   Read by eye, per finding: `final`, `proposed` or `no outcome`; recorded as a count over the section's findings. This
+   field has no script.
+5. **Stamp form.** The stamp bullet of the saved section keeps the stored form: each finding id followed by its
+   backticked term, and the override is recorded on the finding the reply named and no other (`override-mapping` with
+   `--override C<n>=accepted-as-risk:<reason>`), the marker bullet ("Retained review evidence") is printed once, first in
+   the section. Script: `stamp-form` `kept` or `changed` or `missing`, `override-mapping` `mapped` or `misapplied`.
+
+**Go or no-go.** The two runs are read as a go/no-go against the treated3 batch's readings (`pwdetail` `finding-id`
+`bracketed` 6 of 6; saved-detail `criterion-mention` `text-with-number` 3 of 3). Fields 1 to 5 are recorded with their
+counts beside those; a miss on field 1 or 2 is recorded against AC27 or AC28 and is not repaired by a re-run. A run that
+leaves its isolation (a write under the operator's own vaults, config or `~/.claude`) is a stop and is reported.
+
+**Limits, fixed in advance.** The operator's user-level rule files and `CLAUDE.md` load regardless of
+`--setting-sources`; two runs, one reader, one model tier; the throwaway vault holds one spec, so the fact pass has no
+sibling records; `Bash` is granted unrestricted, so the sandbox bounds only a cooperating session and **is not a sandbox**
+against a hostile spec. Neither is corrected for.
+
+**Isolation, checked before and after each run.** Lore reads a throwaway config and state (`LORE_CONFIG_DIR`,
+`LORE_STATE_DIR`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`) under a fresh directory and a synthetic git identity; the
+session's working directory is a fresh directory under it. `lore vault ls` under that environment lists only the
+throwaway vault; the live trailhead vault's `git status --porcelain` and HEAD, and a before and after listing with
+mtimes of `~/.claude/settings.json` and the top level of `~/.claude/projects` (contents neither read nor copied), are
+unchanged.
+
+**What is committed, as the 2026-10-21 run committed it.** The session's final presentation text of each turn and the
+saved section as `runs/pw-realrun3-<n>*.md`, and a trimmed `.init.json` with the worktree path replaced by `<worktree>`.
+The raw stream is not committed. For grading, the saved section is wrapped in one fenced block in its own file, because
+the grader reads the first fenced block holding `## Gauntlet`. Every committed file passes `scripts/capture_scan.py`
+and a search for the home path, the username, the machine name and the throwaway directory name finds nothing. The `.md`
+and `.json` extensions keep the files outside the graded `runs/*.txt` captures.
