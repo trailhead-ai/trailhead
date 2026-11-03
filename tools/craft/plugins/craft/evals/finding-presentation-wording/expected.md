@@ -5135,3 +5135,39 @@ All three pass `--append-system-prompt` inline. The earlier baseline arms are 90
 are the changes to the four sources since the earlier arms were frozen (the plan names the count rule in `rules.md`; no
 per-file breakdown was taken). The earlier arms' `ARG_MAX` of 2097152 was read on the Linux host that
 ran them; this host's value is the one recorded here, and the arms are under both.
+
+### Re-grade of every existing capture under the amended grammar (2026-11-03)
+
+Run after the 2026-11-03 registration above was committed, as that section's "Earlier verdicts" rule requires. Every
+earlier result stands under the grammar it was graded with and no earlier section is rewritten; this sub-section only
+lists what the amended grammar (the plural level name rule) reads differently.
+
+**Method.** The grader as it stood when the registration was committed (before the plural fix) and the amended grader
+were each run over every committed capture in this case's `runs/` (276 `.txt` captures, the `.stderr.txt` and `.exit`
+files excluded), with each check the capture's site runs in the capture-to-verdict table of `test_wording_grader.py`
+(749 gradings, each against its site's canned reports file), and the verdicts were compared. The plain-words captures
+(`pw-*`) were also read by every check the registered grammar defines for their sites (`review-name`, `outcome-word`,
+`finding-id` and `criterion-mention` at every site; `finding-id`, `criterion-mention`, `stamp-form` and `override-mapping`
+on the saved detail and stamp at `pwsaved`): 394 gradings. 32 captures contain a plural level name (`Importants`,
+`Minors` or `Criticals`) anywhere in their text; the count is accounted for below.
+
+**Changed verdicts: 1 of 1143 gradings.**
+
+| Capture | Check | Old verdict | New verdict |
+|---|---|---|---|
+| `pw-baseline-pwopen-2` | `severity-name` | `plain` | `internal` |
+
+The capture writes "the strongest of the Importants" and "The Importants are worth a pass" (recorded as a literal reading
+in the baseline batch above); no other check reads it differently. Of the other 31 captures with a plural level name: 14 write only `Criticals`, which the old grader already read
+`internal`; one writes `Importants` and the old grader already read it `internal` on another level word; 16 are `pwsaved`
+captures, whose registered checks do not include `severity-name` (the plural sits in the saved block's stamp, "Criticals
+dispositioned"). All 394 plain-words gradings of every other check are unchanged.
+
+**Does the flip move a closed criterion?** No. `pw-baseline-pwopen-2` is a baseline capture, and `severity-name` at
+`pwopen` is a guard, not a closing check: a criterion closes on the treated script verdict at the sites it is graded at
+(the plain-words extension's "Bars" above), so no baseline verdict and no guard verdict closed one. The flip changes the
+baseline's guard count at `pwopen` from `plain` 3 of 3 ("guard held at baseline" in the baseline batch's headroom table)
+to `plain` 2 of 3 and `internal` 1 of 3. The baseline guard reading is not rewritten there. No treated, treated2 or
+control capture in the case changes, so the slice's closed criteria (AC25, AC26) and the two partial ones (AC27, AC28)
+stand as recorded, and no follow-up task is due for a flip. `test_wording_grader.py` carries the one changed pin
+(`pw-baseline-pwopen-2` `severity-name`) and no other.
