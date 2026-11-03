@@ -7,7 +7,8 @@ description: >
   has dispositioned every draft.
   TRIGGER when: the user says "distill", "run a distill sweep", "distill this spec", "turn this into
   an ADR", "what did we decide across these specs", "close out the spec lifecycle", or invokes
-  /craft:distill explicitly; also as the handoff after a plan's work has landed and been reviewed.
+  /craft:distill explicitly; also as the handoff tidy-followups prints once a spec's follow-ups are
+  dealt with.
   DO NOT TRIGGER when: the work is still in flight (distillation is a post-hoc reading of finished
   work — the deferral rule would defer it anyway), the user wants to author a design decision BEFORE
   the work, or wants to record a single in-flight finding (both are lore's `decision` / `lesson`

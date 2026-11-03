@@ -4011,3 +4011,27 @@ The expectation that the closing report prints the re-run line alone on its own 
 Verdicts that moved against the first table, all from the final grader: `refinement-fails` r1 and r2 (old text) now fail F1, as their reports print no re-run line (reported as the old text); nothing else moved, and the
 six first-batch left-out reports still pass the stricter L1. The captures are now 27 MB over 40 runs. Cells not re-run were not measured on the shipped text; the `not-answerable` and `unclosed-fence` rows are measured by no arm,
 as no fixture builds an over-long recommended answer or an unclosed fence. The craft scripts were not frozen with the skill: the script fixes made after the first batch (the display-equality refusal in `answer --recommended`, the fence handling in `check`) post-date it, so the 11 cells not re-run ran the older `answer --recommended` and `check`; `accept-recommended` was not re-run although its write path gained the display-equality refusal; and the fixes of the last pass (an unclosed fence hiding a section from `check`, a recommended answer or a question that sanitizes to nothing) post-date the second batch too. The scripts' own tests pin them; no arm measured them, and none is re-run, as the skill's words are unchanged and these are deterministic script behaviours. See `expected.md` for the disclosures on L1's reason line and A1's "may carry one" clause.
+
+## Case: routing of tidy, clean-up, fix-up-list and distill requests
+
+Four runner cases, each `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--runs 3`, no scaffold, graded by two `tool_used` graders on the `Skill` tool (the expected skill `min: 1`, the confusable skill `min: 0` and `max: 0`). Pre-registered in `expected.md` before any run.
+
+| Case | Expected skill | Confusable skill |
+|---|---|---|
+| `tidy-request-routes-to-tidy-followups` | tidy-followups | polish |
+| `clean-up-request-routes-to-tidy-followups` | tidy-followups | polish |
+| `fix-up-list-routes-to-polish` | polish | tidy-followups |
+| `distill-request-routes-to-distill` | distill | tidy-followups |
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC46 (a request to tidy a spec's recorded follow-ups routes to this ritual) | held: baseline 3 of 3 for the tidy case and 3 of 3 for the clean-up case on the unedited prose, so both are guards, not detectors; 3 of 3 each after the distill description edit | `tidy-request-routes-to-tidy-followups`, `clean-up-request-routes-to-tidy-followups` |
+| AC47 (a request to work through a list of in-session code fix-ups still routes to the polish ritual) | held: baseline 3 of 3 and 3 of 3 after the edit; a guard | `fix-up-list-routes-to-polish` |
+
+**Baseline.** All four cases were green 3 of 3 on the current prose, so polish and tidy-followups were not confused and polish's description was not edited. `distill-request-routes-to-distill` was 3 of 3 before and 3 of 3 after the distill description edit (the handoff clause now names tidy-followups).
+
+**Discrimination check.** The graders of `tidy-request-routes-to-tidy-followups` and `fix-up-list-routes-to-polish` were swapped (each expecting the other skill): both went 0 of 3, every grader failing. The graders were restored and match the registered files exactly.
+
+**Not measured.** One phrasing per case, one model tier, three runs; the signal is the first skill invoked, not what the ritual then did. Cost: baseline 3.99 USD, discrimination check 1.93 USD, final runs 3.98 USD (about 9.9 USD in all). The run traces were not kept.
