@@ -122,8 +122,8 @@ ended — it has when the spec carries `craft/slice-loop=complete` or `craft/sli
 ```
 
 **The slice loop has ended:** hand off to tidy-followups, bare and fenced on its own line, so the
-spec's recorded follow-ups are weighed before it is distilled. Never `/craft:distill` — tidy-followups
-prints the build and distill commands once it is done:
+spec's recorded follow-ups are weighed before it is distilled. Never `/craft:distill` —
+tidy-followups prints the build and distill commands once it is done:
 
 > "The slice loop for spec/streaming-export has ended. Run this to choose which of its follow-ups to
 > do now; it hands you the distill command after."
@@ -134,11 +134,12 @@ prints the build and distill commands once it is done:
 
 When the loop *stopped* early (`craft/slice-loop=stopped`), the handoff is the same fenced
 tidy-followups command, plus one prose line — not a second fenced command — saying the slice ritual
-can be re-run once the blocker clears (for example: "Once the blocker is cleared, re-run `/craft:slice`
-on this spec to pick up the unmet criteria.").
+can be re-run once the blocker clears (for example: "Once the blocker is cleared, re-run
+`/craft:slice` on this spec to pick up the unmet criteria.").
 
 **Check the spec id before printing it.** It must match `^[A-Za-z0-9._/-]+$`. If it does not, refuse
-the handoff and say the spec id failed the shape check, rather than printing a command built from it.
+the handoff and say the spec id failed the shape check, rather than printing a command built from
+it.
 
 **This handoff is carryoutable.** `tidy-followups/SKILL.md` accepts exactly the shapes it is handed
 here — a spec carrying a completed or stopped `craft/slice-loop` marker, or one at status `complete`

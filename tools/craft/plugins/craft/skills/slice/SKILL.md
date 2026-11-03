@@ -656,11 +656,10 @@ On the termination path, report the spec complete (or the early stop and what re
 end with its own fully formed next command, never the selection path's `/craft:plan` handoff — the
 operator must always know what to run next:
 
-- **Spec complete:** hand off to tidy-followups, fully formed, bare and fenced on its own line,
-  with a one-line reason: tidy-followups decides which of the spec's follow-ups to do now, and
-  prints the distill command after. Do not print `/craft:distill` here — e.g. "Run this next:
-  tidy-followups decides which of this spec's follow-ups to do now, then prints the distill
-  command":
+- **Spec complete:** hand off to tidy-followups, fully formed, bare and fenced on its own line, with
+  a one-line reason: tidy-followups decides which of the spec's follow-ups to do now, and prints the
+  distill command after. Do not print `/craft:distill` here — e.g. "Run this next: tidy-followups
+  decides which of this spec's follow-ups to do now, then prints the distill command":
 
   ```
   /craft:tidy-followups spec/streaming-export
