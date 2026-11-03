@@ -1,0 +1,21 @@
+The spec is two-thirds delivered: 8 of the 12 acceptance criteria are done according to the end-of-week-8 note, and the other 4 haven't been started.
+
+**Done**
+- A member can book a place from the events page, up to the evening before (AC1).
+- Each day has twelve places, and a thirteenth booking is refused with a message saying the day is full (AC2).
+- A member who cancels at least a week ahead is refunded in full, by card or cheque (AC3).
+- A booked member gets one reminder the evening before, saying where to meet and when the day starts (AC4).
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up the metres built, by site and by year (AC6).
+- The booking confirmation tells the member which boots and gloves to bring (AC10).
+- A member who has attended can download a certificate showing the training days they completed (AC12).
+
+**Not started**
+- The refunds table, showing each refund paid with the amount and date (AC7).
+- Downloading each of the tables as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page, showing all the tables together with the year at the top (AC9).
+- Recording an injury reported on the day, with the insurer's form filled in from the booking (AC11).
+
+**How firm "done" is:** only the booking work and the two tables are reported as checked, with test members and against the 2024 days respectively. The note says the boots and gloves confirmation is done and certificates are "in", but mentions no checks for either, so I'd treat those two as less certain.
+
+**What's left:** the whole Trustee reports section is the main gap. The refunds table should come first, since the spreadsheet download and the annual summary page both cover all the tables. The injury recording stands alone. The spec's Slices section is also empty, so nothing there says how the remaining work is split up.

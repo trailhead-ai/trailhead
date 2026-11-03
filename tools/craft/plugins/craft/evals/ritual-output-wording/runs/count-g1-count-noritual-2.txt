@@ -1,0 +1,10 @@
+Six of the seven acceptance criteria still have something left. Only the late fee is finished: it's charged per item at the category rate and capped at the replacement price (AC2).
+
+- **A borrower whose loan passes its due date is shown as overdue on the desk screen within one minute of the date rolling over (AC1):** the flag works, but it was only seen the morning after, so someone still needs to confirm it appears within a minute of midnight.
+- **A borrower owing more than ten pounds in late fees cannot check out further items until the balance is cleared or a librarian overrides (AC3):** the block and clearing it by payment both work, but the note doesn't show the librarian override releasing the block, so that still needs building or demonstrating.
+- **A librarian override records who granted it and the reason given, and shows in the borrower's history (AC4):** not started, so all of it is left.
+- **Returning an overdue item stops the fee from growing the same day, even if the return is scanned after closing time (AC5):** not started, so all of it is left, including the after-closing case.
+- **A borrower receives one reminder message three days before a due date and one on the day after, and no other automatic messages about the same loan (AC6):** the three-days-before message still has to be built, and someone needs to check that each loan gets exactly those two messages and nothing else.
+- **The monthly fees report lists each category's total charged and total waived, and the two totals reconcile with the per-borrower ledgers (AC7):** not touched, so both the report and the reconciliation are left.
+
+The first two and the "no other messages" part of the reminders are my reading of what the status note doesn't claim, not gaps it reports. They may already work, but nothing in the note shows that.

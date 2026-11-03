@@ -1,0 +1,28 @@
+**Chosen slice: The year-end slice**
+
+You will be able to download the year's attendance, wall-length and refunds tables as spreadsheets and see them together on the annual summary page, and members' booking confirmations will tell them which boots and gloves to bring. Try it: once it's built, open the annual summary page, check the year at the top and download each table, then book a test place and read the confirmation.
+
+**Fully covered (seven criteria):**
+
+Trustee reports:
+- The attendance table shows every training day of the year with how many members came (AC5).
+- The wall-length table adds up the metres built, by site and by year (AC6).
+- The refunds table shows each refund paid, with the amount and the date (AC7).
+- Each of the tables can be downloaded as a spreadsheet for the trustees' meeting (AC8).
+- The annual summary page shows all the tables together, with the year at the top (AC9).
+
+Kit and injuries:
+- The booking confirmation tells the member which boots and gloves to bring on the day (AC10).
+- An injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11).
+
+**Partially covered:** none. This slice makes no criterion only partly green.
+
+**Left once this slice is built:** all four of four in Booking and cancelling, none of five in Trustee reports, none of two in Kit and injuries, and one of one in Certificates. That remainder is booking, the place limit, cancellation refunds and the reminder, plus the members' certificates. No criteria are left partly covered.
+
+**Visual surface:** this slice touches no visual surface beyond the summary page the trustees already see, so no enumerated states apply.
+
+**Value claim:** the trustees get the year's attendance, wall length and refunds as tables they can download and a summary page that shows them together. A member's booking confirmation tells them what to bring and what happens if they are hurt. The trustees' meeting no longer waits on hand-built figures.
+
+The parent task `task/the-year-end-slice` has not been written yet, so this slice can still be rejected at no cost.
+
+AC5, AC6, AC7, AC8, AC9, AC10, AC11

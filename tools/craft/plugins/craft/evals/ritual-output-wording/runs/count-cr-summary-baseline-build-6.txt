@@ -1,0 +1,18 @@
+**The run is not closed: `task/the-trustee-tables-slice` stays `in-progress`.** The observation gate exited 1 and refused the close because no observation is recorded for "Each of the tables can be downloaded as a spreadsheet for the trustees' meeting" (AC8). Phase 6's tick is withheld, and the run stops here.
+
+- **simplify:** no changes
+- **correctness:** SHIP, 0 findings
+- **security:** skipped — no trigger
+- **state-coverage:** parent 3, doc 3, missing 0
+- **criterion-observations:** covered 8, observed 7, missing AC8
+- **push:** 1 repo pushed
+- **metrics:** 4 tasks, 8 dispatches (2.0/task), 51m wall clock, 1 lesson written, 0 lessons consumed
+- **measurement tally:** no Critical or Important findings, so nothing to cite; not yet written to the parent because the close was refused
+
+To finish, the spreadsheet download needs real evidence and a well-formed line for it under the parent's `## Criterion observations`. Phase 6 can then be run again.
+
+No PR was opened — that call is yours. Until the close goes through, that spreadsheet download remains unconfirmed. Run this when you're ready:
+
+```
+/portage:pull_request
+```

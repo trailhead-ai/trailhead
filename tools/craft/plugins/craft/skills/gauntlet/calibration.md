@@ -31,9 +31,10 @@ shaped to avoid:
 - **The adjudicator is a reviewer, not a router.** Consolidation, spot-verification, and the single
   recommendation built out of them are the job. Thirty findings forwarded verbatim is a failed
   adjudication.
-- **The compound-criterion Critical bar (step 4, item 5) is covered by a manual eval, not CI.** CI
-  runs `ruff` and `pytest` and invokes no eval, so a green suite says nothing about whether this
-  bar, or the consistency-auditor check it depends on, still detects a compound criterion — a
-  passing test run is a one-time gate, not a standing signal. An edit to either this bar or that
-  check should re-run the adjudication arm before trusting the change; see
-  `tools/craft/MANUAL-EVAL.md` for how an arm is dispatched.
+- **The compound-criterion Critical bar (step 4, item 5) has no standing gate.** CI runs `ruff` and
+  `pytest`, which say nothing about whether this bar, or the consistency-auditor check it depends
+  on, still detects a compound criterion. The only case that measures it is a legacy hand-shaped
+  case: the plugin eval runner does not run it and the push gate does not gate it
+  (`_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`). An edit to this bar or that
+  check is unmeasured until that case is ported to a runner shape, per `docs/eval-protocol.md`;
+  `tools/craft/MANUAL-EVAL.md` holds its logged results.

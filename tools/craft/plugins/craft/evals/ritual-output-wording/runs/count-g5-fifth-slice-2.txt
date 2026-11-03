@@ -1,0 +1,17 @@
+You will be able to check in a returned item that has a hold on it and have it set aside for the first borrower in its queue, with that borrower told when to collect it by. Try it: check in an item with holds queued against it, then confirm that it will be set aside for the first borrower rather than returned to the open shelf, and that this borrower will receive one message naming the pickup deadline.
+
+**The hold shelf slice** is the next slice for `spec/holds-and-pickup`.
+
+**Fully covered:** this slice makes two criteria green:
+- When a held item is returned, it is set aside for the first borrower in its queue and shown as on the hold shelf (AC5).
+- The first borrower is sent one message that the item is waiting, naming the pickup deadline (AC6).
+
+**Partly covered:** none. This slice makes no criterion only partly green.
+
+**Left after this slice:** two of four in Placing a hold, one of three in Filling a hold, and three of three in Collecting at the desk. One of the two left in Placing a hold is already partly covered by an earlier slice: a borrower can hold at most five items at once, and a sixth hold is refused with a message saying why (AC2).
+
+**Visual surface:** none. The slice changes what the system does when an item comes back and which message goes out. It adds or changes no screen, so no enumerated states apply.
+
+**Value claim:** held items stop going back onto the open shelf, because each one is kept for the borrower next in line, and that borrower gets a single message with the deadline for collecting it.
+
+AC5, AC6

@@ -2,27 +2,20 @@
 
 Behavioural eval cases for lore's own prose — the vault CLI, its record taxonomy, and the librarian/investigator agents.
 
-Each case is a directory here:
+Each case is a directory here, run by `claude plugin eval` against a throwaway vault the
+case seeds for itself. The generic case shape, how to write and run one, and the sandbox
+are in `docs/eval-protocol.md` — read it before adding a case. Results go in
+`tools/lore/MANUAL-EVAL.md`.
 
-```
-<case-name>/
-    expected.md      the pass condition, written BEFORE any arm is run
-    fixtures/        self-contained inputs the run is pointed at
-    arms/            optional: edited prose copies, for a treatment arm
-```
+## Runner cases and legacy cases
 
-The authoring rules, the dispatch shape, and the trust boundary on the
-instructions path are in `docs/eval-protocol.md` — read it before adding a case.
-Results go in `tools/lore/MANUAL-EVAL.md`.
+**Runner cases** carry a `case.yaml`; the layout below is what lore's seeded cases add to
+the protocol's case shape.
 
-## Two case shapes
-
-**Hand-dispatched** (`bash-write-gate`, `carve-out-does-not-generalise`): the shape
-above, run in session per `docs/eval-protocol.md`. Their `fixtures/` hold a script
-(`make-fixture-vault.sh`) and task prompts the operator dispatches by hand.
-
-**Runner cases**: run by `claude plugin eval` against a throwaway vault the case
-seeds for itself.
+**Legacy cases** (`bash-write-gate`, `carve-out-does-not-generalise`) have no
+`case.yaml`. The runner does not run them and the push gate does not gate them. They are
+listed in `_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, which is also
+where a case is removed once it is ported to a runner shape.
 
 ```
 <case-name>/
@@ -90,18 +83,12 @@ context:
   scaffold_script: fixtures/scaffold.sh
 ```
 
-- `runs` (1 to 50, default 3) sits at the top level of `case.yaml`; `--runs`
-  overrides it.
-- `model`, `max_turns` (default 10), `timeout_seconds` (default 300) and
-  `allowed_tools` go under `execution:` in `case.yaml`, or in `prompt.md`
-  frontmatter, which overrides `case.yaml`.
-- `allowed_tools` only lists read-only tools the case wants (`Read`, `Glob`,
-  `Grep`, `Skill`, `Agent`, ...). `Bash`, `Write` and `Edit` are removed from the
-  session unless the operator passes them with `--allow-tools`, which applies to
-  every case in the run.
-- `scaffold_script` runs in the empty workspace before the agent starts, only
-  with `--scaffold`, with `HOME` set to the run's temp home. It has a 120 second
-  limit; a non-zero exit or a timeout scores that run 0.
+The generic fields (`runs`, where `model`, `max_turns`, `timeout_seconds` and
+`allowed_tools` go, and which tools need `--allow-tools`) are in
+`docs/eval-protocol.md`, "Case shape". `scaffold_script` runs in the empty
+workspace before the agent starts, only with `--scaffold`, with `HOME` set to the
+run's temp home. It has a 120 second limit; a non-zero exit or a timeout scores
+that run 0.
 
 `prompt.md`: the body is the task, sent verbatim. Optional frontmatter:
 
@@ -167,48 +154,37 @@ glob, which makes it the grader for a record whose name the agent picks.
 
 ### Running a batch
 
+Run it only on a branch you wrote or reviewed, because `--scaffold` runs the
+case's scaffold script as you (see
+[what the sandbox does not confine](../../../../../docs/eval-protocol.md#what-the-sandbox-confines-and-what-it-does-not)).
+
 ```sh
+export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX)      # Linux only: outside /tmp, short path
 out=$(mktemp -d)
-env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+timeout SECS env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
   claude plugin eval tools/lore/plugins/lore --case '<glob>' --scaffold \
   --allow-tools 'Bash(./lore *)' --ablation none --trust-plugin \
   --runs N --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd N \
   --output-dir "$out" --no-publish
 ```
 
-- `--scaffold` is required; the runner skips `scaffold_script` without it.
-- `--case` takes one glob. Given more than once, only the last one runs, so run
-  one batch per glob.
-- `--output-dir` also keeps `trailhead/tests/test_eval_corpus.py` green: without it the runner
-  writes `evals/results/<ts>/`, which the corpus test treats as a case with no `expected.md`.
-- `--allow-tools` is variadic and takes every following value until the next
-  flag, so keep it before another flag, as above.
-- `--ablation none` runs the with-plugin arm only. The default, `with-without`,
-  adds a no-plugin baseline arm and doubles the cost.
-- `--runs N` sets runs per case; `--max-cost-usd N` stops starting new runs once
-  the list-price cost estimate reaches N (exit 2, partial results); `--model`
-  pins the agent's model so a model change is not mistaken for a prose change.
-- `--json <path>` (ending in `.json`) writes the result document: per-run
-  scores, cost and model, for the results log. It also holds the prompts and grader
-  explanations, so write it into the same temp directory as `--output-dir`, as above,
-  and never commit it. It carries each run's `tracePath` but not the trace: the runner
-  deletes the trace when the run ends. To read a run's transcript, copy
-  `/tmp/claude-eval-*/**/*.jsonl` while the run is still going.
+What each flag does is in `docs/eval-protocol.md`, "Running a batch"; read its
+"Runner gotchas" before a first run. On top of that:
+
+- `timeout SECS` bounds the whole batch from outside, because the runner can
+  overrun its own `timeout_seconds`. Size it to the batch: at least the
+  matched cases times `--runs` times each case's `timeout_seconds`, plus margin.
+- `--json <path>` must end in `.json`. The result carries each run's `tracePath`
+  but not the trace: the runner deletes the trace when the run ends. To read a
+  run's transcript, copy `claude-eval-*/**/*.jsonl` from the runner's temp
+  directory (`$TMPDIR`, or `/tmp` when it is unset) while the run is still
+  going.
 - Unsetting the lore and XDG overrides is belt and braces: the seeder already
   refuses an override that points outside `HOME`.
-- `--no-publish` always. Without it the runner publishes its report to claude.ai.
-- `--trust-plugin` only for first-party branches you wrote or reviewed.
-- Results stay untracked: never commit `results/` or the `--output-dir`.
 - Real batches do not set `LORE_PUBLISH_DISABLE`, so lore's publish worker runs
   against the remoteless throwaway vault; it commits locally and skips the push.
-
-### Snapshot the live lore state around every batch
-
-Before and after a batch, snapshot `~/.local/state/lore/` and `~/.config/lore/`
-(for example `find ... -type f -exec sha256sum {} +` into a file, then `diff`).
-Any difference is a hard stop. The one exception: every changed path is
-attributed to a commit made by another session, and that commit carries none of
-the batch's fixture titles.
+- Diff the live lore state around every batch, as `docs/eval-protocol.md`
+  describes in "What the sandbox confines, and what it does not".
 
 ### The gate mapping
 

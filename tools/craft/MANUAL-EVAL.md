@@ -7,10 +7,9 @@ document says; only a run can show what it causes.
 Same role as `MANUAL-SMOKE.md`, different boundary — that file covers the plugin-system
 boundary (install, agent registration); this one covers the behavioral boundary.
 
-**The protocol — why these run by hand, how an arm is dispatched, the trust
-boundary on the instructions path, and how to read a result honestly — is in
-[`docs/eval-protocol.md`](../../docs/eval-protocol.md).** It was extracted from
-this file so the other tools' corpora follow the same rules. This file is craft's
+**The protocol — how to write and run a case with the plugin eval runner, what its
+sandbox confines, and the retained discipline for a result — is in
+[`docs/eval-protocol.md`](../../docs/eval-protocol.md).** This file is craft's
 results log.
 
 Cases live in `plugins/craft/evals/<case-name>/`.
@@ -2373,6 +2372,24 @@ criterion's own text" is stricter than a reading by eye on paraphrases.
 - **Enabler captures (observed only):** the baseline capture has none of the three parts; the treated capture opens with what the next slice will let you do, says there is nothing to try yet, and states the remainder by section.
 - **Opening address:** every treated opening addresses the operator ("You will be able to ..."); none addresses the spec's consumer as its subject. **Length:** treated statements run 19 to 24 physical lines against 15 to 23 at baseline; the branch real run's statement is 9. Whether that fits one screen depends on the terminal and is not claimed. **Counted by section (AC4 and AC5, observation only):** all six treated slice-site captures and the branch real run state the remainder by section; no coverage of AC4 or AC5 is claimed.
 - **Not measured:** the enabler path beyond its two captures; a legacy spec with no criterion identifiers; a spec with no sections; a real driver run; the slice's `## Outcome` report. Three runs per arm, one model tier, one Claude Code version; any cause finer than "the arm with the step 8 edit" is a hypothesis, since no ablation was run.
+
+**Result, 2026-11-02 (a reply that names more than five acceptance criteria counts them by the spec's own sections and names the exceptions): C passes and every guard holds, so R2 is kept; the observed sites do not all read as expected, and AC4 and AC5 close as unmeasured, pending the operator naming each at slice close.** Registered as an extension in `expected.md` before any run, with R2 the paragraph in `rules.md` (fingerprint `81162064b031`); the per-capture tables, the splits run to six and the limits are in that file under its `Baseline`, `Treated`, `Splits run to six` and `Results at slice close` sections. Baseline is three graded runs per site at B (pilots not counted), treated is three per site at R2, G1 and the control six, and six where a 2-1 split was run to six; the second reader agreed with the first on `counted` and `exceptions` everywhere and differed on `counts-correct` where stated.
+
+| Reading | B | R2 |
+|---|---|---|
+| C, `counted` = `by-section` | 0 of 3 | 3 of 3 |
+| C, `counts-correct` = `correct` | 0 of 3 | 3 of 3 |
+| C, `exceptions` = `both` | 3 of 3 | 3 of 3 |
+| C, `criterion-mention` `text-with-number` | 3 of 3 | 3 of 3 |
+| G1, `criterion-mention` `text-with-number` (control at B, same day) | 5 of 6 | 5 of 6 |
+| G2, `template-shape`; `criterion-mention` `bare` | majority `bare` | 6 of 6; 6 of 6 |
+| G3 and G5, `gate-shape`; `text-with-number` | | 3 of 3; 3 of 3 each |
+| G6, `gate-shape` and `covers_value_names_the_seven` | 3 of 3 | 6 of 6 |
+| G7, `grade_ledger_line` passes | 3 of 3 | 3 of 3 |
+
+- **Observed sites, deciding nothing.** C4 (four remaining): R2 counted by section and also named the four in six of six, where the expected reading was the four named one by one; the threshold of five is not shown to leave four remaining alone, and a cause (the replies counted the eight done) is a hypothesis. CN (a spec with no sections): the expected reading (one count over the whole spec, both exceptions named) is met in two of six (CN-1 and CN-3 state three of twelve done, nine left and both exceptions by text); the other four give figures by state and never state nine, a follow-up against R2's no-sections sentence. Read against the registered words the replies sit between `total-only` and `listed` (`total-only` two, `listed` four; `counts-correct` `correct` two of six). CR (execute report): `by-section` three of three at R2 against `total-only` four and `listed` two of six at B.
+- **The G6 statement, above the cut-off.** `criterion-mention` over the statement (not a bar) moved from `text-with-number` three of three at B to `no-mention` in five of six at R2 (the one is a what-is-left clause naming AC12): the covered seven are counted, not named, in six of six. It is R2 acting, not a miss.
+- **Limits.** G2's replies were not a tally (its captures cite 5 to 7 distinct criteria across findings, which is not a count of what is left); the cut-off is not observed at five or six: every C4 capture at B names all twelve identifiers and every G1 reply names all seven (held by the one-by-one clause), while G3 and G5 replies name two or three and are left alone; 47 capture-table rows equal their prefix default and were mutation-checked rather than red first; the exception definition does not cover a missing observation (AC8). One model tier, one Claude Code version; any cause is a hypothesis, no ablation was run. Dispatched agents other than the reliability reviewer and the advocate are unmeasured (accepted risk, owned by the operator).
 
 ## Case: finding-presentation-wording
 
