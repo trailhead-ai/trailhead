@@ -1,0 +1,36 @@
+**The spec review (gauntlet)** of the telescope loan desk spec: all eight passes are back. maturity: production (basis: stamp). No stand-downs.
+
+**What the passes found.** The core of the design holds up. One member per telescope at a time (AC2), cancellation and the waiting list (AC3), and a loan history that can be checked later (AC6) all match the Problem. The serious gaps are in what happens after a loan, which is where the club's actual complaint lives. First, a telescope can show as free before anyone has checked it (AC4). Second, a mistyped email address breaks the confirmation (AC1) and the reminder (AC5), and nobody ever learns of it. Around those two gaps sit several smaller ones. The Objectives promise members can "see where the loan stands", but nothing after the first email delivers that. The waiting list (AC3) has no way in, no record of an offer, and no way to close one. The 48-hour cancellation window is not tied to any clock. And nothing says whether one member may hold two scopes on the same dates.
+
+**Whether it holds.** The failure-cases pass was most right. Its unchecked-return finding is exactly the Problem's "nobody can tell who had the scope when its mirror was scratched", left open by AC4 as written. It rated the bounced-email finding only as worth fixing. Because this spec is at production maturity, a failure nobody can see is something you need to decide on, so I raised it. Two passes overreached and I moved both from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call":
+- **Right problem:** its "lend by the night" reframe depends on how often members want a single night, which its own report says it doesn't know. That is a guess about how members behave.
+- **Ease of use:** its point that members aren't told about the finder cap misses that the two-day reminder (AC5) already lists what goes back in the case.
+
+Two pairs of passes reached the same issue without seeing each other. Self-consistency and ease of use both found the "see where the loan stands" gap. Buildability and self-consistency both found the waiting-list hole. Those two are the strongest of the lower-severity findings. The fact check says the club has seven telescopes, not six. I haven't checked that myself, and nothing in the spec depends on the number. Security and left-undecided disagree on who may read condition notes, and that is yours to settle.
+
+**What to do.** Rewrite AC4 so a telescope shows as free only once its condition is recorded, and add one criterion that puts an undelivered email in front of the loan officer. With both applied, the spec advances. Before slicing, I'd also close the "see where the loan stands" and waiting-list gaps. They don't need a decision here, but either one will come back as a question mid-build.
+
+**Recommended outcome:** apply both edits and advance the spec to `ready` this round.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An unchecked return shows as free, so damage can't be traced to the borrower* (C1) | fixed in the spec | *AC4 becomes: "When a telescope comes back, the loan officer records it as back with a note of its condition. Until that note is recorded it shows on the loan calendar as returned and unchecked, and the loan stays open against the member who had it; it shows as free from the day the note is recorded."* |
+| *A confirmation or reminder sent to a mistyped address fails and nobody sees it* (C2) | fixed in the spec | *add AC7: "When a confirmation or reminder email cannot be delivered, the loan officer sees it against the loan, with the address it was sent to, on the day it fails."* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call: 10.**
+- "See where the loan stands" has no criterion delivering it (self-consistency, ease of use).
+- The waiting list has no way in, no record of an offer and no way to close one (buildability, self-consistency).
+- Lend by the night rather than by date range (right problem, moved down).
+- Seven telescopes, not six (fact check, not checked by me).
+- The 48-hour clock is not pinned (left undecided, failure cases).
+- One member could hold two scopes on the same dates (left undecided).
+- A forwarded email lets anyone cancel a loan (security).
+- Condition notes are readable by every member, which conflicts with left-undecided's choice of "every member" (security).
+- The Objectives are broader than the complaint (right problem).
+- The finder-cap list could also go in the confirmation email (ease of use, moved down).
+
+**Rough edges, nothing to decide: 3.** "Loan calendar" and "loan history" are used without saying how they differ; the confirmation email shows which dates are taken; it isn't said whether the history is stored or rebuilt from events.
+
+Full detail on any finding is one request away, for example "show me the detail on C1".

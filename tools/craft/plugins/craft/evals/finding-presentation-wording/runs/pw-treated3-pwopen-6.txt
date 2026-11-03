@@ -1,0 +1,30 @@
+The spec review (gauntlet): the Hollin Hill telescope loan desk. `maturity: production (basis: stamp)`, no waivers.
+
+The reviewers found three things wrong with how a loan ends. First, a telescope can come back with no one checking it. Second, the Objectives promise a member can see where the loan stands, but nothing after the first email does that. Third, if an email can't be delivered, nobody finds out. Lower down, the reviewers found the rules for cancelling and the waiting list too loose: who may cancel, which clock the 48 hours run on, and what closes a waiting-list offer. The fact check also says the club's register lists seven telescopes, not six.
+
+The failure-cases reviewer got the sharpest one right. As written, "the telescope shows as free on the club's loan calendar from that day" (AC4) whether or not anyone wrote a condition note. That leaves open the scratched-mirror gap the Problem names. The self-consistency and ease-of-use reviewers couldn't see each other's work, yet both found that nothing after "a confirmation email that states the loan and its return date" (AC1) shows the member where the loan stands. Because two reviewers found it separately, I've moved it up to needing your decision. The bounced-email finding came in as worth fixing. This spec is at production maturity, though, and at that level a failure nobody can see needs your decision.
+
+Some findings overreached. The right-problem reviewer's idea of lending by the night is a guess about how members use the scopes, and its own confidence line admits it. The Problem says members compete for weekends. Its claim that the build is bigger than the complaint misses that the Problem names three complaints, not one. The ease-of-use reviewer wanted a packing list in the first email, but most of that is already covered by the reminder "listing what goes back in the case" (AC5).
+
+Two things are yours to check or decide. The security and left-undecided reviewers disagree on who may read condition notes, and that call is yours. The fact check names the seven-telescope register but gives no line in it, so check it before changing the number.
+
+My plan: fix all three in the spec and advance. I'd rewrite that free-on-return rule (AC4) so a returned scope shows as returned and unchecked until its note is recorded. I'd add two criteria under a new "Keeping members informed" heading: one lets a member see where each loan stands, and one shows the loan officer any email that couldn't be delivered.
+
+**Recommended outcome:** the spec advances to `ready` this round once the three edits below land. No `craft/supersedes` label is present.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *returned telescope shows free before anyone checks it* (C1) | fixed in the spec | *rewrite AC4: the scope shows as returned and unchecked until its condition note is recorded, and free only from then* |
+| *"see where the loan stands" is promised but never delivered* (C2) | fixed in the spec | *add AC7: a member can see each loan's state (booked, on loan, returned and unchecked, returned) with its return date* |
+| *an email that can't be delivered goes unseen* (C3) | fixed in the spec | *add AC8: the loan officer sees any loan whose confirmation or reminder couldn't be delivered, with the address used* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call (7):**
+- **Cancel and waiting list:** "A member can cancel a loan up to 48 hours before it starts" (AC3) doesn't tie the cancel to the borrower, doesn't say which clock the 48 hours run on, and doesn't say what records or closes a waiting-list offer.
+- **Who sees what:** condition notes are visible to every member, and nothing stops one member holding two scopes on the same dates.
+- **Downgraded:** lending by the night (a guess about how members use the scopes) and a packing list in the first email (the reminder already sends one).
+
+**Rough edges, nothing to decide (4):** six vs seven telescopes; "loan calendar" vs "loan history" naming; whether the history is stored or worked out from events; the confirmation email revealing which dates are taken. I cut two style notes.
+
+Full detail is one request away ("show me the detail on the rule that a returned telescope shows as free (C1)").
