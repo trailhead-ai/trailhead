@@ -116,7 +116,10 @@ their intent; the drops and merges are previewed, confirmed and written by
 `scripts/followup_dispose.py` before refinement (`dispose --preview` prints a
 confirmation code, and the write takes it back as `dispose --confirm <code>`), and a
 write that fails is reported by name rather than shown as done. The ritual
-refines each chosen follow-up one at a time, shows each eligible one's scope for
+refines each chosen follow-up one at a time (a refinement that stops on a question only the operator can
+answer is put to the operator in the same run, `question` then `answer --confirm <code>`, and that
+follow-up is refined again with the answer; one that still cannot be made ready is left out and
+named), shows each eligible one's scope for
 confirmation, and nests the confirmed ones under one new parent through
 `scripts/followup_parent.py` (`check --reasons`, then `assemble --confirm <code>` with
 the code `check` printed), ending with the commands to build and distill. A follow-up that is really one of the spec's own unmet

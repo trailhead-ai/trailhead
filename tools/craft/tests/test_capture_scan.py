@@ -374,6 +374,102 @@ def test_a_clean_multi_line_capture_exits_zero(tmp_path):
     assert result.stdout == ""
 
 
+# ---- literal stream field names and JSON escapes ---------------------------
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["cacheCreationEphemeral5mInputTokens", "cacheCreationEphemeral1hInputTokens"],
+)
+def test_a_stream_usage_field_name_is_reported_but_not_a_credential(tmp_path, field):
+    f = _write(tmp_path, "capture.jsonl", f'{{"usage":{{"{field}":0}}}}\n')
+    result = _run(f)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f":stream-field-name:{field}" in result.stdout
+    assert "1 known-safe match(es)" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "cacheCreationEphemeral5mInputTokensX",
+        "XcacheCreationEphemeral5mInputTokens",
+        "cacheCreationEphemeral9mInputTokens",
+        "cacheCreationEphemeral5mInputTokens/QUJDREVGR0hJSktMTU5PUA",
+    ],
+)
+def test_a_token_that_only_resembles_a_stream_field_name_is_a_credential(tmp_path, token):
+    f = _write(tmp_path, "capture.jsonl", f'{{"value":"{token}"}}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f":high-entropy-base64:{token}" in result.stdout
+
+
+def test_a_json_escape_does_not_count_towards_a_tokens_length(tmp_path):
+    # 27 characters of path: the match reaches 32 only by taking in the `u0000`
+    # of the escape in front of it.
+    f = _write(tmp_path, "capture.jsonl", '{"bytes":"\\u0000/opt/homebrew/Cellar/python@3"}\n')
+    result = _run(f)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout == ""
+
+
+def test_a_token_that_is_long_enough_without_the_escape_is_still_a_credential(tmp_path):
+    token = "QUJDREVGR0hJSktMTU5PUFFSU1RVVldY"
+    f = _write(tmp_path, "capture.jsonl", f'{{"bytes":"\\u0000{token}"}}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f":high-entropy-base64:u0000{token}" in result.stdout
+
+
+def test_the_same_characters_without_a_backslash_are_not_an_escape(tmp_path):
+    # No backslash, so `u0000` is part of the token and the match stands.
+    f = _write(tmp_path, "capture.jsonl", '{"value":"u0000abcdefghijklmnopqrstuvwxyz0"}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        'session\\u003d' + "A" * 30,
+        '\\u0022' + "A" * 30 + '\\u0022',
+        '\\uAb12' + "A" * 28,
+    ],
+)
+def test_an_escape_that_is_not_a_control_character_does_not_shorten_a_token(tmp_path, line):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"' + line + '"}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert ":high-entropy-base64:" in result.stdout
+
+
+def test_an_escaped_backslash_before_u_is_not_an_escape(tmp_path):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"\\\\u0000' + "A" * 27 + '"}\n')
+    result = _run(f)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert ":high-entropy-base64:" in result.stdout
+
+
+def test_an_odd_run_of_backslashes_before_u_is_an_escape(tmp_path):
+    f = _write(tmp_path, "capture.jsonl", '{"v":"\\\\\\u0000/opt/homebrew/Cellar/python@3"}\n')
+    result = _run(f)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_scan_text_applies_the_escape_rule_only_to_a_json_stream():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("capture_scan_for_scan_text", SCANNER)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    text = "C:\\uAb12" + "A" * 28
+    assert any(f.cls == "high-entropy-base64" for f in mod.scan_text(text))
+    esc = "\\u0000/opt/homebrew/Cellar/python@3"
+    assert any(f.cls == "high-entropy-base64" for f in mod.scan_text(esc))
+    assert mod.scan_text(esc, json_stream=True) == []
+
+
 # ---- CI enforcement: the committed capture batch is scanned ----------------
 
 

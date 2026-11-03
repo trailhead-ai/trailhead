@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-credential-answer-spec-chosen-2026-11-02.json
+vault ADDED task/build-the-follow-ups-of-fixture-credential-answer-spec-chosen-2026-11-02.md
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-altered.json
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-altered.md
+vault CHANGED task/tide-cache-expire-stale-readings-altered.json
+vault CHANGED task/tide-cache-expire-stale-readings-altered.md

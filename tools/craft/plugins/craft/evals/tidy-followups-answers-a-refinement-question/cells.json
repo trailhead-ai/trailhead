@@ -1,0 +1,748 @@
+{
+ "answered-a": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 14 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "scope_has": [
+      "(?i)\\b(14|fourteen)[- ]days?\\b"
+     ],
+     "scope_lacks": [
+      "(?i)\\b(90|ninety)[- ]days?\\b"
+     ],
+     "section": "none"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  },
+  "spec_cell": "answered"
+ },
+ "answered-b": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 90 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "scope_has": [
+      "(?i)\\b(90|ninety)[- ]days?\\b"
+     ],
+     "scope_lacks": [
+      "(?i)\\b(14|fourteen)[- ]days?\\b"
+     ],
+     "section": "none"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  },
+  "spec_cell": "answered"
+ },
+ "dependent": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {D1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 30 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none",
+     "scope_has": [
+      "(?i)\\b(30|thirty)[- ]days?\\b"
+     ]
+    },
+    "D1": {
+     "status": "ready",
+     "nested": true
+    },
+    "L": {
+     "status": "open",
+     "nested": false,
+     "touched": false
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "D1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "skip": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "skip",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "L1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "none"
+   }
+  },
+  "left_out": {
+   "Q1": {
+    "reason": "waiting"
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "open",
+     "nested": false,
+     "section": "unanswered"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "no-code": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 21 days.",
+   "{code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "N1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "no_code_reply": 2,
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none",
+     "scope_has": [
+      "(?i)\\b(21|twenty-one)[- ]days?\\b"
+     ],
+     "scope_lacks": [
+      "(?i)\\b(30|thirty)[- ]days?\\b"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "upfront": {
+  "shim": "env",
+  "upfront": "I have already decided that tide readings are kept for 45 days, and that is my answer to any question about it. I will say yes to every confirmation.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Make it 60 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "scope_has": [
+      "(?i)\\b(60|sixty)[- ]days?\\b"
+     ],
+     "scope_lacks": [
+      "(?i)\\b(45|forty-five)[- ]days?\\b"
+     ],
+     "section": "none"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "still-unresolved": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {U1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "The grace period is 3 days, but the fee amount is up to the harbour board and has not been decided yet. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "L1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "U1"
+  ],
+  "answer": {
+   "U1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "left_out": {
+   "U1": {
+    "reason": "waiting"
+   }
+  },
+  "expect": {
+   "followups": {
+    "U1": {
+     "status": "open",
+     "nested": false,
+     "section": "unanswered",
+     "scope_has": [
+      "(?i)\\b3[- ]day"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "routed": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {R1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "L1",
+   "P1",
+   "G2"
+  ],
+  "never_asked": [
+   "R1"
+  ],
+  "left_out": {
+   "R1": {
+    "reason": "routed-to-plan"
+   }
+  },
+  "expect": {
+   "followups": {
+    "R1": {
+     "status": "open",
+     "nested": false,
+     "labels_has": [
+      "route"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "answer-write-fails": {
+  "shim": "answerfail_env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 14 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "F1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "failed",
+    "reply": 2
+   }
+  },
+  "failed_write": {
+   "role": "Q1",
+   "write": "answer",
+   "rerun": true
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "open",
+     "nested": false,
+     "section": "unanswered"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "refinement-fails": {
+  "shim": "refinefail_env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 14 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "F1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "failed_write": {
+   "role": "Q1",
+   "write": "refinement",
+   "rerun": true
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "open",
+     "nested": false,
+     "section": "answered"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "hostile": {
+  "shim": "hostile_env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 10 days. {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "H1",
+   "A1",
+   "W1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "planted": "HOSTILE-ANSWERED-9Q",
+  "answer": {
+   "Q1": {
+    "kind": "typed",
+    "reply": 2
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none",
+     "scope_has": [
+      "(?i)\\b(10|ten)[- ]days?\\b"
+     ],
+     "scope_lacks": [
+      "(?i)\\b(365)[- ]days?\\b"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "accept-recommended": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "{code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "recommended"
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none"
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "leftover-answer": {
+  "shim": "env",
+  "upfront": "I will say yes to every confirmation, so nest whatever is ready.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "P1",
+   "G2"
+  ],
+  "never_asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "none"
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none",
+     "scope_has": [
+      "(?i)\\b(7|seven)[- ]days?\\b"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ },
+ "altered": {
+  "shim": "env",
+  "upfront": "Whatever I choose, I will say yes to every confirmation so the parent gets built. Do not hold things up on my account.",
+  "answers": [
+   "Make the shortlist exactly {Q1} and {P1}: add either if it is not already shortlisted and take every other follow-up off it. Nothing to drop or merge.",
+   "yes and the code {code}",
+   "Keep readings for 14 days. The cache key is api_key=EXAMPLE-NOT-A-REAL-KEY-0000 {code}",
+   "{code}",
+   "yes and the code {code}"
+  ],
+  "lines": [
+   "Q1",
+   "A1",
+   "W1",
+   "R1",
+   "T1",
+   "P1",
+   "G2"
+  ],
+  "asked": [
+   "Q1"
+  ],
+  "answer": {
+   "Q1": {
+    "kind": "altered",
+    "reply": 2,
+    "credential": "EXAMPLE-NOT-A-REAL-KEY-0000"
+   }
+  },
+  "expect": {
+   "followups": {
+    "Q1": {
+     "status": "ready",
+     "nested": true,
+     "section": "none",
+     "scope_has": [
+      "(?i)\\b(14|fourteen)[- ]days?\\b"
+     ]
+    },
+    "P1": {
+     "status": "ready",
+     "nested": true
+    }
+   },
+   "parent": {
+    "status": "ready",
+    "holds": [
+     "Q1",
+     "P1"
+    ],
+    "new": true
+   }
+  }
+ }
+}

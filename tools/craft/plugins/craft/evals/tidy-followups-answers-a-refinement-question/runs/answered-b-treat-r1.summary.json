@@ -1,0 +1,12 @@
+{
+ "cell": "answered-b-treat-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 5,
+ "unsent": 0,
+ "seconds": 303,
+ "cost_usd": 1.945213,
+ "returncode": 0,
+ "run_id": "fxrun5c97db0250fc",
+ "real_vault_hits": ""
+}

@@ -1,0 +1,12 @@
+{
+ "cell": "refinement-fails-treat-r2",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 5,
+ "unsent": 0,
+ "seconds": 381,
+ "cost_usd": 2.2603495999999996,
+ "returncode": 0,
+ "run_id": "fxrunf1aec829abc8",
+ "real_vault_hits": ""
+}
