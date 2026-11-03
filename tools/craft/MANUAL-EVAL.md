@@ -4092,3 +4092,19 @@ Graders: an `llm` trace grader on the one next command and a `regex` `not_contai
 
 **Not measured.** One spec, one phrasing, one model tier, three runs; a spec reached with the code-reviewer dispatch. Cost: baselines about 4.2 USD (including the re-run), after-edit runs about 2.7 USD, mutation check 0.5 USD.
 
+
+## Case: pipeline descriptions place tidy-followups before distill
+
+Re-check after the body edits (distill's pipeline sentence and the README's Distill entry). Each case run once (`--runs 1`), `--ablation none`, model `claude-opus-5-5`, `--scaffold`, grants as craft's `eval-gate.json` runner block. These are body sentences, not triggers, so no new case and no baseline.
+
+### Results
+
+| Case | Verdict | Pointer |
+|---|---|---|
+| Distill request still routes to distill (task 1) | held: 1 of 1, both graders green | `distill-request-routes-to-distill` |
+| Complete spec hands off to tidy-followups from slice (task 2) | held: 1 of 1, all three graders green | `slice-spec-complete-hands-off-to-tidy-followups` |
+| Closed-out spec hands off to tidy-followups from review (task 3) | held: 1 of 1, both graders green | `review-hands-a-closed-out-spec-to-tidy-followups` |
+
+**Live arm.** `evals/ritual-deliverable-names-its-record/arms/distill-rule-only.md` was rebuilt from the edited `distill/SKILL.md`. Frozen arms and earlier results in this file were left unchanged on purpose.
+
+**Not measured.** One run per case, one model tier. Each case was run twice (the first batch's scores were not read before its output directory was cleared); both runs passed. Cost: about 1.0 USD per batch.

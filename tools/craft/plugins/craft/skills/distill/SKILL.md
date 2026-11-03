@@ -24,8 +24,8 @@ finished work and condenses it into the ADR log, then brings the `area` profiles
 back into agreement with it.
 
 It is the final stage of the pipeline: brainstorm → gauntlet → (slice → plan → execute → review)* →
-distill. The bracketed loop repeats once per slice; distill attaches once, after the loop reports
-the spec closed out. It is also the **sole writer of a spec's completion edge**
+tidy-followups → distill. The bracketed loop repeats once per slice; distill attaches once, after
+the loop reports the spec closed out. It is also the **sole writer of a spec's completion edge**
 (`planned → complete` for pre-loop records, `ready → complete` for a spec the slice loop closed out)
 — `complete` *means* distilled, including the zero-ADR outcome.
 
