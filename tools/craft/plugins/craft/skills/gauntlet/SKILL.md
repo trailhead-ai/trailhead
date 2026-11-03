@@ -30,10 +30,6 @@ the version that reaches planning is the one worth building. Its output is a bet
 momentum, not a delay to be endured; a pass that only slows the record down without changing it has
 failed at its job.
 
-Eight passes attack the spec in parallel, each from an angle the others structurally cannot see. The
-main session adjudicates what comes back and turns it into one recommendation. Nothing advances
-until the user has accepted that recommendation.
-
 ## Two independent failure axes
 
 **Read `gauntlet/calibration.md` now and follow it in full.** Before adjudicating anything, it
@@ -225,6 +221,10 @@ brackets once; every later line says "the spec review". `/craft:gauntlet` stays 
 Everywhere else your own prose mentions a finding — the synthesis, a list, a next-steps line — name
 it by its headline, or a faithful short form, with the id in round brackets after: "apply the cache
 TTL fix (C1) and the tenant rewrite (C2)", never "apply C1 and C2", "the C1 edit" or "C1's change".
+A second mention, in the same sentence or later, points back in words with the id after ("that fix
+(C1)"), never "with C1 moved down a level". A reply you tell the operator to type is written in
+full as the reply line shows it — "answer C2: followed by what you know", the colon and the reason
+slot named in words — never a bare "answer C2", which the review itself refuses as incomplete.
 The table, the rewrite headers and the reply line keep their own forms.
 
 The deliverable is these four parts, in this order — all four whenever there is a Critical to
@@ -359,16 +359,13 @@ under the operator's signature.
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
 terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
-means and requires. The propose-only rule, the edit-first test, and the never-draft-the-operator's-
-reason rule above stay inline because this skill must apply them unprompted.
+means and requires.
 
 #### Advancing, revise rounds, and runs
 
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines when a record advances,
 the run/revise-round distinction, why a revise round still lands its `resolved` edits and
-provenance, and why `answered` blocks the advance check until re-adjudicated. The `revise`
-prescription-specificity bar in step 4, step 6's advance condition below, and the shape a
-prescription and a `reaches-downstream` scope must take all stay inline — each fires unprompted.
+provenance, and why `answered` blocks the advance check until re-adjudicated.
 
 #### Zero Criticals is still a decision
 
@@ -381,8 +378,7 @@ one — and still gates on operator acceptance.
 **Read `gauntlet/dispositions.md` now and follow it in full.** It defines how the operator's
 acceptance and overrides are taken and applied, including the one-round-trip rule, the post-override
 echo, what makes an override incomplete or out of range, what an override withdraws, when a
-re-present is forced before anything is written, and the round-number rule. The
-never-draft-the-operator's-reason rule above stays inline — it fires unprompted, not by accident.
+re-present is forced before anything is written, and the round-number rule.
 
 #### Escalation points
 
@@ -470,11 +466,13 @@ count (see above):
   C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
   answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
   Important <n>, Minor <n>, detail below.
-- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with
-  its proposed outcome in plain words and put each Critical's id after its headline in round
-  brackets. Name every criterion by its own text with its number after it in round brackets, also
-  where several are listed together: "the packet limit per swap (AC1) and the labelling rule
-  (AC2)", never "this rewrites AC1 and AC2">
+- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with its
+  final outcome in plain words, not its proposed one, and put each Critical's id after its headline in
+  round brackets. The first time the detail names a criterion, give all of its text with its number after
+  in round brackets: quoted word for word, or restated whole only where the text is long; opening words
+  alone don't count. After that, a few words point back to it with the number after. A fix line does the
+  same. For example: "A picking session is full once forty pickers have signed up" (AC4) leaves the
+  forty-first picker unanswered. Fix: that sign-up limit (AC4) asks what the forty-first picker hears>
 ```
 
 That is one invocation. `$EDITS` is the unified diff carrying all three payloads — every `resolved`

@@ -5546,3 +5546,15 @@ fingerprint `0ff013d7a72bb82d47be47c53b324fbd8570e975` (B3), and the record-link
 captures and every result above stay as committed, tied to the G3 copy they were measured against. The branch is held
 with no pull request until the operator decides. AC27 and AC28 are not closed: their treated3 readings are met, but the
 stop overrides them.
+
+### Operator ruling: the `pwopen` `severity-name` miss is residual (2026-11-03)
+
+The operator read the regression stop and ruled the miss residual, choosing the option "Rule it residual". The grounds
+put to them were these. The edit does not touch severity wording. The same-day base3 batch on the same arm read
+`internal` in 2 of 6, so across both base3 sets the reading is 3 of 12, against 2 of 6 treated3. That this is sampling
+variation remains a hypothesis, because no ablation was run. This is an operator ruling made after the captures were
+read, not a reading the registered rule produced. The registered rule's own verdict, a regression, stays recorded
+above. Under the ruling the revert is undone in one commit: `skills/gauntlet/SKILL.md` is back at the reworded G3 copy
+(fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`), the copy the treated3 batch measured, and the live arm is
+rebuilt from it. With the miss residual, the AC27 and AC28 treated3 readings stand as met, subject to the slice-close
+real runs. A follow-up tracks the guard rule's sensitivity, since a 1 of 6 against 2 of 6 difference can trigger a revert.

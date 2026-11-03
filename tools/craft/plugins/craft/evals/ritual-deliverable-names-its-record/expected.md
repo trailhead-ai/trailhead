@@ -1242,3 +1242,6 @@ rebuilt again and now holds `skills/gauntlet/SKILL.md` at fingerprint `09584f7a2
 The skill edit was reverted the same day, after the other case's regression stop. The live arm is back at
 `921214725fb12ab05a447bedbaa178dd7ce02c54`, the copy its earlier results were measured against, and no result was
 taken on either post-edit copy.
+
+The operator ruled the other case's regression residual the same day, and the revert was undone. The live arm again
+holds `skills/gauntlet/SKILL.md` at fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`.
