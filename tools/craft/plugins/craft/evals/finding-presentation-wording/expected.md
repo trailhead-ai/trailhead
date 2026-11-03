@@ -5373,7 +5373,7 @@ No other change is named.
 **Dispatch.** One foreground `claude -p` per run, in turn, from a fresh copy of `fixtures/` and a fresh empty working
 directory, `--setting-sources project`, `--allowedTools "Read"`, the arm inline, no `--model`, a 600-second limit
 enforced in the command (`perl -e 'alarm 600; exec @ARGV'`), the base3 batch's recipe. The hostile site substituted
-`FIXTURES_DIR/pw-spec-hostile.md` for `FIXTURES_DIR/pw-spec.md` in the `pwsaved` prompt. All 36 runs
+`FIXTURES_DIR/pw-spec-hostile.md` for `FIXTURES_DIR/pw-spec.md` in the `pwsaved` prompt. All 24 runs
 (`pw-treated3-pwopen-1` to `-6`, `pw-treated3-pwdetail-1` to `-6`, `pw-treated3-pwsaved-1` to `-3`,
 `pw-treated3-pwsaved-hostile-1` to `-3`, `pw-control3-pwopen-1` to `-6`) exited 0 with an empty stderr file; none
 was crashed, timed out or excluded, and none was replaced. Each verdict is read from the grader with the invocations
