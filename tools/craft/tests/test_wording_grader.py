@@ -2273,8 +2273,11 @@ def test_every_pwsaved_capture_grades_its_saved_section_to_its_mapped_verdicts(s
 
 
 def _site(stem):
-    """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
-    (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-` and `regress3-cal-`) belong to `consult-calibrated`."""
+    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`
+    and `regress3-cal-`) belong to `consult-calibrated`; `summary-guard-specreview-open-` captures belong to
+    `specreview` and every other `summary-guard-specreview-` capture to `fsspecreview`; a capture with
+    `-pwsaved-hostile-` in its name belongs to `pwsaved`. Every other capture belongs to the segment before its run
+    number."""
     if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
         return "consult-calibrated"
     if stem.startswith("summary-guard-specreview-open-"):

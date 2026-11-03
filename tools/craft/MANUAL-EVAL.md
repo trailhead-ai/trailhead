@@ -2598,9 +2598,10 @@ Limits: the recipe is not a sandbox (real `HOME`, unrestricted `Bash`); each run
 `~/.claude/projects`; the live vault's HEAD moved during the second run by other sessions' publishes, unattributable
 by this run; two sessions, one reader.
 
-**Pin check.** `skills/gauntlet/SKILL.md` is at fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`, the copy the
-treated3 arms measured; `rules.md`, `dispositions.md` and `_shared/council.md` were unchanged against origin/main at
-close.
+**Pin check.** Pin against `skills/gauntlet/SKILL.md` at fingerprint `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, the
+shipped file. The `pw-treated3-*` arms carry `09584f7a2daf22740999ff2eef4efd74a7d3f438`, the copy they measured; the two
+differ only by a whitespace reflow made afterwards. `rules.md`, `dispositions.md` and `_shared/council.md` were
+unchanged against origin/main at close.
 
 **Waiver.** `skills/gauntlet/SKILL.md` is 529 lines (it was 531 before G3), so the 500-line guideline is still exceeded
 and unenforced; the waiver rests with the operator.

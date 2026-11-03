@@ -89,11 +89,13 @@ PLAIN_WORDS_EDIT_REVISION = "9bae50c390aaa2f91f1a4dd3dac2eb7ea9da30ef"
 # and every other source from `PLAIN_WORDS_BASELINE_REVISION`.
 PLAIN_WORDS_EDIT2_REVISION = "c6af0ccbf4448626581cfc495ceec0c034f7fbc4"
 
-# origin/main when the third plain-words slice's task branch was cut: every base3 arm reads every source here.
+# origin/main when the base3 arms were composed: every base3 arm reads every source here.
 PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
 
 # The commit carrying the third plain-words ritual edit: the treated3 arms read the two gauntlet files from here and
-# every other source from `PLAIN_WORDS_B3_REVISION`.
+# every other source from `PLAIN_WORDS_B3_REVISION`. It exists only on the branch that built the treated3 arms, so after
+# a squash merge find it by its content instead: `git log --find-object=09584f7a2daf22740999ff2eef4efd74a7d3f438` finds
+# the commit that introduced the `skills/gauntlet/SKILL.md` those arms carry.
 PLAIN_WORDS_EDIT3_REVISION = "2c84ecaa42982aa16a76df31fbfa66bf691395fd"
 
 PLUGIN = "tools/craft/plugins/craft"
