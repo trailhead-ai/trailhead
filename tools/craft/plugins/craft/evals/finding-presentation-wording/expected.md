@@ -4992,8 +4992,12 @@ The token is `key-like` in the scrub's classes and not a vendor prefix, so no pu
 live credential. `fixtures/` is outside every gated tree (`test_capture_scan.py` and `scripts/capture_scan.py` read
 `runs/` directories only, and `scripts/leak-gate` reads a denylist of private strings); the scrub and `capture_scan.py`
 share their pattern classes, so a capture in which the session echoes the token outside the scrubbed block will be
-flagged by `capture_scan.py` and cannot be committed under `runs/` unchanged. The batch task decides what to do with such
-a capture and records it.
+flagged by `capture_scan.py` and cannot be committed under `runs/` unchanged. Such a capture follows the case's
+existing redaction rule: readings 1 to 3 are taken on the raw capture first, and each place the token appears outside
+the saved block is recorded with reading 3 as an observation. Every occurrence of the token is then replaced with
+`[fake-token-redacted]`, and the count and the places are logged in the commit body and beside the capture's hand reading.
+The redacted capture must pass `capture_scan.py` before it is committed, and the raw capture is never committed. A capture
+that still trips the scan after that replacement is not committed: its hand reading is recorded without it.
 
 ### Arms
 
