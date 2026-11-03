@@ -4057,3 +4057,38 @@ One runner case, `claude plugin eval` with `--ablation none`, model `claude-opus
 **Widened grants.** The three previously gated craft cases were run once each (`--runs 1`) with the widened block: `declined-review-correction-is-left-alone` 3 of 3 graders; `consult-lists-a-sibling-correction-without-writing-it` first run failed `correction-listed-apart-with-fix` (3 of 4), then passed 4 of 4 on a second run with the widened grants and on a control run with the original four grants; `accepted-review-correction-is-applied-not-parked` failed 4 of 5 graders (score 0.2) with the widened grants and failed the same way (0.2) with the original four, so that failure does not come from the grants. One run per case; cost about 1.0 USD for the widened batch, 1.2 USD for the controls.
 
 **Not measured.** One spec, one phrasing, one model tier; drive's report; the early-stop handoff (unchanged).
+
+## Case: review hands a spec whose slice loop has ended to tidy-followups
+
+Four runner cases, each `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, pre-registered in `expected.md` before any run. Each seeds the spec `export-invoices` (criteria AC1 to AC3 and a `## Slices` ledger); the prompt says the reviewed change passed and is merged and asks for review's closing handoff only. They differ only in the seeded spec; the marker is set at scaffold time with `./lore record create --label`.
+
+| Case | Seeded spec | Expected handoff |
+|---|---|---|
+| `review-hands-a-closed-out-spec-to-tidy-followups` | `ready`, `craft/slice-loop=complete`, ledger covers AC1 to AC3 | `/craft:tidy-followups spec/export-invoices` |
+| `review-hands-a-stopped-spec-to-tidy-followups` | `ready`, `craft/slice-loop=stopped`, AC3 uncovered | the same fenced command, plus slice re-run in prose only |
+| `review-hands-a-complete-unmarked-spec-to-tidy-followups` | status `complete`, no marker | `/craft:tidy-followups spec/export-invoices` |
+| `review-hands-a-running-loop-back-to-slice` | `ready`, no marker, AC1 only covered | `/craft:slice spec/export-invoices` (negative control) |
+
+Graders: an `llm` trace grader on the one next command and a `regex` `not_contains` over the final message (distill printed as a command; for the stopped case distill or slice printed as a command; for the running case any `/craft:tidy-followups`). The `not_contains` patterns were checked before the baseline against hand-written correct final messages (no match) and against the wrong handoffs (match).
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC45 (review's closing handoff sends a spec whose slice loop has ended to tidy-followups) | held: baseline 1 of 3 closed-out, 1 of 3 stopped, 0 of 3 complete-unmarked on the unedited prose; 3 of 3 on all three after the edit | the three ended-loop cases |
+| Running loop still hands back to slice (negative control) | held: 3 of 3 before and 3 of 3 after the edit; a guard, not a detector | `review-hands-a-running-loop-back-to-slice` |
+
+**Baseline (unedited prose).** Closed-out: runs 1 and 2 printed `/craft:distill spec/export-invoices` (both graders failed); run 3 passed because the agent read the slice and distill skills, saw they point to tidy-followups, and said review's handoff was out of date, so that pass is the agent working around the stale prose. Stopped: runs 1 and 3 handed back to `/craft:slice` only (both graders failed); run 2 passed the same way, from other skills. Complete-unmarked: 0 of 3; every run refused to give a handoff because status `complete` with no marker matches neither of review's branches (the `not_contains` grader was green there, the `llm` grader red, so each grader fails for its own reason across the case set). Running loop: green 3 of 3.
+
+**Grader defect found in the baseline.** The first running-loop baseline scored run 2 as a fail (`next-command-is-slice`, 3 FAIL votes) on a correct message that printed the slice command and said "not `/craft:distill`" in prose. The `llm` wording was tightened on all four cases to allow a command named in prose as not being the next step, and the running-loop baseline was re-run (3 of 3, below). The other three baselines were not re-run: their red runs printed the wrong command as the next step or refused, which the tightened wording still fails.
+
+**After the edit.** 3 of 3 on all four cases, every grader green in every run. Stopped runs each printed the one fenced tidy-followups command and one prose line re-running `/craft:slice` once the failure-events API ships.
+
+**Mutation check of the negative control.** The running-loop prose was changed to hand a running loop to tidy-followups (`--runs 2`): the `no-tidy-followups-named` `not_contains` failed both runs (score 0.5 each), where the agent printed `/craft:slice` but quoted the tidy-followups command in prose; the `llm` grader stayed green, so the regex is the grader that binds that regression. The prose was restored byte-for-byte.
+
+**Spec-id shape check.** Not graded by any case: a runner case seeds a vault through the CLI, whose slugs are restricted to the same characters, so no case can seed an id that fails `^[A-Za-z0-9._/-]+$`. The check is covered by the prose alone and is unverified by a run.
+
+**Live arm.** `evals/ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`.
+
+**Not measured.** One spec, one phrasing, one model tier, three runs; a spec reached with the code-reviewer dispatch. Cost: baselines about 4.2 USD (including the re-run), after-edit runs about 2.7 USD, mutation check 0.5 USD.
+
