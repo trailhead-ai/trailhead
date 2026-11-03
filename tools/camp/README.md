@@ -384,8 +384,10 @@ camp env ls
 
 Lists the dev environments running on this machine and on every host `env_hosts`
 names (see [Remote hosts](#remote-hosts)), whatever group your directory resolves
-to. This machine comes first, then the hosts in the order `env_hosts` names them,
-each block printed as soon as that machine has answered:
+to. Every machine is read at the same time, so the listing takes about as long as
+the slowest one. The blocks always print in the same order: this machine first, then
+the hosts in the order `env_hosts` names them. A block prints as soon as its machine
+and every machine before it have answered:
 
 ```
 this machine (andromeda)

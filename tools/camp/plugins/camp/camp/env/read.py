@@ -50,6 +50,14 @@ one: unreachable names the transport's own cause; an unpinned host key says to r
 host that stopped responding is the timeout reason. Every reason from far-side text passes through
 ``camp.printable.printable_line``: one line, printable characters only, at most 200 characters.
 
+Reading several machines
+------------------------
+``read_concurrently`` starts every read in a sequence at once, each on its own daemon thread (no
+pool, so nothing waits out a read's bound at shutdown or interpreter exit), and yields
+``(key, MachineInventory)`` in input order: each result as soon as it and every read before it have
+finished. A read that raises is that slot's ``UNREADABLE`` with reason ``read failed (<exception
+type name>)``; the message is never carried. No slot is dropped or reordered.
+
 ``runner`` is injected for tests. Left unset, the reads run the real ``docker`` (locally) or ``ssh``
 (remotely), each found through ``PATH`` when the call is made.
 """
@@ -58,8 +66,10 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import threading
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, TypeVar
 
 from ..host import transport
 from ..host.config import Host
@@ -72,6 +82,8 @@ from .contract import (
     has_inventory_header,
     parse_inventory,
 )
+
+_Key = TypeVar("_Key")
 
 ENVIRONMENTS = "environments"
 DOCKER_NOT_INSTALLED = "docker-not-installed"
@@ -204,3 +216,35 @@ def read_remote(
     if isinstance(outcome, transport.TooLarge):
         return _unreadable("reply too large")
     return _unreadable(transport.outcome_detail(outcome))
+
+
+def read_concurrently(
+    reads: Sequence[tuple[_Key, Callable[[], MachineInventory]]],
+) -> Iterator[tuple[_Key, MachineInventory]]:
+    """Start every read now, one daemon thread each; yield ``(key, inventory)`` in input order.
+
+    Each result is yielded as soon as it and every earlier read have finished. A read that raises
+    becomes that slot's unreadable ``read failed (<exception type name>)``.
+    """
+    slots: list[tuple[_Key, threading.Event, list[MachineInventory]]] = []
+    for key, run in reads:
+        done = threading.Event()
+        box: list[MachineInventory] = []
+
+        def work(run=run, done=done, box=box) -> None:
+            try:
+                box.append(run())
+            except Exception as error:
+                box.append(_unreadable(f"read failed ({type(error).__name__})"))
+            finally:
+                done.set()
+
+        slots.append((key, done, box))
+        threading.Thread(target=work, daemon=True).start()
+
+    def results() -> Iterator[tuple[_Key, MachineInventory]]:
+        for key, done, box in slots:
+            done.wait()
+            yield key, box[0]
+
+    return results()

@@ -7,7 +7,11 @@ CLI's stdout file already held at that moment.
 
 - One environment locally, no hosts declared: the `this machine` heading and one line, exit 0.
 - Many: two local environments and one remote print two blocks in order, sorted, columns aligned.
-- Streaming: this machine's block is on stdout before the first remote read starts.
+- Streaming: this machine's block is on stdout while a slower host's read is still running.
+- Concurrency: two hosts' ssh reads (and the docker read with an ssh read) are in flight at the same
+  moment, proved by stubs that rendezvous; two hosts taking T each finish in under 1.5 T.
+- Order: blocks print this machine, then `env_hosts` order, whichever host answers first.
+- Failures stay per host: unreadable, timed out and fine hosts read together each show their own outcome.
 - No environments: a header-only reply prints `no environments` under that host.
 - Unreadable: a reply without the header prints `unreadable: ...` and none of its records, exit 0.
 - Timed out: a stub that outlives the read bound prints `unreadable: no answer within ...`.
@@ -22,10 +26,13 @@ CLI's stdout file already held at that moment.
 from __future__ import annotations
 
 import os
+import queue
 import re
 import shutil
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -38,7 +45,20 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 FIXTURES = Path(__file__).parent / "fixtures"
 HEADER = (FIXTURES / "env_inventory_header_docker_engine_29_8_0_linux.txt").read_text()
 
+_RENDEZVOUS = """
+rv="$STUB_DIR/rv/$me"
+if [ -f "$rv" ]; then
+  peer=$(cat "$rv")
+  : > "$STUB_DIR/started.$me"
+  n=0
+  while [ ! -f "$STUB_DIR/started.$peer" ] && [ $n -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+  [ -f "$STUB_DIR/started.$peer" ] || : > "$STUB_DIR/never-met.$me"
+fi
+"""
+
 _DOCKER_STUB = """#!/bin/sh
+me=docker
+""" + _RENDEZVOUS + """
 [ -f "$STUB_DIR/docker.stdout" ] && cat "$STUB_DIR/docker.stdout"
 [ -f "$STUB_DIR/docker.stderr" ] && cat "$STUB_DIR/docker.stderr" >&2
 [ -f "$STUB_DIR/docker.exit" ] && exit "$(cat "$STUB_DIR/docker.exit")"
@@ -52,8 +72,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 echo "$dest" >> "$STUB_DIR/ssh.log"
+me=$dest
+RENDEZVOUS
 if [ -n "$STUB_STDOUT_FILE" ]; then cat "$STUB_STDOUT_FILE" > "$STUB_DIR/stdout-at-call.$dest"; fi
 reply="$STUB_DIR/ssh/$dest"
+[ -f "$reply.delay" ] && sleep "$(cat "$reply.delay")"
 [ -f "$reply.sleep" ] && exec sleep "$(cat "$reply.sleep")"
 [ -f "$reply.stdout" ] && cat "$reply.stdout"
 [ -f "$reply.stderr" ] && cat "$reply.stderr" >&2
@@ -77,9 +100,10 @@ class Rig:
         self.bin = self.root / "bin"
         self.bin.mkdir(parents=True)
         (self.root / "ssh").mkdir()
+        (self.root / "rv").mkdir()
         for tool in ("sh", "cat", "sleep", "ps"):
             (self.bin / tool).symlink_to(shutil.which(tool))
-        self._script("ssh", _SSH_STUB)
+        self._script("ssh", _SSH_STUB.replace("RENDEZVOUS", _RENDEZVOUS))
         self.config_dir = tmp_path / "camp-config"
         self.config_dir.mkdir()
         self.state_dir = tmp_path / "camp-state"
@@ -108,6 +132,7 @@ class Rig:
         stderr: str = "",
         exit_code: int = 0,
         sleep: float | None = None,
+        delay: float | None = None,
     ) -> None:
         base = self.root / "ssh" / destination
         base.with_name(base.name + ".stdout").write_text(stdout)
@@ -115,6 +140,16 @@ class Rig:
         base.with_name(base.name + ".exit").write_text(str(exit_code))
         if sleep is not None:
             base.with_name(base.name + ".sleep").write_text(str(sleep))
+        if delay is not None:
+            base.with_name(base.name + ".delay").write_text(str(delay))
+
+    def rendezvous(self, machine: str, peer: str) -> None:
+        """Make ``machine``'s stub (an ssh destination, or ``docker``) wait up to 5 s for ``peer``'s."""
+        (self.root / "rv" / machine).write_text(peer)
+
+    def never_met(self) -> list[str]:
+        """The machines whose read ran alone: it started and no peer started within the wait."""
+        return sorted(p.name.removeprefix("never-met.") for p in self.root.glob("never-met.*"))
 
     @property
     def ssh_calls(self) -> list[str]:
@@ -240,16 +275,127 @@ def test_many_environments_print_ordered_sorted_aligned_blocks(rig: Rig) -> None
     assert len({(m.start(3), m.start(5)) for m in local}) == 1, lines
 
 
-def test_this_machines_block_is_on_stdout_before_the_first_remote_read(rig: Rig) -> None:
-    rig.hosts_file(
-        'self_name = "andromeda"\nenv_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
+def _hosts(*names: str, self_name: str | None = None) -> str:
+    head = f'self_name = "{self_name}"\n' if self_name else ""
+    listed = ", ".join(f'"{n}"' for n in names)
+    return head + f"env_hosts = [{listed}]\n" + "".join(
+        f'\n[hosts.{n}]\nssh = "u@{n}"\n' for n in names
     )
+
+
+def test_this_machines_block_is_on_stdout_while_a_slower_host_is_still_being_read(rig: Rig) -> None:
+    rig.hosts_file(_hosts("slow", self_name="andromeda"))
     rig.docker(stdout=_records(("levr", "main", "running")))
-    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply("u@slow", stdout=HEADER, delay=8)
+    process = subprocess.Popen(
+        [sys.executable, str(_CLI_CAMP), "env", "ls"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env=rig.env(),
+        cwd=str(rig.root),
+    )
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True).start()
+    try:
+        got = []
+        deadline = time.monotonic() + 6
+        while len(got) < 2 and time.monotonic() < deadline:
+            try:
+                got.append(lines.get(timeout=0.2))
+            except queue.Empty:
+                pass
+        still_running = process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
 
-    rig.run("env", "ls")
+    assert got == ["this machine (andromeda)\n", "  levr  main  running\n"]
+    assert still_running, "the run had already finished, so the slow read was not still running"
 
-    assert rig.stdout_at_first_call(PERSEUS) == "this machine (andromeda)\n  levr  main  running\n"
+
+def test_two_hosts_are_read_at_the_same_moment(rig: Rig) -> None:
+    rig.hosts_file(_hosts("one", "two"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER)
+    rig.ssh_reply("u@two", stdout=HEADER)
+    rig.rendezvous("u@one", "u@two")
+    rig.rendezvous("u@two", "u@one")
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.never_met() == [], f"read ran alone, no peer started within 5s: {rig.never_met()}"
+
+
+def test_this_machines_docker_read_overlaps_a_remote_read(rig: Rig) -> None:
+    rig.hosts_file(_hosts("one"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER)
+    rig.rendezvous("docker", "u@one")
+    rig.rendezvous("u@one", "docker")
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.never_met() == [], f"read ran alone, no peer started within 5s: {rig.never_met()}"
+
+
+def test_two_hosts_that_each_take_about_t_finish_in_under_one_and_a_half_t(rig: Rig) -> None:
+    t = 3.0
+    rig.hosts_file(_hosts("one", "two"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER, delay=t)
+    rig.ssh_reply("u@two", stdout=HEADER, delay=t)
+
+    started = time.monotonic()
+    result = rig.run("env", "ls")
+    elapsed = time.monotonic() - started
+
+    assert result.stdout == "this machine\n  no environments\none\n  no environments\ntwo\n  no environments\n"
+    assert elapsed < 1.5 * t, f"two {t}s reads took {elapsed:.1f}s"
+
+
+def test_blocks_print_this_machine_then_env_hosts_order_whichever_host_answers_first(rig: Rig) -> None:
+    rig.hosts_file(_hosts("slow", "fast"))
+    rig.docker(stdout=_records(("here", "main", "running")))
+    rig.ssh_reply("u@slow", stdout=_records(("far", "slow-one", "running")), delay=1.5)
+    rig.ssh_reply("u@fast", stdout=_records(("far", "fast-one", "exited")))
+
+    result = rig.run("env", "ls")
+
+    assert result.stdout == (
+        "this machine\n  here  main  running\n"
+        "slow\n  far  slow-one  running\n"
+        "fast\n  far  fast-one  stopped\n"
+    )
+
+
+def test_each_host_shows_its_own_outcome_when_read_together(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from camp.cli import dispatch
+    from camp.env import read
+
+    rig.hosts_file(_hosts("down", "stuck", "fine"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@down", stderr="no route to the thing\n", exit_code=255)
+    rig.ssh_reply("u@stuck", sleep=10)
+    rig.ssh_reply("u@fine", stdout=_records(("levr", "main", "running")))
+    rig.stdout_file.write_text("")
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
+
+    dispatch.main()
+
+    assert capsys.readouterr().out == (
+        "this machine\n  no environments\n"
+        "down\n  unreadable: no route to the thing\n"
+        "stuck\n  unreadable: no answer within 1s\n"
+        "fine\n  levr  main  running\n"
+    )
 
 
 def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> None:
@@ -435,7 +581,7 @@ def test_no_not_opted_in_line_when_every_declared_host_is_opted_in(rig: Rig) -> 
 
     result = rig.run("env", "ls")
 
-    assert rig.ssh_calls == [PERSEUS, MACBOOK]
+    assert sorted(rig.ssh_calls) == sorted([PERSEUS, MACBOOK])
     assert "not opted in" not in result.stdout
 
 

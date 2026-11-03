@@ -1,7 +1,9 @@
 """``camp env`` — the verb for dev environments running on this machine and on opted-in hosts.
 
-``camp env ls`` reads this machine, then each host ``env_hosts`` names, one after another, and
-prints each machine's block as soon as its read finishes. It ignores the current camp group.
+``camp env ls`` reads this machine and each host ``env_hosts`` names all at the same time, and
+prints the blocks in a fixed order: this machine, then the hosts in ``env_hosts`` order. A block
+prints as soon as its read and every read before it have finished. It ignores the current camp
+group.
 
 ``camp env attach TARGET`` puts one remote environment on this machine's localhost: one background
 ``ssh`` forward holding each of the environment's standard ports on 127.0.0.1. It checks, in order,
@@ -109,7 +111,7 @@ def _load_machines():
 
 
 def _cmd_env_ls(args: list[str]) -> None:
-    from ..env.read import read_local, read_remote
+    from ..env.read import read_concurrently, read_local, read_remote
 
     CampParser(verb="env ls").parse_args(args)
 
@@ -121,14 +123,19 @@ def _cmd_env_ls(args: list[str]) -> None:
     except (Unverifiable, Untaggable) as error:
         print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
 
-    _emit(
-        f"this machine ({self_name})" if self_name else "this machine",
-        read_local(),
-    )
+    reads = [
+        (
+            f"this machine ({self_name})" if self_name else "this machine",
+            read_local,
+        )
+    ]
     for name in opted_in:
-        if name == self_name:
-            continue
-        _emit(name, read_remote(name, hosts[name], connect_timeout=connect_timeout))
+        if name != self_name:
+            reads.append(
+                (name, lambda name=name: read_remote(name, hosts[name], connect_timeout=connect_timeout))
+            )
+    for heading, inventory in read_concurrently(reads):
+        _emit(heading, inventory)
 
     left_out = [name for name in hosts if name != self_name and name not in opted_in]
     if left_out:
