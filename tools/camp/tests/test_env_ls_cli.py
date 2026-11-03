@@ -990,9 +990,9 @@ class _Listing:
         rig.hosts_file('env_hosts = ["perseus", "toms-macbook-pro"]\n' + TWO_PEERS)
         self.process: subprocess.Popen | None = None
 
-    def start(self, short_dest: str = "") -> subprocess.Popen:
+    def start(self, short_dest: str = "", host: str = "") -> subprocess.Popen:
         self.process = subprocess.Popen(
-            [sys.executable, str(_CLI_CAMP), "env", "ls"],
+            [sys.executable, str(_CLI_CAMP), "env", "ls", *([host] if host else [])],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -1009,8 +1009,8 @@ class _Listing:
                 found[path.name.removeprefix("pid.")] = int(path.read_text())
         return found
 
-    def wait_for_ssh_children(self) -> None:
-        wanted = {PERSEUS, MACBOOK}
+    def wait_for_ssh_children(self, wanted: set[str] | None = None) -> None:
+        wanted = wanted or {PERSEUS, MACBOOK}
         deadline = time.monotonic() + 10
         while not wanted <= set(self.pids()) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -1067,6 +1067,25 @@ def test_an_interrupt_mid_listing_ends_every_child_and_prints_one_line(rig: Rig,
         assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
         assert err == "camp env: interrupted\n"
         assert printed == ["this machine\n", "  levr  main  running\n"] and rest == ""
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after the interrupt: {left}"
+    finally:
+        listing.cleanup()
+
+
+@pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
+def test_an_interrupt_while_a_named_host_is_read_ends_its_child_and_prints_one_line(rig: Rig, whole_group: bool) -> None:
+    listing = _Listing(rig)
+    process = listing.start(host="perseus")
+    try:
+        listing.wait_for_ssh_children({PERSEUS})
+        (os.killpg if whole_group else os.kill)(process.pid, signal.SIGINT)
+        out, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
+        assert err == "camp env: interrupted\n"
+        assert out == ""
         assert took < 3, f"camp took {took:.1f}s to exit"
         assert left == [], f"children still running after the interrupt: {left}"
     finally:

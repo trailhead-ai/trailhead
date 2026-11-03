@@ -603,8 +603,13 @@ def _alive(pid: int) -> bool:
 
 
 @pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
-def test_an_interrupt_while_a_bare_name_is_read_exits_130_and_leaves_no_read_child(
-    rig: AttachRig, whole_group: bool
+@pytest.mark.parametrize(
+    ("target", "read_children"),
+    [("main", _READ_CHILDREN), ("perseus/main", ["tduffield@perseus"])],
+    ids=["bare-name", "host-named"],
+)
+def test_an_interrupt_while_the_reads_a_target_makes_are_running_exits_130_and_leaves_no_read_child(
+    rig: AttachRig, whole_group: bool, target: str, read_children: list[str]
 ) -> None:
     (rig.bin / "sleep").symlink_to(shutil.which("sleep"))
     rig._script("docker", _SLEEPING_DOCKER)
@@ -612,7 +617,7 @@ def test_an_interrupt_while_a_bare_name_is_read_exits_130_and_leaves_no_read_chi
     rig.declare_hosts("andromeda", "perseus")
     process = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve().parents[1] / "plugins" / "camp" / "cli" / "camp"),
-         "env", "attach", "main"],
+         "env", "attach", target],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -624,10 +629,10 @@ def test_an_interrupt_while_a_bare_name_is_read_exits_130_and_leaves_no_read_chi
     pids: dict[str, int] = {}
     try:
         deadline = time.monotonic() + 10
-        while not set(_READ_CHILDREN) <= set(_read_pids(rig)) and time.monotonic() < deadline:
+        while not set(read_children) <= set(_read_pids(rig)) and time.monotonic() < deadline:
             time.sleep(0.05)
         pids = _read_pids(rig)
-        missing = sorted(set(_READ_CHILDREN) - set(pids))
+        missing = sorted(set(read_children) - set(pids))
         assert not missing, f"reads that never started: {missing}"
 
         started = time.monotonic()
