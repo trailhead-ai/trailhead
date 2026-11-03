@@ -59,6 +59,26 @@
       "measures": [
         "skills/slice/SKILL.md"
       ]
+    },
+    "review-hands-a-closed-out-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-stopped-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-complete-unmarked-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-running-loop-back-to-slice": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
     }
   }
 }
