@@ -1222,3 +1222,16 @@ per site, escalating to 6 total on a 2-1 split within a site's own 3; a clean ma
 a pass. Both sites' pre-treatment baseline is Task 2's 3/3 `link` (commit `4a63a007`), read against
 Task 1's original arms (`arms/rule-only.md` for `slice`, `arms/review-treatment.md` for `review`) —
 unaffected by this amendment, which touches only distill's run count and U1's decision tokens.
+
+## Live arm re-based, 2026-11-03 — the spec review's skill edit (G3)
+
+`arms/gauntlet-rule-only.md` is a live arm, rebuilt from `skills/gauntlet/SKILL.md` plus the
+record-links tail, and the skill gained the G3 wording (ids on every mention of a finding, the
+full reply form, whole criterion text on first mention in the saved detail, the final outcome
+opening each saved finding). The arm was rebuilt in the same change and is **re-based**: it now
+holds the post-G3 skill. Its earlier results (every `gauntlet` capture and verdict above) were
+measured against the earlier copy, whose content fingerprint is
+`921214725fb12ab05a447bedbaa178dd7ce02c54` (`git hash-object`; `git log --find-object=<id>` finds
+where it came from). Those results stand against that copy and are not read as results for the
+rebuilt one. The record-link site at `gauntlet` (step 6's advance handoff) is outside the changed
+wording; no new capture is claimed here.
