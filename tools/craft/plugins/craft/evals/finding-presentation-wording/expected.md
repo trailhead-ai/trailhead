@@ -5648,3 +5648,173 @@ The raw stream is not committed. For grading, the saved section is wrapped in on
 the grader reads the first fenced block holding `## Gauntlet`. Every committed file passes `scripts/capture_scan.py`
 and a search for the home path, the username, the machine name and the throwaway directory name finds nothing. The `.md`
 and `.json` extensions keep the files outside the graded `runs/*.txt` captures.
+
+## Results for slice close: the reply and saved-notes edit, treated3 and two real spec reviews (2026-11-03)
+
+Nothing above this heading is changed. Every count for the scripted sites is read from the per-capture tables of the
+base3, control3 and treated3 sections above; no scripted run was made for this section. The two real spec reviews are the
+only runs made here. Causes named are hypotheses unless a line says a per-capture ablation was run on it.
+
+### The two real runs
+
+**What ran.** Two `/craft:gauntlet` sessions on `spec/a-rainwater-tank-log-for-the-marsh-end-allotment-society`, a
+`draft` spec record in its own throwaway vault each (`fixtures/pw-realrun3-spec.md` with ` *Verified by: manual-check.*`
+appended to each criterion so the review's criterion gate would pass it, as the 2026-10-21 run did), seeded by
+`tools/lore/scripts/seed-eval-vault`, in a session from a fresh git directory declaring `## Project Maturity` production.
+`--plugin-dir <worktree>/tools/craft/plugins/craft`, `--setting-sources project`, `--output-format stream-json
+--verbose`, `--permission-mode dontAsk`, `--allowedTools "Read,Grep,Glob,Agent,Bash"`, one foreground `claude -p` per
+turn (`--resume` for turns after the first), a 600-second limit per turn inside the command, no turn crashed or timed
+out. Lore read a throwaway config and state (`LORE_CONFIG_DIR`, `LORE_STATE_DIR`, `XDG_CONFIG_HOME`, `XDG_STATE_HOME`),
+a synthetic git identity (`GIT_CONFIG_GLOBAL`) and `LORE_PUBLISH_DISABLE=1`. `skills/gauntlet/SKILL.md` was at fingerprint
+`09584f7a2daf22740999ff2eef4efd74a7d3f438` before the first run and before the second (checked), 529 lines. The init
+record (committed, trimmed) lists `craft@inline` at the branch's plugin directory. **This is not a sandbox**: `Bash` was
+unrestricted and the real `HOME` was in use (a fresh `CLAUDE_CONFIG_DIR` is "Not logged in"), so it bounds only a
+cooperating session, and it must not be reused on a spec someone else wrote.
+
+**Turn sequence, as registered.** Run 1: (a) opening deliverable; (b) the detail of every finding needing a decision;
+(c) "accept C1 as a risk: ..., otherwise go", C1 being the first finding in the opening's table; the session wrote
+nothing and re-presented a redrafted table because the override changed five accepted edits; (d) one bare "go", after
+which it wrote the section, set the spec `ready` and read it back; (e) the section read back with `lore record show`.
+Run 2: (a), (b), (c) "accept C2 as a risk: ..., otherwise go", C2 being the second finding in the opening's table; the
+override changed no accepted edit, so the session wrote the section in turn (c) and no turn (d) was needed; (e) read
+back. Each saved section was on its record, with the spec `ready`.
+
+**Isolation, before and after each run.**
+
+| Check | Run 1 before / after | Run 2 before / after |
+|---|---|---|
+| `lore vault ls` under the sandbox env | only the throwaway vault / same | only the throwaway vault / same |
+| live trailhead vault `git status --porcelain` | 0 lines / 0 lines | 0 lines / 0 lines |
+| live trailhead vault HEAD | `1f8f6038` / `1f8f6038` (unchanged) | `1f8f6038` / `03be60b1` (**moved**) |
+| `~/.claude/settings.json` mtime | 1793723377 / 1793723377 | 1793723377 / 1793723377 |
+| `~/.claude/projects` top-level | 608 entries / 609 | 609 / 610 |
+
+Two readings are not "unchanged" and are reported as found. (1) `~/.claude/projects` gained exactly one entry per run:
+the Claude Code harness's own transcript directory for that run's working directory (the entry name carries the
+sandbox's path; checked by listing, not by reading contents). `--resume` needs the transcript, and a session started with
+a fresh config directory cannot log in, so this write is not avoidable on this recipe. Nothing else in `~/.claude` was
+looked at beyond the two mtimes and the entry count. The two entries stay in the operator's `~/.claude/projects` until the
+operator removes them. (2) The live trailhead vault's HEAD moved between run 2's before and after listings: five commits
+"lore: andromeda published N item(s)" by the operator's identity, 12:57 to 13:00, adding or changing eight files
+(`area/camp-env-dev-environments-across-hosts`, two `lesson/` records and `task/camp-env-ls-reads-hosts-concurrently-and-can-name-one-host`, each `.md` and `.json`). None
+mentions the tank log (`git grep -il 'rainwater\|marsh end'` over the vault's HEAD finds 0 files), the run's lore had
+publishing disabled and a vault with no remote, and the working tree stayed clean. This is attributed to other sessions
+publishing into the live vault during the same minutes, which this run cannot prove; it is a hypothesis, not a
+measurement, and the same limit applied on 2026-10-21.
+
+**Reading fields, per run.** Fields are those fixed in "Reading fields for the two real spec reviews at slice close,
+fixed before either run (2026-11-03)". Script: `wording_grader.py` with an empty `--reports` file (a real run has no
+canned reports to drop quoted lines against), the saved section wrapped in one fence in its own file for `--saved-detail`.
+
+| Field | Run 1 | Run 2 |
+|---|---|---|
+| 1 Ids in the detail view's prose (AC27). Script `finding-id` on turn (b) | `bare` | `bracketed` |
+| 1, same check on the other turns and the saved detail | turns (a), (c), (d) `bracketed`; saved detail `bracketed` | turns (a), (c) `bracketed`; saved detail `bracketed` |
+| 2 Criteria in the saved section, by eye | 19 distinct criteria, each first mention whole text word for word with its number in brackets after; point-backs `back` (AC1, AC14, AC15 and others) with the number after; 0 bare | 16 distinct criteria, each first mention whole text word for word with its number after; point-backs `back`; 0 bare |
+| 2 Script `criterion-mention --saved-detail`, `--criteria` the review's final spec body | `nickname` | `bare` |
+| 3 Outcome words (AC26), script `outcome-word` | turns (a) to (c) `plain`; turn (d) `none` (no table) | turns (a) to (c) `plain` |
+| 4 Final outcome opens each saved finding, by eye | 8 of 8 `final`: C1 "accepted as a risk", C2 to C8 "fixed in the spec"; no "proposed" before an outcome | 6 of 6 `final`: C2 "accepted as a risk", the other five "fixed in the spec"; no "proposed" before an outcome |
+| 5 `stamp-form` / `override-mapping` / marker bullet | `kept` / `mapped` / printed once, first | `kept` / `mapped` / printed once, first |
+| First naming (AC25), turn (a), script `review-name` | `plain` ("spec review (gauntlet)") | `plain` ("spec review (gauntlet)") |
+
+**Field 1, the bare ids (run 1, turn b).** Three, all cross-references to another finding by its id alone: "Old AC3
+(restated in full under C2 above)" (line 80), "the refusal rule (old AC2, quoted under C4)" (line 96) and "covered by the
+first dip readings in C1" (line 111). Each is a later mention of a finding made by id with no words naming it and no
+brackets, the form the edit asked to avoid. Run 2's detail view has none. Recorded against AC27 and not repaired by a
+re-run. Cause: none established (hypothesis: a detail view of eight findings that refer to each other gives more
+occasions for a cross-reference than the fixture's three).
+
+**Field 2, script against eye, with ablations.** The script reads word overlap inside a sentence, and a review that
+renumbers its criteria moves the numbers the criteria file knows, so it was run against the review's final spec body (the
+numbers the saved section uses), listing each mention. Run 1: of 22 mentions, 19 read `text-with-number` (16 first mentions, 3 point-backs) and three
+read `nickname` (AC4, AC12, AC14). By eye all three are whole word-for-word quotes. Ablation on this capture: every `;`
+in the saved section and in the criteria file replaced by `,` in scratch copies, the verdict moved from `nickname` to
+`text-with-number` with 0 `nickname` mentions, so the three misreads come from the grader's sentence split at a
+semicolon inside a quoted criterion (AC4, AC12 and AC14 each contain one), not from the wording of the section.
+Run 2: of 27 mentions, 11 first mentions read `text-with-number` and 11 point-backs read as such; one reads `bare`, "(AC2, original wording)", where the brackets hold more than the number; four read `nickname` (AC3, AC11, AC12, AC17), AC11, AC12 and AC17 each holding a semicolon, and
+the AC3 quote reads `nickname` against the final spec because the criteria file holds AC3 as the review rewrote it while the quote
+is the original, which is correct by eye. With the bracket text and the semicolons ablated together the verdict moves
+from `bare` to `nickname` with that one AC3 mention left, and graded against the original spec's AC3 the same quote reads
+`text-with-number`. Two ablations were run together, so the split between the bracket text and the semicolons is not
+separated. The eye reading is the one each run is read by.
+
+**The long criterion on first mention (the plan's fourth Known Unknown).** Run 2: yes, whole. The saved section's first
+mention of the original AC3 quotes all three of its sentences word for word (the 300-litre alert, the not-sent-again rule,
+the same-day combined email ordered lowest to highest with the days-remaining line) and gives "(AC3)" after the quote. Run 1:
+the review split the long criterion into three new criteria, so the saved section never names the original AC3 by number;
+each of the three, AC8, AC9 and AC10, is quoted whole word for whole word on first mention with its number after. In turn (b) of run 1 the long original
+is restated whole, with its number before the text ("Old AC3 ... Restated whole, old AC3 sends ..."), not after it, in the detail view and not in the
+saved section. So in both real runs the first mention of every criterion the saved section cites was whole text, and the
+Known Unknown resolves: a real spec review on a longer draft still gives each criterion's whole text on first mention.
+Opening-words-only mentions: 0 in either run.
+
+**Observations that decide nothing.** `severity-name` read `internal` on turns (a) and (b) of run 1 ("Two Criticals were
+moved down", "moved down from Critical") and `plain`, `plain`, `none` on run 2's turns; this is the same plural level name
+the operator ruled residual at `pwopen`. `review-name` on later turns is not a defined reading and read `internal` or
+`none` as the grammar reads a text with "gauntlet" never beside "spec review"; it is not used.
+
+**Scans.** `scripts/capture_scan.py` over all eleven committed files, together and each alone: 0 known-safe matches, 0
+credential findings, exit 0. A case-insensitive search of the eleven for the home path, the username, the machine name,
+`/tmp/`, `/private` and the throwaway directory name found 0 hits. The raw streams are not committed.
+
+### Per criterion
+
+- **AC27: met at the scripted sites, with a recorded real-run remainder.** Treated3: `pwdetail` `finding-id` `bracketed`
+  6 of 6 (base3 4 of 6), `pwopen` 5 of 6, `pwsaved` echo and saved detail 3 of 3 each. Real runs: the opening, the
+  post-override and written turns and the saved detail are `bracketed` in both runs; the detail view is `bracketed` in
+  run 2 and `bare` in run 1 (three cross-references by id alone). Whether one clean detail view in two real runs closes
+  AC27 is the operator's call at slice close; the scripted reading met the registered bar.
+- **AC28: met.** Treated3: saved-detail `criterion-mention` `text-with-number` 3 of 3 (base3 0 of 6). Real runs: by eye
+  every first mention of every criterion is whole text with its number after, 19 of 19 and 16 of 16, and every later
+  mention is a point-back with the number after; the script's `nickname` and `bare` verdicts are explained by an ablation
+  and a criteria-file mismatch above and are recorded as such.
+- **AC25 and AC26, held.** `review-name` `plain` at turn (a) of both runs; `outcome-word` `plain` on every turn with a
+  table in both runs. Treated3: `pwopen` `review-name` and `outcome-word` held, `pwdetail` and `pwsaved` `outcome-word`
+  held.
+- **The final outcome in the saved detail (folded follow-up): met by eye.** 8 of 8 and 6 of 6 findings open with their
+  final outcome, the overridden one with "accepted as a risk"; treated3 read the same by eye over six captures.
+- **Guards the plan names.** `stamp-form` `kept` and `override-mapping` `mapped` in both real runs and 3 of 3 at
+  treated3; the marker bullet is first and printed once in both real runs and in treated3, and the credential scrub and
+  `capture_scan.py` pass over every saved block. At `pwopen`, `severity-name` read `internal` in 2 of 6 treated3 runs
+  against 1 of 6 in the paired control: the registered rule's own verdict is a regression, and the operator ruled it
+  residual (see "Regression stop: G3 reverted" and "Operator ruling: the `pwopen` `severity-name` miss is residual",
+  above, which this section does not restate).
+
+### Limits
+
+- **Surfaces not measured**, unchanged from the earlier slice's list: the missing-agent stop and the maturity line, the
+  out-of-range override rejection, the `reaches-downstream` escalation table, a revise round's re-presented table, and an
+  `answered` row's re-adjudication. Run 1's re-presented table after an override is a neighbouring surface and read
+  `bracketed` and `plain` there. Also unmeasured: the review on a spec with more than six criteria at a scripted site (the
+  real runs are two sessions, one reader, one model tier).
+- **The 531-line waiver.** `skills/gauntlet/SKILL.md` is 529 lines at the reworded G3 (it was 531 at every earlier
+  point); G3 displaced the intro paragraph and three narration lines, none read by a test or skill, and the guideline of
+  500 is still unenforced (`LINE_LIMIT` is unused). The waiver stands and rests with the operator.
+- **The guard readings.** `pwopen` `criterion-mention` reads `bare` in every treated3 and base3 capture (residual, as in
+  every earlier batch and the earlier same-day control). The base3 arm's `severity-name` and `reviewer-name` at `pwopen`
+  read `plain` 4 of 6 each, so a treated3 reading at those guards is read against that baseline, not against a clean 6 of
+  6. The `pwopen` `severity-name` miss is the operator's residual ruling above.
+- **Grader.** A semicolon inside a quoted criterion splits the sentence `criterion-mention` counts overlap in, so a
+  whole quote of such a criterion can read `nickname` (shown by ablation in run 1); and the check reads a criterion by the
+  number the criteria file holds, which a renumbering review changes. Neither is changed here: the case's grammar is
+  frozen for this slice. A follow-up is for the controller to log.
+- **Environment.** User-level rules and the claude.ai connectors load regardless of `--setting-sources`; `Bash` was
+  unrestricted; the throwaway vault holds one spec so the fact pass had no sibling records; one vault HEAD movement in the
+  live vault during run 2 is unattributed (see the isolation table).
+
+### Drift diff against origin/main, before the pull request
+
+After `git fetch origin`, over the four measured sources: `rules.md`, `skills/gauntlet/dispositions.md` and
+`skills/_shared/council.md` have an empty diff against origin/main. `skills/gauntlet/SKILL.md` differs from origin/main
+by 14 insertions and 16 deletions, which are this branch's G3 and the reworded saved-detail example and nothing else
+(read from the diff: step 5's id sentence, the step 6 criterion and outcome clause, the worked example, and the displaced
+lines named above). origin/main has moved 33 commits since this branch was cut, and `git diff <merge-base> origin/main`
+over the four sources is empty, so none of them touched any measured file. No other change is named.
+
+### Gates at close-out
+
+The scoped run (`test_wording_grader.py`, `test_finding_presentation_wording_arms_contract.py`,
+`test_capture_scan.py`, `test_ritual_deliverable_eval_arms_contract.py`) passed 1311 after each commit of
+this task, with `scripts/inert-test-gate` and `scripts/leak-gate` exit 0. No verdict row was added to
+`test_wording_grader.py`: the real-run captures are `.md` and `.json` files outside the graded `runs/*.txt` set. The
+whole-suite run is the controller's, once.
