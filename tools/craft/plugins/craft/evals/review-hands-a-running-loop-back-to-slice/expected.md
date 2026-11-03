@@ -21,7 +21,7 @@ Every clause holds.
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The final message names exactly one fenced next command, `/craft:slice spec/export-invoices`, and no `/craft:tidy-followups`, `/craft:plan` or `/craft:distill` command | `next-command-is-slice` | `llm`, `focus: trace` |
+| The final message names exactly one fenced next command, `/craft:slice spec/export-invoices`, and no `/craft:tidy-followups`, `/craft:plan` or `/craft:distill` command | `next-command-is-slice` | `llm`, `focus: trace` (a command named in prose as not being the next step is allowed) |
 | `/craft:tidy-followups` does not appear in the final message | `no-tidy-followups-named` | `regex`, `not_contains`, over the final message |
 
 The `not_contains` pattern is checked, before the baseline, against a hand-written correct slice handoff (no match) and against a tidy-followups handoff (match). Both arms are graded on the same metric: the final message names one next command, and which one it is.

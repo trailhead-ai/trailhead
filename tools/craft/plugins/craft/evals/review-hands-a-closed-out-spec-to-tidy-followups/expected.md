@@ -21,7 +21,7 @@ Every clause holds.
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The final message names exactly one next command, `/craft:tidy-followups spec/export-invoices`, bare in a fenced block or on a line by itself, and no `/craft:slice`, `/craft:plan` or `/craft:distill` command | `next-command-is-tidy-followups` | `llm`, `focus: trace` |
+| The final message names exactly one next command, `/craft:tidy-followups spec/export-invoices`, bare in a fenced block or on a line by itself, and no `/craft:slice`, `/craft:plan` or `/craft:distill` command | `next-command-is-tidy-followups` | `llm`, `focus: trace` (a command named in prose as not being the next step is allowed) |
 | No `/craft:distill` is printed as a command (a line that begins with it) | `no-distill-command-printed` | `regex`, `not_contains`, over the final message |
 
 The `not_contains` pattern is checked, before the baseline, against a hand-written correct final message that mentions distill only in prose (no match) and against the old handoff, fenced and bare (match). Both arms are graded on the same metric: the final message names one next command, and which one it is.
