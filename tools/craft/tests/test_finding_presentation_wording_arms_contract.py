@@ -94,7 +94,7 @@ PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
 
 # The commit carrying the third plain-words ritual edit: the treated3 arms read the two gauntlet files from here and
 # every other source from `PLAIN_WORDS_B3_REVISION`.
-PLAIN_WORDS_EDIT3_REVISION = "608547202907089dbe555547e55f37bd65d464c8"
+PLAIN_WORDS_EDIT3_REVISION = "2c84ecaa42982aa16a76df31fbfa66bf691395fd"
 
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
