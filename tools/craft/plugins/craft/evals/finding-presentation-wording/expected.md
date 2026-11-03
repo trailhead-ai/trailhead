@@ -5535,3 +5535,14 @@ disposition carry no outcome opening and are not counted here.
 **Gates.** `scripts/capture_scan.py` and `scripts/leak-gate` as above; the scoped run
 (`test_wording_grader.py`, `test_finding_presentation_wording_arms_contract.py`, `test_capture_scan.py`,
 `test_ritual_deliverable_eval_arms_contract.py`) passed 1311.
+
+### Regression stop: G3 reverted (2026-11-03)
+
+The treated3 batch met the registered Guard-miss rule for a regression at `pwopen` `severity-name`: `internal` in 2 of 6
+treated3 runs, against 1 of 6 in the paired control `pw-control3-pwopen`. As registered, G3 is reverted and the slice
+stops. One commit takes out the skill edit and the live-arm rebuild together: `skills/gauntlet/SKILL.md` is back at
+fingerprint `0ff013d7a72bb82d47be47c53b324fbd8570e975` (B3), and the record-link case's `gauntlet-rule-only.md` is back at
+`921214725fb12ab05a447bedbaa178dd7ce02c54`. No fallback G3b was built, because AC28 did not miss. The treated3 arms, the
+captures and every result above stay as committed, tied to the G3 copy they were measured against. The branch is held
+with no pull request until the operator decides. AC27 and AC28 are not closed: their treated3 readings are met, but the
+stop overrides them.
