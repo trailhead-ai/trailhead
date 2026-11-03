@@ -1058,7 +1058,9 @@ def test_an_interrupt_mid_listing_ends_every_child_and_prints_one_line(rig: Rig,
 
 
 @pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
-def test_an_interrupt_while_a_named_host_is_read_ends_its_child_and_prints_one_line(rig: Rig, whole_group: bool) -> None:
+def test_an_interrupt_while_a_named_host_is_read_ends_its_child_and_prints_one_line(
+    rig: Rig, whole_group: bool
+) -> None:
     listing = _Listing(rig)
     process = listing.start(host="perseus")
     try:

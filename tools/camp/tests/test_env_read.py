@@ -737,7 +737,8 @@ class _Sleepers:
 
     def reads(self):
         def make(name):
-            code = f"import os,time;open({str(self.dir / ('pid.' + name))!r},'w').write(str(os.getpid()));time.sleep(30)"
+            pid_file = str(self.dir / ("pid." + name))
+            code = f"import os,time;open({pid_file!r},'w').write(str(os.getpid()));time.sleep(30)"
 
             def run():
                 self.processes.runner([sys.executable, "-c", code], 60, os.environ, 1000)

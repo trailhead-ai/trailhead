@@ -403,7 +403,8 @@ class Concurrent:
     """Reads that cannot finish until every one of them has started, and that finish in a set order.
 
     ``arrivals`` records each read as it starts; ``finished`` records the order they returned in.
-    ``finish_order`` lists the machines (``local`` and hosts) in the order they must return; a read that is not allowed to return yet waits for the one before it, up to ``WAIT``.
+    ``finish_order`` lists the machines (``local`` and hosts) in the order they must return; a read that
+    is not allowed to return yet waits for the one before it, up to ``WAIT``.
     """
 
     def __init__(self, reads: Reads, finish_order=()):
