@@ -1086,8 +1086,116 @@ def test_closing_stdout_while_a_later_host_is_still_read_ends_it_without_a_trace
         _, err, took = listing.finish()
         left = listing.survivors_after_grace()
 
+        assert process.returncode == 1, f"exit {process.returncode}, stderr {err!r}"
         assert "Traceback" not in err and "BrokenPipe" not in err, err
+        assert "Exception ignored" not in err, err
         assert took < 3, f"camp took {took:.1f}s to exit"
         assert left == [], f"children still running after stdout closed: {left}"
     finally:
         listing.cleanup()
+
+
+class _StdoutClosedAt:
+    """A stdout whose reader has gone: the first write of a line starting with `closing_at` raises."""
+
+    def __init__(self, sink: Path, closing_at: str) -> None:
+        self._file = sink.open("w")
+        self.closing_at = closing_at
+        self.written: list[str] = []
+
+    def write(self, text: str) -> int:
+        if text.startswith(self.closing_at):
+            raise BrokenPipeError(32, "Broken pipe")
+        self.written.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def fileno(self) -> int:
+        return self._file.fileno()
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def _ls_into_a_stdout_that_closes_at(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, closing_at: str
+) -> tuple[int | str | None, _StdoutClosedAt]:
+    from camp.cli import dispatch
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    stdout = _StdoutClosedAt(tmp_path / "closed-stdout", closing_at)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
+    try:
+        with pytest.raises(SystemExit) as exited:
+            dispatch.main()
+    finally:
+        stdout.close()
+    return exited.value.code, stdout
+
+
+def test_closing_stdout_when_the_not_opted_in_line_is_due_exits_quietly(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rig.hosts_file('env_hosts = []\n' + TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+
+    code, stdout = _ls_into_a_stdout_that_closes_at(rig, monkeypatch, tmp_path, "not opted in:")
+
+    assert code == 1
+    assert stdout.written == ["this machine\n  levr  main  running\n"]
+
+
+def test_closing_stdout_when_an_attached_line_is_due_exits_quietly(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from camp.cli import env as env_cli
+
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    monkeypatch.setattr(env_cli, "attachments", lambda: [object()])
+    monkeypatch.setattr(env_cli, "_summary_of", lambda found: "perseus/levr/main on ports 1")
+
+    code, stdout = _ls_into_a_stdout_that_closes_at(rig, monkeypatch, tmp_path, "attached:")
+
+    assert code == 1
+    assert stdout.written == []
+
+
+@pytest.mark.parametrize("ending", [KeyboardInterrupt, BrokenPipeError], ids=["interrupt", "closed-stdout"])
+def test_an_ending_during_thread_start_up_ends_a_child_already_spawned(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, ending: type[BaseException]
+) -> None:
+    from camp.cli import dispatch
+    from camp.env import read
+
+    spawned: list[subprocess.Popen] = []
+
+    def interrupted_while_starting(reads, processes=None):
+        child = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        spawned.append(child)
+        processes._add(child)
+        raise ending()
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "read_concurrently", interrupted_while_starting)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
+    stdout_fd = os.dup(sys.stdout.fileno())
+    target_fd = sys.stdout.fileno()
+    try:
+        with pytest.raises(SystemExit):
+            dispatch.main()
+        try:
+            spawned[0].wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the child spawned before the ending was still running 3s later")
+    finally:
+        os.dup2(stdout_fd, target_fd)
+        os.close(stdout_fd)
+        for child in spawned:
+            if child.poll() is None:
+                child.kill()
+            child.wait()

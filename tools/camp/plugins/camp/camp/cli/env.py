@@ -5,7 +5,8 @@ prints the blocks in a fixed order: this machine, then the hosts in ``env_hosts`
 prints as soon as its read and every read before it have finished. It ignores the current camp
 group. An interrupt ends every ssh and docker the listing started, prints ``camp env: interrupted``
 to stderr and exits 130, leaving the blocks already printed as they are; a closed stdout ends them
-too and exits quietly (status 1) at the next block it tries to write.
+too and exits quietly (status 1) at the next line it tries to write: an ``attached:`` line, a block
+or the ``not opted in:`` line.
 
 ``camp env ls HOST`` reads that one machine alone — this machine for ``local`` or ``self_name``
 (never over ssh), otherwise a declared host whether or not ``env_hosts`` names it — and prints the
@@ -18,6 +19,10 @@ that nothing is attached, resolves the target, refuses a stopped or port-less en
 held standard port, starts the forward, and finds it again by its fresh attach id in the process
 table. Once the forward has been started, every way out (a failed start, a forward that is not
 found, an exception, an interrupt) ends the forward carrying that id and no other.
+
+A bare name reads this machine and every opted-in host at the same time. An interrupt while attach
+is reading machines (a bare name or ``HOST/NAME``) ends every ssh and docker started for the reads,
+prints ``camp env: interrupted`` to stderr and exits 130, before any forward exists.
 
 ``camp env status`` and ``camp env detach`` read only the process table: status prints one
 ``attached:`` line per recognised forward, detach ends them and waits for their ports to bind
@@ -141,12 +146,6 @@ def _cmd_env_ls(args: list[str]) -> None:
         if only.kind == UNDECLARED:
             _refuse(undeclared_host_message(only.name, hosts, str(_hosts_file())))
 
-    try:
-        for found in attachments():
-            print(f"attached: {_summary_of(found)}", flush=True)
-    except (Unverifiable, Untaggable) as error:
-        print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
-
     processes = ProcessSet()
     this_machine = (
         f"this machine ({self_name})" if self_name else "this machine",
@@ -166,28 +165,35 @@ def _cmd_env_ls(args: list[str]) -> None:
     else:
         reads = [remote(only.name)]
     try:
+        try:
+            for found in attachments():
+                print(f"attached: {_summary_of(found)}", flush=True)
+        except (Unverifiable, Untaggable) as error:
+            print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
+
         with read_concurrently(reads, processes) as results:
             for heading, inventory in results:
                 _emit(heading, inventory)
+
+        if only is None:
+            left_out = [name for name in hosts if name != self_name and name not in opted_in]
+            if left_out:
+                hosts_file = _hosts_file()
+                print(
+                    # Host-table keys are not charset-checked by the loader, so they pass the
+                    # same printable-only reduction as far-side text before reaching the terminal.
+                    f"not opted in: {', '.join(printable_line(name) for name in left_out)} "
+                    f"(add to env_hosts in {printable_line(str(hosts_file), limit=4096)})",
+                    flush=True,
+                )
     except KeyboardInterrupt:
+        processes.kill()
         print("camp env: interrupted", file=sys.stderr, flush=True)
         sys.exit(130)
     except BrokenPipeError:
+        processes.kill()
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         sys.exit(1)
-
-    if only is not None:
-        return
-    left_out = [name for name in hosts if name != self_name and name not in opted_in]
-    if left_out:
-        hosts_file = _hosts_file()
-        print(
-            # Host-table keys are not charset-checked by the loader, so they pass the
-            # same printable-only reduction as far-side text before reaching the terminal.
-            f"not opted in: {', '.join(printable_line(name) for name in left_out)} "
-            f"(add to env_hosts in {printable_line(str(hosts_file), limit=4096)})",
-            flush=True,
-        )
 
 
 def display_name(host: str, group: str, name: str) -> str:

@@ -310,7 +310,7 @@ def read_concurrently(
         def work(run=run, done=done, box=box) -> None:
             try:
                 box.append(run())
-            except Exception as error:
+            except BaseException as error:
                 box.append(_unreadable(f"read failed ({type(error).__name__})"))
             finally:
                 done.set()

@@ -659,6 +659,26 @@ def test_a_read_that_raises_is_that_slots_unreadable_and_its_neighbours_are_unto
     assert results[2][1] == read.MachineInventory(read.DOCKER_NOT_INSTALLED)
 
 
+def test_a_read_that_raises_a_non_exception_is_that_slots_unreadable_with_neighbours_intact():
+    def leaves():
+        raise SystemExit(3)
+
+    results = list(
+        read.read_concurrently(
+            [
+                ("before", lambda: read.MachineInventory(read.DOCKER_NOT_RUNNING)),
+                ("leaves", leaves),
+                ("after", lambda: read.MachineInventory(read.DOCKER_NOT_INSTALLED)),
+            ]
+        )
+    )
+
+    assert [key for key, _ in results] == ["before", "leaves", "after"]
+    assert results[0][1] == read.MachineInventory(read.DOCKER_NOT_RUNNING)
+    assert results[1][1] == read.MachineInventory(read.UNREADABLE, reason="read failed (SystemExit)")
+    assert results[2][1] == read.MachineInventory(read.DOCKER_NOT_INSTALLED)
+
+
 def test_a_raised_exception_type_name_reaches_the_reason_as_printable_text():
     hostile = type("Evil\x1b[31mName", (Exception,), {})
 

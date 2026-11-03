@@ -418,7 +418,8 @@ Ctrl-C ends a listing at once: camp ends every `ssh` and `docker` it had started
 reads (whether or not the signal reached them), prints `camp env: interrupted` to stderr
 and exits `130`, with no traceback. Blocks already printed stay as they are. If the
 output is closed (`camp env ls | head -1`), camp ends the reads still running the same
-way at the next block it tries to write, then exits `1` quietly.
+way at the next line it tries to write (an `attached:` line, a block or the `not opted
+in:` line), then exits `1` quietly.
 
 `camp env ls HOST` lists that one machine alone, whether or not `env_hosts` names it,
 and reads no other: a declared host is read over ssh, `local` or this machine's
@@ -508,6 +509,11 @@ refused connection), attach says `camp env: attach failed: ssh could not start t
 forward: <ssh's line>`. If anything goes wrong after the forward started, including an
 interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
 one, and says so if it could not.
+
+A bare name reads this machine and every opted-in host at the same time. An interrupt
+while attach is reading machines (a bare name or `HOST/NAME`) prints `camp env:
+interrupted`, exits `130` and ends every `ssh` and `docker` started for the reads, before
+any forward exists.
 
 ### Status and detach
 
