@@ -466,13 +466,13 @@ count (see above):
   C2 `disputed` (operator override — "<their reason, quoted>"), C3 `resolved` (operator override —
   answered: "<their counterargument, quoted>"), … — <n> from proposal, <n> operator overrides.
   Important <n>, Minor <n>, detail below.
-- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with
-  its final outcome in plain words, not its proposed one, and put each Critical's id after its
-  headline in round brackets. The first time the detail names a criterion, give all of its text with
-  its number after in round brackets: quoted word for word, or restated whole only where the text is
-  long; opening words alone don't count. After that, a few words point back to it with the number
-  after. A fix line does the same. For example: "A picking session is full once forty pickers have
-  signed up" (AC4) names no time of day. Fix: that sign-up limit (AC4) asks whose clock counts>
+- <the consolidated detail, per finding, in the shape `_shared/council.md` defines; open each with its
+  final outcome in plain words, not its proposed one, and put each Critical's id after its headline in
+  round brackets. The first time the detail names a criterion, give all of its text with its number after
+  in round brackets: quoted word for word, or restated whole only where the text is long; opening words
+  alone don't count. After that, a few words point back to it with the number after. A fix line does the
+  same. For example: "A picking session is full once forty pickers have signed up" (AC4) leaves the
+  forty-first picker unanswered. Fix: that sign-up limit (AC4) asks what the forty-first picker hears>
 ```
 
 That is one invocation. `$EDITS` is the unified diff carrying all three payloads — every `resolved`

@@ -5347,3 +5347,17 @@ this host):
 | `pw-treated3-pwsaved.md` | 91894 | under by 39178 | under by 956682 |
 
 All three pass `--append-system-prompt` inline. They are 56 bytes smaller than the base3 arms (91950).
+
+**Example reworded before any treated3 capture (2026-11-03).** The worked example in the saved-detail bullet of
+`skills/gauntlet/SKILL.md` first ended "names no time of day. Fix: that sign-up limit (AC4) asks whose clock counts".
+"Clock" and "time of day" overlap the finding in `fixtures/pw-reports-spec-review.md` about which clock the 48 hours
+run on, and the plan requires the example's domain to share no vocabulary with the `pw-*` fixtures, so a treated
+capture could have passed by copying the example. The tail now reads "leaves the forty-first picker unanswered. Fix:
+that sign-up limit (AC4) asks what the forty-first picker hears". Nothing else in the file changed. No treated3
+capture had been taken, so none is affected; the three arms were recomposed with the same recipe (four sources joined
+by one newline, `rules.md` and `council.md` at B3, the two gauntlet files from the reworded edit). The fingerprints
+above stand for `rules.md`, `dispositions.md` and `council.md`; `skills/gauntlet/SKILL.md` is now
+`09584f7a2daf22740999ff2eef4efd74a7d3f438` (the value in the table above is the pre-rewording one and was never measured). Each treated3 arm is now 91929
+bytes (the prior 91894 plus 35), under `MAX_ARG_STRLEN` (131072) by 39143 and under `getconf ARG_MAX` (1048576) by
+956647. The grader read the new example as `text-with-number` for `criterion-mention --saved-detail`, and the same
+capture with the first mention shortened to "the session limit (AC4)" as `nickname`.

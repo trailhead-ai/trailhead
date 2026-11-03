@@ -1235,3 +1235,6 @@ measured against the earlier copy, whose content fingerprint is
 where it came from). Those results stand against that copy and are not read as results for the
 rebuilt one. The record-link site at `gauntlet` (step 6's advance handoff) is outside the changed
 wording; no new capture is claimed here.
+
+The example in that skill edit was reworded the same day, before any capture of the rebuilt arm; the live arm was
+rebuilt again and now holds `skills/gauntlet/SKILL.md` at fingerprint `09584f7a2daf22740999ff2eef4efd74a7d3f438`, replacing the post-G3 copy for which no result exists.
