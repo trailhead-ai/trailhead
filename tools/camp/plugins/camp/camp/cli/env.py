@@ -3,7 +3,9 @@
 ``camp env ls`` reads this machine and each host ``env_hosts`` names all at the same time, and
 prints the blocks in a fixed order: this machine, then the hosts in ``env_hosts`` order. A block
 prints as soon as its read and every read before it have finished. It ignores the current camp
-group.
+group. An interrupt ends every ssh and docker the listing started, prints ``camp env: interrupted``
+to stderr and exits 130, leaving the blocks already printed as they are; a closed stdout ends them
+too and exits quietly (status 1) at the next block it tries to write.
 
 ``camp env attach TARGET`` puts one remote environment on this machine's localhost: one background
 ``ssh`` forward holding each of the environment's standard ports on 127.0.0.1. It checks, in order,
@@ -18,6 +20,7 @@ free. ``camp env ls`` opens with the same lines.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -111,7 +114,7 @@ def _load_machines():
 
 
 def _cmd_env_ls(args: list[str]) -> None:
-    from ..env.read import read_concurrently, read_local, read_remote
+    from ..env.read import ProcessSet, read_concurrently, read_local, read_remote
 
     CampParser(verb="env ls").parse_args(args)
 
@@ -123,19 +126,33 @@ def _cmd_env_ls(args: list[str]) -> None:
     except (Unverifiable, Untaggable) as error:
         print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
 
+    processes = ProcessSet()
     reads = [
         (
             f"this machine ({self_name})" if self_name else "this machine",
-            read_local,
+            lambda: read_local(runner=processes.runner),
         )
     ]
     for name in opted_in:
         if name != self_name:
             reads.append(
-                (name, lambda name=name: read_remote(name, hosts[name], connect_timeout=connect_timeout))
+                (
+                    name,
+                    lambda name=name: read_remote(
+                        name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner
+                    ),
+                )
             )
-    for heading, inventory in read_concurrently(reads):
-        _emit(heading, inventory)
+    try:
+        with read_concurrently(reads, processes) as results:
+            for heading, inventory in results:
+                _emit(heading, inventory)
+    except KeyboardInterrupt:
+        print("camp env: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
+    except BrokenPipeError:
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(1)
 
     left_out = [name for name in hosts if name != self_name and name not in opted_in]
     if left_out:

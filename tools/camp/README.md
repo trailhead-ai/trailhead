@@ -413,6 +413,12 @@ none, and `--host` has no meaning here). A bare `camp env`, or any subcommand ot
 than `ls`, `attach`, `status` or `detach`, prints one usage line naming those four and
 exits `1`.
 
+Ctrl-C ends a listing at once: camp ends every `ssh` and `docker` it had started for the
+reads (whether or not the signal reached them), prints `camp env: interrupted` to stderr
+and exits `130`, with no traceback. Blocks already printed stay as they are. If the
+output is closed (`camp env ls | head -1`), camp ends the reads still running the same
+way at the next block it tries to write, then exits `1` quietly.
+
 When something is attached (see below), `ls` opens with its `attached:` line, then lists
 as before; when the process table cannot be read it says
 `camp env: could not tell whether anything is attached: <why>` on stderr and lists anyway.

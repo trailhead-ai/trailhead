@@ -58,6 +58,16 @@ pool, so nothing waits out a read's bound at shutdown or interpreter exit), and 
 finished. A read that raises is that slot's ``UNREADABLE`` with reason ``read failed (<exception
 type name>)``; the message is never carried. No slot is dropped or reordered.
 
+Interrupting a read
+-------------------
+A signal reaches only the main thread, so reads on worker threads cannot see it. Reads given a
+:class:`ProcessSet`'s ``runner`` register every local ssh or docker child they start there, and
+``read_concurrently``'s return value, used as a context manager, ends all of them when the caller
+stops consuming: a ``KeyboardInterrupt``, a closed stdout, any exception. A child that starts after
+that point is ended as it starts. This holds whether the signal also reached the children (a
+terminal's Ctrl-C) or only camp's own process, and nothing is left running or holding camp open.
+Only the direct ssh or docker child is ended, not anything it started in turn.
+
 ``runner`` is injected for tests. Left unset, the reads run the real ``docker`` (locally) or ``ssh``
 (remotely), each found through ``PATH`` when the call is made.
 """
@@ -218,13 +228,79 @@ def read_remote(
     return _unreadable(transport.outcome_detail(outcome))
 
 
+class ProcessSet:
+    """The local processes a set of reads started, so they can be ended together.
+
+    ``runner`` is a ``transport.BoundedRunner`` that records each child it starts; hand it to
+    ``read_local`` / ``read_remote`` as their ``runner``. ``kill`` ends every recorded child that is
+    still running and any child recorded afterwards, so a read that had not yet spawned when ``kill``
+    ran never leaves a process behind.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._started: list[subprocess.Popen] = []
+        self._killed = False
+
+    def runner(self, argv, execution_timeout, env, max_stdout_bytes) -> transport.RawResult:
+        return transport.bounded_runner(
+            argv, execution_timeout, env, max_stdout_bytes, on_start=self._add
+        )
+
+    def _add(self, process: subprocess.Popen) -> None:
+        with self._lock:
+            if self._killed:
+                process.kill()
+            else:
+                self._started.append(process)
+
+    def kill(self) -> None:
+        with self._lock:
+            self._killed = True
+            for process in self._started:
+                if process.poll() is None:
+                    process.kill()
+
+
+class ConcurrentReads:
+    """What ``read_concurrently`` returns: iterate it for ``(key, inventory)`` pairs in input order.
+
+    ``close`` (or leaving a ``with`` block, however it is left) ends every process the reads started
+    through the :class:`ProcessSet`, whether or not iteration ever began.
+    """
+
+    def __init__(
+        self, results: Iterator[tuple[_Key, MachineInventory]], processes: ProcessSet | None
+    ) -> None:
+        self._results = results
+        self._processes = processes
+
+    def __iter__(self) -> Iterator[tuple[_Key, MachineInventory]]:
+        return self._results
+
+    def close(self) -> None:
+        if self._processes is not None:
+            self._processes.kill()
+
+    def __enter__(self) -> "ConcurrentReads":
+        return self
+
+    def __exit__(self, *exc_info) -> None:
+        self.close()
+
+
 def read_concurrently(
     reads: Sequence[tuple[_Key, Callable[[], MachineInventory]]],
-) -> Iterator[tuple[_Key, MachineInventory]]:
+    processes: ProcessSet | None = None,
+) -> ConcurrentReads:
     """Start every read now, one daemon thread each; yield ``(key, inventory)`` in input order.
 
     Each result is yielded as soon as it and every earlier read have finished. A read that raises
     becomes that slot's unreadable ``read failed (<exception type name>)``.
+
+    Pass the :class:`ProcessSet` whose ``runner`` the reads use, and use the return value as a
+    context manager: when the caller stops consuming for any reason (an interrupt, a closed stdout,
+    any exception) the ``with`` block ends every child the reads started before control moves on.
     """
     slots: list[tuple[_Key, threading.Event, list[MachineInventory]]] = []
     for key, run in reads:
@@ -247,4 +323,4 @@ def read_concurrently(
             done.wait()
             yield key, box[0]
 
-    return results()
+    return ConcurrentReads(results(), processes)

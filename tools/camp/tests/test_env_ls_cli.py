@@ -20,6 +20,11 @@ CLI's stdout file already held at that moment.
   `not opted in:` line; with every declared host opted in, no such line appears.
 - Self: `env_hosts` entry and `[hosts.*]` table named as `self_name` cause no ssh call, no second block.
 - Refusals: undeclared `env_hosts` entry, extra argument, `--host`, bare `env`, unknown subcommand.
+- Interrupt: SIGINT to the CLI's process group, and to its pid alone, mid-listing: exit 130 within a
+  couple of seconds, stderr exactly `camp env: interrupted`, no traceback, the block already printed
+  is still on stdout, and no stub child is left running.
+- Closed output: stdout closed after the first block while a later host is still being read: no
+  traceback, no stub child left running, a prompt exit.
 - Group independence: the same output from a directory in no group and from inside a group.
 """
 
@@ -29,6 +34,7 @@ import os
 import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -689,3 +695,133 @@ def test_output_is_the_same_outside_and_inside_a_camp_group(rig: Rig, tmp_path: 
     assert outside.returncode == inside.returncode == 0
     assert outside.stdout == inside.stdout
     assert "this machine (andromeda)" in inside.stdout
+
+
+_SLEEPING_DOCKER = """#!/bin/sh
+echo $$ > "$STUB_DIR/pid.docker"
+if [ -f "$STUB_DIR/docker.stdout" ]; then cat "$STUB_DIR/docker.stdout"; fi
+if [ -f "$STUB_DIR/docker.sleep" ]; then exec sleep "$(cat "$STUB_DIR/docker.sleep")"; fi
+exit 0
+"""
+
+_SLEEPING_SSH = """#!/bin/sh
+dest=
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--" ]; then dest=$2; break; fi
+  shift
+done
+echo $$ > "$STUB_DIR/pid.$dest"
+if [ "$dest" = "$STUB_SHORT_DEST" ]; then exec sleep 1; fi
+exec sleep 20
+"""
+
+
+class _Listing:
+    """`camp env ls` in its own session against a stub docker that answers at once and ssh stubs that sleep."""
+
+    def __init__(self, rig: Rig) -> None:
+        self.rig = rig
+        rig._script("docker", _SLEEPING_DOCKER)
+        rig._script("ssh", _SLEEPING_SSH)
+        (rig.root / "docker.stdout").write_text(_records(("levr", "main", "running")))
+        rig.hosts_file('env_hosts = ["perseus", "toms-macbook-pro"]\n' + TWO_PEERS)
+        self.process: subprocess.Popen | None = None
+
+    def start(self, short_dest: str = "") -> subprocess.Popen:
+        self.process = subprocess.Popen(
+            [sys.executable, str(_CLI_CAMP), "env", "ls"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**self.rig.env(), "STUB_SHORT_DEST": short_dest},
+            cwd=str(self.rig.root),
+            start_new_session=True,
+        )
+        return self.process
+
+    def pids(self) -> dict[str, int]:
+        found = {}
+        for path in self.rig.root.glob("pid.*"):
+            if path.read_text().strip():
+                found[path.name.removeprefix("pid.")] = int(path.read_text())
+        return found
+
+    def wait_for_ssh_children(self) -> None:
+        wanted = {PERSEUS, MACBOOK}
+        deadline = time.monotonic() + 10
+        while not wanted <= set(self.pids()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert wanted <= set(self.pids()), f"ssh stubs that never started: {wanted - set(self.pids())}"
+
+    def survivors(self) -> list[str]:
+        alive = []
+        for name, pid in self.pids().items():
+            try:
+                os.kill(pid, 0)
+                alive.append(name)
+            except ProcessLookupError:
+                pass
+        return sorted(alive)
+
+    def survivors_after_grace(self, limit: float = 2.0) -> list[str]:
+        deadline = time.monotonic() + limit
+        while self.survivors() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return self.survivors()
+
+    def finish(self, limit: float = 5.0) -> tuple[str, str, float]:
+        started = time.monotonic()
+        try:
+            out, err = self.process.communicate(timeout=limit)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.communicate()
+            pytest.fail(f"camp env ls was still running {limit}s after it was told to stop")
+        return out, err, time.monotonic() - started
+
+    def cleanup(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            self.process.kill()
+            self.process.communicate()
+        for pid in self.pids().values():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
+def test_an_interrupt_mid_listing_ends_every_child_and_prints_one_line(rig: Rig, whole_group: bool) -> None:
+    listing = _Listing(rig)
+    process = listing.start()
+    try:
+        listing.wait_for_ssh_children()
+        printed = [process.stdout.readline(), process.stdout.readline()]
+        (os.killpg if whole_group else os.kill)(process.pid, signal.SIGINT)
+        rest, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
+        assert err == "camp env: interrupted\n"
+        assert printed == ["this machine\n", "  levr  main  running\n"] and rest == ""
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after the interrupt: {left}"
+    finally:
+        listing.cleanup()
+
+
+def test_closing_stdout_while_a_later_host_is_still_read_ends_it_without_a_traceback(rig: Rig) -> None:
+    listing = _Listing(rig)
+    process = listing.start(short_dest=PERSEUS)
+    try:
+        listing.wait_for_ssh_children()
+        assert process.stdout.readline() == "this machine\n"
+        process.stdout.close()
+        _, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert "Traceback" not in err and "BrokenPipe" not in err, err
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after stdout closed: {left}"
+    finally:
+        listing.cleanup()
