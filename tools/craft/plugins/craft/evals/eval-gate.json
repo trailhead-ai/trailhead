@@ -54,6 +54,11 @@
         "skills/distill/SKILL.md",
         "skills/tidy-followups/SKILL.md"
       ]
+    },
+    "slice-spec-complete-hands-off-to-tidy-followups": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
     }
   }
 }

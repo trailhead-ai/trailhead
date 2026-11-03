@@ -4035,3 +4035,25 @@ Four runner cases, each `claude plugin eval` with `--ablation none`, model `clau
 **Discrimination check.** The graders of `tidy-request-routes-to-tidy-followups` and `fix-up-list-routes-to-polish` were swapped (each expecting the other skill): both went 0 of 3, every grader failing. The graders were restored and match the registered files exactly.
 
 **Not measured.** One phrasing per case, one model tier, three runs; the signal is the first skill invoked, not what the ritual then did. Cost: baseline 3.99 USD, discrimination check 1.93 USD, final runs 3.98 USD (about 9.9 USD in all). The run traces were not kept.
+
+## Case: slice-spec-complete-hands-off-to-tidy-followups
+
+One runner case, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, pre-registered in `expected.md` before any run. The seeded spec has three criteria, a ledger covering all of them and two `done` slice parents, and the prompt runs `/craft:slice spec/export-invoices`. Graders: an `llm` trace grader on the one next command, a `regex` `not_contains` over the final message for `/craft:distill` printed as a command, and a `regex` on the spec's sidecar for `craft/slice-loop` = `complete`. The runner block of `eval-gate.json` gained exactly four grants for this path: `Bash(*/scripts/ledger_gate.py *)`, `Bash(*/scripts/candidate_set.py *)`, `Bash(mktemp)`, `Bash(mktemp *)`; no deletion grant and no `Write`, so the ritual's temp-file cleanup is denied and harmless.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC44 (the slice loop's spec-complete outcome hands a finished spec to tidy-followups rather than distill) | held: baseline 0 of 3 on the unedited prose (the `llm` and `not_contains` graders failed every run, the marker grader passed every run); 3 of 3 after the edit, every grader green in every run | `slice-spec-complete-hands-off-to-tidy-followups` |
+
+**Baseline.** Red as expected: each run reached spec-complete, wrote the marker, and printed `/craft:distill spec/export-invoices`. Cost 1.82 USD.
+
+**Final runs.** The first batch passed run 1 and then hit the account's usage limit on runs 2 and 3 (an error, not a graded fail; 1.07 USD). The full 3-run batch was re-run after the reset: 3 of 3, 1.81 USD, about 0.6 USD a run.
+
+**Grader checks.** The `not_contains` pattern was checked before the baseline against a hand-written correct message that mentions distill only in prose (no match) and against the old handoff, fenced and bare (match both). The marker pattern matches the sidecar after the marker is written, and not the seeded sidecar or one marked `stopped`. The marker grader is green on both arms by design; it shows each run got to the path the handoff belongs to.
+
+**Drive.** Drive's spec-complete outcome reports slice's completion report verbatim (`skills/drive/SKILL.md` step 6), so it inherits the new handoff and needs no edit. Not run here.
+
+**Widened grants.** The three previously gated craft cases were run once each (`--runs 1`) with the widened block: `declined-review-correction-is-left-alone` 3 of 3 graders; `consult-lists-a-sibling-correction-without-writing-it` first run failed `correction-listed-apart-with-fix` (3 of 4), then passed 4 of 4 on a second run with the widened grants and on a control run with the original four grants; `accepted-review-correction-is-applied-not-parked` failed 4 of 5 graders (score 0.2) with the widened grants and failed the same way (0.2) with the original four, so that failure does not come from the grants. One run per case; cost about 1.0 USD for the widened batch, 1.2 USD for the controls.
+
+**Not measured.** One spec, one phrasing, one model tier; drive's report; the early-stop handoff (unchanged).
