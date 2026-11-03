@@ -465,9 +465,14 @@ def bounded_runner(
     execution_timeout: float,
     env: Mapping[str, str],
     max_stdout_bytes: int,
+    *,
+    on_start: Callable[[subprocess.Popen], None] | None = None,
 ) -> RawResult:
     """Run ``argv`` with no stdin, stopping once stdout passes ``max_stdout_bytes``
     or ``execution_timeout`` elapses; never holds more than one chunk past the cap.
+
+    ``on_start``, when given, is called with the child right after it has started, so a caller
+    on another thread can end it (a killed child ends the run as any exited child does).
 
     ``argv[0]`` is resolved through ``env``'s ``PATH`` when the call is made. Past
     the cap the child is killed and the stdout returned is the first
@@ -481,6 +486,8 @@ def bounded_runner(
         stderr=subprocess.PIPE,
         env=dict(env),
     )
+    if on_start is not None:
+        on_start(process)
     timed_out = threading.Event()
 
     def _expire() -> None:

@@ -18,6 +18,14 @@ Test contract:
 - A reply that fails parsing is unreadable with the parser's reason.
 - Far-side text reaches the reason as one printable line of at most 200 characters.
 - The remote argv is the hardened ssh argv and exactly the contract's command.
+- `read_concurrently`: every read starts before any finishes (two reads that wait on a shared
+  barrier both complete); results come back in input order whatever order the reads finish in, and
+  one is held until every earlier one has finished; a read that raises is that slot's unreadable
+  `read failed (<type>)` with no message text and its neighbours are untouched.
+- Cancellation: when the consumer of `read_concurrently` raises mid-iteration, or before taking the
+  first result, every child the reads started through the `ProcessSet` runner (real sleeping
+  processes) is ended and the helper returns within a couple of seconds; a child that starts after
+  the set was killed is ended at once.
 """
 
 from __future__ import annotations
@@ -25,8 +33,10 @@ from __future__ import annotations
 import io
 import os
 import shlex
+import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -552,3 +562,259 @@ def test_default_remote_runner_enforces_the_bound(tmp_path, monkeypatch):
     inventory = read.read_remote("perseus", HOST, connect_timeout=7.0)
     assert time.monotonic() - started < 10
     assert_unreadable(inventory, "no answer within 1s")
+
+
+_READ_OK = read.MachineInventory(read.ENVIRONMENTS)
+
+
+def test_concurrent_reads_all_start_before_any_finishes():
+    barrier = threading.Barrier(2, timeout=5)
+    started: list[str] = []
+
+    def meet(name):
+        def run():
+            started.append(name)
+            try:
+                barrier.wait()
+            except threading.BrokenBarrierError:
+                return read.MachineInventory(read.UNREADABLE, reason=f"{name} never met its peer; started: {started}")
+            return _READ_OK
+
+        return run
+
+    results = list(read.read_concurrently([("a", meet("a")), ("b", meet("b"))]))
+
+    assert [(key, inv.kind, inv.reason) for key, inv in results] == [
+        ("a", read.ENVIRONMENTS, ""),
+        ("b", read.ENVIRONMENTS, ""),
+    ]
+
+
+def test_concurrent_reads_come_back_in_input_order_when_the_later_one_finishes_first():
+    later_done = threading.Event()
+
+    def slow():
+        later_done.wait(timeout=5)
+        time.sleep(0.1)
+        return read.MachineInventory(read.DOCKER_NOT_RUNNING)
+
+    def fast():
+        later_done.set()
+        return read.MachineInventory(read.DOCKER_NOT_INSTALLED)
+
+    results = list(read.read_concurrently([("slow", slow), ("fast", fast)]))
+
+    assert [(key, inv.kind) for key, inv in results] == [
+        ("slow", read.DOCKER_NOT_RUNNING),
+        ("fast", read.DOCKER_NOT_INSTALLED),
+    ]
+
+
+def test_a_finished_read_is_held_until_every_earlier_read_has_finished():
+    gate = threading.Event()
+    later_finished = threading.Event()
+    seen: list[str] = []
+
+    def earlier():
+        gate.wait(timeout=10)
+        return _READ_OK
+
+    def later():
+        later_finished.set()
+        return _READ_OK
+
+    def consume():
+        for key, _ in read.read_concurrently([("earlier", earlier), ("later", later)]):
+            seen.append(key)
+
+    consumer = threading.Thread(target=consume, daemon=True)
+    consumer.start()
+    assert later_finished.wait(timeout=5), "the later read never started"
+    time.sleep(0.3)
+    held = list(seen)
+    gate.set()
+    consumer.join(timeout=5)
+
+    assert held == []
+    assert seen == ["earlier", "later"]
+
+
+def test_a_read_that_raises_is_that_slots_unreadable_and_its_neighbours_are_untouched():
+    def boom():
+        raise RuntimeError("secret detail at /home/tom/key")
+
+    results = list(
+        read.read_concurrently(
+            [
+                ("before", lambda: read.MachineInventory(read.DOCKER_NOT_RUNNING)),
+                ("boom", boom),
+                ("after", lambda: read.MachineInventory(read.DOCKER_NOT_INSTALLED)),
+            ]
+        )
+    )
+
+    assert [key for key, _ in results] == ["before", "boom", "after"]
+    assert results[0][1] == read.MachineInventory(read.DOCKER_NOT_RUNNING)
+    assert results[1][1] == read.MachineInventory(read.UNREADABLE, reason="read failed (RuntimeError)")
+    assert results[2][1] == read.MachineInventory(read.DOCKER_NOT_INSTALLED)
+
+
+def test_a_read_that_raises_a_non_exception_is_that_slots_unreadable_with_neighbours_intact():
+    def leaves():
+        raise SystemExit(3)
+
+    results = list(
+        read.read_concurrently(
+            [
+                ("before", lambda: read.MachineInventory(read.DOCKER_NOT_RUNNING)),
+                ("leaves", leaves),
+                ("after", lambda: read.MachineInventory(read.DOCKER_NOT_INSTALLED)),
+            ]
+        )
+    )
+
+    assert [key for key, _ in results] == ["before", "leaves", "after"]
+    assert results[0][1] == read.MachineInventory(read.DOCKER_NOT_RUNNING)
+    assert results[1][1] == read.MachineInventory(read.UNREADABLE, reason="read failed (SystemExit)")
+    assert results[2][1] == read.MachineInventory(read.DOCKER_NOT_INSTALLED)
+
+
+def test_a_raised_exception_type_name_reaches_the_reason_as_printable_text():
+    hostile = type("Evil\x1b[31mName", (Exception,), {})
+
+    def boom():
+        raise hostile("x")
+
+    ((_, inventory),) = list(read.read_concurrently([("k", boom)]))
+
+    assert inventory.kind == read.UNREADABLE
+    assert "\x1b" not in inventory.reason
+    assert inventory.reason.startswith("read failed (Evil")
+
+
+def test_each_read_runs_on_its_own_daemon_thread():
+    seen: list[tuple[str, bool]] = []
+
+    def run(name):
+        def inner():
+            thread = threading.current_thread()
+            seen.append((thread.name, thread.daemon))
+            return _READ_OK
+
+        return inner
+
+    list(read.read_concurrently([("a", run("a")), ("b", run("b"))]))
+
+    assert len(seen) == 2
+    assert len({name for name, _ in seen}) == 2
+    assert all(daemon for _, daemon in seen)
+    assert all(name != threading.main_thread().name for name, _ in seen)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+class _Sleepers:
+    """Reads that each start a real sleeping child through a ProcessSet and record its pid."""
+
+    def __init__(self, tmp_path: Path, names: list[str]) -> None:
+        self.dir = tmp_path
+        self.names = names
+        self.processes = read.ProcessSet()
+
+    def pids(self) -> dict[str, int]:
+        found = {}
+        for name in self.names:
+            path = self.dir / f"pid.{name}"
+            if path.exists() and path.read_text():
+                found[name] = int(path.read_text())
+        return found
+
+    def reads(self):
+        def make(name):
+            pid_file = str(self.dir / ("pid." + name))
+            code = f"import os,time;open({pid_file!r},'w').write(str(os.getpid()));time.sleep(30)"
+
+            def run():
+                self.processes.runner([sys.executable, "-c", code], 60, os.environ, 1000)
+                return _READ_OK
+
+            return run
+
+        return [(name, make(name)) for name in self.names]
+
+    def wait_started(self) -> None:
+        deadline = time.monotonic() + 10
+        while len(self.pids()) < len(self.names) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        assert len(self.pids()) == len(self.names), f"children that never started: {set(self.names) - set(self.pids())}"
+
+    def survivors(self) -> list[str]:
+        return sorted(name for name, pid in self.pids().items() if _alive(pid))
+
+    def wait_all_ended(self, limit: float = 2.0) -> list[str]:
+        deadline = time.monotonic() + limit
+        while self.survivors() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        return self.survivors()
+
+    def reap(self) -> None:
+        for pid in self.pids().values():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_a_consumer_that_raises_mid_iteration_ends_every_started_child(tmp_path):
+    sleepers = _Sleepers(tmp_path, ["a", "b", "c"])
+    quick = ("quick", lambda: _READ_OK)
+    try:
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="consumer gave up"):
+            with read.read_concurrently([quick, *sleepers.reads()], sleepers.processes) as results:
+                for key, _ in results:
+                    sleepers.wait_started()
+                    raise RuntimeError("consumer gave up")
+        returned_after = time.monotonic() - started
+        left = sleepers.wait_all_ended()
+        assert left == [], f"children still running after the consumer raised: {left}"
+        assert returned_after < 3, f"the helper took {returned_after:.1f}s to return control"
+    finally:
+        sleepers.reap()
+
+
+def test_a_consumer_that_raises_before_taking_any_result_ends_every_started_child(tmp_path):
+    sleepers = _Sleepers(tmp_path, ["a", "b"])
+    try:
+        with pytest.raises(RuntimeError, match="stopped early"):
+            with read.read_concurrently(sleepers.reads(), sleepers.processes):
+                sleepers.wait_started()
+                raise RuntimeError("stopped early")
+        left = sleepers.wait_all_ended()
+        assert left == [], f"children still running after an early exit: {left}"
+    finally:
+        sleepers.reap()
+
+
+def test_a_child_started_after_the_set_was_killed_is_ended_at_once(tmp_path):
+    sleepers = _Sleepers(tmp_path, ["late"])
+    try:
+        sleepers.processes.kill()
+        started = time.monotonic()
+        ((_, run),) = sleepers.reads()
+        run()
+        assert time.monotonic() - started < 5, "the late child was left running to its sleep"
+        assert sleepers.wait_all_ended() == []
+    finally:
+        sleepers.reap()
+
+
+def test_reads_still_come_back_in_order_when_nothing_cancels_them():
+    with read.read_concurrently([("a", lambda: _READ_OK), ("b", lambda: _READ_OK)], read.ProcessSet()) as results:
+        assert [key for key, _ in results] == ["a", "b"]
