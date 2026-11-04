@@ -59,7 +59,8 @@ timeout 580 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR \
   claude plugin eval tools/craft/plugins/craft \
   --case 'declined-review-correction-is-left-alone' --scaffold \
   --allow-tools 'Bash(./lore *)' 'Bash(*/scripts/maturity_bars.py *)' \
-  'Bash(:)' 'Bash(: *)' --ablation none --trust-plugin --runs 1 \
+  'Bash(:)' 'Bash(: *)' 'Bash(*/scripts/ledger_gate.py *)' \
+  'Bash(*/scripts/candidate_set.py *)' 'Bash(mktemp)' 'Bash(mktemp *)' --ablation none --trust-plugin --runs 1 \
   --model claude-opus-5-5 --json "$out/run.json" --max-cost-usd 1 \
   --output-dir "$out" --no-publish -j 1
 ```

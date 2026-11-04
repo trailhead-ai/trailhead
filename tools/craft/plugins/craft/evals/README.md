@@ -56,6 +56,19 @@ the costs below.
 - The command's three grants beyond `./lore` (`maturity_bars.py`, `:`) are for
   consult's calibration step; without them it refuses and never dispatches the
   council.
+- The four grants after those (`ledger_gate.py`, `candidate_set.py`, `mktemp`,
+  `mktemp *`) are for the slice ritual's spec-complete path, which pipes the
+  ledger and candidate scripts and writes a temp file. The two script grants lead with `*`,
+  and a Bash rule's `*` matches any text, spaces included, so they allow any single command
+  whose text contains `<anything>/scripts/ledger_gate.py <anything>` (or the
+  `candidate_set.py` equivalent), whatever program runs it, not only the script itself. The
+  existing `maturity_bars.py` grant has the same shape. A compound line is split on `&&`,
+  `||`, `;`, `|`, `&` and newlines and every part must be allowed, so prefixing another
+  command does not ride on these grants. `mktemp` and `mktemp *` are command grants: the
+  runner's TMPDIR lies outside the sandbox, so plain `mktemp` fails and the agent falls back
+  to a templated `mktemp`, which `mktemp *` allows anywhere the sandbox can write. It
+  creates files and never overwrites them. There is no `rm` grant, so the ritual's temp-file
+  cleanup is denied and left to fail harmlessly.
 - A consult run takes about 2 minutes and about 0.75 USD (its limits are
   `allowed_tools: [Skill, Agent, Read, Glob, Grep]`, `max_turns: 30`,
   `timeout_seconds: 420`). A review-case run takes about 0.2 to 0.35 USD. The

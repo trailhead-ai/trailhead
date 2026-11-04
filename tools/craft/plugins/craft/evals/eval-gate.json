@@ -6,7 +6,11 @@
       "Bash(./lore *)",
       "Bash(*/scripts/maturity_bars.py *)",
       "Bash(:)",
-      "Bash(: *)"
+      "Bash(: *)",
+      "Bash(*/scripts/ledger_gate.py *)",
+      "Bash(*/scripts/candidate_set.py *)",
+      "Bash(mktemp)",
+      "Bash(mktemp *)"
     ],
     "max_cost_usd": 3.5
   },
