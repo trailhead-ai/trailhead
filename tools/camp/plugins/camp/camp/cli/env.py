@@ -1,7 +1,17 @@
 """``camp env`` — the verb for dev environments running on this machine and on opted-in hosts.
 
-``camp env ls`` reads this machine, then each host ``env_hosts`` names, one after another, and
-prints each machine's block as soon as its read finishes. It ignores the current camp group.
+``camp env ls`` reads this machine and each host ``env_hosts`` names all at the same time, and
+prints the blocks in a fixed order: this machine, then the hosts in ``env_hosts`` order. A block
+prints as soon as its read and every read before it have finished. It ignores the current camp
+group. An interrupt ends every ssh and docker the listing started, prints ``camp env: interrupted``
+to stderr and exits 130, leaving the blocks already printed as they are; a closed stdout ends them
+too and exits quietly (status 1) at the next line it tries to write: an ``attached:`` line, a block
+or the ``not opted in:`` line.
+
+``camp env ls HOST`` reads that one machine alone — this machine for ``local`` or ``self_name``
+(never over ssh), otherwise a declared host whether or not ``env_hosts`` names it — and prints the
+``attached:`` lines, then its block, and no ``not opted in:`` line. An undeclared name, text that
+is not a host name and a second argument are refused before anything is printed.
 
 ``camp env attach TARGET`` puts one remote environment on this machine's localhost: one background
 ``ssh`` forward holding each of the environment's standard ports on 127.0.0.1. It checks, in order,
@@ -10,12 +20,17 @@ held standard port, starts the forward, and finds it again by its fresh attach i
 table. Once the forward has been started, every way out (a failed start, a forward that is not
 found, an exception, an interrupt) ends the forward carrying that id and no other.
 
+A bare name reads this machine and every opted-in host at the same time. An interrupt while attach
+is reading machines (a bare name or ``HOST/NAME``) ends every ssh and docker started for the reads,
+prints ``camp env: interrupted`` to stderr and exits 130, before any forward exists.
+
 ``camp env status`` and ``camp env detach`` read only the process table: status prints one
 ``attached:`` line per recognised forward, detach ends them and waits for their ports to bind
 free. ``camp env ls`` opens with the same lines.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import tempfile
@@ -44,7 +59,8 @@ from ..env.read import (
 from ..printable import printable_line
 from .parser import CampParser
 
-_USAGE = "usage: camp env ls | attach TARGET | status | detach"
+_USAGE = "usage: camp env ls [HOST] | attach TARGET | status | detach"
+_LS_USAGE = "usage: camp env ls [HOST]"
 _ATTACH_USAGE = "usage: camp env attach TARGET"
 
 #: Seconds the forward may take to appear in the process table after ``ssh -f`` returned.
@@ -109,37 +125,75 @@ def _load_machines():
 
 
 def _cmd_env_ls(args: list[str]) -> None:
-    from ..env.read import read_local, read_remote
+    from ..env.read import ProcessSet, read_concurrently, read_local, read_remote
+    from ..env.resolve import INVALID, THIS_MACHINE, UNDECLARED, name_host, undeclared_host_message
 
-    CampParser(verb="env ls").parse_args(args)
+    parser = CampParser(verb="env ls")
+    parser.add_argument("host", nargs="*")
+    named = parser.parse_args(args).host
+    if len(named) > 1:
+        print(_LS_USAGE, file=sys.stderr)
+        sys.exit(1)
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
 
-    try:
-        for found in attachments():
-            print(f"attached: {_summary_of(found)}", flush=True)
-    except (Unverifiable, Untaggable) as error:
-        print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
+    only = None
+    if named:
+        only = name_host(named[0], hosts=hosts, self_name=self_name)
+        if only.kind == INVALID:
+            print(f"camp env: {only.problem}\n{_LS_USAGE}", file=sys.stderr)
+            sys.exit(1)
+        if only.kind == UNDECLARED:
+            _refuse(undeclared_host_message(only.name, hosts, str(_hosts_file())))
 
-    _emit(
+    processes = ProcessSet()
+    this_machine = (
         f"this machine ({self_name})" if self_name else "this machine",
-        read_local(),
+        lambda: read_local(runner=processes.runner),
     )
-    for name in opted_in:
-        if name == self_name:
-            continue
-        _emit(name, read_remote(name, hosts[name], connect_timeout=connect_timeout))
 
-    left_out = [name for name in hosts if name != self_name and name not in opted_in]
-    if left_out:
-        hosts_file = _hosts_file()
-        print(
-            # Host-table keys are not charset-checked by the loader, so they pass the
-            # same printable-only reduction as far-side text before reaching the terminal.
-            f"not opted in: {', '.join(printable_line(name) for name in left_out)} "
-            f"(add to env_hosts in {printable_line(str(hosts_file), limit=4096)})",
-            flush=True,
+    def remote(name: str):
+        return (
+            name,
+            lambda: read_remote(name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner),
         )
+
+    if only is None:
+        reads = [this_machine, *(remote(name) for name in opted_in if name != self_name)]
+    elif only.kind == THIS_MACHINE:
+        reads = [this_machine]
+    else:
+        reads = [remote(only.name)]
+    try:
+        try:
+            for found in attachments():
+                print(f"attached: {_summary_of(found)}", flush=True)
+        except (Unverifiable, Untaggable) as error:
+            print(f"camp env: could not tell whether anything is attached: {error}", file=sys.stderr, flush=True)
+
+        with read_concurrently(reads, processes) as results:
+            for heading, inventory in results:
+                _emit(heading, inventory)
+
+        if only is None:
+            left_out = [name for name in hosts if name != self_name and name not in opted_in]
+            if left_out:
+                hosts_file = _hosts_file()
+                print(
+                    # Host-table keys are not charset-checked by the loader, so they pass the
+                    # same printable-only reduction as far-side text before reaching the terminal.
+                    f"not opted in: {', '.join(printable_line(name) for name in left_out)} "
+                    f"(add to env_hosts in {printable_line(str(hosts_file), limit=4096)})",
+                    flush=True,
+                )
+    except KeyboardInterrupt:
+        processes.kill()
+        print("camp env: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
+    except BrokenPipeError:
+        processes.kill()
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        sys.exit(1)
 
 
 def display_name(host: str, group: str, name: str) -> str:
@@ -254,7 +308,7 @@ def _wait_for_forward(attach_id: str) -> "Attachment | None":
 
 
 def _cmd_env_attach(args: list[str]) -> None:
-    from ..env.read import read_local, read_remote
+    from ..env.read import ProcessSet, read_local, read_remote
     from ..env.resolve import Refused, TargetError, parse_target, resolve
     from ..host.transport import local_forward_argv
 
@@ -284,15 +338,24 @@ def _cmd_env_attach(args: list[str]) -> None:
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
     hosts_file = _hosts_file()
-    outcome = resolve(
-        target,
-        hosts=hosts,
-        opted_in=opted_in,
-        self_name=self_name,
-        read_local=read_local,
-        read_remote=lambda name: read_remote(name, hosts[name], connect_timeout=connect_timeout),
-        hosts_file=str(hosts_file),
-    )
+    processes = ProcessSet()
+    try:
+        outcome = resolve(
+            target,
+            hosts=hosts,
+            opted_in=opted_in,
+            self_name=self_name,
+            read_local=lambda: read_local(runner=processes.runner),
+            read_remote=lambda name: read_remote(
+                name, hosts[name], connect_timeout=connect_timeout, runner=processes.runner
+            ),
+            hosts_file=str(hosts_file),
+            processes=processes,
+        )
+    except KeyboardInterrupt:
+        processes.kill()
+        print("camp env: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
     if isinstance(outcome, Refused):
         _refuse(outcome.message)
 

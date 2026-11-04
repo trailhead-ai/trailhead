@@ -47,6 +47,7 @@ _LEGACY_HAND_SHAPED = frozenset(
         "craft:ritual-deliverable-names-its-record",
         "craft:ritual-output-wording",
         "craft:scrub-citation-vs-inline",
+        "craft:tidy-followups-answers-a-refinement-question",
         "craft:tidy-followups-builds-one-parent",
         "craft:tidy-followups-confirms-before-writing",
         "craft:tidy-followups-drops-and-merges",

@@ -720,6 +720,25 @@ def test_bounded_runner_raises_timeout_expired_and_ends_the_child() -> None:
     assert time.monotonic() - started < 10
 
 
+def test_bounded_runner_hands_the_started_child_to_on_start_before_reading_it() -> None:
+    seen: list[subprocess.Popen] = []
+    result = transport.bounded_runner(
+        [sys.executable, "-c", "print('out')"], 30, {}, 1000, on_start=seen.append
+    )
+    assert result.stdout == "out\n"
+    assert len(seen) == 1 and isinstance(seen[0], subprocess.Popen)
+    assert seen[0].returncode == result.exit_code
+
+
+def test_a_child_ended_from_on_start_ends_the_run_at_once() -> None:
+    started = time.monotonic()
+    result = transport.bounded_runner(
+        [sys.executable, "-c", "import time; time.sleep(30)"], 30, {}, 1000, on_start=lambda p: p.kill()
+    )
+    assert time.monotonic() - started < 10, "the run waited out the child instead of seeing it killed"
+    assert result.exit_code != 0
+
+
 # ---------------------------------------------------------------------------
 # local_forward_argv — the attachment's background forward, and the pin that
 # run_camp's own argv for the same host is untouched by it.

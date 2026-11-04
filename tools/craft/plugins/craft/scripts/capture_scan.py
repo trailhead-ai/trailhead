@@ -82,6 +82,26 @@ path/URL fixture this scanner must keep classifying safely satisfies one
 of the two structural checks, so neither retirement nor tightening
 misclassifies a known-safe fixture.
 
+Two more false positives come from the `claude -p` stream format itself, and
+neither is a shape:
+
+  - A usage field name long enough to fill the base64 class. These are matched
+    as exact literals in `_STREAM_FIELD_NAMES` and reported as
+    `stream-field-name`, so one extra character, or a different field, is still
+    a credential finding. Add a name only after reading it in a real stream.
+  - A JSON `\\u0000`-`\\u001f` escape in front of a match. The backslash is outside
+    the character class and the `uXXXX` is inside it, so a run of 27 characters
+    after the escape measures 32. `_reaches_length_through_escape` measures the
+    run without the escape: a match still 32 long without it stands, printed
+    as it was matched, and a shorter one is not a match of this class at all.
+    The rule is narrow on purpose. It applies only to a JSON stream (`scan_file`
+    passes `json_stream=True`; `scan_text` defaults to plain text, where JSON
+    escapes do not exist and `followup_gather.sanitize_text` relies on that). Only
+    a control-character escape counts, since JSON requires those escaped and
+    they cannot sit inside a real token; `\\u003d`, `\\u0022` and the like can be
+    a token's own text. And the backslash run in front of the `u` must be odd,
+    because `\\\\u0000` is an escaped backslash followed by plain text.
+
 Usage:
   capture_scan.py <tree-or-file> [<tree-or-file> ...]
 
@@ -113,6 +133,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 KNOWN_SAFE_CLASS = "path-or-url-shape"
+STREAM_FIELD_CLASS = "stream-field-name"
+_KNOWN_SAFE_CLASSES = frozenset({KNOWN_SAFE_CLASS, STREAM_FIELD_CLASS})
+
+# The stream's usage counters that fill the high-entropy-base64 class.
+_STREAM_FIELD_NAMES = frozenset(
+    {"cacheCreationEphemeral5mInputTokens", "cacheCreationEphemeral1hInputTokens"}
+)
+
+_BASE64_MIN_LENGTH = 32
+_JSON_CONTROL_ESCAPE = re.compile(r"u00[01][0-9A-Fa-f]")
 
 # Ordered (name, pattern) pairs — each name is one of the seven classes named
 # in security.md's credential-pattern scrub list. All patterns are evaluated
@@ -137,7 +167,7 @@ _PATTERNS: list[tuple[str, re.Pattern]] = [
     ),
     ("bearer", re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+")),
     ("high-entropy-hex", re.compile(r"\b[A-Fa-f0-9]{40,}\b")),
-    ("high-entropy-base64", re.compile(r"\b[A-Za-z0-9+/]{32,}={0,2}\b")),
+    ("high-entropy-base64", re.compile(rf"\b[A-Za-z0-9+/]{{{_BASE64_MIN_LENGTH},}}={{0,2}}\b")),
 ]
 
 
@@ -202,8 +232,25 @@ def _resolves_to_repo_path(segments: list[str]) -> bool:
     return True
 
 
+def _reaches_length_through_escape(line: str, match: re.Match) -> bool:
+    """True when a match follows an odd run of backslashes, opens with the
+    `u0000`-`u001f` of a JSON control-character escape, and is too short for the
+    class without those characters.
+    """
+    start = match.start()
+    escape = _JSON_CONTROL_ESCAPE.match(match.group(0))
+    if escape is None:
+        return False
+    backslashes = len(line[:start]) - len(line[:start].rstrip("\\"))
+    return backslashes % 2 == 1 and len(match.group(0)) - escape.end() < _BASE64_MIN_LENGTH
+
+
 def _reclassify(cls: str, matched: str) -> str:
-    if cls != "high-entropy-base64" or matched.count("/") < _PATH_SLASH_THRESHOLD:
+    if cls != "high-entropy-base64":
+        return cls
+    if matched in _STREAM_FIELD_NAMES:
+        return STREAM_FIELD_CLASS
+    if matched.count("/") < _PATH_SLASH_THRESHOLD:
         return cls
     segments = matched.split("/")
     if _record_url_shape(segments) or _resolves_to_repo_path(segments):
@@ -212,14 +259,16 @@ def _reclassify(cls: str, matched: str) -> str:
 
 
 def is_credential_class(cls: str) -> bool:
-    return cls != KNOWN_SAFE_CLASS
+    return cls not in _KNOWN_SAFE_CLASSES
 
 
-def scan_text(text: str) -> list[Finding]:
+def scan_text(text: str, *, json_stream: bool = False) -> list[Finding]:
     findings: list[Finding] = []
     for lineno, line in enumerate(text.splitlines(), start=1):
         for cls, pattern in _PATTERNS:
             for m in pattern.finditer(line):
+                if json_stream and cls == "high-entropy-base64" and _reaches_length_through_escape(line, m):
+                    continue
                 findings.append(Finding(lineno, _reclassify(cls, m.group(0)), m.group(0)))
     return findings
 
@@ -229,7 +278,7 @@ def scan_file(path: Path) -> list[Finding]:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         raise ScanError(f"cannot read {path}: {exc.strerror or exc}") from exc
-    return scan_text(text)
+    return scan_text(text, json_stream=True)
 
 
 def _skip_dir(name: str) -> bool:

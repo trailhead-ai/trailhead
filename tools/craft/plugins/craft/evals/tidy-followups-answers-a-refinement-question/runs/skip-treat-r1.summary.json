@@ -1,0 +1,12 @@
+{
+ "cell": "skip-treat-r1",
+ "model": "claude-opus-5-5",
+ "ended": "no-question",
+ "turns": 5,
+ "unsent": 0,
+ "seconds": 282,
+ "cost_usd": 1.5132519999999998,
+ "returncode": 0,
+ "run_id": "fxrund5fde3092da8",
+ "real_vault_hits": ""
+}

@@ -1239,8 +1239,8 @@ class TestEscapingMembersAgreesWithARealCheckout:
         """`sub/up -> ..` alone is accepted against an empty root — but the
         peer's checkout ALREADY has `sub/up` standing before the archive
         even lands, so re-extracting the very same member resolves its own
-        NAME back to the destination root itself (`tarfile`'s "resolves to
-        the destination itself" guard) and the peer refuses it. Sender and
+        NAME back to the destination root itself (the "resolves to the
+        destination itself" refusal) and the peer refuses it. Sender and
         peer agree once seeded from the real tip; against an empty root
         (`tip=None`) they would disagree — this is the reported gap."""
         from camp.transfer.worktree import (
@@ -1290,6 +1290,98 @@ class TestEscapingMembersAgreesWithARealCheckout:
         buf = io.BytesIO()
         write_archive(repo, (), buf)
         with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    @pytest.mark.parametrize(
+        ("parent", "name", "target"),
+        [("sub", "sub/up", ".."), (None, "self", ".")],
+        ids=["sub-up-to-parent", "self-to-dot"],
+    )
+    def test_link_resolving_to_the_root_is_refused_whatever_the_interpreter_filter_does(
+        self, tmp_path: Path, monkeypatch, parent, name, target
+    ):
+        """The two cases above, with the interpreter's own filter taken away.
+        Python releases differ on whether `data_filter` refuses a link whose
+        path, already standing in the checkout, resolves to the destination
+        root, so camp makes that refusal itself. Sender and peer then reach
+        the same verdict whichever Python each host runs."""
+        from camp.transfer.worktree import (
+            ArchiveMemberEscaped,
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        _simulate_interpreter_without_data_filter(monkeypatch)
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        if parent:
+            (repo / parent).mkdir()
+        (repo / name).symlink_to(target)
+        tip = _commit_all(repo, f"add {name}")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        assert escaping_members(repo, (), tip) == (name,)
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        with pytest.raises(ArchiveMemberEscaped):
+            extract_archive(io.BytesIO(buf.getvalue()), peer)
+
+    def test_already_checked_out_link_to_a_sibling_is_still_accepted_without_the_filter(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """The other side: a tracked link standing in the checkout that
+        resolves to a path inside the root, not to the root itself, is
+        re-extracted with no refusal."""
+        from camp.transfer.worktree import (
+            escaping_members,
+            extract_archive,
+            write_archive,
+        )
+
+        _simulate_interpreter_without_data_filter(monkeypatch)
+        repo = tmp_path / "repo"
+        init_git_repo(repo)
+        (repo / "sub").mkdir()
+        (repo / "sub" / "file").write_text("x\n")
+        (repo / "sub" / "near").symlink_to("file")
+        tip = _commit_all(repo, "add sub/near")
+
+        peer = tmp_path / "peer"
+        _worktree_at_tip(repo, peer, tip)
+
+        assert escaping_members(repo, (), tip) == ()
+
+        buf = io.BytesIO()
+        write_archive(repo, (), buf)
+        extract_archive(io.BytesIO(buf.getvalue()), peer)
+        assert os.readlink(peer / "sub" / "near") == "file"
+
+    def test_hard_link_named_over_a_link_to_the_root_is_refused_without_the_filter(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """A hard link member is a link too: named at a path that already
+        resolves to the root, it would replace the root just as a symlink
+        would, so the peer refuses it with no help from the interpreter."""
+        from camp.transfer.worktree import ArchiveMemberEscaped, extract_archive
+
+        _simulate_interpreter_without_data_filter(monkeypatch)
+        peer = tmp_path / "peer"
+        peer.mkdir()
+        (peer / "file").write_text("x\n")
+        (peer / "self").symlink_to(".")
+
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w") as tf:
+            info = tarfile.TarInfo(name="self")
+            info.type = tarfile.LNKTYPE
+            info.linkname = "file"
+            tf.addfile(info)
+
+        with pytest.raises(ArchiveMemberEscaped, match="destination itself"):
             extract_archive(io.BytesIO(buf.getvalue()), peer)
 
     def test_tracked_chained_link_through_an_already_checked_out_sibling_is_named(

@@ -1,0 +1,6 @@
+vault ADDED task/build-the-follow-ups-of-fixture-upfront-answer-spec-chosen-2026-11-02.json
+vault ADDED task/build-the-follow-ups-of-fixture-upfront-answer-spec-chosen-2026-11-02.md
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-upfront.json
+vault CHANGED task/mooring-log-record-the-berth-with-each-line-upfront.md
+vault CHANGED task/tide-cache-expire-stale-readings-upfront.json
+vault CHANGED task/tide-cache-expire-stale-readings-upfront.md

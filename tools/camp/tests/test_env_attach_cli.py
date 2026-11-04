@@ -11,6 +11,8 @@ test has its own tag namespace and free high ports, and the rig ends whatever it
 - A successful attach returns in a few seconds.
 - Bind-first-then-fail, ssh that cannot start (escape sequence sanitised), die-after-fork: fail, nothing held.
 - Attach while another attachment exists is refused before any host is read.
+- Interrupt while a bare name's machines are being read (SIGINT to the process group, and to the pid
+  alone) exits 130 within about 2 s saying `camp env: interrupted`, leaves no read child and starts no forward.
 - Interrupt after the forward started ends it; an unreadable process table says it could not be ended.
 - Failure cleanup ends only this attach's forward.
 - Bare name, HOST/NAME and HOST/GROUP/NAME reach the same environment; a resolution refusal exits 1.
@@ -23,6 +25,7 @@ import os
 import re
 import signal
 import socket
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -560,3 +563,95 @@ def test_an_invalid_tag_namespace_is_refused(rig: AttachRig) -> None:
     assert done.returncode == 1
     assert done.stderr.startswith("camp env: CAMP_ENV_TAG_NAMESPACE is not a valid tag namespace")
     assert rig.forwards() == []
+
+
+# --- interrupting the reads a bare name makes ----------------------------------------------------
+
+_SLEEPING_DOCKER = """#!/bin/sh
+echo $$ > "$STUB_DIR/pid.docker"
+exec sleep 20
+"""
+
+_SLEEPING_SSH = """#!/bin/sh
+dest=
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--" ]; then dest=$2; break; fi
+  shift
+done
+echo $$ > "$STUB_DIR/pid.$dest"
+exec sleep 20
+"""
+
+_READ_CHILDREN = ["docker", "tduffield@andromeda", "tduffield@perseus"]
+
+
+def _read_pids(rig: AttachRig) -> dict[str, int]:
+    found = {}
+    for path in rig.root.glob("pid.*"):
+        text = path.read_text().strip()
+        if text:
+            found[path.name.removeprefix("pid.")] = int(text)
+    return found
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+@pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
+@pytest.mark.parametrize(
+    ("target", "read_children"),
+    [("main", _READ_CHILDREN), ("perseus/main", ["tduffield@perseus"])],
+    ids=["bare-name", "host-named"],
+)
+def test_an_interrupt_while_the_reads_a_target_makes_are_running_exits_130_and_leaves_no_read_child(
+    rig: AttachRig, whole_group: bool, target: str, read_children: list[str]
+) -> None:
+    (rig.bin / "sleep").symlink_to(shutil.which("sleep"))
+    rig._script("docker", _SLEEPING_DOCKER)
+    rig._script("ssh", _SLEEPING_SSH)
+    rig.declare_hosts("andromeda", "perseus")
+    process = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve().parents[1] / "plugins" / "camp" / "cli" / "camp"),
+         "env", "attach", target],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=rig.environ(),
+        cwd=str(rig.root),
+        start_new_session=True,
+    )
+    rig._popens.append(process)
+    pids: dict[str, int] = {}
+    try:
+        deadline = time.monotonic() + 10
+        while not set(read_children) <= set(_read_pids(rig)) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        pids = _read_pids(rig)
+        missing = sorted(set(read_children) - set(pids))
+        assert not missing, f"reads that never started: {missing}"
+
+        started = time.monotonic()
+        (os.killpg if whole_group else os.kill)(process.pid, signal.SIGINT)
+        out, err = process.communicate(timeout=10)
+        took = time.monotonic() - started
+        deadline = time.monotonic() + 2
+        while any(_alive(pid) for pid in pids.values()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        left = sorted(name for name, pid in pids.items() if _alive(pid))
+
+        assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
+        assert err == "camp env: interrupted\n"
+        assert took < 2.5, f"camp took {took:.1f}s to exit"
+        assert left == [], f"read children still running: {left}"
+        assert rig.tagged_pids() == []
+    finally:
+        for pid in _read_pids(rig).values():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass

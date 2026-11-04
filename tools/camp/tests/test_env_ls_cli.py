@@ -2,12 +2,15 @@
 
 Every machine answer comes from stub `docker` and `ssh` executables on a test-only PATH; the hosts
 file lives under `CAMP_CONFIG_DIR` in tmp_path. The ssh stub picks its reply by the destination
-(the token after `--`), appends every destination it is called with to a log, and records what the
-CLI's stdout file already held at that moment.
+(the token after `--`) and appends every destination it is called with to a log.
 
 - One environment locally, no hosts declared: the `this machine` heading and one line, exit 0.
 - Many: two local environments and one remote print two blocks in order, sorted, columns aligned.
-- Streaming: this machine's block is on stdout before the first remote read starts.
+- Streaming: this machine's block is on stdout while a slower host's read is still running.
+- Concurrency: two hosts' ssh reads (and the docker read with an ssh read) are in flight at the same
+  moment, proved by stubs that rendezvous; two hosts taking T each finish in under 1.5 T.
+- Order: blocks print this machine, then `env_hosts` order, whichever host answers first.
+- Failures stay per host: unreadable, timed out and fine hosts read together each show their own outcome.
 - No environments: a header-only reply prints `no environments` under that host.
 - Unreadable: a reply without the header prints `unreadable: ...` and none of its records, exit 0.
 - Timed out: a stub that outlives the read bound prints `unreadable: no answer within ...`.
@@ -15,20 +18,37 @@ CLI's stdout file already held at that moment.
 - Opt-in: a declared host absent from `env_hosts` is never contacted and is named on the
   `not opted in:` line; with every declared host opted in, no such line appears.
 - Self: `env_hosts` entry and `[hosts.*]` table named as `self_name` cause no ssh call, no second block.
-- Refusals: undeclared `env_hosts` entry, extra argument, `--host`, bare `env`, unknown subcommand.
+- Refusals: undeclared `env_hosts` entry, `--bogus`, `--host`, bare `env`, unknown subcommand.
+- Naming one host (`env ls HOST`), one test per state: no environments, one environment, many
+  environments, unreadable, timed out, Docker not running / not installed, not declared (undeclared
+  name, host-rule text, escape and newline text, each with and without something attached; nothing
+  read), is this machine (`local` and the self_name, never over ssh even with a `[hosts.<self_name>]`
+  table). A declared host outside `env_hosts` is read and no other machine is; the `attached:`
+  lines open the output and no `not opted in:` line follows; two hosts get the usage refusal.
+- Interrupt: SIGINT to the CLI's process group, and to its pid alone, mid-listing: exit 130 within a
+  couple of seconds, stderr exactly `camp env: interrupted`, no traceback, the block already printed
+  is still on stdout, and no stub child is left running.
+- Closed output: stdout closed after the first block while a later host is still being read: no
+  traceback, no stub child left running, a prompt exit.
 - Group independence: the same output from a directory in no group and from inside a group.
 """
 
 from __future__ import annotations
 
 import os
+import queue
 import re
 import shutil
+import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 import pytest
+
+from .env_ssh_stub import AttachRig, attached_rig, wait_for
 
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
@@ -38,7 +58,21 @@ _CLI_CAMP = _PLUGIN_DIR / "cli" / "camp"
 FIXTURES = Path(__file__).parent / "fixtures"
 HEADER = (FIXTURES / "env_inventory_header_docker_engine_29_8_0_linux.txt").read_text()
 
+_RENDEZVOUS = """
+rv="$STUB_DIR/rv/$me"
+if [ -f "$rv" ]; then
+  peer=$(cat "$rv")
+  : > "$STUB_DIR/started.$me"
+  n=0
+  while [ ! -f "$STUB_DIR/started.$peer" ] && [ $n -lt 50 ]; do sleep 0.1; n=$((n+1)); done
+  [ -f "$STUB_DIR/started.$peer" ] || : > "$STUB_DIR/never-met.$me"
+fi
+"""
+
 _DOCKER_STUB = """#!/bin/sh
+me=docker
+""" + _RENDEZVOUS + """
+echo called >> "$STUB_DIR/docker.log"
 [ -f "$STUB_DIR/docker.stdout" ] && cat "$STUB_DIR/docker.stdout"
 [ -f "$STUB_DIR/docker.stderr" ] && cat "$STUB_DIR/docker.stderr" >&2
 [ -f "$STUB_DIR/docker.exit" ] && exit "$(cat "$STUB_DIR/docker.exit")"
@@ -52,8 +86,10 @@ while [ $# -gt 0 ]; do
   shift
 done
 echo "$dest" >> "$STUB_DIR/ssh.log"
-if [ -n "$STUB_STDOUT_FILE" ]; then cat "$STUB_STDOUT_FILE" > "$STUB_DIR/stdout-at-call.$dest"; fi
+me=$dest
+RENDEZVOUS
 reply="$STUB_DIR/ssh/$dest"
+[ -f "$reply.delay" ] && sleep "$(cat "$reply.delay")"
 [ -f "$reply.sleep" ] && exec sleep "$(cat "$reply.sleep")"
 [ -f "$reply.stdout" ] && cat "$reply.stdout"
 [ -f "$reply.stderr" ] && cat "$reply.stderr" >&2
@@ -77,9 +113,10 @@ class Rig:
         self.bin = self.root / "bin"
         self.bin.mkdir(parents=True)
         (self.root / "ssh").mkdir()
+        (self.root / "rv").mkdir()
         for tool in ("sh", "cat", "sleep", "ps"):
             (self.bin / tool).symlink_to(shutil.which(tool))
-        self._script("ssh", _SSH_STUB)
+        self._script("ssh", _SSH_STUB.replace("RENDEZVOUS", _RENDEZVOUS))
         self.config_dir = tmp_path / "camp-config"
         self.config_dir.mkdir()
         self.state_dir = tmp_path / "camp-state"
@@ -108,6 +145,7 @@ class Rig:
         stderr: str = "",
         exit_code: int = 0,
         sleep: float | None = None,
+        delay: float | None = None,
     ) -> None:
         base = self.root / "ssh" / destination
         base.with_name(base.name + ".stdout").write_text(stdout)
@@ -115,14 +153,26 @@ class Rig:
         base.with_name(base.name + ".exit").write_text(str(exit_code))
         if sleep is not None:
             base.with_name(base.name + ".sleep").write_text(str(sleep))
+        if delay is not None:
+            base.with_name(base.name + ".delay").write_text(str(delay))
+
+    def rendezvous(self, machine: str, peer: str) -> None:
+        """Make ``machine``'s stub (an ssh destination, or ``docker``) wait up to 5 s for ``peer``'s."""
+        (self.root / "rv" / machine).write_text(peer)
+
+    def never_met(self) -> list[str]:
+        """The machines whose read ran alone: it started and no peer started within the wait."""
+        return sorted(p.name.removeprefix("never-met.") for p in self.root.glob("never-met.*"))
 
     @property
     def ssh_calls(self) -> list[str]:
         log = self.root / "ssh.log"
         return log.read_text().split() if log.exists() else []
 
-    def stdout_at_first_call(self, destination: str) -> str:
-        return (self.root / f"stdout-at-call.{destination}").read_text()
+    @property
+    def docker_calls(self) -> int:
+        log = self.root / "docker.log"
+        return len(log.read_text().split()) if log.exists() else 0
 
     def env(self) -> dict[str, str]:
         return {
@@ -131,7 +181,6 @@ class Rig:
             "CAMP_CONFIG_DIR": str(self.config_dir),
             "CAMP_STATE_DIR": str(self.state_dir),
             "STUB_DIR": str(self.root),
-            "STUB_STDOUT_FILE": str(self.stdout_file),
         }
 
     def run(self, *args: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -153,6 +202,21 @@ def rig(tmp_path: Path) -> Rig:
     return Rig(tmp_path)
 
 
+def _ls_with_a_one_second_read_bound(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], *args: str
+) -> str:
+    """Run `camp env ls ARGS` in this process with the read bound cut to 1 s; return its stdout."""
+    from camp.cli import dispatch
+    from camp.env import read
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls", *args])
+    dispatch.main()
+    return capsys.readouterr().out
+
+
 PERSEUS = "tduffield@perseus"
 MACBOOK = "tduffield@toms-macbook-pro"
 TWO_PEERS = f"""
@@ -162,6 +226,7 @@ ssh = "{PERSEUS}"
 [hosts.toms-macbook-pro]
 ssh = "{MACBOOK}"
 """
+ONE_HOST = 'env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
 
 
 def test_one_environment_locally_with_no_hosts(rig: Rig) -> None:
@@ -174,7 +239,7 @@ def test_one_environment_locally_with_no_hosts(rig: Rig) -> None:
 
 
 def test_published_ports_do_not_change_what_ls_prints(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(
         stdout=_records(
             ("levr", "main", "running", "127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp"),
@@ -240,20 +305,123 @@ def test_many_environments_print_ordered_sorted_aligned_blocks(rig: Rig) -> None
     assert len({(m.start(3), m.start(5)) for m in local}) == 1, lines
 
 
-def test_this_machines_block_is_on_stdout_before_the_first_remote_read(rig: Rig) -> None:
-    rig.hosts_file(
-        'self_name = "andromeda"\nenv_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0]
+def _hosts(*names: str, self_name: str | None = None) -> str:
+    head = f'self_name = "{self_name}"\n' if self_name else ""
+    listed = ", ".join(f'"{n}"' for n in names)
+    return head + f"env_hosts = [{listed}]\n" + "".join(
+        f'\n[hosts.{n}]\nssh = "u@{n}"\n' for n in names
     )
+
+
+def test_this_machines_block_is_on_stdout_while_a_slower_host_is_still_being_read(rig: Rig) -> None:
+    rig.hosts_file(_hosts("slow", self_name="andromeda"))
     rig.docker(stdout=_records(("levr", "main", "running")))
-    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply("u@slow", stdout=HEADER, delay=8)
+    process = subprocess.Popen(
+        [sys.executable, str(_CLI_CAMP), "env", "ls"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        env=rig.env(),
+        cwd=str(rig.root),
+    )
+    lines: queue.Queue[str] = queue.Queue()
+    threading.Thread(target=lambda: [lines.put(line) for line in process.stdout], daemon=True).start()
+    try:
+        got = []
+        deadline = time.monotonic() + 6
+        while len(got) < 2 and time.monotonic() < deadline:
+            try:
+                got.append(lines.get(timeout=0.2))
+            except queue.Empty:
+                pass
+        still_running = process.poll() is None
+    finally:
+        process.kill()
+        process.wait()
 
-    rig.run("env", "ls")
+    assert got == ["this machine (andromeda)\n", "  levr  main  running\n"]
+    assert still_running, "the run had already finished, so the slow read was not still running"
 
-    assert rig.stdout_at_first_call(PERSEUS) == "this machine (andromeda)\n  levr  main  running\n"
+
+def test_two_hosts_are_read_at_the_same_moment(rig: Rig) -> None:
+    rig.hosts_file(_hosts("one", "two"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER)
+    rig.ssh_reply("u@two", stdout=HEADER)
+    rig.rendezvous("u@one", "u@two")
+    rig.rendezvous("u@two", "u@one")
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.never_met() == [], f"read ran alone, no peer started within 5s: {rig.never_met()}"
+
+
+def test_this_machines_docker_read_overlaps_a_remote_read(rig: Rig) -> None:
+    rig.hosts_file(_hosts("one"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER)
+    rig.rendezvous("docker", "u@one")
+    rig.rendezvous("u@one", "docker")
+
+    result = rig.run("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.never_met() == [], f"read ran alone, no peer started within 5s: {rig.never_met()}"
+
+
+def test_two_hosts_that_each_take_about_t_finish_in_under_one_and_a_half_t(rig: Rig) -> None:
+    t = 3.0
+    rig.hosts_file(_hosts("one", "two"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@one", stdout=HEADER, delay=t)
+    rig.ssh_reply("u@two", stdout=HEADER, delay=t)
+
+    started = time.monotonic()
+    result = rig.run("env", "ls")
+    elapsed = time.monotonic() - started
+
+    assert result.stdout == "this machine\n  no environments\none\n  no environments\ntwo\n  no environments\n"
+    assert elapsed < 1.5 * t, f"two {t}s reads took {elapsed:.1f}s"
+
+
+def test_blocks_print_this_machine_then_env_hosts_order_whichever_host_answers_first(rig: Rig) -> None:
+    rig.hosts_file(_hosts("slow", "fast"))
+    rig.docker(stdout=_records(("here", "main", "running")))
+    rig.ssh_reply("u@slow", stdout=_records(("far", "slow-one", "running")), delay=1.5)
+    rig.ssh_reply("u@fast", stdout=_records(("far", "fast-one", "exited")))
+
+    result = rig.run("env", "ls")
+
+    assert result.stdout == (
+        "this machine\n  here  main  running\n"
+        "slow\n  far  slow-one  running\n"
+        "fast\n  far  fast-one  stopped\n"
+    )
+
+
+def test_each_host_shows_its_own_outcome_when_read_together(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.hosts_file(_hosts("down", "stuck", "fine"))
+    rig.docker(stdout=HEADER)
+    rig.ssh_reply("u@down", stderr="no route to the thing\n", exit_code=255)
+    rig.ssh_reply("u@stuck", sleep=10)
+    rig.ssh_reply("u@fine", stdout=_records(("levr", "main", "running")))
+
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys)
+
+    assert out == (
+        "this machine\n  no environments\n"
+        "down\n  unreadable: no route to the thing\n"
+        "stuck\n  unreadable: no answer within 1s\n"
+        "fine\n  levr  main  running\n"
+    )
 
 
 def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, stdout=HEADER)
 
@@ -263,7 +431,7 @@ def test_header_only_reply_prints_no_environments_under_that_host(rig: Rig) -> N
 
 
 def test_reply_without_the_header_is_unreadable_and_exits_zero(rig: Rig) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=_records(("levr", "main", "running")))
     rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"|""\n')
 
@@ -279,20 +447,12 @@ def test_reply_without_the_header_is_unreadable_and_exits_zero(rig: Rig) -> None
 def test_a_host_that_outlives_the_read_bound_is_unreadable_with_the_timeout(
     rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from camp.cli import dispatch
-    from camp.env import read
-
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, sleep=10)
-    for key, value in rig.env().items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setattr(read, "READ_TIMEOUT_SECONDS", 1)
-    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
 
-    dispatch.main()
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys)
 
-    out = capsys.readouterr().out
     assert out == "this machine\n  no environments\nperseus\n  unreadable: no answer within 1s\n"
 
 
@@ -323,7 +483,7 @@ def test_local_docker_missing_or_not_running(
     ],
 )
 def test_remote_docker_missing_or_not_running(rig: Rig, stderr_fixture: str, line: str) -> None:
-    rig.hosts_file('env_hosts = ["perseus"]\n' + TWO_PEERS.split("\n[hosts.toms")[0])
+    rig.hosts_file(ONE_HOST)
     rig.docker(stdout=HEADER)
     rig.ssh_reply(PERSEUS, stderr=(FIXTURES / stderr_fixture).read_text())
 
@@ -435,7 +595,7 @@ def test_no_not_opted_in_line_when_every_declared_host_is_opted_in(rig: Rig) -> 
 
     result = rig.run("env", "ls")
 
-    assert rig.ssh_calls == [PERSEUS, MACBOOK]
+    assert sorted(rig.ssh_calls) == sorted([PERSEUS, MACBOOK])
     assert "not opted in" not in result.stdout
 
 
@@ -493,7 +653,7 @@ def test_a_malformed_hosts_file_refuses(rig: Rig) -> None:
 @pytest.mark.parametrize(
     ("extra", "message"),
     [
-        (["extra"], "camp env ls: "),
+        (["extra"], "camp env: no host named extra in "),
         (["--bogus"], "camp env ls: "),
         (["--host", "perseus"], "camp env: --host has no meaning here\n"),
     ],
@@ -509,13 +669,252 @@ def test_ls_refuses_any_argument(rig: Rig, extra: list[str], message: str) -> No
     assert "Traceback" not in result.stderr
 
 
+# -- camp env ls HOST ------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("opted_in", [True, False], ids=["opted-in", "not-opted-in"])
+def test_named_host_with_no_environments(rig: Rig, opted_in: bool) -> None:
+    rig.hosts_file(ONE_HOST if opted_in else TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(PERSEUS, stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "perseus\n  no environments\n"
+
+
+def test_named_host_with_one_environment(rig: Rig) -> None:
+    rig.hosts_file(ONE_HOST)
+    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "perseus\n  levr  main  running\n"
+
+
+def test_named_host_with_many_environments(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(
+        PERSEUS,
+        stdout=_records(
+            ("levr", "main", "running"), ("alpha", "zz", "exited"), ("levr", "ben-feature", "paused")
+        ),
+    )
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == (
+        "perseus\n  alpha  zz           stopped\n  levr   ben-feature  stopped\n  levr   main         running\n"
+    )
+
+
+def test_named_host_unreadable(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, stdout='"sneaky-env-one"|"running"|"sneaky"|"one"|""\n')
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.startswith("perseus\n  unreadable: ")
+    assert result.stdout.count("\n") == 2
+    assert "sneaky" not in result.stdout
+
+
+def test_named_host_timed_out(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, sleep=10)
+
+    out = _ls_with_a_one_second_read_bound(rig, monkeypatch, capsys, "perseus")
+
+    assert out == "perseus\n  unreadable: no answer within 1s\n"
+
+
+@pytest.mark.parametrize(
+    ("stderr_fixture", "line"),
+    [
+        ("env_read_perseus_tailscale_daemon_tcp.stderr", "Docker is not running"),
+        ("env_read_perseus_tailscale_unknown_command.stderr", "Docker is not installed"),
+    ],
+    ids=["without-docker-running", "without-docker-installed"],
+)
+def test_named_host_without_docker_running(rig: Rig, stderr_fixture: str, line: str) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.ssh_reply(PERSEUS, stderr=(FIXTURES / stderr_fixture).read_text())
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"perseus\n  {line}\n"
+
+
+def test_named_host_not_declared_is_refused_naming_the_file_and_declared_hosts_and_reads_nothing(rig: Rig) -> None:
+    hosts = rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", "ghost")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == f"camp env: no host named ghost in {hosts}; declared: perseus, toms-macbook-pro\n"
+    assert rig.ssh_calls == []
+    assert rig.docker_calls == 0
+
+
+@pytest.mark.parametrize("text", ["Perseus", "perseus/levr"])
+def test_named_host_not_declared_with_text_breaking_the_host_rule_is_refused_reading_nothing(
+    rig: Rig, text: str
+) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", text)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith(
+        "camp env: the host is not a valid host name: host names must be lowercase letters, digits and -"
+    )
+    assert rig.ssh_calls == []
+    assert rig.docker_calls == 0
+
+
+@pytest.mark.parametrize("text", ["per\x1b[2Jseus", "per\nseus", "per‮seus"], ids=["escape", "newline", "bidi"])
+def test_named_host_not_declared_with_control_characters_reaches_stderr_without_them(rig: Rig, text: str) -> None:
+    rig.hosts_file(TWO_PEERS)
+
+    result = rig.run("env", "ls", text)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert "host names must be" in result.stderr
+    assert "\x1b" not in result.stderr and "‮" not in result.stderr
+    assert "seus\n" not in result.stderr.replace("host names", "")
+    assert rig.ssh_calls == []
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["ghost"], ["Perseus"], ["perseus", "toms-macbook-pro"]],
+    ids=["undeclared", "host-rule", "two-hosts"],
+)
+def test_named_host_not_declared_with_an_attachment_present_still_prints_nothing_on_stdout(
+    tmp_path: Path, args: list[str]
+) -> None:
+    rig = AttachRig(tmp_path)
+    try:
+        attached_rig(rig, host="perseus")
+        rig.decoy_forward("a" * 12)
+        wait_for(lambda: rig.tagged_pids())
+        assert rig.camp("env", "ls", "perseus").stdout.startswith("attached: perseus/levr/other on ports ")
+
+        result = rig.camp("env", "ls", *args)
+
+        assert result.returncode == 1
+        assert result.stdout == ""
+        assert result.stderr.startswith("camp env: ") or result.stderr.startswith("usage: camp env ls [HOST]")
+    finally:
+        rig.close()
+
+
+@pytest.mark.parametrize(
+    ("name", "hosts", "heading"),
+    [
+        ("local", "", "this machine"),
+        ("local", 'self_name = "andromeda"\n', "this machine (andromeda)"),
+        ("andromeda", 'self_name = "andromeda"\n', "this machine (andromeda)"),
+        (
+            "andromeda",
+            'self_name = "andromeda"\n[hosts.andromeda]\nssh = "tduffield@andromeda"\n',
+            "this machine (andromeda)",
+        ),
+        (
+            "local",
+            'self_name = "andromeda"\n[hosts.andromeda]\nssh = "tduffield@andromeda"\n',
+            "this machine (andromeda)",
+        ),
+    ],
+    ids=["local", "local-with-self-name", "self-name", "self-name-declared", "local-with-self-name-declared"],
+)
+def test_named_host_is_this_machine_read_through_docker_never_ssh(
+    rig: Rig, name: str, hosts: str, heading: str
+) -> None:
+    rig.hosts_file(hosts)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+
+    result = rig.run("env", "ls", name)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{heading}\n  levr  main  running\n"
+    assert rig.ssh_calls == []
+
+
+def test_a_named_declared_host_outside_env_hosts_is_read_and_no_other_machine_is(rig: Rig) -> None:
+    rig.hosts_file('env_hosts = ["toms-macbook-pro"]\n' + TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(PERSEUS, stdout=_records(("levr", "main", "running")))
+    rig.ssh_reply(MACBOOK, stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 0, result.stderr
+    assert rig.ssh_calls == [PERSEUS]
+    assert rig.docker_calls == 0
+    assert result.stdout == "perseus\n  levr  main  running\n"
+
+
+def test_named_host_listing_opens_with_the_attached_lines_and_has_no_not_opted_in_line(tmp_path: Path) -> None:
+    rig = AttachRig(tmp_path)
+    try:
+        env = attached_rig(rig, host="perseus")
+        rig.declare_hosts("perseus", "toms-macbook-pro", opted_in=())
+        rig.host_inventory("perseus", env)
+        rig.decoy_forward("b" * 12)
+        wait_for(lambda: rig.tagged_pids())
+
+        result = rig.camp("env", "ls", "perseus")
+
+        assert result.returncode == 0, result.stderr
+        lines = result.stdout.splitlines()
+        assert lines[0].startswith("attached: perseus/levr/other on ports ")
+        assert lines[1:] == ["perseus", "  levr  main  running"]
+        assert rig.inventory_reads() == ["tduffield@perseus"]
+    finally:
+        rig.close()
+
+
+def test_two_named_hosts_get_the_usage_refusal(rig: Rig) -> None:
+    rig.hosts_file(TWO_PEERS)
+    rig.docker(stdout=HEADER)
+
+    result = rig.run("env", "ls", "perseus", "toms-macbook-pro")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == "usage: camp env ls [HOST]\n"
+    assert rig.ssh_calls == []
+
+
+def test_named_host_is_refused_when_the_hosts_file_is_unusable(rig: Rig) -> None:
+    rig.hosts_file("this is = = not toml\n")
+
+    result = rig.run("env", "ls", "perseus")
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr.startswith("camp env: ")
+
+
 @pytest.mark.parametrize("args", [[], ["frobnicate"]])
 def test_bare_env_and_unknown_subcommand_print_one_usage_line(rig: Rig, args: list[str]) -> None:
     result = rig.run("env", *args)
 
     assert result.returncode == 1
     assert result.stdout == ""
-    assert result.stderr == "usage: camp env ls | attach TARGET | status | detach\n"
+    assert result.stderr == "usage: camp env ls [HOST] | attach TARGET | status | detach\n"
 
 
 def test_camp_help_lists_the_verb(rig: Rig) -> None:
@@ -543,3 +942,262 @@ def test_output_is_the_same_outside_and_inside_a_camp_group(rig: Rig, tmp_path: 
     assert outside.returncode == inside.returncode == 0
     assert outside.stdout == inside.stdout
     assert "this machine (andromeda)" in inside.stdout
+
+
+_SLEEPING_DOCKER = """#!/bin/sh
+echo $$ > "$STUB_DIR/pid.docker"
+if [ -f "$STUB_DIR/docker.stdout" ]; then cat "$STUB_DIR/docker.stdout"; fi
+if [ -f "$STUB_DIR/docker.sleep" ]; then exec sleep "$(cat "$STUB_DIR/docker.sleep")"; fi
+exit 0
+"""
+
+_SLEEPING_SSH = """#!/bin/sh
+dest=
+while [ $# -gt 0 ]; do
+  if [ "$1" = "--" ]; then dest=$2; break; fi
+  shift
+done
+echo $$ > "$STUB_DIR/pid.$dest"
+if [ "$dest" = "$STUB_SHORT_DEST" ]; then exec sleep 1; fi
+exec sleep 20
+"""
+
+
+class _Listing:
+    """`camp env ls` in its own session against a stub docker that answers at once and ssh stubs that sleep."""
+
+    def __init__(self, rig: Rig) -> None:
+        self.rig = rig
+        rig._script("docker", _SLEEPING_DOCKER)
+        rig._script("ssh", _SLEEPING_SSH)
+        (rig.root / "docker.stdout").write_text(_records(("levr", "main", "running")))
+        rig.hosts_file('env_hosts = ["perseus", "toms-macbook-pro"]\n' + TWO_PEERS)
+        self.process: subprocess.Popen | None = None
+
+    def start(self, short_dest: str = "", host: str = "") -> subprocess.Popen:
+        self.process = subprocess.Popen(
+            [sys.executable, str(_CLI_CAMP), "env", "ls", *([host] if host else [])],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**self.rig.env(), "STUB_SHORT_DEST": short_dest},
+            cwd=str(self.rig.root),
+            start_new_session=True,
+        )
+        return self.process
+
+    def pids(self) -> dict[str, int]:
+        found = {}
+        for path in self.rig.root.glob("pid.*"):
+            if path.read_text().strip():
+                found[path.name.removeprefix("pid.")] = int(path.read_text())
+        return found
+
+    def wait_for_ssh_children(self, wanted: set[str] | None = None) -> None:
+        wanted = wanted or {PERSEUS, MACBOOK}
+        deadline = time.monotonic() + 10
+        while not wanted <= set(self.pids()) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert wanted <= set(self.pids()), f"ssh stubs that never started: {wanted - set(self.pids())}"
+
+    def survivors(self) -> list[str]:
+        alive = []
+        for name, pid in self.pids().items():
+            try:
+                os.kill(pid, 0)
+                alive.append(name)
+            except ProcessLookupError:
+                pass
+        return sorted(alive)
+
+    def survivors_after_grace(self, limit: float = 2.0) -> list[str]:
+        deadline = time.monotonic() + limit
+        while self.survivors() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return self.survivors()
+
+    def finish(self, limit: float = 5.0) -> tuple[str, str, float]:
+        started = time.monotonic()
+        try:
+            out, err = self.process.communicate(timeout=limit)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.communicate()
+            pytest.fail(f"camp env ls was still running {limit}s after it was told to stop")
+        return out, err, time.monotonic() - started
+
+    def cleanup(self) -> None:
+        if self.process is not None and self.process.poll() is None:
+            self.process.kill()
+            self.process.communicate()
+        for pid in self.pids().values():
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+@pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
+def test_an_interrupt_mid_listing_ends_every_child_and_prints_one_line(rig: Rig, whole_group: bool) -> None:
+    listing = _Listing(rig)
+    process = listing.start()
+    try:
+        listing.wait_for_ssh_children()
+        printed = [process.stdout.readline(), process.stdout.readline()]
+        (os.killpg if whole_group else os.kill)(process.pid, signal.SIGINT)
+        rest, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
+        assert err == "camp env: interrupted\n"
+        assert printed == ["this machine\n", "  levr  main  running\n"] and rest == ""
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after the interrupt: {left}"
+    finally:
+        listing.cleanup()
+
+
+@pytest.mark.parametrize("whole_group", [True, False], ids=["process-group", "pid-only"])
+def test_an_interrupt_while_a_named_host_is_read_ends_its_child_and_prints_one_line(
+    rig: Rig, whole_group: bool
+) -> None:
+    listing = _Listing(rig)
+    process = listing.start(host="perseus")
+    try:
+        listing.wait_for_ssh_children({PERSEUS})
+        (os.killpg if whole_group else os.kill)(process.pid, signal.SIGINT)
+        out, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert process.returncode == 130, f"exit {process.returncode}, stderr {err!r}"
+        assert err == "camp env: interrupted\n"
+        assert out == ""
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after the interrupt: {left}"
+    finally:
+        listing.cleanup()
+
+
+def test_closing_stdout_while_a_later_host_is_still_read_ends_it_without_a_traceback(rig: Rig) -> None:
+    listing = _Listing(rig)
+    process = listing.start(short_dest=PERSEUS)
+    try:
+        listing.wait_for_ssh_children()
+        assert process.stdout.readline() == "this machine\n"
+        process.stdout.close()
+        _, err, took = listing.finish()
+        left = listing.survivors_after_grace()
+
+        assert process.returncode == 1, f"exit {process.returncode}, stderr {err!r}"
+        assert "Traceback" not in err and "BrokenPipe" not in err, err
+        assert "Exception ignored" not in err, err
+        assert took < 3, f"camp took {took:.1f}s to exit"
+        assert left == [], f"children still running after stdout closed: {left}"
+    finally:
+        listing.cleanup()
+
+
+class _StdoutClosedAt:
+    """A stdout whose reader has gone: the first write of a line starting with `closing_at` raises."""
+
+    def __init__(self, sink: Path, closing_at: str) -> None:
+        self._file = sink.open("w")
+        self.closing_at = closing_at
+        self.written: list[str] = []
+
+    def write(self, text: str) -> int:
+        if text.startswith(self.closing_at):
+            raise BrokenPipeError(32, "Broken pipe")
+        self.written.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def fileno(self) -> int:
+        return self._file.fileno()
+
+    def close(self) -> None:
+        self._file.close()
+
+
+def _ls_into_a_stdout_that_closes_at(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, closing_at: str
+) -> tuple[int | str | None, _StdoutClosedAt]:
+    from camp.cli import dispatch
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    stdout = _StdoutClosedAt(tmp_path / "closed-stdout", closing_at)
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
+    try:
+        with pytest.raises(SystemExit) as exited:
+            dispatch.main()
+    finally:
+        stdout.close()
+    return exited.value.code, stdout
+
+
+def test_closing_stdout_when_the_not_opted_in_line_is_due_exits_quietly(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    rig.hosts_file('env_hosts = []\n' + TWO_PEERS)
+    rig.docker(stdout=_records(("levr", "main", "running")))
+
+    code, stdout = _ls_into_a_stdout_that_closes_at(rig, monkeypatch, tmp_path, "not opted in:")
+
+    assert code == 1
+    assert stdout.written == ["this machine\n  levr  main  running\n"]
+
+
+def test_closing_stdout_when_an_attached_line_is_due_exits_quietly(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from camp.cli import env as env_cli
+
+    rig.docker(stdout=_records(("levr", "main", "running")))
+    monkeypatch.setattr(env_cli, "attachments", lambda: [object()])
+    monkeypatch.setattr(env_cli, "_summary_of", lambda found: "perseus/levr/main on ports 1")
+
+    code, stdout = _ls_into_a_stdout_that_closes_at(rig, monkeypatch, tmp_path, "attached:")
+
+    assert code == 1
+    assert stdout.written == []
+
+
+@pytest.mark.parametrize("ending", [KeyboardInterrupt, BrokenPipeError], ids=["interrupt", "closed-stdout"])
+def test_an_ending_during_thread_start_up_ends_a_child_already_spawned(
+    rig: Rig, monkeypatch: pytest.MonkeyPatch, ending: type[BaseException]
+) -> None:
+    from camp.cli import dispatch
+    from camp.env import read
+
+    spawned: list[subprocess.Popen] = []
+
+    def interrupted_while_starting(reads, processes=None):
+        child = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        spawned.append(child)
+        processes._add(child)
+        raise ending()
+
+    for key, value in rig.env().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(read, "read_concurrently", interrupted_while_starting)
+    monkeypatch.setattr(sys, "argv", ["camp", "env", "ls"])
+    stdout_fd = os.dup(sys.stdout.fileno())
+    target_fd = sys.stdout.fileno()
+    try:
+        with pytest.raises(SystemExit):
+            dispatch.main()
+        try:
+            spawned[0].wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pytest.fail("the child spawned before the ending was still running 3s later")
+    finally:
+        os.dup2(stdout_fd, target_fd)
+        os.close(stdout_fd)
+        for child in spawned:
+            if child.poll() is None:
+                child.kill()
+            child.wait()
