@@ -18,8 +18,10 @@ never buffers the whole archive before sending the first byte.
 member's worktree, refusing — before anything from that member is written —
 any member whose path or symlink/hardlink target would land outside the
 extraction root: an absolute path, a `..` segment, a real symlink already on
-disk that routes the resolved path outside, an archived symlink or hardlink
-whose target escapes, or a device/special file. This confinement check is
+disk that routes the resolved path outside, a symlink or hardlink whose own
+path resolves to the extraction root (it would replace the root with a link),
+an archived symlink or hardlink whose target escapes, or a device/special
+file. This confinement check is
 implemented explicitly and unconditionally rather than delegated to
 `tarfile.data_filter` — that filter did not exist at all on Python
 3.11.0-3.11.3, so a peer on one of those releases would otherwise extract
@@ -247,6 +249,17 @@ def _check_member(dest_root: Path, member: tarfile.TarInfo) -> None:
     if member.type in _UNSAFE_TYPES:
         raise ArchiveMemberEscaped(member.name, "device or special file")
 
+    if (member.issym() or member.islnk()) and (
+        (dest_root / member.name).resolve() == dest_root.resolve()
+    ):
+        # A link whose own path resolves to the root, through whatever already
+        # stands at that path, would replace the root with a link. Python
+        # releases disagree on whether `data_filter` refuses this, so camp
+        # refuses it itself and every interpreter reaches the same verdict.
+        raise ArchiveMemberEscaped(
+            member.name, "link member resolves to the destination itself"
+        )
+
     if member.issym():
         link_target = (dest_root / member.name).parent / member.linkname
         _confine(
@@ -386,11 +399,11 @@ def escaping_members(
     This is what surfaces a member the seed alone would have hidden — a
     tracked, unchanged symlink whose OWN path already resolves back to the
     destination root because the peer's checkout already put it there (the
-    `data_filter` "resolves to the destination itself" guard,
-    `tarfile._get_filtered_attrs`) — and it is also why a file the sender
-    deleted only in its working tree (never committed) still stands on the
-    peer via the seed, and a later member routing through it must be judged
-    against that leftover, not against its absence.
+    shared gate's "resolves to the destination itself" refusal) — and it is
+    also why a file the sender deleted only in its working tree (never
+    committed) still stands on the peer via the seed, and a later member
+    routing through it must be judged against that leftover, not against its
+    absence.
 
     On top of the seed, each directory and each gate-accepted symlink
     `write_archive` would already have emitted earlier in the stream is
