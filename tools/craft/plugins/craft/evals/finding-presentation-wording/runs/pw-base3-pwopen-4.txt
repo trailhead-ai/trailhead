@@ -1,0 +1,23 @@
+The spec review (gauntlet) of the telescope loan desk spec: all eight passes are in. Maturity: production (basis: stamp). No concerns were waived.
+
+The passes found one real gap and a lot of loose wording. The gap is in how a return is checked in. As written, the rule that the officer records a telescope as back with a condition note, and it then shows as free from that day (AC4), can be read as the telescope going free on its return date whether or not anyone checked it. That brings back the spec's own founding complaint: nobody can tell who had a scope when its mirror was scratched. The rest is underspecified rather than wrong. The objective that a member can "see where the loan stands" has no criterion behind it. A waiting-list offer is never recorded and never closed. The 48-hour cancellation window has no stated clock. And nothing ties a cancellation to the member who actually borrowed.
+
+The failure-cases pass was right, and its finding is the one that matters: the gap traces straight back to the Problem statement, and at production maturity an unrecorded return is a state the club will certainly reach. The right-problem pass's case for lending by the night is a fair idea, but it rests on guesses about how often members want a single night. Its own confidence line admits that isn't known. I moved it from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call". The ease-of-use pass's Critical about the finder cap overreached. The reminder two days before the return date already lists what goes back in the case: the telescope, its eyepieces and the finder cap (AC5). So I moved that one to "rough edges, nothing to decide". The strongest signals came where passes agreed without seeing each other. Ease of use and self-consistency both flagged the "see where the loan stands" objective, and buildability and self-consistency both flagged the waiting-list offer. Those lead the list below. The fact check found the club has seven telescopes, not six. Nothing depends on the number, but it is wrong.
+
+My plan: rewrite the check-in rule so a telescope goes free only once the officer has recorded it back. A telescope past its return date with nothing recorded shows as overdue and stays on loan to its borrower. After that the spec advances. The other findings are worth fixing before planning starts, and the two convergent ones most of all, but none of them needs your decision now.
+
+**Recommended outcome:** advances to ready this round, once the check-in rewrite (C1) is applied.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *an unchecked return shows the telescope as free* (C1) | fixed in the spec | *AC4 becomes: free only once the officer records it back with a condition note; past its return date with nothing recorded, it shows as overdue and stays on loan to the borrower* |
+
+The full text of the edit, as it would land:
+
+> **AC4.** When the loan officer records a telescope as back, with a note of its condition, it shows as free on the club's loan calendar from that day. A telescope whose return date has passed with no return recorded shows as overdue, not free, and stays on loan to the member who borrowed it until the loan officer records it back.
+
+Reply go, or dispute C1: <why>, accept C1 as a risk: <why>, answer C1: <what you know>.
+
+**Worth fixing, your call (9):** the "see where the loan stands" objective has no criterion delivering it. Waiting-list offers are never recorded or closed. Open choices remain: when the 48-hour clock starts, how many loans one member can hold on the same dates, and whether to lend by the night. Bounced reminders go unseen. Anyone with a forwarded confirmation email can cancel. Condition notes are open to every member; the security pass wants them hidden and the left-undecided pass would leave them open, so this one needs a choice. The Objectives are larger than the double-booking complaint needs.
+
+**Rough edges, nothing to decide (4):** the Problem should say seven telescopes, not six. The case list could also go in the confirmation email. "Waiting list" could read as "next in line". The confirmation email shows which dates a scope is taken.

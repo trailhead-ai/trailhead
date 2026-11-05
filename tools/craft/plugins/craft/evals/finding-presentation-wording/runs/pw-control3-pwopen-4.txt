@@ -1,0 +1,37 @@
+**The spec review (gauntlet) of the telescope loan desk spec: 8 of 8 passes returned.** Maturity: production (basis: stamp). No waivers.
+
+**What the passes found.** Three of the findings concern the spec's main promise that every change to a telescope's record can be checked afterwards. First, a telescope that comes back while the loan officer is away shows as free with no condition note. That is the scratched-mirror problem the spec was written to fix (AC4). Second, if a confirmation or reminder email cannot be delivered, nobody finds out (AC1, AC5). Third, cancellations offer the freed dates to "the first member on that telescope's waiting list" (AC3), but no criterion lets a member join that list, accept an offer, or have the offer recorded. The fourth finding is that the Objectives promise a member can "see where the loan stands", and no criterion delivers that. The fact check also found that the club owns seven telescopes, not six.
+
+**Whether it holds.** The failure-cases reviewer is right on both counts. It rated the undelivered-email finding as worth fixing, but this spec is at production maturity, where a failure nobody can see needs your decision, so I raised it. Two pairs of reviewers that could not see each other's work reached the same findings independently: buildability and self-consistency on the waiting list, and self-consistency and ease of use on the "see where the loan stands" promise. That is the strongest signal this review produces, so I promoted both. I checked the waiting-list one myself: refusing a second request (AC2) offers the next free date and never puts anyone on a list. Two Criticals did not hold. The right-problem reviewer's case for lending by the night rests on how members use the scopes, and its own confidence line says the spec doesn't show that. The Problem describes weekend clashes, so I downgraded it to worth fixing. The ease-of-use reviewer says members are never told what goes back in the case. The reminder before the return date already lists it (AC5), so that one is now a rough edge. The cancellation claim the fact check marked unverifiable is a requirement for the new system, not a fact about today, so nothing needs doing.
+
+**What to do.** All four can be fixed by editing the spec, so I'm proposing no rewrites. The edits are:
+- Rewrite the return criterion so a telescope is free only once a condition note is recorded (AC4).
+- Add a criterion that shows the loan officer any email that could not be delivered.
+- Let a member join a waiting list from a refused request, record each offer, and add a criterion for accepting one.
+- Drop "and see where the loan stands" from the Objectives.
+
+In the same write I would also correct "six telescopes" to "seven". The spec then advances.
+
+**Recommended outcome:** advance this round. Apply the four fixes, then flip the spec to `ready`.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *An unchecked return shows as free with no condition note* (C1) | fixed in the spec | *AC4: free only after a condition note is recorded; until then "returned and unchecked" against the last borrower, and not lendable* |
+| *Nobody learns when a confirmation or reminder email cannot be delivered* (C2) | fixed in the spec | *new AC7: an email that cannot be delivered shows the loan officer the loan and the address that failed* |
+| *The waiting list in the cancellation criterion has no way in, no recorded offer and no way out* (C3) | fixed in the spec | *AC2: a refused member may join the waiting list; AC3: the offer is recorded; new AC8: accepting an offer makes the loan as in AC1 and removes the member from the list* |
+| *The Objectives promise members can see where a loan stands, and no criterion delivers it* (C4) | fixed in the spec | *drop "and see where the loan stands" from the Objectives* |
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C4: <what you know>. For example, if members should get a status page, answer the self-consistency finding (C4) and I'll draft a criterion for it instead.
+
+**Would cause trouble later, worth fixing, your call: 7.**
+- Lend by the night rather than by dates.
+- Narrow the Objectives to preventing double loans.
+- Say whether the loan history is stored or built from events.
+- Tie a cancellation to the member who borrowed.
+- Decide who can read condition notes. Security says committee only and left-undecided says every member, so this needs a decision.
+- Allow at most one loan per member per date.
+- Say when the 48 hours start, noon or midnight. Two reviewers raised this.
+
+**Rough edges, nothing to decide: 5.** Naming the mail provider, the confirmation email showing which dates a telescope is taken, "waiting list" reading as jargon, "loan calendar" against "loan history", and listing the case contents in the confirmation email too.
+
+Full detail on any finding is one request away, for example "show me the detail on C3".

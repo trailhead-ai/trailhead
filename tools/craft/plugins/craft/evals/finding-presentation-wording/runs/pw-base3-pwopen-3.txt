@@ -1,0 +1,39 @@
+**The spec review (gauntlet): the telescope loan desk for the Hollin Hill astronomy club**
+maturity: production (basis: stamp). No waivers. Fact check: 2 of 4 claims confirmed, 1 refuted, 1 could not be checked.
+
+All eight reviewers mostly agree on one thing: the spec still allows the exact incident it was written to prevent. Its Problem ends with a scratched mirror that nobody can trace. As written, though, a telescope shows as free on the calendar from its return date, condition note or not (AC4). A scope a member leaves in the cupboard with no officer there becomes free and unchecked, and the next borrower finds the damage. The rest is smaller. The objective promises a member can "see where the loan stands", but no criterion after the confirmation email delivers it. The waiting-list offer has no way to close and is never said to be recorded (AC3, AC6). The 48-hour cancellation clock, who may cancel, and who sees condition notes are all left open.
+
+The failure-cases reviewer (Reliability) was right, with a concrete scenario that maps straight onto the Problem. Two other "needs your decision" findings don't hold. The right-problem reviewer (Premise) proposed lending by the night instead of by date range. That depends on how often members want a single night, which its own confidence line admits the spec doesn't say, so it drops to "worth fixing, your call". The ease-of-use reviewer (Advocate) said members are never told the finder cap goes back in the case. But two days before the return date, the member already gets a reminder listing what goes back (AC5), so its failure doesn't happen as stated: rough edges. Two findings came independently from two reviewers each: "see where the loan stands" (ease of use and self-consistency) and the waiting-list lifecycle (buildability and self-consistency). They lead the list below. The fact check found the club's equipment register lists seven telescopes, not six. Nothing depends on the number, but the Problem has it wrong.
+
+The plan: make "free" depend on a recorded condition note, and add an explicit "returned, unchecked" state. That is one edit to AC4 plus one new criterion, both drafted below. Nothing needs a rewrite, so the spec can advance this round.
+
+**Recommended outcome:** apply the condition-note fix (C1) and advance to `ready` this round.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *an unchecked return shows as free, so damage can't be traced* (C1) | fixed in the spec | *AC4 makes a scope free only from the day its condition note is recorded; a new AC7 adds a "returned, unchecked" state that can't be borrowed* |
+
+Reply go, or dispute C1: <why>, accept C1 as a risk: <why>, answer C1: <what you know>.
+
+The drafted text for C1:
+- AC4 ends: "…and the telescope shows as free on the club's loan calendar from the day that condition note is recorded."
+- New, under Returns and care: "**AC7.** A telescope whose return date has passed with no condition note recorded shows on the loan calendar as returned and unchecked, not as free, and cannot be borrowed until the loan officer records the note."
+
+**Worth fixing, your call (7):**
+- The objective's "see where the loan stands" has no criterion delivering it.
+- The waiting-list offer can't be accepted, closed or recorded (AC3, AC6).
+- The 48-hour cancellation clock is unspecified: midnight, noon or time zone (AC3).
+- Cancelling isn't tied to the borrower, so a forwarded email is enough to cancel.
+- Condition notes in a history every member can read may carry personal detail. The left-undecided reviewer's pin, "every member sees the history", conflicts with this.
+- A reminder sent to a mistyped address bounces unseen.
+- Nothing says whether one member may hold two telescopes on the same dates.
+- Lending by the night instead of by date range (downgraded, see above).
+
+**Rough edges, nothing to decide (5):**
+- The Problem says six telescopes; the club's register lists seven.
+- The finder-cap list could also go in the confirmation email (downgraded).
+- "Loan calendar" and "loan history" are used without saying how the two differ.
+- "Waiting list" could be "next in line".
+- The confirmation email reveals which dates are taken.
+
+Cut as outside what a spec should decide: naming the mail provider, whether the history is stored or worked out from events, and the right-problem reviewer's point that the build is bigger than the complaint (the Problem names three complaints, and the criteria cover all three).

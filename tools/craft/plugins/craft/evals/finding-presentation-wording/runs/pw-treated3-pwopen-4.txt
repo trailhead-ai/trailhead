@@ -1,0 +1,45 @@
+The spec review (gauntlet) of the telescope loan desk spec: all eight passes are in. Maturity is `maturity: production (basis: stamp)`, and no concerns were waived.
+
+**What the passes found.** The spec's central promise is that every change to a telescope's record can be checked afterwards, so nobody is left asking who had the scope when the mirror was scratched. That promise has a hole at the return. A telescope comes back as free on the loan calendar whether or not anyone wrote down its condition. A second gap is email. The member's email address is the only channel to them, and nothing tells anyone when a message to it doesn't arrive. Beyond those two, the passes found loose ends around the waiting list and the 48-hour cancel window. They also found that the Objectives promise a member can "see where the loan stands", but no criterion delivers it.
+
+**Whether it holds.** The failure-cases pass was right on both counts and gave the sharpest finding. A telescope dropped in the cupboard with no officer present shows as free with no note, which recreates the scratched-mirror problem. That pass rated the email gap only as worth fixing. I've raised it to a decision because this spec is stamped production, and at production a failure no human would ever see needs your decision. Two other passes rated findings as decisions, and I've moved both down to "would cause trouble later, worth fixing, your call":
+
+- **Lending by the night (right-problem pass).** The idea rests on how often members want a scope for a single night, and the pass admits nothing records that.
+- **Case list in the confirmation email (ease-of-use pass).** The member already gets the list of what goes back in the case two days before the return date (AC5). The member it worried about, "not told", is in fact told.
+
+I dropped two claims outright:
+
+- The right-problem pass said the spec is a bigger build than the complaint needs. That misreads the Problem, which names three complaints, and the Objectives answer each one.
+- The buildability pass asked whether the loan history is stored or worked out from events. That's a planning choice, not a spec defect.
+
+The security and left-undecided passes disagree on who may read condition notes. That's a real choice and it's yours. The fact check found one real error: the equipment register lists seven telescopes, not six.
+
+**What to do.** Make both edits below and advance the spec. Both are drafted and land as written.
+
+**Recommended outcome:** the spec advances to `ready` this round. No finding needs a rewrite.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *an unchecked return shows as free, so damage can't be traced (C1)* | fixed in the spec | *rewrite AC4 so a telescope shows as free only once its condition note is recorded* |
+| *an email that can't be delivered goes unseen by everyone (C2)* | fixed in the spec | *add AC7: the loan officer is shown every email that couldn't be delivered* |
+
+Drafted text:
+- **For the return fix (C1):** "**AC4.** On the return date the loan officer records the telescope as back, with a note of its condition. The telescope shows as free on the club's loan calendar only from the day that note is recorded; until then it shows as returned and unchecked."
+- **For the delivery fix (C2):** "**AC7.** When a confirmation or reminder email cannot be delivered, the loan officer is shown the member, the loan, and the address it was sent to."
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.
+
+**Would cause trouble later, worth fixing, your call — 8.** The first two were each raised independently by two passes:
+- The promise that a member can "see where the loan stands" has no criterion behind it.
+- The waiting list is loose. Cancelling frees the dates and offers them to the first member on the telescope's waiting list (AC3), but nothing says how that offer is recorded or how it closes.
+- No clock is named for that same 48-hour window (AC3).
+- Possibly lend by the night instead of by date range.
+- Possibly put the case list in the confirmation email too.
+- Nothing ties a cancel to the member who borrowed.
+- Who may read condition notes in the history is open; the security and left-undecided passes disagree.
+- Nothing says whether one member may hold two telescopes on the same dates.
+
+**Rough edges, nothing to decide — 3.**
+- "Six telescopes" should read "seven", per the equipment register.
+- The loan calendar and the loan history are two different pages, and the spec should say so.
+- A confirmation email shows which dates a scope is already taken.

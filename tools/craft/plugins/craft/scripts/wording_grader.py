@@ -46,8 +46,9 @@ missing element on stderr as `missing: <element>`.
 logical lines without any fenced block and without a line that quotes a reviewer
 report verbatim. `--reports` names a canned report file (repeatable) that supplies
 those quotations. Verdicts: `plain`, `internal`, `none`. `internal` when a
-severity level or reviewer role is named in the working vocabulary, else `plain`
-when a plain reading appears, else `none`.
+severity level or reviewer role is named in the working vocabulary (a plural level name
+such as `Importants`, `Minors` or `Criticals` included), else `plain` when a plain reading
+appears, else `none`.
 
 `calibration-level` reads the same reader-facing text and says whether a severity word
 (`critical`, `criticals`, `important`, `minor`, any case, whole word) shares a logical line
@@ -185,6 +186,7 @@ _SEVERITY_PATTERNS = (
     re.compile(rf"{_BEFORE}(?:Important|Minor){_AFTER} *(?:[:\])]|{_COUNT})"),
     re.compile(rf"(?<=\d ){_BEFORE}(?:Important|Minor){_AFTER}"),
     re.compile(rf"{_BEFORE}(?:Important|Minor) {_FINDING_WORDS}{_AFTER}"),
+    re.compile(rf"{_BEFORE}(?:Important|Minor)s{_AFTER}"),
 )
 _LEVEL_ONLY_RE = re.compile(rf"(?:Important|Minor)(?: *{_COUNT})?")
 _GROUP_LABEL_RE = re.compile(rf"(?:Important|Minor){_AFTER} *[-\u2013\u2014(]")

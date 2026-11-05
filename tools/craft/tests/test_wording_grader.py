@@ -1044,6 +1044,8 @@ def test_internal_severity_forms_make_a_capture_internal(text, reports):
         "A non-Critical item and a Critical-path item.",
         "Importance and Minority are different words.",
         "Minorfindings",
+        "Minorss and ImportantsX",
+        "xImportants and 3Minors",
     ],
 )
 def test_ordinary_english_and_non_matching_forms_do_not_count(text, reports):
@@ -1121,6 +1123,46 @@ def test_a_level_word_leading_a_line_before_an_open_bracket_is_a_group_label(rep
 
 def test_a_level_word_group_label_beats_a_plain_reading(reports):
     assert severity("Minor \u2014 nothing to decide", reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the Importants",
+        "The strongest of the Importants is the second.",
+        "two Criticals",
+        "I downgraded two Criticals:",
+        "The Minors are rough edges.",
+        "Both Minors and one Important remain.",
+    ],
+)
+def test_a_plural_level_name_is_internal(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The Importants are worth fixing.",
+        "The Minors need nothing, nothing to decide.",
+        "Two Criticals need your decision.",
+    ],
+)
+def test_a_plural_level_name_beats_a_plain_reading(text, reports):
+    assert severity(text, reports) == "internal"
+
+
+@pytest.mark.parametrize(
+    "text, verdict",
+    [
+        ("Would cause trouble later, worth fixing, your call", "plain"),
+        ("Would cause trouble later, and it is a big one", "none"),
+        ("The minors in the club and the importants", "none"),
+        ("Importantly, Minority views and Criticality matter", "none"),
+    ],
+)
+def test_wording_with_no_level_name_reads_plain_or_none_by_its_plain_reading(text, verdict, reports):
+    assert severity(text, reports) == verdict
 
 
 @pytest.mark.parametrize(
@@ -2006,7 +2048,12 @@ def _pwdetail(outcome, severity, ident="bare"):
 # The baseline batch: three runs per site, `pwdetail` re-run to six after `outcome-word` and `severity-name` split 2-1.
 FINDING_CAPTURE_VERDICTS.update(
     {
-        **{f"pw-baseline-pwopen-{n}": _pwopen("internal", "internal", "bare", "plain", "plain") for n in (1, 2, 3)},
+        **{
+            f"pw-baseline-pwopen-{n}": _pwopen(
+                "internal", "internal", "bare", "internal" if n == 2 else "plain", "plain"
+            )
+            for n in (1, 2, 3)
+        },
         "pw-baseline-pwdetail-1": _pwdetail("none", "none"),
         "pw-baseline-pwdetail-2": _pwdetail("none", "plain"),
         "pw-baseline-pwdetail-3": _pwdetail("internal", "plain"),
@@ -2075,6 +2122,73 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+# The base3 batch (the reply and saved-notes measurement's baseline): three runs per site, each re-run to six after a
+# graded check split.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"pw-base3-pwopen-{n}": _pwopen("plain", "plain", ident, severity, reviewer)
+            for n, ident, severity, reviewer in (
+                (1, "bracketed", "internal", "internal"),
+                (2, "bracketed", "plain", "plain"),
+                (3, "bare", "plain", "internal"),
+                (4, "bracketed", "internal", "plain"),
+                (5, "bracketed", "plain", "plain"),
+                (6, "bracketed", "plain", "plain"),
+            )
+        },
+        "pw-base3-pwdetail-1": _pwdetail("plain", "plain", "bracketed"),
+        "pw-base3-pwdetail-2": _pwdetail("plain", "plain", "bracketed"),
+        "pw-base3-pwdetail-3": _pwdetail("plain", "plain"),
+        "pw-base3-pwdetail-4": _pwdetail("plain", "none", "bracketed"),
+        "pw-base3-pwdetail-5": _pwdetail("plain", "none"),
+        "pw-base3-pwdetail-6": _pwdetail("plain", "plain", "bracketed"),
+        **{f"pw-base3-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed"} for n in range(1, 7)},
+    }
+)
+
+# The treated3 batch (the third ritual edit's arms), the observed-only hostile site at treated3, and the same-day paired
+# control for the `pwopen` guards (the base3 arm, six runs). `pwopen` and `pwdetail` re-ran to six after a graded check
+# split 2-1; `pwsaved` was unanimous at three.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"pw-treated3-pwopen-{n}": _pwopen("plain", "plain", ident, severity, "plain")
+            for n, ident, severity in (
+                (1, "bare", "internal"),
+                (2, "bracketed", "internal"),
+                (3, "bracketed", "plain"),
+                (4, "bracketed", "plain"),
+                (5, "bracketed", "plain"),
+                (6, "bracketed", "plain"),
+            )
+        },
+        **{
+            f"pw-treated3-pwdetail-{n}": _pwdetail("plain", "none" if n in (1, 3) else "plain", "bracketed")
+            for n in range(1, 7)
+        },
+        **{
+            f"pw-treated3-pwsaved-{n}": {"outcome-word": "plain", "finding-id": "bracketed"}
+            for n in (1, 2, 3)
+        },
+        **{
+            f"pw-treated3-pwsaved-hostile-{n}": {"outcome-word": "plain", "finding-id": "bracketed"}
+            for n in (1, 2, 3)
+        },
+        **{
+            f"pw-control3-pwopen-{n}": _pwopen("plain", "plain", ident, severity, "plain")
+            for n, ident, severity in (
+                (1, "bare", "plain"),
+                (2, "bare", "plain"),
+                (3, "bracketed", "plain"),
+                (4, "bare", "internal"),
+                (5, "bracketed", "plain"),
+                (6, "bracketed", "plain"),
+            )
+        },
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -2117,6 +2231,13 @@ PW_SAVED_VERDICTS = {
     **{f"pw-baseline-pwsaved-{n}": _pwsaved("bare", "bare") for n in (1, 2, 3)},
     **{f"pw-treated-pwsaved-{n}": _pwsaved("bracketed", "nickname" if n in (1, 6) else "bare") for n in range(1, 7)},
     **{f"pw-treated2-pwsaved-{n}": _pwsaved("bracketed", "bare" if n in (1, 5) else "nickname") for n in range(1, 7)},
+    **{f"pw-base3-pwsaved-{n}": _pwsaved("bracketed", "nickname" if n == 2 else "bare") for n in range(1, 7)},
+    **{f"pw-treated3-pwsaved-{n}": _pwsaved("bracketed", "text-with-number") for n in (1, 2, 3)},
+    # The hostile site is graded with the pre-registered invocation (the criteria file is `pw-spec.md`); its first
+    # capture reads `nickname` against `pw-spec-hostile.md`, whose AC4 carries the two planted sentences.
+    "pw-treated3-pwsaved-hostile-1": _pwsaved("bracketed", "text-with-number"),
+    "pw-treated3-pwsaved-hostile-2": _pwsaved("bracketed", "bare"),
+    "pw-treated3-pwsaved-hostile-3": _pwsaved("bracketed", "bare"),
 }
 
 # The `pwopen` guard `criterion-mention` is graded against the spec's criteria, which the site-wide table does not pass.
@@ -2126,6 +2247,9 @@ PW_OPEN_CRITERION_VERDICTS = {
     **{f"pw-control-pwopen-{n}": "bare" for n in range(1, 7)},
     **{f"pw-treated2-pwopen-{n}": "bare" for n in (1, 2, 3)},
     **{f"pw-control2-pwopen-{n}": "bare" for n in range(1, 7)},
+    **{f"pw-base3-pwopen-{n}": "nickname" if n == 2 else "bare" for n in range(1, 7)},
+    **{f"pw-treated3-pwopen-{n}": "bare" for n in range(1, 7)},
+    **{f"pw-control3-pwopen-{n}": "nickname" if n == 3 else "bare" for n in range(1, 7)},
 }
 
 
@@ -2149,14 +2273,19 @@ def test_every_pwsaved_capture_grades_its_saved_section_to_its_mapped_verdicts(s
 
 
 def _site(stem):
-    """The site a capture belongs to: the segment before its run number, except that the calibrated consult's arms
-    (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-` and `regress3-cal-`) belong to `consult-calibrated`."""
+    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`
+    and `regress3-cal-`) belong to `consult-calibrated`; `summary-guard-specreview-open-` captures belong to
+    `specreview` and every other `summary-guard-specreview-` capture to `fsspecreview`; a capture with
+    `-pwsaved-hostile-` in its name belongs to `pwsaved`. Every other capture belongs to the segment before its run
+    number."""
     if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
         return "consult-calibrated"
     if stem.startswith("summary-guard-specreview-open-"):
         return "specreview"
     if stem.startswith("summary-guard-specreview-"):
         return "fsspecreview"
+    if "-pwsaved-hostile-" in stem:
+        return "pwsaved"
     return stem.split("-")[-2]
 
 

@@ -1,0 +1,30 @@
+**The spec review (gauntlet): the telescope loan desk for the Hollin Hill astronomy club**
+
+maturity: production (basis: stamp). No waivers.
+
+The reviewers found three themes. The biggest is that the spec does not solve one of its own problems. The Problem says nobody can tell who had a scope when its mirror was scratched. But the criterion that the officer records the telescope as back with a condition note, and it shows as free from that day (AC4), assumes the officer is there on the return date. A scope left in the cupboard shows as free with no note, so the next borrower finds the damage and the trail is lost. The second theme is promises that no criterion delivers: the Objectives say a member can "see where the loan stands", but nothing after the first email shows it. Waiting-list offers are also never recorded or closed, even though the history lists them. The third theme is decisions left open: what clock the 48 hours run on, whether one member can hold two scopes on the same dates, and who can read the history.
+
+On whether these hold up: the failure-cases reviewer is right, and its finding is the only one that needs your decision. It hits a failure the Problem names, and its failure scenario is concrete. Two other findings were filed as needing your decision, and I have moved both to "would cause trouble later, worth fixing, your call":
+
+- **Lending by the night (right-problem reviewer).** This rests on a guess about how members borrow. The reviewer admits it doesn't know how often a loan is for one night, and the Problem describes weekend clashes.
+- **The case list in the confirmation email (ease-of-use reviewer).** This missed that the reminder already lists the telescope, its eyepieces and the finder cap (AC5).
+
+The right-problem reviewer also claimed that double loans are the only real complaint. That overreaches, because the Problem names three complaints. The self-consistency and ease-of-use reviewers reached the "see where the loan stands" gap separately, so it leads the worth-fixing group. The security and left-undecided reviewers disagree about who can read the history. The spec is silent on it, so it is worth fixing, not a blocker. The fact check found that the club has seven telescopes, not six. Nothing in the spec relies on that number. The cancellation claim couldn't be checked because it is a decision, not a fact about today.
+
+What I recommend: rewrite the criterion that the officer records a returned telescope with its condition (AC4) so that a returned telescope counts as free only once its condition note is recorded. Then advance the spec. The worth-fixing items are cheap to fold in before planning if you want them, but none of them blocks.
+
+**Recommended outcome:** the spec advances to `ready` this round, once the edit for unchecked returns (C1) is applied.
+
+| finding | proposed outcome | proposed edit |
+|---|---|---|
+| *A returned telescope shows as free before anyone checks its condition* (C1) | fixed in the spec | *rewrite AC4 so a scope shows "returned, unchecked" until its condition note is recorded* |
+
+Drafted replacement for the officer's return criterion (AC4), applied word for word on "go":
+
+> **AC4.** When a telescope comes back, the loan officer records it as back with a note of its condition. Until that note is recorded, the club's loan calendar shows the telescope as returned and unchecked and it is not lent again; it shows as free from the day the note is recorded.
+
+Reply go, or dispute C1: <why>, accept C1 as a risk: <why>, answer C1: <what you know>.
+
+**Would cause trouble later, worth fixing, your call (9):** the "see where the loan stands" promise has no criterion behind it. Waiting-list offers are never recorded or closed. The 48-hour clock is undefined. One member can hold two scopes on the same dates. Who reads condition notes in the history is unsettled. Anyone holding a forwarded confirmation email can cancel the loan. A bounced reminder goes unnoticed. Lending by the night was downgraded as a guess about borrowing habits. The case list in the confirmation email was downgraded because the reminder already carries it.
+
+**Rough edges, nothing to decide (4):** the telescope count is six in the spec but seven in the register. Whether the history is stored or built from events is a planning question. The confirmation email reveals which dates a scope is taken. The Objectives could name double loans more sharply.

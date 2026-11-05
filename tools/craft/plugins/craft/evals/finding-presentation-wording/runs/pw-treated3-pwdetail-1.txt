@@ -1,0 +1,47 @@
+Here is the detail on the three findings from the spec review that would build the wrong thing and need your decision.
+
+---
+
+**Members are not told what goes back in the case until it may be too late (C1)**
+
+**Proposed outcome: fixed in the spec.** You are being asked whether members should learn what goes back in the case when they borrow, not only near the end of the loan. I recommend yes. Otherwise a missing finder cap turns into a replacement charge and an argument.
+
+Worst case: a member collects the scope, puts the finder cap in a drawer and forgets it. The spec does tell members what goes back, but only in one place: "Two days before the return date, the member receives a reminder listing what goes back in the case: the telescope, its eyepieces, and the finder cap" (AC5). The first email the member gets is "A member borrows a telescope by giving a name, an email address, the telescope and a start date, and receives a confirmation email that states the loan and its return date" (AC1), and it says nothing about the case. By the time the reminder arrives, the cap may already be lost. If the member typed their email address wrong, the reminder never arrives at all, and nobody hears that it bounced.
+
+Fix: `"…and receives a confirmation email that states the loan, its return date, and what goes back in the case: the telescope, its eyepieces, and the finder cap."` This replaces the end of that borrowing confirmation (AC1). The two-day reminder (AC5) stays as it is.
+
+*Raised by: ease of use. Failure cases raised the bounced-reminder risk on its own, as something that would cause trouble later.*
+
+---
+
+**A loan ties up a whole telescope for every date asked (C2)** — needs a rewrite (`record-only`)
+
+**Proposed outcome: needs a rewrite.** You are being asked whether the club lends a telescope by the night or by a span of dates. I recommend by the night. Otherwise the scope members most want sits unused on clear nights while they wait for weeks.
+
+Worst case: a member wants the club's largest scope for one clear Saturday and gets it for the whole span. That is because the spec ties a loan to a telescope and a start date, through the borrowing confirmation (AC1) and "A telescope is on loan to one member at a time. A second request for the same telescope and dates is refused and the next free start date is offered instead" (AC2). Nothing lets the member say how long they need it. The return date simply appears in the confirmation email. A second member asking for the Sunday is refused and sent weeks ahead to the next free start date, while the scope sits in someone's boot.
+
+Fix: members would book the nights they want and could add more, and a one-night request would no longer block the rest of the week. This rewrites the borrowing criteria: the borrowing confirmation (AC1), the one-member-at-a-time rule (AC2) and the 48-hour cancellation (AC3), whose freed dates become freed nights. It also rewrites how the return date is defined in the return-on-the-day criterion (AC4) and the two-day reminder (AC5). It becomes the morning after the last night booked.
+
+Caveat: the right-problem reviewer was only moderately confident. Everything here depends on how often members actually want a single night, and nothing in the spec or the passes says. If you know how the club's members borrow, that settles this finding. Reply with `answer C2:` followed by what you know, and I will reassess it in light of that.
+
+*Raised by: right problem.*
+
+---
+
+**A scope left in the cupboard shows as free with no condition note (C3)**
+
+**Proposed outcome: fixed in the spec.** You are being asked whether a telescope can show as free before anyone has checked it. I recommend no, because the spec's whole point is being able to say who had a scope when it was damaged.
+
+Worst case: a member drops the telescope in the cupboard on a day the loan officer isn't in. The spec says "On the return date the loan officer records the telescope as back, with a note of its condition, and the telescope shows as free on the club's loan calendar from that day" (AC4). That only works if the officer is there on that day. The calendar shows the scope as free anyway, so the next member collects it and finds the scratched mirror. The loan history, "The loan history lists every loan, cancellation, return and waiting-list offer for a telescope, newest first, with the date and the condition note" (AC6), has no note to show for the earlier loan. So nobody can say whether the mirror was scratched before or after the hand-back. That is the exact problem the spec opens with. This spec is at production maturity, so not knowing when something went wrong counts in full here.
+
+Fix: a telescope handed back without a check would show as "returned, unchecked" and could not be borrowed until the loan officer records its condition. This replaces that return-on-the-day criterion (AC4) with:
+
+    **AC4.** When a telescope comes back, it shows on the club's loan calendar as returned and
+    unchecked. It shows as free only once the loan officer has recorded its condition, and from
+    that day.
+
+*Raised by: failure cases.*
+
+---
+
+Reply go, or dispute C2: followed by why, accept C2 as a risk: followed by why, or answer C2: followed by what you know. The same three replies work for the fix to what goes back in the case (C1) and the unchecked returns (C3).

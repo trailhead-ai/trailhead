@@ -2562,6 +2562,62 @@ stay as jargon beside the plain words, for a later comparison with the guide.
 dated extension to `expected.md` registered before any run, with arms built from the changed files. The `pw-treated2-*`
 arms pin G2 (`c6af0ccb`) and measure that text only; the baseline arms pin `4722bd0b`.
 
+**Reply and saved notes at three spec review sites, 2026-11-03: the reworded edit G3 is kept; two real spec reviews
+read.** A second dated extension to the same case, pre-registered before any run (guard-grammar fixes, base3 arms at
+origin/main when the branch was cut, treated3 arms at G3, bars and the stop rule), read from `expected.md` under
+"Treated3 results", "Regression stop: G3 reverted", "Operator ruling" and "Results for slice close: the reply and
+saved-notes edit". G3 changes `skills/gauntlet/SKILL.md` only (every finding id the session writes sits in brackets after
+words naming the finding, the reply it tells you to type is written in full, a criterion is first named by its whole text
+with the number after and then pointed back to, and each saved finding opens with its final outcome); the file is 529
+lines.
+
+| Criterion | Check, site | Base3 | Treated3 | Reading |
+|---|---|---|---|---|
+| AC27 | `finding-id`, `pwdetail` / `pwopen` / `pwsaved` echo and saved detail | `bracketed` 4 of 6 at `pwdetail` | 6 of 6 / 5 of 6 / 3 of 3 and 3 of 3 | met at the scripted sites |
+| AC28 | `criterion-mention` on the saved detail, `pwsaved` | `text-with-number` 0 of 6 | 3 of 3 | met |
+
+The `pwopen` `severity-name` guard read `internal` in 2 of 6 treated3 runs against 1 of 6 in the paired control, which is
+a regression under the registered rule; the operator ruled it residual after reading the captures, and the rule's own
+verdict stays recorded beside the ruling. The `pwopen` `criterion-mention` guard reads `bare` in every batch (residual),
+and base3's `severity-name` and `reviewer-name` at `pwopen` are 4 of 6 each.
+
+**Two real spec reviews, 2026-11-03, read by script and by eye.** Two real `/craft:gauntlet` sessions on a made-up draft
+spec (a rainwater tank log, six criteria, one long and multi-sentence), each in its own throwaway lore vault with
+the branch's craft plugin only, over the turn sequence present, full detail on every finding needing a decision, one
+override with "otherwise go", and one bare "go" where the session re-presented the table before writing. In both, every
+first mention of every criterion in the saved section was the criterion's whole text with its number after (19 of 19 and
+16 of 16), every later mention a point-back with the number after, none bare, and every saved finding opened with its
+final outcome (8 of 8 and 6 of 6), the overridden one with "accepted as a risk". That resolves the plan's fourth Known
+Unknown: a longer real draft still gets whole text on first mention, the long criterion included. One detail view (run 1)
+still carried three finding cross-references by id alone ("under C2 above"); recorded against AC27 and not repaired. The
+script verdicts on the saved detail read `nickname` and `bare` where the eye reads whole text: a semicolon inside a
+quoted criterion splits the sentence the check counts overlap in (shown by ablation in run 1), and the check reads
+numbers against its criteria file, which a renumbering review changes. Captures: `runs/pw-realrun3-<n>-turn<k>.md`,
+`runs/pw-realrun3-<n>-saved.md`, `runs/pw-realrun3-<n>.init.json` (not graded; the `.txt` capture test ignores them).
+Limits: the recipe is not a sandbox (real `HOME`, unrestricted `Bash`, user-level rules and connectors loaded). The
+throwaway `LORE_*` and `XDG_*` variables are only environment a session could unset. So run it only on a made-up spec,
+never on one someone else wrote, since any instruction planted in the spec reaches a session that can run any command.
+The isolation listings detect a change to the live vault or `~/.claude` after the fact; they prevent nothing, and a read
+elsewhere leaves no trace in them. Each run adds one harness transcript entry under `~/.claude/projects`, which is
+removed by hand once the derived captures are committed. The live vault's HEAD moved during the second run through
+other sessions' publishes, which this run cannot attribute. Two sessions, one reader.
+
+**Pin check.** Pin against `skills/gauntlet/SKILL.md` at fingerprint `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, the
+shipped file. The `pw-treated3-*` arms carry `09584f7a2daf22740999ff2eef4efd74a7d3f438`, the copy they measured; the two
+differ only by a whitespace reflow made afterwards. `rules.md`, `dispositions.md` and `_shared/council.md` were
+unchanged against origin/main at close.
+
+**Waiver.** `skills/gauntlet/SKILL.md` is 529 lines (it was 531 before G3), so the 500-line guideline is still exceeded
+and unenforced; the waiver rests with the operator.
+
+**Manual re-run trigger.** A change to `skills/gauntlet/SKILL.md` step 5 or 6, to `dispositions.md`, to `rules.md`'s
+count rule or to `_shared/council.md` starts from a new dated extension to `expected.md` registered before any run, with
+base and treated arms built from the changed files; the `pw-treated3-*` arms pin G3 and measure that text only. Re-run the
+two real spec reviews (reading fields registered first, a made-up spec and never someone else's, a throwaway vault and a throwaway lore config and
+state, `--plugin-dir`, `--setting-sources project`, turns up to the saved-section read, isolation listings before and
+after) whenever the spec review's step 5 or 6 prose changes, or when the real runs' reading of a criterion's first
+mention is in doubt.
+
 ## Case: tidy-followups-presents-a-finished-spec
 
 `plugins/craft/evals/tidy-followups-presents-a-finished-spec/` holds the fixture builder,
