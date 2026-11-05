@@ -33,9 +33,20 @@ published port on 127.0.0.1. It never dials anywhere but this machine's loopback
 on this machine and no third-party tool (socat and ssh-to-localhost were both considered and not
 adopted: see the two `local-tcp-relay-for-same-machine-attach-*` decisions).
 
-The relay binds every standard port before it reports ready. If any one cannot be bound, it
-releases every port it had already bound and exits, naming the port, so an attach never leaves
-some ports held and others not.
+The relay binds every standard port, on the literal address 127.0.0.1 and nowhere else, before it
+reports ready. If any one cannot be bound, it releases every port it had already bound and exits,
+naming the port, so an attach never leaves some ports held and others not. Because the ready report
+comes only after every bind succeeded on that one address, attach needs no separate check afterwards
+of which addresses the ports are held on.
+
+The relay is started with a small, explicit environment (where camp's code lives, the search path,
+the home directory and Python's safe-path setting), never with camp's own inherited environment, so
+nothing in the environment camp was run with, or in the directory it was started from, can change
+what the relay loads.
+
+If the relay starts but attach cannot then find it in the process table, attach ends the process it
+started directly, rather than looking for it by its attach id, so a relay camp started is never left
+holding ports where camp cannot see it.
 
 Once ready, the relay runs in its own session with its input and output pointed at `/dev/null`
 and its working directory at `/`, so it outlives the camp command that started it and never reads
@@ -65,6 +76,21 @@ a forward: the table is read again before each signal, and only a process still 
 attach id is signalled.
 
 A local attachment is named `local/<group>/<name>` everywhere, the form that attaches it again.
+Messages about a local attachment call it a relay, never a forward.
+
+## Older camp
+
+A camp from before local attach recognises only ssh forwards. Run from such a camp, `status` and
+`detach` say `nothing attached` while a relay holds the standard ports, and its attach is refused
+with the port held by the relay's interpreter (`python3`, or `Python` on macOS). To end a relay
+without a camp that recognises it:
+
+```
+pkill -f 'camp-env-relay -m camp.env.relay'
+```
+
+The release note carries this line too. It is also the way back after reverting to a camp without
+local attach.
 
 ## How a name is resolved
 
