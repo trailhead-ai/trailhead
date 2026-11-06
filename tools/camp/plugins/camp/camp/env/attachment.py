@@ -310,6 +310,7 @@ def _relay_environment() -> dict[str, str]:
     return {
         "PYTHONPATH": _package_root(),
         "PYTHONSAFEPATH": "1",
+        "PYTHONNOUSERSITE": "1",
         "PYTHONHOME": f"{sys.base_prefix}:{sys.base_exec_prefix}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/"),
@@ -376,7 +377,8 @@ def start_relay(
     Returns the started process handle, or a one-line printable reason (the relay's own
     ``port <n>: ...`` line, its exit status, or a timeout) after ending what it started. The relay
     gets an environment built from scratch (``PYTHONPATH`` camp's own package root,
-    ``PYTHONSAFEPATH=1``, ``PYTHONHOME`` this interpreter's base prefixes, ``PATH``,
+    ``PYTHONSAFEPATH=1``, ``PYTHONNOUSERSITE=1`` so the user site is not loaded,
+    ``PYTHONHOME`` this interpreter's base prefixes, ``PATH``,
     ``HOME``), runs from ``/`` in a session of its own, and
     is started with ``sys.executable`` under the argv0 ``camp-env-relay``. Its stderr goes to a
     temporary file removed before this returns.
@@ -428,7 +430,7 @@ def _signal(pids: set[int], sig: int) -> None:
     for pid in pids:
         try:
             os.kill(pid, sig)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
 
 

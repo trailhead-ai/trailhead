@@ -94,7 +94,7 @@ with the port held by the relay's interpreter (`python3`, or `Python` on macOS).
 without a camp that recognises it (the pattern matches a relay under either first word):
 
 ```
-pkill -f -- '-m camp.env.relay -N -o Tag=camp-env:'
+pkill -U "$USER" -f -- '-m camp[.]env[.]relay -N -o Tag=camp-env:'
 ```
 
 The release note carries this line too. It is also the way back after reverting to a camp without

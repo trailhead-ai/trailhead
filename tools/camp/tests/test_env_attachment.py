@@ -437,6 +437,22 @@ def test_end_reports_a_pid_it_could_not_end(child, monkeypatch: pytest.MonkeyPat
     assert attachment.end([made.attachment], grace=0.2) == [made.proc.pid]
 
 
+@pytest.mark.parametrize("refused, survives", [(signal.SIGTERM, False), (signal.SIGKILL, True)])
+def test_end_treats_a_pid_that_became_another_users_as_not_signalled(
+    child, monkeypatch: pytest.MonkeyPatch, refused: int, survives: bool
+) -> None:
+    made = child("ignore")
+    real_kill = os.kill
+
+    def kill(pid, sig):
+        if sig == refused and pid == made.proc.pid:
+            raise PermissionError(1, "Operation not permitted")
+        real_kill(pid, sig)
+
+    monkeypatch.setattr(attachment, "os", types.SimpleNamespace(**{**vars(os), "kill": kill}))
+    assert attachment.end([made.attachment], grace=0.2) == ([made.proc.pid] if survives else [])
+
+
 def test_end_with_nothing_to_end_returns_nothing() -> None:
     assert attachment.end([], runner=_table()) == []
 
@@ -1088,10 +1104,11 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
         tmp_path / "probe",
         ("def main(argv: list[str]) -> int:\n",
          "def main(argv: list[str]) -> int:\n"
-         "    import json as _j, camp as _c\n"
+         "    import json as _j, sys as _s, camp as _c\n"
          "    _null = os.stat(os.devnull).st_rdev\n"
          f"    open({str(dump)!r}, 'w').write(_j.dumps({{'env': dict(os.environ), 'camp': _c.__file__,\n"
-         "        'cwd': os.getcwd(), 'sid': os.getsid(0), 'stdin_is_null': os.fstat(0).st_rdev == _null}))\n"),
+         "        'no_user_site': _s.flags.no_user_site, 'cwd': os.getcwd(), 'sid': os.getsid(0),\n"
+         "        'stdin_is_null': os.fstat(0).st_rdev == _null}))\n"),
     )
     monkeypatch.setenv("PYTHONPATH", str(planted))
     monkeypatch.setenv("PYTHONSTARTUP", "/nonexistent")
@@ -1111,6 +1128,7 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
     seen = json.loads(dump.read_text())
     assert seen["camp"] == str(root / "camp" / "__init__.py")
     assert seen["cwd"] == "/"
+    assert seen["no_user_site"] == 1
     assert seen["sid"] == handle.pid
     assert seen["stdin_is_null"]
     assert seen["env"]["PYTHONPATH"] == str(root)
@@ -1118,7 +1136,8 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
     assert seen["env"]["PYTHONHOME"] == f"{sys.base_prefix}:{sys.base_exec_prefix}"
     assert seen["env"]["HOME"] == os.environ["HOME"]
     assert not {"PYTHONSTARTUP", "CAMP_TEST_SECRET_TOKEN", "GITHUB_TOKEN", "CAMP_ENV_TAG_NAMESPACE"} & set(seen["env"])
-    assert set(seen["env"]) <= {"PYTHONPATH", "PYTHONSAFEPATH", "PYTHONHOME", "PATH", "HOME", "LC_CTYPE"}
+    allowed = {"PYTHONPATH", "PYTHONSAFEPATH", "PYTHONHOME", "PATH", "HOME", "LC_CTYPE", "PYTHONNOUSERSITE"}
+    assert set(seen["env"]) <= allowed
 
 
 def _open_descriptors() -> int:

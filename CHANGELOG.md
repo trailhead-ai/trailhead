@@ -15,7 +15,7 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   dead link ending on its own only when the existing attachment is an ssh forward. A camp
   from before this change does not recognise a relay (its `status` and `detach` say
   `nothing attached` while the relay holds the ports); to end one without a newer camp, run
-  `pkill -f -- '-m camp.env.relay -N -o Tag=camp-env:'`. The same line is the way back after
+  `pkill -U "$USER" -f -- '-m camp[.]env[.]relay -N -o Tag=camp-env:'`. The same line is the way back after
   reverting to a camp without local attach.
 - `lore sync --pull-only` now prints one stderr notice per held vault naming why it
   is holding unpublished work (uncommitted changes, N commit(s) not yet published,
