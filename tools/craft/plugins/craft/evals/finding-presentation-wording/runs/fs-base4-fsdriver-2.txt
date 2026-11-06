@@ -1,0 +1,78 @@
+**The plan doesn't pass review. Two problems need your decision, so I'm stopping the run here.** The spec is rated as production, from its own maturity stamp, and it waives nothing.
+
+**What the reviewers found.** Most of the findings are about how the plan handles a firing's place in line and what happens when a booking is cancelled. Task 1 gives each booking a `turn` number and renumbers every later booking whenever one is cancelled. Task 3 cancels as soon as the email link is opened, and it doesn't take the offered member off the standby list. On the evening side, nothing tells anyone if the 18:00 reminder job doesn't run. The reminder also leaves out the 8 am shelf deadline that the reminder rule asks for (AC5).
+
+**How well the findings hold up.** The buildability and failure-cases reviewers each found the renumbering problem on their own, and they're right. The plan spells out the renumbering, and it clashes with the spec in a second way that neither of them named: a kiln holds one firing per day, and a second booking for the same kiln and day is refused with the next free day offered (AC2). A turn queue lets a second booking in; it doesn't refuse it. The failure-cases reviewer rated the silent reminder job as worth fixing. Because this spec is at production maturity, a failure nobody can see is something you need to decide on, so I raised it. The ease-of-use reviewer's top finding, that "members may find the booking page confusing," describes no actual failure, so I moved it down to "worth fixing". The security findings are sound. The link that cancels on open and the cancel with no confirmation are two separate problems in the same step.
+
+**What to do about it.** Rework Task 1 around the booked day: one booking per kiln per day, refuse a clash and offer the next free day, and drop the turn number completely. That fixes both the double-booking race and the AC2 gap. Have the 18:00 job report to the technician. Then tighten Task 3: a confirm page in place of a cancel-on-open link, a confirmation once the cancel goes through, the 24-hour cutoff, and closing the standby row when the day is offered.
+
+### Would build the wrong thing, needs your decision
+
+**Two members can be told the same firing is theirs.** I recommend dropping the `turn` number. If a cancellation renumbers later bookings while the 18:00 job is reading them, two bookings end up with the same place in line. Both members get the reminder, and one of them turns up to load a kiln they don't hold. The turn queue also accepts a second booking for a day that's already taken, where the spec says to refuse it and offer the next free day (AC2).
+Fix: each kiln-day would hold at most one booking, a clash would be refused with the next free day offered, and cancelling would no longer touch other bookings. This rewrites Task 1 and the cancel path in Task 3.
+*Raised by buildability and failure cases.*
+
+**Reminders can stop without anyone noticing.** I recommend making the 18:00 job report whether it ran. If the job fails one evening, no reminders go out, nobody finds out, and members miss firings the next morning. This was raised from "worth fixing" because the spec is at production maturity, where a failure nobody can see needs your decision.
+Fix: add "email the technician when the job finishes, and again if it has not finished by 19:00" to Task 2.
+*Raised by failure cases.*
+
+### Would cause trouble later, worth fixing, your call
+
+**Opening the cancel link cancels the firing.** I recommend a confirm step. Nothing ties the link in Task 3 to the member it was sent to. If the email is forwarded, or a mail scanner follows the link, the firing is cancelled without the member doing anything.
+Fix: the link would open a page that asks the member to confirm before anything is cancelled. This changes Task 3.
+*Raised by security.*
+
+**A member who cancels gets no confirmation.** I recommend confirming every cancellation. A member who clicked by mistake can't tell whether the booking still stands.
+Fix: "a one-line confirmation, shown on screen and emailed" added to Task 3's cancel step.
+*Raised by ease of use.*
+
+**The reminder leaves out the 8 am deadline.** I recommend adding it, since the reminder rule asks for it (AC5). Members arrive at 9 to find the kiln already packed, and they lose their firing.
+Fix: a sentence giving the 8 am load time, added to the reminder email in Task 2.
+*Raised by ease of use.*
+
+**The offered member stays on the standby list.** I recommend closing their standby row when the day is offered to them. Otherwise the next cancellation offers the same member a second day.
+Fix: making the offer close that member's standby row, added to Task 3.
+*Raised by buildability.*
+
+**The membership spreadsheet stays on the technician's laptop.** I recommend deleting it once the load is checked. Otherwise 90 members' names and email addresses sit there indefinitely.
+Fix: "delete the spreadsheet once the load is verified" added to the launch note.
+*Raised by security.*
+
+**"The booking page may confuse members" names no concrete failure.** I recommend weighing it as a general UX concern, not a blocker. It was moved down from "would build the wrong thing, needs your decision" because it describes no specific way the page fails.
+Fix: add a help page, as the reviewer suggested.
+*Raised by ease of use.*
+
+### Rough edges, nothing to decide
+
+- **A lock reason may expose personal detail.** Every member can read the reason a technician types for a lock on the calendar. I recommend telling technicians the reason is public. *Security.*
+- **No test for the 24-hour cutoff.** Nothing covers a cancellation made exactly 24 hours before the booked day, and the plan doesn't state the cutoff at all. I recommend adding both. *Failure cases.*
+- **Dates are formatted in two places.** Tasks 2 and 5 each format dates for display. I recommend one shared helper. *Buildability.*
+- **"Release" reads as jargon.** The calendar calls a freed day a "release". I recommend plain wording such as "freed". *Ease of use.*
+
+**The run stops here.** I'll record the plan step as complete, then open a blocked task under the slice parent. That task points to this review, filed as the `## Council Review` section on the slice parent. I haven't drafted any decisions on the two problems above; those are yours to make. Once you've decided them, run `/craft:drive` again against this spec. The spec's record name isn't in the plan, spec or reports I was given, so I can't spell out the exact command here. The new run checks for this blocked task before it starts building.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-11-06
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Task 1 `turn` renumbering on cancel races the 18:00 reminder job; two rows share a turn and two members are told the same firing is theirs; turn queue also admits a second booking per kiln-day instead of refusing and offering the next free day (AC2) — builder, breaker
+- No signal when the 18:00 reminder job fails to run; reminders stop silently — breaker (raised from Important: production failure visibility at production maturity)
+
+*Important:*
+- Task 3 cancellation link cancels on open with nothing tying it to the recipient; forwarded email or link-following mail scanner cancels the firing — attacker
+- Cancellation gives no confirmation to the member — advocate
+- Task 2 reminder omits the 8 am shelf-load time (AC5) — advocate
+- Task 3 standby offer does not close the offered member's standby row; same member offered repeatedly — builder
+- Membership spreadsheet (90 names and emails) left on technician's laptop after load — attacker
+- Booking page may confuse members; help page suggested — advocate (downgraded from Critical: speculative, no concrete failure)
+
+*Minor:*
+- Lock reason shown on member-readable calendar may carry personal detail — attacker
+- No test for cancellation exactly 24 hours before the booked day; plan does not state the 24-hour cutoff — breaker
+- Tasks 2 and 5 both format dates; share one helper — builder
+- Calendar calls a freed day a "release" (jargon) — advocate
+```

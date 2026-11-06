@@ -98,6 +98,17 @@ PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
 # the commit that introduced the `skills/gauntlet/SKILL.md` those arms carry.
 PLAIN_WORDS_EDIT3_REVISION = "2c84ecaa42982aa16a76df31fbfa66bf691395fd"
 
+# origin/main when the fix-shape round 4 task branch was cut: every `fs-base4` arm reads every source here. The sources'
+# `git hash-object` values at that commit, which stay checkable without history: `rules.md`
+# 81162064b03191116a24bbc81b216ea02eb5d6fb, `skills/gauntlet/SKILL.md` 3b7a0b2592a6df5ec8dc78a65395aa8e5c123081,
+# `skills/gauntlet/dispositions.md` 6e4ddfb110154cbf72096ec78dbd2f84c5d2a74a, `skills/plan/SKILL.md`
+# dbbfe87c797940a0c0325c50c9e50a590654f029, `skills/consult/SKILL.md` 8e074a91c1c734fbecb52af7101178a89f22df4e,
+# `skills/drive/SKILL.md` 09003e2305b9a38e58350689c4e7f110c824ee3f, `skills/review/SKILL.md`
+# 5cdf5f4f91fad5267d8809ba458bc92f6294989b, `skills/execute/SKILL.md` bffe525c2e0d7718ed356e4bc96282a85cd09c9f,
+# `skills/_shared/execute.md` 92afd6900a5d52bf0ca4fc09b251d8b9781c2803, `skills/_shared/council.md`
+# 36b96b92946374335ce487859867c65e468e0754.
+FIX_SHAPE_B4_REVISION = "22c1ebbb9aa7a5a3391153c990c51285b4b6640a"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -256,6 +267,17 @@ ARM_SOURCES.update(
             (COUNCIL, council_revision),
         ]
         for prefix, council_revision in FS_ROUNDS.items()
+        for site, paths in FS_SITE_SOURCES.items()
+    }
+)
+
+# The round 4 baseline arms: each fix-shape site's sources and `council.md`, all read from `FIX_SHAPE_B4_REVISION`.
+ARM_SOURCES.update(
+    {
+        f"fs-base4-{site}.md": [
+            *[(path, FIX_SHAPE_B4_REVISION) for path in paths],
+            (COUNCIL, FIX_SHAPE_B4_REVISION),
+        ]
         for site, paths in FS_SITE_SOURCES.items()
     }
 )
