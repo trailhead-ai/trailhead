@@ -17,6 +17,12 @@ test has its own tag namespace and free high ports, and the rig ends whatever it
 - Failure cleanup ends only this attach's forward.
 - Bare name, HOST/NAME and HOST/GROUP/NAME reach the same environment; a resolution refusal exits 1.
 - Usage errors; an invalid tag namespace.
+- Local attach (a relay, not an ssh forward): `local/NAME`, `<self_name>/NAME` and a bare name found only here
+  answer on each standard port; a stopped or port-less environment, Docker not running, a port held before
+  attach, and a port taken between the probe and the bind are refused with nothing left running; a relay
+  blocks a remote attach (no dead-link note) and a forward blocks a local one (with it); a name found here and
+  on a host is ambiguous; an environment gone before the relay starts still attaches and closes connections;
+  an interrupt, a failure and a relay hidden from the process table all end the relay camp started.
 """
 
 from __future__ import annotations
@@ -38,7 +44,7 @@ _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from .env_ssh_stub import AttachRig, ask, attached_rig, port_is_free, wait_for  # noqa: E402
+from .env_ssh_stub import AttachRig, ask, attached_rig, local_rig, port_is_free, wait_for  # noqa: E402
 
 _FIXTURES = Path(__file__).resolve().parent / "fixtures"
 USAGE = "usage: camp env attach TARGET\n"
@@ -655,3 +661,382 @@ def test_an_interrupt_while_the_reads_a_target_makes_are_running_exits_130_and_l
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+
+
+# --- attaching an environment on this machine: a relay --------------------------------------------
+
+
+def local_line(env) -> str:
+    return success_line("local", env)
+
+
+def connection_is_closed_without_data(port: int) -> bool:
+    with socket.create_connection(("127.0.0.1", port), timeout=5) as sock:
+        return sock.recv(1024) == b""
+
+
+@pytest.mark.parametrize("target", ["local/main", "tomsmac/main", "main"], ids=["local", "self-name", "bare-name"])
+def test_attaching_this_machine_makes_each_standard_port_reach_the_published_listener(
+    rig: AttachRig, target: str
+) -> None:
+    env = local_rig(rig)
+    rig.declare_hosts(self_name="tomsmac")
+
+    done = rig.attach(target)
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == local_line(env)
+    assert [ask(p) for p in env.standard_ports] == ["main-0", "main-1", "main-2"]
+    assert len(rig.tagged_pids()) == 1
+
+
+def test_a_stopped_environment_on_this_machine_is_refused_and_no_relay_is_started(rig: AttachRig) -> None:
+    local_rig(rig, state="stopped")
+
+    done = rig.attach("local/main")
+
+    assert done.returncode == 1
+    assert done.stderr == (
+        "camp env: local/levr/main is stopped; start it with its project's own tooling, then attach again\n"
+    )
+    assert rig.tagged_pids() == []
+
+
+def test_an_environment_on_this_machine_publishing_no_ports_is_refused_and_no_relay_is_started(
+    rig: AttachRig,
+) -> None:
+    local_rig(rig, count=0)
+
+    done = rig.attach("local/main")
+
+    assert done.returncode == 1
+    assert done.stderr == "camp env: local/levr/main publishes no ports, so there is nothing to attach\n"
+    assert rig.tagged_pids() == []
+
+
+def test_docker_not_running_on_this_machine_refuses_a_local_target_and_starts_nothing(rig: AttachRig) -> None:
+    rig.docker_down()
+
+    done = rig.attach("local/main")
+
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == "camp env: Docker is not running on this machine\n"
+    assert rig.tagged_pids() == []
+
+
+def test_a_standard_port_held_before_a_local_attach_is_refused_and_no_relay_is_started(rig: AttachRig) -> None:
+    env = local_rig(rig)
+    held_port = env.standard_ports[1]
+    listener = hold(held_port, socket.AF_INET, "127.0.0.1")
+    try:
+        done = rig.attach("local/main")
+
+        assert done.returncode == 1
+        assert re.fullmatch(
+            rf"camp env: port {held_port} is held by \S+ \(pid {os.getpid()}\); stop it, then attach again\n",
+            done.stderr,
+        ), done.stderr
+        assert rig.tagged_pids() == []
+        assert [port_is_free(p) for p in env.standard_ports] == [True, False, True]
+    finally:
+        listener.close()
+
+
+def test_a_port_taken_between_the_probe_and_the_bind_names_its_holder_and_leaves_no_relay_and_no_port_held(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    held_port = env.standard_ports[1]
+    taken: list[socket.socket] = []
+    real = env_cli.start_relay
+
+    def start_after_the_port_is_taken(*args, **kwargs):
+        taken.append(hold(held_port, socket.AF_INET, "127.0.0.1"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(env_cli, "start_relay", start_after_the_port_is_taken)
+    try:
+        with pytest.raises(SystemExit) as exit_:
+            env_cli._cmd_env_attach(["local/main"])
+
+        assert exit_.value.code == 1
+        assert re.fullmatch(
+            rf"camp env: attach failed: port {held_port} is held by \S+ \(pid {os.getpid()}\);"
+            r" stop it, then attach again\n",
+            capsys.readouterr().err,
+        )
+        assert rig.tagged_pids() == []
+        assert [port_is_free(p) for p in env.standard_ports] == [True, False, True]
+    finally:
+        for sock in taken:
+            sock.close()
+    assert all(port_is_free(p) for p in env.standard_ports)
+
+
+def test_a_relay_blocks_a_remote_attach_and_its_refusal_has_no_dead_link_note(rig: AttachRig) -> None:
+    local = local_rig(rig, "main")
+    remote = rig.environment("other")
+    rig.declare_hosts("perseus")
+    rig.host_inventory("perseus", remote)
+    assert rig.attach("local/main").returncode == 0
+    reads = rig.inventory_reads()
+
+    done = rig.attach("perseus/levr/other")
+
+    assert done.returncode == 1
+    assert done.stderr == "camp env: local/levr/main is attached; run camp env detach before attaching another\n"
+    assert rig.inventory_reads() == reads
+    assert rig.forwards() == []
+    assert all(port_is_free(p) for p in remote.standard_ports)
+    assert [ask(p) for p in local.standard_ports] == ["main-0", "main-1", "main-2"]
+
+
+def test_a_forward_blocks_a_local_attach_and_its_refusal_keeps_the_dead_link_note(rig: AttachRig) -> None:
+    remote = attached_rig(rig, "other")
+    local = local_rig(rig, "main")
+    assert rig.attach("perseus/levr/other").returncode == 0
+
+    done = rig.attach("local/main")
+
+    assert done.returncode == 1
+    assert done.stderr == (
+        "camp env: perseus/levr/other is attached; run camp env detach before attaching another"
+        " (a forward whose link has died ends on its own within about 45s)\n"
+    )
+    assert len(rig.tagged_pids()) == 1
+    assert all(port_is_free(p) for p in local.standard_ports)
+    assert [ask(p) for p in remote.standard_ports] == ["other-0", "other-1", "other-2"]
+
+
+def test_a_name_found_here_and_on_a_host_is_ambiguous_and_offers_local(rig: AttachRig) -> None:
+    local = local_rig(rig, "main")
+    remote = attached_rig(rig, "main")
+
+    done = rig.attach("main")
+
+    assert done.returncode == 1
+    assert done.stderr == (
+        "camp env: main matches more than one environment: local/main, perseus/main; attach one of those\n"
+    )
+    assert rig.tagged_pids() == []
+    assert rig.forwards() == []
+    assert all(port_is_free(p) for p in local.standard_ports + remote.standard_ports)
+
+
+def test_an_environment_gone_before_the_relay_starts_still_attaches_and_closes_connections_without_data(
+    rig: AttachRig,
+) -> None:
+    env = local_rig(rig)
+    for upstream in env.upstreams:
+        upstream.close()
+
+    done = rig.attach("local/main")
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == local_line(env)
+    assert [connection_is_closed_without_data(p) for p in env.standard_ports] == [True, True, True]
+
+
+def test_an_interrupt_after_the_relay_started_ends_it_names_the_relay_and_exits_130(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", _raises(KeyboardInterrupt()))
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted; the relay it started was ended\n"
+    assert_nothing_held(rig, env)
+
+
+def test_an_interrupt_the_moment_start_relay_returns_ends_the_relay_and_holds_no_port(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real_start = env_cli.start_relay
+    handles: list[subprocess.Popen] = []
+
+    class InterruptedWhenFirstInspected:
+        """Stands in for the handle; the first look at what kind of object it is raises Ctrl-C."""
+
+        def __init__(self, process: subprocess.Popen) -> None:
+            self._process = process
+            self._armed = True
+
+        @property
+        def __class__(self):
+            if self._armed:
+                self._armed = False
+                raise KeyboardInterrupt
+            return type(self._process)
+
+        def __getattr__(self, name: str):
+            return getattr(self._process, name)
+
+    def start_then_hand_back_an_interruptible_handle(*args, **kwargs):
+        process = real_start(*args, **kwargs)
+        handles.append(process)
+        return InterruptedWhenFirstInspected(process)
+
+    monkeypatch.setattr(env_cli, "start_relay", start_then_hand_back_an_interruptible_handle)
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted; the relay it started was ended\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
+def _remember_relay_handles(env_cli, monkeypatch) -> "list[subprocess.Popen]":
+    handles: list[subprocess.Popen] = []
+    real_start = env_cli.start_relay
+
+    def remember(*args, **kwargs):
+        started = real_start(*args, **kwargs)
+        handles.append(started)
+        return started
+
+    monkeypatch.setattr(env_cli, "start_relay", remember)
+    return handles
+
+
+def test_a_relay_attach_that_cannot_read_the_process_table_ends_the_relay_and_says_only_what_happened(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real_attachments = env_cli.attachments
+    calls: list[int] = []
+
+    def unreadable_once_the_relay_runs():
+        calls.append(1)
+        if len(calls) > 1:
+            raise _unverifiable("ps broke")
+        return real_attachments()
+
+    monkeypatch.setattr(env_cli, "attachments", unreadable_once_the_relay_runs)
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 1
+    assert capsys.readouterr().err == "camp env: attach failed: could not tell whether the relay started (ps broke)\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    monkeypatch.setattr(env_cli, "attachments", real_attachments)
+    assert_nothing_held(rig, env)
+
+
+def test_a_relay_attach_that_raises_unexpectedly_ends_the_relay_at_once_and_lets_the_error_out(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", _raises(RuntimeError("boom")))
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="boom"):
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert time.monotonic() - started < 1.5
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
+def test_an_interrupted_relay_attach_returns_at_once_having_ended_the_relay(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", _raises(KeyboardInterrupt()))
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert time.monotonic() - started < 1.5
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted; the relay it started was ended\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
+def test_an_interrupt_while_the_relay_is_starting_does_not_claim_a_relay_was_ended(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "start_relay", _raises(KeyboardInterrupt()))
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted\n"
+    assert_nothing_held(rig, env)
+
+
+def test_a_relay_hidden_from_the_process_table_fails_the_attach_and_is_ended_through_its_handle(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real_attachments = env_cli.attachments
+    monkeypatch.setattr(env_cli, "attachments", lambda: [a for a in real_attachments() if a.kind != "relay"])
+    monkeypatch.setattr(env_cli, "SETTLE_SECONDS", 0.3)
+    handles: list[subprocess.Popen] = []
+    real_start = env_cli.start_relay
+
+    def remember(*args, **kwargs):
+        started = real_start(*args, **kwargs)
+        handles.append(started)
+        return started
+
+    monkeypatch.setattr(env_cli, "start_relay", remember)
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 1
+    assert capsys.readouterr().err == "camp env: attach failed: the relay started but it is not in the process table\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)

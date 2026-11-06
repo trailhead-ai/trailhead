@@ -13,24 +13,30 @@ or the ``not opted in:`` line.
 ``attached:`` lines, then its block, and no ``not opted in:`` line. An undeclared name, text that
 is not a host name and a second argument are refused before anything is printed.
 
-``camp env attach TARGET`` puts one remote environment on this machine's localhost: one background
-``ssh`` forward holding each of the environment's standard ports on 127.0.0.1. It checks, in order,
-that nothing is attached, resolves the target, refuses a stopped or port-less environment and a
-held standard port, starts the forward, and finds it again by its fresh attach id in the process
-table. Once the forward has been started, every way out (a failed start, a forward that is not
-found, an exception, an interrupt) ends the forward carrying that id and no other.
+``camp env attach TARGET`` puts one environment on this machine's localhost, holding each of its
+standard ports on 127.0.0.1. For an environment on a remote host that is one background ``ssh``
+forward; for an environment on this machine (``local/NAME``, ``<self_name>/NAME`` or a bare name
+found only here) it is a relay, a background process camp starts itself that carries each
+connection to the environment's published port. It checks, in order, that nothing is attached,
+resolves the target, refuses a stopped or port-less environment and a held standard port, starts
+the forward or relay, and finds it again by its fresh attach id in the process table. Once it has
+been started, every way out (a failed start, one that is not found, an exception, an interrupt)
+ends the forward or relay carrying that id and no other; for a relay it also ends the process
+handle it started, found in the table or not. A standard port taken between the probe and the
+relay's bind is refused naming its holder.
 
 A bare name reads this machine and every opted-in host at the same time. An interrupt while attach
 is reading machines (a bare name or ``HOST/NAME``) ends every ssh and docker started for the reads,
 prints ``camp env: interrupted`` to stderr and exits 130, before any forward exists.
 
 ``camp env status`` and ``camp env detach`` read only the process table: status prints one
-``attached:`` line per recognised forward, detach ends them and waits for their ports to bind
-free. ``camp env ls`` opens with the same lines.
+``attached:`` line per recognised forward or relay (a relay is named ``local/<group>/<name>``),
+detach ends them and waits for their ports to bind free. ``camp env ls`` opens with the same lines.
 """
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,6 +45,7 @@ import uuid
 from typing import NoReturn
 
 from ..env.attachment import (
+    end_spawned,
     UNSEEN_HOLDER,
     Attachment,
     Unverifiable,
@@ -47,6 +54,7 @@ from ..env.attachment import (
     attachments,
     end,
     port_holder,
+    start_relay,
     tag_for,
 )
 from ..env.contract import Environment
@@ -67,6 +75,8 @@ _ATTACH_USAGE = "usage: camp env attach TARGET"
 SETTLE_SECONDS = 3.0
 #: Seconds detach waits for the ports of the forwards it ended to bind free again.
 PORTS_FREE_SECONDS = 3.0
+#: Seconds a relay may take to bind every standard port and report ready.
+RELAY_READY_SECONDS = 10.0
 #: Seconds ``ssh -f`` may run beyond its connect timeout before the attach gives up on it.
 START_MARGIN_SECONDS = 20.0
 _KEEP_ALIVE_NOTE = "a forward whose link has died ends on its own within about 45s"
@@ -230,40 +240,46 @@ def _port_refusal(port: int, holder: str) -> str:
     return f"port {port} is held by {holder}; stop it, then attach again"
 
 
-def _end_own(attach_id: str) -> "tuple[bool, str | None]":
-    """End the forward carrying *attach_id* and no other. Returns ``(ended, problem)``: whether a
-    forward was found and ended, and why it could not be (``None`` when nothing is left running)."""
+def _end_own(attach_id: str, noun: str = "forward") -> "tuple[bool, str | None]":
+    """End the *noun* (``forward`` or ``relay``) carrying *attach_id* and no other. Returns
+    ``(ended, problem)``: whether one was found and ended, and why it could not be (``None`` when
+    nothing is left running)."""
     try:
         mine = [a for a in attachments() if a.attach_id == attach_id]
         if not mine:
             return False, None
         if end(mine):
-            return False, "the forward it started could not be ended; run camp env detach"
+            return False, f"the {noun} it started could not be ended; run camp env detach"
         return True, None
     except Unverifiable as error:
-        return False, f"the forward it started could not be ended ({error}); run camp env detach"
+        return False, f"the {noun} it started could not be ended ({error}); run camp env detach"
 
 
-def _exit_interrupted(ended: bool, problem: "str | None") -> NoReturn:
+def _exit_interrupted(ended: bool, problem: "str | None", noun: str = "forward") -> NoReturn:
     print(
         "camp env: attach interrupted"
-        + (f"; {problem}" if problem else "; the forward it started was ended" if ended else ""),
+        + (f"; {problem}" if problem else f"; the {noun} it started was ended" if ended else ""),
         file=sys.stderr,
     )
     sys.exit(130)
 
 
-def _end_own_or_exit(attach_id: str) -> "tuple[bool, str | None]":
-    """``_end_own``, except that an interrupt during it exits 130, saying the forward may still be running."""
+def _end_own_or_exit(attach_id: str, noun: str = "forward") -> "tuple[bool, str | None]":
+    """``_end_own``, except that an interrupt during it exits 130, saying it may still be running."""
     try:
-        return _end_own(attach_id)
+        return _end_own(attach_id, noun)
     except KeyboardInterrupt:
-        _exit_interrupted(False, "the forward it started may still be running; run camp env detach")
+        _exit_interrupted(False, f"the {noun} it started may still be running; run camp env detach", noun)
 
 
-def _fail_after_start(reason: str, attach_id: str) -> NoReturn:
-    _, problem = _end_own_or_exit(attach_id)
+def _fail_after_start(reason: str, attach_id: str, noun: str = "forward") -> NoReturn:
+    _, problem = _end_own_or_exit(attach_id, noun)
     _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))
+
+
+def _noun_of(found: "list[Attachment]") -> str:
+    kinds = {a.kind for a in found}
+    return next(iter(kinds)) if len(kinds) == 1 else "attachment"
 
 
 _NOISE_PREFIXES = ("** ", "Warning:", "debug")
@@ -307,10 +323,87 @@ def _wait_for_forward(attach_id: str) -> "Attachment | None":
         time.sleep(_SETTLE_POLL_SECONDS)
 
 
+_PORT_FAILURE = re.compile(r"port ([0-9]+): ")
+
+
+def _refuse_relay_start(reason: str) -> NoReturn:
+    """Refuse an attach whose relay never became ready (``start_relay`` already ended it). A relay
+    that could not bind a port taken since the probe names the port's holder, as the probe does."""
+    named = _PORT_FAILURE.match(reason)
+    if named:
+        holder = port_holder(int(named[1]))
+        if holder is not None:
+            _refuse(f"attach failed: {_port_refusal(int(named[1]), holder)}")
+    _refuse(f"attach failed: {reason}")
+
+
+def _end_relay(started, attach_id: str) -> "tuple[bool, str | None]":
+    """End the relay this process started, through its handle (which also reaps it), then end
+    anything still carrying *attach_id* as a backstop. Returns ``(ended, problem)``: whether the
+    relay is gone, and what could not be ended (``None`` when nothing is left running). An
+    unreadable process table is not a problem once the handle has ended and reaped the relay."""
+    try:
+        end_spawned(started)
+    except KeyboardInterrupt:
+        _exit_interrupted(False, "the relay it started may still be running; run camp env detach", "relay")
+    try:
+        mine = [a for a in attachments() if a.attach_id == attach_id]
+        if mine and end(mine):
+            return False, "the relay it started could not be ended; run camp env detach"
+    except (Unverifiable, KeyboardInterrupt):
+        pass
+    return True, None
+
+
+def _attach_relay(environment: Environment, attach_id: str, tag: str) -> None:
+    """Start the relay for *environment*, find it by *attach_id*, and leave it running. Every way out
+    other than success ends the relay through the handle ``start_relay`` returned, then by attach id,
+    before saying what happened."""
+    try:
+        started = start_relay(environment.ports, tag, timeout=RELAY_READY_SECONDS)
+    except KeyboardInterrupt:
+        _exit_interrupted(False, None, "relay")
+    try:
+        if isinstance(started, str):
+            _refuse_relay_start(started)
+        if _wait_for_forward(attach_id) is not None:
+            return
+        reason = "the relay started but it is not in the process table"
+    except Unverifiable as error:
+        reason = f"could not tell whether the relay started ({error})"
+    except KeyboardInterrupt:
+        _exit_interrupted(*(_end_relay(started, attach_id) if type(started) is not str else (False, None)), "relay")
+    except Exception:
+        if type(started) is not str:
+            _end_relay(started, attach_id)
+        raise
+    _, problem = _end_relay(started, attach_id)
+    _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))
+
+
+def _attach_forward(hosts, outcome, environment: Environment, attach_id: str, tag: str, timeout: float) -> None:
+    from ..host.transport import local_forward_argv
+
+    argv = local_forward_argv(hosts[outcome.host], environment.ports, tag, timeout)
+    try:
+        started = _start_forward(argv, timeout + START_MARGIN_SECONDS)
+        if started is not None:
+            _fail_after_start(started, attach_id)
+        found = _wait_for_forward(attach_id)
+        if found is None:
+            _fail_after_start("ssh started the forward but it is not running", attach_id)
+    except Unverifiable as error:
+        _fail_after_start(f"could not tell whether the forward started ({error})", attach_id)
+    except KeyboardInterrupt:
+        _exit_interrupted(*_end_own_or_exit(attach_id))
+    except Exception:
+        _end_own_or_exit(attach_id)
+        raise
+
+
 def _cmd_env_attach(args: list[str]) -> None:
     from ..env.read import ProcessSet, read_local, read_remote
-    from ..env.resolve import Refused, TargetError, parse_target, resolve
-    from ..host.transport import local_forward_argv
+    from ..env.resolve import LOCAL, Refused, TargetError, parse_target, resolve
 
     parser = CampParser(verb="env attach")
     parser.add_argument("target", nargs="*")
@@ -331,9 +424,10 @@ def _cmd_env_attach(args: list[str]) -> None:
         _refuse(f"{prefix}{error}")
     if current:
         first = current[0]
+        note = f" ({_KEEP_ALIVE_NOTE})" if first.kind == "forward" else ""
         _refuse(
             f"{display_name(first.host, first.group, first.name)} is attached;"
-            f" run camp env detach before attaching another ({_KEEP_ALIVE_NOTE})"
+            f" run camp env detach before attaching another{note}"
         )
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
@@ -372,22 +466,10 @@ def _cmd_env_attach(args: list[str]) -> None:
 
     attach_id = uuid.uuid4().hex[:12]
     tag = tag_for(outcome.host, environment.group, environment.name, attach_id)
-    argv = local_forward_argv(hosts[outcome.host], environment.ports, tag, connect_timeout)
-
-    try:
-        started = _start_forward(argv, connect_timeout + START_MARGIN_SECONDS)
-        if started is not None:
-            _fail_after_start(started, attach_id)
-        found = _wait_for_forward(attach_id)
-        if found is None:
-            _fail_after_start("ssh started the forward but it is not running", attach_id)
-    except Unverifiable as error:
-        _fail_after_start(f"could not tell whether the forward started ({error})", attach_id)
-    except KeyboardInterrupt:
-        _exit_interrupted(*_end_own_or_exit(attach_id))
-    except Exception:
-        _end_own_or_exit(attach_id)
-        raise
+    if outcome.host == LOCAL:
+        _attach_relay(environment, attach_id, tag)
+    else:
+        _attach_forward(hosts, outcome, environment, attach_id, tag, connect_timeout)
     print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
 
 
@@ -427,7 +509,10 @@ def _cmd_env_detach(args: list[str]) -> None:
     try:
         surviving = end(found)
     except UnverifiableAfterSignal as error:
-        _refuse(f"cannot end what is attached ({error}); the forward may already have ended; run camp env status")
+        _refuse(
+            f"cannot end what is attached ({error}); the {_noun_of(found)} may already have ended;"
+            " run camp env status"
+        )
     except Unverifiable as error:
         _refuse(f"cannot end what is attached ({error}); nothing was signalled")
     if surviving:
