@@ -80,7 +80,6 @@ RELAY_READY_SECONDS = 10.0
 #: Seconds ``ssh -f`` may run beyond its connect timeout before the attach gives up on it.
 START_MARGIN_SECONDS = 20.0
 _KEEP_ALIVE_NOTE = "a forward whose link has died ends on its own within about 45s"
-_LOCAL = "local"
 _SETTLE_POLL_SECONDS = 0.05
 
 
@@ -388,7 +387,7 @@ def _attach_forward(hosts, outcome, environment: Environment, attach_id: str, ta
 
 def _cmd_env_attach(args: list[str]) -> None:
     from ..env.read import ProcessSet, read_local, read_remote
-    from ..env.resolve import Refused, TargetError, parse_target, resolve
+    from ..env.resolve import LOCAL, Refused, TargetError, parse_target, resolve
 
     parser = CampParser(verb="env attach")
     parser.add_argument("target", nargs="*")
@@ -451,7 +450,7 @@ def _cmd_env_attach(args: list[str]) -> None:
 
     attach_id = uuid.uuid4().hex[:12]
     tag = tag_for(outcome.host, environment.group, environment.name, attach_id)
-    if outcome.host == _LOCAL:
+    if outcome.host == LOCAL:
         _attach_relay(environment, attach_id, tag)
     else:
         _attach_forward(hosts, outcome, environment, attach_id, tag, connect_timeout)

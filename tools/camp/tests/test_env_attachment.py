@@ -12,7 +12,9 @@ Test contract:
 from __future__ import annotations
 
 import errno
+import json
 import os
+import shutil
 import signal
 import socket
 import stat
@@ -25,6 +27,8 @@ import uuid
 from pathlib import Path
 
 import pytest
+
+from .env_ssh_stub import free_ports, port_is_free, wait_for
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -879,9 +883,6 @@ def test_an_ssh_shaped_row_is_still_recognised_with_kind_forward() -> None:
 
 # Starting real relays. Free high ports, a namespace of its own per test, and every relay ended.
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from env_ssh_stub import free_ports, port_is_free, wait_for  # noqa: E402
-
 _PACKAGE = _PLUGIN_DIR / "camp"
 
 
@@ -912,8 +913,6 @@ def _tag(attach_id: str | None = None) -> str:
 
 
 def _copy_of_camp(destination: Path, patch: "tuple[str, str] | None" = None) -> Path:
-    import shutil
-
     shutil.copytree(_PACKAGE, destination / "camp", ignore=shutil.ignore_patterns("__pycache__"))
     if patch is not None:
         relay = destination / "camp" / "env" / "relay.py"
@@ -967,8 +966,6 @@ print(json.dumps({"found": [[a.pid, a.kind] for a in found], "remaining": remain
 
 
 def _from_checkout(root: Path, mode: str, attach_id: str, cwd: Path) -> dict:
-    import json
-
     env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "PYTHONPATH": str(root),
            "CAMP_ENV_TAG_NAMESPACE": os.environ["CAMP_ENV_TAG_NAMESPACE"]}
     done = subprocess.run([sys.executable, "-c", _FROM_OTHER_CHECKOUT, mode, attach_id], env=env, cwd=cwd,
@@ -982,7 +979,7 @@ def _from_checkout(root: Path, mode: str, attach_id: str, cwd: Path) -> dict:
 def test_a_relay_is_recognised_and_ended_from_a_checkout_whose_path_contains_a_space(
     relays, monkeypatch, tmp_path, starter: str, reader: str
 ) -> None:
-    spaced = _copy_of_camp(_mkdir(tmp_path / "a checkout with spaces"))
+    spaced = _copy_of_camp(tmp_path / "a checkout with spaces")
     roots = {"real": _PLUGIN_DIR, "copy": spaced}
     handle, tag, pairs = _start(relays, monkeypatch, root=roots[starter])
     assert isinstance(handle, subprocess.Popen), handle
@@ -993,11 +990,6 @@ def test_a_relay_is_recognised_and_ended_from_a_checkout_whose_path_contains_a_s
     assert ended["remaining"] == []
     wait_for(lambda: handle.poll() is not None)
     assert all(port_is_free(standard) for standard, _ in pairs)
-
-
-def _mkdir(path: Path) -> Path:
-    path.mkdir(parents=True)
-    return path
 
 
 def test_end_stops_a_relay_on_sigterm_without_sigkill(relays, monkeypatch) -> None:
@@ -1013,7 +1005,7 @@ def test_end_kills_a_relay_that_ignores_sigterm_after_the_grace(relays, monkeypa
         "signal.signal(which, lambda *_: wake_write.send(b\"x\"))",
         "signal.signal(which, lambda *_: wake_write and None)",
     )
-    root = _copy_of_camp(_mkdir(tmp_path / "deaf"), deaf)
+    root = _copy_of_camp(tmp_path / "deaf", deaf)
     handle, tag, _ = _start(relays, monkeypatch, root=root)
     started = time.monotonic()
     assert attachment.end(_mine(tag), grace=0.4) == []
@@ -1041,7 +1033,7 @@ def test_start_relay_whose_relay_never_says_ready_times_out_and_leaves_nothing_r
     relays, monkeypatch, tmp_path
 ) -> None:
     never = ('sys.stdout.write("ready\\n")', 'time.sleep(60); sys.stdout.write("ready\\n")')
-    root = _copy_of_camp(_mkdir(tmp_path / "slow"), never)
+    root = _copy_of_camp(tmp_path / "slow", never)
     started = time.monotonic()
     result, tag, pairs = _start(relays, monkeypatch, root=root, timeout=1.0)
     assert isinstance(result, str) and "not ready within 1s" in result and "\n" not in result
@@ -1053,7 +1045,7 @@ def test_start_relay_whose_relay_never_says_ready_times_out_and_leaves_nothing_r
 def test_start_relay_reports_the_exit_status_of_a_relay_that_dies_without_a_port_line(
     relays, monkeypatch, tmp_path
 ) -> None:
-    root = _copy_of_camp(_mkdir(tmp_path / "dies"), ("    held = Relay(pairs, max_connections())", "    sys.exit(7)"))
+    root = _copy_of_camp(tmp_path / "dies", ("    held = Relay(pairs, max_connections())", "    sys.exit(7)"))
     result, tag, _ = _start(relays, monkeypatch, root=root)
     assert isinstance(result, str) and "7" in result and "\n" not in result
     assert _mine(tag) == []
@@ -1067,7 +1059,7 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
     (planted / "camp" / "__init__.py").write_text("raise RuntimeError('planted camp imported')\n")
     dump = tmp_path / "dump.json"
     root = _copy_of_camp(
-        _mkdir(tmp_path / "probe"),
+        tmp_path / "probe",
         ("def main(argv: list[str]) -> int:\n",
          "def main(argv: list[str]) -> int:\n"
          "    import json as _j, camp as _c\n"
@@ -1089,7 +1081,6 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
         for fd in (saved_stdin, reader, writer):
             os.close(fd)
     assert isinstance(handle, subprocess.Popen), handle
-    import json
 
     seen = json.loads(dump.read_text())
     assert seen["camp"] == str(root / "camp" / "__init__.py")

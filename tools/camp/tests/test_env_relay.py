@@ -23,16 +23,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 
 from camp.env import relay as relay_module  # noqa: E402
 
-
-def free_ports(count: int) -> list[int]:
-    socks = [socket.socket() for _ in range(count)]
-    try:
-        for sock in socks:
-            sock.bind(("127.0.0.1", 0))
-        return [sock.getsockname()[1] for sock in socks]
-    finally:
-        for sock in socks:
-            sock.close()
+from .env_ssh_stub import free_ports  # noqa: E402
 
 
 def can_bind(port: int) -> bool:
