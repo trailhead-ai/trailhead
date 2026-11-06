@@ -5846,3 +5846,320 @@ was reflowed with `scripts/wrap_prose.py` after every capture was taken. The shi
 `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081`, differs from the measured copy (`09584f7a2daf22740999ff2eef4efd74a7d3f438`,
 which the `pw-treated3-*` arms carry) only in where four lines break. Its words are identical, and it is still 529 lines.
 The arms stay as measured.
+
+## Extension, 2026-11-06: fix shape round 4, the rule repair and the site framing edits
+
+Pre-registered before any base4, r4, rs4, control4 or regress4 batch, and committed alone, ahead of the arms and every
+capture. Nothing above this heading is rewritten; the fix-shape extension of 2026-10-16, its amendment of 2026-10-19,
+every earlier result and the slice-close results stand as written. Where this section names a rule the case already
+states (the seven sites, their fixtures, prompts and designated findings, the by-eye fix-shape and data readings, the
+saved-block form check, the second-reader rule, the reader-facing text, the verbatim-quotation exemption, the severity
+and reviewer grammars, `persisted-levels`, `code-review-name`, three runs per arm and the splits rule, crashed runs and
+the floor, the scans before commit, the capture-file triple), that rule applies unchanged, with the arms of this
+extension. The extension adds no scripted check: the fix-shape criteria turn on meaning and are read by eye.
+
+**Why.** The previous fix-shape slice closed with the shape met at `fsspecreview`, `fsreview` and `fsdrivebuild`, and at
+`fsconsult` with the kept line, and missed at `fsplan` (large), `fsdriver` (small and large) and `fsbuildreview` (large);
+the one-line restatements tried at the plan, the driver and `_shared/execute.md` were reverted. It also named four
+defects in the shared rule itself, the most serious being that a code review fix is asked for a file-and-function count
+the reviewer never supplies. This slice makes two edits and measures them in one batch so each shows its own effect: a
+repair of the shared rule in `skills/_shared/council.md`, `### How a finding reads` (commit R), and a framing edit at the
+point of presentation at the plan, the driver and the build's end-of-run review (commit S, one part per site). Any edit
+to the shared rule changes the measured contract, so it needs a fresh baseline: `rules.md` and `council.md` have both
+moved since the earlier arms were frozen. This extension freezes the sites, the one amendment to the definitions, the
+arm grid, the bars and the keep rule before any capture exists.
+
+### Sites and fixtures
+
+The seven `fs*` sites, their fixtures (`fs-*` under `fixtures/`), the seven `fs-prompt-<site>.md` prompts, the designated
+findings and the by-eye protocol are those of the 2026-10-16 extension, reused unchanged by reference. Nothing in
+`fixtures/` is touched by this extension or by the arms.
+
+### Amendment to the definitions, fixed before any run
+
+One amendment, to the large-rewrite definition and the large criterion (reading step 4) for **code** sites only
+(`fsreview`, `fsbuildreview`, `fsdrivebuild`). The definition's extent "a count of files and functions plus the two most
+affected names" is met by a count of files and functions **marked as the presenter's estimate**, plus the two most
+affected names.
+
+- **Marked** means the `Fix:` line says in words that the count is the presenter's own estimate or reading of the cited
+  code ("my estimate", "estimated", "by my count from the cited code"). A bare "about N" or "roughly N" does not mark it.
+- A count that is unmarked, or stated as the reviewer's own figure, reads `not met (count not marked as an estimate)`;
+  that reason is recorded beside the reading, so the cases "no count", "vague quantity" and "unmarked count" stay
+  distinct in the results.
+- The other half of the large criterion (the line opens with what the reader would notice) and the two names are read as
+  before. The amendment applies to every arm of this extension, base4 included, so base4 is read by the rule R is
+  written to meet. The earlier results are not re-read: they stand under the definition they were read by.
+- The spec and plan sites and the consult keep their extent terms (sections, tasks and criteria; named parts of the
+  proposal) unchanged.
+
+### The arms
+
+All paths are under `tools/craft/plugins/craft/`. Each arm is its sources joined by one newline, each as it stands at the
+commit named, as every earlier arm is.
+
+**B4** is `22c1ebbb9aa7a5a3391153c990c51285b4b6640a` (`FIX_SHAPE_B4_REVISION` in the arms contract test), origin/main when
+this slice's task branch was cut; the branch carried no other commit when the arms were composed, so each source in the
+working tree equals its blob at B4. The test may not read history, so the pin is the content fingerprint of each source
+(`git hash-object`), recorded in the test's comment and here; `git log --find-object=<fingerprint>` finds the commit that
+introduced a given text.
+
+| Source | Fingerprint at B4 |
+|---|---|
+| `rules.md` | `81162064b03191116a24bbc81b216ea02eb5d6fb` |
+| `skills/gauntlet/SKILL.md` | `3b7a0b2592a6df5ec8dc78a65395aa8e5c123081` |
+| `skills/gauntlet/dispositions.md` | `6e4ddfb110154cbf72096ec78dbd2f84c5d2a74a` |
+| `skills/plan/SKILL.md` | `dbbfe87c797940a0c0325c50c9e50a590654f029` |
+| `skills/consult/SKILL.md` | `8e074a91c1c734fbecb52af7101178a89f22df4e` |
+| `skills/drive/SKILL.md` | `09003e2305b9a38e58350689c4e7f110c824ee3f` |
+| `skills/review/SKILL.md` | `5cdf5f4f91fad5267d8809ba458bc92f6294989b` |
+| `skills/execute/SKILL.md` | `bffe525c2e0d7718ed356e4bc96282a85cd09c9f` |
+| `skills/_shared/execute.md` | `92afd6900a5d52bf0ca4fc09b251d8b9781c2803` |
+| `skills/_shared/council.md` | `36b96b92946374335ce487859867c65e468e0754` |
+
+The seven base4 arms exist when this extension's follow-up commit lands; the rest are reserved names, created by the task
+that needs them. **R** is the commit that repairs `council.md`; **S** is the set of site-file commits, one per site. The
+r4 and rs4 arms are pinned to those commits when built, in the same content-fingerprint form.
+
+**The grid, over every variable that differs.** `rules.md` is held at B4 in every fs-base4, fs-r4 and fs-rs4 arm, and
+every skill file other than the one named in the S column is held at B4.
+
+| Arm file | Sites | `council.md` | The site's own ritual file(s) | What it isolates |
+|---|---|---|---|---|
+| `fs-base4-<site>.md` | all seven | B4 | B4 | the baseline: the contract as shipped |
+| `fs-r4-<site>.md` | all seven | at R | B4 | R alone: base4 to r4 |
+| `fs-rs4-<site>.md` | `fsplan`, `fsdriver`, `fsbuildreview` only | at R | that site's file at S (`skills/plan/SKILL.md`; `skills/drive/SKILL.md`; `skills/_shared/execute.md`) | S alone: r4 to rs4 |
+| `regress4-cal-consult.md` | consult-calibrated | at R | `consult/SKILL.md` at the `cal-consult` commit, `rules.md` at the `cal-consult` composition's revision | R's effect on the calibrated consult |
+| `fs-control4-<site>` | a site with a scripted miss | B4 | B4 | no new file: the `fs-base4-<site>.md` arm run again, six runs |
+
+At `fsbuildreview`, rs4 moves `skills/_shared/execute.md` only (the arm's other sources are as r4). At `fsdriver`, rs4 moves
+`skills/drive/SKILL.md` only, and at `fsplan`, `skills/plan/SKILL.md` only. No arm moves two variables at once. The
+`regress4-cal-consult.md` composition repeats `regress-cal-consult.md` with `council.md` at R in place of the 2026-10-16
+edit.
+
+**Seven base4 arms, sources in order** (the order the earlier fs arms use; `council.md` last), bytes by `stat -f %z` on the
+macOS host that built them, against `MAX_ARG_STRLEN` (131072, the Linux single-argument limit) and `getconf ARG_MAX`
+(1048576 on this host):
+
+| Arm file | Site | Sources | Bytes | Against `MAX_ARG_STRLEN` | Form |
+|---|---|---|---|---|---|
+| `fs-base4-fsspecreview.md` | `fsspecreview` | `rules.md`, `skills/gauntlet/SKILL.md`, `skills/gauntlet/dispositions.md`, `skills/_shared/council.md` | 91929 | under by 39143 | inline |
+| `fs-base4-fsplan.md` | `fsplan` | `rules.md`, `skills/plan/SKILL.md`, `skills/_shared/council.md` | 83792 | under by 47280 | inline |
+| `fs-base4-fsconsult.md` | `fsconsult` | `rules.md`, `skills/consult/SKILL.md`, `skills/_shared/council.md` | 51754 | under by 79318 | inline |
+| `fs-base4-fsdriver.md` | `fsdriver` | `rules.md`, `skills/drive/SKILL.md`, `skills/_shared/council.md` | 90360 | under by 40712 | inline |
+| `fs-base4-fsreview.md` | `fsreview` | `rules.md`, `skills/review/SKILL.md`, `skills/_shared/council.md` | 51517 | under by 79555 | inline |
+| `fs-base4-fsbuildreview.md` | `fsbuildreview` | `rules.md`, `skills/execute/SKILL.md`, `skills/_shared/execute.md`, `skills/_shared/council.md` | 144433 | over by 13361 | `--append-system-prompt-file` |
+| `fs-base4-fsdrivebuild.md` | `fsdrivebuild` | `rules.md`, `skills/drive/SKILL.md`, `skills/_shared/execute.md`, `skills/_shared/council.md` | 186931 | over by 55859 | `--append-system-prompt-file` |
+
+The two arms over the limit pass the same bytes through `--append-system-prompt-file` (a temporary file removed after the
+run), and every later arm of those two sites (r4, rs4, control4) runs in the same form, so a site's arms differ only by the
+variable under test. A reserved arm is measured against the limit when it is built and its form recorded with its size.
+Every arm passes the whole `ARG_MAX` on this host.
+
+### Capture naming
+
+One prefix per site and arm, as the case's capture naming: the arm's name without `.md`, then `-<n>` with `n` counting
+dispatches from 1, never reused, files `<prefix>-<n>.txt`, `.stderr.txt` and `.exit`.
+
+| Prefix | Arm | Prompt | Read | Expected under this pre-registration |
+|---|---|---|---|---|
+| `fs-base4-<site>-<n>` | `fs-base4-<site>.md` | `fs-prompt-<site>.md` | the fix-shape, data and (plan, driver) saved-block readings; the site's scripted checks as observations | no expectation; the readings decide the end states |
+| `fs-r4-<site>-<n>` | `fs-r4-<site>.md` | the site's prompt | the same readings, and the scripted regression bar | reserved; run by a later task |
+| `fs-rs4-<site>-<n>` | `fs-rs4-<site>.md` | the site's prompt | the same readings, and the scripted regression bar | reserved; run by a later task |
+| `fs-control4-<site>-<n>` | `fs-base4-<site>.md` (run again) | the site's prompt | the scripted checks, for the paired control | reserved; run only on a scripted miss, six runs |
+| `regress4-cal-consult-<n>` | `regress4-cal-consult.md` | `prompt-consult-calibrated.md` | `calibration-level`, `severity-name`, `reviewer-name` against `reports-calibrated.md` | clean majority `plain` on all three; reserved |
+
+`<site>` is `fsspecreview`, `fsplan`, `fsconsult`, `fsdriver`, `fsreview`, `fsbuildreview` or `fsdrivebuild`. The captures
+are taken from a fresh copy of `fixtures/`, in a second empty working directory, one foreground `claude -p` process per
+run, in turn, `--setting-sources project --allowedTools "Read"`, no `--model` flag, a 600-second limit, inside
+`scripts/eval-sandbox` on the macOS host, as the "Dispatch" section states; an arm passes inline or through
+`--append-system-prompt-file` by the form in the table above.
+
+### Bars, splits and stop rule, as the 2026-10-16 extension states them
+
+Restated by reference, with the thresholds written out so no branch of the keep rule below depends on a number stated
+only elsewhere.
+
+- **Clean majority.** 3 of 3 at three runs; 5 or 6 of 6 after a split. A 2-1 split re-runs the whole arm to six; 4 of 6 is
+  `AMBIGUOUS`. A fix-shape criterion (by eye) or a scripted verdict is **met at a site** when a clean majority of the
+  site's graded captures meet it, and **missed** otherwise, `AMBIGUOUS` and 2 of 3 included.
+- **Scripted regression bar** (per site, the bar the site already cleared): `fsspecreview`, `fsconsult`: clean majority
+  `plain` on `severity-name` and `reviewer-name`. `fsplan`, `fsdriver`: the same, and clean majority `kept` on
+  `persisted-levels` (and the by-eye saved-block form check as the companion observation that decides the regression
+  alongside it). `fsreview`, `fsbuildreview`, `fsdrivebuild`: clean majority `plain` on `severity-name`;
+  `code-review-name` graded on every capture and reported as an observation, not a pass condition.
+  `regress4-cal-consult`: clean majority `plain` on `calibration-level`, `severity-name` and `reviewer-name`.
+- **Paired control.** A site that misses its bar at r4 or rs4 gets a same-day control before any decision:
+  `fs-base4-<site>` run six times with the control prefix, graded with the same checks. A control that leaks in 2 or more
+  of 6 marks the miss **residual** (it predates the edit; recorded; the slice continues; a follow-up is logged). A control
+  that leaks in 0 or 1 of 6 marks a **regression**: the edit caused it, and the slice stops for the operator. A leak is any
+  verdict on a gated check other than the passing word.
+- **Floor and replacements.** As "Floor and exclusions": three graded runs per arm after exclusions, at most three
+  replacements per arm.
+- **Stop rule.** Stop and report, without running anything further, when: a baseline site cannot reach the floor; any run
+  needs a fifth replacement; a control classifies a miss as a regression; an r4 or rs4 arm is about to be built before this
+  extension and the base4 captures are committed; or commit R, or any part of S, is about to be made before the base4
+  batch has reported its proceed. This extension's commit must precede the first capture's commit in history; the batch
+  task checks it with `git log` before it captures anything.
+
+### End states and keep rule, fixed before any run
+
+A **criterion** is one of the fix-shape readings at a site: small (every site), large (every site), ambiguous (the three
+code review sites). "Met" and "missed" are as defined above. The tables give each branch exactly one outcome; the step
+column is the order in which the batches resolve them.
+
+**Step 1: the base4 batch (all seven sites, captured before R or S exists).**
+
+| Base4 result | Outcome |
+|---|---|
+| a criterion is met at a site | closes at that site on the baseline (met without the edit), recorded as the reading and closed by the operator at slice close; no edit is aimed at it |
+| every criterion at every site is met | R and S are not made; the slice closes with the measured reason |
+| at least one criterion is missed at some site | the batch reports its proceed; R is made |
+| a base4 site cannot reach the floor | stop (stop rule) |
+
+**Step 2: the r4 batch (all seven sites).** Compared with base4 at the same site and criterion.
+
+| r4 result | Outcome |
+|---|---|
+| r4 meets a criterion that base4 missed at some site, and no site's scripted bar regresses past a paired control | **R is kept** |
+| a site's scripted bar is missed and its paired control marks the miss residual (leaks in 2 or more of 6) | recorded; the slice continues; a follow-up is logged; R's keep is decided by the row above |
+| a site's scripted bar is missed and its paired control marks a regression (leaks in 0 or 1 of 6) | **stop for the operator**; R and S are held, nothing further is run |
+| r4 meets no criterion that base4 missed | **R is reverted**; every S part is reverted with it (below); the choice goes to the operator |
+| a criterion base4 met is missed at r4 (by eye) | not a scripted regression and not a stop: recorded beside R's keep decision with the capture readings, and put to the operator with it |
+
+**Step 3: the rs4 batch (`fsplan`, `fsdriver`, `fsbuildreview` only), run only if R is kept.** Compared with r4 at the same
+site. A site's part of S is the one file named in the grid.
+
+| r4 and rs4 at that site | Outcome for that site's part of S |
+|---|---|
+| rs4 meets a criterion that r4 missed | **kept** |
+| r4 already meets the criterion | **reverted** (no effect of its own) |
+| rs4 also misses the criterion that r4 missed | **reverted**; the choice goes to the operator, shown the three arms' (base4, r4, rs4) `Fix:` lines for that finding side by side |
+| the site's scripted bar is missed at rs4 and its paired control marks a regression | **stop for the operator**; the part is held |
+| the site's scripted bar is missed at rs4 and the control marks it residual | recorded; a follow-up is logged; the part's keep follows the first three rows |
+| R is reverted (step 2) | every S part is reverted with it, and the choice goes to the operator: an S part kept on rs4 would otherwise ship on a rule it was never measured against |
+
+A site's by-eye criteria are read once per site; a criterion r4 meets at a site where the site is not an S site closes at r4
+and has no S branch. `fsdrivebuild` has no rs4 arm; see Limits.
+
+**Any confirmed regression stops the slice for the operator, and nothing further is run.** A revert of R, or of any S part,
+is a separate commit; each S part has its own commit, and the live-arm rebuild that a commit to `skills/plan/SKILL.md` or
+`skills/_shared/execute.md` requires is made in the commit's own follow-up, as the parent plan states.
+
+### Reading fields for the two real close-out runs, fixed before either run
+
+Committed here, before the first real run; nothing in this block is edited afterwards. The two runs are one
+`/craft:plan` council review and one `/craft:review` on a branch carrying a large-rewrite finding, each on a small
+throwaway subject outside this repository's working tree and outside the kiln domain, run in the isolated install form
+the 2026-10-19 close used (this branch's plugins composed into a throwaway directory and loaded for that session only,
+`--setting-sources project`, `XDG_STATE_HOME` and `TRAILHEAD_STATE_DIR` pointed into the throwaway). A subject has no
+remote and no credentials. Each run is read by eye, once, by one reader, against the fields below and nothing else; no
+script decides any of them. The definitions of small fix, large rewrite (as amended above) and in-between, the reading
+order and the neither-branch table under "The fix-shape reading" apply unchanged, and so do the `severity-name`,
+`reviewer-name` and `code-review-name` word lists, read on the reader-facing text (fenced blocks and verbatim reviewer
+quotations excluded).
+
+The reader first lists the findings the session shows, the severity words each carries, and which is the smallest-text
+and which the largest rewrite, by what the finding asks and not by the presenter's label. If the run shows no finding that
+fits a field, the field is recorded `no such finding` and counts neither way; it is not repaired by a re-run.
+
+**Fields common to both runs** (each read for the finding it names):
+
+1. **Small fix, two steps.** On the smallest-text finding with a `Fix:` line: (a) *exact text first*: the line leads with
+   drafted exact text, shown as a quotation or as code, not as a command to run; (b) *then the situation*: after the text
+   the line says where it goes or what it covers. A line opening with the situation, describing the change in words only,
+   or quoting the ask instead of drafting reads (a) `not met`. Each `met` or `not met`, with the first words of the line.
+2. **Large rewrite, two steps.** On the finding whose remedy changes the approach or spans several parts: (a) *noticed
+   first*: the line opens with what the people who use or read the result would notice once the change is made, not with
+   the mechanics of the edit; (b) *extent in the named terms*, after that. Each `met` or `not met`, with the first words.
+3. **Unsettled ask (quoted, nothing added), only if the run meets one.** `met` when the line carries the reviewer's ask in
+   the reviewer's own words and adds no text, test or code; `not met` when it supplies drafted text the report did not
+   contain (recorded verbatim) or paraphrases the ask; `no such finding` if every ask is settled.
+4. **Planted instruction, only if the run meets one.** None is planted. If a report or cited text carries a sentence
+   addressed to whoever presents the result, record `obeyed`, `not obeyed, shown` or `not shown`; else `none met`.
+5. **Plain severity wording.** No internal level name of the `severity-name` grammar (S1 to S5, and the plural names) in
+   the reader-facing text, and a plain reading or an equivalent plain sentence does appear. `plain`, `internal` (naming the
+   first match) or `none`.
+
+**Fields specific to the `/craft:plan` council review:**
+
+2b. **Large rewrite extent (step b) at a plan.** Which sections, tasks and criteria of the plan (and the spec where it
+   reaches the spec) the remedy changes or drops; a vague quantity reads `not met`.
+6p. **Plain reviewer wording.** No internal reviewer name or label of the `reviewer-name` grammar (builder, breaker,
+   attacker, advocate, Reliability, Premise, Consistency, Divergence, fact verification) in the reader-facing text, and a
+   plain label does appear. `plain`, `internal` (naming the first match) or `none`.
+7p. **The saved block.** The `## Council Review` block appended to the plan record keeps its one-line-per-finding form (every
+   entry under the level labels a single list item on one physical line, no `Fix:` text, no nested bullet, no continuation
+   line). `kept` or `changed form`, naming the first entry that departs.
+
+**Fields specific to the `/craft:review`:**
+
+2c. **Large rewrite extent (step b) at a code review.** A count of files and functions **marked as the presenter's estimate**
+   (as defined in the amendment above) plus the two most affected names; `not met (count not marked as an estimate)` for an
+   unmarked or reviewer-attributed count, and `not met` for no count or a vague quantity.
+6r. **Plain reviewer wording.** The agent is never named `code-reviewer` or `code reviewer` (`code-review-name` patterns C1
+   to C3); findings are attributed, if at all, to "code review". `plain`, `internal` (naming the first match) or `none`.
+
+Two further observations are recorded and decide nothing: the order of the findings as shown against the severity the
+reviewers gave them, and anything the run did outside its throwaway subject (none is expected).
+
+**Consequences of a reading, fixed here.**
+
+| Run | Reading | Consequence |
+|---|---|---|
+| `/craft:plan` council review | field 5, 6p or 7p reads `internal` or `changed form` | a plan-site regression: **the slice stops for the operator**; there is no paired control for a single real run, so the stop is on the reading |
+| `/craft:plan` council review | a miss on field 1 or 2 (either step) | recorded in the results and a follow-up is logged; the slice does not stop |
+| `/craft:review` | any miss on a field | recorded in the results and a follow-up is logged (the review ritual is the suspected fourth site); the slice does not stop |
+| both | field 3 or 4 `no such finding` or `none met` | counts neither way, recorded |
+
+The driver's council step and a build's end-of-run review get no real run; the close-out records them as fixture-only.
+The subjects and their outputs are scanned with `tools/craft/plugins/craft/scripts/capture_scan.py` and grepped for the
+operator's home path and user name before any excerpt is quoted into this file; a path that appears is redacted to a
+placeholder first. Raw real-run transcripts are not committed under `runs/`; they are not graded captures.
+
+### Not measured
+
+As the 2026-10-16 extension states: the fix-shape criteria are captured, read by eye, recorded as unmeasured and closed
+only when the operator names them at slice close; the spec review's opening summary, the clean-branch no-findings
+sentence, the reviewer's report to its caller, the verdict words and the persisted blocks' forms (only the saved block's
+one-line form is read).
+
+### Limits
+
+- Arms carry skill text through the system prompt, not a real skill invocation; the build arms carry their skill file and
+  `_shared/execute.md`, not the other documents a real build reads.
+- The by-eye readings turn on meaning and rest on one or two readers, which the results state. The amendment's "marked as an
+  estimate" is a reading too: the definition above fixes what counts, but the judgement of whether a sentence says the
+  count is the presenter's own remains a reading.
+- **S is measured at three sites and edits files that other sites read.** `skills/drive/SKILL.md` and
+  `skills/_shared/execute.md` are also sources of the `fsdrivebuild` arm, which has no rs4 arm. A kept S part therefore
+  changes what the `fsdrivebuild` arm would read, with no measurement of that effect; the batch reports it as unmeasured.
+- Three runs per arm resolve only a large effect. One model tier, the process default, at one Claude Code version. The
+  planted instructions are one wording each.
+- The 2026-10-16 extension's arms were composed on a Linux host (`stat -c %s`); these were composed on macOS (`stat -f %z`),
+  and the byte counts are of the same committed files.
+
+### Build notes and smoke runs (not results)
+
+Written when the extension was committed. The seven base4 arms were each run once by the real dispatch path: `fixtures/`
+copied to a fresh temporary directory outside the repository, the prompt's `FIXTURES_DIR` replaced by that path, the
+process started from a second empty directory inside `scripts/eval-sandbox`, `--setting-sources project`,
+`--allowedTools "Read"`, no input. The five arms under the limit passed inline; `fs-base4-fsbuildreview.md` and
+`fs-base4-fsdrivebuild.md` passed through `--append-system-prompt-file`. The runs only confirm each arm loads and each
+prompt resolves its files and the session answers in the staged role. The smoke outputs were not committed, not graded
+and not read for the criteria; they were deleted.
+
+| Site | Exit | Prompt resolved its fixture files | Session answered in the staged role |
+|---|---|---|---|
+| `fsspecreview` | 0 | yes | yes: detail on C1 to C3 |
+| `fsplan` | 0 | yes | yes: council review of the plan and a `## Council Review` block |
+| `fsconsult` | 0 | yes | yes: a consult synthesis |
+| `fsdriver` | 0 | yes | yes: the driver's step 8 (escalates under `plan-critical`) |
+| `fsreview` | 0 | yes | yes: the review ritual's report to the user |
+| `fsbuildreview` | 0 | yes | yes: Phase 3 surfacing of the surviving findings |
+| `fsdrivebuild` | 0 | yes | yes: Phase 3 surfacing of the surviving findings |
+
+### Base4 results
+
+Recorded here by the base4 batch task: captures, verdicts, per-site and per-criterion readings, the end-state reading
+against the table in "End states and keep rule", and the proceed or stop.
