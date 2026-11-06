@@ -14,6 +14,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import pwd
 import re
 import shutil
 import signal
@@ -1140,5 +1141,95 @@ def test_start_relay_holds_no_descriptor_of_its_own_after_a_refusal(relays, monk
         result, _, _ = _start(relays, monkeypatch, ports=[(holder.getsockname()[1], free_ports(1)[0])])
         assert isinstance(result, str)
         assert _open_descriptors() == before
+    finally:
+        holder.close()
+
+
+def test_an_interrupt_while_start_relay_cleans_up_after_the_relay_is_ready_ends_the_relay(
+    relays, monkeypatch
+) -> None:
+    real_popen = subprocess.Popen
+    spawned: list[subprocess.Popen] = []
+
+    class InterruptedOnClose:
+        def __init__(self, stream) -> None:
+            self._stream = stream
+
+        def close(self) -> None:
+            self._stream.close()
+            raise KeyboardInterrupt
+
+        def __getattr__(self, name: str):
+            return getattr(self._stream, name)
+
+    class InterruptingPopen(real_popen):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.stdout = InterruptedOnClose(self.stdout)
+            spawned.append(self)
+
+    monkeypatch.setattr(attachment.subprocess, "Popen", InterruptingPopen)
+    pairs = [(free_ports(1)[0], free_ports(1)[0])]
+    with pytest.raises(KeyboardInterrupt):
+        attachment.start_relay(pairs, _tag(), timeout=15.0)
+    (process,) = spawned
+    relays.track(process)
+    assert process.poll() is not None
+    assert all(port_is_free(standard) for standard, _ in pairs)
+
+
+_RELOCATABLE_PROBE = "import sys; print(sys.version_info >= (3, 11), sys.base_prefix, sys.base_exec_prefix, sep='|')"
+
+
+def _relocatable_interpreter() -> "tuple[str, str, str] | None":
+    """``(executable, base_prefix, base_exec_prefix)`` of a self-contained CPython (3.11+) whose
+    standard library is found only from its own location: ``CAMP_TEST_RELOCATABLE_PYTHON`` names
+    one, otherwise a uv-managed python-build-standalone under ``~/.local/share/uv/python`` is used."""
+    named = os.environ.get("CAMP_TEST_RELOCATABLE_PYTHON")
+    candidates = [named] if named else sorted(
+        Path(pwd.getpwuid(os.getuid()).pw_dir).glob(".local/share/uv/python/*/bin/python3.[0-9]*"), reverse=True
+    )
+    for candidate in map(str, candidates):
+        if not os.access(candidate, os.X_OK) or Path(candidate).name.endswith("-config"):
+            continue
+        probed = subprocess.run([candidate, "-I", "-c", _RELOCATABLE_PROBE], capture_output=True, text=True, timeout=30)
+        if probed.returncode != 0:
+            continue
+        usable, base, exec_base = probed.stdout.strip().split("|")
+        if usable == "True" and Path(base).resolve() != Path(sys.base_prefix).resolve():
+            return candidate, base, exec_base
+    return None
+
+
+@pytest.fixture
+def relocatable(monkeypatch: pytest.MonkeyPatch):
+    found = _relocatable_interpreter()
+    if found is None:
+        pytest.skip("no relocatable CPython 3.11+ (set CAMP_TEST_RELOCATABLE_PYTHON or install one with uv)")
+    executable, base, exec_base = found
+    monkeypatch.setattr(sys, "executable", executable)
+    monkeypatch.setattr(sys, "base_prefix", base)
+    monkeypatch.setattr(sys, "base_exec_prefix", exec_base)
+    return executable
+
+
+def test_a_relocatable_interpreter_starts_the_relay_and_serves_a_free_port(relays, monkeypatch, relocatable) -> None:
+    handle, tag, pairs = _start(relays, monkeypatch)
+    assert isinstance(handle, subprocess.Popen), handle
+    assert [a.pid for a in _mine(tag)] == [handle.pid]
+    standard, published = pairs[0]
+    assert not port_is_free(standard)
+
+
+def test_a_relocatable_interpreter_reports_a_held_port_as_exactly_the_relays_own_line(
+    relays, monkeypatch, relocatable
+) -> None:
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    try:
+        held = holder.getsockname()[1]
+        result, _, _ = _start(relays, monkeypatch, ports=[(held, free_ports(1)[0])])
+        assert result == f"port {held}: {os.strerror(errno.EADDRINUSE)}"
     finally:
         holder.close()

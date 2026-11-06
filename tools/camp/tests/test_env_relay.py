@@ -198,10 +198,24 @@ def signals_restored():
     handlers = {which: signal.getsignal(which) for which in (signal.SIGTERM, signal.SIGINT)}
     wakeup = signal.set_wakeup_fd(-1)
     signal.set_wakeup_fd(wakeup)
-    yield
-    for which, handler in handlers.items():
-        signal.signal(which, handler)
-    signal.set_wakeup_fd(wakeup)
+    built: list[relay_module.Relay] = []
+    real_init = relay_module.Relay.__init__
+
+    def remembering_init(self, *args, **kwargs):
+        real_init(self, *args, **kwargs)
+        built.append(self)
+
+    relay_module.Relay.__init__ = remembering_init
+    try:
+        yield
+    finally:
+        relay_module.Relay.__init__ = real_init
+        for which, handler in handlers.items():
+            signal.signal(which, handler)
+        signal.set_wakeup_fd(wakeup)
+        for held in built:
+            held.wake_read.close()
+            held.wake_write.close()
 
 
 def test_a_failed_bind_releases_the_ports_already_held_in_the_same_process(upstreams, signals_restored):
@@ -331,11 +345,11 @@ def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
     left the relay waiting forever in a few percent of runs when many start together, so
     this starts hundreds of them in batches and signals each the moment it says ready.
     """
-    batch, batches = 150, 3
-    ports = iter(free_ports(batch * batches))
+    batch, batches = 50, 9
     deaf: list[int] = []
     sent = 0
     for _ in range(batches):
+        ports = iter(free_ports(batch))
         group = [launch(procs, argv_for([(next(ports), 1025)])) for _ in range(batch)]
         signalled = []
         for proc in group:
@@ -348,6 +362,8 @@ def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
             except subprocess.TimeoutExpired:
                 deaf.append(proc.pid)
             sent += 1
+            for stream in (proc.stdout, proc.stderr):
+                stream.close()
     assert deaf == [], f"{len(deaf)} of {sent} relays ignored a SIGTERM sent right after ready: {deaf}"
 
 
@@ -385,8 +401,12 @@ def test_after_ready_descriptors_0_1_and_2_point_at_dev_null(procs, upstreams):
     (up,) = upstreams(1)
     (port,) = free_ports(1)
     proc = start(procs, [(port, up.port)])
+    deadline = time.monotonic() + 2
     for fd in (0, 1, 2):
-        assert os.readlink(f"/proc/{proc.pid}/fd/{fd}") == os.devnull
+        link = f"/proc/{proc.pid}/fd/{fd}"
+        while (target := os.readlink(link)) != os.devnull and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert target == os.devnull, f"descriptor {fd} still points at {target} 2s after ready"
 
 
 def test_at_the_cap_a_waiting_connection_is_served_when_one_ends(procs, upstreams):

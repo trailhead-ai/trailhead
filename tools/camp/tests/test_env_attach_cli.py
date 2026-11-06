@@ -860,6 +860,51 @@ def test_an_interrupt_after_the_relay_started_ends_it_names_the_relay_and_exits_
     assert_nothing_held(rig, env)
 
 
+def test_an_interrupt_the_moment_start_relay_returns_ends_the_relay_and_holds_no_port(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real_start = env_cli.start_relay
+    handles: list[subprocess.Popen] = []
+
+    class InterruptedWhenFirstInspected:
+        """Stands in for the handle; the first look at what kind of object it is raises Ctrl-C."""
+
+        def __init__(self, process: subprocess.Popen) -> None:
+            self._process = process
+            self._armed = True
+
+        @property
+        def __class__(self):
+            if self._armed:
+                self._armed = False
+                raise KeyboardInterrupt
+            return type(self._process)
+
+        def __getattr__(self, name: str):
+            return getattr(self._process, name)
+
+    def start_then_hand_back_an_interruptible_handle(*args, **kwargs):
+        process = real_start(*args, **kwargs)
+        handles.append(process)
+        return InterruptedWhenFirstInspected(process)
+
+    monkeypatch.setattr(env_cli, "start_relay", start_then_hand_back_an_interruptible_handle)
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted; the relay it started was ended\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
 def _remember_relay_handles(env_cli, monkeypatch) -> "list[subprocess.Popen]":
     handles: list[subprocess.Popen] = []
     real_start = env_cli.start_relay

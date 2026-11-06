@@ -363,18 +363,19 @@ def _attach_relay(environment: Environment, attach_id: str, tag: str) -> None:
         started = start_relay(environment.ports, tag, timeout=RELAY_READY_SECONDS)
     except KeyboardInterrupt:
         _exit_interrupted(False, None, "relay")
-    if isinstance(started, str):
-        _refuse_relay_start(started)
     try:
+        if isinstance(started, str):
+            _refuse_relay_start(started)
         if _wait_for_forward(attach_id) is not None:
             return
         reason = "the relay started but it is not in the process table"
     except Unverifiable as error:
         reason = f"could not tell whether the relay started ({error})"
     except KeyboardInterrupt:
-        _exit_interrupted(*_end_relay(started, attach_id), "relay")
+        _exit_interrupted(*(_end_relay(started, attach_id) if type(started) is not str else (False, None)), "relay")
     except Exception:
-        _end_relay(started, attach_id)
+        if type(started) is not str:
+            _end_relay(started, attach_id)
         raise
     _, problem = _end_relay(started, attach_id)
     _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))

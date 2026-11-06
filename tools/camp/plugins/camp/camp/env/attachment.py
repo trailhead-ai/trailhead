@@ -381,27 +381,30 @@ def start_relay(
     is started with ``sys.executable`` under the argv0 ``camp-env-relay``. Its stderr goes to a
     temporary file removed before this returns.
     """
-    with tempfile.TemporaryFile() as errors:
-        try:
-            process = subprocess.Popen(
-                relay_argv(ports, tag), executable=sys.executable, env=_relay_environment(), cwd="/",
-                start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
-            )
-        except OSError as error:
-            return f"the relay could not be started: {printable_line(str(error))}"
-        try:
-            problem = _await_ready(process, timeout)
-            if problem is None:
-                return process
-            if problem:
-                end_spawned(process)
-                return printable_line(problem).strip()
-            return _why_it_stopped(process, errors)
-        except BaseException:
+    process: "subprocess.Popen | None" = None
+    try:
+        with tempfile.TemporaryFile() as errors:
+            try:
+                process = subprocess.Popen(
+                    relay_argv(ports, tag), executable=sys.executable, env=_relay_environment(), cwd="/",
+                    start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+                )
+            except OSError as error:
+                return f"the relay could not be started: {printable_line(str(error))}"
+            try:
+                problem = _await_ready(process, timeout)
+                if problem is None:
+                    return process
+                if problem:
+                    end_spawned(process)
+                    return printable_line(problem).strip()
+                return _why_it_stopped(process, errors)
+            finally:
+                process.stdout.close()
+    except BaseException:
+        if process is not None:
             end_spawned(process)
-            raise
-        finally:
-            process.stdout.close()
+        raise
 
 
 def _alive(pid: int) -> bool:
