@@ -45,7 +45,7 @@ import uuid
 from typing import NoReturn
 
 from ..env.attachment import (
-    _end_spawned,
+    end_spawned,
     UNSEEN_HOLDER,
     Attachment,
     Unverifiable,
@@ -363,7 +363,7 @@ def _attach_relay(environment: Environment, attach_id: str, tag: str) -> None:
             raise
     finally:
         if not succeeded:
-            _end_spawned(started)
+            end_spawned(started)
 
 
 def _attach_forward(hosts, outcome, environment: Environment, attach_id: str, tag: str, timeout: float) -> None:

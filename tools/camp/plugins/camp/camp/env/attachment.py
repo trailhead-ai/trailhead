@@ -307,7 +307,12 @@ def _relay_environment() -> dict[str, str]:
     }
 
 
-def _end_spawned(process: subprocess.Popen) -> None:
+def end_spawned(process: subprocess.Popen) -> None:
+    """End and reap a relay this process spawned itself, through its handle.
+
+    SIGTERM, then SIGKILL after the kill grace. It signals only that child, never a
+    pid read from the process table, so it is safe on every exit path of an attach.
+    """
     if process.poll() is None:
         process.terminate()
         try:
@@ -341,7 +346,7 @@ def _why_it_stopped(process: subprocess.Popen, errors) -> str:
         process.wait(KILL_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         pass
-    _end_spawned(process)
+    end_spawned(process)
     errors.seek(0)
     lines = errors.read().decode("utf-8", "replace").strip().splitlines()
     first = printable_line(lines[0]).strip() if lines else ""
@@ -373,11 +378,11 @@ def start_relay(
             if problem is None:
                 return process
             if problem:
-                _end_spawned(process)
+                end_spawned(process)
                 return printable_line(problem).strip()
             return _why_it_stopped(process, errors)
         except BaseException:
-            _end_spawned(process)
+            end_spawned(process)
             raise
         finally:
             process.stdout.close()
