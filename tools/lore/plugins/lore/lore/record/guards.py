@@ -28,8 +28,9 @@ for every kind, ahead of the kind-specific policy, so a refused write never pays
 for a graph load. It judges the record's PRIOR status against the per-kind table
 :data:`FROZEN_STATUSES` (adr ``active``/``superseded``/``dropped``; spec
 ``ready`` and later; every decision status; task ``done``/``dropped``/``superseded``)
-and compares authored content — the body minus a spec's ``## Slices`` and a
-task's ``## Driver run`` — so only those sections pass a plain update. Refusals
+and compares authored content — the body minus a spec's ``## Slices`` and
+``## Follow-ups`` and a task's ``## Driver run`` — so only those sections pass a
+plain update. Refusals
 are ``[frozen-body]`` and ``[frozen-status]`` and name ``lore record amend``,
 the one write that may change a frozen body, and ``lore record supersede`` for a
 change of scope.
@@ -712,8 +713,8 @@ def check_frozen_body(
     is refused. (A flip into ``superseded`` is refused by
     :func:`check_superseded_status`, not here.) Authored content is the body minus
     the kind's pipeline-maintained sections (:func:`sections.authored_content`),
-    so a change confined to ``## Slices`` (spec) or ``## Driver run`` (task)
-    passes a plain update.
+    so a change confined to ``## Slices`` or ``## Follow-ups`` (spec) or
+    ``## Driver run`` (task) passes a plain update.
 
     Returns a formatted ``graph-guard`` message, or ``None`` when the write may
     proceed. A ``None`` *prior_body* is the no-enforcement default: the caller is
@@ -753,7 +754,7 @@ def check_frozen_body(
         section.heading for section in sections_mod.PIPELINE_SECTIONS.get(kind, ())
     )
     sections_clause = (
-        f"Only {plain_update_sections} passes a plain update."
+        f"A plain update may change only {plain_update_sections}."
         if plain_update_sections
         else "No section passes a plain update."
     )

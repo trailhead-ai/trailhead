@@ -37,10 +37,15 @@ class Section(NamedTuple):
 # Craft consumers of this table:
 #   - ``## Slices`` (spec): the slice ledger, written by ``craft:slice`` /
 #     slice close and read by ``candidate_set.py`` and ``covers_gate.py``.
+#   - ``## Follow-ups`` (spec): the follow-up ledger, written by the craft
+#     follow-up capture and read by ``craft:tidy-followups``.
 #   - ``## Driver run`` (task): the drive checkpoint, one block appended at
 #     each phase boundary by ``craft:drive``.
 PIPELINE_SECTIONS: dict[str, tuple[Section, ...]] = {
-    "spec": (Section("## Slices", repeatable=False),),
+    "spec": (
+        Section("## Slices", repeatable=False),
+        Section("## Follow-ups", repeatable=False),
+    ),
     "task": (Section("## Driver run", repeatable=True),),
 }
 
