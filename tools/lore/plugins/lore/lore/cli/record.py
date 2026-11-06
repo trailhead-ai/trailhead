@@ -1902,7 +1902,7 @@ def _cmd_record_update(args) -> int:
     ``--base REVISION`` is the stale-write handshake: inside the re-runnable read
     half (so the relocation path re-checks it) the stored body's revision is
     compared with it by :func:`_check_base_revision`, and a mismatch writes
-    nothing. It is required when the update edits or removes the existing
+    nothing. It is required when the update creates, edits or removes the
     ``## Follow-ups`` section of a spec at a frozen status (:func:`_require_base_for_follow_ups`); any other
     update may omit it.
     """
@@ -2536,15 +2536,15 @@ _FOLLOW_UPS_HEADING = "## Follow-ups"
 def _require_base_for_follow_ups(
     location, base: str | None, existing_body: str, new_body: str
 ) -> None:
-    """Refuse a frozen spec's ``## Follow-ups`` rewrite that names no ``--base``.
+    """Refuse a frozen spec's ``## Follow-ups`` change that names no ``--base``.
 
     The section is a ledger other writers append to, and a body composed from an
-    earlier read would silently erase their entry. Creating the section where the
-    stored body has none loses nothing, so it needs no ``--base``. MUST be called with the write
+    earlier read would silently erase their entry.  Creating the section counts: a
+    creator composing from a stale copy could drop a ``## Slices`` row added since. MUST be called with the write
     lock held; raises :class:`_UpdateAborted` after printing the refusal.
     """
     from ..record import guards as guards_mod
-    from ..record.sections import section_rewritten
+    from ..record.sections import section_changed
 
     if base is not None or location.kind.casefold() != "spec":
         return
@@ -2558,10 +2558,10 @@ def _require_base_for_follow_ups(
             prior_status = side.get("status")
     if prior_status not in guards_mod.FROZEN_STATUSES["spec"]:
         return
-    if not section_rewritten(existing_body, new_body, _FOLLOW_UPS_HEADING):
+    if not section_changed(existing_body, new_body, _FOLLOW_UPS_HEADING):
         return
     print(
-        f"error: --base is required when an update rewrites the "
+        f"error: --base is required when an update changes the "
         f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec: pass the "
         f"revision of the body you composed against. {_revision_hint(location)}, "
         "then update with --base <revision>. Nothing was written.",
@@ -3047,8 +3047,8 @@ def add_record_subparser(sub) -> None:
                "body's revision ('revision' in --json, 'revision: <hex>' on "
                "stderr). With --base the update is refused, writing nothing, if "
                "the stored body's revision differs (re-read, reapply, retry the "
-               "update). --base is required when the update edits or removes the "
-               "existing '## Follow-ups' section of a spec at a frozen status (ready, "
+               "update). --base is required when the update creates, edits or removes the "
+               "'## Follow-ups' section of a spec at a frozen status (ready, "
                "planned, complete, superseded, dropped): a body composed from an "
                "earlier read would erase another writer's entry. Other updates "
                "(a '## Slices' append that leaves '## Follow-ups' unchanged, a "
@@ -3070,7 +3070,7 @@ def add_record_subparser(sub) -> None:
         help="The body revision you composed against (from 'lore record show': "
              "'revision' in --json, 'revision: <hex>' on stderr). The update is "
              "refused, writing nothing, if the stored body's revision differs. "
-             "Required when the update edits or removes a frozen spec's '## Follow-ups' "
+             "Required when the update creates, edits or removes a frozen spec's '## Follow-ups' "
              "section.",
     )
     p_record_update.add_argument(

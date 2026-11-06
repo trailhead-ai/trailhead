@@ -89,10 +89,22 @@ def test_ready_spec_follow_ups_removal_without_base_is_refused(tmp_path):
     assert _snapshot(vault) == before
 
 
-def test_ready_spec_creating_the_follow_ups_section_without_base_is_accepted(tmp_path):
+def test_ready_spec_creating_the_follow_ups_section_without_base_is_refused(tmp_path):
     vault, state, rid = _spec(tmp_path, "ready", SPEC)
+    before = _snapshot(vault)
 
     r = _update(vault, state, rid, SPEC + FOLLOWUPS)
+
+    assert r.returncode != 0
+    assert "--base" in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_ready_spec_creating_the_follow_ups_section_with_current_base_is_written(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+
+    r = _update(vault, state, rid, SPEC + FOLLOWUPS,
+                "--base", _revision(vault, state, rid))
 
     assert r.returncode == 0, r.stderr
     assert _body(vault, rid) == SPEC + FOLLOWUPS

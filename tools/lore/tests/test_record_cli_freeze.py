@@ -331,7 +331,7 @@ def test_ready_spec_that_only_creates_followups_is_allowed(tmp_path):
     rid = _create(vault, state, "spec", "ready", body=SPEC)
     grown = SPEC + "\n## Follow-ups\n\n- `lesson/one`\n"
 
-    r = _update(vault, state, rid, grown)
+    r = _update(vault, state, rid, grown, ["--base", _revision(vault, state, rid)])
 
     assert r.returncode == 0, r.stderr
     assert _paths(vault, rid)[0].read_text(encoding="utf-8") == grown

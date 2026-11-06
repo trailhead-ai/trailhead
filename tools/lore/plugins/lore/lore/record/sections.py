@@ -142,22 +142,21 @@ def _section_text(body: str, heading: str) -> str | None | bool:
     return "".join(lines[starts[0]:_section_end(lines, masked, starts[0])])
 
 
-def section_rewritten(before: str, after: str, heading: str) -> bool:
-    """Whether the section under *heading* in *before* is changed or removed by *after*.
+def section_changed(before: str, after: str, heading: str) -> bool:
+    """Whether the section under *heading* differs between two bodies.
 
-    A section absent from *before* has nothing to lose, so creating it is not a
-    rewrite. Trailing blank lines before the next heading are not content. A
-    heading that appears more than once outside fences and comments cannot be
-    located, so such a section counts as rewritten whenever the bodies differ
-    at all.
+    Absent in both is unchanged; created or removed is changed. Trailing blank
+    lines before the next heading are not content. A heading that appears more
+    than once outside fences and comments cannot be located, so the section
+    counts as changed whenever the bodies differ at all.
     """
     old = _section_text(before, heading)
-    if old is None:
-        return False
     new = _section_text(after, heading)
     if old is False or new is False:
         return before != after
-    return new is None or old.rstrip() != new.rstrip()
+    if old is None or new is None:
+        return old is not new
+    return old.rstrip() != new.rstrip()
 
 
 def authored_content(kind: str, body: str) -> str:
