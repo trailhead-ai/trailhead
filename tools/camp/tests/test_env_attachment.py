@@ -781,3 +781,347 @@ def test_ipv4_in_use_is_held_even_when_ipv6_is_free() -> None:
             raise OSError(errno.EADDRINUSE, "in use")
 
     assert attachment.port_holder(5555, bind=bind, lsof_runner=lambda argv: "") == "a process camp cannot see"
+
+
+# --- the relay ---------------------------------------------------------------
+
+_RELAY_TAIL = "-N -o Tag={tag} -L 127.0.0.1:{standard}:127.0.0.1:{published}"
+_PYTHON_APP = (
+    "/opt/homebrew/Cellar/python@3.12/3.12.4/Frameworks/Python.framework/Versions/3.12"
+    "/Resources/Python.app/Contents/MacOS/Python"
+)
+
+
+def _relay_command(argv0: str = "camp-env-relay", tail: str | None = None, module: str = "-m camp.env.relay",
+                   standard: int = 5173, published: int = 41990) -> str:
+    tail = tail if tail is not None else _RELAY_TAIL
+    tag = f"{_NS}:abc123:local/grp/main"
+    return f"{argv0} {module} " + tail.format(tag=tag, standard=standard, published=published)
+
+
+def _good_relay(pid: int = 100) -> Attachment:
+    return Attachment(
+        pid=pid, host="local", group="grp", name="main", ports=((5173, 41990),),
+        attach_id="abc123", kind="relay",
+    )
+
+
+def test_relay_argv_names_the_relay_by_a_fixed_word_and_carries_every_port_pair() -> None:
+    argv = attachment.relay_argv([(5173, 41990), (80, 41991)], "ns:id:local/grp/main")
+    assert argv == [
+        "camp-env-relay", "-m", "camp.env.relay", "-N", "-o", "Tag=ns:id:local/grp/main",
+        "-L", "127.0.0.1:5173:127.0.0.1:41990", "-L", "127.0.0.1:80:127.0.0.1:41991",
+    ]
+
+
+@pytest.mark.parametrize(
+    "argv0", ["camp-env-relay", _PYTHON_APP, "/usr/bin/python3.12", "/usr/bin/python", "/x/Python"]
+)
+def test_a_relay_row_with_an_interpreter_or_the_fixed_argv0_is_recognised_as_a_relay(argv0: str) -> None:
+    found = attachment.attachments(runner=_table(_row(100, _relay_command(argv0))))
+    assert found == [_good_relay(100)]
+
+
+@pytest.mark.parametrize(
+    "argv0",
+    ["grep", "bash", "/usr/bin/env", "python3", "./python3", "/usr/bin/pythonista-x/bash", "/usr/bin/xpython",
+     "/usr/bin/PYTHON"],
+)
+def test_the_relay_tail_after_another_argv0_is_not_recognised(argv0: str) -> None:
+    found = attachment.attachments(runner=_table(_row(200, _relay_command(argv0)), _row(100, _relay_command())))
+    assert found == [_good_relay(100)]
+
+
+@pytest.mark.parametrize(
+    "decoy_row",
+    [
+        _row(200, f"grep camp-env-relay -N -o Tag={_NS}:abc123:local/grp/main -L 127.0.0.1:5173:127.0.0.1:41990"),
+        _row(200, _relay_command(module="-m camp.env.other")),
+        _row(200, _relay_command(module="-c camp.env.relay")),
+        _row(200, _relay_command(module="")),
+        _row(200, _relay_command(tail="-o Tag={tag} -L 127.0.0.1:{standard}:127.0.0.1:{published}")),
+        _row(200, _relay_command(tail=_RELAY_TAIL + " -o Tag=" + _NS + ":zzz:local/grp/main")),
+        _row(200, _relay_command(tail="-N -o Tag={tag} -L 10.0.0.1:{standard}:127.0.0.1:{published}")),
+        _row(200, _relay_command(tail="-N -o Tag={tag} -L 127.0.0.1:{standard}:10.0.0.1:{published}")),
+        _row(200, _relay_command(tail="-N -o Tag={tag}")),
+        _row(200, _relay_command(), uid=_UID + 1),
+    ],
+    ids=["grep-argv0", "other-module", "c-instead-of-m", "no-module", "no-N", "two-tags", "non-loopback-listen",
+         "non-loopback-target", "no-L", "other-uid"],
+)
+def test_a_relay_decoy_is_not_recognised_and_the_others_still_parse(decoy_row: str) -> None:
+    found = attachment.attachments(runner=_table(decoy_row, _row(100, _relay_command())))
+    assert found == [_good_relay(100)]
+
+
+@pytest.mark.parametrize(
+    "standard, published, recognised",
+    [(1023, 41990, False), (1024, 41990, True), (5173, 1023, False), (5173, 1024, True), (65535, 65535, True),
+     (5173, 65536, False)],
+)
+def test_a_relay_row_follows_the_relays_own_port_range_at_its_edge(
+    standard: int, published: int, recognised: bool
+) -> None:
+    found = attachment.attachments(runner=_table(_row(100, _relay_command(standard=standard, published=published))))
+    assert [a.ports for a in found] == ([((standard, published),)] if recognised else [])
+
+
+@pytest.mark.parametrize("standard", [1, 80, 1023, 1024])
+def test_a_forward_row_keeps_the_one_to_65535_rule_and_is_a_forward(standard: int) -> None:
+    command = f"ssh -N -o Tag={_TAG} -L 127.0.0.1:{standard}:127.0.0.1:41990 -- dest"
+    found = attachment.attachments(runner=_table(_row(100, command)))
+    assert [(a.kind, a.ports) for a in found] == [("forward", ((standard, 41990),))]
+
+
+def test_an_ssh_shaped_row_is_still_recognised_with_kind_forward() -> None:
+    assert attachment.attachments(runner=_table(_row(100, _GOOD_CMD)))[0].kind == "forward"
+
+
+# Starting real relays. Free high ports, a namespace of its own per test, and every relay ended.
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from env_ssh_stub import free_ports, port_is_free, wait_for  # noqa: E402
+
+_PACKAGE = _PLUGIN_DIR / "camp"
+
+
+class _Started:
+    def __init__(self) -> None:
+        self.handles: list[subprocess.Popen] = []
+
+    def track(self, handle: subprocess.Popen) -> subprocess.Popen:
+        self.handles.append(handle)
+        threading.Thread(target=handle.wait, daemon=True).start()
+        return handle
+
+
+@pytest.fixture
+def relays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    namespace = f"camp-env-t{uuid.uuid4().hex[:10]}"
+    monkeypatch.setenv("CAMP_ENV_TAG_NAMESPACE", namespace)
+    started = _Started()
+    yield started
+    for handle in started.handles:
+        if handle.poll() is None:
+            handle.kill()
+        handle.wait()
+
+
+def _tag(attach_id: str | None = None) -> str:
+    return attachment.tag_for("local", "grp", "main", attach_id or uuid.uuid4().hex[:8])
+
+
+def _copy_of_camp(destination: Path, patch: "tuple[str, str] | None" = None) -> Path:
+    import shutil
+
+    shutil.copytree(_PACKAGE, destination / "camp", ignore=shutil.ignore_patterns("__pycache__"))
+    if patch is not None:
+        relay = destination / "camp" / "env" / "relay.py"
+        text = relay.read_text()
+        assert patch[0] in text
+        relay.write_text(text.replace(patch[0], patch[1], 1))
+    return destination
+
+
+def _start(
+    relays: _Started, monkeypatch: pytest.MonkeyPatch, root: Path | None = None, ports=None, timeout: float = 15.0
+):
+    if root is not None:
+        monkeypatch.setattr(attachment, "_package_root", lambda: str(root))
+    pairs = [(free_ports(1)[0], free_ports(1)[0])] if ports is None else ports
+    tag = _tag()
+    result = attachment.start_relay(pairs, tag, timeout=timeout)
+    if isinstance(result, subprocess.Popen):
+        relays.track(result)
+    return result, tag, pairs
+
+
+def _mine(tag: str) -> list[Attachment]:
+    attach_id = tag.split(":")[1]
+    return [a for a in attachment.attachments() if a.attach_id == attach_id]
+
+
+def test_a_started_relay_is_found_by_attachments_as_a_relay_from_another_cwd(relays, monkeypatch, tmp_path) -> None:
+    handle, tag, pairs = _start(relays, monkeypatch)
+    assert isinstance(handle, subprocess.Popen), handle
+    monkeypatch.chdir(tmp_path)
+    found = _mine(tag)
+    expected = [("relay", "local", "grp", "main", tuple(pairs))]
+    assert [(a.kind, a.host, a.group, a.name, a.ports) for a in found] == expected
+
+
+def test_start_relay_returns_a_handle_whose_process_is_the_recognised_relay(relays, monkeypatch) -> None:
+    handle, tag, _ = _start(relays, monkeypatch)
+    assert isinstance(handle, subprocess.Popen), handle
+    assert [a.pid for a in _mine(tag)] == [handle.pid]
+
+
+_FROM_OTHER_CHECKOUT = """
+import json, sys
+from camp.env import attachment
+mode = sys.argv[1]
+found = [a for a in attachment.attachments() if a.attach_id == sys.argv[2]]
+remaining = attachment.end(found, grace=5.0) if mode == "end" else None
+print(json.dumps({"found": [[a.pid, a.kind] for a in found], "remaining": remaining}))
+"""
+
+
+def _from_checkout(root: Path, mode: str, attach_id: str, cwd: Path) -> dict:
+    import json
+
+    env = {"PATH": os.environ["PATH"], "HOME": os.environ.get("HOME", "/"), "PYTHONPATH": str(root),
+           "CAMP_ENV_TAG_NAMESPACE": os.environ["CAMP_ENV_TAG_NAMESPACE"]}
+    done = subprocess.run([sys.executable, "-c", _FROM_OTHER_CHECKOUT, mode, attach_id], env=env, cwd=cwd,
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+@pytest.mark.parametrize("starter", ["real", "copy"])
+@pytest.mark.parametrize("reader", ["real", "copy"])
+def test_a_relay_is_recognised_and_ended_from_a_checkout_whose_path_contains_a_space(
+    relays, monkeypatch, tmp_path, starter: str, reader: str
+) -> None:
+    spaced = _copy_of_camp(_mkdir(tmp_path / "a checkout with spaces"))
+    roots = {"real": _PLUGIN_DIR, "copy": spaced}
+    handle, tag, pairs = _start(relays, monkeypatch, root=roots[starter])
+    assert isinstance(handle, subprocess.Popen), handle
+    attach_id = tag.split(":")[1]
+    seen = _from_checkout(roots[reader], "list", attach_id, tmp_path)
+    assert seen["found"] == [[handle.pid, "relay"]]
+    ended = _from_checkout(roots[reader], "end", attach_id, tmp_path)
+    assert ended["remaining"] == []
+    wait_for(lambda: handle.poll() is not None)
+    assert all(port_is_free(standard) for standard, _ in pairs)
+
+
+def _mkdir(path: Path) -> Path:
+    path.mkdir(parents=True)
+    return path
+
+
+def test_end_stops_a_relay_on_sigterm_without_sigkill(relays, monkeypatch) -> None:
+    handle, tag, _ = _start(relays, monkeypatch)
+    assert attachment.end(_mine(tag), grace=5.0) == []
+    wait_for(lambda: handle.poll() is not None)
+    assert handle.returncode == 0
+
+
+def test_end_kills_a_relay_that_ignores_sigterm_after_the_grace(relays, monkeypatch, tmp_path) -> None:
+    # The handler still closes over wake_write, so the wake pair stays open while SIGTERM is ignored.
+    deaf = (
+        "signal.signal(which, lambda *_: wake_write.send(b\"x\"))",
+        "signal.signal(which, lambda *_: wake_write and None)",
+    )
+    root = _copy_of_camp(_mkdir(tmp_path / "deaf"), deaf)
+    handle, tag, _ = _start(relays, monkeypatch, root=root)
+    started = time.monotonic()
+    assert attachment.end(_mine(tag), grace=0.4) == []
+    wait_for(lambda: handle.poll() is not None)
+    assert handle.returncode == -signal.SIGKILL
+    assert time.monotonic() - started >= 0.4
+
+
+def test_start_relay_with_a_held_port_names_that_port_and_leaves_nothing_behind(relays, monkeypatch) -> None:
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    try:
+        held = holder.getsockname()[1]
+        free = free_ports(1)[0]
+        result, tag, _ = _start(relays, monkeypatch, ports=[(free, free_ports(1)[0]), (held, free_ports(1)[0])])
+        assert isinstance(result, str) and f"port {held}:" in result and "\n" not in result
+        assert _mine(tag) == []
+        assert port_is_free(free)
+    finally:
+        holder.close()
+
+
+def test_start_relay_whose_relay_never_says_ready_times_out_and_leaves_nothing_running(
+    relays, monkeypatch, tmp_path
+) -> None:
+    never = ('sys.stdout.write("ready\\n")', 'time.sleep(60); sys.stdout.write("ready\\n")')
+    root = _copy_of_camp(_mkdir(tmp_path / "slow"), never)
+    started = time.monotonic()
+    result, tag, pairs = _start(relays, monkeypatch, root=root, timeout=1.0)
+    assert isinstance(result, str) and "not ready within 1s" in result and "\n" not in result
+    assert time.monotonic() - started < 10
+    wait_for(lambda: _mine(tag) == [])
+    assert all(port_is_free(standard) for standard, _ in pairs)
+
+
+def test_start_relay_reports_the_exit_status_of_a_relay_that_dies_without_a_port_line(
+    relays, monkeypatch, tmp_path
+) -> None:
+    root = _copy_of_camp(_mkdir(tmp_path / "dies"), ("    held = Relay(pairs, max_connections())", "    sys.exit(7)"))
+    result, tag, _ = _start(relays, monkeypatch, root=root)
+    assert isinstance(result, str) and "7" in result and "\n" not in result
+    assert _mine(tag) == []
+
+
+def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own_root(
+    relays, monkeypatch, tmp_path
+) -> None:
+    planted = tmp_path / "planted"
+    (planted / "camp").mkdir(parents=True)
+    (planted / "camp" / "__init__.py").write_text("raise RuntimeError('planted camp imported')\n")
+    dump = tmp_path / "dump.json"
+    root = _copy_of_camp(
+        _mkdir(tmp_path / "probe"),
+        ("def main(argv: list[str]) -> int:\n",
+         "def main(argv: list[str]) -> int:\n"
+         "    import json as _j, camp as _c\n"
+         "    _null = os.stat(os.devnull).st_rdev\n"
+         f"    open({str(dump)!r}, 'w').write(_j.dumps({{'env': dict(os.environ), 'camp': _c.__file__,\n"
+         "        'cwd': os.getcwd(), 'sid': os.getsid(0), 'stdin_is_null': os.fstat(0).st_rdev == _null}))\n"),
+    )
+    monkeypatch.setenv("PYTHONPATH", str(planted))
+    monkeypatch.setenv("PYTHONSTARTUP", "/nonexistent")
+    monkeypatch.setenv("CAMP_TEST_SECRET_TOKEN", "hunter2")
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_x")
+    saved_stdin = os.dup(0)
+    reader, writer = os.pipe()
+    os.dup2(reader, 0)
+    try:
+        handle, tag, _ = _start(relays, monkeypatch, root=root)
+    finally:
+        os.dup2(saved_stdin, 0)
+        for fd in (saved_stdin, reader, writer):
+            os.close(fd)
+    assert isinstance(handle, subprocess.Popen), handle
+    import json
+
+    seen = json.loads(dump.read_text())
+    assert seen["camp"] == str(root / "camp" / "__init__.py")
+    assert seen["cwd"] == "/"
+    assert seen["sid"] == handle.pid
+    assert seen["stdin_is_null"]
+    assert seen["env"]["PYTHONPATH"] == str(root)
+    assert seen["env"]["PYTHONSAFEPATH"] == "1"
+    assert seen["env"]["HOME"] == os.environ["HOME"]
+    assert not {"PYTHONSTARTUP", "CAMP_TEST_SECRET_TOKEN", "GITHUB_TOKEN", "CAMP_ENV_TAG_NAMESPACE"} & set(seen["env"])
+    assert set(seen["env"]) <= {"PYTHONPATH", "PYTHONSAFEPATH", "PATH", "HOME", "LC_CTYPE"}
+
+
+def _open_descriptors() -> int:
+    return len(os.listdir("/dev/fd"))
+
+
+def test_start_relay_holds_no_descriptor_of_its_own_after_a_success(relays, monkeypatch) -> None:
+    before = _open_descriptors()
+    handle, _, _ = _start(relays, monkeypatch)
+    assert isinstance(handle, subprocess.Popen), handle
+    assert _open_descriptors() == before
+
+
+def test_start_relay_holds_no_descriptor_of_its_own_after_a_refusal(relays, monkeypatch) -> None:
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    try:
+        before = _open_descriptors()
+        result, _, _ = _start(relays, monkeypatch, ports=[(holder.getsockname()[1], free_ports(1)[0])])
+        assert isinstance(result, str)
+        assert _open_descriptors() == before
+    finally:
+        holder.close()

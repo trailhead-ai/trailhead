@@ -1,4 +1,4 @@
-"""An attachment: one background ``ssh`` forward, found again from the process table.
+"""An attachment: one background ``ssh`` forward or local relay, found again from the process table.
 
 Nothing about an attachment is written to disk. The process table is the only record.
 A process is **recognised** as an attachment when all of these hold:
@@ -27,6 +27,22 @@ command or follows the destination rather than being an option (``ssh box pgrep 
 a tag that is the value of another option (``ssh -l -o Tag=... -N box``); a tagged ``-N`` ssh
 with no ``-L``; two tag options; another namespace; a malformed host, group or name.
 
+A **relay** (``python -m camp.env.relay``, the stand-in for a forward when the environment is on
+this machine) is recognised by a second shape. The same user, ``-N``, one tag and ``-L`` rules hold,
+read by the same option parser, with these differences:
+
+- its argv0 is either exactly ``camp-env-relay`` (what ``start_relay`` asks for; Linux keeps it) or
+  an absolute interpreter path whose basename starts with ``python`` or is exactly ``Python``
+  (macOS re-execs Homebrew's python into ``.../Python.app/Contents/MacOS/Python``, and ``ps`` shows
+  that path), so a relative ``python3``, ``bash``, ``/usr/bin/env`` and ``grep`` are decoys;
+- words 1 and 2 are exactly ``-m camp.env.relay``, and options are read from word 3;
+- every ``-L`` port also satisfies the relay's own rule, ``camp.env.relay.port_in_range``
+  (1024-65535), so a relay row with a port below 1024 is not recognised, while a forward keeps 1-65535.
+
+Nothing in a relay's argv names where camp lives: ``start_relay`` passes that in its environment, so
+a relay started by one camp checkout is recognised from any other, whatever its path holds.
+:attr:`Attachment.kind` says which shape a row had.
+
 ``CAMP_ENV_TAG_NAMESPACE`` replaces the namespace ``camp-env`` (the test seam). It
 is read on every call, and a value outside camp's identifier rule is refused.
 """
@@ -35,16 +51,19 @@ from __future__ import annotations
 import errno
 import os
 import re
+import select
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
 
 from ..printable import printable_line
 from .contract import is_identifier
+from .relay import port_in_range
 
 DEFAULT_NAMESPACE = "camp-env"
 NAMESPACE_ENV = "CAMP_ENV_TAG_NAMESPACE"
@@ -58,6 +77,8 @@ _ARG_OPTIONS = frozenset("BbcDEeFIiJLlmOoPpQRSWw")
 _FLAG_OPTIONS = frozenset("1246AaCfGgKkMNnqsTtVvXxYy")
 _FORWARD_RE = re.compile(r"127\.0\.0\.1:([1-9][0-9]{0,4}):127\.0\.0\.1:([1-9][0-9]{0,4})")
 _MAX_PORT = 65535
+_RELAY_ARGV0 = "camp-env-relay"
+_RELAY_MODULE_WORDS = ["-m", "camp.env.relay"]
 _PS_ARGV = ["ps", "-axwwo", "pid=,uid=,command="]
 _POLL_SECONDS = 0.05
 
@@ -76,8 +97,8 @@ class Untaggable(ValueError):
 
 @dataclass(frozen=True)
 class Attachment:
-    """One recognised forward. ``ports`` holds ``(standard, published)`` pairs
-    read from its ``-L`` arguments, ordered by standard port."""
+    """One recognised forward or relay. ``ports`` holds ``(standard, published)`` pairs
+    read from its ``-L`` arguments, ordered by standard port; ``kind`` is ``"forward"`` or ``"relay"``."""
 
     pid: int
     host: str
@@ -85,6 +106,7 @@ class Attachment:
     name: str
     ports: tuple[tuple[int, int], ...]
     attach_id: str
+    kind: str = "forward"
 
 
 def _namespace() -> str:
@@ -145,12 +167,12 @@ def _parse_tag(value: str, namespace: str) -> tuple[str, str, str, str] | None:
     return attach_id, host, group, name
 
 
-def _options(words: list[str]) -> "tuple[bool, list[tuple[str, str]]] | None":
-    """Parse ssh's options as OpenSSH does: ``(has_N, [(letter, value) for -o and -L])``, or None
-    when the argv is not one ssh would parse (an unknown letter, an option missing its value)."""
+def _options(words: list[str], start: int = 1) -> "tuple[bool, list[tuple[str, str]]] | None":
+    """Parse ssh's options as OpenSSH does, from word *start*: ``(has_N, [(letter, value) for -o and -L])``,
+    or None when the argv is not one ssh would parse (an unknown letter, an option missing its value)."""
     has_n = False
     taken: list[tuple[str, str]] = []
-    index = 1
+    index = start
     while index < len(words):
         word = words[index]
         index += 1
@@ -178,11 +200,29 @@ def _options(words: list[str]) -> "tuple[bool, list[tuple[str, str]]] | None":
     return has_n, taken
 
 
+def _is_interpreter(argv0: str) -> bool:
+    base = os.path.basename(argv0)
+    return os.path.isabs(argv0) and (base.startswith("python") or base == "Python")
+
+
+def _shape(words: list[str]) -> "tuple[str, int] | None":
+    """``(kind, index of the first option)`` for a row's words, or None when it has neither shape."""
+    if not words:
+        return None
+    if os.path.basename(words[0]) == "ssh":
+        return "forward", 1
+    if words[1:3] == _RELAY_MODULE_WORDS and (words[0] == _RELAY_ARGV0 or _is_interpreter(words[0])):
+        return "relay", 3
+    return None
+
+
 def _recognise(pid: int, command: str, namespace: str) -> Attachment | None:
     words = command.split()
-    if not words or os.path.basename(words[0]) != "ssh":
+    shape = _shape(words)
+    if shape is None:
         return None
-    parsed_options = _options(words)
+    kind, start = shape
+    parsed_options = _options(words, start)
     if parsed_options is None:
         return None
     has_n, taken = parsed_options
@@ -203,9 +243,11 @@ def _recognise(pid: int, command: str, namespace: str) -> Attachment | None:
         standard, published = int(match.group(1)), int(match.group(2))
         if standard > _MAX_PORT or published > _MAX_PORT:
             return None
+        if kind == "relay" and not (port_in_range(standard) and port_in_range(published)):
+            return None
         ports.append((standard, published))
     attach_id, host, group, name = parsed
-    return Attachment(pid, host, group, name, tuple(sorted(ports)), attach_id)
+    return Attachment(pid, host, group, name, tuple(sorted(ports)), attach_id, kind)
 
 
 def attachments(
@@ -240,6 +282,105 @@ def attachments(
         if recognised is not None:
             found.append(recognised)
     return found
+
+
+def relay_argv(ports: Sequence[tuple[int, int]], tag: str) -> list[str]:
+    """The argv a relay is started with: ``camp-env-relay -m camp.env.relay -N -o Tag=<tag> -L ...``
+    for each ``(standard, published)`` pair."""
+    argv = [_RELAY_ARGV0, *_RELAY_MODULE_WORDS, "-N", "-o", f"Tag={tag}"]
+    for standard, published in ports:
+        argv += ["-L", f"127.0.0.1:{standard}:127.0.0.1:{published}"]
+    return argv
+
+
+def _package_root() -> str:
+    """The directory holding the ``camp`` package this module belongs to."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _relay_environment() -> dict[str, str]:
+    return {
+        "PYTHONPATH": _package_root(),
+        "PYTHONSAFEPATH": "1",
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", "/"),
+    }
+
+
+def _end_spawned(process: subprocess.Popen) -> None:
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def _await_ready(process: subprocess.Popen, timeout: float) -> "str | None":
+    """None once the relay has printed ``ready``; the timeout reason when it has not by *timeout*
+    seconds; ``""`` when its stdout closed or said something else."""
+    fd = process.stdout.fileno()
+    deadline = time.monotonic() + timeout
+    seen = b""
+    while b"\n" not in seen:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return f"the relay was not ready within {timeout:g}s"
+        if not select.select([fd], [], [], remaining)[0]:
+            continue
+        chunk = os.read(fd, 1024)
+        if not chunk:
+            return ""
+        seen += chunk
+    return None if seen.split(b"\n", 1)[0].strip() == b"ready" else ""
+
+
+def _why_it_stopped(process: subprocess.Popen, errors) -> str:
+    try:
+        process.wait(KILL_GRACE_SECONDS)
+    except subprocess.TimeoutExpired:
+        pass
+    _end_spawned(process)
+    errors.seek(0)
+    lines = errors.read().decode("utf-8", "replace").strip().splitlines()
+    first = printable_line(lines[0]).strip() if lines else ""
+    return first or f"the relay exited with status {process.returncode} before it was ready"
+
+
+def start_relay(
+    ports: Sequence[tuple[int, int]], tag: str, *, timeout: float
+) -> "subprocess.Popen | str":
+    """Start a relay holding each ``(standard, published)`` pair and wait up to *timeout* seconds for ``ready``.
+
+    Returns the started process handle, or a one-line printable reason (the relay's own
+    ``port <n>: ...`` line, its exit status, or a timeout) after ending what it started. The relay
+    gets an environment built from scratch (``PYTHONPATH`` camp's own package root,
+    ``PYTHONSAFEPATH=1``, ``PATH``, ``HOME``), runs from ``/`` in a session of its own, and
+    is started with ``sys.executable`` under the argv0 ``camp-env-relay``. Its stderr goes to a
+    temporary file removed before this returns.
+    """
+    with tempfile.TemporaryFile() as errors:
+        try:
+            process = subprocess.Popen(
+                relay_argv(ports, tag), executable=sys.executable, env=_relay_environment(), cwd="/",
+                start_new_session=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=errors,
+            )
+        except OSError as error:
+            return f"the relay could not be started: {printable_line(str(error))}"
+        try:
+            problem = _await_ready(process, timeout)
+            if problem is None:
+                return process
+            if problem:
+                _end_spawned(process)
+                return printable_line(problem).strip()
+            return _why_it_stopped(process, errors)
+        except BaseException:
+            _end_spawned(process)
+            raise
+        finally:
+            process.stdout.close()
 
 
 def _alive(pid: int) -> bool:

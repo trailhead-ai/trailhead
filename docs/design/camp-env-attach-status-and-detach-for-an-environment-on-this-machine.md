@@ -62,18 +62,24 @@ carries nothing from camp's own install:
 camp-env-relay -m camp.env.relay -N -o Tag=camp-env:<id>:local/<group>/<name> -L 127.0.0.1:<standard>:127.0.0.1:<published> ...
 ```
 
-Its first word is the fixed name `camp-env-relay`, not the interpreter's path, and where camp lives
-is passed to it in its environment, never in its arguments. So a relay started by one camp checkout
-or install, including one whose path contains whitespace, is recognised by `status`, `detach`,
-`ls` and the already-attached refusal run from any directory through any other.
+Its first word is `camp-env-relay`, not the interpreter's path, and where camp lives is passed to
+it in its environment, never in its arguments. On Linux `ps` shows that first word as given. On
+macOS, Homebrew's python (and any venv built from it) re-executes itself, so `ps` shows the first
+word as the interpreter's own path, `<prefix>/Resources/Python.app/Contents/MacOS/Python`, with the
+rest of the arguments unchanged. Either way nothing from camp's own install is in the arguments, so a
+relay started by one camp checkout or install, including one whose path contains whitespace, is
+recognised by `status`, `detach`, `ls` and the already-attached refusal run from any directory
+through any other.
 
-A process is recognised as a relay when it is owned by this user, its first word is
-`camp-env-relay`, its next two are `-m camp.env.relay`, and the words after them read, exactly as a
-forward's options do, as `-N`, at least one `-L` of the same shape and exactly one tag. The tag's
-host is `local`. A process that only mentions the tag (a `grep`), names another module, lacks `-N`,
-or belongs to another user is never counted, reported or ended. Ending a relay is the same as ending
-a forward: the table is read again before each signal, and only a process still carrying the same
-attach id is signalled.
+A process is recognised as a relay when it is owned by this user, its first word is either exactly
+`camp-env-relay` or an absolute interpreter path whose last component starts with `python` or is
+exactly `Python`, its next two words are `-m camp.env.relay`, and the words after them read, exactly
+as a forward's options do, as `-N`, at least one `-L` of the same shape and exactly one tag. A relay's
+`-L` ports must also fall in the relay's own range, 1024 to 65535 (a forward's stay 1 to 65535). The
+tag's host is `local`. A process that only mentions the tag (a `grep`), whose first word is a relative
+`python3`, `bash` or `/usr/bin/env`, names another module, lacks `-N`, or belongs to another user is
+never counted, reported or ended. Ending a relay is the same as ending a forward: the table is read
+again before each signal, and only a process still carrying the same attach id is signalled.
 
 A local attachment is named `local/<group>/<name>` everywhere, the form that attaches it again.
 Messages about a local attachment call it a relay, never a forward.
@@ -83,10 +89,10 @@ Messages about a local attachment call it a relay, never a forward.
 A camp from before local attach recognises only ssh forwards. Run from such a camp, `status` and
 `detach` say `nothing attached` while a relay holds the standard ports, and its attach is refused
 with the port held by the relay's interpreter (`python3`, or `Python` on macOS). To end a relay
-without a camp that recognises it:
+without a camp that recognises it (the pattern matches a relay under either first word):
 
 ```
-pkill -f 'camp-env-relay -m camp.env.relay'
+pkill -f -- '-m camp.env.relay -N -o Tag=camp-env:'
 ```
 
 The release note carries this line too. It is also the way back after reverting to a camp without
