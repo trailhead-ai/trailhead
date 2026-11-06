@@ -110,9 +110,14 @@ class Relay:
         self.open: set[socket.socket] = set()
         self.active = 0
         self.stopping = False
-        self.wake_read, wake_write = socket.socketpair()
+        self.wake_read, self.wake_write = socket.socketpair()
+        self.wake_write.setblocking(False)
+        # The interpreter's C-level handler writes the wake byte the moment a signal lands, so a
+        # signal arriving just before the wait begins still leaves a byte for it to read. The
+        # Python handlers exist only so SIGTERM and SIGINT are caught rather than fatal.
+        self.previous_wakeup_fd = signal.set_wakeup_fd(self.wake_write.fileno(), warn_on_full_buffer=False)
         for which in (signal.SIGTERM, signal.SIGINT):
-            signal.signal(which, lambda *_: wake_write.send(b"x"))
+            signal.signal(which, lambda *_: None)
 
     def bind(self) -> tuple[int, str] | None:
         """None once every port is held, otherwise (port, reason) with nothing held."""

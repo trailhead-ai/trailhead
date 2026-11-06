@@ -14,6 +14,7 @@ from __future__ import annotations
 import errno
 import json
 import os
+import re
 import shutil
 import signal
 import socket
@@ -848,10 +849,13 @@ def test_the_relay_tail_after_another_argv0_is_not_recognised(argv0: str) -> Non
         _row(200, _relay_command(tail="-N -o Tag={tag} -L 10.0.0.1:{standard}:127.0.0.1:{published}")),
         _row(200, _relay_command(tail="-N -o Tag={tag} -L 127.0.0.1:{standard}:10.0.0.1:{published}")),
         _row(200, _relay_command(tail="-N -o Tag={tag}")),
+        _row(200, _relay_command(
+            tail="-N -o Tag=" + _NS + ":abc123:perseus/grp/main -L 127.0.0.1:{standard}:127.0.0.1:{published}"
+        )),
         _row(200, _relay_command(), uid=_UID + 1),
     ],
     ids=["grep-argv0", "other-module", "c-instead-of-m", "no-module", "no-N", "two-tags", "non-loopback-listen",
-         "non-loopback-target", "no-L", "other-uid"],
+         "non-loopback-target", "no-L", "remote-host-tag", "other-uid"],
 )
 def test_a_relay_decoy_is_not_recognised_and_the_others_still_parse(decoy_row: str) -> None:
     found = attachment.attachments(runner=_table(decoy_row, _row(100, _relay_command())))
@@ -1000,10 +1004,9 @@ def test_end_stops_a_relay_on_sigterm_without_sigkill(relays, monkeypatch) -> No
 
 
 def test_end_kills_a_relay_that_ignores_sigterm_after_the_grace(relays, monkeypatch, tmp_path) -> None:
-    # The handler still closes over wake_write, so the wake pair stays open while SIGTERM is ignored.
     deaf = (
-        "signal.signal(which, lambda *_: wake_write.send(b\"x\"))",
-        "signal.signal(which, lambda *_: wake_write and None)",
+        "signal.signal(which, lambda *_: None)",
+        "signal.signal(which, signal.SIG_IGN)",
     )
     root = _copy_of_camp(tmp_path / "deaf", deaf)
     handle, tag, _ = _start(relays, monkeypatch, root=root)
@@ -1025,6 +1028,28 @@ def test_start_relay_with_a_held_port_names_that_port_and_leaves_nothing_behind(
         assert isinstance(result, str) and f"port {held}:" in result and "\n" not in result
         assert _mine(tag) == []
         assert port_is_free(free)
+    finally:
+        holder.close()
+
+
+def test_start_relay_names_the_held_port_even_when_the_interpreter_printed_a_warning_first(
+    relays, monkeypatch, tmp_path
+) -> None:
+    noisy = (
+        "    held = Relay(pairs, max_connections())",
+        "    print('Could not find platform dependent libraries <exec_prefix>', file=sys.stderr)\n"
+        "    held = Relay(pairs, max_connections())",
+    )
+    root = _copy_of_camp(tmp_path / "noisy", noisy)
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen()
+    try:
+        held = holder.getsockname()[1]
+        result, tag, _ = _start(relays, monkeypatch, root=root, ports=[(held, free_ports(1)[0])])
+        assert isinstance(result, str) and "\n" not in result
+        assert re.match(rf"port {held}: ", result), result
+        assert _mine(tag) == []
     finally:
         holder.close()
 
@@ -1089,9 +1114,10 @@ def test_the_relay_gets_a_scratch_environment_and_imports_camp_only_from_its_own
     assert seen["stdin_is_null"]
     assert seen["env"]["PYTHONPATH"] == str(root)
     assert seen["env"]["PYTHONSAFEPATH"] == "1"
+    assert seen["env"]["PYTHONHOME"] == f"{sys.base_prefix}:{sys.base_exec_prefix}"
     assert seen["env"]["HOME"] == os.environ["HOME"]
     assert not {"PYTHONSTARTUP", "CAMP_TEST_SECRET_TOKEN", "GITHUB_TOKEN", "CAMP_ENV_TAG_NAMESPACE"} & set(seen["env"])
-    assert set(seen["env"]) <= {"PYTHONPATH", "PYTHONSAFEPATH", "PATH", "HOME", "LC_CTYPE"}
+    assert set(seen["env"]) <= {"PYTHONPATH", "PYTHONSAFEPATH", "PYTHONHOME", "PATH", "HOME", "LC_CTYPE"}
 
 
 def _open_descriptors() -> int:

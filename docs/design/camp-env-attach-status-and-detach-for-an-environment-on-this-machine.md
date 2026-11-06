@@ -69,7 +69,9 @@ word as the interpreter's own path, `<prefix>/Resources/Python.app/Contents/MacO
 rest of the arguments unchanged. Either way nothing from camp's own install is in the arguments, so a
 relay started by one camp checkout or install, including one whose path contains whitespace, is
 recognised by `status`, `detach`, `ls` and the already-attached refusal run from any directory
-through any other.
+through any other. One limit: `ps` rows are split on whitespace, so on macOS a relay started from an
+interpreter whose own path contains whitespace is never recognised; attach then fails safely and ends
+it through its handle.
 
 A process is recognised as a relay when it is owned by this user, its first word is either exactly
 `camp-env-relay` or an absolute interpreter path whose last component starts with `python` or is

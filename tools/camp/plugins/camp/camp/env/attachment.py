@@ -36,8 +36,14 @@ read by the same option parser, with these differences:
   (macOS re-execs Homebrew's python into ``.../Python.app/Contents/MacOS/Python``, and ``ps`` shows
   that path), so a relative ``python3``, ``bash``, ``/usr/bin/env`` and ``grep`` are decoys;
 - words 1 and 2 are exactly ``-m camp.env.relay``, and options are read from word 3;
+- its tag host is ``local`` (a relay carries only this machine's environments), so a relay-shaped
+  row tagged with any other host is not recognised;
 - every ``-L`` port also satisfies the relay's own rule, ``camp.env.relay.port_in_range``
   (1024-65535), so a relay row with a port below 1024 is not recognised, while a forward keeps 1-65535.
+
+A row is read by splitting ``ps``'s command on whitespace, so on macOS (where ``ps`` shows the
+interpreter's path) a relay started from an interpreter at a path containing whitespace is never
+recognised: attach then fails safely and ends the relay through its handle.
 
 Nothing in a relay's argv names where camp lives: ``start_relay`` passes that in its environment, so
 a relay started by one camp checkout is recognised from any other, whatever its path holds.
@@ -247,6 +253,8 @@ def _recognise(pid: int, command: str, namespace: str) -> Attachment | None:
             return None
         ports.append((standard, published))
     attach_id, host, group, name = parsed
+    if kind == "relay" and host != "local":
+        return None
     return Attachment(pid, host, group, name, tuple(sorted(ports)), attach_id, kind)
 
 
@@ -302,6 +310,7 @@ def _relay_environment() -> dict[str, str]:
     return {
         "PYTHONPATH": _package_root(),
         "PYTHONSAFEPATH": "1",
+        "PYTHONHOME": f"{sys.base_prefix}:{sys.base_exec_prefix}",
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", "/"),
     }
@@ -341,6 +350,9 @@ def _await_ready(process: subprocess.Popen, timeout: float) -> "str | None":
     return None if seen.split(b"\n", 1)[0].strip() == b"ready" else ""
 
 
+_RELAY_PORT_LINE = re.compile(r"port [0-9]+: ")
+
+
 def _why_it_stopped(process: subprocess.Popen, errors) -> str:
     try:
         process.wait(KILL_GRACE_SECONDS)
@@ -349,7 +361,10 @@ def _why_it_stopped(process: subprocess.Popen, errors) -> str:
     end_spawned(process)
     errors.seek(0)
     lines = errors.read().decode("utf-8", "replace").strip().splitlines()
-    first = printable_line(lines[0]).strip() if lines else ""
+    own = next((line for line in lines if _RELAY_PORT_LINE.match(line)), None)
+    if own is None:
+        own = next((line for line in lines if line.strip()), "")
+    first = printable_line(own).strip()
     return first or f"the relay exited with status {process.returncode} before it was ready"
 
 
@@ -361,7 +376,8 @@ def start_relay(
     Returns the started process handle, or a one-line printable reason (the relay's own
     ``port <n>: ...`` line, its exit status, or a timeout) after ending what it started. The relay
     gets an environment built from scratch (``PYTHONPATH`` camp's own package root,
-    ``PYTHONSAFEPATH=1``, ``PATH``, ``HOME``), runs from ``/`` in a session of its own, and
+    ``PYTHONSAFEPATH=1``, ``PYTHONHOME`` this interpreter's base prefixes, ``PATH``,
+    ``HOME``), runs from ``/`` in a session of its own, and
     is started with ``sys.executable`` under the argv0 ``camp-env-relay``. Its stderr goes to a
     temporary file removed before this returns.
     """

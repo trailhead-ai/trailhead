@@ -337,32 +337,47 @@ def _refuse_relay_start(reason: str) -> NoReturn:
     _refuse(f"attach failed: {reason}")
 
 
+def _end_relay(started, attach_id: str) -> "tuple[bool, str | None]":
+    """End the relay this process started, through its handle (which also reaps it), then end
+    anything still carrying *attach_id* as a backstop. Returns ``(ended, problem)``: whether the
+    relay is gone, and what could not be ended (``None`` when nothing is left running). An
+    unreadable process table is not a problem once the handle has ended and reaped the relay."""
+    try:
+        end_spawned(started)
+    except KeyboardInterrupt:
+        _exit_interrupted(False, "the relay it started may still be running; run camp env detach", "relay")
+    try:
+        mine = [a for a in attachments() if a.attach_id == attach_id]
+        if mine and end(mine):
+            return False, "the relay it started could not be ended; run camp env detach"
+    except (Unverifiable, KeyboardInterrupt):
+        pass
+    return True, None
+
+
 def _attach_relay(environment: Environment, attach_id: str, tag: str) -> None:
     """Start the relay for *environment*, find it by *attach_id*, and leave it running. Every way out
-    other than success ends the relay by attach id when the table shows it and always through the
-    handle ``start_relay`` returned, which also reaps it."""
+    other than success ends the relay through the handle ``start_relay`` returned, then by attach id,
+    before saying what happened."""
     try:
         started = start_relay(environment.ports, tag, timeout=RELAY_READY_SECONDS)
     except KeyboardInterrupt:
-        _exit_interrupted(True, None, "relay")
+        _exit_interrupted(False, None, "relay")
     if isinstance(started, str):
         _refuse_relay_start(started)
-    succeeded = False
     try:
-        try:
-            if _wait_for_forward(attach_id) is None:
-                _fail_after_start("the relay started but it is not in the process table", attach_id, "relay")
-            succeeded = True
-        except Unverifiable as error:
-            _fail_after_start(f"could not tell whether the relay started ({error})", attach_id, "relay")
-        except KeyboardInterrupt:
-            _exit_interrupted(*_end_own_or_exit(attach_id, "relay"), "relay")
-        except Exception:
-            _end_own_or_exit(attach_id, "relay")
-            raise
-    finally:
-        if not succeeded:
-            end_spawned(started)
+        if _wait_for_forward(attach_id) is not None:
+            return
+        reason = "the relay started but it is not in the process table"
+    except Unverifiable as error:
+        reason = f"could not tell whether the relay started ({error})"
+    except KeyboardInterrupt:
+        _exit_interrupted(*_end_relay(started, attach_id), "relay")
+    except Exception:
+        _end_relay(started, attach_id)
+        raise
+    _, problem = _end_relay(started, attach_id)
+    _refuse(f"attach failed: {reason}" + (f"; {problem}" if problem else ""))
 
 
 def _attach_forward(hosts, outcome, environment: Environment, attach_id: str, tag: str, timeout: float) -> None:

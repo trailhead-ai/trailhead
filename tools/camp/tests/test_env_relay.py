@@ -192,10 +192,21 @@ def test_one_standard_port_already_held_fails_naming_it_and_frees_the_other(proc
         holder.close()
 
 
-def test_a_failed_bind_releases_the_ports_already_held_in_the_same_process(upstreams):
+@pytest.fixture
+def signals_restored():
+    """Puts back the SIGTERM/SIGINT handlers and the wakeup descriptor a Relay built in this process replaces."""
+    handlers = {which: signal.getsignal(which) for which in (signal.SIGTERM, signal.SIGINT)}
+    wakeup = signal.set_wakeup_fd(-1)
+    signal.set_wakeup_fd(wakeup)
+    yield
+    for which, handler in handlers.items():
+        signal.signal(which, handler)
+    signal.set_wakeup_fd(wakeup)
+
+
+def test_a_failed_bind_releases_the_ports_already_held_in_the_same_process(upstreams, signals_restored):
     (up,) = upstreams(1)
     first, second = free_ports(2)
-    saved = {which: signal.getsignal(which) for which in (signal.SIGTERM, signal.SIGINT)}
     holder = socket.socket()
     holder.bind(("127.0.0.1", second))
     holder.listen(1)
@@ -206,26 +217,20 @@ def test_a_failed_bind_releases_the_ports_already_held_in_the_same_process(upstr
         assert can_bind(first)
     finally:
         holder.close()
-        for which, handler in saved.items():
-            signal.signal(which, handler)
 
 
-def test_every_listener_is_bound_to_loopback_only(upstreams):
+def test_every_listener_is_bound_to_loopback_only(upstreams, signals_restored):
     (up,) = upstreams(1)
     (port,) = free_ports(1)
-    saved = {which: signal.getsignal(which) for which in (signal.SIGTERM, signal.SIGINT)}
     held = relay_module.Relay([(port, up.port)], 4)
     try:
         assert held.bind() is None
         assert [sock.getsockname()[0] for sock, _ in held.listeners] == ["127.0.0.1"]
     finally:
         held.close_listeners()
-        for which, handler in saved.items():
-            signal.signal(which, handler)
 
 
-def test_stop_closes_every_tracked_connection(upstreams):
-    saved = {which: signal.getsignal(which) for which in (signal.SIGTERM, signal.SIGINT)}
+def test_stop_closes_every_tracked_connection(signals_restored):
     held = relay_module.Relay([], 4)
     ours, theirs = socket.socketpair()
     try:
@@ -236,8 +241,6 @@ def test_stop_closes_every_tracked_connection(upstreams):
     finally:
         theirs.close()
         ours.close()
-        for which, handler in saved.items():
-            signal.signal(which, handler)
 
 
 @pytest.mark.parametrize(
@@ -321,6 +324,33 @@ def test_a_signal_exits_0_within_2s_and_frees_every_port(procs, upstreams, which
     assert can_bind(pa) and can_bind(pb)
 
 
+def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
+    """The relay's wait must not be able to miss a signal that lands just before it starts.
+
+    A signal consumed between the interpreter's pending-signal check and the blocking wait
+    left the relay waiting forever in a few percent of runs when many start together, so
+    this starts hundreds of them in batches and signals each the moment it says ready.
+    """
+    batch, batches = 150, 3
+    ports = iter(free_ports(batch * batches))
+    deaf: list[int] = []
+    sent = 0
+    for _ in range(batches):
+        group = [launch(procs, argv_for([(next(ports), 1025)])) for _ in range(batch)]
+        signalled = []
+        for proc in group:
+            assert proc.stdout.readline() == b"ready\n"
+            proc.send_signal(signal.SIGTERM)
+            signalled.append((proc, time.monotonic()))
+        for proc, at in signalled:
+            try:
+                proc.wait(timeout=max(at + 2 - time.monotonic(), 0.01))
+            except subprocess.TimeoutExpired:
+                deaf.append(proc.pid)
+            sent += 1
+    assert deaf == [], f"{len(deaf)} of {sent} relays ignored a SIGTERM sent right after ready: {deaf}"
+
+
 def test_a_signal_closes_an_open_relayed_connection(procs, upstreams):
     (up,) = upstreams(1)
     (port,) = free_ports(1)
@@ -350,6 +380,7 @@ def test_closing_the_parents_read_end_of_stdout_does_not_kill_the_relay(procs, u
     assert proc.poll() is None
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc/<pid>/fd to read a process's descriptors")
 def test_after_ready_descriptors_0_1_and_2_point_at_dev_null(procs, upstreams):
     (up,) = upstreams(1)
     (port,) = free_ports(1)

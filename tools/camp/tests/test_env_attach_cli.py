@@ -860,6 +860,112 @@ def test_an_interrupt_after_the_relay_started_ends_it_names_the_relay_and_exits_
     assert_nothing_held(rig, env)
 
 
+def _remember_relay_handles(env_cli, monkeypatch) -> "list[subprocess.Popen]":
+    handles: list[subprocess.Popen] = []
+    real_start = env_cli.start_relay
+
+    def remember(*args, **kwargs):
+        started = real_start(*args, **kwargs)
+        handles.append(started)
+        return started
+
+    monkeypatch.setattr(env_cli, "start_relay", remember)
+    return handles
+
+
+def test_a_relay_attach_that_cannot_read_the_process_table_ends_the_relay_and_says_only_what_happened(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    real_attachments = env_cli.attachments
+    calls: list[int] = []
+
+    def unreadable_once_the_relay_runs():
+        calls.append(1)
+        if len(calls) > 1:
+            raise _unverifiable("ps broke")
+        return real_attachments()
+
+    monkeypatch.setattr(env_cli, "attachments", unreadable_once_the_relay_runs)
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 1
+    assert capsys.readouterr().err == "camp env: attach failed: could not tell whether the relay started (ps broke)\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    monkeypatch.setattr(env_cli, "attachments", real_attachments)
+    assert_nothing_held(rig, env)
+
+
+def test_a_relay_attach_that_raises_unexpectedly_ends_the_relay_at_once_and_lets_the_error_out(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", _raises(RuntimeError("boom")))
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    started = time.monotonic()
+    with pytest.raises(RuntimeError, match="boom"):
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert time.monotonic() - started < 1.5
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
+def test_an_interrupted_relay_attach_returns_at_once_having_ended_the_relay(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "_wait_for_forward", _raises(KeyboardInterrupt()))
+    handles = _remember_relay_handles(env_cli, monkeypatch)
+
+    started = time.monotonic()
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert time.monotonic() - started < 1.5
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted; the relay it started was ended\n"
+    (handle,) = handles
+    assert handle.returncode is not None
+    assert_nothing_held(rig, env)
+
+
+def test_an_interrupt_while_the_relay_is_starting_does_not_claim_a_relay_was_ended(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = local_rig(rig)
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "start_relay", _raises(KeyboardInterrupt()))
+
+    with pytest.raises(SystemExit) as exit_:
+        env_cli._cmd_env_attach(["local/main"])
+
+    assert exit_.value.code == 130
+    assert capsys.readouterr().err == "camp env: attach interrupted\n"
+    assert_nothing_held(rig, env)
+
+
 def test_a_relay_hidden_from_the_process_table_fails_the_attach_and_is_ended_through_its_handle(
     rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
