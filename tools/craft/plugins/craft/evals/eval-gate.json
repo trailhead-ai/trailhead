@@ -30,6 +30,60 @@
       "measures": [
         "skills/receiving-code-review/SKILL.md"
       ]
+    },
+    "tidy-request-routes-to-tidy-followups": {
+      "measures": [
+        "skills/tidy-followups/SKILL.md",
+        "skills/polish/SKILL.md"
+      ]
+    },
+    "clean-up-request-routes-to-tidy-followups": {
+      "measures": [
+        "skills/tidy-followups/SKILL.md",
+        "skills/polish/SKILL.md"
+      ]
+    },
+    "fix-up-list-routes-to-polish": {
+      "measures": [
+        "skills/polish/SKILL.md",
+        "skills/tidy-followups/SKILL.md"
+      ]
+    },
+    "distill-request-routes-to-distill": {
+      "measures": [
+        "skills/distill/SKILL.md",
+        "skills/tidy-followups/SKILL.md"
+      ]
+    },
+    "slice-spec-complete-hands-off-to-tidy-followups": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "review-hands-a-closed-out-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-stopped-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-complete-unmarked-spec-to-tidy-followups": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-hands-a-running-loop-back-to-slice": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
+    },
+    "review-refuses-a-malformed-spec-id": {
+      "measures": [
+        "skills/review/SKILL.md"
+      ]
     }
   }
 }

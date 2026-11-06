@@ -656,11 +656,13 @@ On the termination path, report the spec complete (or the early stop and what re
 end with its own fully formed next command, never the selection path's `/craft:plan` handoff — the
 operator must always know what to run next:
 
-- **Spec complete:** hand off to distill, fully formed, matching review/SKILL.md's own closing
-  handoff — e.g. "Run this when you're ready to distill this work into the ADR log":
+- **Spec complete:** hand off to tidy-followups, fully formed, bare and fenced on its own line, with
+  a one-line reason: tidy-followups decides which of the spec's follow-ups to do now, and prints the
+  distill command after. Do not print `/craft:distill` here — e.g. "Run this next: tidy-followups
+  decides which of this spec's follow-ups to do now, then prints the distill command":
 
   ```
-  /craft:distill spec/streaming-export
+  /craft:tidy-followups spec/streaming-export
   ```
 
 - **Early stop:** name what remains, then hand off to re-running this skill once it clears — e.g.

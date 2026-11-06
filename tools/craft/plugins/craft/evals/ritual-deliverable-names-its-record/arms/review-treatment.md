@@ -104,11 +104,31 @@ You: [Fix progress indicators]
 
 ## Closing handoff
 
-Review sits before distill in the pipeline (brainstorm → gauntlet → (slice → plan → execute →
-review)* → distill) — merging closes review's own job, not the spec's lifecycle. Under the loop, one
-review closes one slice, not the spec: once the reviewed diff is merged, end with a fully-formed
-handoff back into `/craft:slice` for the spec's next pass — the real spec id, never a
-`<placeholder>`:
+Review sits before tidy-followups and distill in the pipeline (brainstorm → gauntlet → (slice → plan
+→ execute → review)* → tidy-followups → distill) — merging closes review's own job, not the spec's
+lifecycle. Under the loop, one review closes one slice, not the spec.
+
+**Check the spec id first, before it enters any command or printed handoff.** The id is the one the
+change belongs to, and it is operator-supplied. Strip a leading `spec/`, then check what is left
+once: it must match `^[A-Za-z0-9._/-]+$`, must not start with `-`, and must not contain a `..` path
+segment. If it fails any of the three, refuse the handoff: say the spec id failed the shape check,
+run no `lore` command with it, and print no command. It is never substituted, quoted, or escaped in,
+and never replaced by a guessed or placeholder id.
+
+A review with no linked spec (an ad-hoc review, or a standalone task) has no handoff to print; end
+with the review verdict alone.
+
+Once the reviewed diff is merged and the id has passed the check, read the spec record
+(`lore record show spec/<id>`) and end with one fully-formed handoff, the real spec id, never a
+`<placeholder>`. Which one depends on whether the spec's slice loop has ended — it has when the spec
+carries `craft/slice-loop=complete` or `craft/slice-loop=stopped` (per
+`../_shared/status-ownership.md`), or its status is `complete`.
+
+**The slice loop is still running** (it has not ended: no slice-loop marker and a status other than
+`complete`): hand back into `/craft:slice` for the spec's next pass. A `ready` spec is the usual
+case. `/craft:slice` refuses a spec that is not `ready`, so for any other status name slice's own
+remedy for it in prose (a `draft` goes to `/craft:gauntlet` first) instead of printing the fenced
+slice command:
 
 > "Review passed and the change is merged. Run this to choose the next slice."
 
@@ -116,22 +136,25 @@ handoff back into `/craft:slice` for the spec's next pass — the real spec id, 
 /craft:slice spec/streaming-export
 ```
 
-Hand off to distill instead, fully formed the same way, but only once the slice loop reports the
-spec closed out (`craft/slice-loop=complete`, per `../_shared/status-ownership.md`) — never as the
-unconditional next step from a per-slice review:
+**The slice loop has ended:** hand off to tidy-followups, bare and fenced on its own line, so the
+spec's recorded follow-ups are weighed before it is distilled. Never `/craft:distill` —
+tidy-followups prints the build and distill commands once it is done:
 
-> "The slice loop reports spec/streaming-export closed out. Run this when you're ready to distill
-> this work into the ADR log."
+> "The slice loop for spec/streaming-export has ended. Run this to choose which of its follow-ups to
+> do now."
 
 ```
-/craft:distill spec/streaming-export
+/craft:tidy-followups spec/streaming-export
 ```
 
-**This handoff is carryoutable.** `distill/SKILL.md` enumerates `ready` specs carrying the
-`craft/slice-loop` marker `/craft:slice` writes at its terminating condition, and its completion
-gate accepts `craft/slice-loop=complete` — exactly the shape a spec is in when the loop reports it
-closed out. A spec the loop *stopped* early is queued too, and distill records it without claiming
-it complete.
+When the loop *stopped* early (`craft/slice-loop=stopped`), the handoff is the same fenced
+tidy-followups command, plus one prose line — not a second fenced command — saying the slice ritual
+can be re-run once the blocker clears (for example: "Once the blocker is cleared, re-run
+`/craft:slice` on this spec to pick up the unmet criteria.").
+
+**This handoff is carryoutable.** `tidy-followups/SKILL.md` accepts exactly the shapes it is handed
+here — a spec carrying a completed or stopped `craft/slice-loop` marker, or one at status `complete`
+— and refuses any other with `slice-loop-not-ended`.
 
 ## Red Flags
 

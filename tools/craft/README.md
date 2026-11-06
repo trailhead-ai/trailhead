@@ -136,7 +136,8 @@ before closing it, so a later run gathers them again.
 
 **Distill:** `/craft:distill` — condense completed spec/task work into ADRs
 and re-synthesize the area profiles they touch, the backward-distillation
-ritual that closes out a spec's lifecycle.
+ritual that closes out a spec's lifecycle. It follows `/craft:tidy-followups`,
+which gathers the spec's worthwhile follow-ups first.
 
 **Reference:** `/craft:receiving-code-review` — a reference pattern (not a
 dispatchable ritual) for evaluating incoming review feedback — human comments,

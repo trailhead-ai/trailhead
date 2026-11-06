@@ -7,17 +7,15 @@ Each runner case is a directory here, run by `claude plugin eval`. The case shap
 write and run one, and the sandbox are in `docs/eval-protocol.md` — read it before adding
 a case. Results, with per-case evidence and limitations, go in `tools/craft/MANUAL-EVAL.md`.
 
-Eighteen cases here have no `case.yaml`: they are legacy hand-shaped cases. The runner
+The cases here with no `case.yaml` are legacy hand-shaped cases. The runner
 does not run them and the push gate does not gate them. They are listed in
 `_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, which is also where a
 case is removed once it is ported to a runner shape.
 
 ## Runner cases
 
-Three cases are run by `claude plugin eval`:
-`consult-lists-a-sibling-correction-without-writing-it`,
-`accepted-review-correction-is-applied-not-parked` and
-`declined-review-correction-is-left-alone`. The case format, the runner's flags and the
+Every directory here with a `case.yaml` is run by `claude plugin eval`, and `eval-gate.json`
+lists each with the prose it measures. The case format, the runner's flags and the
 live-state snapshot rule are in `docs/eval-protocol.md`, and the graders and lore seeding
 in `tools/lore/plugins/lore/evals/README.md`; this section covers what a craft case needs
 on top.

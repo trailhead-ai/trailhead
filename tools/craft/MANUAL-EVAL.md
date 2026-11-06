@@ -4067,3 +4067,132 @@ The expectation that the closing report prints the re-run line alone on its own 
 Verdicts that moved against the first table, all from the final grader: `refinement-fails` r1 and r2 (old text) now fail F1, as their reports print no re-run line (reported as the old text); nothing else moved, and the
 six first-batch left-out reports still pass the stricter L1. The captures are now 27 MB over 40 runs. Cells not re-run were not measured on the shipped text; the `not-answerable` and `unclosed-fence` rows are measured by no arm,
 as no fixture builds an over-long recommended answer or an unclosed fence. The craft scripts were not frozen with the skill: the script fixes made after the first batch (the display-equality refusal in `answer --recommended`, the fence handling in `check`) post-date it, so the 11 cells not re-run ran the older `answer --recommended` and `check`; `accept-recommended` was not re-run although its write path gained the display-equality refusal; and the fixes of the last pass (an unclosed fence hiding a section from `check`, a recommended answer or a question that sanitizes to nothing) post-date the second batch too. The scripts' own tests pin them; no arm measured them, and none is re-run, as the skill's words are unchanged and these are deterministic script behaviours. See `expected.md` for the disclosures on L1's reason line and A1's "may carry one" clause.
+
+## Case: routing of tidy, clean-up, fix-up-list and distill requests
+
+Four runner cases, each `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--runs 3`, no scaffold, graded by two `tool_used` graders on the `Skill` tool (the expected skill `min: 1`, the confusable skill `min: 0` and `max: 0`). Pre-registered in `expected.md` before any run.
+
+| Case | Expected skill | Confusable skill |
+|---|---|---|
+| `tidy-request-routes-to-tidy-followups` | tidy-followups | polish |
+| `clean-up-request-routes-to-tidy-followups` | tidy-followups | polish |
+| `fix-up-list-routes-to-polish` | polish | tidy-followups |
+| `distill-request-routes-to-distill` | distill | tidy-followups |
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC46 (a request to tidy a spec's recorded follow-ups routes to this ritual) | held: baseline 3 of 3 for the tidy case and 3 of 3 for the clean-up case on the unedited prose, so both are guards, not detectors; 3 of 3 each after the distill description edit | `tidy-request-routes-to-tidy-followups`, `clean-up-request-routes-to-tidy-followups` |
+| AC47 (a request to work through a list of in-session code fix-ups still routes to the polish ritual) | held: baseline 3 of 3 and 3 of 3 after the edit; a guard | `fix-up-list-routes-to-polish` |
+
+**Baseline.** All four cases were green 3 of 3 on the current prose, so polish and tidy-followups were not confused and polish's description was not edited. `distill-request-routes-to-distill` was 3 of 3 before and 3 of 3 after the distill description edit (the handoff clause now names tidy-followups).
+
+**Discrimination check.** The graders of `tidy-request-routes-to-tidy-followups` and `fix-up-list-routes-to-polish` were swapped (each expecting the other skill): both went 0 of 3, every grader failing. The graders were restored and match the registered files exactly.
+
+**Not measured.** One phrasing per case, one model tier, three runs; the signal is the first skill invoked, not what the ritual then did. Cost: baseline 3.99 USD, discrimination check 1.93 USD, final runs 3.98 USD (about 9.9 USD in all). The run traces were not kept.
+
+## Case: slice-spec-complete-hands-off-to-tidy-followups
+
+One runner case, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, pre-registered in `expected.md` before any run. The seeded spec has three criteria, a ledger covering all of them and two `done` slice parents, and the prompt runs `/craft:slice spec/export-invoices`. Graders: an `llm` trace grader on the one next command, a `regex` `not_contains` over the final message for `/craft:distill` printed as a command, and a `regex` on the spec's sidecar for `craft/slice-loop` = `complete`. The runner block of `eval-gate.json` gained exactly four grants for this path: `Bash(*/scripts/ledger_gate.py *)`, `Bash(*/scripts/candidate_set.py *)`, `Bash(mktemp)`, `Bash(mktemp *)`; no deletion grant and no `Write`, so the ritual's temp-file cleanup is denied and harmless.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC44 (the slice loop's spec-complete outcome hands a finished spec to tidy-followups rather than distill) | held: baseline 0 of 3 on the unedited prose (the `llm` and `not_contains` graders failed every run, the marker grader passed every run); 3 of 3 after the edit, every grader green in every run | `slice-spec-complete-hands-off-to-tidy-followups` |
+
+**Baseline.** Red as expected: each run reached spec-complete, wrote the marker, and printed `/craft:distill spec/export-invoices`. Cost 1.82 USD.
+
+**Final runs.** The first batch passed run 1 and then hit the account's usage limit on runs 2 and 3 (an error, not a graded fail; 1.07 USD). The full 3-run batch was re-run after the reset: 3 of 3, 1.81 USD, about 0.6 USD a run.
+
+**Grader checks.** The `not_contains` pattern was checked before the baseline against a hand-written correct message that mentions distill only in prose (no match) and against the old handoff, fenced and bare (match both). The marker pattern matches the sidecar after the marker is written, and not the seeded sidecar or one marked `stopped`. The marker grader is green on both arms by design; it shows each run got to the path the handoff belongs to.
+
+**Drive.** Drive's spec-complete outcome reports slice's completion report verbatim (`skills/drive/SKILL.md` step 6), so it inherits the new handoff and needs no edit. Not run here.
+
+**Widened grants.** The three previously gated craft cases were run once each (`--runs 1`) with the widened block: `declined-review-correction-is-left-alone` 3 of 3 graders; `consult-lists-a-sibling-correction-without-writing-it` first run failed `correction-listed-apart-with-fix` (3 of 4), then passed 4 of 4 on a second run with the widened grants and on a control run with the original four grants; `accepted-review-correction-is-applied-not-parked` failed 4 of 5 graders (score 0.2) with the widened grants and failed the same way (0.2) with the original four, so that failure does not come from the grants. One run per case; cost about 1.0 USD for the widened batch, 1.2 USD for the controls.
+
+**Not measured.** One spec, one phrasing, one model tier; drive's report; the early-stop handoff (unchanged).
+
+## Case: review hands a spec whose slice loop has ended to tidy-followups
+
+Four runner cases, each `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, pre-registered in `expected.md` before any run. Each seeds the spec `export-invoices` (criteria AC1 to AC3 and a `## Slices` ledger); the prompt says the reviewed change passed and is merged and asks for review's closing handoff only. They differ only in the seeded spec; the marker is set at scaffold time with `./lore record create --label`.
+
+| Case | Seeded spec | Expected handoff |
+|---|---|---|
+| `review-hands-a-closed-out-spec-to-tidy-followups` | `ready`, `craft/slice-loop=complete`, ledger covers AC1 to AC3 | `/craft:tidy-followups spec/export-invoices` |
+| `review-hands-a-stopped-spec-to-tidy-followups` | `ready`, `craft/slice-loop=stopped`, AC3 uncovered | the same fenced command, plus slice re-run in prose only |
+| `review-hands-a-complete-unmarked-spec-to-tidy-followups` | status `complete`, no marker | `/craft:tidy-followups spec/export-invoices` |
+| `review-hands-a-running-loop-back-to-slice` | `ready`, no marker, AC1 only covered | `/craft:slice spec/export-invoices` (negative control) |
+
+Graders: an `llm` trace grader on the one next command and a `regex` `not_contains` over the final message (distill printed as a command; for the stopped case distill or slice printed as a command; for the running case any `/craft:tidy-followups`). The `not_contains` patterns were checked before the baseline against hand-written correct final messages (no match) and against the wrong handoffs (match).
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| AC45 (review's closing handoff sends a spec whose slice loop has ended to tidy-followups) | held: baseline 1 of 3 closed-out, 1 of 3 stopped, 0 of 3 complete-unmarked on the unedited prose; 3 of 3 on all three after the edit | the three ended-loop cases |
+| Running loop still hands back to slice (negative control) | held: 3 of 3 before and 3 of 3 after the edit; a guard, not a detector | `review-hands-a-running-loop-back-to-slice` |
+
+**Baseline (unedited prose).** Closed-out: runs 1 and 2 printed `/craft:distill spec/export-invoices` (both graders failed); run 3 passed because the agent read the slice and distill skills, saw they point to tidy-followups, and said review's handoff was out of date, so that pass is the agent working around the stale prose. Stopped: runs 1 and 3 handed back to `/craft:slice` only (both graders failed); run 2 passed the same way, from other skills. Complete-unmarked: 0 of 3; every run refused to give a handoff because status `complete` with no marker matches neither of review's branches (the `not_contains` grader was green there, the `llm` grader red, so each grader fails for its own reason across the case set). Running loop: green 3 of 3.
+
+**Grader defect found in the baseline.** The first running-loop baseline scored run 2 as a fail (`next-command-is-slice`, 3 FAIL votes) on a correct message that printed the slice command and said "not `/craft:distill`" in prose. The `llm` wording was loosened on all four cases to allow a command named in prose as not being the next step, and the pre-registered `expected.md` of each case was edited to match after that first run. The running-loop baseline was re-run (3 of 3, below). The other three baselines were not re-run: their red runs printed the wrong command as the next step or refused, which the loosened wording still fails.
+
+**After the edit.** 3 of 3 on all four cases, every grader green in every run. Stopped runs each printed the one fenced tidy-followups command and one prose line re-running `/craft:slice` once the failure-events API ships.
+
+**Mutation check of the negative control.** The running-loop prose was changed to hand a running loop to tidy-followups (`--runs 2`): the `no-tidy-followups-named` `not_contains` failed both runs (score 0.5 each), where the agent printed `/craft:slice` but quoted the tidy-followups command in prose; the `llm` grader stayed green, so the regex is the grader that binds that regression. The prose was restored byte-for-byte.
+
+**Spec-id shape check.** Not graded by any case: a runner case seeds a vault through the CLI, whose slugs are restricted to the same characters, so no case can seed an id that fails `^[A-Za-z0-9._/-]+$`. The check is covered by the prose alone and is unverified by a run.
+
+**Live arm.** `evals/ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`.
+
+**Not measured.** One spec, one phrasing, one model tier, three runs; a spec reached with the code-reviewer dispatch. Cost: baselines about 4.2 USD (including the re-run), after-edit runs about 2.7 USD, mutation check 0.5 USD.
+
+
+## Case: pipeline descriptions place tidy-followups before distill
+
+Re-check after the body edits (distill's pipeline sentence and the README's Distill entry). Each case run once (`--runs 1`), `--ablation none`, model `claude-opus-5-5`, `--scaffold`, grants as craft's `eval-gate.json` runner block. These are body sentences, not triggers, so no new case and no baseline.
+
+### Results
+
+| Case | Verdict | Pointer |
+|---|---|---|
+| Distill request still routes to distill (task 1) | held: 1 of 1, both graders green | `distill-request-routes-to-distill` |
+| Complete spec hands off to tidy-followups from slice (task 2) | held: 1 of 1, all three graders green | `slice-spec-complete-hands-off-to-tidy-followups` |
+| Closed-out spec hands off to tidy-followups from review (task 3) | held: 1 of 1, both graders green | `review-hands-a-closed-out-spec-to-tidy-followups` |
+
+**Live arm.** `evals/ritual-deliverable-names-its-record/arms/distill-rule-only.md` was rebuilt from the edited `distill/SKILL.md`. Frozen arms and earlier results in this file were left unchanged on purpose.
+
+**Not measured.** One run per case, one model tier. Each case was run twice (the first batch's scores were not read before its output directory was cleared); both runs passed. Cost: about 1.0 USD per batch.
+
+## Case: review refuses a malformed spec id (review-fix pass)
+
+Fix pass on the review closing handoff after the whole-change review. One new runner case, `review-refuses-a-malformed-spec-id`, plus re-runs of the four existing review cases. Each batch `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants as craft's `eval-gate.json` runner block. `expected.md` was committed alone before any run. The case reuses the closed-out scaffold (a real `ready` spec `export-invoices`, `craft/slice-loop=complete`); its prompt names the spec as `spec/../export-invoices`, which passes the character-class regex and fails the `..` segment rule.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| Review checks the spec id once, before it enters a command or a handoff, and refuses a malformed one without running `lore` or printing a command | held: baseline 0 of 3 on the unfixed prose; 3 of 3 after the fix | `review-refuses-a-malformed-spec-id` |
+| The four existing review cases still hold after the prose and grader edits | held: 3 of 3 each, every grader green | the four `review-hands-a-*` cases |
+
+**Baseline (unfixed prose).** 0 of 3, each run 0.33. `no-command-run-with-the-id` (`tool_used`, `Bash`, `max: 0`) and `refuses-and-prints-no-command` (`llm`) failed in every run; `no-craft-command-line` passed. The unedited prose has the agent read the spec before it states the check, so the id reached a command. Cost 0.64 USD.
+
+**After the fix, first batch.** 0 of 3, each run 0.67: the `tool_used` grader went green in all three (no Bash call carried the id), but the `llm` grader failed three correct refusals. Each refusal said the id failed the shape check, ran nothing and printed no command, and then told the operator to re-run review with the real id, giving `spec/export-invoices` as an example in prose. The grader wording ("fail on a corrected or guessed id") read that as a fail. Cost 0.59 USD.
+
+**Grader defect and edit.** The `llm` wording and the matching row of the pre-registered `expected.md` were edited after that result, to fail an id used in a *printed command* and to allow a prose suggestion of the real id. This is a post-hoc edit to a pre-registered case, made after seeing a run; the baseline was red on the `tool_used` grader independently of it. The edit was committed apart from the case.
+
+**After the fix, second batch.** 3 of 3, all three graders green in every run. Cost 0.59 USD.
+
+**Re-runs after the prose fix** (the fix also reworded the reason line, stated the running-loop branch for every non-ended status, and tightened the ended-loop `llm` graders): `review-hands-a-closed-out-spec-to-tidy-followups` 3 of 3, `review-hands-a-stopped-spec-to-tidy-followups` 3 of 3, `review-hands-a-complete-unmarked-spec-to-tidy-followups` 3 of 3, `review-hands-a-running-loop-back-to-slice` 3 of 3. Costs about 0.69 USD for each ended-loop case and 0.68 for the running case.
+
+**Ended-loop grader tightening.** The three ended-loop `llm` graders previously let a command offered inside a sentence pass (the regex is line-anchored and the wording allowed prose mentions). They now fail any `/craft:distill`, `/craft:slice` or `/craft:plan` offered to run next whether fenced, alone on a line or in a sentence, and allow a command named as not the next step; the stopped case allows the slice re-run only as the prose alternative. Checked before the re-runs by giving the new wording and a hand-written message to the judge model (`claude -p`, two votes each; this is not the runner's own judge): a correct message ending in "the next step is not `/craft:distill`" passed 2 of 2 on closed-out and complete-unmarked; a message adding "Once that is done, run `/craft:distill spec/export-invoices`" failed 2 of 2 on both; the stopped grader passed a correct message with the slice re-run in prose 2 of 2 and failed one saying "run distill; or run `/craft:slice` right away" 2 of 2. `expected.md` of those cases was not edited; its clauses still hold, the graders are stricter than the wording there.
+
+**Corrections to earlier entries in this file.**
+- The task-4 re-check ran only `review-hands-a-closed-out-spec-to-tidy-followups` of task 3's three ended-loop cases, not all three.
+- The earlier claim that no run can verify the spec-id check was wrong: a spec id with a `..` segment is a prompt value, not a seeded slug, so the case above is that run. It exercises only the `..` rule; the character class and the leading `-` are not separately exercised.
+- `portage eval-gate plan --repo .` for this branch now selects 10 cases: `clean-up-request-routes-to-tidy-followups`, `distill-request-routes-to-distill`, `fix-up-list-routes-to-polish`, `review-hands-a-closed-out-spec-to-tidy-followups`, `review-hands-a-complete-unmarked-spec-to-tidy-followups`, `review-hands-a-running-loop-back-to-slice`, `review-hands-a-stopped-spec-to-tidy-followups`, `review-refuses-a-malformed-spec-id`, `slice-spec-complete-hands-off-to-tidy-followups`, `tidy-request-routes-to-tidy-followups` (max cost 35.0 USD).
+
+**Live arm.** `ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`. No other live arm sources `review/SKILL.md` or `_shared/security.md`; `execute-rule-only.md` sources `_shared/execute.md`, not security.
+
+**Not measured.** One malformed id, one model tier, three runs; the early-stop slice/review divergence is unchanged (slice's handoff on a stopped loop is a logged follow-up). Cost: baseline 0.64, fix batches 1.18, re-runs about 2.75 USD.
