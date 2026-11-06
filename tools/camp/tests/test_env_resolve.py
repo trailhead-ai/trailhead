@@ -171,7 +171,7 @@ def test_match_here_and_on_a_host_is_ambiguous_naming_this_machine():
     reads = Reads(local=envs(("levr", "main")), andromeda=envs(), perseus=envs(("levr", "main")))
     result = run("main", reads)
     assert result == Refused(
-        "main matches more than one environment: local/main (this machine; cannot be attached yet),"
+        "main matches more than one environment: local/main,"
         " perseus/main; attach one of those"
     )
 
@@ -306,19 +306,78 @@ def test_undeclared_host_is_refused_naming_the_declared_hosts_and_reads_nothing(
 
 # -- this machine --------------------------------------------------------------------------------
 
-NOT_YET = "attaching an environment on this machine is not supported yet"
+LOCAL_ENV = Environment("levr", "main", "running")
 
 
-@pytest.mark.parametrize("text", ["local/main", "local/levr/main", "box/main", "box/levr/main"])
-def test_this_machine_by_either_name_is_refused_without_reading(text):
-    reads = Reads()
-    assert run(text, reads, self_name="box", hosts=HOSTS) == Refused(NOT_YET)
-    assert (reads.local_calls, reads.remote_calls) == (0, [])
+@pytest.mark.parametrize("text", ["local/main", "box/main", "local/levr/main", "box/levr/main"])
+def test_this_machine_by_either_name_resolves_through_read_local_alone(text):
+    reads = Reads(local=envs(("levr", "main")))
+    assert run(text, reads, self_name="box") == Resolved("local", LOCAL_ENV)
+    assert (reads.local_calls, reads.remote_calls) == (1, [])
 
 
-def test_bare_name_found_only_here_is_refused_as_not_supported_yet():
+def test_this_machine_host_form_picks_the_matching_group_only():
+    reads = Reads(local=envs(("levr", "main"), ("acme", "main")))
+    assert run("local/acme/main", reads) == Resolved("local", Environment("acme", "main", "running"))
+
+
+def test_this_machine_host_form_in_two_groups_is_ambiguous_naming_both_local_forms():
+    reads = Reads(local=envs(("levr", "main"), ("acme", "main")))
+    assert run("local/main", reads) == Refused(
+        "main matches more than one environment on this machine: local/levr/main, local/acme/main;"
+        " attach one of those"
+    )
+
+
+def test_this_machine_host_form_not_found_says_this_machine():
+    reads = Reads(local=envs(("levr", "other")))
+    assert run("local/main", reads) == Refused(
+        "no environment named main on this machine; run camp env ls to see what is running"
+    )
+    assert run("local/acme/main", reads) == Refused(
+        "no environment named acme/main on this machine; run camp env ls to see what is running"
+    )
+
+
+@pytest.mark.parametrize(
+    ("inventory", "message"),
+    [
+        (MachineInventory(DOCKER_NOT_RUNNING), "Docker is not running on this machine"),
+        (MachineInventory(DOCKER_NOT_INSTALLED), "Docker is not installed on this machine"),
+        (unreadable("line 2: bad"), "this machine could not be read: line 2: bad"),
+    ],
+)
+def test_this_machine_host_form_that_cannot_answer_says_why(inventory, message):
+    reads = Reads(local=inventory)
+    assert run("local/main", reads) == Refused(message)
+    assert run("box/main", reads, self_name="box") == Refused(message)
+
+
+def test_bare_name_found_only_here_resolves_to_local():
     reads = Reads(local=envs(("levr", "main")), andromeda=envs(), perseus=envs())
-    assert run("main", reads) == Refused(NOT_YET)
+    assert run("main", reads) == Resolved("local", LOCAL_ENV)
+
+
+def test_bare_name_here_and_on_a_host_lists_this_machine_as_local_form():
+    reads = Reads(local=envs(("levr", "main")), andromeda=envs(), perseus=envs(("levr", "main")))
+    assert run("main", reads) == Refused(
+        "main matches more than one environment: local/main, perseus/main; attach one of those"
+    )
+
+
+def test_bare_name_in_two_groups_here_lists_local_group_forms():
+    reads = Reads(local=envs(("levr", "main"), ("acme", "main")), andromeda=envs(), perseus=envs())
+    assert run("main", reads) == Refused(
+        "main matches more than one environment: local/levr/main, local/acme/main; attach one of those"
+    )
+
+
+def test_unreadable_refusal_offers_this_machine_when_it_has_the_name():
+    reads = Reads(local=envs(("levr", "main")), andromeda=envs(), perseus=unreadable("no answer within 30s"))
+    assert run("main", reads) == Refused(
+        "main cannot be resolved while perseus could not be read (no answer within 30s);"
+        " name the host, as local/main or perseus/main"
+    )
 
 
 # -- printable -----------------------------------------------------------------------------------
@@ -496,7 +555,7 @@ def test_an_ambiguous_match_names_this_machine_then_env_hosts_order_whatever_ord
     result = run_concurrent("main", gate)
     assert gate.finished == ["local", "perseus", "andromeda"], f"reads that never started: {gate.never_started}"
     assert result == Refused(
-        "main matches more than one environment: local/main (this machine; cannot be attached yet),"
+        "main matches more than one environment: local/main,"
         " andromeda/main, perseus/main; attach one of those"
     )
 

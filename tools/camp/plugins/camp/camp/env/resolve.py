@@ -15,8 +15,9 @@ attached in any form, and ``env_hosts`` could not name it either.
   ``env_host_names()``; ``self_name`` is ``self_host_name()`` (or ``None``).
 * ``read_local()`` and ``read_remote(host_name)`` each return a ``read.MachineInventory``.
   ``read_remote`` takes the declared host's name; the caller binds the host, timeout and runner.
-* A host form reads that declared host alone. A bare name reads this machine and the ``opted_in``
-  hosts other than ``self_name`` (this machine, already read), never any other declared host. A bare
+* A host form reads that host alone — ``local`` or ``self_name`` through ``read_local`` (resolving to
+  host ``local``), a declared host through ``read_remote``. A bare name reads this machine and the
+  ``opted_in`` hosts other than ``self_name`` (this machine, already read), never any other declared host. A bare
   name's reads run at the same time through ``read.read_concurrently``; ``processes`` is the
   ``read.ProcessSet`` whose runner the callables use, so leaving the reads early (an interrupt) ends
   every child they started. Machines are named in this-machine-then-``opted_in`` order whatever order
@@ -26,7 +27,7 @@ attached in any form, and ``env_hosts`` could not name it either.
 ``name_host(text, *, hosts, self_name)`` classifies host text on its own — this machine (``local`` or
 ``self_name``), a declared host, an undeclared well-formed name, or text breaking the host-name rule
 (``problem`` says which part) — and refuses nothing; the caller decides what a class means. Attach
-refuses this machine as not supported yet; ``camp env ls`` reads it. ``undeclared_host_message`` is the
+reads this machine through ``read_local``; ``camp env ls`` reads it too. ``undeclared_host_message`` is the
 refusal both give for an undeclared name.
 
 ``Refused.message`` is the whole text, one or more lines, without the ``camp env: `` prefix: the
@@ -55,7 +56,6 @@ THIS_MACHINE = "this machine"
 DECLARED = "declared"
 UNDECLARED = "undeclared"
 INVALID = "invalid"
-_NOT_YET = "attaching an environment on this machine is not supported yet"
 _HOST_RULE = (
     "the host is not a valid host name: host names must be lowercase letters, digits and -, "
     "starting with a letter or digit"
@@ -195,29 +195,33 @@ def _resolve_host(
     *,
     hosts: Mapping[str, Host],
     self_name: str | None,
+    read_local: Callable[[], MachineInventory],
     read_remote: Callable[[str], MachineInventory],
     hosts_file: str,
 ) -> Resolved | Refused:
     host = target.host
     assert host is not None
     named = name_host(host, hosts=hosts, self_name=self_name)
-    if named.kind == THIS_MACHINE:
-        return Refused(_NOT_YET)
     if named.kind == UNDECLARED:
         return Refused(undeclared_host_message(host, hosts, hosts_file))
-    inventory = read_remote(host)
+    if named.kind == THIS_MACHINE:
+        host = LOCAL
+        inventory = read_local()
+    else:
+        inventory = read_remote(host)
+    where = _label(host)
     if inventory.kind == UNREADABLE:
-        return Refused(f"{host} could not be read: {_reason(inventory)}")
+        return Refused(f"{where} could not be read: {_reason(inventory)}")
     note = _docker_note(host, inventory)
     if note is not None:
         return Refused(note)
     matches = _matches(inventory, target)
     if not matches:
-        return Refused(f"no environment named {_qualified(target)} on {host}; {_LS_POINTER}")
+        return Refused(f"no environment named {_qualified(target)} on {where}; {_LS_POINTER}")
     if len(matches) > 1:
         forms = _shortest_forms(host, matches, target.name)
         return Refused(
-            f"{target.name} matches more than one environment on {host}: {', '.join(forms)};"
+            f"{target.name} matches more than one environment on {where}: {', '.join(forms)};"
             " attach one of those"
         )
     return Resolved(host, matches[0])
@@ -246,7 +250,7 @@ def _resolve_bare(
 
     if unread:
         causes = _and([f"{_label(m)} could not be read ({_reason(inv)})" for m, inv in unread])
-        forms = [f"{m}/{name}" for m, _ in found if m != LOCAL]
+        forms = [f"{m}/{name}" for m, _ in found]
         forms += [f"{m}/{name}" for m, _ in unread if m != LOCAL and f"{m}/{name}" not in forms]
         forms = forms or [f"{m}/{name}" for m in remote]
         offer = f"name the host, as {_words(forms)}" if forms else f"name a host, as <host>/{name}"
@@ -257,16 +261,11 @@ def _resolve_bare(
         return Refused(_not_found_bare(name, read, hosts, remote, self_name))
     if total == 1:
         machine, matches = found[0]
-        if machine == LOCAL:
-            return Refused(_NOT_YET)
         return Resolved(machine, matches[0])
 
     forms: list[str] = []
     for machine, matches in found:
-        shown = _shortest_forms(machine, matches, name)
-        if machine == LOCAL:
-            shown = [f"{form} (this machine; cannot be attached yet)" for form in shown]
-        forms.extend(shown)
+        forms.extend(_shortest_forms(machine, matches, name))
     return Refused(f"{name} matches more than one environment: {', '.join(forms)}; attach one of those")
 
 
@@ -302,7 +301,12 @@ def resolve(
     """Resolve ``target`` to one environment, reading only the machines the target needs."""
     if target.host is not None:
         return _resolve_host(
-            target, hosts=hosts, self_name=self_name, read_remote=read_remote, hosts_file=hosts_file
+            target,
+            hosts=hosts,
+            self_name=self_name,
+            read_local=read_local,
+            read_remote=read_remote,
+            hosts_file=hosts_file,
         )
     return _resolve_bare(
         target,
