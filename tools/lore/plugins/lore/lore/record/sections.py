@@ -119,13 +119,45 @@ def _removed_lines(kind: str, lines: list[str], masked: list[bool]) -> set[int]:
         if len(starts) > 1 and not section.repeatable:
             continue
         for start in starts:
-            end = len(lines)
-            for j in range(start + 1, len(lines)):
-                if not masked[j] and _ATX_HEADING_RE.match(_content(lines[j])):
-                    end = j
-                    break
-            removed.update(range(start, end))
+            removed.update(range(start, _section_end(lines, masked, start)))
     return removed
+
+
+def _section_end(lines: list[str], masked: list[bool], start: int) -> int:
+    for j in range(start + 1, len(lines)):
+        if not masked[j] and _ATX_HEADING_RE.match(_content(lines[j])):
+            return j
+    return len(lines)
+
+
+def _section_text(body: str, heading: str) -> str | None | bool:
+    """The text of *heading*'s section in *body*; ``None`` when absent, ``False`` when ambiguous."""
+    lines = _split_lines(body)
+    masked = _mask(lines)
+    starts = _heading_lines(lines, masked, Section(heading, False).heading_re)
+    if not starts:
+        return None
+    if len(starts) > 1:
+        return False
+    return "".join(lines[starts[0]:_section_end(lines, masked, starts[0])])
+
+
+def section_rewritten(before: str, after: str, heading: str) -> bool:
+    """Whether the section under *heading* in *before* is changed or removed by *after*.
+
+    A section absent from *before* has nothing to lose, so creating it is not a
+    rewrite. Trailing blank lines before the next heading are not content. A
+    heading that appears more than once outside fences and comments cannot be
+    located, so such a section counts as rewritten whenever the bodies differ
+    at all.
+    """
+    old = _section_text(before, heading)
+    if old is None:
+        return False
+    new = _section_text(after, heading)
+    if old is False or new is False:
+        return before != after
+    return new is None or old.rstrip() != new.rstrip()
 
 
 def authored_content(kind: str, body: str) -> str:

@@ -1898,6 +1898,13 @@ def _cmd_record_update(args) -> int:
     the in-place correction path.
     The read / body-resolve / guard step is :func:`_read_apply_and_guard`, shared
     with ``record amend``.
+
+    ``--base REVISION`` is the stale-write handshake: inside the re-runnable read
+    half (so the relocation path re-checks it) the stored body's revision is
+    compared with it by :func:`_check_base_revision`, and a mismatch writes
+    nothing. It is required when the update edits or removes the existing
+    ``## Follow-ups`` section of a spec at a frozen status (:func:`_require_base_for_follow_ups`); any other
+    update may omit it.
     """
     from contextlib import ExitStack
 
@@ -2017,7 +2024,10 @@ def _cmd_record_update(args) -> int:
                         ),
                     )
 
-                sidecar, new_body, notices, _ = _read_apply_and_guard(
+                base = getattr(args, "base", None)
+                _check_base_revision(location, base, required=False, command="update")
+
+                sidecar, new_body, notices, existing_body = _read_apply_and_guard(
                     location,
                     stdin_text=stdin_text,
                     use_diff=use_diff,
@@ -2028,6 +2038,7 @@ def _cmd_record_update(args) -> int:
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
                     parent_supplied=getattr(args, "parent", None) is not None,
                 )
+                _require_base_for_follow_ups(location, base, existing_body, new_body)
                 return sidecar, new_body, notices
 
             sidecar, new_body, guard_notices = read_apply_and_guard()
@@ -2437,7 +2448,17 @@ _SESSION_AMEND_REFUSAL = (
 )
 
 
-def _check_base_revision(location, base: str | None, *, required: bool) -> None:
+def _revision_hint(location) -> str:
+    return (
+        f"read the current revision with `lore record show {location.record_id}` "
+        "(`--json` carries it as `revision`; plain show prints `revision: <hex>` "
+        "on stderr)"
+    )
+
+
+def _check_base_revision(
+    location, base: str | None, *, required: bool, command: str = "amend"
+) -> None:
     """Refuse a write composed against a body that is no longer the stored one.
 
     MUST be called with the record's vault write lock held, after the implicit
@@ -2445,15 +2466,12 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
     is the revision the caller read (``lore record show``); *required* is true
     when the new body is a full replacement, which would otherwise silently
     overwrite a change made after the read. Raises :class:`_UpdateAborted` after
-    printing the refusal; returns when the write may proceed.
+    printing the refusal; returns when the write may proceed. *command* (``amend``
+    or ``update``) picks the retry remedy the stale refusal closes with.
     """
     from ..record import store as record_store_mod
 
-    show_hint = (
-        f"read the current revision with `lore record show {location.record_id}` "
-        "(`--json` carries it as `revision`; plain show prints `revision: <hex>` "
-        "on stderr)"
-    )
+    show_hint = _revision_hint(location)
     if base is None:
         if required:
             print(
@@ -2496,12 +2514,57 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
         )
     else:
         last_changed = _neutral(f"It was last changed by {updated_by} at {updated_at}.")
+    remedy = (
+        "reapply your change to what you read, and retry the update with the "
+        "new revision."
+        if command == "update"
+        else "reapply your correction to what you read, and amend again."
+    )
     print(
         f"error: {location.record_id} changed after you read it: --base is "
         f"{base} but the stored body's revision is {current}. "
         f"{last_changed}{history_hint} Nothing was "
-        f"written. To proceed: {show_hint}, reapply your correction to what "
-        "you read, and amend again.",
+        f"written. To proceed: {show_hint}, {remedy}",
+        file=sys.stderr,
+    )
+    raise _UpdateAborted()
+
+
+_FOLLOW_UPS_HEADING = "## Follow-ups"
+
+
+def _require_base_for_follow_ups(
+    location, base: str | None, existing_body: str, new_body: str
+) -> None:
+    """Refuse a frozen spec's ``## Follow-ups`` rewrite that names no ``--base``.
+
+    The section is a ledger other writers append to, and a body composed from an
+    earlier read would silently erase their entry. Creating the section where the
+    stored body has none loses nothing, so it needs no ``--base``. MUST be called with the write
+    lock held; raises :class:`_UpdateAborted` after printing the refusal.
+    """
+    from ..record import guards as guards_mod
+    from ..record.sections import section_rewritten
+
+    if base is not None or location.kind.casefold() != "spec":
+        return
+    prior_status = None
+    if location.sidecar_path.exists():
+        try:
+            side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            side = {}
+        if isinstance(side, dict):
+            prior_status = side.get("status")
+    if prior_status not in guards_mod.FROZEN_STATUSES["spec"]:
+        return
+    if not section_rewritten(existing_body, new_body, _FOLLOW_UPS_HEADING):
+        return
+    print(
+        f"error: --base is required when an update rewrites the "
+        f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec: pass the "
+        f"revision of the body you composed against. {_revision_hint(location)}, "
+        "then update with --base <revision>. Nothing was written.",
         file=sys.stderr,
     )
     raise _UpdateAborted()
@@ -2980,6 +3043,16 @@ def add_record_subparser(sub) -> None:
                     + _UNSET_PAIRING_RULE,
         epilog="Group-default scope routing applies to 'create' only; "
                "update (and delete) are unaffected and never seed scopes from a camp group. "
+               "--base: the stale-write handshake. 'lore record show' gives the "
+               "body's revision ('revision' in --json, 'revision: <hex>' on "
+               "stderr). With --base the update is refused, writing nothing, if "
+               "the stored body's revision differs (re-read, reapply, retry the "
+               "update). --base is required when the update edits or removes the "
+               "existing '## Follow-ups' section of a spec at a frozen status (ready, "
+               "planned, complete, superseded, dropped): a body composed from an "
+               "earlier read would erase another writer's entry. Other updates "
+               "(a '## Slices' append that leaves '## Follow-ups' unchanged, a "
+               "draft spec) need no --base. "
                + _LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_update.add_argument(
@@ -2991,6 +3064,14 @@ def add_record_subparser(sub) -> None:
         "--diff", action="store_true",
         help="Treat piped stdin as a unified diff. Any non-applying hunk leaves "
              "the record unmodified and prints the rejects to stderr.",
+    )
+    p_record_update.add_argument(
+        "--base", dest="base", default=None, metavar="REVISION",
+        help="The body revision you composed against (from 'lore record show': "
+             "'revision' in --json, 'revision: <hex>' on stderr). The update is "
+             "refused, writing nothing, if the stored body's revision differs. "
+             "Required when the update edits or removes a frozen spec's '## Follow-ups' "
+             "section.",
     )
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",

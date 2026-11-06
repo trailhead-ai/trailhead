@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lore.record.sections import authored_content
+from lore.record.sections import authored_content, section_rewritten
 from lore.record.store import neutralize_fences
 
 
@@ -284,3 +284,51 @@ def test_followups_section_in_a_task_is_authored():
     before = "# Task\n\nintro\n\n## Follow-ups\n\n- a\n"
     after = before.replace("- a", "- b")
     assert not same("task", before, after)
+
+
+FU = "## Follow-ups"
+FU_BODY = PLAN + "\n## Follow-ups\n\n- F1 one\n"
+
+
+def test_section_rewritten_is_false_for_identical_bodies_and_when_absent_in_both():
+    assert not section_rewritten(FU_BODY, FU_BODY, FU)
+    assert not section_rewritten(PLAN, PLAN + "\nmore intro\n", FU)
+
+
+def test_section_rewritten_sees_an_existing_section_edited_extended_or_removed():
+    assert section_rewritten(FU_BODY, FU_BODY + "- F2 two\n", FU)
+    assert section_rewritten(FU_BODY, FU_BODY.replace("F1 one", "F1 uno"), FU)
+    assert section_rewritten(FU_BODY, PLAN, FU)
+
+
+def test_section_rewritten_is_false_when_the_section_is_created_from_nothing():
+    assert not section_rewritten(PLAN, FU_BODY, FU)
+
+
+def test_section_rewritten_ignores_blank_lines_before_the_next_section():
+    grown = FU_BODY + "\n## Slices\n\n- a\n"
+    assert not section_rewritten(FU_BODY, grown, FU)
+    assert not section_rewritten(FU_BODY.rstrip("\n"), FU_BODY, FU)
+
+
+def test_section_rewritten_ignores_edits_outside_the_section_and_other_sections():
+    other = FU_BODY + "\n## Slices\n\n- a\n"
+    assert not section_rewritten(other, other.replace("- a", "- b"), FU)
+    assert not section_rewritten(FU_BODY, FU_BODY.replace("Intent", "Changed intent"), FU)
+
+
+def test_section_rewritten_ends_the_section_at_the_next_heading():
+    before = FU_BODY + "\n## Notes\n\nx\n"
+    assert not section_rewritten(before, before.replace("x", "y"), FU)
+
+
+def test_section_rewritten_is_ambiguity_closed_when_a_heading_repeats_and_bodies_differ():
+    twice = FU_BODY + "\n## Follow-ups\n\n- F9 stray\n"
+    assert section_rewritten(twice, twice.replace("F9 stray", "F9 other"), FU)
+    assert section_rewritten(twice, twice.replace("Intent", "Changed"), FU)
+    assert not section_rewritten(twice, twice, FU)
+
+
+def test_section_rewritten_ignores_a_heading_hidden_in_a_fence():
+    hidden = PLAN + "\n```\n## Follow-ups\n- F1\n```\n"
+    assert not section_rewritten(hidden, hidden.replace("- F1", "- F2"), FU)
