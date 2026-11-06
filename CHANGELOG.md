@@ -5,6 +5,18 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `camp env attach local/NAME` (also `<self_name>/NAME`, or a bare name found only on this
+  machine) now attaches an environment running on this machine: a background relay, started
+  by camp itself with no sshd and no third-party tool, holds each standard port on 127.0.0.1
+  and carries connections to the environment's published port. `camp env status`,
+  `detach` and the `attached:` line of `camp env ls` name it `local/<group>/<name>`, from any
+  directory and whichever camp checkout started it. A bare name found both here and on a host
+  is refused as ambiguous and offers `local/NAME`. The already-attached refusal mentions a
+  dead link ending on its own only when the existing attachment is an ssh forward. A camp
+  from before this change does not recognise a relay (its `status` and `detach` say
+  `nothing attached` while the relay holds the ports); to end one without a newer camp, run
+  `pkill -f -- '-m camp.env.relay -N -o Tag=camp-env:'`. The same line is the way back after
+  reverting to a camp without local attach.
 - `lore sync --pull-only` now prints one stderr notice per held vault naming why it
   is holding unpublished work (uncommitted changes, N commit(s) not yet published,
   a conflict that could not be integrated) and pointing at `lore sync`. A held

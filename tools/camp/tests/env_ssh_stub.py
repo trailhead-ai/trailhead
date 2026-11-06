@@ -253,6 +253,12 @@ exec "$REAL_PS" "$@"
 """
 
 
+_DOCKER_DOWN = """#!/bin/sh
+echo "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?" >&2
+exit 1
+"""
+
+
 def free_ports(count: int) -> list[int]:
     socks = [socket.socket() for _ in range(count)]
     for sock in socks:
@@ -287,6 +293,12 @@ class Upstream:
             client.close()
 
     def close(self) -> None:
+        """Stop listening: shut the socket down first, because a blocked ``accept`` keeps a merely
+        closed listening socket open on Linux."""
+        try:
+            self.sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
         self.sock.close()
 
 
@@ -365,10 +377,17 @@ class AttachRig:
 
     # -- configuring the machine ---------------------------------------------------------------
 
-    def declare_hosts(self, *names: str, opted_in: tuple[str, ...] | None = None) -> Path:
-        """Write hosts.toml declaring each name as ``tduffield@<name>``; *opted_in* defaults to all."""
+    def declare_hosts(
+        self, *names: str, opted_in: tuple[str, ...] | None = None, self_name: str | None = None
+    ) -> Path:
+        """Write hosts.toml declaring each name as ``tduffield@<name>``; *opted_in* defaults to all.
+
+        *self_name* declares this machine's own name, so ``<self_name>/NAME`` targets it.
+        """
         opted = names if opted_in is None else opted_in
         text = "env_hosts = [" + ", ".join(f'"{n}"' for n in opted) + "]\n"
+        if self_name is not None:
+            text += f'self_name = "{self_name}"\n'
         for name in names:
             text += f'\n[hosts.{name}]\nssh = "{self.destination(name)}"\n'
         return self.write_hosts_file(text)
@@ -404,6 +423,10 @@ class AttachRig:
     def docker_inventory(self, *environments: RigEnvironment) -> None:
         """What this machine's own ``docker`` answers (nothing by default)."""
         (self.root / "docker.stdout").write_text(self.inventory_text(*environments))
+
+    def docker_down(self) -> None:
+        """This machine's own ``docker`` cannot reach its daemon."""
+        self._script("docker", _DOCKER_DOWN)
 
     def configure(self, **switches) -> None:
         (self.root / "stub.json").write_text(json.dumps(switches))
@@ -523,6 +546,16 @@ def attached_rig(rig: AttachRig, name: str = "main", host: str = "perseus", **kw
     env = rig.environment(name, **kw)
     rig.declare_hosts(host)
     rig.host_inventory(host, env)
+    return env
+
+
+def local_rig(rig: AttachRig, name: str = "main", **kw) -> RigEnvironment:
+    """An environment *name* that this machine's own Docker answers an inventory read with.
+
+    Its published ports are real loopback listeners; its standard ports are free high ports.
+    """
+    env = rig.environment(name, **kw)
+    rig.docker_inventory(env)
     return env
 
 

@@ -16,6 +16,9 @@ and the rig ends whatever it started.
 - `ls` leads with the attached line when attached; with `ps` unavailable it warns and lists, while
   status exits 1 with the reason.
 - Status and detach take no arguments.
+- A relay (a local attachment) is named `local/<group>/<name>` by status from another directory, is ended
+  by detach with its ports freed, is found and ended across a camp copy at a path with a space, and once
+  detached (as a forward is) status and detach say `nothing attached`.
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import AttachRig, ask, attached_rig, free_ports, port_is_free, wait_for
+from .env_ssh_stub import AttachRig, ask, attached_rig, free_ports, local_rig, port_is_free, wait_for
 
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -473,3 +476,77 @@ def test_detach_after_real_traffic_leaves_the_ports_free_and_attach_works_again_
     again = rig.attach("perseus/levr/main")
     assert again.returncode == 0, again.stderr
     assert again.stdout == f"attached perseus/levr/main on ports {ports_of(env)}; its health was not checked\n"
+
+
+# --- an attachment on this machine: a relay ---------------------------------------------------------
+
+
+def local_status_line(env) -> str:
+    return f"attached: local/{env.group}/{env.name} on ports {ports_of(env)}; its health was not checked\n"
+
+
+def test_status_from_another_directory_names_a_relay_as_local_group_name(rig: AttachRig, tmp_path: Path) -> None:
+    env = local_rig(rig)
+    assert rig.attach("local/main").returncode == 0
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    result = rig.camp("env", "status", cwd=elsewhere)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == local_status_line(env)
+
+
+def test_detach_ends_a_relay_and_its_ports_bind_free(rig: AttachRig) -> None:
+    env = local_rig(rig)
+    assert rig.attach("local/main").returncode == 0
+    for port in env.standard_ports:
+        assert ask(port).startswith("main-")
+
+    result = rig.camp("env", "detach")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"detached local/levr/main; ports {ports_of(env)} are free\n"
+    assert rig.tagged_pids() == []
+    assert all(port_is_free(p) for p in env.standard_ports)
+
+
+def test_a_relay_made_by_a_camp_copy_at_a_path_with_a_space_is_found_by_status_and_ended_by_detach(
+    rig: AttachRig, tmp_path: Path
+) -> None:
+    env = local_rig(rig)
+    home = tmp_path / "a copy with spaces"
+    shutil.copytree(_PLUGIN_DIR, home / "plugin", ignore=shutil.ignore_patterns("__pycache__"))
+    other_cli = home / "plugin" / "cli" / "camp"
+
+    made = subprocess.run(
+        [sys.executable, str(other_cli), "env", "attach", "local/main"],
+        capture_output=True, text=True, cwd=str(home), timeout=60,
+        env={**rig.environ(), "TRAILHEAD_ROOT": str(_REPO_ROOT)},
+    )
+    assert made.returncode == 0, made.stderr
+
+    assert rig.camp("env", "status").stdout == local_status_line(env)
+    ended = rig.camp("env", "detach")
+    assert ended.returncode == 0, ended.stderr
+    assert ended.stdout == f"detached local/levr/main; ports {ports_of(env)} are free\n"
+    assert rig.tagged_pids() == []
+    assert all(port_is_free(p) for p in env.standard_ports)
+
+
+@pytest.mark.parametrize("kind", ["relay", "forward"])
+def test_after_a_detach_status_and_detach_say_nothing_attached_for_either_kind(rig: AttachRig, kind: str) -> None:
+    if kind == "relay":
+        local_rig(rig)
+        target = "local/main"
+    else:
+        attached_rig(rig)
+        target = "perseus/levr/main"
+    assert rig.attach(target).returncode == 0
+    assert rig.camp("env", "detach").returncode == 0
+
+    status = rig.camp("env", "status")
+    again = rig.camp("env", "detach")
+
+    assert (status.returncode, status.stdout) == (0, "nothing attached\n")
+    assert (again.returncode, again.stdout) == (0, "nothing attached\n")

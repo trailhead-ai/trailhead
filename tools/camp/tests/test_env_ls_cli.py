@@ -48,7 +48,7 @@ from pathlib import Path
 
 import pytest
 
-from .env_ssh_stub import AttachRig, attached_rig, wait_for
+from .env_ssh_stub import AttachRig, attached_rig, local_rig, wait_for
 
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
@@ -1201,3 +1201,22 @@ def test_an_ending_during_thread_start_up_ends_a_child_already_spawned(
             if child.poll() is None:
                 child.kill()
             child.wait()
+
+
+def test_ls_opens_with_an_attached_line_naming_a_relay_as_local_group_name(tmp_path: Path) -> None:
+    rig = AttachRig(tmp_path)
+    try:
+        env = local_rig(rig)
+        assert rig.attach("local/main").returncode == 0
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+
+        result = rig.camp("env", "ls", cwd=elsewhere)
+
+        ports = " ".join(str(p) for p in env.standard_ports)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.splitlines()[0] == (
+            f"attached: local/levr/main on ports {ports}; its health was not checked"
+        )
+    finally:
+        rig.close()
