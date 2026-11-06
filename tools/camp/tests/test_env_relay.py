@@ -6,6 +6,7 @@ here binds a real standard port.
 
 from __future__ import annotations
 
+import errno
 import os
 import signal
 import socket
@@ -143,10 +144,20 @@ def request(port: int, payload: bytes, timeout: float = 10) -> bytes:
 
 
 def closed_without_reply(port: int, payload: bytes) -> bool:
+    """True when the relay closed this connection without sending anything back.
+
+    The relay closes the client with the payload unread, so the client sees that close
+    as a reset at whichever step it is on: the send (broken pipe), the half-close
+    (ENOTCONN on Linux, when the reset lands first) or the read (connection reset).
+    """
     try:
         return request(port, payload) == b""
     except (ConnectionResetError, BrokenPipeError):
         return True
+    except OSError as error:
+        if error.errno == errno.ENOTCONN:
+            return True
+        raise
 
 
 def test_bytes_to_a_standard_port_reach_its_upstream_and_the_reply_returns(procs, upstreams):
