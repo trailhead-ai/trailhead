@@ -171,3 +171,15 @@ def test_revision_changes_when_and_only_when_the_body_changes(tmp_path):
     assert _revision(vault, state, rid) != r0
     _update_body(vault, state, rid, BODY)
     assert _revision(vault, state, rid) == r0
+
+
+def test_amend_stale_refusal_still_closes_with_the_amend_remedy(tmp_path):
+    vault, state, rid = _adr(tmp_path)
+    stale = _revision(vault, state, rid)
+    _update_body(vault, state, rid, "# Decision\n\nsomeone else's edit\n")
+
+    r = _amend(vault, state, rid, AMENDED, base=stale)
+
+    assert r.returncode != 0
+    assert "reapply your correction to what you read, and amend again." in r.stderr
+    assert "retry the update" not in r.stderr

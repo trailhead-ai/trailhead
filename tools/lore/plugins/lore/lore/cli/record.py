@@ -1662,6 +1662,17 @@ class _UpdateAborted(Exception):
         self.code = code
 
 
+def _stored_sidecar(location) -> dict:
+    """The record's sidecar as stored; ``{}`` when it is missing, unreadable or not an object."""
+    if not location.sidecar_path.exists():
+        return {}
+    try:
+        side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return side if isinstance(side, dict) else {}
+
+
 def _read_apply_and_guard(
     location,
     *,
@@ -1689,22 +1700,11 @@ def _read_apply_and_guard(
     hands the resolved new body to the ADR body freeze as the one value it may
     become (``amend``); every other guard runs identically either way.
     """
-    import json
-
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
 
     # Load the existing sidecar so the field flags mutate the live record.
-    existing_sidecar: dict = {}
-    if location.sidecar_path.exists():
-        try:
-            existing_sidecar = json.loads(
-                location.sidecar_path.read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError):
-            existing_sidecar = {}
-    if not isinstance(existing_sidecar, dict):
-        existing_sidecar = {}
+    existing_sidecar = _stored_sidecar(location)
 
     existing_body = (
         location.body_path.read_text(encoding="utf-8")
@@ -1898,6 +1898,13 @@ def _cmd_record_update(args) -> int:
     the in-place correction path.
     The read / body-resolve / guard step is :func:`_read_apply_and_guard`, shared
     with ``record amend``.
+
+    ``--base REVISION`` is the stale-write handshake: inside the re-runnable read
+    half (so the relocation path re-checks it) the stored body's revision is
+    compared with it by :func:`_check_base_revision`, and a mismatch writes
+    nothing. It is required when the update creates, edits or removes the
+    ``## Follow-ups`` section of a spec at a frozen status
+    (:func:`_require_base_for_follow_ups`); any other update may omit it.
     """
     from contextlib import ExitStack
 
@@ -2017,7 +2024,10 @@ def _cmd_record_update(args) -> int:
                         ),
                     )
 
-                sidecar, new_body, notices, _ = _read_apply_and_guard(
+                base = getattr(args, "base", None)
+                _check_base_revision(location, base, required=False, command="update")
+
+                sidecar, new_body, notices, existing_body = _read_apply_and_guard(
                     location,
                     stdin_text=stdin_text,
                     use_diff=use_diff,
@@ -2028,6 +2038,7 @@ def _cmd_record_update(args) -> int:
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
                     parent_supplied=getattr(args, "parent", None) is not None,
                 )
+                _require_base_for_follow_ups(location, base, existing_body, new_body)
                 return sidecar, new_body, notices
 
             sidecar, new_body, guard_notices = read_apply_and_guard()
@@ -2437,7 +2448,17 @@ _SESSION_AMEND_REFUSAL = (
 )
 
 
-def _check_base_revision(location, base: str | None, *, required: bool) -> None:
+def _revision_hint(location) -> str:
+    return (
+        f"read the current revision with `lore record show {location.record_id}` "
+        "(`--json` carries it as `revision`; plain show prints `revision: <hex>` "
+        "on stderr)"
+    )
+
+
+def _check_base_revision(
+    location, base: str | None, *, required: bool, command: str = "amend"
+) -> None:
     """Refuse a write composed against a body that is no longer the stored one.
 
     MUST be called with the record's vault write lock held, after the implicit
@@ -2445,15 +2466,12 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
     is the revision the caller read (``lore record show``); *required* is true
     when the new body is a full replacement, which would otherwise silently
     overwrite a change made after the read. Raises :class:`_UpdateAborted` after
-    printing the refusal; returns when the write may proceed.
+    printing the refusal; returns when the write may proceed. *command* (``amend``
+    or ``update``) picks the retry remedy the stale refusal closes with.
     """
     from ..record import store as record_store_mod
 
-    show_hint = (
-        f"read the current revision with `lore record show {location.record_id}` "
-        "(`--json` carries it as `revision`; plain show prints `revision: <hex>` "
-        "on stderr)"
-    )
+    show_hint = _revision_hint(location)
     if base is None:
         if required:
             print(
@@ -2470,17 +2488,10 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
     if base == current:
         return
 
-    updated_by = updated_at = "unknown"
-    has_history = False
-    if location.sidecar_path.exists():
-        try:
-            side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            side = {}
-        if isinstance(side, dict):
-            updated_by = _inert_stamp(side.get("updated-by", updated_by))
-            updated_at = _inert_stamp(side.get("updated-at", updated_at))
-            has_history = bool(side.get("change-history"))
+    side = _stored_sidecar(location)
+    updated_by = _inert_stamp(side.get("updated-by", "unknown"))
+    updated_at = _inert_stamp(side.get("updated-at", "unknown"))
+    has_history = bool(side.get("change-history"))
     history_hint = (
         f" If that change was an amend, `lore record history {location.record_id}` "
         "lists it."
@@ -2496,12 +2507,53 @@ def _check_base_revision(location, base: str | None, *, required: bool) -> None:
         )
     else:
         last_changed = _neutral(f"It was last changed by {updated_by} at {updated_at}.")
+    remedy = (
+        "reapply your change to what you read, and retry the update with the "
+        "new revision."
+        if command == "update"
+        else "reapply your correction to what you read, and amend again."
+    )
     print(
         f"error: {location.record_id} changed after you read it: --base is "
         f"{base} but the stored body's revision is {current}. "
         f"{last_changed}{history_hint} Nothing was "
-        f"written. To proceed: {show_hint}, reapply your correction to what "
-        "you read, and amend again.",
+        f"written. To proceed: {show_hint}, {remedy}",
+        file=sys.stderr,
+    )
+    raise _UpdateAborted()
+
+
+_FOLLOW_UPS_HEADING = "## Follow-ups"
+
+
+def _require_base_for_follow_ups(
+    location, base: str | None, existing_body: str, new_body: str
+) -> None:
+    """Refuse a frozen spec's ``## Follow-ups`` change that names no ``--base``.
+
+    The section is a ledger other writers append to, and a body composed from an
+    earlier read would silently erase their entry. Creating the section counts: a
+    creator composing from a stale copy could drop a ``## Slices`` row added since.
+    MUST be called with the write lock held; raises :class:`_UpdateAborted` after
+    printing the refusal.
+    """
+    from ..record import guards as guards_mod
+    from ..record.sections import section_changed
+
+    if base is not None or location.kind.casefold() != "spec":
+        return
+    prior_status = _stored_sidecar(location).get("status")
+    if prior_status not in guards_mod.FROZEN_STATUSES["spec"]:
+        return
+    if not section_changed(existing_body, new_body, _FOLLOW_UPS_HEADING):
+        return
+    print(
+        f"error: --base is required when an update changes the "
+        f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec. Nothing was "
+        f"written. To proceed: {_revision_hint(location)}, reapply your change "
+        "to that fresh body (for a ## Follow-ups write, re-run "
+        "followups_gate.py --prior on that read), then update with --base set "
+        "to that read's revision, never a newer one fetched separately.",
         file=sys.stderr,
     )
     raise _UpdateAborted()
@@ -2976,10 +3028,9 @@ def add_record_subparser(sub) -> None:
         description="Update a vault record; a piped body replaces the existing one "
                     "and no stdin leaves it untouched. --repo/--product/--suite/"
                     "--team each set their namesake scope field, re-route the "
-                    "record, and auto-move it when the destination vault changes. "
+                    "record, and auto-move it if the vault changes. "
                     + _UNSET_PAIRING_RULE,
-        epilog="Group-default scope routing applies to 'create' only; "
-               "update (and delete) are unaffected and never seed scopes from a camp group. "
+        epilog="Group-default scope routing applies to 'create' only. "
                + _LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_update.add_argument(
@@ -2991,6 +3042,11 @@ def add_record_subparser(sub) -> None:
         "--diff", action="store_true",
         help="Treat piped stdin as a unified diff. Any non-applying hunk leaves "
              "the record unmodified and prints the rejects to stderr.",
+    )
+    p_record_update.add_argument(
+        "--base", dest="base", default=None, metavar="REVISION",
+        help="Revision from 'lore record show'; stale is refused. Needed to "
+             "edit a frozen spec's '## Follow-ups'.",
     )
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
