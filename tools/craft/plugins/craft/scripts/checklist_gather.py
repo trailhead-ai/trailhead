@@ -31,8 +31,14 @@ never lore's own output, and is never dropped:
 - `not-configured`: a search hit's vault path matches zero, or more than one,
   configured vault.
 - `stale`: lore reported `stale` or `config_stale`.
-- `cut-off`: paging ended with `truncated` still set, fewer hits than `total`,
-  or a search reply that could not be read.
+- `cut-off`: paging ended with `truncated` still set, or with fewer hits than
+  `total`.
+- `search-unreadable`: the search could not be run, or its reply could not be
+  read; or a hit was not a dict, lacked a string `id` or `vault`, or had an `id`
+  outside its vault's `spec/` directory.
+
+Hits are de-duplicated by `id` across pages, so an entry is never counted or
+shown twice.
 
 A shared-layer spec's body comes back from lore escaped (`&`, `<`, `>` only);
 it is un-escaped exactly, before anything is parsed or cleaned, so such a spec
@@ -70,6 +76,7 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from criterion_gate import _TRAILER_RE  # noqa: E402
 from covers_gate import DuplicateHeadingError, parse_criteria_with_text  # noqa: E402
 from followup_gather import (  # noqa: E402
     GatherError,
@@ -87,6 +94,7 @@ REASONS = {
     "not-configured": "it is not a configured vault",
     "stale": "its index is stale, so some ready specs may be missing; run lore reindex",
     "cut-off": "its results were cut off, so some ready specs are missing",
+    "search-unreadable": "it could not be run or read, so some ready specs may be missing",
 }
 
 REASON_CODES = frozenset(
@@ -166,22 +174,33 @@ def _json_object(done: subprocess.CompletedProcess) -> dict | None:
 
 
 def _search(runner, unreadable: set) -> list:
-    """Every ready-spec hit, paged until `total` is read; a gap adds `cut-off`."""
+    """Every distinct ready-spec hit, paged until `total` is read; a gap adds `cut-off`,
+    an unreadable reply `search-unreadable`."""
     hits: list = []
+    seen: set[str] = set()
+    read = 0
     total = None
     complete = False
     for _ in range(MAX_PAGES):
-        argv = ["search", "--json", "--limit", str(PAGE_SIZE), "--offset", str(len(hits)),
+        argv = ["search", "--json", "--limit", str(PAGE_SIZE), "--offset", str(read),
                 SEARCH_QUERY]
         page = _json_object(_lore(runner, argv))
         page_hits = page.get("hits") if page else None
         total = page.get("total") if page else None
         if not isinstance(page_hits, list) or not isinstance(total, int) or isinstance(total, bool):
-            break
+            unreadable.add((SEARCH_LABEL, "search-unreadable"))
+            return hits
         if page.get("stale") or page.get("config_stale"):
             unreadable.add((SEARCH_LABEL, "stale"))
-        hits.extend(page_hits)
-        if len(hits) >= total:
+        read += len(page_hits)
+        for hit in page_hits:
+            hit_id = hit.get("id") if isinstance(hit, dict) else None
+            if isinstance(hit_id, str):
+                if hit_id in seen:
+                    continue
+                seen.add(hit_id)
+            hits.append(hit)
+        if read >= total:
             complete = not page.get("truncated")
             break
         if not page_hits:
@@ -201,7 +220,9 @@ def _criteria(body: str) -> dict[str, str]:
     words: dict[str, str] = {}
     for identifier, text in found:
         if identifier is not None and identifier not in words:
-            words[identifier] = _CRITERION_PREFIX_RE.sub("", text, count=1)
+            words[identifier] = _CRITERION_PREFIX_RE.sub(
+                "", _TRAILER_RE.sub("", text), count=1
+            ).strip()
     return words
 
 
@@ -239,27 +260,28 @@ def gather(runner) -> tuple[list, set]:
     for name, path in vaults:
         if not _shape_ok(name):
             unreadable.add((_clean(f"vault {name}"), "unsafe-name"))
-        elif path:
+        if path:
             by_path.setdefault(path, []).append(name)
-    unsafe_paths = {path for name, path in vaults if path and not _shape_ok(name)}
     for hit in _search(runner, unreadable):
         hit_id = hit.get("id") if isinstance(hit, dict) else None
         hit_path = hit.get("vault") if isinstance(hit, dict) else None
         if not isinstance(hit_id, str) or not isinstance(hit_path, str):
-            unreadable.add((SEARCH_LABEL, "cut-off"))
+            unreadable.add((SEARCH_LABEL, "search-unreadable"))
             continue
         hit_path = hit_path.rstrip("/")
         owners = by_path.get(hit_path, [])
-        if not owners and hit_path in unsafe_paths:
+        if len(owners) == 1 and not _shape_ok(owners[0]):
             continue
         if len(owners) != 1:
             unreadable.add((_clean(f"vault {hit_path.rsplit('/', 1)[-1]}"), "not-configured"))
             continue
         prefix = f"{hit_path}/spec/"
         name = hit_id[len(prefix):] if hit_id.startswith(prefix) else None
-        if name is None or not _shape_ok(name):
-            tail = name if name is not None else hit_id.rsplit("/", 1)[-1]
-            unreadable.add((_clean(f"{owners[0]}/{tail}"), "unsafe-name"))
+        if name is None:
+            unreadable.add((SEARCH_LABEL, "search-unreadable"))
+            continue
+        if not _shape_ok(name):
+            unreadable.add((_clean(f"{owners[0]}/{name}"), "unsafe-name"))
             continue
         _read_spec(runner, owners[0], name, unreadable, rows)
     return rows, unreadable

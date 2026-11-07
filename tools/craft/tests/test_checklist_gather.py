@@ -497,9 +497,88 @@ def test_a_search_that_cannot_be_read_never_reads_as_nothing_waiting(capsys, kwa
     assert code == 0
     assert out == (
         "Nothing waiting in the specs that could be read.\n"
-        + could_not_read("lore's search", "cut-off") + "\n"
+        + could_not_read("lore's search", "search-unreadable") + "\n"
     )
     assert "SECRET-STDERR" not in out + err
+
+
+def test_an_unreadable_search_is_worded_as_the_design_doc_words_it(capsys):
+    _, out, _ = go(capsys, FakeLore(["alpha"], search_rc=1))
+    assert out.splitlines()[1] == (
+        "Could not read: lore's search — it could not be run or read, "
+        "so some ready specs may be missing"
+    )
+
+
+def test_a_page_that_cannot_be_read_after_a_good_one_is_unreadable_not_cut_off(capsys):
+    fake = FakeLore(["alpha"], page_cap=1)
+    fake.add("alpha", "one", spec_body(pending()))
+    fake.add("alpha", "two", spec_body())
+
+    def runner(argv):
+        if argv[0] == "search" and argv[argv.index("--offset") + 1] != "0":
+            return subprocess.CompletedProcess(argv, 0, "not json", "")
+        return fake(argv)
+
+    code, out, _ = go(capsys, runner)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "1 check waiting, in 1 spec."
+    assert lines[1] == could_not_read("lore's search", "search-unreadable")
+    assert out.count("Could not read:") == 1
+
+
+def test_a_hit_repeated_on_a_later_page_is_counted_and_rendered_once(capsys):
+    fake = FakeLore(["alpha"], page_cap=1)
+    fake.add("alpha", "one", spec_body(pending()))
+    fake.hits.append(dict(fake.hits[0]))
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    assert out.splitlines()[0] == "1 check waiting, in 1 spec."
+    assert out.count("[1/1]") == 1
+    assert "[2/" not in out
+    assert "Could not read" not in out
+
+
+def test_the_criterion_words_do_not_carry_the_verified_by_suffix(capsys):
+    fake = FakeLore(["a"])
+    fake.add("a", "s", spec_body(pending(), criteria={
+        "AC32": "Checkout collects billing details. *Verified by: automated assertion.*"}))
+    _, out, _ = go(capsys, fake)
+    assert "[1/1] Checkout collects billing details. (AC32)\n" in out
+    assert "Verified" not in out
+
+
+def test_a_wrapped_verified_by_suffix_is_dropped_from_the_criterion_words(capsys):
+    fake = FakeLore(["a"])
+    fake.add("a", "s", spec_body(pending(), criteria={
+        "AC32": "Checkout collects details.\n  *Verified by: automated\n  assertion.*"}))
+    _, out, _ = go(capsys, fake)
+    assert "[1/1] Checkout collects details. (AC32)\n" in out
+
+
+def test_a_hit_whose_id_is_not_under_its_vaults_spec_directory_is_a_search_problem(capsys):
+    fake = FakeLore(["alpha"])
+    good_spec(fake)
+    fake.hits.append({"id": "/v/alpha/note/x", "kind": "spec", "status": "ready",
+                      "vault": "/v/alpha"})
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    assert_listed_after_the_count_line(out, could_not_read("lore's search", "search-unreadable"))
+    assert out.count("Could not read:") == 1
+    assert not any("note" in w for w in fake.argv_words())
+
+
+@pytest.mark.parametrize("bad", ["junk", 7, {"id": "/v/alpha/spec/x"}, {"vault": "/v/alpha"},
+                                 {"id": 3, "vault": "/v/alpha"}])
+def test_a_hit_that_is_not_a_dict_or_misses_a_field_is_a_search_problem(capsys, bad):
+    fake = FakeLore(["alpha"])
+    good_spec(fake)
+    fake.hits.append(bad)
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    assert_listed_after_the_count_line(out, could_not_read("lore's search", "search-unreadable"))
+    assert out.count("Could not read:") == 1
 
 
 # --- shared layer -------------------------------------------------------------
@@ -530,6 +609,21 @@ def test_two_configured_vaults_sharing_a_path_make_a_hit_there_unreadable(capsys
     code, out, _ = go(capsys, fake)
     assert code == 0
     assert_listed_after_the_count_line(out, could_not_read("vault shared", "not-configured"))
+    assert not any(a[:2] == ["record", "show"] and "spec/x" in a for a in fake.calls)
+
+
+def test_a_path_shared_by_an_unsafe_and_a_safe_vault_name_is_not_configured(capsys):
+    fake = FakeLore([("bad name", "/v/shared"), ("alpha", "/v/shared"), ("gamma", "/v/gamma")])
+    fake.add("gamma", "good", spec_body(pending(check="still-rendered")))
+    fake.specs[("alpha", "x")] = shown(spec_body(pending()))
+    fake.hits.append({"id": "/v/shared/spec/x", "kind": "spec", "status": "ready",
+                      "vault": "/v/shared"})
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "1 check waiting, in 1 spec."
+    assert could_not_read("vault shared", "not-configured") in lines
+    assert "  check: still-rendered" in lines
     assert not any(a[:2] == ["record", "show"] and "spec/x" in a for a in fake.calls)
 
 
@@ -572,6 +666,10 @@ def hard(capsys, fake):
     reason = lines[0].removeprefix("reason-code: ")
     assert reason in cg.REASON_CODES
     return code, reason
+
+
+def test_no_configured_vaults_exits_2_with_its_reason_and_empty_stdout(capsys):
+    assert hard(capsys, FakeLore([])) == (2, "no-vaults")
 
 
 def test_lore_missing_exits_2_with_its_reason_and_empty_stdout(capsys):

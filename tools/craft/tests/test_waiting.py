@@ -116,12 +116,17 @@ FAIL_CLOSED = {
     "missing-how": lambda: body(_without(PENDING, "how:")),
     "missing-waits-on": lambda: body(_without(SET_ASIDE, "waits on:")),
     "bad-building-slice": lambda: body(PENDING.replace("task/build-the-thing", "task/Bad Slice")),
+    "duplicate-entry": lambda: body(PENDING + "\n" + PENDING),
+    "duplicate-field": lambda: body(PENDING.replace("  - how:", "  - check: again\n  - how:")),
+    "unexpected-field": lambda: body(SET_ASIDE.replace("  - 2026", "  - check: x\n  - 2026")),
+    "bad-entry-line (field after history)": lambda: body(PENDING + "  - how: again\n"),
+    "bad-entry-line (unreadable indented line)": lambda: body(PENDING + "    stray indented\n"),
 }
 
 
-@pytest.mark.parametrize("expected", sorted(FAIL_CLOSED))
-def test_each_fail_closed_case_refuses_with_its_own_code(expected):
-    assert code_of(FAIL_CLOSED[expected]()) == expected
+@pytest.mark.parametrize("case", sorted(FAIL_CLOSED))
+def test_each_fail_closed_case_refuses_with_its_own_code(case):
+    assert code_of(FAIL_CLOSED[case]()) == case.split(" ")[0]
 
 
 def test_prose_and_orphan_field_before_any_entry_refuse_as_unmarked_prose():
@@ -130,7 +135,8 @@ def test_prose_and_orphan_field_before_any_entry_refuse_as_unmarked_prose():
 
 
 def test_reason_codes_are_distinct_per_case():
-    assert len({code_of(make()) for make in FAIL_CLOSED.values()}) == len(FAIL_CLOSED)
+    codes = {code_of(make()) for make in FAIL_CLOSED.values()}
+    assert codes == {case.split(" ")[0] for case in FAIL_CLOSED}
 
 
 def test_malformed_date_shapes_all_refuse():

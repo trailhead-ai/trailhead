@@ -138,10 +138,16 @@ The reasons are a closed set, and each maps to one cause. A line names a spec as
   index (`stale`) or its configuration (`config_stale`) out of date.
 - `its results were cut off, so some ready specs are missing`: paging ended with lore still
   reporting `truncated`, or with fewer hits read than `total`.
+- `it could not be run or read, so some ready specs may be missing`: the search failed, or its
+  reply was not readable JSON in the expected shape; or a hit was not a record with a string `id`
+  and `vault`, or its `id` was not under its vault's `spec/` directory. The count line never
+  claims that nothing is waiting, and the gather still exits 0.
 
 An entry whose criterion number has no line under `## Acceptance Criteria` is still shown, with
 `(criterion text not found)` in place of the criterion's words and its number after it.
 
-When lore itself cannot be run at all (not installed, or `lore vault ls` fails), there is no list
-to show. The gather exits 2 with a `reason-code:` line, and the skill reports that the check list
-could not be gathered, naming the remedy.
+When there is no list to show, the gather exits 2 with nothing on stdout and one `reason-code:`
+line on stderr, and the skill reports that the check list could not be gathered, naming the remedy.
+The codes are `lore-missing` (lore is not installed), `timeout` (a lore call timed out),
+`lore-failed` (`lore vault ls` failed), `no-vaults` (it listed none), `invalid-arguments` and
+`internal-error` (any unexpected exception).
