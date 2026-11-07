@@ -26,9 +26,11 @@ Every clause holds.
 | The earlier block is still present byte for byte | `earlier-block-preserved-byte-for-byte` | `regex`, `source: file` |
 | A second block follows it | `a-second-block-follows` | `regex`, `source: file` |
 | No question is numbered `Q1` a second time | `no-question-number-reused` | `regex`, `not_contains`, `source: file` |
-| The last line is an outcome line | `final-line-is-an-outcome-line` | `regex` over the final message |
+| The last line is `outcome: plan-ready task/<name> parked=0` | `final-line-is-plan-ready` | `regex` over the final message |
+| The run got past step 8's full-body write (the council section is on the parent) | `plan-reached-the-council-review` | `regex`, `source: file` |
 
 ## Limitations
 
 - The `Q2`-or-later clause is graded as "`Q1` is not reused": a run that parks nothing passes it vacuously. A parked question is not forced by this fixture.
+- Amended before any edit to the prose, after the first baseline run: the final-line clause was loosened to any outcome kind and a run that stopped before step 8 passed every grader (1 run, score 1.0, 19 turns). The final line is now `plan-ready` and the council section must be on the parent, so the case can only pass by reaching and surviving the full-body write.
 - One fixture, one phrasing, one model tier.
