@@ -24,10 +24,13 @@ Every clause holds.
 |---|---|---|
 | The final message poses no question and waits on no answer | `asked-nothing` | `llm`, `focus: trace` |
 | The last line is `outcome: slice-chosen task/<name> parked=0` | `final-line-is-slice-chosen` | `regex` over the final message |
-| The created slice record carries `## Unattended run` with `**Format:** 1`, `**Outcome:** slice-chosen` and a decision entry giving question, choice and reasoning | `run-block-on-created-record` | `llm`, `target: files` |
+| The created slice record has a `## Unattended run` section carrying `**Format:** 1` and then `**Outcome:** slice-chosen` | `run-block-opened-and-closed` | `regex`, `target: files` |
+| The first decision entry gives a question, a choice and the reasoning | `selection-logged-as-a-decision` | `regex`, `target: files` |
 | No `/craft:plan task/...` command line is printed | `no-plan-command-printed` | `regex`, `not_contains`, over the final message |
 
 ## Limitations
+
+- The block is graded by two `regex` graders over the files the run created, not an `llm` grader: an `llm` grader with `focus: files` is shown the file names only, not their contents, so it cannot read a block. The decision grader checks that the three labels appear in order in the first entry, not that the reasoning is good.
 
 - One spec, one phrasing, one model tier, three runs.
 - "Asked nothing" is behavioural and judged by a model over the first and last 12 events of the trace.
