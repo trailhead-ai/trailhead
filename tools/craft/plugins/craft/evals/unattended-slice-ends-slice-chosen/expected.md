@@ -24,7 +24,7 @@ Every clause holds.
 |---|---|---|
 | The final message poses no question and waits on no answer | `asked-nothing` | `llm`, `focus: trace` |
 | The last line is `outcome: slice-chosen task/<name> parked=0` | `final-line-is-slice-chosen` | `regex` over the final message |
-| A block-writing `lore record update --diff` carries `## Unattended run` and `**Format:** 1` | `block-opened-on-the-new-record` | `tool_used` Bash, `min: 1` |
+| A block-writing `lore record update --diff` carries `## Unattended run` and `**Format:** 1` | `block-open-command-issued` | `tool_used` Bash, `min: 1` |
 | A block-writing `--diff` carries the `**Decisions:**` list with a `Question:`, a `Choice:` and a `Reasoning:` | `selection-logged-as-a-decision` | `tool_used` Bash, `min: 1` |
 | A `--diff` sets `**Outcome:** slice-chosen` on the block | `outcome-set-on-the-block` | `tool_used` Bash, `min: 1` |
 | No `/craft:plan task/...` command line is printed | `no-plan-command-printed` | `regex`, `not_contains`, over the final message |
@@ -33,6 +33,7 @@ Every clause holds.
 
 - The block is graded from the `lore record update --diff` commands the run issued (`tool_used` scans every call), not from the created record: `regex` and `llm` with `target: files` / `focus: files` see only the names of files created through the CLI, never their contents, and the record's name is the agent's choice, so `source: file` cannot name it. A `tool_used` match shows the command was issued, not that it applied; a block write that failed would end `stuck`, and the final-line grader would fail.
 
+- `block-open-command-issued` shows that a block-writing `--diff` command was issued, not that it landed on the new record.
 - One spec, one phrasing, one model tier, three runs.
 - "Asked nothing" is behavioural and judged by a model over the first and last 12 events of the trace.
 - The session cannot answer, so a ritual that asked and stopped would end without the outcome line and fail the second clause.
