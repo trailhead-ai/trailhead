@@ -1,0 +1,50 @@
+**Maturity:** `maturity: production (basis: requested)`. No concerns were waived.
+
+## What the council found
+
+All four reviewers kept coming back to the committee's rule that nobody's work should be lost to someone else's mistake. They found two ways the member-run option breaks that rule. First, a member can overload the large kiln, crack a shelf and ruin everyone else's pots in the same firing. Nothing in a door code and a booking form stops that from happening. Second, when it does happen, nobody can tell who loaded or started the firing. A shared code from the booking sheet makes both problems worse, because anyone who has the code, even a stranger, can start the kiln. Smaller points cover what a new member sees before booking, what the evening slots are called, and whether "about nine firings a month" is a reliable figure.
+
+The failure-cases finding is the strongest. A cracked shelf ruining other people's work is exactly the loss the committee wants to prevent, and no record or log can undo it afterwards. The buildability reviewer is right that a ruined firing can't be traced. Its remedy, though, is to scrap evening firings and run a technician queue, which goes further than traceability needs. The security reviewer's fix of giving each member their own code would also solve traceability, since every start would then be tied to a person. The ease-of-use reviewer's top finding, that evening rules might feel unfair, guesses at how members will feel and names nothing that would actually fail. I've moved it from "needs your decision" to "worth fixing, your call".
+
+My recommendation is to keep the technician starting every large-kiln firing. Members could still load during evenings and weekends: they leave their loaded kiln furniture by a set time, and the technician checks the load before starting it. That's the only option here that prevents the loss rather than just recording it. If the committee still wants members to start firings themselves, three things should be in place first: a personal code for each member, a record of every start, and a check against the shelf limit before the kiln will start. Separately, count firings over a full quarter before deciding how much technician time this needs.
+
+## Consolidated findings
+
+### Would build the wrong thing, needs your decision
+
+**1. Decide whether members may start the large kiln at all. I recommend they don't, because an overloaded kiln can wreck everyone's work in it.** *(failure cases; buildability reaches the same remedy)*
+A member loads past the kiln's shelf limit and starts the firing. A shelf cracks and every other member's pots in that load are ruined. Nothing in starting by code and form would have stopped them.
+Fix: only the technician starts a large-kiln firing. Members could still load in the evenings, but the technician would check each load against the shelf limit before starting it. This answers the question put to the council one way, so it settles the whole proposal.
+
+**2. Decide how a ruined firing gets traced to whoever loaded and started it. I recommend recording every start against a named member, or else nobody who loses work has anyone to ask.** *(buildability, failure cases: 2 reviewers)*
+A firing comes out ruined, with a burst pot and a cracked shelf. The sheet holds only a shared code, so the studio can't tell whose work caused it, and a dispute a month later can't be settled.
+Fix: each firing would show who started it, written to the same calendar history the booking sheet already uses. If the technician starts every firing (finding 1), the technician is the record. Buildability's alternative is to drop the door code and have the technician start everything from a queue, which is finding 1's remedy.
+
+### Would cause trouble later, worth fixing, your call
+
+**3. A single shared door code lets anyone start the kiln. I recommend a personal code for each member.** *(security)*
+A member passes the code to a friend, or an old email gets forwarded, and someone who never did the induction opens the studio and starts the large kiln.
+Fix: each member would use their own code, so a code can be traced to one person and switched off for one person. This also covers finding 2.
+
+**4. The sheet can't record a firing that was stopped early. Worth adding if members start firings.** *(buildability)*
+A member stops a firing partway through, the next person assumes it completed, and pots come out under-fired with no note explaining why.
+Fix: as the reviewer put it, "have the booking sheet ask for it when the member closes the door."
+
+**5. New members only find out the large kiln needs the induction stamp when they're turned away at the door. Worth saying at the point of booking.** *(ease of use)*
+A new member books an evening slot, turns up with work ready to load, and is refused because they haven't done the induction. Their evening is wasted.
+Fix: `"The large kiln needs the induction stamp."` placed directly under the booking button, so members see it before they book.
+
+**6. Some members may see evening rules as unfair to people who can't come in the evenings. Worth explaining, but this is a guess about how members will feel.** *(ease of use; moved down from "needs your decision" because no member has been asked and nothing concrete fails)*
+Members who only come in during the day see evening slots they can't use and feel shut out of the large kiln.
+Fix: as the reviewer put it, "explain the rules on the studio's site."
+
+### Rough edges, nothing to decide
+
+**7. The code in the confirmation email doesn't expire.** It should stop working after the booked evening, so an old email can't open the studio. *(security)*
+
+**8. The evening slots are labelled "unsupervised runs".** *(ease of use)*
+Fix: `"member firings"` instead of `"unsupervised runs"`, wherever the slots are named.
+
+**9. "About nine firings a month" is a rough figure.** Count a full quarter before deciding how much technician time this needs. *(failure cases)*
+
+**10. The new wording could match the booking confirmation email.** Reuse that email's wording in the sheet so members see one voice. *(buildability)*

@@ -2215,6 +2215,64 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+# The round 4 treated batch: `fs-r4-*` (the repaired shared rule alone), `fs-rs4-*` (the repaired rule plus one site's
+# framing edit), `regress4-cal-consult-*` (the calibrated consult regression with the repaired rule), and the paired
+# controls `fs-control4-fsspecreview-*` and `regress4-control-cal-consult-*` (the same compositions with the rule as
+# shipped). Every capture reads plain on every check its site runs and kept on persisted-levels, bar the ones below.
+# `fsspecreview` (r4 and its control) writes "All three ... need your decision" and so reads `none` on severity-name,
+# and its control's fourth capture also names a reviewer; `fs-r4-fsconsult-2` writes "Critical 1" and "Minor 3" in its
+# reader-facing text; three of the six `regress4-cal-consult` captures and one control capture put a severity word
+# beside a calibration word. The `fsspecreview` and `fsconsult` r4 arms and the calibrated arm ran six captures after
+# a 2-1 split on a scripted check, and `fsplan` r4 ran six after a 2-1 split of its large criterion.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"{arm}-{site}-{n}": _plain_verdicts(site)
+            for arm, site, runs in (
+                ("fs-r4", "fsspecreview", (2, 3, 4)),
+                ("fs-r4", "fsplan", (1, 2, 3, 4, 5, 6)),
+                ("fs-r4", "fsconsult", (1, 3, 4, 5, 6)),
+                ("fs-r4", "fsdriver", (1, 2, 3)),
+                ("fs-r4", "fsreview", (1, 2, 3)),
+                ("fs-r4", "fsbuildreview", (1, 2, 3)),
+                ("fs-r4", "fsdrivebuild", (1, 2, 3)),
+                ("fs-rs4", "fsplan", (1, 2, 3)),
+                ("fs-rs4", "fsdriver", (1, 2, 3)),
+                ("fs-rs4", "fsbuildreview", (1, 2, 3)),
+                ("fs-control4", "fsspecreview", (1, 2, 3)),
+            )
+            for n in runs
+        },
+        **{
+            f"fs-r4-fsspecreview-{n}": {"severity-name": "none", "reviewer-name": "plain"} for n in (1, 5, 6)
+        },
+        **{
+            f"fs-control4-fsspecreview-{n}": {"severity-name": "none", "reviewer-name": "plain"} for n in (5, 6)
+        },
+        "fs-control4-fsspecreview-4": {"severity-name": "none", "reviewer-name": "internal"},
+        "fs-r4-fsconsult-2": {"severity-name": "internal", "reviewer-name": "plain"},
+        **{
+            f"regress4-cal-consult-{n}": _plain_verdicts("consult-calibrated")
+            for n in (1, 2, 4)
+        },
+        "regress4-cal-consult-3": {
+            "calibration-level": "internal", "severity-name": "internal", "reviewer-name": "plain"
+        },
+        **{
+            f"regress4-cal-consult-{n}": {
+                "calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"
+            }
+            for n in (5, 6)
+        },
+        **{
+            f"regress4-control-cal-consult-{n}": _plain_verdicts("consult-calibrated") for n in (1, 2, 3, 4, 6)
+        },
+        "regress4-control-cal-consult-5": {
+            "calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"
+        },
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -2299,12 +2357,15 @@ def test_every_pwsaved_capture_grades_its_saved_section_to_its_mapped_verdicts(s
 
 
 def _site(stem):
-    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`
-    and `regress3-cal-`) belong to `consult-calibrated`; `summary-guard-specreview-open-` captures belong to
-    `specreview` and every other `summary-guard-specreview-` capture to `fsspecreview`; a capture with
+    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`,
+    `regress3-cal-`, `regress4-cal-` and `regress4-control-cal-`) belong to `consult-calibrated`;
+    `summary-guard-specreview-open-` captures belong to `specreview` and every other
+    `summary-guard-specreview-` capture to `fsspecreview`; a capture with
     `-pwsaved-hostile-` in its name belongs to `pwsaved`. Every other capture belongs to the segment before its run
     number."""
-    if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
+    if stem.startswith(
+        ("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-", "regress4-cal-", "regress4-control-cal-")
+    ):
         return "consult-calibrated"
     if stem.startswith("summary-guard-specreview-open-"):
         return "specreview"

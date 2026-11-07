@@ -1,0 +1,71 @@
+**Maturity:** `maturity: production (basis: requested)`. The level was set by the request, not read from the spec or the studio's own documents. Nothing was waived.
+
+## What the panel found
+
+The question was whether inducted members may load and fire the large kiln on evenings and weekends with a code from the booking sheet. The four reviewers kept returning to the committee's own rule that nobody's work should be lost to someone else's mistake. Two problems come out of that rule. First, nothing in a code-and-form start stops one member from overloading a shared load and ruining everyone's work in the kiln. Second, nothing records afterwards who loaded or started which firing, partly because the code is shared rather than personal. The rest is smaller work on the booking sheet itself: telling new members about the induction stamp before they reach the door, recording a firing that was stopped early, and wording.
+
+## How well it holds up
+
+The strongest finding is the failure-cases reviewer's point about overloaded shelves. It is concrete and it breaks the committee's rule directly. The buildability reviewer was right that a ruined firing can't be traced today. But its fix, a technician-run queue, is really an answer to the whole question rather than a fix for traceability. The cheaper fix for traceability comes from two other findings together: the failure-cases reviewer's log of every start, plus the security reviewer's code for each member. Each code then identifies who started the kiln. The ease-of-use reviewer's fairness concern was rated as needing your decision, but it rests on a guess about how members might feel, and the reviewer said no member has been asked. I downgraded it from "would build the wrong thing, needs your decision" to "would cause trouble later, worth fixing, your call". The note that nine firings a month is a rough figure is fair but doesn't change the answer.
+
+## What to do
+
+As the design stands, member-run firings can't meet the committee's rule, because nothing stops a bad load. My recommendation is that the technician keeps starting every large-kiln firing. Members can still load in the evening if the studio uses the queue the buildability reviewer suggested. At about nine firings a month, this is the cheap way to keep the rule. If the studio still wants members to start firings, two things should come first:
+- something that actually stops an overloaded load before the kiln starts
+- a personal code for each member, with every start logged
+
+The booking-sheet fixes below are worth making either way.
+
+---
+
+### Would build the wrong thing, needs your decision
+
+**1. Decide whether members may start the large kiln at all. I recommend not yet, because one member's overloaded load can ruin everyone else's work in the same firing.**
+A member loads past the kiln's shelf limit, enters the code and starts the firing. A shelf cracks and every other member's pots in that load are lost. That is the exact outcome the committee ruled out, and nothing in the code-and-form start prevents it.
+Fix: members would leave their loaded kiln furniture for the technician to check and start, instead of starting the kiln themselves. This changes the member-start part of the proposal, and whatever the booking-sheet spec says about issuing a code for the large kiln.
+*Raised by: failure cases.*
+
+**2. Decide whether a ruined firing must be traceable to whoever loaded and started it. I recommend yes, because without it the members who lost work have no one to ask.**
+A firing comes out with a burst pot and a cracked shelf. The studio can't tell whose pot burst or who started the kiln, and a dispute a month later can't be settled.
+Fix: members and the committee would be able to see who started every firing. Every start would be written to the same calendar history the booking sheet already uses, alongside a personal code for each member (finding 3). This changes the member-start part of the proposal. The buildability reviewer's alternative, a queue where the technician starts every firing, also settles this and is the same choice as finding 1.
+*Raised by: buildability, failure cases (2 reviewers).*
+
+### Would cause trouble later, worth fixing, your call
+
+**3. Replace the shared door code with one code per member, so a code can't be passed on.**
+A member passes the code from their booking sheet to a friend, and someone who isn't a member and has never done the induction opens the studio and starts the kiln.
+Fix: members would each get their own code instead of one shared through the booking sheet. This is also what lets the start log in finding 2 name a person.
+*Raised by: security.*
+
+**4. Tell new members about the induction stamp before they book, not when they're turned away.**
+A new member books the large kiln without knowing it needs the induction stamp, and finds out only when they're refused at the door.
+Fix: `"The large kiln needs the induction stamp."`, a sentence under the booking button on the booking sheet.
+*Raised by: ease of use.*
+
+**5. Record a firing that was stopped early, so it isn't mistaken for a finished one.**
+A member stops a firing partway through, and the sheet shows it as an ordinary firing. Whoever unloads it, or looks back at it later, has no idea it never finished.
+Fix: "have the booking sheet ask for it when the member closes the door."
+*Raised by: buildability.*
+
+**6. Explain the evening and weekend rules where members will see them, in case members who can't come in the evenings feel left out.** (Downgraded, because it guesses at how members will feel without having asked them.)
+Members who can't come in the evenings might see the new rules as favouring those who can. No member has been asked yet.
+Fix: "explain the rules on the studio's site."
+*Raised by: ease of use.*
+
+### Rough edges, nothing to decide
+
+**7. Make the code in the confirmation email expire after the booked evening.** At the moment an old email could still open the studio.
+Fix: members would find that each emailed code works only for the evening they booked.
+*Raised by: security.*
+
+**8. Use "member firings" rather than "unsupervised runs" for the evening slots.**
+Fix: `"member firings"` in place of `"unsupervised runs"` wherever the booking sheet names the evening slots.
+*Raised by: ease of use.*
+
+**9. Count a full quarter of large-kiln firings before deciding.** "About nine a month" is a rough figure, and the case for keeping the technician in charge depends on how much load that puts on them.
+Fix: "count a full quarter before deciding."
+*Raised by: failure cases.*
+
+**10. Match the booking sheet's wording to the booking confirmation email.**
+Fix: "The sheet could reuse the booking confirmation email's wording."
+*Raised by: buildability.*

@@ -1,0 +1,34 @@
+The code review says this change needs fixes before it merges. It returned four findings. One needs your decision, one is worth fixing, and two are rough edges.
+
+**Would build the wrong thing, needs your decision**
+
+**`fs-kiln/unload.py:3`: the board decides when a kiln is safe to open from its size alone. I recommend basing that time on how each firing ran, as the change asks, but you need to decide where that number comes from.**
+`COOL_HOURS` gives every large-kiln firing 18 hours and every small-kiln firing 10, whatever the firing was like. The change says the cool-down "depends on how the firing ran, not only on which kiln it was in." The worst case: a firing that ran hotter in the large kiln goes on the board as ready after 18 hours while it is still too hot, and someone opens it.
+Fix: a firing that ran hotter would stay off the board until its own cool-down has passed, not the kiln's fixed 18 or 10 hours. My estimate, from the cited code, is about 1 file and 2 functions plus the table, mainly `cool_hours` and `unload_time`. One caveat: the reviewer suggests storing the cool-down hours on each firing record and removing the table. That means the record needs a new field that someone has to fill in, and the change doesn't say who works out that number or how.
+*Raised by: code review*
+
+**Would cause trouble later, worth fixing, your call**
+
+**`fs-kiln/unload.py:17`: a firing that cools exactly at this minute is left off the board. I recommend including it, as the change asks.**
+The check is `unload_time(firing) < now`, so a firing that becomes ready at 9:00 doesn't appear on a board built at 9:00. The change says "a firing that cools exactly at this minute appears on the board as ready."
+Fix: `if unload_time(firing) <= now:` in `ready_firings`, so a firing that becomes ready at that exact minute is listed.
+*Raised by: code review*
+
+**Rough edges, nothing to decide**
+
+**`fs-kiln/test_unload.py:9`: the only test is one small-kiln firing from the day before.** It touches none of the cases the other findings are about, so it passes even with those bugs in the code. I recommend adding the cases the reviewer named.
+Fix: the reviewer's words were "cover the edge the other findings touch."
+*Raised by: code review*
+
+**`fs-kiln/unload.py:25`: the board line doesn't say when the firing became ready.** It reads only `<name>: ready to unload`. The change asks that the line "gives the time it became ready." I recommend adding the time.
+Fix: the reviewer's words were "the board line gives no time for when the firing became ready; add it."
+*Raised by: code review*
+
+**What I'll do**
+
+- **First, your decision on the kiln-size finding.** Should each firing record carry its own cool-down hours, as the reviewer suggests? If so, who supplies the number? Or does it come from something else about how the firing ran? I won't guess.
+- **Then the exact-minute fix and the missing time on the board line, both now.** The time is filed under rough edges, but I'm taking it now because the change explicitly requires it and the fix is small.
+- **Tests first.** For each fix I'll write a failing test before touching the code: a firing that becomes ready exactly at `now`, a board line that must include the ready time, and two firings in the same kiln that ran differently and become ready at different times. I'll show you each one failing, then make it pass. That also covers the thin-test finding.
+- **Then another review.** Once the tests pass, I'll run the review again on the updated change before it merges.
+
+This change isn't linked to a spec, so there's no next step to hand off after the review.

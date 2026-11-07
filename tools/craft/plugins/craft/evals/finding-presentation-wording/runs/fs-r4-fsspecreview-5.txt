@@ -1,0 +1,53 @@
+Here is the full detail on the three findings that need your decision. All three were rated against this spec's production maturity.
+
+---
+
+**A forwarded confirmation email is enough to cancel someone else's firing (C1)** — fixed in the spec
+
+Should a cancellation have to come from the member who made the booking? I recommend yes, because otherwise anyone who sees a confirmation email can take a member's firing away from them.
+
+**Worst case.** The spec says "A member can cancel a booking up to 24 hours before its day. The day is freed and offered to the first member on that kiln's standby list." (AC3). It never says how the system knows the person cancelling is the person who booked. Confirmation emails get forwarded to a partner, sent on to a class group, or left open on the studio's shared computer. Anyone who reads one can cancel the booking. The day then goes straight to the first member on standby, so the real booker turns up with a packed box to find their firing has gone to someone else, and there is no booking left to restore.
+
+Fix: replace that cancellation criterion (AC3) with this text:
+
+> **AC3.** A member can cancel a booking up to 24 hours before its day. The cancellation takes effect only once it is confirmed from the email address the booking was made with; until then the booking stands. Once confirmed, the day is freed and offered to the first member on that kiln's standby list.
+
+A forwarded email can still start a cancellation, but only the booker's own mailbox can finish it. The edit doesn't change the 24-hour cut-off.
+
+Raised by: security.
+
+---
+
+**The spec books the whole kiln for a day, but members share a firing (C2)** — needs a rewrite (`record-only`)
+
+Should members book a share of a firing, meaning space on its shelves, instead of the whole kiln for a day? I recommend yes. As written, the system turns a shared resource into a single-owner one, and members end up waiting for no reason.
+
+**Worst case.** The spec says "A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking." (AC1). It also says "A kiln holds one firing per day. A second booking for the same kiln and day is refused and the next free day is offered instead." (AC2). In practice a firing is a load of several members' work, and a kiln is full when its shelves are full, not when one person has claimed the day. A member with one bowl books the large kiln for Saturday. The next four members are refused and pushed back day by day. With two kilns and a membership in the low hundreds (the fact check found 112 members on the register, not the spec's "about 90"), that queue soon runs to weeks. The spec's own Problem supports this reading: "Two members regularly turn up with work for the same firing" describes members sharing a firing, which is normal studio practice and not a clash.
+
+Fix: members would book space in a firing and see how much room is left in it, instead of claiming or being refused a whole kiln-day. A firing would be full only when its shelves are. This rewrites the Problem and Objectives, along with that booking criterion (AC1), the one-firing-per-day rule (AC2), the cancellation and standby criterion (AC3) and the reminder criterion (AC5). The lock for repair (AC4) and the calendar history (AC6) stand as written.
+
+  Prescription: what is wrong is that the unit being booked is the kiln-day, when it should be shelf space within a firing. Change AC2 from "one firing per day" to "a firing holds bookings until its shelves are full", and offer the next firing with room in place of the next free day. Restate AC1 and AC3 in terms of a share of a firing: freeing a share offers that share, not the whole day, to standby. Before AC2 can be rewritten, the spec needs each kiln's shelf capacity, which neither the spec nor any pass report states. That missing number is why this is a rewrite rather than an edit I could draft now.
+
+Raised by: right problem. The spec's own Problem statement supports it.
+
+---
+
+**Members first hear about the 8 am loading time the evening before their firing (C3)** — fixed in the spec
+
+Should the 8 am loading time be in the booking confirmation, and not only in the reminder? I recommend yes. A member who learns it the night before may have no way to get there in time, and their firing goes ahead without their work.
+
+I checked this one against the spec, and it is narrower than the pass stated it. The spec does tell members about 8 am: "The evening before a firing, the member receives a reminder listing what must be on the shelves by 8 am." (AC5). The real gap is timing and reliance on a single message. The booking confirmation (AC1) states only the booking.
+
+**Worst case.** A member books a Thursday firing a fortnight ahead and plans to drop their work off at 9 on the way to work. The first mention of 8 am arrives in Wednesday evening's reminder, too late to rearrange the morning. If they typed their email address wrong, the reminder never arrives at all. They arrive at 9 to a packed, sealed kiln and lose the firing. The failure-cases pass separately flagged that a reminder sent to a mistyped address is never seen, which makes the confirmation the safer place to say this first.
+
+Fix: add this text to the end of that booking criterion (AC1), so the criterion reads:
+
+> **AC1.** A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking and that work must be on the shelves by 8 am on the day.
+
+The evening reminder (AC5) stays as it is.
+
+Raised by: ease of use. Failure cases supports it through the mistyped-address finding.
+
+---
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

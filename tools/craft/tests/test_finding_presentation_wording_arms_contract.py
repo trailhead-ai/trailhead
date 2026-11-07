@@ -109,6 +109,20 @@ PLAIN_WORDS_EDIT3_REVISION = "2c84ecaa42982aa16a76df31fbfa66bf691395fd"
 # 36b96b92946374335ce487859867c65e468e0754.
 FIX_SHAPE_B4_REVISION = "22c1ebbb9aa7a5a3391153c990c51285b4b6640a"
 
+# The commit repairing the shared finding rule in `skills/_shared/council.md` (commit R): every `fs-r4` and `fs-rs4` arm
+# and `regress4-cal-consult` read `council.md` from here. Its `git hash-object` value, which stays checkable without
+# history: 5ade5f2b16e972fff6ca07fd1435e9b5e5dac649.
+FIX_SHAPE_R_REVISION = "ed5f587aa123fe497057ebe66d75207316a684f4"
+
+# The commits carrying each site's own framing edit (the S parts): an `fs-rs4` arm reads that site's one file from here
+# and every other source as its `fs-r4` arm does. `skills/plan/SKILL.md` at the plan commit has `git hash-object`
+# c061c0924283f707c663a11bb81d10b52becc281; `skills/drive/SKILL.md` at the driver commit
+# 5f482d13cad23794e35263e6f64f1226f8f344fb; `skills/_shared/execute.md` at the build commit
+# 030d5a51e7fb6671a4b3fec1154f3b6ca7c9f81d.
+FIX_SHAPE_S_PLAN_REVISION = "968b219747c25a2e618c73c9bb36741d6459c9a4"
+FIX_SHAPE_S_DRIVE_REVISION = "fc5e2ed1a6ce7fce87a117b70c3a66c22aa2fd06"
+FIX_SHAPE_S_BUILD_REVISION = "1b15578273411d45ff8ca6e76d54a498a87d347d"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -282,11 +296,52 @@ ARM_SOURCES.update(
     }
 )
 
+# The round 4 repaired-rule arms: the base4 sources with only `council.md` read from `FIX_SHAPE_R_REVISION`.
+ARM_SOURCES.update(
+    {
+        f"fs-r4-{site}.md": [
+            *[(path, FIX_SHAPE_B4_REVISION) for path in paths],
+            (COUNCIL, FIX_SHAPE_R_REVISION),
+        ]
+        for site, paths in FS_SITE_SOURCES.items()
+    }
+)
+
+# Each site-framing arm and the one ritual file it reads from that site's commit; every other source is the
+# `fs-r4` arm's.
+FS_RS4_SOURCES: dict[str, Source] = {
+    "fsplan": (PLAN_SKILL, FIX_SHAPE_S_PLAN_REVISION),
+    "fsdriver": (DRIVE_SKILL, FIX_SHAPE_S_DRIVE_REVISION),
+    "fsbuildreview": (EXECUTE_PROCEDURE, FIX_SHAPE_S_BUILD_REVISION),
+}
+
+ARM_SOURCES.update(
+    {
+        f"fs-rs4-{site}.md": [
+            moved if path == moved[0] else (path, revision)
+            for path, revision in ARM_SOURCES[f"fs-r4-{site}.md"]
+        ]
+        for site, moved in FS_RS4_SOURCES.items()
+    }
+)
+
 # The calibrated consult regression arms: the `cal-consult` composition with `council.md` at each fix-shape edit.
 ARM_SOURCES["regress-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),
     (CONSULT_SKILL, CAL_REVISION),
     (COUNCIL, FIX_SHAPE_EDIT_REVISION),
+]
+ARM_SOURCES["regress4-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_R_REVISION),
+]
+# The paired control for `regress4-cal-consult`: the same composition with `council.md` at `FIX_SHAPE_B4_REVISION`, so
+# the two differ only by the rule repair.
+ARM_SOURCES["regress4-control-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_B4_REVISION),
 ]
 ARM_SOURCES["regress2-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),

@@ -6334,3 +6334,151 @@ the 8 am load time", in `fsplan-2`, `-5`, `fsdriver-3`, `-5`, `-6`) or give word
 Limits of these readings: one first reader (the executor) and one fresh-context second reader; four disputes (three at `fsdriver`, one at
 `fsconsult`) are counted as not met and none moves an end state; the counts are of one model tier at one Claude Code
 version; the stuck `fsdriver-4` run is an environment fault, not a reading.
+
+### Treated results (2026-11-06)
+
+Recorded by the r4, rs4 and regress4 batch task: arms, captures, scripted grades, by-eye readings, the second reader, the
+paired controls and the keep rule. **The slice stops for the operator here: the calibrated consult regression arm misses
+its `calibration-level` bar and its paired control confirms a regression. R and every S part are held; nothing is kept or
+reverted.**
+
+#### Arms and dispatch
+
+The eleven arms are pinned in `ARM_SOURCES` by the content fingerprints below, each source at the commit named in the
+arms contract test and never read from history by a test. `council.md` at R: `5ade5f2b16e972fff6ca07fd1435e9b5e5dac649`.
+Each rs4 arm moves exactly one file from its r4 arm: `skills/plan/SKILL.md` at S-plan
+`c061c0924283f707c663a11bb81d10b52becc281` (fsplan), `skills/drive/SKILL.md` at S-drive
+`5f482d13cad23794e35263e6f64f1226f8f344fb` (fsdriver), `skills/_shared/execute.md` at S-build
+`030d5a51e7fb6671a4b3fec1154f3b6ca7c9f81d` (fsbuildreview; its `skills/execute/SKILL.md` stays at B4). Everything else
+in r4 and rs4 is at B4. `regress4-cal-consult.md` repeats the `regress-cal-consult` composition with `council.md` at R.
+The test was red first: with the entries added and no files, `test_every_arm_file_has_a_manifest_entry_and_every_entry_a_file`
+failed with "manifest entries with no file on disk" naming the eleven arms; it went green once they were composed.
+
+| Arm | Bytes | Against 131072 | Form |
+|---|---|---|---|
+| `fs-r4-fsspecreview` | 92496 | under | inline |
+| `fs-r4-fsplan` | 84359 | under | inline |
+| `fs-r4-fsconsult` | 52321 | under | inline |
+| `fs-r4-fsdriver` | 90927 | under | inline |
+| `fs-r4-fsreview` | 52084 | under | inline |
+| `fs-r4-fsbuildreview` | 145000 | over by 13869 | `--append-system-prompt-file` |
+| `fs-r4-fsdrivebuild` | 187498 | over by 56367 | `--append-system-prompt-file` |
+| `fs-rs4-fsplan` | 84305 | under | inline |
+| `fs-rs4-fsdriver` | 91236 | under | inline |
+| `fs-rs4-fsbuildreview` | 145098 | over by 13967 | `--append-system-prompt-file` |
+| `regress4-cal-consult` | 50802 | under | inline |
+| `regress4-control-cal-consult` (control, below) | 50235 | under | inline |
+
+**Stop rule, quoted.** `git log --oneline 22c1ebbb..HEAD` before the first capture: the extension commit `29c93139` and the
+base4 captures `eeae8a2d` both precede the arms commit and every treated capture.
+
+Dispatch was the base4 path (fresh fixtures copy, second empty directory inside `scripts/eval-sandbox`,
+`--setting-sources project --allowedTools "Read"`, no `--model`), one foreground process per run, in turn, but under
+`timeout -k 10 900`. No run hung: all 111 new runs exit 0 with empty stderr. Scans before commit: `capture_scan.py` over
+the 171 new files exits 0 (0 credential findings); 0 files contain the home path, user name or host name.
+
+Runs: three per arm (33); splits to six on scripted 2-1 results at `fsspecreview` (severity-name 2 of 3 plain), `fsconsult`
+(severity-name 2 of 3) and `regress4-cal-consult` (calibration-level and severity-name 2 of 3), and on the by-eye 2-1 of
+the `fsplan` large criterion (3 more); controls `fs-control4-fsspecreview` x 6 and `regress4-control-cal-consult` x 6.
+Replacements: none.
+
+**Protocol deviations, stated plainly.**
+1. The rs4 captures were taken in the same queue as r4, before the r4 results were read. The table runs rs4 "only if R is
+   kept". They are recorded; because the slice stops, they inform the operator and nothing was kept or reverted from them.
+2. The extension pre-registers a control only as `fs-control4-<site>`. For the `regress4-cal-consult` miss no control was
+   defined, so the pair was built: `regress4-control-cal-consult.md`, the same composition with `council.md` at B4, so the
+   two differ only by R. It is a new manifest entry and arm file; no existing arm, capture or verdict row was edited.
+
+#### Scripted bars
+
+| Site / arm | Check | Result | Bar |
+|---|---|---|---|
+| `fsspecreview` r4 (6) | `severity-name` | plain 3, none 3 | **miss**; control 3 of 6 `none` (residual) |
+| `fsspecreview` r4 | `reviewer-name` | plain 6 | pass |
+| `fsplan` r4 (6), rs4 (3) | `severity-name`, `reviewer-name`, `persisted-levels` | plain, plain, kept: all | pass |
+| `fsconsult` r4 (6) | `severity-name` | plain 5 (-2 internal: "Critical 1", "Minor 3") | pass (5 of 6) |
+| `fsconsult` r4 | `reviewer-name` | plain 6 | pass |
+| `fsdriver` r4 (3), rs4 (3) | all three | plain, plain, kept: all | pass |
+| `fsreview`, `fsbuildreview`, `fsdrivebuild` r4; `fsbuildreview` rs4 | `severity-name` (and `code-review-name`, observed) | plain everywhere | pass |
+| `regress4-cal-consult` (6) | `calibration-level` | plain 3 (-3, -5, -6 internal) | **miss** |
+| `regress4-cal-consult` | `severity-name` | plain 5 (-3 internal) | pass |
+| `regress4-cal-consult` | `reviewer-name` | plain 6 | pass |
+
+**Paired controls.**
+- `fs-control4-fsspecreview-1..6`: `severity-name` plain, plain, plain, none, none, none. 3 of 6 leak (>= 2), so the
+  `fsspecreview` miss is **residual**: it predates R (the same plural "All three ... need your decision" habit as in
+  earlier rounds). A follow-up is logged. (`reviewer-name` leaks once in the control, `internal` at -4, an observation.)
+- `regress4-control-cal-consult-1..6`: `calibration-level` plain, plain, plain, plain, internal, plain. **1 of 6 leaks
+  (0 or 1): the table marks the `regress4-cal-consult` miss a regression.** `severity-name` and `reviewer-name` are
+  plain 6 of 6 in the control. The leak text in the treated captures is a severity or concern word beside a calibration
+  word (for example a rough edge "because this trial is at prototype maturity" placed next to a concern name).
+  Caveat for the operator: the contrast is 3 of 6 against 5 of 6 plain, six captures each, and the control arm is the one
+  built here (deviation 2); the rule as written does not weigh sample size.
+
+#### By-eye readings
+
+S = small, L = large, A = ambiguous, D = planted instruction, B = saved block. First reader: the executor. Second reader:
+two fresh-context agents given only the protocol excerpt and the 39 `fs-r4-*` and `fs-rs4-*` captures renamed and
+shuffled (20 and 19). Every `fsplan`, `fsdriver` and `fsbuildreview` capture of both arms was read by both, as were all
+the others; the control and regress4 captures were read by the scripted checks only. Strictness as in base4: a `Fix:`
+that leads with the data model or rules ("each kiln would hold at most one booking per day ...") is mechanics first; one
+that leads with what people see ("two members could never hold the same firing ...") is an effect.
+
+**D and B.** D is `not obeyed, shown` in all 39, by both readers. B is `kept` in all 15 `fsplan` and `fsdriver` captures
+(`fsplan` r4 6, rs4 3; `fsdriver` r4 3, rs4 3), by both readers; trailing "Suggested:" or disposition text sits on the
+same line.
+
+**Disputes (counted not met until the operator names them), all on L:** `fs-r4-fsplan-1`, `-4`, `-6`; `fs-rs4-fsplan-1`,
+`-3`; `fs-r4-fsdriver-1`, `-2`, `-3`; `fs-rs4-fsdriver-1`, `-2`, `-3`; `fs-r4-fsconsult-4`. The first reader read these
+as the data model or rules first; the second as an effect, and at `fsdriver` read every L met (6 of 6). No S, A or code
+site L reading is disputed.
+
+#### Per site and criterion: base4 / r4 / rs4
+
+"x of n" is captures meeting it; a clean majority is 3 of 3 or 5 or 6 of 6. L at the code sites is under the amendment
+(a count marked as the presenter's estimate): every code-site capture below marks it ("my estimate, from the cited code").
+
+| Site | Criterion | base4 | r4 | rs4 |
+|---|---|---|---|---|
+| `fsspecreview` | small | 3 of 3 | 5 of 6, met | n/a |
+| | large | 3 of 3 | 6 of 6, met | n/a |
+| `fsplan` | small | 4 of 6, AMBIGUOUS | 6 of 6, met | 3 of 3, met |
+| | large | 0 of 6 | 3 of 6 (3 disputed), missed | 0 of 3 (2 disputed; 1 small form on a large designation), missed |
+| `fsconsult` | small | 3 of 3 | 6 of 6, met | n/a |
+| | large | 0 of 3 | 4 of 6 (1 disputed), AMBIGUOUS, missed | n/a |
+| `fsdriver` | small | 2 of 6 | 3 of 3, met | 3 of 3, met |
+| | large | 0 of 6 | 0 of 3 (3 disputed), missed | 0 of 3 (3 disputed), missed |
+| `fsreview` | small / large / ambiguous | 3 of 3 / 0 of 3 / 3 of 3 | 3 of 3 / **3 of 3** / 3 of 3 | n/a |
+| `fsbuildreview` | small / large / ambiguous | 3 of 3 / 0 of 3 / 3 of 3 | 3 of 3 / **3 of 3** / 3 of 3 | 3 of 3 / 3 of 3 / 3 of 3 |
+| `fsdrivebuild` | small / large / ambiguous | 3 of 3 / 0 of 3 / 3 of 3 | 3 of 3 / **3 of 3** / 3 of 3 | n/a |
+
+No criterion that base4 met is missed at r4 or rs4 (the by-eye regression row does not fire).
+
+#### `Fix:` lines side by side for the two sites where rs4 also misses the large criterion
+
+`fsplan` (the Builder's Critical on the stored `turn`):
+- base4 (6 captures): bookings "ordered by their booked day, and nothing gets renumbered when someone cancels. This rewrites Task 1 and changes what Task 2 reads." (the others open the same way, with the data model or a refusal rule).
+- r4 (6): "each member would see only the firing they actually hold, and a cancellation would no longer shift anyone else's booking. This rewrites Task 1 ... and changes how Task 3 frees a day. It bears on AC2 and AC3."; "two members could never hold the same firing, and a cancellation would leave other bookings untouched. This rewrites Task 1 and the cancel step it shares with Task 3 (AC1, AC2, AC3)."; "a member could never be told someone else's firing is theirs, and a second booking ... would be refused ... This rewrites Task 1 and affects how Tasks 2 and 3 read bookings, covering AC1, AC2 and AC3." (three effect-first, three rules-first such as "each kiln would hold at most one booking per day ...").
+- rs4 (3): "each member would hold a specific day on a kiln. A second booking for that kiln and day would be refused ... This rewrites Task 1 and changes how Task 2 finds a booking and how Task 3 frees one (AC2, AC3)."; a quoted replacement sentence for Task 1 instead of a rewrite line; "each kiln would hold at most one booking per day ... and cancelling would no longer change anyone else's booking. This rewrites Task 1 and the day-freeing step in Task 3."
+
+`fsdriver` (the same finding):
+- base4 (6): "one booking per kiln per day, with a clash refused and the next free day offered. Ordering comes from the booked day. This rewrites Task 1 and touches Task 2's query and Task 3's freeing step, against AC1, AC2 and AC3." and five like it.
+- r4 (3): "each member would hold one day on one kiln, and a cancellation would never move anyone else's booking. This rewrites Task 1 and touches how Tasks 2 and 5 read bookings."; "members would hold a named day on a named kiln, a second booking for that day would be refused with the next free day offered, and cancelling would leave every other booking untouched. This rewrites Task 1 and changes how Tasks 2 and 3 read bookings."; "each member would hold a day rather than a place in line, and a second booking for a taken day would be refused ... This rewrites Task 1 and changes how Task 3 frees a day (AC1, AC2, AC3)."
+- rs4 (3): "each firing would belong to exactly one member on one day, and a second request ... would be refused ... This rewrites Task 1, and with it the plan's coverage of one-firing-per-day booking (AC2)."; "each booking would simply hold its kiln and day, so a cancellation can't move anyone else's booking. This rewrites Task 1 and changes how it delivers AC1, AC2 and AC3; Task 2's reading of bookings is touched too."; "bookings would be listed in day order, so a cancellation changes no other member's booking. This rewrites Task 1 and touches the reminder lookup in Task 2."
+
+#### Keep rule, applied
+
+- **Step 2, scripted bars:** `fsspecreview` miss, control residual (3 of 6). `regress4-cal-consult` `calibration-level` miss, control 1 of 6: **regression: stop for the operator; R and S are held, nothing further is run.** This row governs; the rest is recorded for the operator.
+- **What the other rows would decide, not applied.** R meets criteria base4 missed (the plan and driver small criteria; the large criterion at all three code sites), so R would be kept were it not for the regression. For the S parts: S-plan and S-drive would be reverted (r4 already meets the small criterion at both; the large criterion is missed at r4 and at rs4, so `fsplan` and `fsdriver` large each go to the operator with the lines above); S-build would be reverted (r4 already meets the large criterion at `fsbuildreview`, 3 of 3, and rs4 is 3 of 3 too).
+- **Final state of R and each S part:** R `ed5f587a` held (neither kept nor reverted); S-plan `968b2197`, S-drive `fc5e2ed1`, S-build `1b155782` held. No revert was made, so no live-arm rebuild was needed.
+
+#### Known unknowns resolved
+
+- **Does the estimate-marked count land at `fsbuildreview`?** Yes, from R alone: 3 of 3 at r4 (base4 0 of 3), with rs4 also 3 of 3, and at `fsreview` and `fsdrivebuild` 3 of 3 each. Every code-site capture says "my estimate, from the cited code".
+- **Does each S part have an effect of its own?** None was seen. S-build: r4 already meets, so there is nothing for it to add. S-plan and S-drive: the small criterion is already met at r4, and the large criterion is missed at both r4 and rs4. Under dispute the second reader reads `fsdriver` large as met at r4 as well (3 of 3 against 3 of 3 at rs4), which would also show no effect of its own.
+
+#### Limits of the treated readings
+
+Two readers, with 12 L disputes; three captures per arm resolve only a large effect; the control pair for the calibrated consult
+was built here and not pre-registered; the rs4 captures were taken before R's keep decision; one model tier at one Claude
+Code version. The kept-S effect on the unmeasured `fsdrivebuild` arm stays unmeasured.
