@@ -6,7 +6,7 @@ Without the explicit `--unattended` request, `/craft:slice` behaves as it always
 
 ## Fixture
 
-The same `word-count-tool` fixture as `unattended-slice-ends-slice-chosen`; the prompt runs `/craft:slice spec/word-count-tool` with no flag.
+The same `word-count-tool` fixture as `unattended-slice-ends-slice-chosen`; the prompt runs `/craft:slice spec/word-count-tool` with no flag and says the operator approves whichever slice it chooses. The approval is in the prompt because an attended slice stops to have its claim approved before it writes the record, and a headless session with no approval in it sometimes stops there (observed on the baseline, 1 of 3 runs created a record without it); the approval lets the run reach the handoff. It does not say anything about unattended mode.
 
 ## Conditions, sample and bar
 
