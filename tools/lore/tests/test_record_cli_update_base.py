@@ -222,7 +222,6 @@ def test_write_landing_between_the_relocation_lock_spans_is_refused_against_a_ba
         return real(*roots)
 
     monkeypatch.setattr(locking, "vault_write_locks", write_lands_between_spans)
-    _snapshot(vault_a)
 
     r = _run_cfg(["record", "update", rid, "--team", "beta", "--base", base],
                  vault=vault_a, state=state, config_home=config_home,
