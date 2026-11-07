@@ -30,10 +30,9 @@ for a graph load. It judges the record's PRIOR status against the per-kind table
 ``ready`` and later; every decision status; task ``done``/``dropped``/``superseded``)
 and compares authored content — the body minus a spec's ``## Slices`` and
 ``## Follow-ups`` and a task's ``## Driver run`` — so only those sections pass a
-plain update. Refusals
-are ``[frozen-body]`` and ``[frozen-status]`` and name ``lore record amend``,
-the one write that may change a frozen body, and ``lore record supersede`` for a
-change of scope.
+plain update. Refusals are ``[frozen-body]`` and ``[frozen-status]`` and name
+``lore record amend``, the one write that may change a frozen body, and
+``lore record supersede`` for a change of scope.
 
 The supersession door: ``superseded`` is reached only through ``lore record
 supersede``. :func:`check_superseded_status` runs from :func:`evaluate_graph_guards`

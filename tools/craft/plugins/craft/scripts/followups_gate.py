@@ -73,8 +73,6 @@ from criterion_gate import (  # noqa: E402
     _scrub_credential_shaped,
 )
 from followups import (  # noqa: E402
-    DUPLICATE_HEADING_REASON_CODE,
-    Entry,
     FollowupsError,
     excise_section,
     parse_followups,
@@ -156,10 +154,6 @@ def _read_stdin() -> str:
     return text
 
 
-def _status(e: Entry) -> tuple[str, str | None]:
-    return e.status_kind, e.status_detail
-
-
 def _certify(prior_body: str, proposed: str) -> None:
     if _ends_inside_masked_region(_COMMONMARK_LINE_RE.split(proposed)):
         raise _Refusal(
@@ -182,9 +176,7 @@ def _certify(prior_body: str, proposed: str) -> None:
     except FollowupsError as e:
         raise _Refusal(str(e), e.reason_code, 1)
     except DuplicateHeadingError as e:
-        raise _Refusal(
-            f"{e} — keep a single '## Follow-ups' heading", DUPLICATE_HEADING_REASON_CODE, 1
-        )
+        raise _Refusal(f"{e} — keep a single '## Follow-ups' heading", e.reason_code, 1)
 
     seen: set[str] = set()
     for e in entries:
@@ -207,7 +199,8 @@ def _certify(prior_body: str, proposed: str) -> None:
                 "removed-entry",
                 1,
             )
-        if old.status_kind in ("done", "dropped") and _status(old) != _status(new):
+        settled = old.status_kind in ("done", "dropped")
+        if settled and (old.status_kind, old.status_detail) != (new.status_kind, new.status_detail):
             raise _Refusal(
                 f"entry {old.id} is already '{old.status_kind}' and its status cannot "
                 "change — restore the prior status line",

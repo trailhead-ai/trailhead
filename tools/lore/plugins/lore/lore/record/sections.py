@@ -7,7 +7,8 @@ names, so it never moves a heading, a fence, or a comment.
 
 Lore carries its own copy of the heading and masking rules: plugins stand
 alone, so this module must not import craft. A parity test in craft's suite
-holds the two copies in agreement about where ``## Slices`` starts.
+holds the two copies in agreement about where ``## Slices`` and
+``## Follow-ups`` start.
 """
 from __future__ import annotations
 

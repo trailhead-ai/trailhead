@@ -1662,6 +1662,17 @@ class _UpdateAborted(Exception):
         self.code = code
 
 
+def _stored_sidecar(location) -> dict:
+    """The record's sidecar as stored; ``{}`` when it is missing, unreadable or not an object."""
+    if not location.sidecar_path.exists():
+        return {}
+    try:
+        side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return side if isinstance(side, dict) else {}
+
+
 def _read_apply_and_guard(
     location,
     *,
@@ -1689,22 +1700,11 @@ def _read_apply_and_guard(
     hands the resolved new body to the ADR body freeze as the one value it may
     become (``amend``); every other guard runs identically either way.
     """
-    import json
-
     from ..record import guards as guards_mod
     from ..record import store as record_store_mod
 
     # Load the existing sidecar so the field flags mutate the live record.
-    existing_sidecar: dict = {}
-    if location.sidecar_path.exists():
-        try:
-            existing_sidecar = json.loads(
-                location.sidecar_path.read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError):
-            existing_sidecar = {}
-    if not isinstance(existing_sidecar, dict):
-        existing_sidecar = {}
+    existing_sidecar = _stored_sidecar(location)
 
     existing_body = (
         location.body_path.read_text(encoding="utf-8")
@@ -1903,8 +1903,8 @@ def _cmd_record_update(args) -> int:
     half (so the relocation path re-checks it) the stored body's revision is
     compared with it by :func:`_check_base_revision`, and a mismatch writes
     nothing. It is required when the update creates, edits or removes the
-    ``## Follow-ups`` section of a spec at a frozen status (:func:`_require_base_for_follow_ups`); any other
-    update may omit it.
+    ``## Follow-ups`` section of a spec at a frozen status
+    (:func:`_require_base_for_follow_ups`); any other update may omit it.
     """
     from contextlib import ExitStack
 
@@ -2488,17 +2488,10 @@ def _check_base_revision(
     if base == current:
         return
 
-    updated_by = updated_at = "unknown"
-    has_history = False
-    if location.sidecar_path.exists():
-        try:
-            side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            side = {}
-        if isinstance(side, dict):
-            updated_by = _inert_stamp(side.get("updated-by", updated_by))
-            updated_at = _inert_stamp(side.get("updated-at", updated_at))
-            has_history = bool(side.get("change-history"))
+    side = _stored_sidecar(location)
+    updated_by = _inert_stamp(side.get("updated-by", "unknown"))
+    updated_at = _inert_stamp(side.get("updated-at", "unknown"))
+    has_history = bool(side.get("change-history"))
     history_hint = (
         f" If that change was an amend, `lore record history {location.record_id}` "
         "lists it."
@@ -2539,23 +2532,17 @@ def _require_base_for_follow_ups(
     """Refuse a frozen spec's ``## Follow-ups`` change that names no ``--base``.
 
     The section is a ledger other writers append to, and a body composed from an
-    earlier read would silently erase their entry.  Creating the section counts: a
-    creator composing from a stale copy could drop a ``## Slices`` row added since. MUST be called with the write
-    lock held; raises :class:`_UpdateAborted` after printing the refusal.
+    earlier read would silently erase their entry. Creating the section counts: a
+    creator composing from a stale copy could drop a ``## Slices`` row added since.
+    MUST be called with the write lock held; raises :class:`_UpdateAborted` after
+    printing the refusal.
     """
     from ..record import guards as guards_mod
     from ..record.sections import section_changed
 
     if base is not None or location.kind.casefold() != "spec":
         return
-    prior_status = None
-    if location.sidecar_path.exists():
-        try:
-            side = json.loads(location.sidecar_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            side = {}
-        if isinstance(side, dict):
-            prior_status = side.get("status")
+    prior_status = _stored_sidecar(location).get("status")
     if prior_status not in guards_mod.FROZEN_STATUSES["spec"]:
         return
     if not section_changed(existing_body, new_body, _FOLLOW_UPS_HEADING):
