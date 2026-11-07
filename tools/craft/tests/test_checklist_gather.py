@@ -590,6 +590,38 @@ def test_a_wrapped_verified_by_suffix_is_dropped_from_the_criterion_words(capsys
     assert "[1/1] Checkout collects details. (AC32)\n" in out
 
 
+def _gather_into(queue, fake):
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        code = cg.main([], fake)
+    queue.put((code, buf.getvalue()))
+
+
+def test_an_unclosed_verified_by_with_a_huge_whitespace_run_still_lists_the_entry():
+    import multiprocessing
+
+    ctx = multiprocessing.get_context("fork")
+    fake = FakeLore(["a"])
+    fake.add("a", "s", spec_body(pending(), criteria={
+        "AC32": "Checkout collects billing details. *Verified by:" + " " * 20000}))
+    queue = ctx.Queue()
+    child = ctx.Process(target=_gather_into, args=(queue, fake))
+    child.start()
+    child.join(10)
+    hung = child.is_alive()
+    if hung:
+        child.terminate()
+        child.join()
+    assert not hung, "gathering did not finish within 10s: verified-by stripping is not linear"
+    code, out = queue.get(timeout=5)
+    assert code == 0
+    assert "(AC32)" in out
+    assert "Checkout collects billing details." in out
+
+
 def test_a_hit_whose_id_is_not_under_its_vaults_spec_directory_is_a_search_problem(capsys):
     fake = FakeLore(["alpha"])
     good_spec(fake)

@@ -221,7 +221,7 @@ def _criteria(body: str) -> dict[str, str]:
     for identifier, text in found:
         if identifier is not None and identifier not in words:
             words[identifier] = _CRITERION_PREFIX_RE.sub(
-                "", _TRAILER_RE.sub("", text), count=1
+                "", _TRAILER_RE.sub("", " ".join(text.split())), count=1
             ).strip()
     return words
 
