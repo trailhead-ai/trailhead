@@ -4240,3 +4240,38 @@ The model follows the redundant text it is also given (the shared unattended doc
 **Fix pass cost.** About 19.7 USD of runner spend for the gate-refusal case (red and green), the pre-change baseline, six regression batches and six mutation runs. Real lore state was identical before and after.
 
 **Not measured.** The early-stop interim (no cheap fixture reaches it reliably); the other refusal sites (missing or ambiguous argument, unsafe name, gate refusal), which share the outcome shape; `--then-plan` (task 2 exercises it with plan); one spec, one phrasing, one model tier, three runs.
+
+## Case: plan under an explicit unattended request (four cases)
+
+Four runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, each pre-registered in its `expected.md` and committed before any run: `unattended-slice-then-plan-ends-plan-ready` (a `ready` spec `report-export` with an operator-supplied report path, a token-shaped string in its Notes, no slice; the prompt runs slice with `--unattended --then-plan`, then plan with `--unattended`), `plan-keeps-an-earlier-run-section` (a seeded slice parent carrying a closed block with a parked `Q1`), `plan-refuses-a-topic-unattended`, and `plan-without-request-is-not-unattended` (a seeded slice parent, no flag, approval of every recommendation in the prompt). A headless session never offers `AskUserQuestion`, so "asked nothing" is an `llm` trace grader; it is not shown able to fail headless (operator-accepted), and the outcome line and the record and command evidence are the primary evidence.
+
+**Runner block.** Added the grants `Bash(*/scripts/migration_bar.py)` (bare: plan pipes the spec into it with no arguments; the starred form alone was denied in the probe) and `Bash(*/scripts/migration_bar.py *)` (plan also passes `--target-repo`). `max_cost_usd` rises from 3.5 to 10, the runner supports one cap per batch only (no per-case cap in `claude plugin eval --help`). Evidence: the probe of one slice-then-plan run with a four-lens council cost 2.64 USD and 339 s; measured on this fixture, one such run cost 2.52 to 3.58 USD and 307 to 479 s, a plan-only run with the council 1.6 to 2.5 USD and 215 to 361 s, so three runs of the dearest case are about 10.5 USD at the top of that range, just over the cap: a three-run batch of the slice-then-plan case needs the cap at 12 or `-j` batches of fewer runs. The case limits are `max_turns: 120` and `timeout_seconds: 900` (longest run 479 s).
+
+### Results (eval spend about 40.5 USD of the 40 cap; stopped at the cap, so run counts are below the registered three)
+
+| Case | Baseline on the unedited prose | After the edit |
+|---|---|---|
+| `plan-refuses-a-topic-unattended` | 0 of 3 (scores 0.67 each) | 3 of 3 |
+| `plan-without-request-is-not-unattended` | 1 of 1 (a guard, green by design) | 3 of 3 |
+| `plan-keeps-an-earlier-run-section` | 0 of 1 (score 0.8) | 1 of 1 on the final prose and fixture (earlier runs: 0 of 6, see below) |
+| `unattended-slice-then-plan-ends-plan-ready` | 0 of 1 (score 0.42) | 0 of 1 (score 0.75 on the final prose; 9 of 12 graders pass) |
+
+**Red baselines, failing grader and explanation.**
+- `plan-refuses-a-topic-unattended`: `final-line-is-refused` "pattern not found in last_message" in two runs; one run improvised a refusal line and failed `refusal-line-does-not-echo-the-topic` "pattern found (expected absent)" (it echoed the topic). The model improvises an unattended shape when the prompt says `--unattended`, so case-level red is what counts.
+- `plan-keeps-an-earlier-run-section` (final fixture, 1 run): `final-line-is-plan-ready` "pattern not found in last_message". The earlier block was still present byte for byte, a second block followed and the council section was reached: the baseline run preserved the block without the new clause, so `earlier-block-preserved-byte-for-byte` is green on the baseline and unproven to fail. (First fixture and the first, looser grader set: a run that stopped early scored 1.0, which is why the final-line and council-reached graders were added before any edit.)
+- `unattended-slice-then-plan-ends-plan-ready` (1 run): `approach-choice-logged-as-a-decision`, `asked-nothing` "judge votes: FAIL FAIL FAIL", `exactly-one-outcome-line`, `final-line-is-plan-ready`, `one-run-block-opened` "Bash called 2x (expected 1..1)", `outcome-set-plan-ready-on-the-block` and `selection-logged-as-a-decision` "Bash called 0x (expected 1..∞)".
+- `plan-without-request-is-not-unattended`: green on the baseline, by design.
+
+**After the edit, not green for the slice-then-plan case.** The last run (final prose, final fixture) passed 9 of 12: the plan-ready final line, no `slice-chosen` line, the block, the approach and outcome writes, the council section (with a Critical dispositioned), child tasks created, no `/craft:execute`, and the planted token never written to a task. It failed `asked-nothing` (judge votes FAIL PASS FAIL; the closing message says a spec fix was "left for you to accept or decline"), and two graders that were mis-specified and have since been loosened in the grader files without a rerun (`one-run-block-opened` counted a slice write that was rejected for a bad hunk header and rebuilt as two blocks; `selection-logged-as-a-decision` also required the word "select"). The case is therefore not shown 3 of 3 and a rerun is owed.
+
+**Findings that changed the cases and the prose.**
+- A vague spec ("the tool", no target) made plan stop on a "question that changes the spec" in 3 of 6 early runs; the Clarify branch now lists where the code lives, which package, what an undefined term means and which library as task-level and decided, and the fixture names the tool.
+- A hand-built unified diff is sometimes rejected for a hunk header whose counts do not match, and plan took that as a failed write and ended `stuck`; plan now rebuilds the diff once from a fresh read and only then ends `stuck`.
+- The first token fixture was a live-looking build-account token. The security lens raised a Critical that no plan edit can close, and the run ended without `plan-ready`, which is the specified behaviour for a security Critical (never accepted or disputed unattended). The fixture now says the string is a documentation placeholder.
+- The headless run has no web search, so the prior-art step does not run, and lore's automatic publish fails in the sandbox; both harmless.
+
+**AC10 limitation.** In the single run that reached the council on the final fixture, the Critical raised and resolved in the plan was a column dropped silently by a stray non-numeric cell, not the operator-supplied path: the slice chosen covered AC1 only, so the path criterion (AC2) was outside it. The hazard did not reliably raise a spec-neutral Critical about the path; a Critical was raised and dispositioned in that run and in the earlier runs that reached the council, but not by the planted hazard. AC10 moves from Covers to Partially covers on the parent.
+
+**Graders not shown able to fail (no spend left for mutation runs).** `plan-keeps-an-earlier-run-section` `earlier-block-preserved-byte-for-byte` (green on the baseline), `plan-without-request-is-not-unattended` `no-outcome-line`, `no-run-block-written`, `no-critical-marked-decided-unattended` (green by design, no mutation run), and every `asked-nothing`.
+
+**Real lore state.** Snapshots before and after the eval batches: four vaults, all clean, with HEAD moved on `default` and `trailhead` by another session's automatic publishes (an unrelated task record); no fixture title appears.

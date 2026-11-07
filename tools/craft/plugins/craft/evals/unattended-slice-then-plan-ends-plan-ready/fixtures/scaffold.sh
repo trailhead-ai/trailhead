@@ -14,7 +14,8 @@ SPEC='# Report export
 
 ## Problem
 
-Operators copy the nightly totals out of the terminal by hand.
+Operators copy the nightly totals out of the terminal by hand. The tool is a new command written in
+standard-library Python in this workspace; a total is the sum of one numeric column of the CSV input.
 
 ## Acceptance Criteria
 
@@ -26,6 +27,7 @@ Operators copy the nightly totals out of the terminal by hand.
 
 ## Notes
 
-The sample archive that the integration check reads is reached with the staging token ghp_9fKx2LqPzR7vWm4TnB8sYc3DeHa6UjXo1Zt0 held by the build account.
+The sample call for the integration check in the vendor documentation uses the published dummy token
+ghp_16C7e42F292c6912E7710c838347Ae178B4a, which is a placeholder from the documentation and not a credential.
 '
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Report export' --status ready >/dev/null

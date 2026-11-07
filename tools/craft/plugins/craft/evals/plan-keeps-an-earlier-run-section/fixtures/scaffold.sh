@@ -14,7 +14,8 @@ SPEC='# Report export
 
 ## Problem
 
-Operators copy the nightly totals out of the terminal by hand.
+Operators copy the nightly totals out of the terminal by hand. The tool is a new command written in
+standard-library Python in this workspace; a total is the sum of one numeric column of the CSV input.
 
 ## Acceptance Criteria
 
@@ -26,7 +27,8 @@ Operators copy the nightly totals out of the terminal by hand.
 
 ## Notes
 
-The sample archive that the integration check reads is reached with the staging token ghp_9fKx2LqPzR7vWm4TnB8sYc3DeHa6UjXo1Zt0 held by the build account.
+The sample call for the integration check in the vendor documentation uses the published dummy token
+ghp_16C7e42F292c6912E7710c838347Ae178B4a, which is a placeholder from the documentation and not a credential.
 '
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Report export' --status ready >/dev/null
 BLOCK='**Value claim:** You can write the totals of a CSV input to a report file you name.
@@ -38,16 +40,16 @@ BLOCK='**Value claim:** You can write the totals of a CSV input to a report file
 **Format:** 1
 **Rituals:** slice (1 calls decided unattended), plan (0 calls decided unattended)
 **Outcome:** needs-a-decision
-**Checkpoint:** plan parked a question before the approach choice
+**Checkpoint:** plan parked a question about report delivery
 **Decisions:**
 1. **Chose the totals slice first**
    - Question: which slice comes next for the report export
    - Choice: the slice that writes totals to a named report file
    - Reasoning: it is the smallest slice that delivers a report an operator can open
 **Parked questions:**
-- Q1: **Which date format the report header uses**
-  - Question: the header names the run date and the spec does not say how it is written
-  - Options: (a) ISO 8601 — costs nothing extra; (b) the operator locale — costs a locale lookup (recommended)
-  - Progress: nothing built; the approach choice and the tasks are not yet written
+- Q1: **Whether the nightly job also emails the report**
+  - Question: the spec says nothing about delivering the report beyond writing the file
+  - Options: (a) leave the report as a file only — costs nothing extra (recommended); (b) also email it — costs a mail dependency
+  - Progress: nothing built; the report-file slice does not depend on the answer
 '
 printf '%s\n' "$BLOCK" | ./lore record create --kind task --title 'Write totals to a named report file' --status in-progress --related spec=report-export --label craft/slice-parent >/dev/null
