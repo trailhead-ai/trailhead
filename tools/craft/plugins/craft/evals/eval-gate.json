@@ -125,6 +125,12 @@
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "unattended-slice-refuses-on-a-gate-refusal": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }
