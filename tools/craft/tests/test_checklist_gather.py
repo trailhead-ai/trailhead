@@ -528,16 +528,49 @@ def test_a_page_that_cannot_be_read_after_a_good_one_is_unreadable_not_cut_off(c
     assert out.count("Could not read:") == 1
 
 
-def test_a_hit_repeated_on_a_later_page_is_counted_and_rendered_once(capsys):
+def test_a_hit_repeated_on_a_later_page_is_rendered_once_and_names_the_cut_off(capsys):
     fake = FakeLore(["alpha"], page_cap=1)
     fake.add("alpha", "one", spec_body(pending()))
     fake.hits.append(dict(fake.hits[0]))
     code, out, _ = go(capsys, fake)
     assert code == 0
-    assert out.splitlines()[0] == "1 check waiting, in 1 spec."
+    lines = out.splitlines()
+    assert lines[0] == "1 check waiting, in 1 spec."
+    assert lines[1] == could_not_read("lore's search", "cut-off")
     assert out.count("[1/1]") == 1
     assert "[2/" not in out
+
+
+def test_a_repeated_hit_with_every_distinct_record_read_is_not_a_cut_off(capsys):
+    fake = FakeLore(["alpha"], page_cap=2, total=3)
+    fake.add("alpha", "a", spec_body(pending()))
+    fake.add("alpha", "b", spec_body())
+    fake.hits.append(dict(fake.hits[1]))
+    fake.add("alpha", "c", spec_body())
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    assert out.splitlines()[0] == "1 check waiting, in 1 spec."
+    assert out.count("[1/1]") == 1
     assert "Could not read" not in out
+
+
+def test_a_spec_edited_between_pages_that_is_never_returned_names_the_cut_off(capsys):
+    fake = FakeLore(["alpha"], page_cap=2)
+    fake.add("alpha", "a", spec_body())
+    fake.add("alpha", "b", spec_body())
+    fake.add("alpha", "c", spec_body(pending()))
+
+    def runner(argv):
+        done = fake(argv)
+        if argv[0] == "search" and argv[argv.index("--offset") + 1] == "0":
+            fake.hits.insert(0, fake.hits.pop())
+        return done
+
+    code, out, _ = go(capsys, runner)
+    assert code == 0
+    assert "Nothing is waiting on you." not in out
+    assert out.splitlines()[0] == "Nothing waiting in the specs that could be read."
+    assert could_not_read("lore's search", "cut-off") in out.splitlines()
 
 
 def test_the_criterion_words_do_not_carry_the_verified_by_suffix(capsys):

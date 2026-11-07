@@ -201,7 +201,7 @@ def _search(runner, unreadable: set) -> list:
                 seen.add(hit_id)
             hits.append(hit)
         if read >= total:
-            complete = not page.get("truncated")
+            complete = not page.get("truncated") and len(hits) >= total
             break
         if not page_hits:
             break
