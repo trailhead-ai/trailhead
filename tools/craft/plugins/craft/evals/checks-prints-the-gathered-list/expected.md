@@ -19,7 +19,7 @@ Every clause holds.
 |---|---|---|
 | The skill was invoked | `skill-used` | `tool_used`, `Skill`, input matching `craft:checks`, min 1 |
 | The gather ran | `gather-ran` | `tool_used`, `Bash`, input matching `gather`, min 1 |
-| No tool call follows the gather | `only-skill-and-gather` | `tool_used`: `Bash` max 1, `Skill` max 1, `Write`, `Edit`, `Read`, `Glob`, `Grep` and `Agent` max 0 each |
+| No tool call follows the gather | `bash-once`, `skill-once`, `no-write`, `no-edit` | `tool_used`: `Bash` max 1 (the gather itself), `Skill` max 1, `Write` and `Edit` max 0; no other tool is offered |
 | No vault write | `no-lore-call` | `tool_used`, `Bash`, input matching `lore`, max 0 |
 | The count line reaches the answer | `count-line` | `regex` over the last message |
 | The hostile entry's check line reaches the answer verbatim | `hostile-line` | `regex` over the last message |

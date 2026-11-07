@@ -10,7 +10,8 @@
       "Bash(*/scripts/ledger_gate.py *)",
       "Bash(*/scripts/candidate_set.py *)",
       "Bash(mktemp)",
-      "Bash(mktemp *)"
+      "Bash(mktemp *)",
+      "Bash(./gather)"
     ],
     "max_cost_usd": 3.5
   },
@@ -83,6 +84,11 @@
     "review-refuses-a-malformed-spec-id": {
       "measures": [
         "skills/review/SKILL.md"
+      ]
+    },
+    "checks-prints-the-gathered-list": {
+      "measures": [
+        "skills/checks/SKILL.md"
       ]
     }
   }
