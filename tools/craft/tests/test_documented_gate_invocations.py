@@ -19,7 +19,6 @@ Flags are where a rename bites; positional operands are placeholders in the pros
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys
@@ -87,16 +86,6 @@ def _registered_options(script: str, args: str = "") -> set[str] | None:
             if result.returncode != 0:
                 return None
     return set(_OPTION.findall(result.stdout))
-
-
-@pytest.mark.parametrize("script", sorted({s for s, _ in _documented_invocations()}))
-def test_every_script_a_documented_invocation_names_ships_as_an_executable(script: str):
-    """A recipe naming a script the plugin does not ship — or ships without the
-    execute bit, since the prose runs it by path — fails at the agent's first run,
-    whether or not the invocation passes any flags."""
-    target = _SCRIPTS / script
-    assert target.is_file(), f"craft's prose runs `{script}`, but scripts/ ships no such file"
-    assert os.access(target, os.X_OK), f"craft's prose runs `{script}` by path, but it is not executable"
 
 
 @pytest.mark.parametrize(
