@@ -150,14 +150,9 @@ def test_base_is_the_prior_documents_revision(tmp_path, rev):
 
 
 def test_base_is_not_a_hash_of_the_body_text_for_a_crlf_prior(tmp_path):
-    import hashlib
-
-    body = BASE.replace("\n", "\r\n")
     folded = BASE
     res = gate(folded, with_section(entry()), tmp_path, revision="b" * 64)
     assert res.stdout.decode() == "base: " + "b" * 64 + "\n"
-    assert hashlib.sha256(folded.encode()).hexdigest() != "b" * 64
-    assert hashlib.sha256(body.encode()).hexdigest() != "b" * 64
 
 
 # ---- refusals (exit 1) ------------------------------------------------------
@@ -336,8 +331,42 @@ def test_change_outside_followups_when_section_already_exists(tmp_path):
 
 
 def test_section_not_appended_at_end_is_refused(tmp_path):
-    new = "# Spec\n\n" + section(entry()) + "\n# Spec2\n\nprose\n\n## Slices\n\n- task/s1 covers AC1\n"
-    refused(gate(BASE, new, tmp_path), "change-outside-followups")
+    new = "# Spec\n\nprose\n\n" + section(entry()) + "\n## Slices\n\n- task/s1 covers AC1\n"
+    refused(gate(BASE, new, tmp_path), "section-not-at-end", "end of the body")
+
+
+def test_section_appended_after_trailing_blank_lines_is_accepted(tmp_path):
+    accepted(gate(BASE, BASE + "\n\n\n" + section(entry()) + "\n\n", tmp_path))
+
+
+def test_existing_section_may_stay_before_later_headings(tmp_path):
+    prior = "# S\n\n" + section(entry("F1")) + "\n## Slices\n\n- x\n"
+    new = "# S\n\n" + section(entry("F1"), entry("F2")) + "\n## Slices\n\n- x\n"
+    accepted(gate(prior, new, tmp_path))
+
+
+def test_trailing_whitespace_on_last_authored_line_must_be_preserved(tmp_path):
+    prior = "# S\n\nprose  "
+    refused(
+        gate(prior, with_section(entry(), base="# S\n\nprose"), tmp_path),
+        "change-outside-followups",
+    )
+    accepted(gate(prior, prior + "\n\n" + section(entry()), tmp_path))
+
+
+@pytest.mark.parametrize("bad_id", ["F0", "F01", "F007"])
+def test_entry_id_with_leading_zero_or_zero_is_malformed(tmp_path, bad_id):
+    refused(gate(BASE, with_section(entry(bad_id)), tmp_path), "malformed-entry")
+
+
+def test_zero_padded_id_cannot_sit_beside_the_plain_one(tmp_path):
+    refused(
+        gate(BASE, with_section(entry("F1"), entry("F01")), tmp_path), "malformed-entry"
+    )
+
+
+def test_multi_digit_id_is_accepted(tmp_path):
+    accepted(gate(BASE, with_section(entry("F10")), tmp_path))
 
 
 def test_duplicate_followups_heading_in_proposed(tmp_path):

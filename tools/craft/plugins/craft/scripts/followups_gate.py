@@ -29,11 +29,14 @@ gate refuses a proposed body that:
     - carries a malformed entry, a task target that is not `task/<id>`, or a
       `where:` path that is not repository-relative
     - differs from the prior anywhere outside `## Follow-ups`
+    - creates the section anywhere but the end of the body (a section the prior
+      already had may stay where it is)
+
+Entry ids are `F` followed by a positive integer without leading zeros.
 
 The outside-the-section comparison excises the section from both bodies (an
 absent section excises nothing), joins the lines with LF and drops trailing
-whitespace. A first write therefore appends the new section at the end of the
-body.
+blank lines, never trailing whitespace within an authored line.
 
 Every `reason:` line is vault-sourced text, so it passes once, at the output
 boundary, through `criterion_gate._neutralize_control_chars` and then
@@ -45,7 +48,7 @@ Exit codes:
        `reason-code:` tokens: removed-entry, duplicate-entry-id,
        drop-without-reason, settled-entry-changed, entry-origin-changed,
        malformed-entry, malformed-task-id, path-outside-repository,
-       duplicate-followups-heading, change-outside-followups.
+       duplicate-followups-heading, change-outside-followups, section-not-at-end.
     2  could not certify — empty-stdin, non-utf8-stdin, stdin-too-large,
        unterminated-masked-region (the proposed body ends inside an open fence
        or comment), unreadable-prior, malformed-prior (not a JSON object
@@ -75,7 +78,9 @@ from criterion_gate import (  # noqa: E402
 from followups import (  # noqa: E402
     FollowupsError,
     excise_section,
+    has_section,
     parse_followups,
+    section_is_last,
 )
 from observation_gate import _ends_inside_masked_region  # noqa: E402
 
@@ -222,6 +227,13 @@ def _certify(prior_body: str, proposed: str) -> None:
             "change-outside-followups",
             1,
         )
+    if not has_section(prior_body) and not section_is_last(proposed):
+        raise _Refusal(
+            "a new '## Follow-ups' section goes at the end of the body — move it below "
+            "everything else",
+            "section-not-at-end",
+            1,
+        )
 
 
 def main(argv: list[str]) -> int:
@@ -240,6 +252,8 @@ def main(argv: list[str]) -> int:
         prior_body, revision = _load_prior(args.prior)
         _certify(prior_body, proposed)
     except _Refusal as r:
+        # Every vault-sourced value in a message is already repr'd, which escapes
+        # every character the neutralizer would; _safe is a second layer.
         print(f"followups-gate: reason: {_safe(str(r))}", file=sys.stderr)
         print(f"followups-gate: reason-code: {r.reason_code}", file=sys.stderr)
         return r.exit_code

@@ -22,6 +22,8 @@ Entry grammar:
 Public API:
     parse_followups(body) -> list[Entry]   entries in document order
     excise_section(body) -> str            the body without the section
+    has_section(body) -> bool              whether the section heading is present
+    section_is_last(body) -> bool          whether only blank lines follow the section
     FollowupsError                         a grammar violation; carries a
                                            stable `reason_code`
     DuplicateHeadingError                  a second unmasked heading (re-exported
@@ -56,7 +58,7 @@ DROP_WITHOUT_REASON = "drop-without-reason"
 
 _HEADING_RE = re.compile(r"^## Follow-ups$", re.IGNORECASE)
 _ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|\Z)")
-_ENTRY_RE = re.compile(r"^- \*\*(F[0-9]+)\.\*\* (\S.*)$")
+_ENTRY_RE = re.compile(r"^- \*\*(F[1-9][0-9]*)\.\*\* (\S.*)$")
 _ENTRY_START_RE = re.compile(r"^- ")
 _FIELD_RE = re.compile(r"^ {2,}- ([a-z]+):[ \t]*(.*?)[ \t]*$")
 _TASK_ID_RE = re.compile(r"^task/[A-Za-z0-9._-]+$")
@@ -108,15 +110,30 @@ def _section_range(lines: list[str], masked: list[bool]) -> tuple[int, int] | No
 
 
 def excise_section(body: str) -> str:
-    """The body without the section, lines joined by LF and trailing
-    whitespace dropped, so a section appended at the end leaves the rest
-    equal to the body it was appended to."""
+    """The body without the section, lines joined by LF and trailing blank
+    lines dropped (never trailing whitespace within an authored line), so a
+    section appended at the end leaves the rest equal to the body it was
+    appended to."""
     lines, masked = _split(body)
     located = _section_range(lines, masked)
     if located is not None:
         start, end = located
         lines = lines[:start] + lines[end:]
-    return "\n".join(lines).rstrip()
+    while lines and lines[-1] == "":
+        lines.pop()
+    return "\n".join(lines)
+
+
+def has_section(body: str) -> bool:
+    lines, masked = _split(body)
+    return _section_range(lines, masked) is not None
+
+
+def section_is_last(body: str) -> bool:
+    """True when the section is absent or only blank lines follow it."""
+    lines, masked = _split(body)
+    located = _section_range(lines, masked)
+    return located is None or all(not line.strip() for line in lines[located[1]:])
 
 
 def _check_task_id(value: str, entry_id: str, field: str) -> None:
