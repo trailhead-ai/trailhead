@@ -2549,9 +2549,11 @@ def _require_base_for_follow_ups(
         return
     print(
         f"error: --base is required when an update changes the "
-        f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec: pass the "
-        f"revision of the body you composed against. {_revision_hint(location)}, "
-        "then update with --base <revision>. Nothing was written.",
+        f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec. Nothing was "
+        f"written. To proceed: {_revision_hint(location)}, reapply your change "
+        "to that fresh body (for a ## Follow-ups write, re-run "
+        "followups_gate.py --prior on that read), then update with --base set "
+        "to that read's revision, never a newer one fetched separately.",
         file=sys.stderr,
     )
     raise _UpdateAborted()

@@ -185,3 +185,51 @@ def test_stale_base_on_the_relocation_path_refuses_and_moves_nothing(tmp_path):
     assert "retry the update with the new revision" in r.stderr
     assert _snapshot(vault_a) == before
     assert not list(vault_b.rglob("*.md"))
+
+
+def test_both_base_refusals_tell_the_writer_to_reapply_its_change_on_a_fresh_read(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC + FOLLOWUPS)
+    stale = _revision(vault, state, rid)
+    assert _update(vault, state, rid, SPEC + FOLLOWUPS + "- F5 late idea\n",
+                   "--base", stale).returncode == 0
+    before = _snapshot(vault)
+
+    missing = _update(vault, state, rid, SPEC + FOLLOWUPS_CHANGED)
+    outdated = _update(vault, state, rid, SPEC + FOLLOWUPS_CHANGED, "--base", stale)
+
+    for r in (missing, outdated):
+        assert r.returncode != 0
+        assert "reapply your change" in r.stderr
+        assert "lore record show" in r.stderr
+    assert "followups_gate.py --prior" in missing.stderr
+    assert "that read's revision" in missing.stderr
+    assert _snapshot(vault) == before
+
+
+def test_write_landing_between_the_relocation_lock_spans_is_refused_against_a_base_current_at_the_first(
+    tmp_path, monkeypatch
+):
+    from lore import locking
+
+    vault_a, vault_b, state, config_home = _two_team_config(tmp_path)
+    rid = _create_routed(vault_a, state, config_home, scope_args=["--team", "alpha"])
+    base = _revision(vault_a, state, rid)
+    kind, name = rid.split("/", 1)
+    body_path = vault_a / kind / f"{name}.md"
+    real = locking.vault_write_locks
+
+    def write_lands_between_spans(*roots):
+        body_path.write_text("someone else's body\n", encoding="utf-8")
+        return real(*roots)
+
+    monkeypatch.setattr(locking, "vault_write_locks", write_lands_between_spans)
+    before = _snapshot(vault_a)
+
+    r = _run_cfg(["record", "update", rid, "--team", "beta", "--base", base],
+                 vault=vault_a, state=state, config_home=config_home,
+                 stdin_text="")
+
+    assert r.returncode != 0
+    assert "changed after you read it" in r.stderr
+    assert body_path.read_text(encoding="utf-8") == "someone else's body\n"
+    assert not list(vault_b.rglob("*.md"))

@@ -152,6 +152,8 @@ identical to the stored one, a missing record, and any `session` record.
   status (ready, planned, complete, superseded, dropped), because a body composed from an
   earlier read would erase another writer's entry. Other updates (a `## Slices` append
   that leaves `## Follow-ups` unchanged, a draft spec) need no `--base`.
+  `update` and `delete` never seed scopes from a camp group; only an explicit scope flag
+  re-routes a record.
 - **`--initiated-by`** says who asked for the edit. `operator` means a human
   instructed this edit in the current session; `agent` means the agent proposed it.
 - **Attested, not verified.** The value is recorded as stated; lore cannot check it.
