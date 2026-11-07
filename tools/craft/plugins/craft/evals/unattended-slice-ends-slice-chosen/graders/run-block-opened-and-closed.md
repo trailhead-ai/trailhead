@@ -1,5 +1,5 @@
 ---
 type: regex
-pattern: '(?s)## Unattended run.*\*\*Format:\*\* 1.*\*\*Outcome:\*\* slice-chosen'
+pattern: '## Unattended run[\s\S]*\*\*Format:\*\* 1[\s\S]*\*\*Outcome:\*\* slice-chosen'
 target: files
 ---
