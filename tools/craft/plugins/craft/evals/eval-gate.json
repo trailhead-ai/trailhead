@@ -85,6 +85,11 @@
       "measures": [
         "skills/review/SKILL.md"
       ]
+    },
+    "checks-prints-the-gathered-list": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ]
     }
   }
 }
