@@ -10,7 +10,8 @@
       "Bash(*/scripts/ledger_gate.py *)",
       "Bash(*/scripts/candidate_set.py *)",
       "Bash(mktemp)",
-      "Bash(mktemp *)"
+      "Bash(mktemp *)",
+      "Bash(./gather)"
     ],
     "max_cost_usd": 3.5
   },
