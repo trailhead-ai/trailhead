@@ -1,5 +1,6 @@
 ---
-type: regex
-pattern: '## Unattended run[\s\S]*\*\*Decisions:\*\*\s*\n1\. [\s\S]*Question:[\s\S]*Choice:[\s\S]*Reasoning:'
-target: files
+type: tool_used
+tool: Bash
+input_match: '(?=.*record update)(?=.*--diff)(?=.*Decisions:)(?=.*Question:)(?=.*Choice:)(?=.*Reasoning:)'
+min: 1
 ---

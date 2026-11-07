@@ -26,9 +26,11 @@ Every clause holds.
 |---|---|---|
 | No line of the final message begins with `outcome:` | `no-outcome-line` | `regex`, `not_contains` |
 | A slice record was created (the run reached materialization) | `a-slice-was-created` | `file_exists` on `vault/task/*.md` |
-| No created file contains `## Unattended run` | `no-run-block-in-created-record` | `regex`, `not_contains`, `target: files` |
+| No Bash call mentions `## Unattended run` | `no-run-block-written` | `tool_used` Bash, `min: 0`, `max: 0` |
 | The `/craft:plan task/<name>` handoff is printed | `plan-handoff-printed` | `regex` over the final message |
 
 ## Limitations
+
+- The absence of a block is graded from the commands the run issued (`tool_used`), since a grader over the created record's contents is not available (see `unattended-slice-ends-slice-chosen`).
 
 - One spec, one phrasing, one model tier, three runs.
