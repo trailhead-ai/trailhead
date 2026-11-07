@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from lore.record.sections import authored_content
+from lore.record.sections import authored_content, section_changed
 from lore.record.store import neutralize_fences
 
 
@@ -228,3 +228,107 @@ def test_four_space_indented_hash_line_does_not_end_the_section():
 def test_three_space_indented_heading_ends_the_section():
     before = LEDGER + "   ## Other\n\nProse A\n"
     assert not same("spec", before, before.replace("Prose A", "Prose B"))
+
+
+FOLLOWUPS = "## Follow-ups\n\n- `lesson/one`, raised 2026-01-01\n"
+FOLLOWUPS_MORE = FOLLOWUPS + "- `lesson/two`, raised 2026-01-02\n"
+
+
+def test_followups_change_without_existing_section_is_pipeline():
+    assert same("spec", PLAN, PLAN + "\n" + FOLLOWUPS)
+
+
+def test_followups_change_with_existing_section_is_pipeline():
+    assert same("spec", PLAN + "\n" + FOLLOWUPS, PLAN + "\n" + FOLLOWUPS_MORE)
+
+
+def test_followups_change_before_slices_is_pipeline():
+    before = PLAN + "\n" + FOLLOWUPS + "\n" + LEDGER
+    after = PLAN + "\n" + FOLLOWUPS_MORE + "\n" + LEDGER
+    assert same("spec", before, after)
+
+
+def test_followups_change_after_slices_is_pipeline():
+    before = PLAN + "\n" + LEDGER + "\n" + FOLLOWUPS
+    after = PLAN + "\n" + LEDGER + "\n" + FOLLOWUPS_MORE
+    assert same("spec", before, after)
+
+
+def test_followups_change_alongside_authored_change_is_authored():
+    before = PLAN + "\n" + FOLLOWUPS
+    after = PLAN.replace("Intent", "Changed intent") + "\n" + FOLLOWUPS_MORE
+    assert not same("spec", before, after)
+
+
+def test_duplicate_followups_headings_exempt_nothing():
+    base = PLAN + "\n" + FOLLOWUPS
+    assert not same("spec", base + "\n## Follow-ups\nA\n", base + "\n## Follow-ups\nB\n")
+
+
+@pytest.mark.parametrize("wrapper", ["```\n{h}\n```\n", "<!--\n{h}\n-->\n"])
+def test_followups_heading_inside_fence_or_comment_is_not_a_section(wrapper):
+    hidden = wrapper.format(h="## Follow-ups\nnote one")
+    before = PLAN + "\n" + hidden
+    after = PLAN + "\n" + hidden.replace("note one", "note two")
+    assert not same("spec", before, after)
+
+
+@pytest.mark.parametrize("heading", ["## Follow-ups (out of scope)", "### Follow-ups"])
+def test_near_miss_followups_heading_is_authored(heading):
+    before = PLAN + "\n" + heading + "\n\n- a\n"
+    after = PLAN + "\n" + heading + "\n\n- b\n"
+    assert not same("spec", before, after)
+
+
+def test_followups_section_in_a_task_is_authored():
+    before = "# Task\n\nintro\n\n## Follow-ups\n\n- a\n"
+    after = before.replace("- a", "- b")
+    assert not same("task", before, after)
+
+
+FU = "## Follow-ups"
+FU_BODY = PLAN + "\n## Follow-ups\n\n- F1 one\n"
+
+
+def test_section_changed_is_false_for_identical_bodies_and_when_absent_in_both():
+    assert not section_changed(FU_BODY, FU_BODY, FU)
+    assert not section_changed(PLAN, PLAN + "\nmore intro\n", FU)
+
+
+def test_section_changed_sees_an_existing_section_edited_extended_or_removed():
+    assert section_changed(FU_BODY, FU_BODY + "- F2 two\n", FU)
+    assert section_changed(FU_BODY, FU_BODY.replace("F1 one", "F1 uno"), FU)
+    assert section_changed(FU_BODY, PLAN, FU)
+
+
+def test_section_changed_sees_the_section_created_from_nothing():
+    assert section_changed(PLAN, FU_BODY, FU)
+
+
+def test_section_changed_ignores_blank_lines_before_the_next_section():
+    grown = FU_BODY + "\n## Slices\n\n- a\n"
+    assert not section_changed(FU_BODY, grown, FU)
+    assert not section_changed(FU_BODY.rstrip("\n"), FU_BODY, FU)
+
+
+def test_section_changed_ignores_edits_outside_the_section_and_other_sections():
+    other = FU_BODY + "\n## Slices\n\n- a\n"
+    assert not section_changed(other, other.replace("- a", "- b"), FU)
+    assert not section_changed(FU_BODY, FU_BODY.replace("Intent", "Changed intent"), FU)
+
+
+def test_section_changed_ends_the_section_at_the_next_heading():
+    before = FU_BODY + "\n## Notes\n\nx\n"
+    assert not section_changed(before, before.replace("x", "y"), FU)
+
+
+def test_section_changed_is_ambiguity_closed_when_a_heading_repeats_and_bodies_differ():
+    twice = FU_BODY + "\n## Follow-ups\n\n- F9 stray\n"
+    assert section_changed(twice, twice.replace("F9 stray", "F9 other"), FU)
+    assert section_changed(twice, twice.replace("Intent", "Changed"), FU)
+    assert not section_changed(twice, twice, FU)
+
+
+def test_section_changed_ignores_a_heading_hidden_in_a_fence():
+    hidden = PLAN + "\n```\n## Follow-ups\n- F1\n```\n"
+    assert not section_changed(hidden, hidden.replace("- F1", "- F2"), FU)

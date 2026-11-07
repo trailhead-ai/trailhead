@@ -7,7 +7,8 @@ names, so it never moves a heading, a fence, or a comment.
 
 Lore carries its own copy of the heading and masking rules: plugins stand
 alone, so this module must not import craft. A parity test in craft's suite
-holds the two copies in agreement about where ``## Slices`` starts.
+holds the two copies in agreement about where ``## Slices`` and
+``## Follow-ups`` start.
 """
 from __future__ import annotations
 
@@ -37,10 +38,15 @@ class Section(NamedTuple):
 # Craft consumers of this table:
 #   - ``## Slices`` (spec): the slice ledger, written by ``craft:slice`` /
 #     slice close and read by ``candidate_set.py`` and ``covers_gate.py``.
+#   - ``## Follow-ups`` (spec): the follow-up ledger, parsed by craft's
+#     ``followups.py``; every write is certified by ``followups_gate.py``.
 #   - ``## Driver run`` (task): the drive checkpoint, one block appended at
 #     each phase boundary by ``craft:drive``.
 PIPELINE_SECTIONS: dict[str, tuple[Section, ...]] = {
-    "spec": (Section("## Slices", repeatable=False),),
+    "spec": (
+        Section("## Slices", repeatable=False),
+        Section("## Follow-ups", repeatable=False),
+    ),
     "task": (Section("## Driver run", repeatable=True),),
 }
 
@@ -114,13 +120,44 @@ def _removed_lines(kind: str, lines: list[str], masked: list[bool]) -> set[int]:
         if len(starts) > 1 and not section.repeatable:
             continue
         for start in starts:
-            end = len(lines)
-            for j in range(start + 1, len(lines)):
-                if not masked[j] and _ATX_HEADING_RE.match(_content(lines[j])):
-                    end = j
-                    break
-            removed.update(range(start, end))
+            removed.update(range(start, _section_end(lines, masked, start)))
     return removed
+
+
+def _section_end(lines: list[str], masked: list[bool], start: int) -> int:
+    for j in range(start + 1, len(lines)):
+        if not masked[j] and _ATX_HEADING_RE.match(_content(lines[j])):
+            return j
+    return len(lines)
+
+
+def _section_text(body: str, heading: str) -> str | None | bool:
+    """The text of *heading*'s section in *body*; ``None`` when absent, ``False`` when ambiguous."""
+    lines = _split_lines(body)
+    masked = _mask(lines)
+    starts = _heading_lines(lines, masked, Section(heading, False).heading_re)
+    if not starts:
+        return None
+    if len(starts) > 1:
+        return False
+    return "".join(lines[starts[0]:_section_end(lines, masked, starts[0])])
+
+
+def section_changed(before: str, after: str, heading: str) -> bool:
+    """Whether the section under *heading* differs between two bodies.
+
+    Absent in both is unchanged; created or removed is changed. Trailing blank
+    lines before the next heading are not content. A heading that appears more
+    than once outside fences and comments cannot be located, so the section
+    counts as changed whenever the bodies differ at all.
+    """
+    old = _section_text(before, heading)
+    new = _section_text(after, heading)
+    if old is False or new is False:
+        return before != after
+    if old is None or new is None:
+        return old is not new
+    return old.rstrip() != new.rstrip()
 
 
 def authored_content(kind: str, body: str) -> str:

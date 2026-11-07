@@ -1,8 +1,10 @@
-"""Lore's pipeline-section finder and craft's `## Slices` heading search must agree.
+"""Lore's pipeline-section finder and craft's heading searches must agree.
 
-Craft reads the slice ledger (candidate_set.py, covers_gate.py); lore decides
-which part of a spec body is exempt from the freeze guard. If they disagree
-about where `## Slices` starts, the guard exempts text the pipeline never owns.
+Craft reads the slice ledger (candidate_set.py, covers_gate.py) and the
+follow-ups ledger (followups.py); lore decides which part of a spec body is
+exempt from the freeze guard and which edits need a revision handshake. If they
+disagree about where `## Slices` or `## Follow-ups` starts, the guard exempts
+text the pipeline never owns or demands a handshake for text it does not guard.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ for _path in (str(SCRIPTS_DIR), str(_LORE_PLUGIN)):
 
 import candidate_set  # noqa: E402
 import covers_gate  # noqa: E402
+import followups  # noqa: E402
 from lore.record import sections  # noqa: E402
 
 CORPUS = {
@@ -71,47 +74,68 @@ CORPUS = {
 }
 
 
-def _craft_start(body: str) -> int | None:
+HEADINGS = ("## Slices", "## Follow-ups")
+
+
+def _body_for(heading: str, body: str) -> str:
+    if heading == "## Slices":
+        return body
+    return (
+        body.replace("Sliſes", "Follow-upſ")
+        .replace("SLICES", "FOLLOW-UPS")
+        .replace("slices", "follow-ups")
+        .replace("Slices", "Follow-ups")
+    )
+
+
+def _craft_start(heading: str, body: str) -> int | None:
     lines = covers_gate._COMMONMARK_LINE_RE.split(body)
     masked = covers_gate._mask_fenced_lines(lines)
-    after = covers_gate._find_unique_heading(
-        lines,
-        masked,
-        candidate_set._SLICES_HEADING_RE,
-        candidate_set._SLICES_HEADING,
-        candidate_set._DUPLICATE_SLICES_HEADING_REASON_CODE,
-    )
-    return None if after is None else after - 1
+    if heading == "## Slices":
+        after = covers_gate._find_unique_heading(
+            lines,
+            masked,
+            candidate_set._SLICES_HEADING_RE,
+            candidate_set._SLICES_HEADING,
+            candidate_set._DUPLICATE_SLICES_HEADING_REASON_CODE,
+        )
+        return None if after is None else after - 1
+    located = followups._section_range(lines, masked)
+    return None if located is None else located[0]
 
 
-def _lore_starts(body: str) -> list[int]:
+def _lore_starts(heading: str, body: str) -> list[int]:
     lines = sections._split_lines(body)
-    section = sections.PIPELINE_SECTIONS["spec"][0]
+    registered = [s for s in sections.PIPELINE_SECTIONS["spec"] if s.heading == heading]
+    assert registered, f"lore registers no pipeline section {heading!r} for specs"
+    section = registered[0]
     return sections._heading_lines(lines, sections._mask(lines), section.heading_re)
 
 
+@pytest.mark.parametrize("heading", HEADINGS)
 @pytest.mark.parametrize("name", sorted(CORPUS))
-def test_lore_and_craft_agree_where_slices_starts(name):
-    body = CORPUS[name]
+def test_lore_and_craft_agree_where_the_section_starts(heading, name):
+    body = _body_for(heading, CORPUS[name])
     try:
-        expected = _craft_start(body)
+        expected = _craft_start(heading, body)
     except covers_gate.DuplicateHeadingError:
-        assert len(_lore_starts(body)) > 1
+        assert len(_lore_starts(heading, body)) > 1
         return
-    starts = _lore_starts(body)
+    starts = _lore_starts(heading, body)
     assert starts == ([] if expected is None else [expected])
 
 
-def _craft_outcome(body: str) -> str:
+def _craft_outcome(heading: str, body: str) -> str:
     try:
-        return "absent" if _craft_start(body) is None else "start"
+        return "absent" if _craft_start(heading, body) is None else "start"
     except covers_gate.DuplicateHeadingError:
         return "duplicate"
 
 
+@pytest.mark.parametrize("heading", HEADINGS)
 @pytest.mark.parametrize(
     "name,outcome",
     [("plain", "start"), ("none", "absent"), ("duplicate", "duplicate")],
 )
-def test_craft_finder_reaches_each_outcome_the_parity_corpus_relies_on(name, outcome):
-    assert _craft_outcome(CORPUS[name]) == outcome
+def test_craft_finder_reaches_each_outcome_the_parity_corpus_relies_on(heading, name, outcome):
+    assert _craft_outcome(heading, _body_for(heading, CORPUS[name])) == outcome

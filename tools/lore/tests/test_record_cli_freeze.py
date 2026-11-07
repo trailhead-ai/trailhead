@@ -189,9 +189,9 @@ def test_ac9_non_task_refusal_does_not_offer_a_reopen_route(tmp_path):
 
 
 @pytest.mark.parametrize("kind,status,passes,not_passes", [
-    ("spec", "ready", ["## Slices"], ["## Driver run"]),
-    ("task", "done", ["## Driver run"], ["## Slices"]),
-    ("decision", "active", [], ["## Slices", "## Driver run"]),
+    ("spec", "ready", ["## Slices", "## Follow-ups"], ["## Driver run"]),
+    ("task", "done", ["## Driver run"], ["## Slices", "## Follow-ups"]),
+    ("decision", "active", [], ["## Slices", "## Follow-ups", "## Driver run"]),
 ])
 def test_ac9_refusal_names_only_the_kinds_own_plain_update_section(
     tmp_path, kind, status, passes, not_passes
@@ -204,8 +204,8 @@ def test_ac9_refusal_names_only_the_kinds_own_plain_update_section(
     r = _update(vault, state, rid, EDITED)
 
     assert "[frozen-body]" in r.stderr
-    for section in passes:
-        assert f"Only {section} passes a plain update" in r.stderr
+    if passes:
+        assert f"A plain update may change only {' or '.join(passes)}." in r.stderr
     for section in not_passes:
         assert section not in r.stderr
     if not passes:
@@ -324,6 +324,32 @@ def test_ac11_ready_spec_full_body_that_only_appends_to_slices_is_allowed(tmp_pa
 
     assert r.returncode == 0, r.stderr
     assert _paths(vault, rid)[0].read_text(encoding="utf-8") == grown
+
+
+def test_ready_spec_that_only_creates_followups_is_allowed(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "spec", "ready", body=SPEC)
+    grown = SPEC + "\n## Follow-ups\n\n- `lesson/one`\n"
+
+    r = _update(vault, state, rid, grown, ["--base", _revision(vault, state, rid)])
+
+    assert r.returncode == 0, r.stderr
+    assert _paths(vault, rid)[0].read_text(encoding="utf-8") == grown
+
+
+def test_ready_spec_followups_plus_authored_change_is_refused_naming_both_sections(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "spec", "ready", body=SPEC)
+    before = _snapshot(vault)
+    mixed = SPEC.replace("intro text", "intro TEXT") + "\n## Follow-ups\n\n- `lesson/one`\n"
+
+    r = _update(vault, state, rid, mixed)
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert "## Slices" in r.stderr and "## Follow-ups" in r.stderr
+    assert "may change" in r.stderr
+    assert _snapshot(vault) == before
 
 
 def test_ac11_done_task_diff_that_only_appends_a_driver_run_block_is_allowed(tmp_path):
