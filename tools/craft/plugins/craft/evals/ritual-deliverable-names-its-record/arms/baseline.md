@@ -119,8 +119,9 @@ starts as a new spec, not another slice against this one.
 
 **Under `--unattended`, run step 5's open-slice guard now, before anything below, and refuse on a
 hit exactly as step 5 does.** The reconcile that follows writes the spec; a refusal that comes after
-it has already changed something. Running the guard first is what makes a refusal change nothing.
-Step 5 still runs at its own place afterwards, unchanged.
+it has already changed something. Running the guard first, and holding the reconcile write until
+both gates have passed (below), is what makes a refusal change nothing. Step 5 still runs at its own
+place afterwards, unchanged.
 
 On entry, before deriving the candidate set, reconcile the ledger against what has actually shipped:
 query `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent status:done"`
@@ -266,11 +267,45 @@ of scope for a markdown section in a git-backed vault. Neither limit is a defect
 are named so a future reader does not mistake either gate for more than it certifies.
 
 **Under `--unattended`, a gate that refuses ends the session with**
-`outcome: refused spec/<spec-name> parked=0 — <the gate's reason-code>; <the remedy this step names>`.
-That covers the ledger gate's refusals above, the failed-search refusals of this step, and the
-candidate-set gate's refusals below. Only the `reason-code:` token goes in the line, never the free
-`reason:` text. The reconcile append, when it ran before the refusal, stays: it is the same write
-every pass makes, and a refusal writes nothing beyond it.
+`outcome: refused spec/<spec-name> parked=0 — <the gate's reason-code>; <the remedy this step names>`
+and **writes nothing, the reconcile's ledger line included.** That covers the ledger gate's refusals
+above, the failed-search refusals of this step, and the candidate-set gate's refusals below. Only
+the `reason-code:` token goes in the line, never the free `reason:` text.
+
+**Under `--unattended`, the reconcile write is held until both gates have passed.** Both gates read
+the spec body from stdin, so they certify a body that has not been written yet. In place of the
+write-then-certify order above, run this order; everything the attended reconcile appends or
+backfills is unchanged, only when it is written moves:
+
+1. **Compose the would-be body.** Read the spec fresh (`lore record show spec/<spec-name>`), add the
+   reconcile's new and backfilled lines to it in memory exactly as above (same value sources, same
+   scrub), and write the whole result to a file created with `mktemp` (carry the printed path
+   between calls as a literal). Write it with one command that does not interpret the body:
+   `printf '%s' '<body>' > <body-path>` with each single quote in the body written `'\''`. Build the
+   `--parent-coverage` file as above.
+2. **Ledger gate on the composed body**, strictly before the candidate-set gate:
+   `${CLAUDE_PLUGIN_ROOT}/scripts/ledger_gate.py --parent-coverage <path-to-temp-parent-coverage.json> < <body-path>`.
+3. **Candidate-set gate on the composed body**, with the criteria state file made and filled as the
+   paragraphs after this one describe:
+   `${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py --criteria-state <state-path> < <body-path>`. Its
+   output is the candidate set this pass derives from; the criteria state is unaffected by a ledger
+   line, so it need not be re-read.
+4. **A non-zero exit from either gate is a refusal.** Remove every temp file made here (the body,
+   the parent-coverage file, the state file), write nothing, and end with the refused outcome line.
+   Nothing has touched the spec, so there is nothing to undo.
+5. **Only when both gates exit 0, write.** Read the spec fresh once more; if its body differs from
+   the one step 1 started from, discard the composed body and start again at step 1, since another
+   writer got in between. Otherwise pipe the composed body back with a bare
+   `lore record update spec/<spec-name> < <body-path>` (the same full-body write as above, skipped
+   when the reconcile had nothing to add), then remove the temp files. A write that fails ends the
+   session `outcome: refused spec/<spec-name> parked=0 — the ledger write failed; re-run`, having
+   changed nothing.
+
+A re-run after any of these stops starts clean: nothing is written before the gates pass, and once
+the write has landed a re-run finds a current ledger and has nothing to append.
+
+Under `--unattended` the state file and the candidate-set gate below already ran in the order above,
+against the composed body; use that result and do not run the gate a second time.
 
 Only now — with the ledger reconciled and certified — is the candidate set derived. Each Bash call
 is a fresh shell, so no shell variable survives from one to the next: carry the state file's path
