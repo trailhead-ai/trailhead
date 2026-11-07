@@ -131,6 +131,31 @@
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "plan-keeps-an-earlier-run-section": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "plan-refuses-a-topic-unattended": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "plan-without-request-is-not-unattended": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-slice-then-plan-ends-plan-ready": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/slice/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }
