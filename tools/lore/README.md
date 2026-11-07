@@ -144,6 +144,14 @@ identical to the stored one, a missing record, and any `session` record.
   since the read is kept when it overlaps no hunk and shifts no lines above one; with a stale `--base` it is
   refused even if it would apply. The revision covers the body only, so a label or
   status change after the read neither changes it nor is overwritten.
+- **`lore record update --base REVISION`** is the same handshake for an update. Get the
+  revision from `lore record show` (`revision` in `--json`, `revision: <hex>` on stderr).
+  With `--base`, an update whose stored body has a different revision is refused,
+  writing nothing; re-read, reapply, retry the update. `--base` is **required** when the
+  update creates, edits or removes the `## Follow-ups` section of a spec at a frozen
+  status (ready, planned, complete, superseded, dropped), because a body composed from an
+  earlier read would erase another writer's entry. Other updates (a `## Slices` append
+  that leaves `## Follow-ups` unchanged, a draft spec) need no `--base`.
 - **`--initiated-by`** says who asked for the edit. `operator` means a human
   instructed this edit in the current session; `agent` means the agent proposed it.
 - **Attested, not verified.** The value is recorded as stated; lore cannot check it.

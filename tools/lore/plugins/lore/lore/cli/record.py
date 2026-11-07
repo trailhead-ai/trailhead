@@ -3039,20 +3039,9 @@ def add_record_subparser(sub) -> None:
         description="Update a vault record; a piped body replaces the existing one "
                     "and no stdin leaves it untouched. --repo/--product/--suite/"
                     "--team each set their namesake scope field, re-route the "
-                    "record, and auto-move it when the destination vault changes. "
+                    "record, and auto-move it if the vault changes. "
                     + _UNSET_PAIRING_RULE,
-        epilog="Group-default scope routing applies to 'create' only; "
-               "update (and delete) are unaffected and never seed scopes from a camp group. "
-               "--base: the stale-write handshake. 'lore record show' gives the "
-               "body's revision ('revision' in --json, 'revision: <hex>' on "
-               "stderr). With --base the update is refused, writing nothing, if "
-               "the stored body's revision differs (re-read, reapply, retry the "
-               "update). --base is required when the update creates, edits or removes the "
-               "'## Follow-ups' section of a spec at a frozen status (ready, "
-               "planned, complete, superseded, dropped): a body composed from an "
-               "earlier read would erase another writer's entry. Other updates "
-               "(a '## Slices' append that leaves '## Follow-ups' unchanged, a "
-               "draft spec) need no --base. "
+        epilog="Group-default scope routing applies to 'create' only. "
                + _LABELS_FLAG_MECHANISM_RULE,
     )
     p_record_update.add_argument(
@@ -3067,11 +3056,8 @@ def add_record_subparser(sub) -> None:
     )
     p_record_update.add_argument(
         "--base", dest="base", default=None, metavar="REVISION",
-        help="The body revision you composed against (from 'lore record show': "
-             "'revision' in --json, 'revision: <hex>' on stderr). The update is "
-             "refused, writing nothing, if the stored body's revision differs. "
-             "Required when the update creates, edits or removes a frozen spec's '## Follow-ups' "
-             "section.",
+        help="Revision from 'lore record show'; stale is refused. Needed to "
+             "edit a frozen spec's '## Follow-ups'.",
     )
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
