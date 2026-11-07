@@ -154,12 +154,13 @@ def _section_lines(lines: list[str], masked: list[bool], start: int) -> list[str
             break
     section = lines[start:end]
     # A sentinel line is masked only if a fence or comment is still open.
-    if _mask_fenced_lines(section + ["sentinel"])[-1]:
+    section_masked = _mask_fenced_lines(section + ["sentinel"])
+    if section_masked[-1]:
         raise WaitingParseError(
             "unterminated-fence",
             "a fence or HTML comment in the section is never closed",
         )
-    return [ln for ln, m in zip(section, _mask_fenced_lines(section)) if not m]
+    return [ln for ln, m in zip(section, section_masked) if not m]
 
 
 class _Draft:

@@ -249,9 +249,9 @@ def gather(runner) -> tuple[list, set]:
             unreadable.add((SEARCH_LABEL, "cut-off"))
             continue
         hit_path = hit_path.rstrip("/")
-        if hit_path in unsafe_paths and len(by_path.get(hit_path, [])) == 0:
-            continue
         owners = by_path.get(hit_path, [])
+        if not owners and hit_path in unsafe_paths:
+            continue
         if len(owners) != 1:
             unreadable.add((_clean(f"vault {hit_path.rsplit('/', 1)[-1]}"), "not-configured"))
             continue
