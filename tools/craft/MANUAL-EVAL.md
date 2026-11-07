@@ -4196,3 +4196,35 @@ Fix pass on the review closing handoff after the whole-change review. One new ru
 **Live arm.** `ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`. No other live arm sources `review/SKILL.md` or `_shared/security.md`; `execute-rule-only.md` sources `_shared/execute.md`, not security.
 
 **Not measured.** One malformed id, one model tier, three runs; the early-stop slice/review divergence is unchanged (slice's handoff on a stopped loop is a logged follow-up). Cost: baseline 0.64, fix batches 1.18, re-runs about 2.75 USD.
+
+## Case: slice under an explicit unattended request (five cases)
+
+Five runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, each pre-registered in its `expected.md` and committed with its graders before any run. The fixtures are a `ready` spec with two criteria and no slices (`unattended-slice-ends-slice-chosen`, `slice-without-request-is-not-unattended`), the same spec with a `done` slice parent that has no ledger line plus an `in-progress` one (`unattended-slice-refuses-an-open-slice`), a `draft` spec (`unattended-slice-refuses-a-draft-spec`), and the finished `export-invoices` spec (`unattended-slice-reports-spec-complete`). The runner block of `eval-gate.json` gained two grants for the materialization path: `Bash(*/scripts/covers_gate.py *)` and `Bash(printf *)`; without them a run that chooses a slice stops at the covers gate (seen in the first smoke run) and cannot pipe a body into `lore record create` / `update --diff`.
+
+A headless eval session never offers `AskUserQuestion`, so "asked nothing" is graded by behaviour: the typed outcome line is reached, the record state is written (graded from the issued commands, see below), and an `llm` trace grader confirms the last message poses no question and waits on no answer.
+
+### Results
+
+| Case | Baseline on the unedited prose | After the edit |
+|---|---|---|
+| `unattended-slice-ends-slice-chosen` | 0 of 3 (a 3-run batch with the first graders scored 0.25 a run; the final graders on 1 run scored 1 of 6) | 3 of 3 |
+| `slice-without-request-is-not-unattended` | 3 of 3 (a guard, green by design) | 3 of 3 |
+| `unattended-slice-refuses-an-open-slice` | 0 of 3 | 3 of 3 |
+| `unattended-slice-refuses-a-draft-spec` | 0 of 3 | 3 of 3 |
+| `unattended-slice-reports-spec-complete` | 0 of 3 | 3 of 3 |
+| `slice-spec-complete-hands-off-to-tidy-followups` (AC5 regression) | not rerun | 3 of 3 |
+
+**Red baselines, failing grader and explanation.**
+- `unattended-slice-ends-slice-chosen`: `final-line-is-slice-chosen` "pattern not found in last_message"; `no-plan-command-printed` "pattern found (expected absent)" (the prose prints the `/craft:plan` handoff); `block-opened-on-the-new-record`, `selection-logged-as-a-decision` and `outcome-set-on-the-block` "Bash called 0x (expected 1..∞)". `asked-nothing` passed (the attended run also asks nothing on its happy path).
+- `unattended-slice-refuses-an-open-slice`: `final-line-is-refused` "pattern not found in last_message"; `no-ledger-line-written` "pattern found (expected absent)" and `spec-sidecar-untouched` "pattern not found in file vault/spec/word-count-tool.json": the unedited prose reconciles the ledger and writes the spec before its open-slice guard refuses, which is the defect the guard reorder fixes.
+- `unattended-slice-refuses-a-draft-spec`: `final-line-is-refused` "pattern not found in last_message"; the other two graders (no task, spec untouched) passed because the attended refusal writes nothing either.
+- `unattended-slice-reports-spec-complete`: `final-line-is-spec-complete` "pattern not found in last_message"; `no-tidy-followups-command` "pattern found (expected absent)"; the marker grader passed by design.
+
+**Findings that changed the cases.**
+- `regex` with `target: files` and `llm` with `focus: files` see only the names of files the agent created through the CLI, never their contents (the llm judge's evidence was a list of paths). A run block therefore cannot be read from the created record, and the record's name is the agent's choice so `source: file` cannot name it. The block is graded from the `lore record update --diff` commands the run issued, with `tool_used` (which scans every call), and the no-request case asserts none mentions `Unattended run` (`min: 0`, `max: 0`). A `tool_used` match shows a command was issued, not that it applied; a failed block write would end `stuck` and fail the final-line grader. Observed in the kept traces of three runs: the created record carried `**Format:** 1`, the decision entry and `**Outcome:** slice-chosen`.
+- A headless run with no flag and no approval sometimes stops to have the slice's claim approved before writing it (attended behaviour, unchanged); the first baseline of `slice-without-request-is-not-unattended` created a record in 2 of 3 runs and the edited prose in 0 of 3. The prompt now states the operator's approval, which makes the attended path reach its handoff 3 of 3 on both arms.
+- The regex dialect is JavaScript: `(?s)` throws; use `[\s\S]`.
+
+**Cost.** About 33.4 USD of runner spend in total across smoke runs, baselines and checks; the green batches cost 1.2 to 2.4 USD for three runs each. The real lore state was snapshotted around every batch; the only changes were to an unrelated task record another session was editing and the lore index, none carrying a fixture title.
+
+**Not measured.** The early-stop interim (no cheap fixture reaches it reliably); the other refusal sites (missing or ambiguous argument, unsafe name, gate refusal), which share the outcome shape; `--then-plan` (task 2 exercises it with plan); one spec, one phrasing, one model tier, three runs.
