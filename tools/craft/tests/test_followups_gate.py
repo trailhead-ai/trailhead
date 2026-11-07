@@ -142,7 +142,7 @@ def test_section_in_the_middle_can_grow(tmp_path):
 # ---- base: -----------------------------------------------------------------
 
 
-@pytest.mark.parametrize("rev", ["f" * 64, "0123abcd" * 8, "rev-1"])
+@pytest.mark.parametrize("rev", ["f" * 64, "0123abcd" * 8, "e" * 64])
 def test_base_is_the_prior_documents_revision(tmp_path, rev):
     res = gate(BASE, with_section(entry()), tmp_path, revision=rev)
     assert res.returncode == 0, res.stderr.decode()
@@ -153,6 +153,44 @@ def test_base_is_not_a_hash_of_the_body_text_for_a_crlf_prior(tmp_path):
     folded = BASE
     res = gate(folded, with_section(entry()), tmp_path, revision="b" * 64)
     assert res.stdout.decode() == "base: " + "b" * 64 + "\n"
+
+
+@pytest.mark.parametrize(
+    "rev", ["abc\n", "a" * 63 + "\n", "-" + "a" * 63, "A" * 64, "a" * 63, "a" * 65, "g" * 64]
+)
+def test_revision_that_is_not_a_sha256_hex_digest_is_refused(tmp_path, rev):
+    res = gate(BASE, with_section(entry()), tmp_path, revision=rev)
+    unreadable(res, "malformed-prior")
+
+
+def test_gate_stays_linear_on_a_huge_interior_space_run(tmp_path):
+    hostile = entry(what="a" + " " * 200_000 + "b")
+    prior = tmp_path / "prior.json"
+    prior.write_text(prior_json(with_section(hostile)), encoding="utf-8")
+    res = subprocess.run(
+        [sys.executable, str(GATE), "--prior", str(prior)],
+        input=with_section(hostile).encode("utf-8"),
+        capture_output=True,
+        timeout=5,
+    )
+    assert res.returncode == 0, res.stderr.decode()
+
+
+def test_reason_echo_of_a_long_malformed_line_is_bounded(tmp_path):
+    bad = with_section(entry("F1")) + "stray " + "word " * 20_000 + "\n"
+    res = gate(BASE, bad, tmp_path)
+    assert res.returncode == 1
+    reason = reason_of(res)
+    assert len(reason) < 400, len(reason)
+    assert "..." in reason
+    assert "Follow-ups" in reason
+
+
+def test_reason_echo_of_a_short_malformed_line_is_unchanged(tmp_path):
+    res = gate(BASE, with_section(entry("F1")) + "stray words\n", tmp_path)
+    reason = reason_of(res)
+    assert "'stray words'" in reason
+    assert "..." not in reason
 
 
 # ---- refusals (exit 1) ------------------------------------------------------

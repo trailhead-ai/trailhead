@@ -8,7 +8,8 @@ Usage:
 The proposed spec body arrives on stdin. `--prior` names the JSON document
 `lore record show spec/<n> --json` printed when the session read the spec: the
 gate takes the prior body from its `body` field and the revision from its
-`revision` field. On success the gate exits 0 and prints exactly one line,
+`revision` field (a 64-character lowercase hex sha256 digest; anything else is
+`malformed-prior`). On success the gate exits 0 and prints exactly one line,
 `base: <revision>` — the revision the writer passes to
 `lore record update --base`, so the body this gate checked and the revision
 lore compares come from one read. The revision is never computed by hashing
@@ -85,7 +86,7 @@ from followups import (  # noqa: E402
 from observation_gate import _ends_inside_masked_region  # noqa: E402
 
 _MAX_BYTES = 256 * 1024
-_REVISION_RE = re.compile(r"^[A-Za-z0-9._:-]+$")
+_REVISION_RE = re.compile(r"[0-9a-f]{64}")
 
 
 class _Refusal(Exception):
@@ -127,9 +128,9 @@ def _load_prior(path_str: str) -> tuple[str, str]:
             "malformed-prior",
             2,
         )
-    if not _REVISION_RE.match(data["revision"]):
+    if not _REVISION_RE.fullmatch(data["revision"]):
         raise _Refusal(
-            "--prior 'revision' is empty or carries characters a revision never has — "
+            "--prior 'revision' is not a 64-character lowercase hex digest — "
             "pass the output of 'lore record show spec/<n> --json'",
             "malformed-prior",
             2,

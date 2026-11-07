@@ -60,7 +60,16 @@ _HEADING_RE = re.compile(r"^## Follow-ups$", re.IGNORECASE)
 _ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|\Z)")
 _ENTRY_RE = re.compile(r"^- \*\*(F[1-9][0-9]*)\.\*\* (\S.*)$")
 _ENTRY_START_RE = re.compile(r"^- ")
-_FIELD_RE = re.compile(r"^ {2,}- ([a-z]+):[ \t]*(.*?)[ \t]*$")
+_FIELD_RE = re.compile(r"^ {2,}- ([a-z]+):(.*)$")
+_ECHO_MAX = 120
+
+
+def _echo(text: str) -> str:
+    """Bounded repr of vault text for a reason line."""
+    r = repr(text)
+    return r if len(r) <= _ECHO_MAX else r[:_ECHO_MAX] + "..."
+
+
 _TASK_ID_RE = re.compile(r"^task/[A-Za-z0-9._-]+$")
 _PATH_CHARS_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
 _WHERE_RE = re.compile(r"^`[^`]*`(?:, `[^`]*`)*$")
@@ -139,7 +148,7 @@ def section_is_last(body: str) -> bool:
 def _check_task_id(value: str, entry_id: str, field: str) -> None:
     if not _TASK_ID_RE.match(value):
         raise FollowupsError(
-            f"entry {entry_id}: {field} target {value!r} is not a task id — "
+            f"entry {entry_id}: {field} target {_echo(value)} is not a task id — "
             "write it as task/<id> using only letters, digits, '.', '_' and '-'",
             MALFORMED_TASK_ID,
         )
@@ -163,7 +172,7 @@ def _parse_status(value: str, entry_id: str) -> tuple[str, str | None]:
             )
         return "dropped", reason
     raise FollowupsError(
-        f"entry {entry_id}: status {value!r} is not recognised — use "
+        f"entry {entry_id}: status {_echo(value)} is not recognised — use "
         "'open', 'folded into task/<id>', 'done by task/<id>' or "
         "'dropped: <reason>'",
         MALFORMED_ENTRY,
@@ -178,7 +187,7 @@ def _check_path(path: str, entry_id: str) -> None:
     )
     if bad:
         raise FollowupsError(
-            f"entry {entry_id}: where path {path!r} is not repository-relative — "
+            f"entry {entry_id}: where path {_echo(path)} is not repository-relative — "
             "use a relative path of letters, digits, '.', '_', '-' and '/', "
             "with no '.', '..' or empty segment and no leading '-'",
             PATH_OUTSIDE_REPOSITORY,
@@ -236,7 +245,7 @@ def parse_followups(body: str) -> list[Entry]:
             m = _ENTRY_RE.match(line)
             if not m:
                 raise FollowupsError(
-                    f"section '{HEADING}' line {i + 1}: entry line {line!r} is "
+                    f"section '{HEADING}' line {i + 1}: entry line {_echo(line)} is "
                     "malformed — start it '- **F<n>.** Title'",
                     MALFORMED_ENTRY,
                 )
@@ -247,7 +256,7 @@ def parse_followups(body: str) -> list[Entry]:
         m = _FIELD_RE.match(line)
         if current is None or not m or m.group(1) not in _ALLOWED_FIELDS:
             raise FollowupsError(
-                f"section '{HEADING}' line {i + 1}: {line!r} is not part of an "
+                f"section '{HEADING}' line {i + 1}: {_echo(line)} is not part of an "
                 "entry — keep only entries here, each field as '  - key: value'",
                 MALFORMED_ENTRY,
             )
@@ -257,7 +266,7 @@ def parse_followups(body: str) -> list[Entry]:
                 f"entry {current[0]}: '{key}:' appears twice — keep one",
                 MALFORMED_ENTRY,
             )
-        fields[key] = m.group(2)
+        fields[key] = m.group(2).strip(" \t")
     if current is not None:
         entries.append(_build_entry(current[0], current[1], fields))
     return entries

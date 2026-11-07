@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -93,6 +94,27 @@ def test_html_comment_inside_section_is_ignored():
 def test_heading_inside_fence_is_not_the_section():
     body = "```\n## Follow-ups\n" + entry() + "```\n"
     assert followups.parse_followups(body) == []
+
+
+def test_field_parse_is_linear_on_a_huge_interior_space_run():
+    hostile = entry().replace("something is wrong", "a" + " " * 200_000 + "b")
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import followups; "
+        "e = followups.parse_followups(sys.stdin.read()); print(len(e))"
+    )
+    res = subprocess.run(
+        [sys.executable, "-c", code, str(SCRIPTS_DIR)],
+        input=doc(hostile),
+        capture_output=True,
+        text=True,
+        timeout=5,
+    )
+    assert res.stdout.strip() == "1", res.stderr
+
+
+def test_field_value_is_stripped_of_surrounding_blanks():
+    e = followups.parse_followups(doc(entry().replace("something is wrong", "\t x  y \t")))
+    assert e[0].what == "x  y"
 
 
 def test_unmarked_prose_in_section_is_an_error():
