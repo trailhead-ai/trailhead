@@ -43,7 +43,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from covers_gate import (  # noqa: E402
     _COMMONMARK_LINE_RE,
-    DuplicateHeadingError,
+    DuplicateHeadingError,  # noqa: F401  (re-exported: followups.DuplicateHeadingError)
     _find_unique_heading,
     _mask_fenced_lines,
 )

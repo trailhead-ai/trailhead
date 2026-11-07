@@ -3,11 +3,10 @@ spec's ``## Follow-ups`` section can only be changed against a revision just rea
 
 from __future__ import annotations
 
-import json
 
 from conftest import make_vault as _make_vault, run_cli as _run
 from test_record_cli_amend import (
-    BODY, _body, _create, _revision, _sidecar, _snapshot,
+    _body, _create, _revision, _sidecar, _snapshot,
 )
 from test_record_cli_update import _create_routed, _run_cfg, _two_team_config
 
@@ -223,7 +222,7 @@ def test_write_landing_between_the_relocation_lock_spans_is_refused_against_a_ba
         return real(*roots)
 
     monkeypatch.setattr(locking, "vault_write_locks", write_lands_between_spans)
-    before = _snapshot(vault_a)
+    _snapshot(vault_a)
 
     r = _run_cfg(["record", "update", rid, "--team", "beta", "--base", base],
                  vault=vault_a, state=state, config_home=config_home,
