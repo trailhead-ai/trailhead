@@ -2306,3 +2306,22 @@ for the fixture slugs and the plan name finds 0 files. I created nothing there a
 
 Runner **15.057 USD**, judge **0.457 USD**, **15.514 USD** for this dispatch (limit 16.5). The slice was at 55.86 USD before, so **71.37 USD**
 against the 74 ceiling. No rerun was used.
+
+## Case: flush-leaves-found-work-decisions
+
+`plugins/lore/evals/flush-leaves-found-work-decisions/` — a dirty session seeded through `fixtures/session.json` (the real `lore session candidate`): a `found-work` deferred line, its `found-work-result` line, a `found-work` folded line, its result line, and one `lesson` candidate. `expected.md` carries the pass condition, written before any run.
+
+**Under test:** `skills/flush/SKILL.md`, Step 3 — a `kind=found-work` or `kind=found-work-result` candidate is left in the session log, never promoted, and the flush still stamps the session clean.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-11-07 | baseline (flush prose before the rule) | none | 3 | **not observable** — 0.714 x3 | `lesson-became-a-record` and `session-is-clean` failed in all 3 runs; the five no-record graders passed vacuously |
+| 2026-11-07 | treatment (flush prose with the rule) | Step 3 found-work rule | 0 | **not run** | blocked by the same host condition as the baseline |
+
+### Why the runs say nothing about the rule
+
+Every write through `./lore` inside the runner's sandbox failed on this host (macOS, `claude` 2.1.319) with `error: set git config user.email; *-by provenance is required and cannot be defaulted`, although the run's `~/.gitconfig` held the runner's identity. Reads worked (`./lore session show`, `./lore search`). An existing case, `apply-ruled-fix-to-draft-record`, run once on the same host before the rule landed, failed the same way (0.6: its two spec-text graders; `LORE_EMAIL` exported to the runner did not change it), so the cause is the host's sandbox, not this case. In the baseline transcript the agent read the session, tried `./lore record create --kind lesson`, hit that error, and left the session dirty, so the baseline never reached the point where the unedited prose would promote a found-work line to a task. The "no record from found-work" grader was therefore never seen to fail on the baseline, and the treatment arm was not run. Outstanding: baseline x3 (expect `no-task-from-found-work` to fail at least once), treatment x3 (bar 3 of 3), on a host where writes through `./lore` work in the sandbox.
+
+Graders were checked against hand-built run directories before any baseline: a passing state (lesson recorded through the real CLI, session flushed with `lore flush --session-id`, no other records) scores all 7 graders; a task created, a decision, a spec or an area created each fails exactly its own `no-*-from-found-work` grader; no lesson plus an unflushed session fails `lesson-became-a-record` and `session-is-clean`; a session body with its `found-work-result` headers rewritten fails `found-work-lines-stay-in-the-session-log`. That check emulates the grader semantics in a scratch script; the live runner's own file/regex verdicts agreed on the failures it did produce (`vault/lesson/*.md missing`, `"status": "clean"` not found).
+
+Cost of the attempts: baseline x3 0.778 USD, one kept-temp diagnostic run 0.262, two runs of the existing case 0.481 (diagnosis).
