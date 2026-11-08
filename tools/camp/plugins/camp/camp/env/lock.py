@@ -9,6 +9,10 @@ When camp's state directory, the lock file's own directory, does not exist, it i
 0700 and the lock file 0600. Missing directories above it are created with the user's umask
 defaults; their modes are left to the user.
 
+Right after opening, the descriptor is checked with `fstat`: anything but a regular file
+owned by the effective user is closed unlocked and refused as `LockUnavailable`, so a FIFO or
+another user's file planted at the path cannot wedge an attach.
+
 The file is never unlinked. Removing it while attachers are queued lets one open the
 old inode and another create a new one, so two holders lock different files and
 exclude nothing. The kernel releases the lock when the holder's descriptor closes,
@@ -23,12 +27,14 @@ from __future__ import annotations
 
 import fcntl
 import os
+import stat
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 _POLL_INTERVAL_SECONDS = 0.05
+_euid = os.geteuid
 
 
 class LockBusy(Exception):
@@ -53,9 +59,21 @@ def attach_lock_path() -> Path:
 def _open(path: Path) -> int:
     try:
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        return os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     except OSError as exc:
         raise LockUnavailable(path, exc.strerror or str(exc)) from exc
+    try:
+        info = os.fstat(fd)
+    except OSError as exc:
+        os.close(fd)
+        raise LockUnavailable(path, exc.strerror or str(exc)) from exc
+    if not stat.S_ISREG(info.st_mode):
+        os.close(fd)
+        raise LockUnavailable(path, "not a regular file")
+    if info.st_uid != _euid():
+        os.close(fd)
+        raise LockUnavailable(path, "owned by another user")
+    return fd
 
 
 @contextmanager

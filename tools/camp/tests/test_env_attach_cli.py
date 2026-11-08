@@ -1308,6 +1308,24 @@ def test_a_lock_file_that_cannot_be_opened_refuses_naming_it_and_starts_nothing(
     assert rig.tagged_pids() == []
 
 
+def test_a_fifo_planted_at_the_lock_path_refuses_naming_it_and_starts_nothing(rig: AttachRig, tmp_path: Path) -> None:
+    attached_rig(rig)
+    state = tmp_path / "state"
+    state.mkdir()
+    lock = state / "env-attach.lock"
+    os.mkfifo(lock, 0o600)
+
+    done = rig.attach("perseus/levr/main", CAMP_STATE_DIR=str(state))
+
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == (
+        f"camp env: cannot take the attach lock at {lock} (not a regular file); nothing was started\n"
+    )
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
 @pytest.mark.parametrize("variable", ["CAMP_STATE_DIR", "XDG_STATE_HOME"])
 def test_a_relative_state_directory_refuses_cleanly_and_starts_nothing(rig: AttachRig, variable: str) -> None:
     attached_rig(rig)

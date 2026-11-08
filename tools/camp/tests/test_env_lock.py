@@ -4,6 +4,9 @@ Test contract:
 - Exclusion across real processes: busy after about the timeout, free once the holder
   releases, acquired mid-wait at a time that depends on when the holder lets go.
 - Released when the holder is SIGKILLed; not inherited by children the holder spawned.
+- A FIFO planted at the path and a file owned by another user are refused as LockUnavailable
+  with a printable reason, leaving the planted file as it was; the same file owned by the
+  caller is accepted.
 - An unopenable path and a symlink planted at the path raise LockUnavailable and create
   or touch nothing; the lock file is never written, truncated or unlinked.
 - The first-try-found-held signal (on_wait) fires once when busy and never when free.
@@ -13,6 +16,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import stat
 import signal
 import subprocess
 import sys
@@ -195,6 +199,44 @@ def test_a_symlink_at_the_lock_path_leaves_its_target_untouched(tmp_path: Path):
     after = victim.stat()
     assert (after.st_size, after.st_mtime_ns) == (before.st_size, before.st_mtime_ns)
     assert victim.read_bytes() == b"precious"
+
+
+def test_a_fifo_at_the_lock_path_is_refused_and_left_a_fifo(tmp_path: Path):
+    fifo = tmp_path / "env-attach.lock"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(LockUnavailable) as err:
+        with attach_lock(fifo, timeout=0):
+            pass
+    assert err.value.path == fifo
+    assert err.value.reason.isprintable() and "regular file" in err.value.reason
+    assert str(fifo) in str(err.value)
+    assert stat.S_ISFIFO(fifo.lstat().st_mode)
+
+
+def test_a_lock_file_owned_by_another_user_is_refused_and_the_same_file_owned_by_the_caller_is_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    lock = tmp_path / "env-attach.lock"
+    lock.write_bytes(b"")
+    lock.chmod(0o600)
+    monkeypatch.setattr("camp.env.lock._euid", lambda: os.geteuid() + 1)
+    with pytest.raises(LockUnavailable) as err:
+        with attach_lock(lock, timeout=0):
+            pass
+    assert err.value.path == lock
+    assert err.value.reason.isprintable() and "another user" in err.value.reason
+    monkeypatch.setattr("camp.env.lock._euid", os.geteuid)
+    _acquire_now(lock)
+
+
+def test_a_refused_lock_file_leaves_no_descriptor_open(tmp_path: Path):
+    fifo = tmp_path / "env-attach.lock"
+    os.mkfifo(fifo, 0o600)
+    before = set(os.listdir("/proc/self/fd"))
+    with contextlib.suppress(LockUnavailable):
+        with attach_lock(fifo, timeout=0):
+            pass
+    assert set(os.listdir("/proc/self/fd")) == before
 
 
 def test_the_lock_file_is_never_written_or_removed(lock_file: Path):
