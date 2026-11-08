@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Observation gate — certifies that a slice parent's `**Covers:**` claim is
-backed by a recorded observation, BEFORE Phase 6 lets the parent close.
+backed by a recorded observation, BEFORE Phase 6 lets the parent close, and
+that any `pending-check` line sits only on a `**Partially covers:**`
+identifier.
 
 Usage:
     lore record show task/<parent-name> | observation_gate.py
@@ -29,7 +31,7 @@ Grammar this gate reads (fixed by the parent plan, not to be re-invented):
     - **AC7** — design-doc-review — <evidence pointer>
 
 Sanctioned method tokens are exactly `automated-assertion`,
-`design-doc-review`, and `manual-check`. Evidence text is required and never
+`design-doc-review`, `manual-check`, and `pending-check`. Evidence text is required and never
 empty — where "empty" means carrying no character beyond whitespace and
 Unicode format/control code points (category Cf/Cc), not merely
 `str.strip()` producing an empty string, so an invisible-but-nonempty
@@ -60,6 +62,22 @@ same non-empty bar as evidence text above (whitespace and Cf/Cc code points
 alone do not count). The other two methods need no attestation line and are
 unaffected by its absence.
 
+The parent's `**Partially covers:**` field uses the same identifier-list
+grammar as `**Covers:**` (parsed by the same shared pattern; a second
+unmasked line or a malformed value is a fail-closed exit 2, below). The
+declared set the gate checks observations against is `**Covers:**` ∪
+`**Partially covers:**`. A `pending-check` observation records that the
+criterion's manual check is waiting on the operator rather than done: it is
+accepted only for an identifier listed under `**Partially covers:**`, needs no
+attestation line, and an attestation line for that identifier does not change
+the outcome — an attestation never upgrades a pending check. A `pending-check`
+on a `**Covers:**` identifier is refused: a pending check never discharges full
+coverage. Evidence text for it holds the same non-empty bar as any method. A
+`**Partially covers:**` identifier with no observation is legal, and a parent
+carrying only `**Partially covers:**` is gated on whatever observation lines it
+has, never skipped. A `manual-check` observation still needs an attestation
+whichever list its identifier is on.
+
 The evidence text (and the attestation text) is inert: pattern-matched and
 printed only, never opened as a path and never passed to a subprocess. A
 vault-authored string is untrusted input; dereferencing it would turn this
@@ -68,21 +86,27 @@ gate into a path-traversal and command-injection sink.
 Exit codes:
     0  derived — every identifier `**Covers:**` names carries a well-formed
        observation (and every manual-check observation among them has a
-       matching attestation), or there is no `**Covers:**` field at all (the
-       legacy and enabler shapes close exactly as they do today).
+       matching attestation), or there is neither a `**Covers:**` nor a
+       `**Partially covers:**` field (the legacy and enabler shapes close
+       exactly as they do today).
     1  integrity violation — a covered identifier with no observation, a
        duplicated observation, an observation for an identifier `**Covers:**`
-       does not declare, an unsanctioned method token, empty evidence text,
-       a duplicated identifier within `**Covers:**`, or a manual-check
-       observation with no matching attestation (prints a `reason:` line to
+       and `**Partially covers:**` do not declare, an unsanctioned method
+       token, empty evidence text, a duplicated identifier within
+       `**Covers:**` or `**Partially covers:**`, a `pending-check` observation
+       on a `**Covers:**` identifier, or a manual-check observation with no
+       matching attestation (prints a `reason:` line to
        stderr naming the identifier or token at fault).
     2  could not certify — fail-closed: empty stdin
        (`reason-code: empty-stdin`), non-UTF-8 stdin
        (`reason-code: non-utf8-stdin`), a `**Covers:**` value that does not
        match `^AC\\d+(, ?AC\\d+)*$` (`reason-code: malformed-covers-field`), a
        second unmasked `**Covers:**` line (`reason-code:
-       duplicate-covers-field`), a second unmasked `## Criterion observations`
-       heading (`reason-code: duplicate-observations-section`), a second
+       duplicate-covers-field`), a `**Partially covers:**` value that does not
+       match the same grammar (`reason-code: malformed-partially-covers-field`),
+       a second unmasked `**Partially covers:**` line (`reason-code:
+       duplicate-partially-covers-field`), a second unmasked
+       `## Criterion observations` heading (`reason-code: duplicate-observations-section`), a second
        unmasked `## Operator attestations` heading (`reason-code:
        duplicate-attestations-section`), or the document ending while still
        inside an open fenced code block or an open HTML comment
@@ -111,6 +135,7 @@ from covers_gate import (  # noqa: E402
 )
 
 _COVERS_FIELD_RE = re.compile(r"^\*\*Covers:\*\*\s*(.*)$", re.IGNORECASE)
+_PARTIALLY_COVERS_FIELD_RE = re.compile(r"^\*\*Partially covers:\*\*\s*(.*)$", re.IGNORECASE)
 _OBSERVATIONS_HEADING = "## Criterion observations"
 _OBSERVATIONS_HEADING_RE = re.compile(r"^## Criterion observations$", re.IGNORECASE)
 _ATTESTATIONS_HEADING = "## Operator attestations"
@@ -128,11 +153,19 @@ _ATTESTATION_LINE_RE = re.compile(r"^-\s+\*\*(AC[0-9]+)\*\*\s*—\s*(.*)$")
 
 _SANCTIONED_METHODS = {"automated-assertion", "design-doc-review", "manual-check"}
 _MANUAL_CHECK_METHOD = "manual-check"
+# Not a verification method: a pending check records that a manual check is
+# still owed, so it is sanctioned only as an observation, never as the
+# verification trailer a spec criterion may name (`criterion_gate` imports
+# `_SANCTIONED_METHODS` for that vocabulary and must not gain this token).
+_PENDING_CHECK_METHOD = "pending-check"
+_OBSERVATION_METHODS = _SANCTIONED_METHODS | {_PENDING_CHECK_METHOD}
 
 _MALFORMED_COVERS_REASON_CODE = "malformed-covers-field"
 _DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE = "duplicate-observations-section"
 _DUPLICATE_ATTESTATIONS_SECTION_REASON_CODE = "duplicate-attestations-section"
 _DUPLICATE_COVERS_FIELD_REASON_CODE = "duplicate-covers-field"
+_MALFORMED_PARTIALLY_COVERS_REASON_CODE = "malformed-partially-covers-field"
+_DUPLICATE_PARTIALLY_COVERS_FIELD_REASON_CODE = "duplicate-partially-covers-field"
 _UNTERMINATED_MASKED_REGION_REASON_CODE = "unterminated-masked-region"
 _EMPTY_STDIN_REASON_CODE = "empty-stdin"
 _NON_UTF8_STDIN_REASON_CODE = "non-utf8-stdin"
@@ -206,6 +239,25 @@ class DuplicateCoversFieldError(ValueError):
         )
 
 
+class MalformedPartiallyCoversField(ValueError):
+    """The `**Partially covers:**` value does not parse as an identifier list
+    — exit code 2, `reason-code: malformed-partially-covers-field`."""
+
+
+class DuplicatePartiallyCoversFieldError(ValueError):
+    """A second unmasked `**Partially covers:**` line was found — the set of
+    identifiers allowed a pending check is not uniquely determined. Exit code
+    2, `reason-code: duplicate-partially-covers-field`."""
+
+    reason_code = _DUPLICATE_PARTIALLY_COVERS_FIELD_REASON_CODE
+
+    def __init__(self) -> None:
+        super().__init__(
+            "a second unmasked '**Partially covers:**' line was found — the "
+            "partially covered set is not uniquely determined"
+        )
+
+
 class UnterminatedMaskedRegionError(ValueError):
     """The document ends while still inside an open fenced code block or an
     open HTML comment — every line from the opening marker to end of document
@@ -242,6 +294,24 @@ def _ends_inside_masked_region(lines: list[str]) -> bool:
     return probed[-1]
 
 
+def _find_field(
+    lines: list[str],
+    masked: list[bool],
+    field_re: re.Pattern[str],
+    duplicate_error: type[ValueError],
+) -> str | None:
+    value: str | None = None
+    for i, line in enumerate(lines):
+        if masked[i]:
+            continue
+        m = field_re.match(line)
+        if m:
+            if value is not None:
+                raise duplicate_error()
+            value = m.group(1).strip()
+    return value
+
+
 def find_covers_field(lines: list[str], masked: list[bool]) -> str | None:
     """Return the raw value of the sole unmasked `**Covers:**` line, or None
     if the field is absent — the legacy and enabler shape. Raises
@@ -249,29 +319,33 @@ def find_covers_field(lines: list[str], masked: list[bool]) -> str | None:
     anywhere in the document, even one that comes after the first — a
     first-match-wins scan would silently certify against whichever claim it
     saw first and never check the other."""
-    value: str | None = None
-    for i, line in enumerate(lines):
-        if masked[i]:
-            continue
-        m = _COVERS_FIELD_RE.match(line)
-        if m:
-            if value is not None:
-                raise DuplicateCoversFieldError()
-            value = m.group(1).strip()
-    return value
+    return _find_field(lines, masked, _COVERS_FIELD_RE, DuplicateCoversFieldError)
 
 
-def parse_covers_field(value: str) -> list[str]:
-    """Parse the `**Covers:**` grammar into an ordered, duplicate-free
-    identifier list. Raises MalformedCoversField on bad grammar and
-    ObservationViolation on a repeated identifier."""
+def find_partially_covers_field(lines: list[str], masked: list[bool]) -> str | None:
+    """Return the raw value of the sole unmasked `**Partially covers:**` line,
+    or None if absent. Raises DuplicatePartiallyCoversFieldError on a second
+    unmasked line, for the same reason `find_covers_field` does."""
+    return _find_field(
+        lines, masked, _PARTIALLY_COVERS_FIELD_RE, DuplicatePartiallyCoversFieldError
+    )
+
+
+def parse_covers_field(
+    value: str,
+    field: str = "**Covers:**",
+    malformed_error: type[ValueError] = MalformedCoversField,
+) -> list[str]:
+    """Parse the `**Covers:**` (or `**Partially covers:**`) grammar into an
+    ordered, duplicate-free identifier list. Raises `malformed_error` on bad
+    grammar and ObservationViolation on a repeated identifier."""
     if not value or not _COVERS_RE.match(value):
-        raise MalformedCoversField(f"**Covers:** value is not a valid identifier list: {value!r}")
+        raise malformed_error(f"{field} value is not a valid identifier list: {value!r}")
     identifiers = [t.lstrip(" ") for t in value.split(",")]
     seen: set[str] = set()
     for identifier in identifiers:
         if identifier in seen:
-            raise ObservationViolation(f"**Covers:** repeats identifier {identifier!r}")
+            raise ObservationViolation(f"{field} repeats identifier {identifier!r}")
         seen.add(identifier)
     return identifiers
 
@@ -335,7 +409,7 @@ def parse_observations(
         method_raw, sep, evidence_raw = remainder.partition("—")
         method = method_raw.strip()
         evidence = evidence_raw.strip() if sep else ""
-        if method not in _SANCTIONED_METHODS:
+        if method not in _OBSERVATION_METHODS:
             raise ObservationViolation(
                 f"identifier {identifier} carries unsanctioned method token {method!r}"
             )
@@ -364,12 +438,17 @@ def parse_attestations(lines: list[str], masked: list[bool]) -> dict[str, str]:
     return {identifier: remainder.strip() for identifier, (remainder, _i) in raw.items()}
 
 
-def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
-    """Return (covers, observations) on success. Raises MalformedCoversField,
-    ObservationViolation, DuplicateHeadingError, or DuplicateCoversFieldError
-    on failure. `covers` is empty exactly when the `**Covers:**` field is
-    absent — the caller distinguishes that from a present-but-empty field,
-    which parse_covers_field already refuses as malformed."""
+def certify(
+    body: str,
+) -> tuple[list[str], dict[str, tuple[str, str]], list[str]]:
+    """Return (covers, observations, partial) on success. Raises
+    MalformedCoversField, MalformedPartiallyCoversField, ObservationViolation,
+    DuplicateHeadingError, DuplicateCoversFieldError, or
+    DuplicatePartiallyCoversFieldError on failure. `covers` is empty when the
+    `**Covers:**` field is absent — the caller distinguishes that from a
+    present-but-empty field, which parse_covers_field already refuses as
+    malformed. A parent with neither field is the legacy/enabler shape and
+    certifies as ([], {}, [])."""
     lines = _COMMONMARK_LINE_RE.split(body)
     masked = _mask_fenced_lines(lines)
 
@@ -377,18 +456,37 @@ def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
         raise UnterminatedMaskedRegionError()
 
     covers_value = find_covers_field(lines, masked)
-    if covers_value is None:
-        return [], {}
+    partial_value = find_partially_covers_field(lines, masked)
+    if covers_value is None and partial_value is None:
+        return [], {}, []
 
-    covers = parse_covers_field(covers_value)
+    covers = parse_covers_field(covers_value) if covers_value is not None else []
+    partial = (
+        parse_covers_field(
+            partial_value, "**Partially covers:**", MalformedPartiallyCoversField
+        )
+        if partial_value is not None
+        else []
+    )
     covers_set = set(covers)
+    declared = covers_set | set(partial)
 
     observations = parse_observations(lines, masked)
 
-    undeclared = [i for i in observations if i not in covers_set]
+    undeclared = [i for i in observations if i not in declared]
     if undeclared:
         raise ObservationViolation(
-            f"observation recorded for identifier(s) not in **Covers:**: {', '.join(undeclared)}"
+            "observation recorded for identifier(s) not in **Covers:** or "
+            f"**Partially covers:**: {', '.join(undeclared)}"
+        )
+
+    pending_on_covers = [
+        i for i in covers if observations.get(i, ("", ""))[0] == _PENDING_CHECK_METHOD
+    ]
+    if pending_on_covers:
+        raise ObservationViolation(
+            "pending-check observation(s) on **Covers:** identifier(s) — a pending "
+            "check never discharges full coverage: " + ", ".join(pending_on_covers)
         )
 
     missing = [i for i in covers if i not in observations]
@@ -400,8 +498,8 @@ def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
     attestations = parse_attestations(lines, masked)
     unattested = [
         i
-        for i in covers
-        if observations[i][0] == _MANUAL_CHECK_METHOD
+        for i, (method, _evidence) in observations.items()
+        if method == _MANUAL_CHECK_METHOD
         and not _is_meaningfully_nonempty(attestations.get(i, ""))
     ]
     if unattested:
@@ -410,7 +508,7 @@ def certify(body: str) -> tuple[list[str], dict[str, tuple[str, str]]]:
             f"{', '.join(unattested)}"
         )
 
-    return covers, observations
+    return covers, observations, partial
 
 
 def main(argv: list[str]) -> int:
@@ -428,12 +526,12 @@ def main(argv: list[str]) -> int:
         return 2
 
     try:
-        covers, observations = certify(body)
+        covers, observations, partial = certify(body)
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
         return 2
-    except DuplicateCoversFieldError as e:
+    except (DuplicateCoversFieldError, DuplicatePartiallyCoversFieldError) as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
         return 2
@@ -445,18 +543,24 @@ def main(argv: list[str]) -> int:
         _err(f"reason: {e}")
         _err(f"reason-code: {_MALFORMED_COVERS_REASON_CODE}")
         return 2
+    except MalformedPartiallyCoversField as e:
+        _err(f"reason: {e}")
+        _err(f"reason-code: {_MALFORMED_PARTIALLY_COVERS_REASON_CODE}")
+        return 2
     except ObservationViolation as e:
         _err(f"reason: {e}")
         return 1
 
     if not covers:
         print("covers: none")
-        return 0
-
-    print(f"covers: {', '.join(covers)}")
-    for identifier in covers:
-        method, _evidence = observations[identifier]
-        print(f"{identifier}: {method}")
+    else:
+        print(f"covers: {', '.join(covers)}")
+        for identifier in covers:
+            method, _evidence = observations[identifier]
+            print(f"{identifier}: {method}")
+    for identifier in partial:
+        if identifier in observations and identifier not in covers:
+            print(f"{identifier}: {observations[identifier][0]}")
     return 0
 
 

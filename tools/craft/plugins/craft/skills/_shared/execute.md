@@ -841,11 +841,12 @@ Then complete the ritual:
   assertion, a design-doc state section confirmed accurate, or an operator's manual check — append a
   line for it to the parent's `## Criterion observations` section. Full grammar and write mechanism
   below; [Phase 6](#phase-6-close-and-completion-report)'s observation gate refuses the close while
-  any covered identifier has none. **Never** append an observation line for an identifier the
-  parent's `**Partially covers:**` field names instead — a partially covered criterion is by
-  definition not yet green, and the gate refuses the close with "observation recorded for
-  identifier(s) not in `**Covers:**`" if one is written; catch this at write time rather than
-  discovering it only at Phase 6.
+  any covered identifier has none. **Never** append an observation line yourself for an identifier
+  the parent's `**Partially covers:**` field names instead — a partially covered criterion is by
+  definition not yet green, so the session has no evidence to record for it. The one sanctioned
+  observation on a partially covered identifier is the `pending-check` line that `pending_check.py`
+  writes when it moves a waiting manual check onto the parent, and the gate accepts it without an
+  attestation.
 - **Run the dispatch postmortem.** It reads the `## Run Metrics` block this run wrote at step 5 of
   each task — columns `| Task | Band | Dispatches | Status | Drift-Gate | Model | Elapsed |` — and
   treats it as the evidence for what to write about: a task with more than one dispatch, a task that
@@ -1062,9 +1063,14 @@ that never needed one. Do not overstate it as an access-control enforcement mech
 
 **The observation gate.** A parent carrying `**Covers:**` is refused `done` while any covered
 identifier lacks a well-formed `## Criterion observations` line, or carries a `manual-check`
-observation with no matching `## Operator attestations` line for the same identifier. Evaluate it by
-piping the parent body into the gate, the same `${CLAUDE_PLUGIN_ROOT}/scripts/...` convention
-`footprint_guard.py` already establishes at [Phase 2](#phase-2-simplify):
+observation with no matching `## Operator attestations` line for the same identifier. A
+`pending-check` observation is the fourth sanctioned method: it is accepted only for an identifier
+the parent lists under `**Partially covers:**`, needs no attestation (and no attestation upgrades
+it), and is refused on a `**Covers:**` identifier — a pending check never discharges full coverage.
+The gate's declared set is `**Covers:**` plus `**Partially covers:**`, so a parent carrying only
+`**Partially covers:**` is gated on its observation lines too. Evaluate it by piping the parent body
+into the gate, the same `${CLAUDE_PLUGIN_ROOT}/scripts/...` convention `footprint_guard.py` already
+establishes at [Phase 2](#phase-2-simplify):
 
 ```
 lore record show task/<parent-name> --vault <elected-vault> | ${CLAUDE_PLUGIN_ROOT}/scripts/observation_gate.py
@@ -1078,6 +1084,7 @@ name, never a generic failure; exit 1 carries only that free-text `reason:` line
 Exit `2` means the gate could not certify — fails closed the same way the state-coverage gate's own
 absent/invalid/unreadable case does, naming both the `reason:` and one of the `reason-code:` tokens
 on stderr rather than passing silently: `malformed-covers-field`, `duplicate-covers-field`,
+`malformed-partially-covers-field`, `duplicate-partially-covers-field`,
 `duplicate-observations-section`, `duplicate-attestations-section`, `unterminated-masked-region`
 (the parent body ends while still inside an open fenced code block or an open HTML comment —
 everything after the opening marker, `**Covers:**` included, is invisible to the field search, so

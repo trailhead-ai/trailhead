@@ -467,3 +467,131 @@ def test_fullwidth_digit_identifier_is_not_recognized_as_an_observation():
     result = _run(FULLWIDTH_IDENTIFIER)
     assert result.returncode == 1, result.stdout
     assert "AC９" in result.stderr
+
+
+# ---- pending-check: a fourth method, valid only on a partially covered identifier
+
+
+def _parent(
+    covers: str | None = None,
+    partial: str | None = None,
+    observations: tuple[str, ...] = (),
+    attestations: tuple[str, ...] = (),
+) -> str:
+    body = ""
+    if covers is not None:
+        body += f"**Covers:** {covers}\n\n"
+    if partial is not None:
+        body += f"**Partially covers:** {partial}\n\n"
+    if observations:
+        body += "## Criterion observations\n\n" + "\n".join(observations) + "\n\n"
+    if attestations:
+        body += "## Operator attestations\n\n" + "\n".join(attestations) + "\n"
+    return body
+
+
+_PENDING_AC2 = "- **AC2** — pending-check — waiting entry on spec/x; confirm the button renders"
+_AUTO_AC1 = "- **AC1** — automated-assertion — tests/test_x.py::test_y"
+
+
+def test_pending_check_on_partially_covered_identifier_without_attestation_exits_0():
+    result = _run(_parent("AC1", "AC2", (_AUTO_AC1, _PENDING_AC2)))
+    assert result.returncode == 0, result.stderr
+    assert "AC2: pending-check" in result.stdout
+
+
+def test_pending_check_with_an_attestation_line_present_still_exits_0():
+    body = _parent(
+        "AC1", "AC2", (_AUTO_AC1, _PENDING_AC2), ("- **AC2** — I did look at it.",)
+    )
+    result = _run(body)
+    assert result.returncode == 0, result.stderr
+
+
+def test_pending_check_on_a_covers_identifier_exits_1_naming_it():
+    result = _run(_parent("AC1, AC2", None, (_AUTO_AC1, _PENDING_AC2)))
+    assert result.returncode == 1
+    assert "AC2" in result.stderr
+    assert "pending-check" in result.stderr
+
+
+def test_pending_check_on_a_covers_identifier_is_not_upgraded_by_an_attestation():
+    body = _parent(
+        "AC2", None, (_PENDING_AC2,), ("- **AC2** — Yes, I checked it myself at close.",)
+    )
+    result = _run(body)
+    assert result.returncode == 1
+    assert "AC2" in result.stderr
+
+
+def test_pending_check_on_an_identifier_in_neither_field_exits_1():
+    result = _run(_parent("AC1", "AC5", (_AUTO_AC1, _PENDING_AC2)))
+    assert result.returncode == 1
+    assert "AC2" in result.stderr
+
+
+def test_pending_check_with_empty_whitespace_or_zero_width_evidence_exits_1():
+    for evidence in ("", "   ", "​", " ​⁠ ﻿"):
+        line = f"- **AC2** — pending-check — {evidence}"
+        result = _run(_parent("AC1", "AC2", (_AUTO_AC1, line)))
+        assert result.returncode == 1, (evidence, result.stderr)
+        assert "AC2" in result.stderr
+
+
+def test_manual_check_on_a_partially_covered_identifier_needs_an_attestation():
+    line = "- **AC2** — manual-check — operator clicked through"
+    refused = _run(_parent("AC1", "AC2", (_AUTO_AC1, line)))
+    assert refused.returncode == 1
+    assert "AC2" in refused.stderr
+    accepted = _run(
+        _parent(
+            "AC1",
+            "AC2",
+            (_AUTO_AC1, line),
+            ("- **AC2** — Yes, I carried this check out myself.",),
+        )
+    )
+    assert accepted.returncode == 0, accepted.stderr
+
+
+def test_partially_covered_identifier_with_no_observation_is_still_legal():
+    result = _run(_parent("AC1", "AC2", (_AUTO_AC1,)))
+    assert result.returncode == 0, result.stderr
+
+
+def test_partially_covers_only_parent_is_gated_on_its_pending_check_line():
+    accepted = _run(_parent(None, "AC2", (_PENDING_AC2,)))
+    assert accepted.returncode == 0, accepted.stderr
+    emptied = _run(_parent(None, "AC2", ("- **AC2** — pending-check —",)))
+    assert emptied.returncode == 1
+    assert "AC2" in emptied.stderr
+
+
+def test_two_unmasked_partially_covers_lines_exit_2_with_reason_code():
+    body = "**Partially covers:** AC2\n\n**Partially covers:** AC3\n"
+    result = _run(body)
+    assert result.returncode == 2
+    assert "reason-code: duplicate-partially-covers-field" in result.stderr
+    assert "reason:" in result.stderr
+
+
+def test_partially_covers_inside_a_fence_is_invisible_to_the_duplicate_check():
+    body = (
+        "**Partially covers:** AC2\n\n```\n**Partially covers:** AC3\n```\n\n"
+        "## Criterion observations\n\n" + _PENDING_AC2 + "\n"
+    )
+    result = _run(body)
+    assert result.returncode == 0, result.stderr
+
+
+def test_malformed_partially_covers_value_exits_2_with_reason_code():
+    result = _run("**Covers:** AC1\n\n**Partially covers:** AC2 and AC3\n")
+    assert result.returncode == 2
+    assert "reason-code: malformed-partially-covers-field" in result.stderr
+    assert "reason:" in result.stderr
+
+
+def test_repeated_identifier_within_partially_covers_exits_1_naming_it():
+    result = _run("**Partially covers:** AC2, AC2\n")
+    assert result.returncode == 1
+    assert "AC2" in result.stderr
