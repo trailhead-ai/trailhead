@@ -8,6 +8,19 @@ the slice record, the outcome line and the no-next-command rule. `slice/SKILL.md
 `plan/SKILL.md` each state their own unattended branch at each of their own stops and point here for
 the shapes; neither restates them.
 
+<!-- toc:start -->
+**Contents**
+
+- The request
+- The decision rule
+- The run section
+  - When the block is written
+  - How the block is written
+- The outcome line
+- No next command
+- Continuing a block across rituals
+<!-- toc:end -->
+
 ## The request
 
 The request is a whole-token `--unattended` argument on the ritual's invocation. It is read from the
@@ -103,8 +116,8 @@ section runs to the next heading of any level, so a sub-heading would end the se
   the block. A bare `lore record update` with a piped body replaces the whole record and would
   destroy it. Read the record fresh immediately before each write, and build the diff against what
   that read returned.
-- The text of the diff goes through the credential-pattern scrub in `_shared/security.md` before the
-  write. A vault is git-backed and team-synced, so a credential in a block ships.
+- The text of the diff goes through the shared credential-pattern scrub before the write. A vault is
+  git-backed and team-synced, so a credential in a block ships.
 - Text the ritual writes into the block is flattened to single lines. Every line of it opens with
   its label (`Question:`, `Choice:`, `Reasoning:`, `Options:`, `Progress:`, a bold summary,
   `Q<n>:`), so no line the ritual writes begins with `#`, with `**Answer:**` or with `outcome:`.
