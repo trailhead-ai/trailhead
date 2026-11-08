@@ -190,6 +190,21 @@
       "measures": [
         "skills/slice/SKILL.md"
       ]
+    },
+    "close-defers-an-unconfirmed-check": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "stale-write-leaves-the-slice-open": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "one-failed-check-saves-nothing": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
     }
   }
 }
