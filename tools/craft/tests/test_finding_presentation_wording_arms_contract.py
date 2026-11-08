@@ -266,46 +266,32 @@ FS_SITE_SOURCES: dict[str, list[str]] = {
     "fsdrivebuild": [RULES, DRIVE_SKILL, EXECUTE_PROCEDURE],
 }
 
-# Each fix-shape round's arm prefix and the `council.md` revision its arms read; every other source of a fix-shape
-# arm is at the fix-shape baseline.
+# Each fix-shape round's arm prefix, the revision its arms read every source but `council.md` from, and the revision
+# they read `council.md` from.
 FS_ROUNDS = {
-    "fs-baseline": FIX_SHAPE_BASELINE_REVISION,
-    "fs-treated": FIX_SHAPE_EDIT_REVISION,
-    "fs-treated2": FIX_SHAPE_SHARPENED_REVISION,
+    "fs-baseline": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_BASELINE_REVISION),
+    "fs-treated": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_EDIT_REVISION),
+    "fs-treated2": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_SHARPENED_REVISION),
+    "fs-base4": (FIX_SHAPE_B4_REVISION, FIX_SHAPE_B4_REVISION),
+    "fs-r4": (FIX_SHAPE_B4_REVISION, FIX_SHAPE_R_REVISION),
 }
 
 ARM_SOURCES.update(
     {
         f"{prefix}-{site}.md": [
-            *[(path, FIX_SHAPE_BASELINE_REVISION) for path in paths],
+            *[(path, site_revision) for path in paths],
             (COUNCIL, council_revision),
         ]
-        for prefix, council_revision in FS_ROUNDS.items()
+        for prefix, (site_revision, council_revision) in FS_ROUNDS.items()
         for site, paths in FS_SITE_SOURCES.items()
     }
 )
 
-# The round 4 baseline arms: each fix-shape site's sources and `council.md`, all read from `FIX_SHAPE_B4_REVISION`.
-ARM_SOURCES.update(
-    {
-        f"fs-base4-{site}.md": [
-            *[(path, FIX_SHAPE_B4_REVISION) for path in paths],
-            (COUNCIL, FIX_SHAPE_B4_REVISION),
-        ]
-        for site, paths in FS_SITE_SOURCES.items()
-    }
-)
 
-# The round 4 repaired-rule arms: the base4 sources with only `council.md` read from `FIX_SHAPE_R_REVISION`.
-ARM_SOURCES.update(
-    {
-        f"fs-r4-{site}.md": [
-            *[(path, FIX_SHAPE_B4_REVISION) for path in paths],
-            (COUNCIL, FIX_SHAPE_R_REVISION),
-        ]
-        for site, paths in FS_SITE_SOURCES.items()
-    }
-)
+def _moved(arm: str, source: Source) -> list[Source]:
+    """`arm`'s sources with the one at `source`'s path read from `source`'s revision instead."""
+    return [source if path == source[0] else (path, revision) for path, revision in ARM_SOURCES[arm]]
+
 
 # Each site-framing arm and the one ritual file it reads from that site's commit; every other source is the
 # `fs-r4` arm's.
@@ -315,15 +301,7 @@ FS_RS4_SOURCES: dict[str, Source] = {
     "fsbuildreview": (EXECUTE_PROCEDURE, FIX_SHAPE_S_BUILD_REVISION),
 }
 
-ARM_SOURCES.update(
-    {
-        f"fs-rs4-{site}.md": [
-            moved if path == moved[0] else (path, revision)
-            for path, revision in ARM_SOURCES[f"fs-r4-{site}.md"]
-        ]
-        for site, moved in FS_RS4_SOURCES.items()
-    }
-)
+ARM_SOURCES.update({f"fs-rs4-{site}.md": _moved(f"fs-r4-{site}.md", moved) for site, moved in FS_RS4_SOURCES.items()})
 
 # The calibrated consult regression arms: the `cal-consult` composition with `council.md` at each fix-shape edit.
 ARM_SOURCES["regress-cal-consult.md"] = [
@@ -360,10 +338,7 @@ FIX_SHAPE_FALLBACKS: dict[str, Source] = {
 
 ARM_SOURCES.update(
     {
-        f"fs-fallback-{site}.md": [
-            fallback if path == fallback[0] else (path, revision)
-            for path, revision in ARM_SOURCES[f"fs-treated2-{site}.md"]
-        ]
+        f"fs-fallback-{site}.md": _moved(f"fs-treated2-{site}.md", fallback)
         for site, fallback in FIX_SHAPE_FALLBACKS.items()
     }
 )
@@ -376,10 +351,7 @@ CONSULT_REWORDED_ARMS = {
 
 ARM_SOURCES.update(
     {
-        arm: [
-            (path, CONSULT_REWORDING_REVISION if path == CONSULT_SKILL else revision)
-            for path, revision in ARM_SOURCES[predecessor]
-        ]
+        arm: _moved(predecessor, (CONSULT_SKILL, CONSULT_REWORDING_REVISION))
         for arm, predecessor in CONSULT_REWORDED_ARMS.items()
     }
 )
