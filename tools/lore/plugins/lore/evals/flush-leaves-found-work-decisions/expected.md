@@ -17,6 +17,7 @@ After the run the lesson is a record, no record exists that came from a found-wo
 | No decision was created | `no-decision-from-found-work` | `file_exists` on `vault/decision/*.md`, `exists: false` |
 | No spec was created | `no-spec-from-found-work` | `file_exists` on `vault/spec/*.md`, `exists: false` |
 | No area was created | `no-area-from-found-work` | `file_exists` on `vault/area/*.md`, `exists: false` |
+| No `record create/update/amend/supersede` call of any kind carries a found-work finding's text | `no-record-carries-found-work-text` | `tool_used` on Bash, `min: 0` `max: 0`, `input_match` on `ExpiryNullDrop`, `unit_header_label`, `pantry/export.py` and the two finding phrases |
 | The session is stamped clean | `session-is-clean` | `regex` on the session sidecar, `"status": "clean"` |
 | The found-work lines are still in the session log | `found-work-lines-stay-in-the-session-log` | `regex` on the session body, `kind=found-work-result phase=Build` |
 
@@ -27,5 +28,5 @@ The baseline arm is expected to fail `no-task-from-found-work` in at least one r
 ## Limitations
 
 - `file_exists` counts only files created during the run, which is what these clauses need: the vault is seeded with no records.
-- Only the kinds a flush plausibly produces from these lines (task, decision, spec, area) are graded absent; a lesson written from a found-work line would not be caught, and the one lesson file is not matched to its source candidate.
+- The four kind graders check that no task, decision, spec or area exists. `no-record-carries-found-work-text` covers every other kind: it reads every Bash call (a `regex` grader on `target: files` was tried and sees only files the agent created through its file tools, so it passed vacuously on a lesson written from a found-work line), and fails when a record-writing `./lore` call carries one of the planted identifiers or finding phrases. A record that restates a finding in words that avoid all of them is not caught.
 - A single fixture and phrasing; the rule's wording for other candidate shapes is not measured.
