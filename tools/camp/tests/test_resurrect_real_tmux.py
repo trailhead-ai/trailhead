@@ -196,6 +196,20 @@ def _list_windows(sock: str, session: str) -> list[list[str]]:
     return [line.split("\t") for line in result.stdout.splitlines()]
 
 
+def _wait_for_window_dirs(sock: str, session: str, expected: list[str], timeout: float = 5.0) -> list[list[str]]:
+    """Poll `list-windows` until each window's `#{pane_current_path}` is its
+    expected directory, and return the rows. tmux derives the path from the
+    pane's process, which can still be mid-spawn right after attach returns,
+    so a single read races; on timeout the last rows come back and the
+    caller's own assertion reports the mismatch."""
+    deadline = time.monotonic() + timeout
+    rows = _list_windows(sock, session)
+    while [row[2] for row in rows] != expected and time.monotonic() < deadline:
+        time.sleep(0.05)
+        rows = _list_windows(sock, session)
+    return rows
+
+
 @pytest.mark.skipif(_REAL_TMUX is None, reason="no tmux binary on PATH (captured at import time)")
 def test_resurrection_brings_back_three_windows_and_reconciles_clean_on_the_next_attach(
     real_tmux_socket: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
@@ -232,7 +246,9 @@ def test_resurrection_brings_back_three_windows_and_reconciles_clean_on_the_next
     assert "dropped" not in captured.err
     assert "did not come back" not in captured.err
 
-    rows = _list_windows(sock, session)
+    rows = _wait_for_window_dirs(
+        sock, session, [str(ws_dir.resolve()), str(ws_dir.resolve()), str((ws_dir / "sub").resolve())]
+    )
     assert len(rows) == 3, "the resurrected session must hold exactly three windows"
     names = [row[1] for row in rows]
     dirs = [row[2] for row in rows]

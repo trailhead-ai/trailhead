@@ -43,7 +43,9 @@ _FENCE = re.compile(r"```[a-zA-Z]*\n(.*?)```", re.DOTALL)
 _INLINE = re.compile(r"`(lore [^`\n]*)`")
 _FLAG_SPAN = re.compile(r"`(--[a-z][^`\n]*)`")
 _COMMENT = re.compile(r"\s+#.*$")
-_PLACEHOLDER = re.compile(r"<[^>]*>")
+# A placeholder opens with a non-space character, so a stdin redirect before one
+# (`< <body-path>`) stays a shell operator instead of being swallowed into it.
+_PLACEHOLDER = re.compile(r"<[^\s<>][^<>]*>")
 _RECORD_WRITE = re.compile(r"^lore\s+record\s+(?:create|update)\b")
 
 # A lesson has no `superseded` status, so consolidate's carry-over of a folded

@@ -68,6 +68,7 @@ from test_resurrect_real_tmux import (  # noqa: E402
     _list_windows,
     _wait_for_output,
     _wait_for_shell,
+    _wait_for_window_dirs,
     _wire_workspace,
 )
 
@@ -413,7 +414,9 @@ def test_a_transferred_conversations_member_subpath_roots_the_resurrected_window
     captured = capsys.readouterr()
     assert code == 0, captured.err
 
-    rows = _list_windows(server.sock, session)
+    rows = _wait_for_window_dirs(
+        server.sock, session, [str((ws_dir / "member-a").resolve()), str((ws_dir / "member-b").resolve())]
+    )
     assert len(rows) == 2, rows
     dirs = [row[2] for row in rows]
     assert dirs == [
