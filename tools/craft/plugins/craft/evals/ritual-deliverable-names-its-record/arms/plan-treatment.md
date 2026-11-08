@@ -641,6 +641,13 @@ If a lens shows that a record other than the plan or its spec is wrong with a kn
 `_shared/council.md` defines under "Corrections to other records", apart from the findings and
 outside the persisted `## Council Review` section.
 
+**Under `--unattended`, the correction list is not put to the operator.** The "Ask once, after the
+list" step and the "Write nothing until accepted" wait in `_shared/council.md` do not apply: nobody
+is there to accept, and the closing message asks nothing and leaves nothing "for you to accept or
+decline". Log each correction as a decision in the run block as it is found (the record id, the
+wrong text, the drafted fix, and that it was neither applied nor asked about). Write nothing to that
+record and create no task for it. It is logged, not parked, in this version.
+
 **Disposition (required for every Critical):**
 
 For each Critical finding, the user assigns one of:

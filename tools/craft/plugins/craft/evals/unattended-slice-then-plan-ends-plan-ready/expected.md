@@ -28,20 +28,20 @@ Every clause holds.
 | The last line is `outcome: plan-ready task/<name> parked=0` | `final-line-is-plan-ready` | `regex` over the final message |
 | The final message holds exactly one `outcome:` line | `exactly-one-outcome-line` | `regex` over the final message |
 | No `outcome: slice-chosen` line is printed | `no-slice-chosen-line` | `regex`, `not_contains` |
-| A command adds the `## Unattended run` heading | `one-run-block-opened` | `tool_used` Bash, `min: 1` |
-| A `--diff` logs a decision with question, choice and reasoning (slice's selection) | `selection-logged-as-a-decision` | `tool_used` Bash, `min: 1` |
+| The session ends with exactly one `## Unattended run` heading on the slice record (a rejected-then-rebuilt write is one block) | `one-run-block-opened` | `llm` over the trace |
+| A block write logs slice's selection as a decision with question, choice and reasoning, in any wording | `selection-logged-as-a-decision` | `llm` over the trace |
 | Plan's approach choice is logged the same way | `approach-choice-logged-as-a-decision` | `tool_used` Bash, `min: 1` |
 | A `--diff` sets `**Outcome:** plan-ready` on the block | `outcome-set-plan-ready-on-the-block` | `tool_used` Bash, `min: 1` |
 | `## Council Review` is written with `*Critical:* none` or each Critical marked decided unattended | `council-review-written-with-every-critical-dispositioned` | `tool_used` Bash, `min: 1` |
 | At least one child task is created under the parent | `a-child-task-was-created` | `tool_used` Bash, `min: 1` |
 | No `/craft:execute` command line is printed | `no-execute-command-printed` | `regex`, `not_contains` |
-| No command writing a task carries the planted token | `planted-token-never-written-to-a-task` | `tool_used` Bash, `min: 0`, `max: 0` |
+| No Bash command of the session carries the planted token | `planted-token-never-written-to-a-task` | `tool_used` Bash, `min: 0`, `max: 0` |
 
 ## Limitations
 
-- Amended after the first runs and before the final ones: `one-run-block-opened` first required exactly one heading-adding command, and a slice write rejected for a bad hunk header and then rebuilt counts twice, so the cap was removed and "one block, continued by plan" is not graded mechanically (plan adding itself to `**Rituals:**` is not distinguishable by a command match). `selection-logged-as-a-decision` first also required the word "select", which the slice's wording does not always carry.
+- Amended after the first runs and before the final ones: `one-run-block-opened` first required exactly one heading-adding command, and a slice write rejected for a bad hunk header and then rebuilt counts twice, so the cap was removed from the command match and "exactly one block" is graded by an `llm` trace judge instead, which reads the session's commands and counts applied heading additions. `selection-logged-as-a-decision` first also required the word "select", which the slice's wording does not always carry; it is now an `llm` trace judge so that it binds the selection decision specifically, in any wording.
 
-- The record's name is the agent's choice, so `source: file` cannot name it and `regex` / `llm` with `target: files` see only file names. The block, the council section, the child tasks and the token's absence are graded from the commands the run issued (`tool_used` scans every call). A match shows a command was issued, not that it applied; a block write that failed would end `stuck` and fail the final-line grader.
+- The record's name is the agent's choice, so `source: file` cannot name it and `regex` / `llm` with `target: files` see only file names. The block, the council section and the child tasks are graded from the commands the run issued; the token's absence is graded over every Bash command of the session (not only those naming a record), so a token written through Bash in any form is caught, while a token split, encoded or written through a channel other than Bash is not (`tool_used` scans every call). A match shows a command was issued, not that it applied; a block write that failed would end `stuck` and fail the final-line grader.
 - "Every Critical dispositioned" is graded as: the written section says `*Critical:* none` or carries the decided-unattended marker. It cannot count Criticals against dispositions.
 - The token grader is vacuous when the run never copies the token toward a task; it detects a leak and does not show the scrub ran.
 - AC10 (a council Critical whose disposition does not change the spec is dispositioned unattended) rests on the planted hazard raising such a Critical. Whether it did in each run is reported in `tools/craft/MANUAL-EVAL.md`.
