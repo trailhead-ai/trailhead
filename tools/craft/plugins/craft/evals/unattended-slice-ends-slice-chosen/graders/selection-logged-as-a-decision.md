@@ -1,6 +1,6 @@
 ---
 type: tool_used
-tool: Bash
-input_match: '(?=.*record update)(?=.*--diff)(?=.*Decisions:)(?=.*Question:)(?=.*Choice:)(?=.*Reasoning:)'
+tool: Write
+input_match: '(?=.*Decisions:)(?=.*Question:)(?=.*Choice:)(?=.*Reasoning:)'
 min: 1
 ---

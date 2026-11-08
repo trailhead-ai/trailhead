@@ -280,9 +280,9 @@ backfills is unchanged, only when it is written moves:
 1. **Compose the would-be body.** Read the spec fresh (`lore record show spec/<spec-name>`), add the
    reconcile's new and backfilled lines to it in memory exactly as above (same value sources, same
    scrub), and write the whole result to a file created with `mktemp` (carry the printed path
-   between calls as a literal). Write it with one command that does not interpret the body:
-   `printf '%s' '<body>' > <body-path>` with each single quote in the body written `'\''`. Build the
-   `--parent-coverage` file as above.
+   between calls as a literal). The body is vault-sourced, so it never appears on a command line,
+   quoted or escaped: write it into that file with your file-writing tool, never through a shell
+   command. Build the `--parent-coverage` file the same way.
 2. **Ledger gate on the composed body**, strictly before the candidate-set gate:
    `${CLAUDE_PLUGIN_ROOT}/scripts/ledger_gate.py --parent-coverage <path-to-temp-parent-coverage.json> < <body-path>`.
 3. **Candidate-set gate on the composed body**, with the criteria state file made and filled as the
@@ -290,16 +290,20 @@ backfills is unchanged, only when it is written moves:
    `${CLAUDE_PLUGIN_ROOT}/scripts/candidate_set.py --criteria-state <state-path> < <body-path>`. Its
    output is the candidate set this pass derives from; the criteria state is unaffected by a ledger
    line, so it need not be re-read.
-4. **A non-zero exit from either gate is a refusal.** Remove every temp file made here (the body,
-   the parent-coverage file, the state file), write nothing, and end with the refused outcome line.
-   Nothing has touched the spec, so there is nothing to undo.
+4. **A non-zero exit from either gate is a refusal, except the one carve-out below.** The
+   candidate-set gate's exit 2 with `reason-code: zero-criterion-identifiers` is the legacy spec
+   that declares no `**ACn.**` identifiers: it is not a refusal, and the pass falls back to prose
+   matching and prints `termination basis: legacy prose-match, not gate-certified`, exactly as the
+   attended order does. Every other non-zero exit refuses: remove every temp file made here (the
+   body, the parent-coverage file, the state file), write nothing, and end with the refused outcome
+   line. Nothing has touched the spec, so there is nothing to undo.
 5. **Only when both gates exit 0, write.** Read the spec fresh once more; if its body differs from
    the one step 1 started from, discard the composed body and start again at step 1, since another
    writer got in between. Otherwise pipe the composed body back with a bare
    `lore record update spec/<spec-name> < <body-path>` (the same full-body write as above, skipped
-   when the reconcile had nothing to add), then remove the temp files. A write that fails ends the
-   session `outcome: refused spec/<spec-name> parked=0 — the ledger write failed; re-run`, having
-   changed nothing.
+   when the reconcile had nothing to add), then remove the temp files. A write that fails is not a
+   refusal: it ends the session `outcome: stuck spec/<spec-name> parked=0 — the ledger write failed;
+   re-run`, as `../_shared/unattended.md` says of any failed write.
 
 A re-run after any of these stops starts clean: nothing is written before the gates pass, and once
 the write has landed a re-run finds a current ledger and has nothing to append.
@@ -523,12 +527,12 @@ say so plainly instead, rather than inventing one. On the enabler path, there is
 name — an enabler makes no criterion green by definition — so state that plainly too, on the same
 footing as the legacy case, rather than naming a criterion it does not cover. Whether the slice
 touches a visual surface is judged against `_shared/slice.md`'s state-coverage reference, a judgment
-call this skill states rather than derives mechanically. Steps 4 and 6 above may already have
-written to the spec record by this point (the ledger reconcile, and a stale `craft/slice-loop`
-marker's clear) — this promise is scoped to the parent task record specifically, the write that
-actually creates the slice the operator is being asked to accept. Nothing in this procedure writes
-the parent task record or hands off to `/craft:plan` ahead of that statement: the claim is stated
-while it is still cheap to reject, not discovered after the parent task already exists.
+call this skill states rather than derives mechanically. Step 4 above may already have written to
+the spec record by this point (the ledger reconcile) — this promise is scoped to the parent task
+record specifically, the write that actually creates the slice the operator is being asked to
+accept. Nothing in this procedure writes the parent task record or hands off to `/craft:plan` ahead
+of that statement: the claim is stated while it is still cheap to reject, not discovered after the
+parent task already exists.
 
 **On the same footing as the full-coverage call above, and never conflated with it,** state which
 spec acceptance criteria the chosen slice makes only partially green — never left unstated, and
@@ -578,10 +582,6 @@ section, is what tells `/craft:plan` there is nothing to design.
 
 The enumeration covers at least the archetype floor `_shared/slice.md` fixes for the slice's
 archetype — a minimum, not a ceiling; the slice's actual states govern beyond it.
-
-**If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
-pass, clear it here** — this pass is selecting again, so an earlier stopping point is no longer the
-loop's live status: `lore record update spec/<spec-name> --unset-label craft/slice-loop`.
 
 **Credential-pattern scrub, before any write.** **Read `../_shared/security.md` now and follow it in
 full.** It defines the credential-pattern scrub regex list and the untrusted-value rule. Run the
@@ -715,6 +715,12 @@ The value claim, the `## Enumerated states` section (when the slice touches a vi
 `craft/slice-parent` label, and the `--related spec=` edge all ride this same `lore record create`
 invocation — never a follow-up write for any of them.
 
+**If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
+pass, clear it now** — after the shape checks and the covers gate above have passed, and immediately
+before the create, so a refusal at either leaves the label as it was. This pass is selecting again,
+so an earlier stopping point is no longer the loop's live status:
+`lore record update spec/<spec-name> --unset-label craft/slice-loop`.
+
 Create the parent `task` record, linking it to the spec on the same write:
 
 ```sh
@@ -738,9 +744,14 @@ has just materialized has no children yet — `/craft:plan`, rooted at it, write
 Link it to the spec with `--related spec=<spec-name>` in that same `lore record create` invocation —
 never a follow-up write that could land after the record has already moved on.
 
-**Under `--unattended`, a failed shape check or a gate refusal in this step is a refusal too:** the
-last line is `outcome: refused spec/<spec-name> parked=0 — <the gate's reason-code or the failed
-shape>; <what to fix>`, and the create does not run.
+**Under `--unattended`, a failed shape check or a gate refusal in this step stops the pass before
+the label is unset and before the create.** Whether it is a refusal depends on what this session has
+already written. When nothing has (step 4's reconcile had no line to add), the last line is
+`outcome: refused spec/<spec-name> parked=0 — <the gate's reason-code or the failed shape>; <what to
+fix>`. When step 4's reconcile write has landed, the run is not a refusal, because it has already
+written: the last line is `outcome: stuck spec/<spec-name> parked=0 — <the gate's reason-code or the
+failed shape>, after the ledger reconcile already landed on the spec; <what to fix>`. The create
+does not run in either case.
 
 **Under `--unattended`, open the run block as soon as the create succeeds** — before step 10's
 re-check and before anything else is written. Read `../_shared/unattended.md` for the block's shape
@@ -754,7 +765,8 @@ calls, what is left). It carries no `**Outcome:**` line yet, and `**Parked quest
 line the skill writes opens with its label, so none begins with `#`, `**Answer:**` or `outcome:`.
 **A write that fails ends the session** with
 `outcome: stuck task/<task-name> parked=0 — run-section write failed; <what to do instead>`, and
-nothing further is written.
+nothing further is written. A diff that does not apply is first retried once, read fresh and
+rebuilt, as `../_shared/unattended.md` says.
 
 ### 10. Re-check for a concurrent duplicate
 
@@ -781,7 +793,9 @@ and the new parent task's record id in prose, then finish the run block and end:
   printed, in a fence or on a line of its own.
 - **With `--then-plan`:** plan follows in this session, so this skill is not the last ritual. The
   block stays open with no `**Outcome:**` line, and no outcome line and no handoff command is
-  printed. Plan continues the same block.
+  printed. Plan continues the same block because this session's slice pass, run with `--then-plan`,
+  opened it, not because the record carries a block without an outcome; an outcome-less block from
+  an earlier session is left as it is.
 
 The termination and early-stop paths end on their outcome lines from step 6, not on a handoff.
 

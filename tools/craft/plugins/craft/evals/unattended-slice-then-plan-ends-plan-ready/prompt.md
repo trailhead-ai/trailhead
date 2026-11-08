@@ -1,5 +1,5 @@
 ---
-allowed_tools: [Skill, Read, Glob, Grep, Agent]
+allowed_tools: [Skill, Read, Glob, Grep, Agent, Write]
 max_turns: 120
 timeout_seconds: 900
 ---

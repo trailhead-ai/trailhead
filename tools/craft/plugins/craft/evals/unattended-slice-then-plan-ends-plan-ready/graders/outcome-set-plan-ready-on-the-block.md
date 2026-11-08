@@ -1,6 +1,6 @@
 ---
 type: tool_used
-tool: Bash
-input_match: '(?=.*record update)(?=.*--diff)(?=.*Outcome:\*\* plan-ready)'
+tool: Write
+input_match: '(?=.*Outcome:\*\* plan-ready)'
 min: 1
 ---

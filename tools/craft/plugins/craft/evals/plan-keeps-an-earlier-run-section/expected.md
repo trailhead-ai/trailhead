@@ -2,11 +2,11 @@
 
 ## Under test
 
-`/craft:plan task/<slice> --unattended` on a slice parent that already carries a closed `## Unattended run` block (outcome `needs-a-decision`, a parked `Q1`) keeps that block byte for byte through step 8's full-body parent write, appends a second block after it, and numbers any question it parks `Q2` or later. The prose under test is `skills/plan/SKILL.md` and `skills/_shared/unattended.md`.
+`/craft:plan task/<slice> --unattended` on a slice parent that already carries a closed `## Unattended run` block (outcome `slice-chosen`, nothing parked) keeps that block byte for byte through step 8's full-body parent write, and appends a second block after it. The prose under test is `skills/plan/SKILL.md` and `skills/_shared/unattended.md`.
 
 ## Fixture
 
-`fixtures/scaffold.sh` seeds the `ready` spec `report-export` and the slice parent `write-totals-to-a-named-report-file` (`in-progress`, label `craft/slice-parent`, linked to the spec) whose body carries the value claim and an earlier block with a parked `Q1`. The prompt runs `/craft:plan task/write-totals-to-a-named-report-file --unattended`.
+`fixtures/scaffold.sh` seeds the `ready` spec `report-export` and the slice parent `write-totals-to-a-named-report-file` (`in-progress`, label `craft/slice-parent`, linked to the spec) whose body carries the value claim and an earlier block from a slice-only session that parked nothing (an earlier block that parked a question would make a later slice pass re-park it, which is not this case's subject). The prompt runs `/craft:plan task/write-totals-to-a-named-report-file --unattended`.
 
 ## Conditions, sample and bar
 
@@ -25,12 +25,11 @@ Every clause holds.
 |---|---|---|
 | The earlier block is still present byte for byte | `earlier-block-preserved-byte-for-byte` | `regex`, `source: file` |
 | A second block follows it | `a-second-block-follows` | `regex`, `source: file` |
-| No question is numbered `Q1` a second time | `no-question-number-reused` | `regex`, `not_contains`, `source: file` |
 | The last line is `outcome: plan-ready task/<name> parked=0` | `final-line-is-plan-ready` | `regex` over the final message |
 | The run got past step 8's full-body write (the council section is on the parent) | `plan-reached-the-council-review` | `regex`, `source: file` |
 
 ## Limitations
 
-- The `Q2`-or-later clause is graded as "`Q1` is not reused": a run that parks nothing passes it vacuously. A parked question is not forced by this fixture.
+- Question numbering across blocks is not graded: the earlier block parks nothing, so there is no `Q1` for a later block to reuse, and a reuse check would pass vacuously. No case exercises a `Q<n>` that follows an earlier block's question.
 - Amended before any edit to the prose, after the first baseline run: the final-line clause was loosened to any outcome kind and a run that stopped before step 8 passed every grader (1 run, score 1.0, 19 turns). The final line is now `plan-ready` and the council section must be on the parent, so the case can only pass by reaching and surviving the full-body write.
 - One fixture, one phrasing, one model tier.

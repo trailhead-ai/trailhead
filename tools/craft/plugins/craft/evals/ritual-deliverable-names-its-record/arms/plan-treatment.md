@@ -76,11 +76,13 @@ attended.
 **The run block, once the check passes.** Read `../_shared/unattended.md` for the block's shape, the
 `Q<n>` shape and numbering, and the outcome grammar; this skill never restates them.
 
-- **Continue or open.** Read the slice record fresh and look for a `## Unattended run` block with no
-  `**Outcome:**` line. That is the open block `/craft:slice` left under `--then-plan`: continue it
-  by adding plan to its `**Rituals:**` line. When there is none — plan is the session's first
-  ritual, or every block on the record already carries an outcome from an earlier session — open a
-  new block now, after any earlier block and leaving the earlier one as it is, with `**Format:** 1`,
+- **Continue or open.** Continue an existing block only on a positive same-session signal: this
+  session's own `/craft:slice` pass, run with `--then-plan`, opened it on this record (its output is
+  in this conversation). Then add plan to that block's `**Rituals:**` line. A block with no
+  `**Outcome:**` line is not that signal on its own: it is just as likely an earlier session's
+  interrupted or failed run, which plan must neither adopt nor close. In every other case — plan is
+  the session's first ritual, or the only outcome-less block is from an earlier session — open a new
+  block now, after any earlier block and leaving the earlier one as it is, with `**Format:** 1`,
   `**Rituals:** plan (0 calls decided unattended)`, a `**Checkpoint:**`, an empty `**Decisions:**`
   and `**Parked questions:** none`, and no `**Outcome:**` line.
 - **Fill it in as each call is made.** Each decision is written the moment it is made, as its own
@@ -89,10 +91,10 @@ attended.
   date with each write.
 - **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, read
   fresh immediately beforehand, after the credential scrub (`_shared/security.md`) has run over the
-  text to be written. The same scrub runs before step 8's full-body parent write. When an update
-  reports that the diff did not apply (a hunk header whose counts do not match its lines is the
-  usual cause), read the record fresh and rebuild the diff once; a write that still fails, or fails
-  for any other reason, ends the session with
+  text to be written. The same scrub runs before step 8's full-body parent write and before every
+  later write to the parent. When an update reports that the diff did not apply, read the record
+  fresh and rebuild the diff once, as `_shared/unattended.md` says; a write that still fails, or
+  fails for any other reason, ends the session with
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
@@ -100,6 +102,10 @@ attended.
   Clarify question whose answer would change the spec, a council Critical whose disposition would be
   `bounced-back-to-spec`, and a security-lens Critical the plan cannot close by editing itself.
   Every other stop marked *reserved* below still ends `stuck`.
+- **A `stuck` exit is written to the block too.** Every `stuck` exit below, other than a failed
+  run-section write, first sets `**Outcome:** stuck` and brings `**Checkpoint:**` up to date with
+  one more edit confined to the block (read fresh, scrubbed), and only then prints the `outcome:
+  stuck` line. Only a failed run-section write skips that edit, since the block cannot be written.
 - **How a stop is parked.** Write the question into the run block as its own edit (read fresh,
   scrubbed, confined to the block): a `Q<n>` entry with the question, two or more options each
   saying what choosing it costs, the recommended option marked with the literal word `(recommended)`
@@ -184,9 +190,10 @@ code until the user approves the written plan.
 
 **Under `--unattended`, the two stops above that route away from planning — a fuzzy idea sent to
 brainstorming, and a request spanning independent subsystems — would change what is being planned,
-so neither is decided.** They are *reserved* stops: write nothing further, and end with `outcome:
-stuck task/<parent-name> parked=0 — a stop that changes the spec is not decided unattended; read the
-plan's reasoning and decide it by hand`, naming the stop in plain words.
+so neither is decided.** They are *reserved* stops: set `**Outcome:** stuck` and `**Checkpoint:**`
+on the run block, write nothing further, and end with `outcome: stuck task/<parent-name> parked=0 —
+a stop that changes the spec is not decided unattended; read the plan's reasoning and decide it by
+hand`, naming the stop in plain words.
 
 ### 2. Clarify (1-2 questions max)
 
@@ -402,8 +409,9 @@ path. When the commit itself fails — no signing key, a rejecting hook — stop
 the doc stays uncommitted, and execute's preflight will refuse to build until it is committed, so
 the failure is fixed here, not worked around there (under `--unattended`, a failed commit or a path
 that fails the shape check ends `outcome: stuck task/<parent-name> parked=<n> — <what failed>; <what
-to do instead>` with nothing pushed and nothing further written). After this step, `git -C <repo>
-status` shows nothing for the design-doc path and the path is tracked at HEAD.
+to do instead>` with nothing pushed; the run block gets `**Outcome:** stuck` and `**Checkpoint:**`,
+and nothing further is written). After this step, `git -C <repo> status` shows nothing for the
+design-doc path and the path is tracked at HEAD.
 
 When the parent carries no `## Enumerated states` section, this step does nothing — no document, no
 label, no commit.
@@ -668,7 +676,7 @@ record and create no task for it. It is logged, not parked, in this version.
 **Disposition (required for every Critical):**
 
 For each Critical finding, the user assigns one of:
-- `resolved` — user edits the plan inline to address the finding
+- `resolved` — user edits the plan inline to address the finding (a `--diff` edit, as below)
 - `bounced-back-to-spec` — finding changes spec objectives / AC / non-goals; stop planning, route
   back to brainstorming
 - `accepted-as-risk: <reason>` — explicit acceptance, recorded for audit
@@ -695,7 +703,16 @@ below) first, then park: the section is the last write before the question. Edit
 nor the slice's status, and end on `outcome: needs-a-decision task/<parent-name> parked=<n>`. A
 non-zero exit of `maturity_bars.py` still refuses the dispatch, and under `--unattended` ends
 `outcome: stuck task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the
-remedy in words>`.
+remedy in words>`, after setting `**Outcome:** stuck` and `**Checkpoint:**` on the run block.
+
+**Every write to the parent after step 8 is a `lore record update <parent-name> --diff` edit**, read
+fresh immediately beforehand and confined to the lines it changes: this step's `## Council Review`
+append and an inline edit that makes a Critical `resolved` alike. A bare full-body update here would
+replace the whole record and drop every `## Unattended run` block, which is why step 8 is the only
+full-body write. Under `--unattended` each such edit goes through the credential-pattern scrub
+(`_shared/security.md`) first, as the block writes do, and a diff that does not apply is retried
+once under the rule in `_shared/unattended.md`; a write that still fails ends `stuck`, as a block
+write does.
 
 **Persistence:** append a `## Council Review` section to the parent task's body capturing all
 findings and the disposition for each Critical. Each Critical disposition is exactly one of

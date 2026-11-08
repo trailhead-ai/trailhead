@@ -38,18 +38,14 @@ BLOCK='**Value claim:** You can write the totals of a CSV input to a report file
 ## Unattended run
 
 **Format:** 1
-**Rituals:** slice (1 calls decided unattended), plan (0 calls decided unattended)
-**Outcome:** needs-a-decision
-**Checkpoint:** plan parked a question about report delivery
+**Rituals:** slice (1 calls decided unattended)
+**Outcome:** slice-chosen
+**Checkpoint:** slice materialized
 **Decisions:**
 1. **Chose the totals slice first**
    - Question: which slice comes next for the report export
    - Choice: the slice that writes totals to a named report file
    - Reasoning: it is the smallest slice that delivers a report an operator can open
-**Parked questions:**
-- Q1: **Whether the nightly job also emails the report**
-  - Question: the spec says nothing about delivering the report beyond writing the file
-  - Options: (a) leave the report as a file only — costs nothing extra (recommended); (b) also email it — costs a mail dependency
-  - Progress: nothing built; the report-file slice does not depend on the answer
+**Parked questions:** none
 '
 printf '%s\n' "$BLOCK" | ./lore record create --kind task --title 'Write totals to a named report file' --status in-progress --related spec=report-export --label craft/slice-parent >/dev/null

@@ -123,7 +123,12 @@ section runs to the next heading of any level, so a sub-heading would end the se
   `Q<n>:`), so no line the ritual writes begins with `#`, with `**Answer:**` or with `outcome:`.
   Text copied from a spec, a task or any tool output only ever sits after such a label, so copied
   text cannot forge a heading, an answer or an outcome line.
-- **A failed block write** — the update errors, or the diff does not apply — ends the session with
+- **A diff that does not apply is retried once.** The run environment shows transient diff failures
+  (a hunk header whose counts do not match its lines is the usual cause). Read the record fresh,
+  rebuild the diff and write it again. This is the one rule for every `--diff` write in a block, in
+  every ritual.
+- **A failed block write** — the update errors, or the diff still does not apply after that one
+  retry — ends the session with
   `outcome: stuck <record> parked=<n> — run-section write failed; <what to do instead>`, and nothing
   further is written. It is never skipped over.
 
@@ -152,6 +157,15 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
   prints no outcome line; plan prints it.
 - The `<why>` and `<what to run instead>` are plain words on that one line. They are not a command
   for a person to paste.
+- **Every outcome except `refused` is also written to the run block, when the session has one,**
+  before the final line is printed (a session that ended before any slice record existed, or on the
+  spec alone as `spec-complete` and slice's early stop do, has no block to write): set
+  `**Outcome:** <kind>` and bring `**Checkpoint:**` up to date with one more confined edit, after
+  the credential scrub. That includes `stuck`. Only a failed run-section write skips it, since the
+  block cannot be written to.
+- **`refused` is for a run that has written nothing.** A stop that comes after any write this
+  session made (a ledger line, a label, a record) is not a refusal: it ends `stuck`, and its reason
+  names what had already landed. A failed write is always `stuck`, never `refused`.
 - **A refused run writes nothing**: its outcome appears on the final line only, and no record, label
   or block is touched. An argument that failed validation is never echoed anywhere, the outcome line
   included: the line prints the placeholder `<unresolved>` in place of the record name, as in
@@ -168,7 +182,10 @@ with a handoff command, the unattended one reports the outcome and stops.
 
 When slice runs with both `--unattended` and `--then-plan`, it opens the block on the new slice
 record (selection logged, no `**Outcome:**` line), leaves the block open, and prints no outcome
-line. `/craft:plan`, running next in the same session, continues that same block: it adds itself to
-`**Rituals:**`, appends its decisions and parked questions, and sets `**Outcome:**` and prints the
-outcome line at the end. Plan points at this file for the block shape, the `Q<n>` shape and the
-outcome grammar rather than restating them.
+line. `/craft:plan`, running next in the same session, continues that same block, and only on a
+positive same-session signal: this session's own slice pass, run with `--then-plan`, opened it. A
+block on the record that carries no `**Outcome:**` line is not that signal, since it is just as
+likely an earlier session's interrupted or failed run; plan leaves such a block as it is and opens a
+new one. Plan, continuing the block, adds itself to `**Rituals:**`, appends its decisions and parked
+questions, and sets `**Outcome:**` and prints the outcome line at the end. Plan points at this file
+for the block shape, the `Q<n>` shape and the outcome grammar rather than restating them.
