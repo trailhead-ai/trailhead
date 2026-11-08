@@ -1234,20 +1234,29 @@ echoing its `reason:` text or the entry's text — and gives the re-run command
 `/craft:execute task/<parent-name>`; re-running is safe, because an entry that already landed is not
 written twice. Exit `1` is a refusal, exit `2` a failure to complete. Word it per state:
 
-- A refused or failed write of the entry (`credential-shaped-text`, `control-characters`,
-  `multiline-entry-text`, `covers-refused`, `entry-already-answered`, `invalid-entries`, and any
-  other refusal): `The check for "<criterion words>" (AC2) could not be added to your check list:
-  the spec refused the entry (<reason-code>). Nothing on the slice was changed. Fix the check's
-  wording and run the close again:` and the re-run command. When lore itself could not be reached or
-  the write errored (`lore-missing`, `lore-timeout`, `lore-failed`, `spec-write-failed`), the reason
-  clause reads `the write to spec/<spec-name> failed` instead, with the same lines after it.
+- A refused entry whose text the spec's gate rejected (`credential-shaped-text`,
+  `control-characters`, `multiline-entry-text`): `The check for "<criterion words>" (AC2) could not
+  be added to your check list: the spec refused the entry (<reason-code>). Nothing on the slice was
+  changed. Fix the check's wording and run the close again:` and the re-run command.
+- Any other refusal (`not-an-unconfirmed-manual-check`, `not-a-slice-parent`, `unreadable-parent`,
+  `malformed-prior-section`, `shared-layer-prior`, `invalid-name`, `entry-already-answered`, and the
+  covers-gate codes): `The check for "<criterion words>" (AC2) could not be added to your check list
+  (<reason-code>). Nothing on the slice was changed. Running the close again will not help until the
+  record that code names is fixed.` Name the code and stop; give no re-run command.
+- When lore itself could not be reached or the write errored (`lore-missing`, `lore-timeout`,
+  `lore-failed`, `spec-write-failed`): `The check for "<criterion words>" (AC2) could not be added
+  to your check list: the write to spec/<spec-name> failed. Nothing on the slice was changed. Run
+  the close again:` and the re-run command.
 - `stale-spec`: `spec/<spec-name> changed while the close was writing to it, so your check was not
   added — nothing was overwritten. Run the close again; it reads the spec fresh:` and the re-run
   command.
-- `parent-write-failed`, `stale-parent`, `parent-not-finished`, or a `pending-check-without-entry`
-  from `verify`: the entry is already on your check list but the slice was not updated to match, so
-  say that and give the re-run command, which finishes the close; the operator answers "Not yet"
-  again for that criterion.
+- `parent-write-failed`, `stale-parent`, or `parent-not-finished`: the entry is already on your
+  check list but the slice was not updated to match, so say that and give the re-run command, which
+  finishes the close; the operator answers "Not yet" again for that criterion.
+- `pending-check-without-entry` from `verify`: the parent carries a `pending-check` line for that
+  criterion but no waiting entry exists on the spec behind it (hand-written or forged). Say so, name
+  the criterion, and say the parent's `pending-check` line needs repairing by the operator, or the
+  writer run for that criterion; running the close again alone will not help.
 
 When the operator does not confirm a criterion and it is not a waiting one, no attestation line is
 written for it and the gate's own refusal (a manual-check observation with no matching attestation)

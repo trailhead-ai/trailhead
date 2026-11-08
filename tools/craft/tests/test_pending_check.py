@@ -376,6 +376,19 @@ def test_spec_write_failure_with_changed_revision_is_stale_spec_and_parent_untou
     assert fake.body(f"task/{PARENT}") == PARENT_BODY
 
 
+def test_a_failed_spec_write_is_not_landed_by_another_slices_waiting_entry_for_the_same_criterion(
+    entries_file, capsys
+):
+    fake = FakeLore(spec_body=spec_with(waiting_text("AC2", parent="other-parent")))
+    fake.fail_update.add(f"spec/{SPEC}")
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) in ("spec-write-failed", "stale-spec"), err
+    assert fake.update_ids() == [f"spec/{SPEC}"]
+    assert fake.body(f"task/{PARENT}") == PARENT_BODY
+
+
 def test_parent_write_failure_with_unchanged_revision_is_parent_write_failed(entries_file, capsys):
     fake = FakeLore()
     fake.fail_update.add(f"task/{PARENT}")

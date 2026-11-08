@@ -520,7 +520,10 @@ silence. The spec is `ready`, so its body is frozen and a plain `lore record upd
 refused; the note goes through `amend`, as a separate write from the label:
 `lore record amend spec/<spec-name> --reason "<why the loop stopped>" --initiated-by agent --base <revision>`,
 piping the whole body with the note added (under `--unattended`, from a body file by redirect, as
-below). The reason is one line, at most 500 characters; the detail goes in the body. Read the spec
+below). The note goes before any `## Waiting` section, never at the end of the body, where that
+section may now sit: a note after its entries is unmarked prose inside it, which the waiting parser
+rejects and every later candidate-set pass then refuses as `malformed-waiting-section`. The reason
+is one line, at most 500 characters; the detail goes in the body. Read the spec
 fresh immediately before this write — the `revision` from that read is the `--base`, so a body that
 changed in between is refused rather than overwritten — and run the note through the
 credential-scrub first. The reason and the diff, removed lines included, stay in the vault's change
