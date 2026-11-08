@@ -1130,12 +1130,14 @@ def test_a_remote_attach_and_a_local_attach_started_together_end_with_one_attach
     remote = attached_rig(rig, "main")
     local = local_rig(rig, "main")
     rig.configure(parent_delay=1.5)
+    rig.delay_ps(0.5)
 
     winner, loser = one_winner(race(rig, "perseus/levr/main", "local/levr/main"))
 
     remote_won = winner[0].startswith("perseus")
     won, lost = (remote, local) if remote_won else (local, remote)
     assert winner[2] == success_line("perseus" if remote_won else "local", won)
+    assert loser[3].startswith(WAITING), loser
     assert refused_as(loser[3], "perseus/levr/main" if remote_won else "local/levr/main", note=remote_won), loser
     assert len(rig.tagged_pids()) == 1
     assert len(rig.forwards()) == (1 if remote_won else 0)
@@ -1153,11 +1155,13 @@ def test_two_local_attaches_started_together_end_with_one_relay_and_no_stray_one
         other = rig.environment("other")
         rig.docker_inventory(main, other)
     second = "local/levr/main" if same_environment else "local/levr/other"
+    rig.delay_ps(0.5)
 
     winner, loser = one_winner(race(rig, "local/levr/main", second))
 
     won, lost = (main, other) if winner[0].endswith("main") else (other, main)
     assert winner[2] == success_line("local", won)
+    assert loser[3].startswith(WAITING), loser
     assert refused_as(loser[3], f"local/levr/{won.name}", note=False), loser
     assert len(rig.tagged_pids()) == 1
     if not same_environment:
@@ -1300,6 +1304,25 @@ def test_a_lock_file_that_cannot_be_opened_refuses_naming_it_and_starts_nothing(
         f"camp env: cannot take the attach lock at {where / 'env-attach.lock'} (Not a directory);"
         " nothing was started\n"
     )
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
+@pytest.mark.parametrize("variable", ["CAMP_STATE_DIR", "XDG_STATE_HOME"])
+def test_a_relative_state_directory_refuses_cleanly_and_starts_nothing(rig: AttachRig, variable: str) -> None:
+    attached_rig(rig)
+    environ = {"CAMP_STATE_DIR": "", "XDG_STATE_HOME": "", variable: "relative/state"}
+
+    done = rig.attach("perseus/levr/main", **environ)
+
+    assert "Traceback" not in done.stderr
+    assert done.returncode == 1
+    assert done.stdout == ""
+    lines = done.stderr.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("camp env: cannot take the attach lock (")
+    assert lines[0].endswith("); nothing was started")
+    assert variable in lines[0]
     assert rig.forwards() == []
     assert rig.tagged_pids() == []
 

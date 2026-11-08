@@ -437,13 +437,17 @@ def _say_waiting() -> None:
 def _take_attach_lock(held: contextlib.ExitStack, connect_timeout: float) -> None:
     """Take the attach lock onto *held*, waiting at most the connect timeout plus
     ``LOCK_WAIT_MARGIN_SECONDS``. Refuses, starting nothing, when the wait runs out or the lock file
-    cannot be opened; an interrupt while waiting exits 130."""
+    cannot be located or opened; an interrupt while waiting exits 130."""
+    from trailhead.paths import PathResolutionError
+
     try:
         held.enter_context(
             attach_lock(
                 attach_lock_path(), timeout=connect_timeout + LOCK_WAIT_MARGIN_SECONDS, on_wait=_say_waiting
             )
         )
+    except PathResolutionError as error:
+        _refuse(f"cannot take the attach lock ({printable_line(str(error))}); nothing was started")
     except LockBusy:
         _refuse("another attach is still starting; wait for it to finish, then try again")
     except LockUnavailable as error:

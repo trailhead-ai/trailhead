@@ -661,6 +661,7 @@ def test_with_the_forward_or_relay_alive_the_same_second_attach_is_refused(rig: 
 
 SSH_DEST_ENV = "CAMP_ENV_TEST_SSH_DEST"
 SSH_CONFIG_ENV = "CAMP_ENV_TEST_SSH_CONFIG"
+SSH_PROBE_SECONDS_ENV = "CAMP_ENV_TEST_SSH_PROBE_SECONDS"
 SILENT_LINK_BOUND_SECONDS = 75.0
 
 #: A ProxyCommand that carries ssh's bytes to the sshd until the flag file appears, then keeps reading
@@ -694,6 +695,31 @@ def processes_mentioning(needle: str) -> list[int]:
     return found
 
 
+@pytest.mark.parametrize("cause", ["no-ssh", "stalled-login"])
+def test_the_real_ssh_probe_skips_when_ssh_is_missing_or_the_login_stalls(tmp_path: Path, cause: str) -> None:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    environ = {k: v for k, v in os.environ.items() if k not in (SSH_CONFIG_ENV,)}
+    environ[SSH_DEST_ENV] = "someone@stalled.invalid"
+    environ["PATH"] = str(bin_dir)
+    if cause == "stalled-login":
+        stub = bin_dir / "ssh"
+        stub.write_text("#!/bin/sh\nexec sleep 30\n")
+        stub.chmod(0o755)
+        (bin_dir / "sleep").symlink_to(shutil.which("sleep"))
+        environ[SSH_PROBE_SECONDS_ENV] = "0.5"
+
+    done = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-n", "0", "-p", "no:cacheprovider", "-rs",
+         f"{Path(__file__)}::test_a_forward_over_a_silent_link_exits_on_its_keep_alive_and_frees_every_port"],
+        capture_output=True, text=True, env=environ, cwd=str(tmp_path), timeout=120,
+    )
+
+    assert "1 skipped" in done.stdout, done.stdout + done.stderr
+    assert "error" not in done.stdout.splitlines()[-1]
+    assert ("no ssh on PATH" if cause == "no-ssh" else "did not finish a key login") in done.stdout
+
+
 def test_a_forward_over_a_silent_link_exits_on_its_keep_alive_and_frees_every_port(tmp_path: Path) -> None:
     """Run camp's own forward argv under real ssh, through a relay that goes silent, and time its exit.
 
@@ -715,10 +741,16 @@ def test_a_forward_over_a_silent_link_exits_on_its_keep_alive_and_frees_every_po
         )
     config = os.environ.get(SSH_CONFIG_ENV)
     config_args = ["-F", config] if config else []
-    reach = subprocess.run(
-        ["ssh", *config_args, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", dest, "true"],
-        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
-    )
+    probe_seconds = float(os.environ.get(SSH_PROBE_SECONDS_ENV, "60"))
+    try:
+        reach = subprocess.run(
+            ["ssh", *config_args, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", dest, "true"],
+            capture_output=True, text=True, timeout=probe_seconds, stdin=subprocess.DEVNULL,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip(f"{SSH_DEST_ENV}={dest} accepted a connection but did not finish a key login in {probe_seconds:g}s")
+    except FileNotFoundError:
+        pytest.skip(f"no ssh on PATH to probe {SSH_DEST_ENV}={dest}")
     if reach.returncode != 0:
         pytest.skip(f"{SSH_DEST_ENV}={dest} did not answer a key login: {reach.stderr.strip()}")
 

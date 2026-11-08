@@ -27,6 +27,11 @@ The stub serves two kinds of call:
 * ``parent_delay``: seconds the foreground process lingers after forking, so a test can act while
   ``ssh -f`` has not yet returned.
 
+``AttachRig.delay_ps(seconds)`` makes every stub ``ps`` call wait before answering, so the window in
+which an attach reads the process table, starts its forward or relay and reads the table again stays
+open for a second attach to arrive in. It holds the window open for a relay start as well as a
+forward start.
+
 Using the rig from another test file::
 
     from .env_ssh_stub import AttachRig
@@ -244,6 +249,8 @@ _PS_STUB = """#!/bin/sh
 n=$(cat "$STUB_DIR/ps.count" 2>/dev/null || echo 0)
 n=$((n + 1))
 echo "$n" > "$STUB_DIR/ps.count"
+delay=$(cat "$STUB_DIR/ps.delay" 2>/dev/null)
+[ -n "$delay" ] && sleep "$delay"
 limit=$(cat "$STUB_DIR/ps.limit" 2>/dev/null)
 if [ -n "$limit" ] && [ "$n" -gt "$limit" ]; then
   echo "ps: simulated failure" >&2
@@ -430,6 +437,13 @@ class AttachRig:
 
     def configure(self, **switches) -> None:
         (self.root / "stub.json").write_text(json.dumps(switches))
+
+    def delay_ps(self, seconds: float) -> None:
+        """Every ``ps`` call waits *seconds* before answering."""
+        sleep = self.bin / "sleep"
+        if not sleep.exists():
+            sleep.symlink_to(shutil.which("sleep"))
+        (self.root / "ps.delay").write_text(str(seconds))
 
     def break_ps_after(self, calls: int) -> None:
         """Every ``ps`` call after the first *calls* fails; 0 fails them all."""

@@ -5,6 +5,10 @@ table and starts the forward without another attach doing the same in between. I
 an advisory exclusive `flock` on a single file under camp's state directory, and it
 records nothing: the file stays empty, and the holder's identity is never written.
 
+When camp's state directory, the lock file's own directory, does not exist, it is created
+0700 and the lock file 0600. Missing directories above it are created with the user's umask
+defaults; their modes are left to the user.
+
 The file is never unlinked. Removing it while attachers are queued lets one open the
 old inode and another create a new one, so two holders lock different files and
 exclude nothing. The kernel releases the lock when the holder's descriptor closes,

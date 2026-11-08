@@ -215,6 +215,19 @@ def test_the_lock_file_is_never_written_or_removed(lock_file: Path):
         os.close(witness)
 
 
+def test_a_missing_nested_state_directory_is_created_with_the_state_directory_private(tmp_path: Path):
+    lock_file = tmp_path / "a" / "b" / "state" / "env-attach.lock"
+    old = os.umask(0o022)
+    try:
+        with attach_lock(lock_file, timeout=1):
+            pass
+    finally:
+        os.umask(old)
+
+    assert lock_file.parent.stat().st_mode & 0o777 == 0o700
+    assert lock_file.stat().st_mode & 0o777 == 0o600
+
+
 def test_the_path_helper_follows_camp_state_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CAMP_STATE_DIR", str(tmp_path / "a"))
     first = attach_lock_path()
