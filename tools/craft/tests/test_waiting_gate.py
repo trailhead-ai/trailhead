@@ -434,3 +434,55 @@ def test_missing_prior_argument_exits_2(tmp_path):
     res = run(with_section(pending()), tmp_path=tmp_path, extra_args=[])
     assert res.returncode == 2
     assert b"--prior" in res.stderr
+
+
+# --- bounded text ------------------------------------------------------------
+
+import time  # noqa: E402
+
+HOSTILE = "token" * 8000
+
+
+def _timed(proposed, prior_body, tmp_path):
+    start = time.monotonic()
+    res = check(proposed, prior_body, tmp_path)
+    return res, time.monotonic() - start
+
+
+def test_a_long_credential_shaped_field_in_a_new_entry_is_refused_promptly(tmp_path):
+    res, elapsed = _timed(with_section(pending(how=HOSTILE)), BASE, tmp_path)
+    refused(res, "field-too-long")
+    assert elapsed < 1
+    assert "AC7" in reason_of(res)
+    assert "how" in reason_of(res)
+    assert "tokentoken" not in res.stderr.decode()
+
+
+def test_a_long_entry_line_is_refused_promptly(tmp_path):
+    proposed = BASE + "\n## Waiting\n\n- **AC1.** " + HOSTILE + "\n"
+    res, elapsed = _timed(proposed, BASE, tmp_path)
+    assert res.returncode == 1
+    assert elapsed < 1
+    assert len(reason_of(res)) < 500
+
+
+def test_a_field_at_the_limit_certifies_and_one_past_it_is_refused(tmp_path):
+    prefix = "  - how: "
+    at_limit = ("word " * 300)[: 1000 - len(prefix) - 1] + "w"
+    assert check(with_section(pending(how=at_limit)), BASE, tmp_path).returncode == 0
+    refused(check(with_section(pending(how=at_limit + "w")), BASE, tmp_path), "field-too-long")
+
+
+def test_a_long_unknown_kind_is_echoed_bounded(tmp_path):
+    proposed = BASE + "\n## Waiting\n\n- **AC1.** " + "k" * 900 + "\n"
+    res = check(proposed, BASE, tmp_path)
+    assert res.returncode == 1
+    assert len(reason_of(res)) < 300
+
+
+def test_control_character_line_copied_from_another_entry_of_the_prior_is_refused(tmp_path):
+    prior = with_section(pending(check="open the page\x1f"))
+    proposed = with_section(
+        pending(check="open the page\x1f"), pending("AC8", "b", check="open the page\x1f")
+    )
+    refused(check(proposed, prior, tmp_path), "control-characters")

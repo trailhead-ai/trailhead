@@ -2538,8 +2538,9 @@ def _require_base_for_ledger_change(
     Creating a section counts: a creator composing from a stale copy could drop a
     ``## Slices`` row added since. The refusal names each changed ledger and that
     ledger's own gate. A ``## Waiting`` change that arrives together with a
-    ``## Slices`` change is the stale-copy side effect of a slice write, so its
-    remedy is to re-read and reapply rather than to run the waiting gate.
+    ``## Slices`` change may be the stale-copy side effect of a slice write, so
+    its remedy is conditional: re-read and reapply the slice change if the
+    Waiting change was unintended, otherwise run ``waiting_gate.py --prior``.
     MUST be called with the write lock held; raises :class:`_UpdateAborted`
     after printing the refusal.
     """

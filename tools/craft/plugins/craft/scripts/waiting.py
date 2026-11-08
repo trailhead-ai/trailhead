@@ -230,7 +230,7 @@ class _Draft:
 def _open_entry(criterion_id: str, rest: str) -> _Draft:
     kind, sep, slice_text = rest.strip().partition(_KIND_SEPARATOR)
     if kind not in KINDS:
-        raise WaitingParseError("unknown-kind", f"{criterion_id}: unknown kind {kind!r}")
+        raise WaitingParseError("unknown-kind", f"{criterion_id}: unknown kind {kind[:60]!r}")
     if kind == "set aside":
         if sep:
             raise WaitingParseError(
@@ -301,11 +301,11 @@ def parse_waiting(body: str) -> list[WaitingEntry]:
             when, status, words = hist.groups()
             if not _valid_date(when):
                 raise WaitingParseError(
-                    "malformed-date", f"{draft.criterion_id}: bad date {when!r}"
+                    "malformed-date", f"{draft.criterion_id}: bad date {when[:60]!r}"
                 )
             if status not in STATUSES:
                 raise WaitingParseError(
-                    "unknown-status", f"{draft.criterion_id}: unknown status {status!r}"
+                    "unknown-status", f"{draft.criterion_id}: unknown status {status[:60]!r}"
                 )
             draft.history.append((when, status, words.strip()))
             continue

@@ -271,3 +271,18 @@ def test_the_shared_helpers_for_waiting_ignore_a_fenced_heading_and_refuse_a_dup
     assert not waiting.has_section(fenced)
     with pytest.raises(waiting.DuplicateHeadingError):
         waiting.has_section(body(PENDING, after="\n## Waiting\n"))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda t, v: t.replace("pending check", v),
+        lambda t, v: t.replace("waiting:", f"{v}:"),
+        lambda t, v: t.replace("2026-11-02", v),
+    ],
+    ids=["kind", "status", "date"],
+)
+def test_vault_text_echoed_in_a_parse_refusal_is_bounded(mutate):
+    with pytest.raises(WaitingParseError) as e:
+        parse_waiting(body(mutate(PENDING, "9" + "z" * 5000)))
+    assert len(str(e.value)) < 200

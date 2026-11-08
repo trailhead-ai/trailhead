@@ -21,10 +21,11 @@ grow through it. It refuses a proposed body that:
     - appends any history line to an existing entry
     - changes an existing entry's check, how, changed behaviour or waits on
     - adds an entry whose history is not exactly one `waiting` line
+    - carries a `## Waiting` line longer than `MAX_LINE_CHARS`
     - adds an entry whose text is credential-shaped
     - carries a control or format character on any `## Waiting` line that is not
-      byte-identical to a line of the prior section (whitespace-class characters
-      the parser strips included)
+      byte-identical to a line the prior section holds under the same entry
+      (whitespace-class characters the parser strips included)
     - adds an entry dated after today
     - carries a fenced code block or HTML comment inside the section
     - differs from the prior anywhere outside `## Waiting`
@@ -32,6 +33,9 @@ grow through it. It refuses a proposed body that:
 
 "Today" is the local date, or the ISO date in `CRAFT_WAITING_GATE_TODAY` when
 that variable is set (a malformed value cannot certify).
+
+The credential check is the shared credential-pattern heuristic: a tripwire, not a
+guarantee, so common token formats outside its list pass.
 
 Known boundaries: a raw `lore record update` skips this gate, and the `base:`
 line certifies the caller's `--prior` document, not the vault's current state.
@@ -41,7 +45,7 @@ Exit codes:
     1  violation — `reason:` names the entry key, the field and the fix, and
        never repeats credential or control-character text. Stable
        `reason-code:` tokens: removed-entry, history-rewritten,
-       status-transition, entry-changed, new-entry-not-waiting,
+       status-transition, entry-changed, new-entry-not-waiting, field-too-long,
        credential-shaped-text, control-characters, masked-content, future-date,
        change-outside-waiting, section-not-at-end, plus the parser's own codes
        (`waiting.REASON_CODES`).
@@ -54,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from datetime import date
 from pathlib import Path
@@ -73,6 +78,10 @@ from gate_plumbing import Refusal, emit_refusal, load_prior, read_stdin  # noqa:
 from observation_gate import _ends_inside_masked_region  # noqa: E402
 
 TODAY_ENV = "CRAFT_WAITING_GATE_TODAY"
+MAX_LINE_CHARS = 1000
+_ENTRY_ID_RE = re.compile(r"^- \*\*(AC[1-9][0-9]{0,8})\.\*\*")
+_FIELD_NAME_RE = re.compile(r"^  - (check|how|changed behaviour|waits on):")
+_HISTORY_START_RE = re.compile(r"^  - \d")
 
 
 def _today() -> date:
@@ -184,14 +193,51 @@ def _section_lines(body: str) -> list[str]:
     return lines[start + 1 : end]
 
 
+def _owned_lines(body: str) -> list[tuple[str, str]]:
+    """(owner, line) for every section line; the owner is the entry-opening
+    line the line sits under, or the line itself when it opens one."""
+    owner = ""
+    owned = []
+    for line in _section_lines(body):
+        if line.strip() and not line.startswith(" "):
+            owner = line
+        owned.append((owner, line))
+    return owned
+
+
+def _line_field(line: str) -> str:
+    if _ENTRY_ID_RE.match(line):
+        return "entry line"
+    m = _FIELD_NAME_RE.match(line)
+    if m:
+        return m.group(1)
+    if _HISTORY_START_RE.match(line):
+        return "history words"
+    return "line"
+
+
+def _check_line_lengths(proposed: str) -> None:
+    """Bounds the text every later check scrubs or echoes."""
+    for owner, line in _owned_lines(proposed):
+        if len(line) > MAX_LINE_CHARS:
+            m = _ENTRY_ID_RE.match(owner)
+            key = m.group(1) if m else "an unkeyed line"
+            raise Refusal(
+                f"entry {key} has a {_line_field(line)} longer than {MAX_LINE_CHARS} "
+                "characters — shorten it",
+                "field-too-long",
+                1,
+            )
+
+
 def _check_raw_lines(prior_body: str, proposed: str) -> None:
     """The parser strips whitespace, so a separator or other whitespace-class
     control character can sit in a line the parsed values never show. Every
-    proposed section line that is not byte-identical to a prior section line
-    is checked raw."""
-    prior_lines = set(_section_lines(prior_body))
-    for line in _section_lines(proposed):
-        if line not in prior_lines and _neutralize_control_chars(line) != line:
+    proposed section line is checked raw unless the prior section carries the
+    same line under the same entry-opening line."""
+    prior = set(_owned_lines(prior_body))
+    for pair in _owned_lines(proposed):
+        if pair not in prior and _neutralize_control_chars(pair[1]) != pair[1]:
             raise Refusal(
                 "the '## Waiting' section has a control or format character on a line "
                 "you added or changed — remove it",
@@ -217,6 +263,10 @@ def _certify(prior_body: str, proposed: str) -> None:
             "malformed-prior-section",
             2,
         )
+    try:
+        _check_line_lengths(proposed)
+    except DuplicateHeadingError:
+        pass
     try:
         entries = waiting.parse_waiting(proposed)
     except waiting.WaitingParseError as e:

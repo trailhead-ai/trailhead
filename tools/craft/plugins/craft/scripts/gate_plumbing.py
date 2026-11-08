@@ -3,6 +3,7 @@
 
     Refusal         an exception carrying a stable reason code and an exit code
     safe(text)      control-character neutralizer, then credential scrub
+    clip(text, n)   text cut to n characters, so a scrub never sees unbounded input
     load_prior(p)   (body, revision) from a `lore record show <spec> --json` file
     read_stdin()    the proposed body, capped, UTF-8, non-empty
     emit_refusal(prog, r) -> int
@@ -30,6 +31,8 @@ from criterion_gate import (  # noqa: E402
 )
 
 MAX_BYTES = 256 * 1024
+ECHO_CHARS = 60
+MAX_REASON_CHARS = 1000
 _REVISION_RE = re.compile(r"[0-9a-f]{64}")
 
 
@@ -38,6 +41,10 @@ class Refusal(Exception):
         self.reason_code = reason_code
         self.exit_code = exit_code
         super().__init__(message)
+
+
+def clip(text: str, limit: int = ECHO_CHARS) -> str:
+    return text if len(text) <= limit else text[:limit] + "..."
 
 
 def safe(text: str) -> str:
@@ -50,10 +57,10 @@ def load_prior(path_str: str) -> tuple[str, str]:
         with Path(path_str).open("rb") as f:
             raw = f.read(MAX_BYTES + 1)
     except OSError as e:
-        raise Refusal(f"--prior file {path_str!r} could not be read: {e}", "unreadable-prior", 2)
+        raise Refusal(f"--prior file {clip(path_str)!r} could not be read: {e}", "unreadable-prior", 2)
     if len(raw) > MAX_BYTES:
         raise Refusal(
-            f"--prior file {path_str!r} exceeds the {MAX_BYTES}-byte cap", "unreadable-prior", 2
+            f"--prior file {clip(path_str)!r} exceeds the {MAX_BYTES}-byte cap", "unreadable-prior", 2
         )
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -107,6 +114,6 @@ def read_stdin() -> str:
 def emit_refusal(prog: str, r: Refusal) -> int:
     # Every vault-sourced value in a message is already repr'd, which escapes
     # every character the neutralizer would; safe() is a second layer.
-    print(f"{prog}: reason: {safe(str(r))}", file=sys.stderr)
+    print(f"{prog}: reason: {safe(clip(str(r), MAX_REASON_CHARS))}", file=sys.stderr)
     print(f"{prog}: reason-code: {r.reason_code}", file=sys.stderr)
     return r.exit_code
