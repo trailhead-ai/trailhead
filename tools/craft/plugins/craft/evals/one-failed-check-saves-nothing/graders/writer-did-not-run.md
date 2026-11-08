@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: 'pending_check\.py (--spec|verify)'
+pattern: 'pending_check\.py (?!describe)'
 match: not_contains
 target:
   source: file

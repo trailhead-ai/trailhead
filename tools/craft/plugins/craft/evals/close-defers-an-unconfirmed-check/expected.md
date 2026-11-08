@@ -15,7 +15,7 @@ How the operator's answers arrive: the runner is headless, so the prompt states 
 ## Conditions, sample and bar
 
 - Runner: `claude plugin eval`, target `tools/craft/plugins/craft`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants from craft's `eval-gate.json` runner block.
-- Limits: `allowed_tools: [Skill, Read, Glob, Grep]`, `max_turns: 40`, `timeout_seconds: 500`. The prompt asks for single-command Bash calls.
+- Limits: `allowed_tools: [Skill, Read, Write, Glob, Grep]`, `max_turns: 40`, `timeout_seconds: 500`. The prompt asks for single-command Bash calls.
 - A run scores the fraction of graders that pass and passes only at 1.0. The case passes at 3 of 3 runs after the change. One rerun of a failed batch is permitted, stated here before any run, and a rerun-green is reported as such. A scaffold failure or timeout is an error, logged apart from graded fails.
 - The baseline runs on the unedited prose before any prose edit and is expected red: that prose asks one confirmation question, writes no attestation for an unconfirmed criterion, and lets the observation gate refuse, so `pending_check.py` never runs.
 

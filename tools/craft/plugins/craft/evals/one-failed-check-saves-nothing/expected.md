@@ -19,7 +19,7 @@ Every clause holds.
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The writer did not run | `writer-did-not-run` | `regex` on `lore-calls.log`, `pending_check.py (--spec|verify)`, not_contains |
+| The writer did not run | `writer-did-not-run` | `regex` on `lore-calls.log`, `pending_check.py (?!describe)`, not_contains |
 | No close write | `no-close-write` | `regex` on `lore-calls.log`, `--status done`, not_contains |
 | The parent is still `in-progress` | `parent-still-in-progress` | `regex` on `vault/task/pickups-can-be-booked-and-confirmed.json`, contains |
 | No attestation written | `no-attestation-written` | `regex` on the parent's body, `## Operator attestations`, not_contains |
@@ -46,4 +46,4 @@ Every clause holds.
 
 ## Grader correction after the first post-edit batch
 
-The first post-edit batch scored 0 of 3, every run failing only `writer-did-not-run`. That grader matched any `pending_check.py` line in the call log, and the edited prose runs the read-only `describe` mode before asking, which the wrapper logs like any other call, so the grader failed a correct run. The pattern was narrowed after that batch to the writer's and `verify`'s call shapes, `pending_check.py (--spec|verify)`; `describe --spec` does not match it because `describe` precedes `--spec`. This is a post-hoc grader change, disclosed here and in `MANUAL-EVAL.md`; the clause still fails the two branches it was written for (writes the entry as it arrives, writes it then stops), because both run the writer.
+The first post-edit batch scored 0 of 3, every run failing only `writer-did-not-run`. That grader matched any `pending_check.py` line in the call log, and the edited prose runs the read-only `describe` mode before asking, which the wrapper logs like any other call, so the grader failed a correct run. The pattern was narrowed after that batch to the writer's and `verify`'s call shapes, `pending_check.py (--spec|verify)`; `describe --spec` does not match it because `describe` precedes `--spec`. This is a post-hoc grader change, disclosed here and in `MANUAL-EVAL.md`; the clause still fails the two branches it was written for (writes the entry as it arrives, writes it then stops), because both run the writer. A later widening, reasoned only and with no new billed run: `pending_check\.py (--spec|verify)` missed a writer call that put `--parent` or `--entries` first or wrote `--spec=`, so the pattern is now `pending_check\.py (?!describe)`, which matches every logged `pending_check.py` call except `describe`; the call log writes one `pending_check.py <args>` line per call, so the first word after the script name is the mode or the first flag.

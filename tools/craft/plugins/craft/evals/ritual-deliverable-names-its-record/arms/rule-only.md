@@ -195,7 +195,12 @@ applies for the parent task write.
 **The append is a full-body read-modify-write of the spec, not `lore record update --diff`.** Read
 the spec fresh immediately before this write — never the body read back in step 2, which may already
 be stale by now — add or extend its `## Slices` section with the new line(s) in memory, and pipe the
-whole body back with a bare `lore record update spec/<spec-name>` (no `--diff` flag). A unified diff
+whole body back with `lore record update spec/<spec-name> --base <revision>` (no `--diff` flag),
+passing the revision from that same fresh read. New ledger lines go inside the existing `## Slices`
+section, before the next heading — never at the end of the body, where a `## Waiting` section may
+now sit — and a first-ever `## Slices` heading is created before any `## Waiting` section. When the
+write is refused because the spec changed after that read (a close's waiting-entry write racing this
+one), read the spec fresh again and redo the append; never retry the stale body. A unified diff
 cannot reliably create a section that does not exist yet — precisely the first-ever-append case
 every spec passes through once — and a hand-edited body under `--diff` would strand the loop on a
 permanently non-applying hunk with no way to recover. A failed append surfaces rather than being
@@ -383,13 +388,13 @@ re-running. On exit 2 with `reason-code: malformed-criteria-state` or
 spec body it was read beside: re-read both from the same pass (the `lore record criteria` call and
 the `lore record show`) and re-run, and never hand-edit the state file. On exit 2 with
 `reason-code: malformed-waiting-section`, the spec's `## Waiting` section is unreadable and the
-gate's own stderr names the parser's code for why — report it, and that the fix is to correct the
-section through its gated writer, never by hand, before re-running. On exit 2 with
-`reason-code: duplicate-slices-heading` or `reason-code: duplicate-acceptance-criteria-heading`, the
-spec carries that heading twice — fix the spec record before re-running. Every other exit-2 reason
-(empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all —
-the spec itself is unreadable or malformed, so the remedy is to fix the spec record, not a ledger
-line, before re-running.
+gate's own stderr names the parser's code for why — report it, and that the fix is for the operator
+to repair the section with a direct edit (the waiting gate certifies the writes that come after),
+before re-running. On exit 2 with `reason-code: duplicate-slices-heading` or
+`reason-code: duplicate-acceptance-criteria-heading`, the spec carries that heading twice — fix the
+spec record before re-running. Every other exit-2 reason (empty or non-UTF-8 stdin, no
+`## Acceptance Criteria` heading) names no identifier or line at all — the spec itself is unreadable
+or malformed, so the remedy is to fix the spec record, not a ledger line, before re-running.
 
 **A spec predating the `**ACn.**` convention is a legacy carve-out, not a refusal.** The carve-out
 keys on a single machine-readable signal and nothing else: when the spec declares zero criterion
