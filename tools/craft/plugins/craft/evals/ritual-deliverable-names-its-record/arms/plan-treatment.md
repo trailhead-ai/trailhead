@@ -690,10 +690,12 @@ Critical as the question, options such as changing the spec or the plan's scope,
 or reshaping the slice (each with what it costs), and your recommendation marked. In the persisted
 `## Council Review`, a Critical that changes the spec is recorded with the disposition
 `bounced-back-to-spec`; a security-lens Critical the plan cannot close is left undispositioned.
-Neither is marked `(decided unattended)`. Edit neither the spec nor the slice's status, and end on
-`outcome: needs-a-decision task/<parent-name> parked=<n>`. A non-zero exit of `maturity_bars.py`
-still refuses the dispatch, and under `--unattended` ends `outcome: stuck task/<parent-name>
-parked=<n> — council dispatch refused (<reason-code>); <the remedy in words>`.
+Neither is marked `(decided unattended)`. Write that `## Council Review` section (Persistence,
+below) first, then park: the section is the last write before the question. Edit neither the spec
+nor the slice's status, and end on `outcome: needs-a-decision task/<parent-name> parked=<n>`. A
+non-zero exit of `maturity_bars.py` still refuses the dispatch, and under `--unattended` ends
+`outcome: stuck task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the
+remedy in words>`.
 
 **Persistence:** append a `## Council Review` section to the parent task's body capturing all
 findings and the disposition for each Critical. Each Critical disposition is exactly one of
