@@ -21,8 +21,10 @@ grow through it. It refuses a proposed body that:
     - appends any history line to an existing entry
     - changes an existing entry's check, how, changed behaviour or waits on
     - adds an entry whose history is not exactly one `waiting` line
-    - adds an entry whose text is credential-shaped or carries a control or
-      format character
+    - adds an entry whose text is credential-shaped
+    - carries a control or format character on any `## Waiting` line that is not
+      byte-identical to a line of the prior section (whitespace-class characters
+      the parser strips included)
     - adds an entry dated after today
     - carries a fenced code block or HTML comment inside the section
     - differs from the prior anywhere outside `## Waiting`
@@ -142,16 +144,7 @@ def _check_new(entry: waiting.WaitingEntry, today: date) -> None:
             "new-entry-not-waiting",
             1,
         )
-    texts = _entry_texts(entry)
-    for name, text in texts:
-        if _neutralize_control_chars(text) != text:
-            raise Refusal(
-                f"new entry {label} has a control or format character in its {name} — "
-                "remove it",
-                "control-characters",
-                1,
-            )
-    for name, text in texts:
+    for name, text in _entry_texts(entry):
         if _scrub_credential_shaped(text) != text:
             raise Refusal(
                 f"new entry {label} has credential-shaped text in its {name} — remove "
@@ -178,6 +171,33 @@ def _section_has_masked_lines(proposed: str) -> bool:
         return False
     start, end = located
     return any(masked[start + 1 : end])
+
+
+def _section_lines(body: str) -> list[str]:
+    lines, masked = markdown_section.split_body(body)
+    located = markdown_section.section_range(
+        lines, masked, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE
+    )
+    if located is None:
+        return []
+    start, end = located
+    return lines[start + 1 : end]
+
+
+def _check_raw_lines(prior_body: str, proposed: str) -> None:
+    """The parser strips whitespace, so a separator or other whitespace-class
+    control character can sit in a line the parsed values never show. Every
+    proposed section line that is not byte-identical to a prior section line
+    is checked raw."""
+    prior_lines = set(_section_lines(prior_body))
+    for line in _section_lines(proposed):
+        if line not in prior_lines and _neutralize_control_chars(line) != line:
+            raise Refusal(
+                "the '## Waiting' section has a control or format character on a line "
+                "you added or changed — remove it",
+                "control-characters",
+                1,
+            )
 
 
 def _certify(prior_body: str, proposed: str) -> None:
@@ -209,6 +229,8 @@ def _certify(prior_body: str, proposed: str) -> None:
             "masked-content",
             1,
         )
+
+    _check_raw_lines(prior_body, proposed)
 
     by_key = {e.key: e for e in entries}
     for old in prior_entries:

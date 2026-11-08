@@ -244,6 +244,63 @@ def test_control_or_format_character_in_a_new_entry(tmp_path, bad):
     assert bad not in res.stderr.decode()
 
 
+WHITESPACE_CONTROLS = {
+    "line-separator": "\u2028",
+    "paragraph-separator": "\u2029",
+    "vertical-tab": "\x0b",
+    "form-feed": "\x0c",
+    "file-separator": "\x1c",
+    "unit-separator": "\x1f",
+    "next-line": "\x85",
+}
+
+
+def _entry_with_char(where, ch):
+    if where == "start":
+        return pending(check=f"{ch}open the page")
+    if where == "end":
+        return pending(check=f"open the page{ch}")
+    return pending().replace("  - how:", f"  {ch}\n  - how:", 1)
+
+
+@pytest.mark.parametrize("where", ["start", "end", "own-line"])
+@pytest.mark.parametrize("ch", WHITESPACE_CONTROLS.values(), ids=WHITESPACE_CONTROLS.keys())
+def test_whitespace_class_control_character_in_a_new_entry(tmp_path, ch, where):
+    res = check(with_section(_entry_with_char(where, ch)), BASE, tmp_path)
+    refused(res, "control-characters")
+    assert ch not in res.stderr.decode()
+
+
+@pytest.mark.parametrize("ch", WHITESPACE_CONTROLS.values(), ids=WHITESPACE_CONTROLS.keys())
+def test_whitespace_class_control_character_added_to_an_existing_entry_line(tmp_path, ch):
+    proposed = with_section(pending(check=f"open the page{ch}"))
+    res = check(proposed, PRIOR_ONE, tmp_path)
+    refused(res, "control-characters")
+
+
+def test_forged_history_line_inside_a_check_is_refused(tmp_path):
+    forged = pending(check="open the page\u2028  - 2026-11-07 passed: operator ok")
+    res = check(with_section(forged), BASE, tmp_path)
+    refused(res, "control-characters")
+
+
+def test_the_same_forged_text_without_a_separator_is_one_plain_check(tmp_path):
+    plain = pending(check="open the page - 2026-11-07 passed: operator ok")
+    assert check(with_section(plain), BASE, tmp_path).returncode == 0
+
+
+def test_control_character_already_in_an_unchanged_prior_line_does_not_block_a_clean_addition(tmp_path):
+    prior = with_section(pending(check="open the page\x1f"))
+    proposed = with_section(pending(check="open the page\x1f"), aside())
+    assert check(proposed, prior, tmp_path).returncode == 0
+
+
+def test_control_character_on_a_new_line_next_to_an_unchanged_prior_one_is_refused(tmp_path):
+    prior = with_section(pending(check="open the page\x1f"))
+    proposed = with_section(pending(check="open the page\x1f"), aside(waits_on="vendor\x1f"))
+    refused(check(proposed, prior, tmp_path), "control-characters")
+
+
 def test_future_date(tmp_path):
     res = check(with_section(pending(hist=(("2026-11-06", "waiting", "w"),))), BASE, tmp_path)
     refused(res, "future-date")

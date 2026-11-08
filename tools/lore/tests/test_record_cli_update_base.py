@@ -287,8 +287,10 @@ def test_slices_write_from_a_copy_predating_a_waiting_entry_is_refused_with_a_re
     assert r.returncode != 0
     assert "--base" in r.stderr
     assert "## Waiting" in r.stderr
-    assert "reapply your change" in r.stderr
-    assert "waiting_gate.py" not in r.stderr
+    assert "if your ## Waiting change was not intended" in r.stderr
+    assert "re-read the spec and reapply your ## Slices change" in r.stderr
+    assert "if it was intended, re-run waiting_gate.py --prior on that read" in r.stderr
+    assert "without running the waiting gate" not in r.stderr
     assert _snapshot(vault) == before
 
 

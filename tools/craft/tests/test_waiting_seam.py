@@ -213,6 +213,7 @@ def test_body_that_changes_waiting_and_edits_problem_is_refused_by_gate_and_by_l
     before = lore.stored_bytes(rid)
     r = lore.run("record", "update", rid, "--base", prior["revision"], stdin_text=proposed)
     assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
     assert lore.stored_bytes(rid) == before
 
 

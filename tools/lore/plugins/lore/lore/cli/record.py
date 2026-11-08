@@ -2566,9 +2566,10 @@ def _require_base_for_ledger_change(
     if _WAITING_HEADING in changed:
         if section_changed(existing_body, new_body, _SLICES_HEADING):
             gates.append(
-                f"{_WAITING_HEADING} changed only because your copy predates another "
-                f"writer's entry: re-read the spec and reapply your {_SLICES_HEADING} "
-                "change to it, without running the waiting gate"
+                f"if your {_WAITING_HEADING} change was not intended (your copy "
+                f"predates another writer's entry), re-read the spec and reapply your "
+                f"{_SLICES_HEADING} change to it; if it was intended, re-run "
+                "waiting_gate.py --prior on that read"
             )
         else:
             gates.append(
