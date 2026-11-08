@@ -40,9 +40,23 @@ again from the start of the locked part. By then the attach that held it has eit
 the waiting attach is refused naming that attachment, or failed and ended what it started, and the
 waiting attach goes ahead.
 
-Every camp install and checkout run by the same user, from any directory, uses the same state
-directory, so the lock covers attaches started by different checkouts too. A camp run with a
-different `CAMP_STATE_DIR` (a test, for one) is outside it.
+The lock file is opened without following a symlink and is created readable and writable by its
+owner only. Every camp install and checkout carrying this change, run by the same user from any
+directory, uses the same state directory, so the lock covers attaches started by different checkouts
+too.
+
+What the lock does not cover:
+
+- **A camp from before this change.** It never takes the lock, so an attach it runs can still race a
+  newer attach exactly as two attaches race today. Update every checkout to close it.
+- **A camp run with a different state directory** (`CAMP_STATE_DIR` or `XDG_STATE_HOME` set
+  differently, as a test does) meets on a different file.
+- **Another user on the same machine.** The lock, like the process-table reading of attachments, is
+  per user. Two users attaching at once on a shared machine are not kept to one. That is the spec's
+  shared-machine residual, unchanged.
+
+Rolling back leaves an empty `env-attach.lock` behind. Nothing reads it, and it can be deleted or
+left.
 
 ## State — one of two simultaneous attaches wins
 
@@ -55,6 +69,14 @@ On stdout, exit 0, in exactly the shape of an attach run alone. Whichever attach
 first is the one that attaches, whatever order they were started in.
 
 ## State — simultaneous attach loser refused naming the winner
+
+While it waits for the lock, the loser says so once, on stderr, so it does not look hung:
+
+```
+camp env: another attach is starting; waiting for it to finish
+```
+
+An attach that finds the lock free prints nothing extra.
 
 ```
 $ camp env attach local/levr/main
@@ -69,7 +91,7 @@ If the waiting attach is still waiting after the longest an attach can take to s
 timeout plus thirty seconds), it gives up without starting anything:
 
 ```
-camp env: another attach is still starting; run camp env status, then try again
+camp env: another attach is still starting; wait for it to finish, then try again
 ```
 
 On stderr, exit 1. An interrupt while waiting prints `camp env: interrupted` on stderr and exits 130,
@@ -113,8 +135,10 @@ unchanged. If the lock file cannot be opened (camp's state directory is unwritab
 refused before starting anything:
 
 ```
-camp env: cannot take the attach lock (<why>); nothing was started
+camp env: cannot take the attach lock at <state directory>/env-attach.lock (<why>); nothing was started
 ```
+
+The path and the reason pass through the same control-character removal as every other message.
 
 ## State — status after a race names one attachment
 
