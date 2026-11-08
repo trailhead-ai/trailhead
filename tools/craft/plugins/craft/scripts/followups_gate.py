@@ -62,8 +62,6 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
-import json
-import re
 import sys
 from pathlib import Path
 
@@ -72,9 +70,11 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from covers_gate import _COMMONMARK_LINE_RE, DuplicateHeadingError  # noqa: E402
-from criterion_gate import (  # noqa: E402
-    _neutralize_control_chars,
-    _scrub_credential_shaped,
+from gate_plumbing import (  # noqa: E402
+    Refusal as _Refusal,
+    emit_refusal,
+    load_prior,
+    read_stdin,
 )
 from followups import (  # noqa: E402
     FollowupsError,
@@ -84,81 +84,6 @@ from followups import (  # noqa: E402
     section_is_last,
 )
 from observation_gate import _ends_inside_masked_region  # noqa: E402
-
-_MAX_BYTES = 256 * 1024
-_REVISION_RE = re.compile(r"[0-9a-f]{64}")
-
-
-class _Refusal(Exception):
-    def __init__(self, message: str, reason_code: str, exit_code: int):
-        self.reason_code = reason_code
-        self.exit_code = exit_code
-        super().__init__(message)
-
-
-def _safe(text: str) -> str:
-    return _scrub_credential_shaped(_neutralize_control_chars(text))
-
-
-def _load_prior(path_str: str) -> tuple[str, str]:
-    """(body, revision) from the `--prior` document."""
-    try:
-        with Path(path_str).open("rb") as f:
-            raw = f.read(_MAX_BYTES + 1)
-    except OSError as e:
-        raise _Refusal(f"--prior file {path_str!r} could not be read: {e}", "unreadable-prior", 2)
-    if len(raw) > _MAX_BYTES:
-        raise _Refusal(
-            f"--prior file {path_str!r} exceeds the {_MAX_BYTES}-byte cap", "unreadable-prior", 2
-        )
-    try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError) as e:
-        raise _Refusal(
-            f"--prior is not valid UTF-8 JSON ({type(e).__name__}) — pass the output of "
-            "'lore record show spec/<n> --json'",
-            "malformed-prior",
-            2,
-        )
-    fields = ("body", "revision", "layer")
-    if not isinstance(data, dict) or not all(isinstance(data.get(k), str) for k in fields):
-        raise _Refusal(
-            "--prior must be a JSON object with string 'body', 'revision' and 'layer' — "
-            "pass the output of 'lore record show spec/<n> --json'",
-            "malformed-prior",
-            2,
-        )
-    if not _REVISION_RE.fullmatch(data["revision"]):
-        raise _Refusal(
-            "--prior 'revision' is not a 64-character lowercase hex digest — "
-            "pass the output of 'lore record show spec/<n> --json'",
-            "malformed-prior",
-            2,
-        )
-    if data["layer"] != "personal":
-        raise _Refusal(
-            "--prior is not from a personal-layer vault: in a shared vault 'show' "
-            "XML-escapes the body, so a body composed from it would write escaped text",
-            "shared-layer-prior",
-            2,
-        )
-    return data["body"], data["revision"]
-
-
-def _read_stdin() -> str:
-    raw = sys.stdin.buffer.read(_MAX_BYTES + 1)
-    if len(raw) > _MAX_BYTES:
-        raise _Refusal(
-            f"proposed body on stdin exceeds the {_MAX_BYTES}-byte cap", "stdin-too-large", 2
-        )
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError as e:
-        raise _Refusal(f"proposed body on stdin is not valid UTF-8: {e}", "non-utf8-stdin", 2)
-    if not text.strip():
-        raise _Refusal("proposed body on stdin is empty", "empty-stdin", 2)
-    return text
-
 
 def _certify(prior_body: str, proposed: str) -> None:
     if _ends_inside_masked_region(_COMMONMARK_LINE_RE.split(proposed)):
@@ -249,15 +174,11 @@ def main(argv: list[str]) -> int:
     )
     args = ap.parse_args(argv)
     try:
-        proposed = _read_stdin()
-        prior_body, revision = _load_prior(args.prior)
+        proposed = read_stdin()
+        prior_body, revision = load_prior(args.prior)
         _certify(prior_body, proposed)
     except _Refusal as r:
-        # Every vault-sourced value in a message is already repr'd, which escapes
-        # every character the neutralizer would; _safe is a second layer.
-        print(f"followups-gate: reason: {_safe(str(r))}", file=sys.stderr)
-        print(f"followups-gate: reason-code: {r.reason_code}", file=sys.stderr)
-        return r.exit_code
+        return emit_refusal("followups-gate", r)
     print(f"base: {revision}")
     return 0
 
