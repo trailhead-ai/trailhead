@@ -115,6 +115,7 @@ terminal 1 $ camp env attach perseus/levr/main
 attached perseus/levr/main on ports 5173 8080 8443; its health was not checked
 
 terminal 2 $ camp env attach local/levr/main
+camp env: another attach is starting; waiting for it to finish
 camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
 ```
 
@@ -139,6 +140,13 @@ camp env: cannot take the attach lock at <state directory>/env-attach.lock (<why
 ```
 
 The path and the reason pass through the same control-character removal as every other message.
+When camp's state directory cannot be resolved at all (a relative `CAMP_STATE_DIR` or
+`XDG_STATE_HOME`), there is no path to name, so the line leaves it out and the reason says which
+variable is wrong:
+
+```
+camp env: cannot take the attach lock (<why>); nothing was started
+```
 
 ## State — status after a race names one attachment
 
