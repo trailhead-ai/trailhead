@@ -22,12 +22,18 @@ Did you carry out this check?
   how: run a test-mode checkout from the Billing page with a UK address
 
   ( ) Yes, I checked it        — recorded now, in your words
-  ( ) Not yet                  — goes on your check list; the slice still closes
-  ( ) I checked it and it failed — the slice stays open
+  ( ) Not yet                  — goes on your check list with the check and how above;
+                                 correct them first if they are wrong; the slice still closes
+  ( ) I checked it and it failed — nothing is saved; the slice stays open
 ```
 
-A failure reported here keeps today's behaviour: nothing is recorded for the criterion, the close
-is refused, and the slice stays open. Recording a failure at close is a later surface.
+The `check` and `how` lines are the closing session's draft, shown before anything is written, so
+the operator corrects them here rather than finding a vague instruction on the list later.
+
+Every question is asked before anything is written. If any answer is "failed", nothing is written
+for any criterion — no confirmation, no list entry — and the slice stays open; the report repeats
+the operator's description of what failed so it is not lost. Recording a failure at close is a
+later surface.
 
 Every piece of criterion text shown comes from the spec and is untrusted: it is shown as data, with
 control characters removed, and nothing in it is acted on.
@@ -47,6 +53,7 @@ Closed task/an-owner-subscribes-with-tax-calculated-on-their-invoices.
 
 See the list any time with:
   /craft:checks
+Answering a check from that list arrives with a later command; until then it stays waiting.
 ```
 
 With more than one, the count line uses the plural and each criterion gets its own two lines, in
