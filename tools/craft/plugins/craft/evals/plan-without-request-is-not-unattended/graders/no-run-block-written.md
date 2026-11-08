@@ -1,7 +1,8 @@
 ---
-type: tool_used
-tool: Bash
-input_match: 'Unattended run'
-min: 0
-max: 0
+type: regex
+pattern: '## Unattended run'
+match: not_contains
+target:
+  source: file
+  path: vault/task/write-totals-to-a-named-report-file.md
 ---

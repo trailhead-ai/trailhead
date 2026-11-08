@@ -24,7 +24,7 @@ Every clause holds.
 | Clause | Grader | Type and target |
 |---|---|---|
 | No line of the final message begins with `outcome:` | `no-outcome-line` | `regex`, `not_contains` |
-| No Bash call mentions `Unattended run` | `no-run-block-written` | `tool_used` Bash, `min: 0`, `max: 0` |
+| The slice parent's body carries no `## Unattended run` heading, whichever tool wrote it | `no-run-block-written` | `regex`, `not_contains`, `source: file` on `vault/task/write-totals-to-a-named-report-file.md` |
 | The `/craft:execute task/<name>` handoff is printed | `execute-handoff-printed` | `regex` over the final message |
 | The council ran and its section is on the parent | `council-review-reached` | `regex`, `source: file` |
 | No `## Council Review` entry is marked decided unattended | `no-critical-marked-decided-unattended` | `regex`, `not_contains`, `source: file` |

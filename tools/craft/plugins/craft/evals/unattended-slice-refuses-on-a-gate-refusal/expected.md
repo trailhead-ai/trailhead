@@ -23,7 +23,7 @@ Every clause holds.
 |---|---|---|
 | The last line is `outcome: refused <record> parked=0 — <why>` | `final-line-is-refused` | `regex` over the final message |
 | The spec body gained no line for `count-words` | `no-ledger-line-written` | `regex`, `not_contains`, `source: file` on the spec `.md` |
-| The composed spec body is written with the file-writing tool | `body-written-with-the-file-tool` | `tool_used` `Write`, `min: 1` |
+| The composed spec body is written with the file-writing tool: a Write whose content opens with the spec's own text (`# Word count tool`, optionally after a `revision:` line) | `body-written-with-the-file-tool` | `tool_used` `Write`, `min: 1` |
 | No spec text appears on a Bash command line (the body never passes through argv) | `no-spec-text-on-a-command-line` | `tool_used` `Bash`, `input_match` on the spec's title or a criterion's words, `min: 0`, `max: 0` |
 | The spec sidecar's `updated-at` still equals `created-at` (nothing wrote the spec) | `spec-sidecar-untouched` | `regex` with a back-reference, `source: file` on the spec `.json` |
 

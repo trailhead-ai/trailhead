@@ -30,7 +30,7 @@ Every clause holds.
 | No `outcome: slice-chosen` line is printed | `no-slice-chosen-line` | `regex`, `not_contains` |
 | The session ends with exactly one `## Unattended run` heading on the slice record (a rejected-then-rebuilt write is one block) | `one-run-block-opened` | `llm` over the trace |
 | A block diff written by slice (its `**Rituals:**` line names slice) carries the selection as a decision with `Question:`, `Choice:` and `Reasoning:` | `selection-logged-as-a-decision` | `tool_used` Write, `min: 1` |
-| Plan's approach choice is logged the same way | `approach-choice-logged-as-a-decision` | `tool_used` Write, `min: 1` |
+| Plan's approach choice is logged the same way: the word "approach" sits in the entry's own bold summary or `Question:` line, followed by that entry's `Choice:` and `Reasoning:` | `approach-choice-logged-as-a-decision` | `tool_used` Write, `min: 1` |
 | A `--diff` sets `**Outcome:** plan-ready` on the block | `outcome-set-plan-ready-on-the-block` | `tool_used` Write, `min: 1` |
 | `## Council Review` is written with `*Critical:* none` or each Critical marked decided unattended | `council-review-written-with-every-critical-dispositioned` | `tool_used` Write, `min: 1` |
 | At least one child task is created under the parent | `a-child-task-was-created` | `tool_used` Bash, `min: 1` |
