@@ -199,7 +199,6 @@ _GATE = _SCRIPT_DIR / "followups_gate.py"
 _GATE_CODE_RE = re.compile(r"^followups-gate: reason-code: ([a-z0-9-]+)$", re.MULTILINE)
 _BASE_RE = re.compile(r"base: ([0-9a-f]{64})")
 _SPEC_RECORD_RE = re.compile(r"spec/[A-Za-z0-9._-]+")
-_NEW_TASK_RE = re.compile(r"task/[A-Za-z0-9._-]+")
 _ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
 _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
@@ -401,7 +400,7 @@ class _TaskWriter:
                 continue
             slug = str(hit.get("id", "")).rstrip("/").rsplit("/", 1)[-1]
             found = f"task/{slug}"
-            if not _NEW_TASK_RE.fullmatch(found):
+            if not _TASK_RECORD_RE.fullmatch(found):
                 continue
             read = _read_record(runner, found)
             if read and f"found-work-key: {key}" in read[0]["body"].splitlines():
@@ -418,7 +417,7 @@ class _TaskWriter:
             argv += ["--label", "route=brainstorm"]
         done = _call(runner, argv, _task_body(d, _found_work_key(d), self.brainstorm))
         out = [ln for ln in (done.stdout or "").splitlines() if ln.strip()]
-        if done.returncode != 0 or len(out) != 1 or not _NEW_TASK_RE.fullmatch(out[0].strip()):
+        if done.returncode != 0 or len(out) != 1 or not _TASK_RECORD_RE.fullmatch(out[0].strip()):
             return _failure(record, "write-failed")
         return WriteResult(out[0].strip())
 
@@ -428,9 +427,10 @@ def _no_write(decision: Decision, runner, record: str) -> WriteResult:
 
 
 _deferral = _Deferral()
+_log_only = Handler(prepare=lambda d, r: d.parent, write=_no_write)
 HANDLERS: dict[str, Handler] = {
-    "folded": Handler(prepare=lambda d, r: d.parent, write=_no_write),
-    "dropped": Handler(prepare=lambda d, r: d.parent, write=_no_write),
+    "folded": _log_only,
+    "dropped": _log_only,
     "deferred": Handler(prepare=_deferral.prepare, write=_deferral.write),
     "separate": Handler(prepare=(_sep := _TaskWriter(False)).prepare, write=_sep.write),
     "brainstorm": Handler(prepare=(_brain := _TaskWriter(True)).prepare, write=_brain.write),
