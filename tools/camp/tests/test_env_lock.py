@@ -26,7 +26,6 @@ _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
-from camp.env import lock  # noqa: E402
 from camp.env.lock import LockBusy, LockUnavailable, attach_lock, attach_lock_path  # noqa: E402
 
 _HOLDER = r"""
