@@ -212,6 +212,10 @@ def _scrub_credential_shaped(text: str) -> str:
     return _apply_credential_patterns(text)
 
 
+scrub_credential_shaped = _scrub_credential_shaped
+"""Public name for `_scrub_credential_shaped`, for callers outside this module."""
+
+
 # ---------------------------------------------------------------------------
 # Control-character neutralization — a separate concern from the credential
 # scrub above, applied at the same single output-join site. Several refuse
