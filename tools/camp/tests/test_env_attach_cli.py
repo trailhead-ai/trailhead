@@ -1063,7 +1063,8 @@ def lock_file(rig: AttachRig) -> Path:
 
 
 def refusal(shown: str, *, note: bool) -> str:
-    return f"camp env: {shown} is attached; run camp env detach before attaching another{FORWARD_NOTE if note else ''}\n"
+    suffix = FORWARD_NOTE if note else ""
+    return f"camp env: {shown} is attached; run camp env detach before attaching another{suffix}\n"
 
 
 def race(rig: AttachRig, *targets: str) -> "list[tuple[str, int, str, str]]":
