@@ -128,7 +128,7 @@ def _check_names(*names: str | None) -> None:
 def _load_entries(path: str) -> list[dict]:
     try:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+    except (OSError, ValueError, RecursionError):
         raise Refusal("--entries could not be read as a JSON list", "invalid-entries", 2)
     if not isinstance(raw, list) or not raw:
         raise Refusal("--entries must be a non-empty JSON list", "invalid-entries", 2)

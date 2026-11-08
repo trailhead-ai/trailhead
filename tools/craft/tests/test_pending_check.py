@@ -596,8 +596,8 @@ def test_an_entry_already_answered_is_refused_and_nothing_is_written(status, ent
     "content",
     ["not json", json.dumps({"criterion": "AC2"}), json.dumps([]), json.dumps([{"criterion": "AC2"}]),
      json.dumps([entry("AC2"), entry("AC2")]), json.dumps([entry("nope")]),
-     json.dumps([dict(entry("AC2"), changed_behaviour="yes")])],
-    ids=["not-json", "not-a-list", "empty", "missing-keys", "duplicate", "bad-id", "non-bool"],
+     json.dumps([dict(entry("AC2"), changed_behaviour="yes")]), "[" * 200000],
+    ids=["not-json", "not-a-list", "empty", "missing-keys", "duplicate", "bad-id", "non-bool", "too-deeply-nested"],
 )
 def test_an_unusable_entries_file_is_invalid_entries_with_no_lore_call(content, tmp_path, capsys):
     path = tmp_path / "e.json"
