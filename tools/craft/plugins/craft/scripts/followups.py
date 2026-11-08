@@ -24,6 +24,20 @@ Public API:
     excise_section(body) -> str            the body without the section
     has_section(body) -> bool              whether the section heading is present
     section_is_last(body) -> bool          whether only blank lines follow the section
+    compose_entry(id, title, what, where, found) -> str
+                                           one `status: open` entry in the grammar
+                                           above, the only place it is written;
+                                           raises FollowupsError when parsing
+                                           the result would not read back the
+                                           same fields (a line break in a field,
+                                           an empty field, a bad id or path)
+    append_entry(body, entry_text) -> str  the body with the entry added: the
+                                           section is created at the end when
+                                           absent, otherwise the entry lands
+                                           after the section's last non-blank
+                                           line (a section that is not last
+                                           stays where it is); everything
+                                           outside the section is unchanged
     FollowupsError                         a grammar violation; carries a
                                            stable `reason_code`
     DuplicateHeadingError                  a second unmasked heading (re-exported
@@ -34,6 +48,7 @@ from __future__ import annotations
 
 import re
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -270,3 +285,47 @@ def parse_followups(body: str) -> list[Entry]:
     if current is not None:
         entries.append(_build_entry(current[0], current[1], fields))
     return entries
+
+
+def compose_entry(
+    entry_id: str, title: str, what: str, where: Sequence[str], found: str
+) -> str:
+    """One `status: open` entry in the section grammar, no trailing newline.
+
+    The text is parsed back before it is returned; any input the parser would
+    read differently (or reject) raises FollowupsError instead of producing
+    an entry that is not the one asked for."""
+    text = "\n".join(
+        [
+            f"- **{entry_id}.** {title}",
+            "  - status: open",
+            f"  - what: {what}",
+            "  - where: " + ", ".join(f"`{w}`" for w in where),
+            f"  - found: {found}",
+        ]
+    )
+    expected = (entry_id, title, what, tuple(where), found)
+    parsed = parse_followups(f"{HEADING}\n\n{text}\n")
+    if (
+        len(parsed) != 1
+        or (parsed[0].id, parsed[0].title, parsed[0].what, parsed[0].where, parsed[0].found)
+        != expected
+    ):
+        raise FollowupsError(
+            f"entry {entry_id}: the fields do not read back as written — keep each "
+            "field to one line with no leading or trailing space",
+            MALFORMED_ENTRY,
+        )
+    return text
+
+
+def append_entry(body: str, entry_text: str) -> str:
+    """`body` with `entry_text` added to the `## Follow-ups` section."""
+    lines, masked = _split(body)
+    located = _section_range(lines, masked)
+    if located is None:
+        return body.rstrip("\n") + "\n\n" + HEADING + "\n\n" + entry_text + "\n"
+    end = located[1]
+    while end > located[0] + 1 and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join([*lines[:end], entry_text, *lines[end:]])

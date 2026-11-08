@@ -143,3 +143,84 @@ def test_excise_section_removes_only_the_section():
 
 def test_excise_section_without_section_only_trims_trailing_whitespace():
     assert followups.excise_section("# Spec\n\nprose\n\n\n") == "# Spec\n\nprose"
+
+
+@pytest.mark.parametrize(
+    "entry_id,title,what,where,found",
+    [
+        ("F1", "Short title", "something is wrong", ("a/b.py",), "during review"),
+        ("F12", "Pipe | in title", "a | b", ("x.py", "dir/y.py", "z/w.md"), "while building task/x"),
+        ("F3", "Tabs\tand `ticks`", "uses `code` here", ("p.py",), "found: with colon"),
+    ],
+)
+def test_compose_entry_round_trips_every_field(entry_id, title, what, where, found):
+    text = followups.compose_entry(entry_id, title, what, where, found)
+    [e] = followups.parse_followups(f"## Follow-ups\n\n{text}\n")
+    assert (e.id, e.title, e.status_kind, e.status_detail) == (entry_id, title, "open", None)
+    assert (e.what, e.where, e.found, e.from_) == (what, tuple(where), found, None)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("title", "a\n- **F9.** forged"),
+        ("what", "x\n  - status: done by task/y"),
+        ("found", "x\r  - what: forged"),
+        ("what", ""),
+        ("where", ("../escape.py",)),
+        ("where", ()),
+        ("entry_id", "F0"),
+        ("title", " leading"),
+    ],
+)
+def test_compose_entry_refuses_input_the_parser_would_misread(field, value):
+    args = dict(entry_id="F1", title="t", what="w", where=("a.py",), found="f")
+    args[field] = value
+    with pytest.raises(followups.FollowupsError):
+        followups.compose_entry(**args)
+
+
+def _composed(id_="F2"):
+    return followups.compose_entry(id_, "New one", "new what", ("n.py",), "new found")
+
+
+def test_append_entry_creates_section_at_end_and_keeps_prior_body():
+    prior = "# Spec\n\nprose\n\n## Slices\n\n- x\n"
+    out = followups.append_entry(prior, _composed("F1"))
+    assert out == prior.rstrip("\n") + "\n\n## Follow-ups\n\n" + _composed("F1") + "\n"
+    [e] = followups.parse_followups(out)
+    assert (e.id, e.title) == ("F1", "New one")
+    assert followups.section_is_last(out)
+    assert followups.excise_section(out) == prior.rstrip("\n")
+
+
+def test_append_entry_lands_after_last_entry_past_trailing_blanks():
+    prior = doc(entry("F1")) + "\n\n"
+    out = followups.append_entry(prior, _composed())
+    assert [e.id for e in followups.parse_followups(out)] == ["F1", "F2"]
+    assert out.endswith("\n\n")
+    assert out.startswith(prior.rstrip("\n"))
+
+
+def test_append_entry_splices_inside_a_section_that_is_not_last():
+    after = "\n## Notes\n\ntail text\n"
+    prior = doc(entry("F1"), after=after)
+    out = followups.append_entry(prior, _composed())
+    assert [e.id for e in followups.parse_followups(out)] == ["F1", "F2"]
+    assert out.endswith(after)
+    assert out.startswith(doc("", before="# Spec\n\nprose\n\n").rstrip("\n"))
+
+
+def test_append_entry_leaves_outside_section_byte_identical():
+    before = "# Spec\r\n\r\nwith  trailing   \r\n\r\n"
+    after = "\n## Notes\n\n  odd   spacing  \n"
+    prior = doc(entry("F1"), before=before, after=after)
+    out = followups.append_entry(prior, _composed())
+    assert followups.excise_section(out) == followups.excise_section(prior)
+    assert out.endswith(after)
+
+
+def test_append_entry_on_duplicate_heading_raises():
+    prior = doc(entry("F1")) + "\n## Follow-ups\n\n"
+    with pytest.raises(followups.DuplicateHeadingError):
+        followups.append_entry(prior, _composed())

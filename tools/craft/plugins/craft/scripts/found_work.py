@@ -62,7 +62,10 @@ and is followed by a result line):
                next `F<n>` (one above the highest id present, dropped entries
                included; `F1` when absent) is the decision line's
                `record: spec/<id>#F<n>`. The entry (`status: open`, `what`, `where`,
-               `found`, no `from`) is appended to the body read then, creating
+               `found`, no `from`) is composed by `followups.compose_entry` (a field it
+               cannot write as one faithful entry fails with the grammar's own
+               reason code, such as `malformed-entry`) and appended to
+               the body read then by `followups.append_entry`, creating
                `## Follow-ups` at the end when absent, certified with
                `followups_gate.py --prior` (the gate's `base:` is the write's
                `--base`), written with `lore record update spec/<id> --base`, then
@@ -282,30 +285,6 @@ def _read_record(runner, spec: str) -> tuple[dict, str] | None:
     return doc, done.stdout
 
 
-def _entry_text(d: Decision, entry_id: str) -> str:
-    where = ", ".join(f"`{w}`" for w in d.where)
-    return "\n".join(
-        [
-            f"- **{entry_id}.** {d.title}",
-            "  - status: open",
-            f"  - what: {d.what or d.title}",
-            f"  - where: {where}",
-            f"  - found: {d.found or 'while building ' + d.parent}",
-        ]
-    )
-
-
-def _with_entry(body: str, entry: str) -> str:
-    lines, masked = followups._split(body)
-    located = followups._section_range(lines, masked)
-    if located is None:
-        return body.rstrip("\n") + "\n\n" + followups.HEADING + "\n\n" + entry + "\n"
-    end = located[1]
-    while end > located[0] + 1 and not lines[end - 1].strip():
-        end -= 1
-    return "\n".join([*lines[:end], entry, *lines[end:]])
-
-
 class _Deferral:
     """`deferred`: the spec is read in `prepare` (before the decision capture) and
     the body, revision and `F<n>` it yielded are what `write` composes from."""
@@ -339,7 +318,17 @@ class _Deferral:
             return _failure(record, "spec-unreadable")
         if self.entry_id is None:
             return _failure(record, "malformed-prior-section")
-        proposed = _with_entry(self.prior["body"], _entry_text(d, self.entry_id))
+        try:
+            entry_text = followups.compose_entry(
+                self.entry_id,
+                d.title,
+                d.what or d.title,
+                d.where,
+                d.found or "while building " + d.parent,
+            )
+        except followups.FollowupsError as exc:
+            return _failure(record, exc.reason_code)
+        proposed = followups.append_entry(self.prior["body"], entry_text)
         base, code = _run_gate(self.prior_json, proposed)
         if code:
             return _failure(record, code)
