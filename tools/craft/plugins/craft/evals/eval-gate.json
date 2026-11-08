@@ -156,6 +156,12 @@
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "unattended-plan-parks-a-spec-change": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }
