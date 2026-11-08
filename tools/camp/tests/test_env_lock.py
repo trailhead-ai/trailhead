@@ -232,11 +232,11 @@ def test_a_lock_file_owned_by_another_user_is_refused_and_the_same_file_owned_by
 def test_a_refused_lock_file_leaves_no_descriptor_open(tmp_path: Path):
     fifo = tmp_path / "env-attach.lock"
     os.mkfifo(fifo, 0o600)
-    before = set(os.listdir("/proc/self/fd"))
+    before = set(os.listdir("/dev/fd"))
     with contextlib.suppress(LockUnavailable):
         with attach_lock(fifo, timeout=0):
             pass
-    assert set(os.listdir("/proc/self/fd")) == before
+    assert set(os.listdir("/dev/fd")) == before
 
 
 def test_the_lock_file_is_never_written_or_removed(lock_file: Path):
