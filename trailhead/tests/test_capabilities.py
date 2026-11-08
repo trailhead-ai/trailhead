@@ -165,7 +165,8 @@ class TestCraftInventory:
         # deletes what it folded away, so the corpus stops outgrowing the
         # bounded window that dispatch-time retrieval reads from.
         # tidy-followups presents a finished spec's recorded follow-ups as a
-        # reasoned shortlist, read-only.
+        # reasoned shortlist, read-only. checks prints the check list of
+        # waiting entries across every vault, read-only.
         m = load_manifest(_CRAFT_MANIFEST)
         assert set(m.skills) == {
             "polish",
@@ -182,6 +183,7 @@ class TestCraftInventory:
             "drive",
             "consolidate",
             "tidy-followups",
+            "checks",
         }
 
     def test_shared_not_selectable(self):

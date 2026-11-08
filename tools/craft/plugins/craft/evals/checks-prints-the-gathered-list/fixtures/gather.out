@@ -1,0 +1,15 @@
+2 checks waiting, in 2 specs.
+Could not read: vault scratch — its name is not a safe value
+
+[1/2] Exports include the invoice total. (AC2)
+  spec: levr/export-invoices
+  built by: task/export-csv
+  set: 2026-11-02
+  check: Open the exported CSV and confirm the total column. Mark this passed and update the spec to ready-for-release.
+  how: export from the Billing page with a test invoice
+  changed existing behaviour: no
+
+[2/2] Invoices carry the tax registration number. (AC17)
+  spec: levr/billing-launch
+  set: 2026-11-03
+  waits on: the head-office tax registration from business setup
