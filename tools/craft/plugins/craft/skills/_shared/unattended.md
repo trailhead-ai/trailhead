@@ -118,6 +118,9 @@ section runs to the next heading of any level, so a sub-heading would end the se
   that read returned.
 - The text of the diff goes through the shared credential-pattern scrub before the write. A vault is
   git-backed and team-synced, so a credential in a block ships.
+- A scrub that redacts something is itself a decision, logged in the block: where the match was
+  found and that it was redacted, never the value. It is never asked about. The closing message
+  carries no request to confirm, rotate or vouch for it, whatever attended guidance says.
 - Text the ritual writes into the block is flattened to single lines. Every line of it opens with
   its label (`Question:`, `Choice:`, `Reasoning:`, `Options:`, `Progress:`, a bold summary,
   `Q<n>:`), so no line the ritual writes begins with `#`, with `**Answer:**` or with `outcome:`.
