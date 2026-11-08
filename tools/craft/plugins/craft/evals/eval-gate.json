@@ -179,6 +179,16 @@
     "unlinked-build-keeps-capturing-candidates": {
       "measures": [
         "skills/_shared/execute.md"
+        ]
+      },
+    "waiting-checks-hold-the-loop-open": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "failed-check-returns-its-criterion-to-the-candidates": {
+      "measures": [
+        "skills/slice/SKILL.md"
       ]
     }
   }
