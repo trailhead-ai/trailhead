@@ -220,19 +220,7 @@ class _Parent:
     def __init__(self, body: str):
         self.body = body
         try:
-            self.lines, self.masked = markdown_section.split_body(body)
-            if obs._ends_inside_masked_region(self.lines):
-                raise ValueError("unterminated masked region")
-            covers_value = obs.find_covers_field(self.lines, self.masked)
-            partial_value = obs.find_partially_covers_field(self.lines, self.masked)
-            self.covers = obs.parse_covers_field(covers_value) if covers_value is not None else []
-            self.partial = (
-                obs.parse_covers_field(
-                    partial_value, "**Partially covers:**", obs.MalformedPartiallyCoversField
-                )
-                if partial_value is not None
-                else []
-            )
+            self.lines, self.masked, self.covers, self.partial = obs.read_covers_fields(body)
             self.observations = obs.parse_observations(self.lines, self.masked)
             self.attestations = obs.parse_attestations(self.lines, self.masked)
             self.obs_lines = self._observation_lines()

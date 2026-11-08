@@ -400,10 +400,10 @@ def test_evidence_shaped_like_command_substitution_and_traversal_is_inert():
             marker.unlink()
 
 
-# ---- item 18: **Partially covers:** is never read ------------------------------
+# ---- item 18: **Partially covers:** alone, with no observation, does not refuse --
 
 
-def test_partially_covers_field_alone_is_never_read_and_does_not_refuse():
+def test_partially_covers_field_alone_with_no_observation_does_not_refuse():
     result = _run(PARTIALLY_COVERS_ONLY)
     assert result.returncode == 0, result.stderr
     assert "covers: none" in result.stdout

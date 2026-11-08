@@ -438,6 +438,36 @@ def parse_attestations(lines: list[str], masked: list[bool]) -> dict[str, str]:
     return {identifier: remainder.strip() for identifier, (remainder, _i) in raw.items()}
 
 
+def read_covers_fields(
+    body: str,
+) -> tuple[list[str], list[bool], list[str], list[str]]:
+    """Return (lines, masked, covers, partial) for a parent body: its lines,
+    the masker's per-line flags, and the parsed `**Covers:**` and
+    `**Partially covers:**` identifier lists, each empty when its field is
+    absent (a present field never parses empty — parse_covers_field refuses
+    that as malformed). Raises UnterminatedMaskedRegionError,
+    DuplicateCoversFieldError, DuplicatePartiallyCoversFieldError,
+    MalformedCoversField, MalformedPartiallyCoversField, or
+    ObservationViolation (a repeated identifier) — all ValueError."""
+    lines = _COMMONMARK_LINE_RE.split(body)
+    masked = _mask_fenced_lines(lines)
+
+    if _ends_inside_masked_region(lines):
+        raise UnterminatedMaskedRegionError()
+
+    covers_value = find_covers_field(lines, masked)
+    partial_value = find_partially_covers_field(lines, masked)
+    covers = parse_covers_field(covers_value) if covers_value is not None else []
+    partial = (
+        parse_covers_field(
+            partial_value, "**Partially covers:**", MalformedPartiallyCoversField
+        )
+        if partial_value is not None
+        else []
+    )
+    return lines, masked, covers, partial
+
+
 def certify(
     body: str,
 ) -> tuple[list[str], dict[str, tuple[str, str]], list[str]]:
@@ -449,25 +479,10 @@ def certify(
     present-but-empty field, which parse_covers_field already refuses as
     malformed. A parent with neither field is the legacy/enabler shape and
     certifies as ([], {}, [])."""
-    lines = _COMMONMARK_LINE_RE.split(body)
-    masked = _mask_fenced_lines(lines)
-
-    if _ends_inside_masked_region(lines):
-        raise UnterminatedMaskedRegionError()
-
-    covers_value = find_covers_field(lines, masked)
-    partial_value = find_partially_covers_field(lines, masked)
-    if covers_value is None and partial_value is None:
+    lines, masked, covers, partial = read_covers_fields(body)
+    if not covers and not partial:
         return [], {}, []
 
-    covers = parse_covers_field(covers_value) if covers_value is not None else []
-    partial = (
-        parse_covers_field(
-            partial_value, "**Partially covers:**", MalformedPartiallyCoversField
-        )
-        if partial_value is not None
-        else []
-    )
     covers_set = set(covers)
     declared = covers_set | set(partial)
 
