@@ -93,13 +93,21 @@ Stdout on success (exit 0), one token per line, in this order:
     covered: AC1, AC2
     candidates: AC3, ..., AC9
     partial: AC7
+    waiting: AC2
     complete-eligible: yes
 
-`covered:`, `candidates:`, and `partial:` print `none` when empty. `candidates:`
-is computed against the fully covered set alone — a criterion covered only
-partially remains a candidate on every subsequent pass, and it is never
-listed on `partial:` once a later entry fully covers it. `complete-eligible:`
-is `yes` only when every ledger entry carries at least one coverage token
+`covered:`, `candidates:`, `partial:` and `waiting:` print `none` when empty.
+`candidates:` is computed against the fully covered set and the waiting set —
+a criterion covered only partially remains a candidate on every subsequent
+pass, and it is never listed on `partial:` once a later entry fully covers it.
+A criterion leaves `candidates:` while any of its `## Waiting` entries has the
+status `waiting` as its latest history line, and `waiting:` lists those
+declared identifiers in declared order; entries whose latest status is
+`passed`, `failed` or `released` exclude nothing. The `## Waiting` section is
+read only through `waiting.parse_waiting`. Any waiting entry, including one
+naming an identifier the spec does not declare, makes `complete-eligible:`
+`no` whatever the ledger says. `complete-eligible:` is `yes` only when every
+ledger entry carries at least one coverage token
 (`covers`, `partially covers`, or both) and every non-blank line in the
 section either belongs to a canonical entry (its bullet or one of its
 continuation lines) or is blank; a single legacy entry (neither field), or a
@@ -129,8 +137,8 @@ body does not declare contradicts it. A `covers` or
 counted as covered or partial, is not an undeclared identifier, and does not
 change `complete-eligible` (the entry still carries a coverage token). With the
 flag, three more lines follow `complete-eligible:`, in this order: `void:`,
-`closed:` and `closed-uncounted:`. Without the flag the five lines above are
-the whole output, unchanged.
+`closed:` and `closed-uncounted:`. Without the flag the six lines above are
+the whole output.
 
 `reopened` maps an identifier to the snapshot of ledger task ids that covered
 it when an amend reopened it. A `covers` or `partially covers` token naming a
@@ -214,10 +222,11 @@ from covers_gate import (  # noqa: E402
     parse_covers,
     parse_criteria,
 )
+from waiting import WaitingParseError, parse_waiting  # noqa: E402
 
-# Stdout line keys: the first five always, the last three only with
+# Stdout line keys: the first six always, the last three only with
 # `--criteria-state`. A consumer derives the output grammar from these.
-STDOUT_LINE_KEYS = ("criteria", "covered", "candidates", "partial", "complete-eligible")
+STDOUT_LINE_KEYS = ("criteria", "covered", "candidates", "partial", "waiting", "complete-eligible")
 CRITERIA_STATE_LINE_KEYS = ("void", "closed", "closed-uncounted")
 VOID_REMOVED_ANNOTATION = "removed by amend"
 VOID_REOPENED_ANNOTATION = "reopened by amend"
@@ -236,6 +245,7 @@ _MALFORMED_TOKEN_REASON_CODE = "malformed-coverage-token"
 _DUPLICATE_SLICES_HEADING_REASON_CODE = "duplicate-slices-heading"
 _MALFORMED_CRITERIA_STATE_REASON_CODE = "malformed-criteria-state"
 _CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
+_MALFORMED_WAITING_REASON_CODE = "malformed-waiting-section"
 
 _CRITERIA_STATE_MAX_BYTES = 1024 * 1024
 _CRITERIA_STATE_REQUIRED_KEYS = frozenset({"record", "declared", "removed"})
@@ -871,13 +881,25 @@ def main(argv: list[str]) -> int:
         _err(f"reason-code: {_UNDECLARED_REASON_CODE}")
         return 1
 
-    candidates = [c for c in criteria if c not in covered]
+    try:
+        entries = parse_waiting(spec_body)
+    except WaitingParseError as e:
+        _err(f"reason: the spec's `## Waiting` section is not readable ({e.code})")
+        _err(f"reason-code: {_MALFORMED_WAITING_REASON_CODE}")
+        return 2
+    waiting_ids = {e.criterion_id for e in entries if e.status == "waiting"}
+    waiting = [c for c in criteria if c in waiting_ids]
+    if waiting_ids:
+        eligible = False
+
+    candidates = [c for c in criteria if c not in covered and c not in waiting_ids]
 
     print(f"{STDOUT_LINE_KEYS[0]}: {', '.join(criteria)}")
     print(f"{STDOUT_LINE_KEYS[1]}: {', '.join(covered) if covered else 'none'}")
     print(f"{STDOUT_LINE_KEYS[2]}: {', '.join(candidates) if candidates else 'none'}")
     print(f"{STDOUT_LINE_KEYS[3]}: {', '.join(partial) if partial else 'none'}")
-    print(f"{STDOUT_LINE_KEYS[4]}: {'yes' if eligible else 'no'}")
+    print(f"{STDOUT_LINE_KEYS[4]}: {', '.join(waiting) if waiting else 'none'}")
+    print(f"{STDOUT_LINE_KEYS[5]}: {'yes' if eligible else 'no'}")
     if args.criteria_state is not None:
         void_key, closed_key, uncounted_key = CRITERIA_STATE_LINE_KEYS
         uncounted = sorted(set(closed) - set(closed_counted), key=lambda i: int(i[2:]))

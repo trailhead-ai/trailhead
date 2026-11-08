@@ -363,6 +363,12 @@ the criterion again. `closed:` lists the criteria counted as done by an operator
 `closed-uncounted:` lists a close with no slice coverage behind it; amend refuses that, so it means
 the history was edited outside lore — investigate it, and never edit the ledger.
 
+Surface the gate's `waiting:` token in that same printed basis too, whether it lists identifiers or
+reads `none`. It lists each criterion whose `## Waiting` entry is waiting on a manual check or set
+aside; those criteria are already left off `candidates:`, so a criterion absent from it is not
+necessarily done. While anything waits, `complete-eligible:` reads `no`, so step 6 never terminates
+the loop on it.
+
 A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
 refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what the
 exit actually names. On exit 1 (`reason-code: undeclared-covered-identifier`), the gate's own stderr
@@ -376,6 +382,9 @@ re-running. On exit 2 with `reason-code: malformed-criteria-state` or
 `reason-code: criteria-state-contradicts-body`, the state file is unreadable or disagrees with the
 spec body it was read beside: re-read both from the same pass (the `lore record criteria` call and
 the `lore record show`) and re-run, and never hand-edit the state file. On exit 2 with
+`reason-code: malformed-waiting-section`, the spec's `## Waiting` section is unreadable and the
+gate's own stderr names the parser's code for why — report it, and that the fix is to correct the
+section through its gated writer, never by hand, before re-running. On exit 2 with
 `reason-code: duplicate-slices-heading` or `reason-code: duplicate-acceptance-criteria-heading`, the
 spec carries that heading twice — fix the spec record before re-running. Every other exit-2 reason
 (empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all —

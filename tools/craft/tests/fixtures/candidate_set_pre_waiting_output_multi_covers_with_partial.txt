@@ -1,0 +1,5 @@
+criteria: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9
+covered: AC1, AC2
+candidates: AC3, AC4, AC5, AC6, AC7, AC8, AC9
+partial: AC3
+complete-eligible: yes
