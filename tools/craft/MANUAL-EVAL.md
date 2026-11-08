@@ -4420,3 +4420,25 @@ Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opu
 **Live lore state.** The real lore config and state were hashed before and after the batches; every changed path belongs to other sessions' sync commits and none carries a fixture title.
 
 **Not measured.** One spec, one phrasing, one model tier, three runs per case. The call log records arguments, not piped bodies. Drive's halt on the waiting outcome is not run. The runner block grants no `covers_gate.py`, so the chosen slice's task is not created in the failed case.
+
+## Case: close-defers-an-unconfirmed-check, stale-write-leaves-the-slice-open and one-failed-check-saves-nothing
+
+Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, run on the operator's own login, measuring `skills/_shared/execute.md` Phase 6's manual-check discharge and completion report. Each `expected.md` was committed alone before any run, with every pass line checked against today's branch, the edited branch and the ways to get the edit wrong. They share one seeded spec and parent; the runner block grants `pending_check.py`, `observation_gate.py` and the Write tool.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| "Yes" for one criterion and "Not yet" for another: attestation for the confirmed one only, the writer once naming only the unconfirmed one, then verify, then the close write, the report names the waiting check and `/craft:checks` | held: baseline 0 of 3 (0.36 each run; the writer, entries, order, close, spec entry and both reply clauses failed every run); 3 of 3 after the edit | `close-defers-an-unconfirmed-check` |
+| The writer exits 2 `stale-spec`: no close write, parent `in-progress`, no retry, the report says the spec changed and gives the re-run command | held: baseline 0 of 3 (0.62 each run: the writer never ran, the reply lacked `stale-spec`, and the attestation was written); 3 of 3 after the edit | `stale-write-leaves-the-slice-open` |
+| "Not yet" plus "failed": nothing written, no writer, no close, the report repeats the failure | held: 3 of 3 on both the unedited prose (a guard, expected green) and the edited prose | `one-failed-check-saves-nothing` |
+
+**Baseline (unedited prose).** close-defers 0 of 3, cost 1.47 USD; stale-write 0 of 3, cost 1.51 USD; one-failed 3 of 3, cost 1.04 USD (guard, not a detector, as its `expected.md` states). One deviation from a pre-registered table: the stale case's table says today's prose passes `no-attestation-written`, but today's prose attests the confirmed AC2 and then stops at the refused AC3, so that clause also failed in all three baseline runs. It fails for a reason the edited prose removes, so the verdict is unchanged.
+
+**After the edit.** close-defers 3 of 3, 2.22 USD; stale-write 3 of 3, 1.41 USD; one-failed 3 of 3, 1.13 USD.
+
+**Grader defect, corrected after the first post-edit batch.** one-failed first scored 0 of 3 after the edit (1.13 USD), every run failing only `writer-did-not-run`. That grader matched any `pending_check.py` line, and the edited prose runs the read-only `describe` mode before asking. The pattern was narrowed to `pending_check.py (--spec|verify)` and the case re-run, 3 of 3. The change is a post-hoc grader edit, disclosed in `expected.md`; the run before it is not counted as a pass. Total spend about 10.9 USD across all batches.
+
+**Not measured.** The question is never put to a person, so the case does not show that the draft `check` and `how` appear in the "Not yet" choice, that criterion words come from `describe`, or that the `mktemp` entries file is removed (no `rm` grant). One spec, one phrasing, one model tier, three runs per case; only `stale-spec` is exercised among the failure codes.
+
+**Why the runner block grants Write.** The prose has the session write the entries file (a JSON list) at a `mktemp` path, and the runner's single-command Bash rule gives it no redirection or `tee` to do so. Without Write the "Not yet" arm cannot reach the writer. The grant applies to every craft case in the run, which is the price of the arm; the other craft cases' prompts name their own `allowed_tools` and none of the earlier ones was changed.

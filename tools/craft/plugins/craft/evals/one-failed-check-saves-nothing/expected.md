@@ -19,7 +19,7 @@ Every clause holds.
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The writer did not run | `writer-did-not-run` | `regex` on `lore-calls.log`, `pending_check.py`, not_contains |
+| The writer did not run | `writer-did-not-run` | `regex` on `lore-calls.log`, `pending_check.py (--spec|verify)`, not_contains |
 | No close write | `no-close-write` | `regex` on `lore-calls.log`, `--status done`, not_contains |
 | The parent is still `in-progress` | `parent-still-in-progress` | `regex` on `vault/task/pickups-can-be-booked-and-confirmed.json`, contains |
 | No attestation written | `no-attestation-written` | `regex` on the parent's body, `## Operator attestations`, not_contains |
@@ -43,3 +43,7 @@ Every clause holds.
 - One spec, one phrasing, one model tier, three runs; the replies are stated, not asked.
 - The failure-description clause is a regex on one token of the operator's words; a paraphrase fails it.
 - A mixed arm where the failed criterion comes first is not run: the order that would expose a write-as-you-go session is the one chosen.
+
+## Grader correction after the first post-edit batch
+
+The first post-edit batch scored 0 of 3, every run failing only `writer-did-not-run`. That grader matched any `pending_check.py` line in the call log, and the edited prose runs the read-only `describe` mode before asking, which the wrapper logs like any other call, so the grader failed a correct run. The pattern was narrowed after that batch to the writer's and `verify`'s call shapes, `pending_check.py (--spec|verify)`; `describe --spec` does not match it because `describe` precedes `--spec`. This is a post-hoc grader change, disclosed here and in `MANUAL-EVAL.md`; the clause still fails the two branches it was written for (writes the entry as it arrives, writes it then stops), because both run the writer.
