@@ -1,5 +1,6 @@
 """``record update --base``: the stale-write handshake, and the rule that a frozen
-spec's ``## Follow-ups`` section can only be changed against a revision just read."""
+spec's ``## Follow-ups`` and ``## Waiting`` ledgers can only be changed against a
+revision just read."""
 
 from __future__ import annotations
 
@@ -14,6 +15,11 @@ SPEC = "# Spec\n\nintro text\n\n## Acceptance Criteria\n\n- AC1 first\n"
 SLICES_1 = "\n## Slices\n\n- [slice one](task/one) covers AC1\n"
 FOLLOWUPS = "\n## Follow-ups\n\n- F1 first idea\n- F4 fourth idea\n"
 FOLLOWUPS_CHANGED = "\n## Follow-ups\n\n- F1 first idea\n"
+WAITING = (
+    "\n## Waiting\n\n- **AC1.** set aside\n  - waits on: a vendor\n"
+    "  - 2026-11-03 waiting: parked\n"
+)
+WAITING_ENTRY_2 = "\n- **AC2.** set aside\n  - waits on: a date\n  - 2026-11-04 waiting: later\n"
 
 
 def _update(vault, state, rid, body, *flags):
@@ -231,3 +237,136 @@ def test_write_landing_between_the_relocation_lock_spans_is_refused_against_a_ba
     assert "changed after you read it" in r.stderr
     assert body_path.read_text(encoding="utf-8") == "someone else's body\n"
     assert not list(vault_b.rglob("*.md"))
+
+
+def test_ready_spec_waiting_section_added_with_current_base_lands_and_reads_back(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+
+    r = _update(vault, state, rid, SPEC + WAITING, "--base", _revision(vault, state, rid))
+
+    assert r.returncode == 0, r.stderr
+    assert _body(vault, rid) == SPEC + WAITING
+
+
+def test_ready_spec_waiting_change_without_base_is_refused_naming_the_section_and_its_gate(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, SPEC + WAITING)
+
+    assert r.returncode != 0
+    assert "## Waiting" in r.stderr
+    assert "waiting_gate.py --prior" in r.stderr
+    assert "--base" in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_ready_spec_waiting_change_with_a_stale_base_is_refused_and_writes_nothing(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC + WAITING)
+    stale = _revision(vault, state, rid)
+    assert _update(vault, state, rid, SPEC + WAITING + WAITING_ENTRY_2,
+                   "--base", stale).returncode == 0
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, SPEC, "--base", stale)
+
+    assert r.returncode != 0
+    assert "retry the update with the new revision" in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_slices_write_from_a_copy_predating_a_waiting_entry_is_refused_with_a_reread_remedy(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+    stale_copy = _body(vault, rid)
+    landed = _update(vault, state, rid, SPEC + WAITING, "--base", _revision(vault, state, rid))
+    assert landed.returncode == 0, landed.stderr
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, stale_copy + SLICES_1)
+
+    assert r.returncode != 0
+    assert "--base" in r.stderr
+    assert "## Waiting" in r.stderr
+    assert "reapply your change" in r.stderr
+    assert "waiting_gate.py" not in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_fresh_slices_only_write_leaving_waiting_unchanged_needs_no_base(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC + WAITING)
+
+    r = _update(vault, state, rid, SPEC + WAITING + SLICES_1)
+
+    assert r.returncode == 0, r.stderr
+    assert _body(vault, rid) == SPEC + WAITING + SLICES_1
+
+
+def test_draft_spec_waiting_change_without_base_is_accepted(tmp_path):
+    vault, state, rid = _spec(tmp_path, "draft", SPEC + WAITING)
+
+    r = _update(vault, state, rid, SPEC)
+
+    assert r.returncode == 0, r.stderr
+    assert _body(vault, rid) == SPEC
+
+
+def test_ready_spec_with_two_waiting_headings_is_not_exempted(tmp_path):
+    twice = SPEC + WAITING + WAITING
+    vault, state, rid = _spec(tmp_path, "draft", twice)
+    assert _update(vault, state, rid, twice, "--status", "ready").returncode == 0
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, twice + WAITING_ENTRY_2,
+                "--base", _revision(vault, state, rid))
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_missing_base_refusal_for_follow_ups_does_not_point_at_the_waiting_gate(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+
+    r = _update(vault, state, rid, SPEC + FOLLOWUPS)
+
+    assert r.returncode != 0
+    assert "followups_gate.py --prior" in r.stderr
+    assert "waiting_gate.py" not in r.stderr
+
+
+def test_missing_base_refusal_names_both_ledgers_when_both_changed(tmp_path):
+    vault, state, rid = _spec(tmp_path, "ready", SPEC)
+
+    r = _update(vault, state, rid, SPEC + FOLLOWUPS + WAITING)
+
+    assert r.returncode != 0
+    assert "followups_gate.py --prior" in r.stderr
+    assert "waiting_gate.py --prior" in r.stderr
+
+
+def test_with_waiting_unregistered_a_waiting_change_is_refused_as_authored_and_still_parses(
+    tmp_path, monkeypatch
+):
+    from pathlib import Path
+
+    from lore.record import sections
+
+    craft_scripts = Path(__file__).resolve().parents[2] / "craft" / "plugins" / "craft" / "scripts"
+    monkeypatch.syspath_prepend(str(craft_scripts))
+    import waiting
+
+    vault, state, rid = _spec(tmp_path, "ready", SPEC + WAITING)
+    monkeypatch.setitem(
+        sections.PIPELINE_SECTIONS,
+        "spec",
+        tuple(s for s in sections.PIPELINE_SECTIONS["spec"] if s.heading != "## Waiting"),
+    )
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, SPEC + WAITING + WAITING_ENTRY_2,
+                "--base", _revision(vault, state, rid))
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _snapshot(vault) == before
+    assert [e.criterion_id for e in waiting.parse_waiting(_body(vault, rid))] == ["AC1"]

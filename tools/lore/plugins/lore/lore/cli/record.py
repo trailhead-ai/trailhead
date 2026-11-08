@@ -1903,8 +1903,8 @@ def _cmd_record_update(args) -> int:
     half (so the relocation path re-checks it) the stored body's revision is
     compared with it by :func:`_check_base_revision`, and a mismatch writes
     nothing. It is required when the update creates, edits or removes the
-    ``## Follow-ups`` section of a spec at a frozen status
-    (:func:`_require_base_for_follow_ups`); any other update may omit it.
+    ``## Follow-ups`` or ``## Waiting`` section of a spec at a frozen status
+    (:func:`_require_base_for_ledger_change`); any other update may omit it.
     """
     from contextlib import ExitStack
 
@@ -2038,7 +2038,7 @@ def _cmd_record_update(args) -> int:
                     supplied_depends_on=list(getattr(args, "depends_on", None) or []),
                     parent_supplied=getattr(args, "parent", None) is not None,
                 )
-                _require_base_for_follow_ups(location, base, existing_body, new_body)
+                _require_base_for_ledger_change(location, base, existing_body, new_body)
                 return sidecar, new_body, notices
 
             sidecar, new_body, guard_notices = read_apply_and_guard()
@@ -2524,18 +2524,24 @@ def _check_base_revision(
 
 
 _FOLLOW_UPS_HEADING = "## Follow-ups"
+_WAITING_HEADING = "## Waiting"
+_SLICES_HEADING = "## Slices"
 
 
-def _require_base_for_follow_ups(
+def _require_base_for_ledger_change(
     location, base: str | None, existing_body: str, new_body: str
 ) -> None:
-    """Refuse a frozen spec's ``## Follow-ups`` change that names no ``--base``.
+    """Refuse a frozen spec's ledger change that names no ``--base``.
 
-    The section is a ledger other writers append to, and a body composed from an
-    earlier read would silently erase their entry. Creating the section counts: a
-    creator composing from a stale copy could drop a ``## Slices`` row added since.
-    MUST be called with the write lock held; raises :class:`_UpdateAborted` after
-    printing the refusal.
+    ``## Follow-ups`` and ``## Waiting`` are ledgers other writers append to, and
+    a body composed from an earlier read would silently erase their entry.
+    Creating a section counts: a creator composing from a stale copy could drop a
+    ``## Slices`` row added since. The refusal names each changed ledger and that
+    ledger's own gate. A ``## Waiting`` change that arrives together with a
+    ``## Slices`` change is the stale-copy side effect of a slice write, so its
+    remedy is to re-read and reapply rather than to run the waiting gate.
+    MUST be called with the write lock held; raises :class:`_UpdateAborted`
+    after printing the refusal.
     """
     from ..record import guards as guards_mod
     from ..record.sections import section_changed
@@ -2545,14 +2551,35 @@ def _require_base_for_follow_ups(
     prior_status = _stored_sidecar(location).get("status")
     if prior_status not in guards_mod.FROZEN_STATUSES["spec"]:
         return
-    if not section_changed(existing_body, new_body, _FOLLOW_UPS_HEADING):
+    changed = [
+        heading
+        for heading in (_FOLLOW_UPS_HEADING, _WAITING_HEADING)
+        if section_changed(existing_body, new_body, heading)
+    ]
+    if not changed:
         return
+    gates = []
+    if _FOLLOW_UPS_HEADING in changed:
+        gates.append(
+            f"for a {_FOLLOW_UPS_HEADING} write, re-run followups_gate.py --prior on that read"
+        )
+    if _WAITING_HEADING in changed:
+        if section_changed(existing_body, new_body, _SLICES_HEADING):
+            gates.append(
+                f"{_WAITING_HEADING} changed only because your copy predates another "
+                f"writer's entry: re-read the spec and reapply your {_SLICES_HEADING} "
+                "change to it, without running the waiting gate"
+            )
+        else:
+            gates.append(
+                f"for a {_WAITING_HEADING} write, re-run waiting_gate.py --prior on that read"
+            )
+    noun = "section" if len(changed) == 1 else "sections"
     print(
         f"error: --base is required when an update changes the "
-        f"{_FOLLOW_UPS_HEADING} section of a {prior_status} spec. Nothing was "
+        f"{' and '.join(changed)} {noun} of a {prior_status} spec. Nothing was "
         f"written. To proceed: {_revision_hint(location)}, reapply your change "
-        "to that fresh body (for a ## Follow-ups write, re-run "
-        "followups_gate.py --prior on that read), then update with --base set "
+        f"to that fresh body ({'; '.join(gates)}), then update with --base set "
         "to that read's revision, never a newer one fetched separately.",
         file=sys.stderr,
     )
@@ -3046,7 +3073,8 @@ def add_record_subparser(sub) -> None:
     p_record_update.add_argument(
         "--base", dest="base", default=None, metavar="REVISION",
         help="Revision from 'lore record show'; stale is refused. Needed to "
-             "edit a frozen spec's '## Follow-ups'.",
+             "edit a frozen spec's '## Follow-ups' or '## Waiting' "
+             "(waiting.py, waiting_gate.py).",
     )
     p_record_update.add_argument(
         "--vault", dest="vault", default=None, metavar="NAME",
