@@ -712,7 +712,7 @@ def check_frozen_body(
     is refused. (A flip into ``superseded`` is refused by
     :func:`check_superseded_status`, not here.) Authored content is the body minus
     the kind's pipeline-maintained sections (:func:`sections.authored_content`),
-    so a change confined to ``## Slices`` or ``## Follow-ups`` (spec) or
+    so a change confined to ``## Slices``, ``## Follow-ups`` or ``## Waiting`` (spec), or
     ``## Driver run`` (task) passes a plain update.
 
     Returns a formatted ``graph-guard`` message, or ``None`` when the write may

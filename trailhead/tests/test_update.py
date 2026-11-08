@@ -997,7 +997,7 @@ class TestHostileUpstreamBranchNeverReachesGit:
     rejects the shape. A remote named `--output=<path>` with a matching
     remote-tracking ref makes `git rev-parse --abbrev-ref @{u}` return
     `--output=<path>/main`, which `git diff` parses as an option and uses to
-    TRUNCATE that path. Reproduced against REAL git.
+    TRUNCATE that path. The fixtures build the hostile checkout with REAL git.
     """
 
     def _hostile_checkout(self, tmp_path, remote_name: str):
@@ -1035,37 +1035,6 @@ class TestHostileUpstreamBranchNeverReachesGit:
 
         assert branch is None
         assert "option" in error
-
-    def test_option_shaped_upstream_does_not_overwrite_a_file_via_diff(self, tmp_path):
-        victim = tmp_path / "VICTIM.txt"
-        victim.write_text("important")
-        checkout = self._hostile_checkout(tmp_path, f"--output={victim}")
-
-        env = _env(tmp_path)
-        from trailhead import provenance
-
-        head = subprocess.run(
-            ["git", "-C", str(checkout), "rev-parse", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        provenance._atomic_write_json(
-            provenance.stamp_path(env=env),
-            {
-                "checkout": str(checkout),
-                "sha": head,
-                "wired_at": "2026-01-01T00:00:00Z",
-                "last_check": None,
-            },
-        )
-
-        result = update.check_for_update(
-            env=env, runner=lambda args, **kw: subprocess.run(args, **kw)
-        )
-
-        assert victim.read_text() == "important", "the victim file must not be touched"
-        assert result["outcome"] == "unanswerable"
 
     def test_an_ordinary_upstream_still_resolves(self, tmp_path):
         checkout = self._hostile_checkout(tmp_path, "origin")

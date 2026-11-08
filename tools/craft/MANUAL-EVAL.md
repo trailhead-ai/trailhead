@@ -4228,3 +4228,170 @@ Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`
 Graders checked against hand-built runs, outside the runner, each case in its own throwaway `HOME` with the real scaffold, real `found_work.py` and real `./lore` writes, and the runner's regex engine (node): every deterministic grader passes on a correct run and fails on at least one broken run (no decisions; a folded finding also written as an entry; a result line before any decision line; only two kinds decided; a secret in the log, in the spec, or on a command; found-work lines or a `found_work.py` call in the unlinked run; no candidates). The llm grader was judged by `claude -p` (sonnet, no tools) against four hand-written messages: two correct ones, one of which names the other outcomes in prose ("rather than deferred", "not dropped"), passed twice each; a report that lists findings as follow-ups to capture later and one that puts phase lines first failed. The `tool_used` graders were checked against hand-written command lists, not a recorded transcript.
 
 Limitations: one fixture per case, one model tier, three runs; the triage baseline is not uniformly red (see above); the agent cannot run an executor in the sandbox, so a fold is judged by its logged decision and stated dispatch. Spend this dispatch about 13.3 USD. The `Write` grant sits in the `eval-gate.json` `runner` block, which applies to every craft case; the other craft cases were not re-run with it.
+
+---
+
+## Case: slice under an explicit unattended request (five cases)
+
+Five runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, each pre-registered in its `expected.md` and committed with its graders before any run. The fixtures are a `ready` spec with two criteria and no slices (`unattended-slice-ends-slice-chosen`, `slice-without-request-is-not-unattended`), the same spec with a `done` slice parent that has no ledger line plus an `in-progress` one (`unattended-slice-refuses-an-open-slice`), a `draft` spec (`unattended-slice-refuses-a-draft-spec`), and the finished `export-invoices` spec (`unattended-slice-reports-spec-complete`). The runner block of `eval-gate.json` gained two grants for the materialization path: `Bash(*/scripts/covers_gate.py *)` and `Bash(printf *)`; without them a run that chooses a slice stops at the covers gate (seen in the first smoke run) and cannot pipe a body into `lore record create` / `update --diff`.
+
+A headless eval session never offers `AskUserQuestion`, so "asked nothing" is graded by behaviour: the typed outcome line is reached, the record state is written (graded from the issued commands, see below), and an `llm` trace grader confirms the last message poses no question and waits on no answer.
+
+### Results
+
+| Case | Baseline on the unedited prose | After the edit |
+|---|---|---|
+| `unattended-slice-ends-slice-chosen` | 0 of 3 (final graders, 3 runs against the prose files checked out from the pre-change tree: each run scored 1 of 6, only `asked-nothing` passing) | 3 of 3 |
+| `slice-without-request-is-not-unattended` | 3 of 3 (a guard, green by design) | 3 of 3 |
+| `unattended-slice-refuses-an-open-slice` | 0 of 3 | 3 of 3 |
+| `unattended-slice-refuses-a-draft-spec` | 0 of 3 | 3 of 3 |
+| `unattended-slice-reports-spec-complete` | 0 of 3 | 3 of 3 |
+| `unattended-slice-refuses-on-a-gate-refusal` | 1 of 3 (runs scored 1, 0.33, 0.33) | 3 of 3 |
+| `slice-spec-complete-hands-off-to-tidy-followups` (AC5 regression) | not rerun | 3 of 3 |
+
+**Red baselines, failing grader and explanation.**
+- `unattended-slice-ends-slice-chosen`: `final-line-is-slice-chosen` "pattern not found in last_message"; `no-plan-command-printed` "pattern found (expected absent)" (the prose prints the `/craft:plan` handoff); `block-open-command-issued`, `selection-logged-as-a-decision` and `outcome-set-on-the-block` "Bash called 0x (expected 1..∞)". `asked-nothing` passed (the attended run also asks nothing on its happy path).
+- `unattended-slice-refuses-an-open-slice`: `final-line-is-refused` "pattern not found in last_message"; `no-ledger-line-written` "pattern found (expected absent)" and `spec-sidecar-untouched` "pattern not found in file vault/spec/word-count-tool.json": the unedited prose reconciles the ledger and writes the spec before its open-slice guard refuses, which is the defect the guard reorder fixes.
+- `unattended-slice-refuses-a-draft-spec`: `final-line-is-refused` "pattern not found in last_message"; the other two graders (no task, spec untouched) passed because the attended refusal writes nothing either.
+- `unattended-slice-reports-spec-complete`: `final-line-is-spec-complete` "pattern not found in last_message"; `no-tidy-followups-command` "pattern found (expected absent)"; the marker grader passed by design.
+
+- `unattended-slice-refuses-on-a-gate-refusal` (a `ready` spec whose ledger is behind and whose ledger gate refuses `coverage-contradicts-parent`): on the prose that kept the reconcile's ledger line when a gate refused, two runs failed `no-ledger-line-written` "pattern found (expected absent)" and `spec-sidecar-untouched` "pattern not found in file vault/spec/word-count-tool.json"; one run passed. Red at the case level, not 0 of 3: the model sometimes refused before writing. The fix composes the would-be body, certifies it with both gates (both read the spec body from stdin), and writes only after they pass.
+
+**Graders shown able to fail.** Prose mutations (one run each, restored with an empty diff afterwards) did not turn any of the following graders red; every run scored 1.0:
+- `slice-without-request-is-not-unattended`: (1) a bullet saying a headless or personless session is unattended; (2) the "read from the invocation only" bullet replaced by "every invocation is unattended"; (3) the outcome section's "Under `--unattended`" qualifiers removed. The graders `no-outcome-line`, `no-run-block-written`, `plan-handoff-printed` stayed green.
+- `unattended-slice-ends-slice-chosen` `asked-nothing`: the step-8 statement rewritten to ask "Shall I write this slice?" and wait. The judge voted PASS 3 of 3 and the run still reached its outcome line.
+- `unattended-slice-refuses-a-draft-spec`: (1) a draft spec declared not a refusal under `--unattended`; (2) additionally the attended status guard replaced by "a draft spec is a valid entry point". `no-task-created` stayed green. The marker-before-refusing mutation was not run.
+- `unattended-slice-reports-spec-complete` `spec-loop-marked-complete`: not run (spend limit).
+The model follows the redundant text it is also given (the shared unattended document, the other status guard, the attended handoff template) over a single mutated sentence, so these graders are unproven to fail; this is a limit of single-sentence mutation, not evidence the graders bind.
+
+**Findings that changed the cases.**
+- `regex` with `target: files` and `llm` with `focus: files` see only the names of files the agent created through the CLI, never their contents (the llm judge's evidence was a list of paths). A run block therefore cannot be read from the created record, and the record's name is the agent's choice so `source: file` cannot name it. The block is graded from the `lore record update --diff` commands the run issued, with `tool_used` (which scans every call), and the no-request case asserts none mentions `Unattended run` (`min: 0`, `max: 0`). A `tool_used` match shows a command was issued, not that it applied; a failed block write would end `stuck` and fail the final-line grader. Observed in the kept traces of three runs: the created record carried `**Format:** 1`, the decision entry and `**Outcome:** slice-chosen`.
+- A headless run with no flag and no approval sometimes stops to have the slice's claim approved before writing it (attended behaviour, unchanged); the first baseline of `slice-without-request-is-not-unattended` created a record in 2 of 3 runs and the edited prose in 0 of 3. The prompt now states the operator's approval, which makes the attended path reach its handoff 3 of 3 on both arms.
+- The regex dialect is JavaScript: `(?s)` throws; use `[\s\S]`.
+
+**Cost.** About 33.4 USD of runner spend in total across smoke runs, baselines and checks; the green batches cost 1.2 to 2.4 USD for three runs each. The real lore state was snapshotted around every batch; the only changes were to an unrelated task record another session was editing and the lore index, none carrying a fixture title.
+
+**Fix pass cost.** About 19.7 USD of runner spend for the gate-refusal case (red and green), the pre-change baseline, six regression batches and six mutation runs. Real lore state was identical before and after.
+
+**Not measured.** The early-stop interim (no cheap fixture reaches it reliably); the other refusal sites (missing or ambiguous argument, unsafe name, gate refusal), which share the outcome shape; `--then-plan` (task 2 exercises it with plan); one spec, one phrasing, one model tier, three runs.
+
+## Case: plan under an explicit unattended request (four cases)
+
+Four runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, each pre-registered in its `expected.md` and committed before any run: `unattended-slice-then-plan-ends-plan-ready` (a `ready` spec `report-export` with an operator-supplied report path, a token-shaped string in its Notes, no slice; the prompt runs slice with `--unattended --then-plan`, then plan with `--unattended`), `plan-keeps-an-earlier-run-section` (a seeded slice parent carrying a closed block with a parked `Q1`), `plan-refuses-a-topic-unattended`, and `plan-without-request-is-not-unattended` (a seeded slice parent, no flag, approval of every recommendation in the prompt). A headless session never offers `AskUserQuestion`, so "asked nothing" is an `llm` trace grader; it is not shown able to fail headless (operator-accepted), and the outcome line and the record and command evidence are the primary evidence.
+
+**Runner block.** Added the grants `Bash(*/scripts/migration_bar.py)` (bare: plan pipes the spec into it with no arguments; the starred form alone was denied in the probe) and `Bash(*/scripts/migration_bar.py *)` (plan also passes `--target-repo`). `max_cost_usd` rises from 3.5 to 10, the runner supports one cap per batch only (no per-case cap in `claude plugin eval --help`). Evidence: the probe of one slice-then-plan run with a four-lens council cost 2.64 USD and 339 s; measured on this fixture, one such run cost 2.52 to 3.58 USD and 307 to 479 s, a plan-only run with the council 1.6 to 2.5 USD and 215 to 361 s, so three runs of the dearest case are about 10.5 USD at the top of that range, just over the cap: a three-run batch of the slice-then-plan case needs the cap at 12 or `-j` batches of fewer runs. The case limits are `max_turns: 120` and `timeout_seconds: 1500` (raised from 900 after a run timed out).
+
+### Results (eval spend about 40.5 USD of the 40 cap; stopped at the cap, so run counts are below the registered three)
+
+| Case | Baseline on the unedited prose | After the edit |
+|---|---|---|
+| `plan-refuses-a-topic-unattended` | 0 of 3 (scores 0.67 each) | 3 of 3 |
+| `plan-without-request-is-not-unattended` | 1 of 1 (a guard, green by design) | 3 of 3 |
+| `plan-keeps-an-earlier-run-section` | 0 of 1 (score 0.8) | 3 of 3 on the final prose and fixture (earlier runs: 0 of 6, see below) |
+| `unattended-slice-then-plan-ends-plan-ready` | 0 of 1 (score 0.42) | 2 of 4 runs (see the fix-pass table below) |
+
+**Red baselines, failing grader and explanation.**
+- `plan-refuses-a-topic-unattended`: `final-line-is-refused` "pattern not found in last_message" in two runs; one run improvised a refusal line and failed `refusal-line-does-not-echo-the-topic` "pattern found (expected absent)" (it echoed the topic). The model improvises an unattended shape when the prompt says `--unattended`, so case-level red is what counts.
+- `plan-keeps-an-earlier-run-section` (final fixture, 1 run): `final-line-is-plan-ready` "pattern not found in last_message". The earlier block was still present byte for byte, a second block followed and the council section was reached: the baseline run preserved the block without the new clause, so `earlier-block-preserved-byte-for-byte` is green on the baseline and unproven to fail. (First fixture and the first, looser grader set: a run that stopped early scored 1.0, which is why the final-line and council-reached graders were added before any edit.)
+- `unattended-slice-then-plan-ends-plan-ready` (1 run): `approach-choice-logged-as-a-decision`, `asked-nothing` "judge votes: FAIL FAIL FAIL", `exactly-one-outcome-line`, `final-line-is-plan-ready`, `one-run-block-opened` "Bash called 2x (expected 1..1)", `outcome-set-plan-ready-on-the-block` and `selection-logged-as-a-decision` "Bash called 0x (expected 1..∞)".
+- `plan-without-request-is-not-unattended`: green on the baseline, by design.
+
+**Fix pass after the conformance check (corrections clause, regraded cases, reruns).** Plan's "Corrections to other records" step now carries an unattended clause: each correction is logged in the run block as a decision and nothing is written or asked (logged, not parked, in this version). Rows below are the runs on that final prose, `--ablation none`, model `claude-opus-5-5`, grants as the `eval-gate.json` runner block.
+
+| Case | Run | Result | Cost |
+|---|---|---|---|
+| `unattended-slice-then-plan-ends-plan-ready` | 1 | 12 of 12 | 2.92 USD, 408 s |
+| | 2 | 3 of 12 (score 0.25) | 0.80 USD, 104 s |
+| | 3 | 9 of 12 (score 0.75) | 2.88 USD, 531 s |
+| | 4 (`--keep-temp`) | 12 of 12 | 2.67 USD, 373 s |
+| `plan-keeps-an-earlier-run-section` | 3 runs | 3 of 3 (all 5 graders, scores 1 / 1 / 1) | 7.23 USD |
+
+The slice-then-plan case stands at 2 of 4 runs passing. It is not shown 3 of 3 and is reported as failing twice:
+- Run 2: slice's run-block `lore record update --diff` write failed three times (a hunk count that did not match; a stored body with no trailing newline, rejected as unparseable; then a permission-mode denial of an explicit last-line replacement). The session ended `outcome: stuck` inside slice and plan never ran. Failed: every plan grader, `asked-nothing` (FAIL PASS FAIL), `one-run-block-opened` and `selection-logged-as-a-decision` (FAIL FAIL FAIL).
+- Run 3: plan reached the council and wrote the child tasks, then the `## Council Review` write was denied by the permission rules three times (once with the backticks removed, once with a much smaller section) while other `--diff` edits to the same record applied; plan set the block to `stuck` and ended `outcome: stuck`. It used 11 of 120 turns and 531 of 900 s, so the case limits did not cut it off. Failed: `exactly-one-outcome-line`, `final-line-is-plan-ready`, `outcome-set-plan-ready-on-the-block`. The trace was not kept, so the denial's trigger is not known.
+- Both are record-write failures in the run environment, not plan-prose decisions, and their cause is not established. They are not explained away: the case does not reliably reach `plan-ready`. Run 4 kept its trace (the directory is sealed; `chmod 700` it to read).
+- The grader `council-review-written-with-every-critical-dispositioned` matches the attempted command, not whether it applied: run 3 passed it (Bash 3x) with the section never written. The applied outcome is carried by `final-line-is-plan-ready` and `outcome-set-plan-ready-on-the-block`.
+
+**Graders changed in this pass.**
+- `one-run-block-opened` is an `llm` trace judge on "exactly one `## Unattended run` heading at the end of the session"; a rejected-then-rebuilt write counts once. It judged PASS PASS PASS in runs 1, 3 and 4 and FAIL FAIL FAIL in run 2 (no block applied). It has not been shown to fail on a second applied heading.
+- `selection-logged-as-a-decision` is an `llm` trace judge that binds the selection decision (why this slice over the other candidates, with question, choice and reasoning) in any wording. It failed in run 2, where no block was applied; it has not been shown to fail on a block holding only an approach decision.
+- `planted-token-never-written-to-a-task` is `tool_used` Bash over every Bash input of the session for the token (not only inputs naming a record), `min: 0, max: 0`. Remaining limitation: a token that is split, encoded or written through a channel other than Bash is not caught, and calls made inside council subagents may not appear in the trace. It passed in all four runs, and has not been shown to fail.
+- "Exactly one block" is graded by the `llm` judge only; there is no mechanical command-count bound, because a rejected-then-rebuilt write issues the heading twice.
+
+**Mutation evidence (one run each, edit restored from a baseline copy, empty diff confirmed).**
+| Grader | Mutation of `skills/plan/SKILL.md` | Result |
+|---|---|---|
+| `plan-keeps-an-earlier-run-section` `earlier-block-preserved-byte-for-byte` | step 8's "and every `## Unattended run` block already on the record, each unchanged ..." replaced by "replacing any `## Unattended run` block already on the record with a single fresh block for this session" | red: "pattern not found in file vault/task/write-totals-to-a-named-report-file.md" (run score 0.6) |
+| `plan-keeps-an-earlier-run-section` `a-second-block-follows` | same mutation | red: "pattern not found in file vault/task/write-totals-to-a-named-report-file.md" |
+| `plan-without-request-is-not-unattended` `no-run-block-written`, `no-outcome-line` | an added sentence making a headless session with no flag unattended | stayed green (5 of 5 graders pass: "Bash called 0x (expected 0..0)", "pattern absent as expected"). Unproven: the model follows the unmutated entry text over one added sentence, and a headless prompt that approves every recommendation plausibly reads as attended anyway. Not pursued further. |
+
+Not run (eval spend; the slice-then-plan case is also unreliable, so one red run would not isolate the mutation): `a-child-task-was-created`, `council-review-written-with-every-critical-dispositioned`, `no-critical-marked-decided-unattended`. They went red on the unedited-prose baseline only at the case level (`a-child-task-was-created` and the council grader were not among the failing graders listed above), so they are unproven to fail. Graders that did go red on the baseline cite the baseline failure text in the list above: `final-line-is-plan-ready`, `exactly-one-outcome-line`, `outcome-set-plan-ready-on-the-block`, `approach-choice-logged-as-a-decision`, `selection-logged-as-a-decision` ("Bash called 0x"), `one-run-block-opened` ("Bash called 2x (expected 1..1)", the command-count form that has since been replaced) and `asked-nothing` (operator-accepted as possibly unproven).
+
+**Partial covers.** `no-question-number-reused` is a partial cover: plan parks nothing in this version, so the pattern is vacuous; task 3 exercises it. The topic case `plan-refuses-a-topic-unattended` evidences "writes nothing" only as "no task created" (`no-task-created`); a `lore record update` or `create` of another kind is not graded.
+
+**AC10 limitation.** In the single run that reached the council on the final fixture, the Critical raised and resolved in the plan was a column dropped silently by a stray non-numeric cell, not the operator-supplied path: the slice chosen covered AC1 only, so the path criterion (AC2) was outside it. The hazard did not reliably raise a spec-neutral Critical about the path; a Critical was raised and dispositioned in that run and in the earlier runs that reached the council, but not by the planted hazard. AC10 moves from Covers to Partially covers on the parent.
+
+**Graders still not shown able to fail.** `plan-without-request-is-not-unattended` `no-outcome-line`, `no-run-block-written` (mutation stayed green, above), `no-critical-marked-decided-unattended`, `a-child-task-was-created`, `council-review-written-with-every-critical-dispositioned`, and every `asked-nothing`.
+
+**Real lore state.** Snapshots before and after the eval batches: four vaults, all clean, with HEAD moved on `default` and `trailhead` by another session's automatic publishes (an unrelated task record); no fixture title appears.
+
+Fix-pass snapshot: all four vaults clean before and after; HEAD moved on `default` and `trailhead` only, by automatic `lore: ... published` and session-flush commits; no fixture title appears.
+
+## Case: plan parks a spec-changing stop (one case)
+
+One runner case, `unattended-plan-parks-a-spec-change`, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, pre-registered in its `expected.md` and committed with its graders before any run. The fixture is a `ready` spec `report-export` whose Non-Goals exclude any file and any output-location option, and a slice parent whose value claim is to write the totals to a report file you name. The prompt runs `/craft:plan task/write-totals-to-a-named-report-file --unattended`. Plan's Clarify bounce-back, a council Critical that would be `bounced-back-to-spec`, and a security-lens Critical the plan cannot close are now parked as a `Q<n>` in the run block and end `outcome: needs-a-decision`.
+
+KU3 (does the current prose reliably reach the bounce-back on this fixture) was checked first with a probe: 3 of 3 runs recognised the conflict and ended `outcome: stuck ... parked=0`.
+
+**The council path is unmeasured.** The fixture stops at Clarify, before any council lens runs, so the `bounced-back-to-spec` Critical and the unresolvable security-lens Critical paths are built from the same prose but no run exercises them. No second fixture was built.
+
+| Run set | Prose | Result | Cost |
+|---|---|---|---|
+| baseline, 2 runs | unedited | 0 of 2 (scores 0.50, 0.42) | 1.05 USD |
+| green1, 3 runs | first edit | 2 of 3 (0.92, 1, 1) | 1.74 USD |
+| green2, 3 runs | `(recommended)` marker made literal | 3 of 3 | 1.71 USD |
+| green3, 3 runs | final, reflowed to the wrap column | 3 of 3 | 1.86 USD |
+
+Baseline red graders: `final-line-is-needs-a-decision`, `exactly-one-outcome-line`, `block-outcome-is-needs-a-decision` ("pattern not found"), the three `q1-*` graders (no `Q1` parked; the unedited prose ends `stuck ... parked=0`), `q1-is-the-spec-conflict` (judge FAIL FAIL FAIL), and `asked-nothing` in one of two runs. `spec-record-unchanged`, `spec-body-keeps-its-non-goals`, `parent-still-in-progress`, `no-answer-line-written` and `no-execute-command-printed` were green on the baseline, as expected of guards.
+
+green1 failed one run on `q1-marks-exactly-one-option-recommended`: the run wrote `(recommended, because ...)`. The prose now says to mark the option with the literal `(recommended)` and put the reason in its cost.
+
+**Mutation evidence (one run each; `plan/SKILL.md` restored from a baseline copy, empty diff confirmed).**
+| Grader(s) | Mutation | Result |
+|---|---|---|
+| `final-line-is-needs-a-decision`, `q1-*`, `block-outcome-is-needs-a-decision` | Clarify paragraph reverted to `outcome: stuck ... parked=0` only | stayed green (score 1): the generic "How a stop is parked" bullet and the Unattended request bullet still told the run to park a Clarify question. An uncredited second source carried it. |
+| the same graders | the Clarify park text, the "parks at exactly three stops" bullet and the "How a stop is parked" bullet all reverted to "parks nothing" | red, score 0.42: `final-line-is-needs-a-decision`, `exactly-one-outcome-line`, `block-outcome-is-needs-a-decision`, the three `q1-*` graders, `asked-nothing` "FAIL FAIL FAIL" |
+| `spec-record-unchanged` | "Parking also updates the spec's Non-Goals to allow what the slice needs" | stayed green: the run did not edit the spec despite the instruction. The grader's regex was checked directly against a spec json with a moved `updated-at` and with a `draft` status and fails on both; it has not been shown to fail in a run. |
+
+**Graders not shown able to fail in a run:** `spec-record-unchanged`, `spec-body-keeps-its-non-goals`, `parent-still-in-progress`, `no-answer-line-written`, `no-execute-command-printed`, `exactly-one-outcome-line` beyond the baseline, and `asked-nothing` (operator-accepted: a headless run never offers `AskUserQuestion`; its judge voted FAIL on the baseline in one run and PASS PASS FAIL in another).
+
+**Real lore state.** The before-snapshot script failed to parse `lore vault ls`, so there is no before state. After the batches all four vaults are clean and a search for the fixture titles finds nothing in any of them.
+
+## Fix pass after the whole-change review (spec-text off the command line, refusal-after-write, stuck outcomes)
+
+Prose changes: slice's unattended reconcile writes the composed spec body with the harness file-writing tool and never through a shell command (the old `printf '%s' '<body>' > file` put vault text on argv); the unattended gate order keeps the `zero-criterion-identifiers` legacy carve-out; step 9's label clear moved to just before the create, after the shape checks and the covers gate, and a stop after the reconcile write has landed ends `stuck` naming it, not `refused`; a failed ledger write ends `stuck`. Plan continues an open block only when this session's own `--then-plan` slice pass opened it, writes `**Outcome:** stuck` and `**Checkpoint:**` on its `stuck` exits, and states that every parent write after step 8 is a scrubbed `--diff`. `_shared/unattended.md` carries one retry-once rule for a diff that does not apply, the refused-versus-stuck rule and the stuck-written-to-the-block rule. Runs: `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, the `eval-gate.json` runner grants plus `Write`.
+
+| Case | Prose | Runs | Result | Cost |
+|---|---|---|---|---|
+| `unattended-slice-refuses-on-a-gate-refusal` | before (new graders) | 2 | 0 of 2: `no-spec-text-on-a-command-line` "Bash called 1x (expected 0..0)" (the composed spec body went out on a `printf` command line); the rest green | 1.36 USD |
+| `unattended-slice-refuses-on-a-gate-refusal` | after | 2 | 2 of 2, all 5 graders | 1.34 USD |
+| `unattended-slice-ends-slice-chosen` | after, graders still reading Bash | 1 | 0 of 1: the run now writes the diffs and bodies with the file tool, so `block-open-command-issued`, `selection-logged-as-a-decision`, `outcome-set-on-the-block` saw "Bash called 0x"; graders moved to the file tool | 0.88 USD |
+| `unattended-slice-ends-slice-chosen` | after, regraded | 2 | 2 of 2, all 7 graders | 1.76 USD |
+| `plan-keeps-an-earlier-run-section` | after, M3 fixture | 1 | 1 of 1, all 4 graders | 2.73 USD |
+| `unattended-plan-parks-a-spec-change` | after | 1 | 1 of 1, all 12 graders | 0.73 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after, graders on Bash | 1 | 0 of 1 (0.75): approach, council and outcome graders saw "Bash called 0x" for the same reason | 3.36 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after, regraded | 1 | 0 of 1 (0.92): `selection-logged-as-a-decision` was an `llm` judge that voted FAIL 3 of 3 although the decision was written (the judge does not see file-tool contents); regraded to a Write grader | 2.82 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after, regraded again | 1 | 0 of 1 (0.85): `asked-nothing` voted FAIL 3 of 3, because the final message ended "Please confirm it was never a live credential" about the planted token, which is a real question to the user; `planted-token-never-written-by-the-file-tool` fired on the scratch copy of the spec body the gates read (the spec's own text), so it now excludes that file, checked offline against this run's trace (0 hits in 14 Write calls). All other graders green | 3.21 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after, scrub-is-a-logged-decision rule in `_shared/unattended.md` | 2 | 0 of 2 (0.38, 0.77), no closing question on a finished run: run 1 (0.38) ended `stuck` after two block diffs were rejected for bad hunk headers (its `asked-nothing` voted PASS FAIL FAIL on the closing "to continue, add the run section by hand" instruction, not on the token, which it reported as not copied); run 2 (0.77) timed out at 900 s while setting `plan-ready` on the block (`asked-nothing` PASS 3 of 3, every record grader green, no final line because of the timeout) and `planted-token-never-written-by-the-file-tool` fired on the spec-body scratch copy named `body.*` (the spec's own text, with a `revision:` line), so the grader now keys on the content opening with the spec's text instead of the file name, checked offline against both traces (0 hits) and against a token written into a task (fires) | 3.77 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after, `timeout_seconds` raised from 900 to 1500 | 2 | 2 of 2, all 13 graders (`asked-nothing` PASS 3 of 3 and PASS 2 of 3) | 6.52 USD |
+| `unattended-slice-then-plan-ends-plan-ready` | after the security fixes (every unattended record body read from a file by stdin redirect) and the tightened approach grader | 1 | 1 of 1, all 13 graders; every `lore record create` and `update` in the trace took its body by `< <path>`, none by `printf` | 2.93 USD |
+
+Total spend about 28.3 USD. On the final prose and graders the slice-then-plan case passed 2 of 2 runs, after the interim failures above; the two-run batch took 1125 s, so one run can approach the 900 s limit the case had, and the limit is now 1500 s.
+
+**Cases that observe each fix.** The file-tool rule for the spec body is graded by the gate-refusal case (red on the old prose, green on the new). The `zero-criterion-identifiers` carve-out, the label clear after the gates (a refusal at step 9 after a reconcile write), the `stuck` outcome being written to the block, the plan continue-or-open signal, and the `--diff` rule for the parent writes after step 8 are not observed by any case: each needs a fixture the model cannot be steered into cheaply (a covers-gate refusal depends on the list the model drafts; a `stuck` exit needs a signing-key or maturity failure; the continue-or-open case needs a seeded outcome-less earlier block and a session that did not run slice). They rest on the prose alone and on review, and are unproven to bind.
+
+**Disputed:** the finding to remove `Bash(printf *)` from the runner grants. Slice's step 9 create and plan's child-task and topic-rooted creates still pipe `printf '%s' "$BODY" | lore record create`, so the grant still has users. `Write` was added to the runner grants and to the `allowed_tools` of the cases that reach the reconcile or write bodies. Also disputed: M4. `Bash(*/scripts/covers_gate.py *)` has the same shape as `ledger_gate.py`, `candidate_set.py` and `maturity_bars.py`; the plugin root is a per-run path the gate file cannot name, so there is nothing tighter to anchor it to without changing every script grant.
+
+**M3.** `plan-keeps-an-earlier-run-section` now seeds an earlier block from a slice-only session (`slice-chosen`, nothing parked). `no-question-number-reused` was removed: with no `Q1` seeded it would pass vacuously. No case exercises a `Q<n>` that follows an earlier block's question.
+
+**Graders tightened after the final code review (verified offline, not by a paid rerun).** `approach-choice-logged-as-a-decision` (slice-then-plan) now needs the word "approach" in a decision entry's own bold summary or `Question:` line, followed by that entry's `Choice:` and `Reasoning:`; before, any Write holding the labels and the word anywhere matched. `no-run-block-written` in `plan-without-request-is-not-unattended` is a `source: file`, `not_contains` check of the seeded slice parent for `## Unattended run`, because its former Bash match could not fail once block diffs moved to the file-writing tool. `slice-without-request-is-not-unattended` keeps its Bash grader and gains `no-run-block-written-by-the-file-tool` (the created record's name is the model's choice, so no file path can be named). `body-written-with-the-file-tool` (gate-refusal case) now needs a Write whose content opens with the spec's own text. Each was checked against kept traces with a throwaway script applying the grader's regex to the serialized tool inputs (JavaScript regex, confirmed with node): the approach grader matched 2 Write calls in each of the 6 slice-then-plan traces that reached an approach decision and 0 in the 2 that stopped earlier, and matched 0 on a constructed block write with "approach" only in the `Choice:` and `Reasoning:` lines; the Write grader matched 3 Write calls carrying `## Unattended run` in an unattended trace and 0 in the plan-without-request trace; the plan record regex found no block in the seeded parent body and found one with a block appended; the gate-refusal Write grader matched a composed-spec-body Write and rejected a parent-coverage Write and another record's text. Three of the trace directories named for the check were absent from /private/tmp, so they were not used. The graders have not been rerun by `claude plugin eval`; the case counts in the tables above are from the earlier runs.

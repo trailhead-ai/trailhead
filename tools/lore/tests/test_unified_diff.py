@@ -155,3 +155,32 @@ def test_out_of_order_hunks_are_refused(replay):
 def test_touching_hunks_are_not_overlapping(replay):
     result = replay(_LINES10, _ADJACENT)
     assert (result[0] if isinstance(result, tuple) else result) == _LINES10
+
+
+BLANK_BODY = "para one\n\npara two\n"
+BLANK_APPENDED = "para one\n\npara two\npara three\n"
+BLANK_HEADER = "--- a\n+++ b\n@@ -1,3 +1,4 @@\n"
+
+
+def test_empty_line_inside_open_hunk_reads_as_blank_context():
+    diff = BLANK_HEADER + " para one\n\n para two\n+para three\n"
+    assert rs.apply_unified_diff(BLANK_BODY, diff) == (BLANK_APPENDED, [])
+
+
+def test_space_blank_context_line_gives_same_result_as_empty_line():
+    spaced = BLANK_HEADER + " para one\n \n para two\n+para three\n"
+    bare = BLANK_HEADER + " para one\n\n para two\n+para three\n"
+    assert rs.apply_unified_diff(BLANK_BODY, spaced) == rs.apply_unified_diff(BLANK_BODY, bare)
+    assert rs.apply_unified_diff(BLANK_BODY, spaced) == (BLANK_APPENDED, [])
+
+
+def test_empty_lines_after_closed_hunk_change_nothing():
+    diff = BLANK_HEADER + " para one\n \n para two\n+para three\n\n\n"
+    assert rs.apply_unified_diff(BLANK_BODY, diff) == (BLANK_APPENDED, [])
+
+
+def test_empty_line_context_over_text_is_rejected_as_mismatch():
+    body = "para one\ntext\npara two\n"
+    diff = BLANK_HEADER + " para one\n\n para two\n+para three\n"
+    with pytest.raises(rs.DiffRejectError):
+        rs.apply_unified_diff(body, diff)

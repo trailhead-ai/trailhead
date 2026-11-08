@@ -413,6 +413,24 @@ def test_update_diff_editing_a_dash_dash_body_line_applies(tmp_path):
     assert _find_body(vault, record_id) == modified
 
 
+def test_update_diff_empty_line_as_blank_context_applies(tmp_path):
+    """A hand-written diff whose blank context line is an empty line applies."""
+    vault, state = _make_vault(tmp_path)
+    original = "para one\n\npara two\n"
+    record_id = _create(vault, state, body=original)
+
+    diff = "--- a\n+++ b\n@@ -1,3 +1,4 @@\n para one\n\n para two\n+para three\n"
+    r = _run(
+        ["record", "update", record_id, "--diff"],
+        vault=vault,
+        state_dir=state,
+        stdin_text=diff,
+    )
+
+    assert r.returncode == 0, r.stderr
+    assert _find_body(vault, record_id) == "para one\n\npara two\npara three\n"
+
+
 # ===========================================================================
 # CLI: --diff stale hunk → atomic reject
 # ===========================================================================

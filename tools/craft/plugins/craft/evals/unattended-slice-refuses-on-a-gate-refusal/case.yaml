@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: unattended-slice-refuses-on-a-gate-refusal
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

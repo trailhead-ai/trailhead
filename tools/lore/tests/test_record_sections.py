@@ -332,3 +332,53 @@ def test_section_changed_is_ambiguity_closed_when_a_heading_repeats_and_bodies_d
 def test_section_changed_ignores_a_heading_hidden_in_a_fence():
     hidden = PLAN + "\n```\n## Follow-ups\n- F1\n```\n"
     assert not section_changed(hidden, hidden.replace("- F1", "- F2"), FU)
+
+
+WAITING = "## Waiting\n\n- **AC1.** set aside\n  - waits on: x\n  - 2026-11-03 waiting: y\n"
+
+
+def test_waiting_section_is_pipeline_for_a_spec_and_authored_for_other_kinds():
+    before = PLAN
+    after = PLAN + "\n" + WAITING
+    assert same("spec", before, after)
+    assert same("spec", after, after.replace("set aside", "parked"))
+    assert not same("spec", after, after.replace("Intent", "Changed intent"))
+    assert not same("task", before, after)
+
+
+def test_waiting_ends_at_the_next_heading_so_text_after_it_stays_authored():
+    body = PLAN + "\n" + WAITING + "\n## Other\n\nkeep\n"
+    assert not same("spec", body, body.replace("keep", "changed"))
+    assert same("spec", body, body.replace("set aside", "parked"))
+
+
+def test_duplicate_waiting_headings_are_not_exempted():
+    twice = PLAN + "\n" + WAITING + "\n" + WAITING
+    assert not same("spec", twice, twice.replace("parked", "x").replace("set aside", "other"))
+    assert "set aside" in authored_content("spec", twice)
+
+
+def test_waiting_heading_inside_a_fence_is_not_the_section():
+    hidden = PLAN + "\n```\n" + WAITING + "```\n"
+    assert not same("spec", hidden, hidden.replace("set aside", "parked"))
+
+
+def test_section_changed_sees_a_waiting_entry_added_edited_and_removed():
+    base = PLAN + "\n" + WAITING
+    assert section_changed(PLAN, base, "## Waiting")
+    assert section_changed(base, base + "- **AC2.** x\n", "## Waiting")
+    assert section_changed(base, PLAN, "## Waiting")
+    assert not section_changed(base, base.replace("Intent", "Other"), "## Waiting")
+    assert not section_changed(PLAN, PLAN + "\n## Slices\n- a\n", "## Waiting")
+
+
+def test_waiting_unregistered_makes_a_waiting_change_authored(monkeypatch):
+    from lore.record import sections
+
+    base = PLAN + "\n" + WAITING
+    monkeypatch.setitem(
+        sections.PIPELINE_SECTIONS,
+        "spec",
+        tuple(s for s in sections.PIPELINE_SECTIONS["spec"] if s.heading != "## Waiting"),
+    )
+    assert not same("spec", PLAN, base)

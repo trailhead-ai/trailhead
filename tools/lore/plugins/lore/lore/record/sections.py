@@ -7,8 +7,8 @@ names, so it never moves a heading, a fence, or a comment.
 
 Lore carries its own copy of the heading and masking rules: plugins stand
 alone, so this module must not import craft. A parity test in craft's suite
-holds the two copies in agreement about where ``## Slices`` and
-``## Follow-ups`` start.
+holds the two copies in agreement about where ``## Slices``,
+``## Follow-ups`` and ``## Waiting`` start.
 """
 from __future__ import annotations
 
@@ -40,12 +40,15 @@ class Section(NamedTuple):
 #     slice close and read by ``candidate_set.py`` and ``covers_gate.py``.
 #   - ``## Follow-ups`` (spec): the follow-up ledger, parsed by craft's
 #     ``followups.py``; every write is certified by ``followups_gate.py``.
+#   - ``## Waiting`` (spec): the operator-check ledger, parsed by craft's
+#     ``waiting.py``; every write is certified by ``waiting_gate.py``.
 #   - ``## Driver run`` (task): the drive checkpoint, one block appended at
 #     each phase boundary by ``craft:drive``.
 PIPELINE_SECTIONS: dict[str, tuple[Section, ...]] = {
     "spec": (
         Section("## Slices", repeatable=False),
         Section("## Follow-ups", repeatable=False),
+        Section("## Waiting", repeatable=False),
     ),
     "task": (Section("## Driver run", repeatable=True),),
 }

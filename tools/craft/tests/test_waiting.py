@@ -187,3 +187,102 @@ def test_error_carries_code_and_message():
     assert exc.value.code == "unmarked-prose"
     assert "prose" in str(exc.value)
     assert waiting.WaitingParseError is WaitingParseError
+
+
+def _pending(cid, slice_):
+    return PENDING.replace("AC32", cid).replace("task/build-the-thing", f"task/{slice_}")
+
+
+def test_one_criterion_under_two_building_slices_is_two_entries_each_with_its_own_slice():
+    entries = parse_waiting(body(_pending("AC7", "a") + "\n" + _pending("AC7", "b")))
+    assert [(e.criterion_id, e.building_slice) for e in entries] == [("AC7", "a"), ("AC7", "b")]
+
+
+def test_the_key_is_criterion_and_building_slice_or_none_for_a_set_aside_criterion():
+    entries = parse_waiting(body(_pending("AC7", "a") + "\n" + SET_ASIDE))
+    assert [e.key for e in entries] == [("AC7", "a"), ("AC17", None)]
+
+
+def test_a_set_aside_criterion_and_a_pending_check_for_it_are_two_entries():
+    text = body(SET_ASIDE.replace("AC17", "AC7") + "\n" + _pending("AC7", "a"))
+    assert [e.key for e in parse_waiting(text)] == [("AC7", None), ("AC7", "a")]
+
+
+def test_a_repeated_key_refuses_and_names_the_criterion_and_building_slice():
+    with pytest.raises(WaitingParseError) as exc:
+        parse_waiting(body(_pending("AC7", "a") + "\n" + _pending("AC7", "b") + "\n" + _pending("AC7", "a")))
+    assert exc.value.code == "duplicate-entry"
+    assert "AC7" in str(exc.value) and "task/a" in str(exc.value) and "task/b" not in str(exc.value)
+
+
+def test_a_set_aside_criterion_given_twice_refuses_as_a_repeated_key():
+    two = SET_ASIDE + "\n" + SET_ASIDE
+    assert code_of(body(two)) == "duplicate-entry"
+    with pytest.raises(WaitingParseError) as exc:
+        parse_waiting(body(two))
+    assert "AC17" in str(exc.value) and "set aside" in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "heading", ["### Note", "# Top", "#### Deep", "###### Six", "   ### Indented", "###", "## Other"]
+)
+def test_any_unmasked_atx_heading_ends_the_section(heading):
+    entries = parse_waiting(body(PENDING, after=f"\n{heading}\n\nprose after it\n\n" + SET_ASIDE))
+    assert [e.criterion_id for e in entries] == ["AC32"]
+
+
+@pytest.mark.parametrize(
+    "line", ["    ### four spaces", "####### seven", "#nospace", "### \u200b".replace("### ", "###\u00a0")]
+)
+def test_a_line_that_is_not_an_atx_heading_does_not_end_the_section(line):
+    with pytest.raises(WaitingParseError) as exc:
+        parse_waiting(body(PENDING, after=f"\n{line}\n"))
+    assert exc.value.code in {"unmarked-prose", "bad-entry-line"}
+
+
+def test_a_heading_inside_a_fence_in_the_section_does_not_end_it():
+    entries = parse_waiting(body(PENDING + "\n```\n### Note\n```\n\n" + SET_ASIDE.replace("AC17", "AC18")))
+    assert [e.criterion_id for e in entries] == ["AC32", "AC18"]
+
+
+def test_the_shared_helpers_for_waiting_with_the_section_absent():
+    text = "# Spec\n\nprose\n\n"
+    assert not waiting.has_section(text)
+    assert waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\nprose"
+
+
+def test_the_shared_helpers_for_waiting_with_the_section_last():
+    text = body(PENDING, before="# Spec\n\nprose\n\n") + "\n\n"
+    assert waiting.has_section(text)
+    assert waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\nprose"
+
+
+def test_the_shared_helpers_for_waiting_with_the_section_mid_body():
+    text = body(PENDING, before="# Spec\n\n", after="\n## Slices\n\n- x\n")
+    assert waiting.has_section(text)
+    assert not waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\n## Slices\n\n- x"
+
+
+def test_the_shared_helpers_for_waiting_ignore_a_fenced_heading_and_refuse_a_duplicate():
+    fenced = "# Spec\n\n```\n## Waiting\n```\n"
+    assert not waiting.has_section(fenced)
+    with pytest.raises(waiting.DuplicateHeadingError):
+        waiting.has_section(body(PENDING, after="\n## Waiting\n"))
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda t, v: t.replace("pending check", v),
+        lambda t, v: t.replace("waiting:", f"{v}:"),
+        lambda t, v: t.replace("2026-11-02", v),
+    ],
+    ids=["kind", "status", "date"],
+)
+def test_vault_text_echoed_in_a_parse_refusal_is_bounded(mutate):
+    with pytest.raises(WaitingParseError) as e:
+        parse_waiting(body(mutate(PENDING, "9" + "z" * 5000)))
+    assert len(str(e.value)) < 200
