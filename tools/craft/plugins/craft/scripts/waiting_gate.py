@@ -180,12 +180,6 @@ def _section_has_masked_lines(proposed: str) -> bool:
     return any(masked[start + 1 : end])
 
 
-def _excise(body: str) -> str:
-    return markdown_section.excise_section(
-        body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE
-    )
-
-
 def _certify(prior_body: str, proposed: str) -> None:
     if _ends_inside_masked_region(markdown_section.split_body(proposed)[0]):
         raise Refusal(
@@ -234,18 +228,14 @@ def _certify(prior_body: str, proposed: str) -> None:
         if entry.key not in prior_keys:
             _check_new(entry, today)
 
-    if _excise(prior_body) != _excise(proposed):
+    if waiting.excise_section(prior_body) != waiting.excise_section(proposed):
         raise Refusal(
             "the proposed body differs from the prior outside '## Waiting' — change only "
             "that section (a first write appends it at the end of the body)",
             "change-outside-waiting",
             1,
         )
-    if not markdown_section.has_section(
-        prior_body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE
-    ) and not markdown_section.section_is_last(
-        proposed, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE
-    ):
+    if not waiting.has_section(prior_body) and not waiting.section_is_last(proposed):
         raise Refusal(
             "a new '## Waiting' section goes at the end of the body — move it below "
             "everything else",

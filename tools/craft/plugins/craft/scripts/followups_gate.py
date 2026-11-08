@@ -70,12 +70,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from covers_gate import _COMMONMARK_LINE_RE, DuplicateHeadingError  # noqa: E402
-from gate_plumbing import (  # noqa: E402
-    Refusal as _Refusal,
-    emit_refusal,
-    load_prior,
-    read_stdin,
-)
+from gate_plumbing import Refusal, emit_refusal, load_prior, read_stdin  # noqa: E402
 from followups import (  # noqa: E402
     FollowupsError,
     excise_section,
@@ -87,7 +82,7 @@ from observation_gate import _ends_inside_masked_region  # noqa: E402
 
 def _certify(prior_body: str, proposed: str) -> None:
     if _ends_inside_masked_region(_COMMONMARK_LINE_RE.split(proposed)):
-        raise _Refusal(
+        raise Refusal(
             "the proposed body ends inside an open fenced code block or HTML comment — "
             "close it so the '## Follow-ups' section is fully visible",
             "unterminated-masked-region",
@@ -96,7 +91,7 @@ def _certify(prior_body: str, proposed: str) -> None:
     try:
         prior_entries = parse_followups(prior_body)
     except (FollowupsError, DuplicateHeadingError) as e:
-        raise _Refusal(
+        raise Refusal(
             f"the prior body's own '## Follow-ups' section does not parse: {e} — "
             "repair it with a direct edit before writing again",
             "malformed-prior-section",
@@ -105,14 +100,14 @@ def _certify(prior_body: str, proposed: str) -> None:
     try:
         entries = parse_followups(proposed)
     except FollowupsError as e:
-        raise _Refusal(str(e), e.reason_code, 1)
+        raise Refusal(str(e), e.reason_code, 1)
     except DuplicateHeadingError as e:
-        raise _Refusal(f"{e} — keep a single '## Follow-ups' heading", e.reason_code, 1)
+        raise Refusal(f"{e} — keep a single '## Follow-ups' heading", e.reason_code, 1)
 
     seen: set[str] = set()
     for e in entries:
         if e.id in seen:
-            raise _Refusal(
+            raise Refusal(
                 f"entry {e.id} appears twice — ids are never reused; give the new entry "
                 "the next unused id",
                 "duplicate-entry-id",
@@ -124,7 +119,7 @@ def _certify(prior_body: str, proposed: str) -> None:
     for old in prior_entries:
         new = by_id.get(old.id)
         if new is None:
-            raise _Refusal(
+            raise Refusal(
                 f"entry {old.id} is missing from the proposed body — entries are never "
                 "removed; restore it (set 'status: dropped: <reason>' to retire it)",
                 "removed-entry",
@@ -132,14 +127,14 @@ def _certify(prior_body: str, proposed: str) -> None:
             )
         settled = old.status_kind in ("done", "dropped")
         if settled and (old.status_kind, old.status_detail) != (new.status_kind, new.status_detail):
-            raise _Refusal(
+            raise Refusal(
                 f"entry {old.id} is already '{old.status_kind}' and its status cannot "
                 "change — restore the prior status line",
                 "settled-entry-changed",
                 1,
             )
         if (old.found, old.from_) != (new.found, new.from_):
-            raise _Refusal(
+            raise Refusal(
                 f"entry {old.id} has a changed 'found:' or 'from:' — an entry's origin is "
                 "fixed; restore the prior lines",
                 "entry-origin-changed",
@@ -147,14 +142,14 @@ def _certify(prior_body: str, proposed: str) -> None:
             )
 
     if excise_section(prior_body) != excise_section(proposed):
-        raise _Refusal(
+        raise Refusal(
             "the proposed body differs from the prior outside '## Follow-ups' — change only "
             "that section (a first write appends it at the end of the body)",
             "change-outside-followups",
             1,
         )
     if not has_section(prior_body) and not section_is_last(proposed):
-        raise _Refusal(
+        raise Refusal(
             "a new '## Follow-ups' section goes at the end of the body — move it below "
             "everything else",
             "section-not-at-end",
@@ -177,7 +172,7 @@ def main(argv: list[str]) -> int:
         proposed = read_stdin()
         prior_body, revision = load_prior(args.prior)
         _certify(prior_body, proposed)
-    except _Refusal as r:
+    except Refusal as r:
         return emit_refusal("followups-gate", r)
     print(f"base: {revision}")
     return 0

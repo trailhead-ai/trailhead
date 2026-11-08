@@ -11,7 +11,6 @@ SCRIPTS_DIR = Path(__file__).parent.parent / "plugins" / "craft" / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-import markdown_section  # noqa: E402
 import waiting  # noqa: E402
 from waiting import REASON_CODES, WaitingParseError, parse_waiting  # noqa: E402
 
@@ -246,33 +245,29 @@ def test_a_heading_inside_a_fence_in_the_section_does_not_end_it():
     assert [e.criterion_id for e in entries] == ["AC32", "AC18"]
 
 
-def _w(fn, text):
-    return fn(text, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE)
-
-
 def test_the_shared_helpers_for_waiting_with_the_section_absent():
     text = "# Spec\n\nprose\n\n"
-    assert not _w(markdown_section.has_section, text)
-    assert _w(markdown_section.section_is_last, text)
-    assert _w(markdown_section.excise_section, text) == "# Spec\n\nprose"
+    assert not waiting.has_section(text)
+    assert waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\nprose"
 
 
 def test_the_shared_helpers_for_waiting_with_the_section_last():
     text = body(PENDING, before="# Spec\n\nprose\n\n") + "\n\n"
-    assert _w(markdown_section.has_section, text)
-    assert _w(markdown_section.section_is_last, text)
-    assert _w(markdown_section.excise_section, text) == "# Spec\n\nprose"
+    assert waiting.has_section(text)
+    assert waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\nprose"
 
 
 def test_the_shared_helpers_for_waiting_with_the_section_mid_body():
     text = body(PENDING, before="# Spec\n\n", after="\n## Slices\n\n- x\n")
-    assert _w(markdown_section.has_section, text)
-    assert not _w(markdown_section.section_is_last, text)
-    assert _w(markdown_section.excise_section, text) == "# Spec\n\n## Slices\n\n- x"
+    assert waiting.has_section(text)
+    assert not waiting.section_is_last(text)
+    assert waiting.excise_section(text) == "# Spec\n\n## Slices\n\n- x"
 
 
 def test_the_shared_helpers_for_waiting_ignore_a_fenced_heading_and_refuse_a_duplicate():
     fenced = "# Spec\n\n```\n## Waiting\n```\n"
-    assert not _w(markdown_section.has_section, fenced)
+    assert not waiting.has_section(fenced)
     with pytest.raises(waiting.DuplicateHeadingError):
-        _w(markdown_section.has_section, body(PENDING, after="\n## Waiting\n"))
+        waiting.has_section(body(PENDING, after="\n## Waiting\n"))

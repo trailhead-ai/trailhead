@@ -50,6 +50,12 @@ lookalike headings) apply here exactly as they do to `## Slices`.
 
 Entry text is untrusted vault data and is returned as written: callers must
 clean it before display.
+
+Besides `parse_waiting`, the section's position helpers are bound here to
+`HEADING` (each raises `DuplicateHeadingError` on a second unmasked heading):
+    excise_section(body) -> str      the body without the section
+    has_section(body) -> bool        whether the section heading is present
+    section_is_last(body) -> bool    whether only blank lines follow the section
 """
 
 from __future__ import annotations
@@ -58,6 +64,7 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date
+from functools import partial
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -94,6 +101,15 @@ STATUSES = ("waiting", "passed", "failed", "released")
 
 HEADING = "## Waiting"
 DUPLICATE_HEADING_REASON_CODE = "duplicate-heading"
+excise_section = partial(
+    markdown_section.excise_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+has_section = partial(
+    markdown_section.has_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+section_is_last = partial(
+    markdown_section.section_is_last, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
 _ENTRY_RE = re.compile(r"^- \*\*(AC[1-9][0-9]{0,8})\.\*\* (.+)$")
 _FIELD_RE = re.compile(r"^  - (check|how|changed behaviour|waits on): ?(.*)$")
 _HISTORY_RE = re.compile(r"^  - (\d\S*) (\S+): ?(.*)$")
