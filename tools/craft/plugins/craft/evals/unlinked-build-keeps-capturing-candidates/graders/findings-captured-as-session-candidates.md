@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: '(?i)- candidate [^\n]*\n[^\n]*(header|rounding|streaming|ledger)'
+pattern: '- candidate [^\n]*\n[^\n]*([Hh]eader|[Rr]ounding|[Ss]treaming|[Ll]edger)'
 target:
   source: file
   path: vault/session/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.md
