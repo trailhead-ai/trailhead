@@ -780,3 +780,69 @@ def test_a_dropped_entry_with_the_same_title_and_where_is_not_the_prior_deferral
         ("F2", "dropped"),
         ("F3", "open"),
     ]
+
+
+def _entries(seam, spec_id):
+    return followups.parse_followups(show(seam, spec_id)["body"])
+
+
+def _decision_lines(seam):
+    return [ln for ln in found_work_lines(seam.session_text()) if ln.startswith("found-work: ")]
+
+
+def test_a_deferral_with_path_line_writes_bare_paths_and_logs_the_line(seam):
+    spec_id = make_spec(seam)
+    code, out, err = go(seam, deferral(finding={"where": ["src/a.py:10", "src/b.py:3-7", "src/a.py:42"]}))
+    assert code == 0, err
+    assert [e.where for e in _entries(seam, spec_id)] == [("src/a.py", "src/b.py")]
+    assert "where: src/a.py:10, src/b.py:3-7, src/a.py:42 |" in _decision_lines(seam)[0]
+
+
+def test_a_security_deferral_names_path_line_and_carries_no_finding_text(seam):
+    spec_id = make_spec(seam)
+    doc = deferral(
+        finding={
+            "security": True,
+            "where": ["export/csv.py:10", "export/io.py:7"],
+            "what": "SQLI-DETAIL",
+            "found": "EXPLOIT-PATH",
+        }
+    )
+    code, out, err = go(seam, doc)
+    assert code == 0, err
+    (entry,) = _entries(seam, spec_id)
+    assert entry.what == "security finding — see export/csv.py:10, export/io.py:7"
+    assert entry.where == ("export/csv.py", "export/io.py")
+    body = show(seam, spec_id)["body"] + seam.session_text()
+    assert "SQLI-DETAIL" not in body and "EXPLOIT-PATH" not in body
+
+
+@pytest.mark.parametrize("where", ["../x.py:3", "x.py:abc", "x.py:"], ids=["parent-dir", "non-numeric", "empty-line"])
+def test_a_path_still_invalid_after_the_line_is_stripped_is_refused_before_any_capture(seam, where):
+    spec_id = make_spec(seam)
+    lore = RealLore(seam)
+    code, out, err = go(seam, deferral(finding={"where": [where]}), lore)
+    assert code == 1
+    assert "reason-code: path-outside-repository" in err
+    assert lore.calls_with("session", "candidate") == []
+    assert _entries(seam, spec_id) == []
+
+
+def test_retrying_a_path_line_deferral_adds_no_second_entry(seam):
+    spec_id = make_spec(seam)
+    doc = deferral(finding={"where": ["src/a.py:10"]})
+    first = go(seam, doc)
+    second = go(seam, doc)
+    assert second[0] == 0 and second[1] == first[1]
+    assert [e.id for e in _entries(seam, spec_id)] == ["F1"]
+
+
+def test_retrying_a_path_line_deferral_after_a_lost_result_returns_the_same_entry(seam):
+    spec_id = make_spec(seam)
+    doc = deferral(finding={"where": ["src/a.py:10"]})
+    code, out, _ = go(seam, doc, RealLore(seam, before=_lose_result_capture))
+    assert code == 2 and "#F1" in out
+    code, out, err = go(seam, doc)
+    assert code == 0, err
+    assert out.strip().endswith("record: spec/fixture-spec#F1 | reason-code: none")
+    assert [e.id for e in _entries(seam, spec_id)] == ["F1"]

@@ -44,9 +44,9 @@ Validation (refusals, exit 1, `reason-code:` on stderr):
     is absolute, has a `..` segment, starts with `-`, or holds NUL or a
     backslash), drop-without-reason, security-detail-without-location (a
     `security: true` finding needs a `path:line` in `where`).
-A security finding has its `what` and `found` replaced with a fixed
-"security finding — see location" before anything is scrubbed, captured or
-printed.
+A security finding has its `found` replaced with a fixed "security finding — see
+location" and its `what` with "security finding — see <where paths, line included>",
+before anything is scrubbed, captured or printed; no finding text survives.
 
 Scrub: `criterion_gate.scrub_credential_shaped` runs over every text field
 (title, what, each where path, found, reason). The scrub is a best-effort regex
@@ -62,7 +62,11 @@ and is followed by a result line):
                next `F<n>` (one above the highest id present, dropped entries
                included; `F1` when absent) is the decision line's
                `record: spec/<id>#F<n>`. The entry (`status: open`, `what`, `where`,
-               `found`, no `from`) is composed by `followups.compose_entry` (a field it
+               `found`, no `from`) keeps bare paths in `where` (a trailing
+               `:<line>` or `:<line>-<line>` is stripped, repeats dropped; the
+               decision line keeps `path:line`, and a path with a `:` left after the
+               strip is refused as `path-outside-repository` before any capture)
+               and is composed by `followups.compose_entry` (a field it
                cannot write as one faithful entry fails with the grammar's own
                reason code, such as `malformed-entry`) and appended to
                the body read then by `followups.append_entry`, creating
@@ -187,7 +191,8 @@ EXIT_WRITE_FAILED = 3
 KNOWN_DECISIONS = ("folded", "deferred", "separate", "brainstorm", "dropped")
 NEEDS_OPERATOR_HEADING = "Needs the operator:"
 NO_DECISIONS_LINE = "The build made no decisions about found work."
-SECURITY_REPLACEMENT = "security finding — see location"
+SECURITY_REPLACEMENT_PREFIX = "security finding — see"
+SECURITY_REPLACEMENT = SECURITY_REPLACEMENT_PREFIX + " location"
 LORE_TIMEOUT_SECONDS = 60
 
 _GATE = _SCRIPT_DIR / "followups_gate.py"
@@ -200,6 +205,7 @@ _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
 _CODE_RE = re.compile(r"[a-z0-9-]+")
 _LOCATION_RE = re.compile(r".+:[0-9]+(?:-[0-9]+)?")
+_LINE_SUFFIX_RE = re.compile(r":[0-9]+(?:-[0-9]+)?$")
 _ENTRY_HEADER_RE = re.compile(r"- candidate \S+ kind=(\S+) phase=\S+")
 _NEUTRALIZE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Zs"}
 
@@ -226,6 +232,11 @@ class Decision:
     @property
     def where_text(self) -> str:
         return ", ".join(self.where) or "-"
+
+    @property
+    def entry_where(self) -> tuple[str, ...]:
+        """`where` as a follow-up entry stores it: bare paths, line suffixes removed, repeats dropped."""
+        return tuple(dict.fromkeys(_LINE_SUFFIX_RE.sub("", w) for w in self.where))
 
     @property
     def why_text(self) -> str:
@@ -292,6 +303,8 @@ class _Deferral:
     def prepare(self, d: Decision, runner) -> str:
         if not _SPEC_RECORD_RE.fullmatch(d.spec):
             raise Refusal("a deferred decision needs spec: spec/<id>", "unsafe-id")
+        if any(":" in path for path in d.entry_where):
+            raise Refusal("a where path may carry only a trailing :<line> or :<line>-<line>", "path-outside-repository")
         self.prior = None
         self.entry_id = None
         self.existing = None
@@ -304,7 +317,7 @@ class _Deferral:
         except (followups.FollowupsError, followups.DuplicateHeadingError):
             return d.spec
         for e in entries:
-            if e.status_kind == "open" and e.title == d.title and set(e.where) == set(d.where):
+            if e.status_kind == "open" and e.title == d.title and set(e.where) == set(d.entry_where):
                 self.existing = f"{d.spec}#{e.id}"
                 return self.existing
         top = max((int(e.id[1:]) for e in entries), default=0)
@@ -323,7 +336,7 @@ class _Deferral:
                 self.entry_id,
                 d.title,
                 d.what or d.title,
-                d.where,
+                d.entry_where,
                 d.found or "while building " + d.parent,
             )
         except followups.FollowupsError as exc:
@@ -518,7 +531,8 @@ def build_decision(raw: str) -> Decision:
     if security:
         if not any(_LOCATION_RE.fullmatch(w) for w in where_raw):
             raise Refusal("a security finding needs a path:line location in where", "security-detail-without-location")
-        what = found = SECURITY_REPLACEMENT
+        what = f"{SECURITY_REPLACEMENT_PREFIX} {', '.join(where_raw)}"
+        found = SECURITY_REPLACEMENT
 
     return Decision(
         kind=kind,

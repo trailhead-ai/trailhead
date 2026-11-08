@@ -983,7 +983,8 @@ recorded observation — never as a silent pass.
 
 ### Phase 6: Close and completion report
 
-When the run's parent is linked to a spec, the completion report opens and ends as [Found
+When the run's parent is linked to a spec, the needs-the-operator block is the first thing in the
+completion report, with nothing before it, and the decision sentences close it, as [Found
 work](#found-work) says.
 
 **Push before close.** Before the close phase of a run writes `done`, every member repo carrying
@@ -1340,12 +1341,14 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py decide < decision.json
 
 The document is `{"decision", "parent", "spec", "finding": {"title", "what", "where", "found",
 "security"}, "reason"}`, where `decision` is one of the five names in the table, `parent` and `spec`
-are `task/<id>` and `spec/<id>`, `where` is a list of repository-relative paths, and `reason` says
-why. Set `security` to true for a security finding and give its `path:line` in `where`: the script
-then records the location only, never the finding's detail. Leave `what` and `found` out of that
-document, so a quoted credential or exploit string never reaches a command. A `folded` or `dropped`
-decision writes nothing beyond the log; make the fix only after the script exits 0. A retry after an
-error sends the same document again; the script returns the earlier result instead of writing twice.
+are `task/<id>` and `spec/<id>`, `where` is a list of repository-relative paths (give `path:line`
+where a line is known; a follow-up entry stores the bare path and the decision log keeps the line),
+and `reason` says why. Set `security` to true for a security finding and give its `path:line` in
+`where`: the script then records the location only, never the finding's detail. Leave `what` and
+`found` out of that document, so a quoted credential or exploit string never reaches a command. A
+`folded` or `dropped` decision writes nothing beyond the log; make the fix only after the script
+exits 0. A retry after an error sends the same document again; the script returns the earlier result
+instead of writing twice.
 
 Exit codes: `0` done, the result line is printed. `1` the input was refused; the `reason-code:` line
 on stderr says why (`reason-code: no-spec` when the parent has no spec link, `reason-code:
@@ -1355,16 +1358,18 @@ the controller carries into the completion report. `3` the write failed; the scr
 failure and captured the finding as a candidate, so it is not lost, and the report lists it
 (`reason-code: stale-base` means the spec changed after it was read; decide the finding again).
 
-**The completion report** opens, before the phase lines, with what needs the operator: the finding
-text from every exit `2`, carried as printed, and the needs-the-operator block of
+**The completion report** begins with what needs the operator, and nothing, no summary or preamble,
+comes before it: the finding text from every exit `2`, carried as printed, and the
+needs-the-operator block of
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<parent-name>
 ```
 
-(failed writes and the `/craft:brainstorm task/<id>` command for each brainstorm task). It ends with
-the decision sentences the same command prints, or its line saying the build made no decisions about
-found work. Carry the script's output as printed.
+(failed writes and the `/craft:brainstorm task/<id>` command for each brainstorm task). The phase
+lines follow that block, and the report closes with the decision sentences the same command prints,
+or its line saying the build made no decisions about found work. Carry the script's output as
+printed.
 
 ## Blocked-Path Write
 
