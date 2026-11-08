@@ -19,11 +19,18 @@ and the rig ends whatever it started.
 - A relay (a local attachment) is named `local/<group>/<name>` by status from another directory, is ended
   by detach with its ports freed, is found and ended across a camp copy at a path with a space, and once
   detached (as a forward is) status and detach say `nothing attached`.
+- A forward or relay that died (SIGKILL, or SIGTERM) after serving traffic leaves nothing attached: status
+  says `nothing attached` and `ls` prints no `attached:` line, whichever the kind; a second attach of the
+  same target then succeeds with no detach, starts a new process and holds each standard port, which
+  answers through it. With the process still alive the same second attach is refused instead.
+- Opt-in, against a real sshd named by `CAMP_ENV_TEST_SSH_DEST`: ssh run with camp's own forward argv, its
+  link silenced, exits within the 75 s bound and leaves every `-L` port free.
 """
 
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import signal
 import socket
@@ -550,3 +557,207 @@ def test_after_a_detach_status_and_detach_say_nothing_attached_for_either_kind(r
 
     assert (status.returncode, status.stdout) == (0, "nothing attached\n")
     assert (again.returncode, again.stdout) == (0, "nothing attached\n")
+
+
+# --- a forward or relay that died ---------------------------------------------------------------------
+
+DEATHS = [
+    pytest.param("perseus/levr/main", signal.SIGKILL, id="forward-sigkill"),
+    pytest.param("perseus/levr/main", signal.SIGTERM, id="forward-sigterm"),
+    pytest.param("local/main", signal.SIGKILL, id="relay-sigkill"),
+    pytest.param("local/main", signal.SIGTERM, id="relay-sigterm"),
+]
+KINDS = [pytest.param("perseus/levr/main", id="forward"), pytest.param("local/main", id="relay")]
+
+
+def attach_serving(rig: AttachRig, target: str):
+    """Attach *target* and carry one connection through each standard port, so each port's closing
+    side is left in TIME_WAIT; returns the environment and the attachment's one pid."""
+    env = local_rig(rig) if target.startswith("local/") else attached_rig(rig)
+    done = rig.attach(target)
+    assert done.returncode == 0, done.stderr
+    assert [ask(p) for p in env.standard_ports] == ["main-0", "main-1", "main-2"]
+    (pid,) = rig.tagged_pids()
+    return env, pid
+
+
+def end_with(rig: AttachRig, pid: int, sig: int) -> None:
+    os.kill(pid, sig)
+    wait_for(lambda: not alive(pid) and not rig.tagged_pids())
+
+
+def attached_lines(stdout: str) -> list[str]:
+    return [line for line in stdout.splitlines() if line.startswith("attached:")]
+
+
+def attached_shown(target: str) -> str:
+    return "local/levr/main" if target.startswith("local/") else target
+
+
+@pytest.mark.parametrize("target, sig", DEATHS)
+def test_status_says_nothing_attached_once_the_forward_or_relay_has_died(
+    rig: AttachRig, target: str, sig: int
+) -> None:
+    _, pid = attach_serving(rig, target)
+    end_with(rig, pid, sig)
+
+    result = rig.camp("env", "status")
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "nothing attached\n"
+
+
+@pytest.mark.parametrize("target, sig", DEATHS)
+def test_ls_prints_no_attached_line_once_the_forward_or_relay_has_died(
+    rig: AttachRig, target: str, sig: int
+) -> None:
+    _, pid = attach_serving(rig, target)
+    assert attached_lines(rig.camp("env", "ls").stdout) != []
+    end_with(rig, pid, sig)
+
+    result = rig.camp("env", "ls")
+
+    assert result.returncode == 0, result.stderr
+    assert attached_lines(result.stdout) == []
+
+
+@pytest.mark.parametrize("target, sig", DEATHS)
+def test_a_fresh_attach_of_the_same_target_needs_no_detach_and_holds_the_standard_ports(
+    rig: AttachRig, target: str, sig: int
+) -> None:
+    env, pid = attach_serving(rig, target)
+    end_with(rig, pid, sig)
+
+    done = rig.attach(target)
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == (
+        f"attached {attached_shown(target)} on ports {ports_of(env)}; its health was not checked\n"
+    )
+    (fresh,) = rig.tagged_pids()
+    assert fresh != pid
+    assert [ask(p) for p in env.standard_ports] == ["main-0", "main-1", "main-2"]
+    assert rig.camp("env", "status").stdout == (
+        f"attached: {attached_shown(target)} on ports {ports_of(env)}; its health was not checked\n"
+    )
+
+
+@pytest.mark.parametrize("target", KINDS)
+def test_with_the_forward_or_relay_alive_the_same_second_attach_is_refused(rig: AttachRig, target: str) -> None:
+    env, pid = attach_serving(rig, target)
+
+    done = rig.attach(target)
+
+    note = " (a forward whose link has died ends on its own within about 45s)" if target != "local/main" else ""
+    assert done.returncode == 1
+    assert done.stderr == (
+        f"camp env: {attached_shown(target)} is attached; run camp env detach before attaching another{note}\n"
+    )
+    assert rig.tagged_pids() == [pid]
+    assert [ask(p) for p in env.standard_ports] == ["main-0", "main-1", "main-2"]
+
+
+# --- real ssh: a silent link ends the forward on its own ------------------------------------------------
+
+SSH_DEST_ENV = "CAMP_ENV_TEST_SSH_DEST"
+SSH_CONFIG_ENV = "CAMP_ENV_TEST_SSH_CONFIG"
+SILENT_LINK_BOUND_SECONDS = 75.0
+
+#: A ProxyCommand that carries ssh's bytes to the sshd until the flag file appears, then keeps reading
+#: both sides and throws what it reads away without closing either: a link that has gone silent.
+BLACK_HOLE_RELAY = """\
+import os, socket, sys, threading
+host, port, flag = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+sock = socket.create_connection((host, port))
+def pump(read, write):
+    while True:
+        data = read()
+        if not data:
+            os._exit(0)
+        if not os.path.exists(flag):
+            write(data)
+def to_stdout(data):
+    while data:
+        data = data[os.write(1, data):]
+threading.Thread(target=pump, args=(lambda: sock.recv(65536), to_stdout), daemon=True).start()
+pump(lambda: os.read(0, 65536), sock.sendall)
+"""
+
+
+def processes_mentioning(needle: str) -> list[int]:
+    out = subprocess.run(["ps", "-axwwo", "pid=,command="], capture_output=True, text=True, check=True).stdout
+    found = []
+    for line in out.splitlines():
+        pid, command = line.split(None, 1)
+        if needle in command and int(pid) != os.getpid():
+            found.append(int(pid))
+    return found
+
+
+def test_a_forward_over_a_silent_link_exits_on_its_keep_alive_and_frees_every_port(tmp_path: Path) -> None:
+    """Run camp's own forward argv under real ssh, through a relay that goes silent, and time its exit.
+
+    Opt-in: set ``CAMP_ENV_TEST_SSH_DEST`` to an ssh destination that accepts key login without a
+    prompt and whose host key ssh already trusts (a ``user@host``, or a ``Host`` alias from the file
+    named by ``CAMP_ENV_TEST_SSH_CONFIG``, which is then passed as ``ssh -F``). The test is skipped
+    when the variable is unset or the destination does not answer. ssh must give up on the silent
+    link within 75 s, leaving every ``-L`` port free; an ssh that keeps the forward past that, as
+    one run with the keep-alive options dropped or loosened does, fails.
+    """
+    from camp.host.config import Host
+    from camp.host.transport import local_forward_argv
+
+    dest = os.environ.get(SSH_DEST_ENV)
+    if not dest:
+        pytest.skip(
+            f"set {SSH_DEST_ENV} to an ssh destination (user@host, or a Host alias in the file named by "
+            f"{SSH_CONFIG_ENV}) that accepts key login without a prompt"
+        )
+    config = os.environ.get(SSH_CONFIG_ENV)
+    config_args = ["-F", config] if config else []
+    reach = subprocess.run(
+        ["ssh", *config_args, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "--", dest, "true"],
+        capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL,
+    )
+    if reach.returncode != 0:
+        pytest.skip(f"{SSH_DEST_ENV}={dest} did not answer a key login: {reach.stderr.strip()}")
+
+    relay = tmp_path / "relay.py"
+    relay.write_text(BLACK_HOLE_RELAY)
+    flag = tmp_path / "silent"
+    log = tmp_path / "ssh.log"
+    tag = "camp-env-t" + tmp_path.name.replace("_", "").replace("-", "")[-8:] + ":silentlink:perseus/levr/main"
+    ports = free_ports(4)
+    links = [(ports[0], ports[2]), (ports[1], ports[3])]
+    argv = local_forward_argv(Host(ssh=dest, camp_bin="camp"), links, tag, 10.0)
+    proxy = f"ProxyCommand={shlex.quote(sys.executable)} {shlex.quote(str(relay))} %h %p {shlex.quote(str(flag))}"
+    argv[1:1] = [*config_args, "-E", str(log), "-o", proxy]
+    forwarders: list[int] = []
+    try:
+        with open(tmp_path / "ssh.err", "w") as err:
+            started = subprocess.run(
+                argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err, timeout=60
+            )
+        assert started.returncode == 0, (tmp_path / "ssh.err").read_text() + log.read_text()
+        wait_for(lambda: processes_mentioning(f"Tag={tag}"))
+        forwarders = processes_mentioning(f"Tag={tag}")
+        assert len(forwarders) == 1, forwarders
+        assert not any(port_is_free(p) for p in ports[:2]), "the forward holds its -L ports before the link goes silent"
+
+        flag.touch()
+        silenced = time.monotonic()
+        deadline = silenced + SILENT_LINK_BOUND_SECONDS
+        while processes_mentioning(f"Tag={tag}") and time.monotonic() < deadline:
+            time.sleep(0.5)
+
+        exited_after = time.monotonic() - silenced
+        assert not processes_mentioning(f"Tag={tag}"), (
+            f"ssh still forwarding {SILENT_LINK_BOUND_SECONDS:g}s after its link went silent\n" + log.read_text()
+        )
+        assert all(port_is_free(p) for p in ports[:2]), f"a -L port stayed held after ssh exited ({exited_after:.0f}s)"
+    finally:
+        for pid in forwarders + processes_mentioning(str(relay)):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
