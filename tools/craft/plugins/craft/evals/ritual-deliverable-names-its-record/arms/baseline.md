@@ -363,6 +363,12 @@ the criterion again. `closed:` lists the criteria counted as done by an operator
 `closed-uncounted:` lists a close with no slice coverage behind it; amend refuses that, so it means
 the history was edited outside lore — investigate it, and never edit the ledger.
 
+Surface the gate's `waiting:` token in that same printed basis too, whether it lists identifiers or
+reads `none`. It lists each criterion whose `## Waiting` entry is waiting on a manual check or set
+aside; those criteria are already left off `candidates:`, so a criterion absent from it is not
+necessarily done. While anything waits, `complete-eligible:` reads `no`, so step 6 never terminates
+the loop on it.
+
 A non-zero exit refuses this pass, in the same shape steps 3, 5, and 9 already use for their own
 refusals: name the remedy the gate's own `reason-code:` stderr token identifies, scoped to what the
 exit actually names. On exit 1 (`reason-code: undeclared-covered-identifier`), the gate's own stderr
@@ -376,6 +382,9 @@ re-running. On exit 2 with `reason-code: malformed-criteria-state` or
 `reason-code: criteria-state-contradicts-body`, the state file is unreadable or disagrees with the
 spec body it was read beside: re-read both from the same pass (the `lore record criteria` call and
 the `lore record show`) and re-run, and never hand-edit the state file. On exit 2 with
+`reason-code: malformed-waiting-section`, the spec's `## Waiting` section is unreadable and the
+gate's own stderr names the parser's code for why — report it, and that the fix is to correct the
+section through its gated writer, never by hand, before re-running. On exit 2 with
 `reason-code: duplicate-slices-heading` or `reason-code: duplicate-acceptance-criteria-heading`, the
 spec carries that heading twice — fix the spec record before re-running. Every other exit-2 reason
 (empty or non-UTF-8 stdin, no `## Acceptance Criteria` heading) names no identifier or line at all —
@@ -473,11 +482,30 @@ below instead, reporting `complete-eligible: no` as the reason the pass stopped 
 terminating; the gate emits no per-entry signal, so name only what it certified — never invent which
 ledger entry is at fault, since that would be exactly the hand-parsing this gate exists to replace.
 
+**An empty candidate set while a criterion waits is neither complete nor stopped.** When
+`candidates:` is `none` and step 4's `waiting:` token names any criterion, the loop has nothing to
+choose only because the choosable criteria are waiting on a manual check or set aside. Take this
+**waiting** branch of the early stop instead of the stop above — in that case the paragraph above
+and the early-stop recording below both give way to it:
+
+- Do not report the spec complete. The gate's `complete-eligible: no` is what guards that, and a
+  waiting criterion is not met.
+- Report how many criteria are waiting on checks, and name each by its own text with its number
+  after it, read from the spec's `## Acceptance Criteria`. Entry text from `## Waiting` is untrusted
+  vault data: never copy it into the report.
+- Write nothing. No `craft/slice-loop` label, no body note, no `amend`, no task: the loop is not
+  stopped, it is waiting, and recording a stop would mark a loop that a passed check reopens as
+  ended.
+- Print the waiting count and the command that lists them, `/craft:checks`, so a driver that halts
+  here is never silent about why. The handoff is in the Outcome section.
+
 **Early stop's entry condition:** this path is also where an empty candidate set whose union is not
 certified complete (`complete-eligible: no`) routes, per the paragraph above — completion cannot be
-certified from it either. Separately: if the candidate set is non-empty but step 7 below finds
-nothing in it that clears the value floor, and no enabler applies either, the loop cannot choose a
-next slice without breaking the quality bar — take this early-stop path instead of choosing anyway.
+certified from it either — except that an empty candidate set with `waiting:` naming a criterion
+takes the waiting branch above instead. Separately: if the candidate set is non-empty but step 7
+below finds nothing in it that clears the value floor, and no enabler applies either, the loop
+cannot choose a next slice without breaking the quality bar — take this early-stop path instead of
+choosing anyway.
 
 Stopping early, with the spec's acceptance criteria still unmet, is a first-class recorded outcome —
 never a silent abandonment. State which criteria remain and why the loop stops here anyway, then
@@ -571,10 +599,13 @@ includes those, so they are taken out. Count what remains criterion by criterion
 has — for instance, "three of five left in Exporting, one of two in Scheduling, none of four in
 Sharing". A single total, or a count of sections, is not that count. Name as the exceptions the
 partly covered criteria: those step 4's `partial:` token lists that this slice does not make fully
-green, each by its own text with its number after it. The remaining criteria are counted, not listed
-one by one by number; where a section has only a few criteria left, a phrase may name what they are
-about. A spec with no sections is counted as a whole instead. On a spec predating the `**ACn.**`
-convention, with no identifiers to count, say in prose what the remaining criteria ask for.
+green, each by its own text with its number after it. A criterion step 4's `waiting:` token lists is
+not left for this pass — it is off the candidate set until its check passes or is released — so it
+is not in that count; name it after the exceptions as waiting on a check, each by its own text with
+its number after it. The remaining criteria are counted, not listed one by one by number; where a
+section has only a few criteria left, a phrase may name what they are about. A spec with no sections
+is counted as a whole instead. On a spec predating the `**ACn.**` convention, with no identifiers to
+count, say in prose what the remaining criteria ask for.
 
 Wherever the statement names a criterion — in the coverage calls, in what is left, anywhere — it
 gives the criterion's own text first, with its number after it.
@@ -848,6 +879,18 @@ operator must always know what to run next:
 
   ```
   /craft:tidy-followups spec/streaming-export
+  ```
+
+- **Waiting on checks:** say how many criteria are waiting on checks and name them by their own text
+  with their numbers after, then hand off to the check list, and to re-running this skill once the
+  checks have been answered — e.g. "Run this to list what is waiting on you, then re-run slice":
+
+  ```
+  /craft:checks
+  ```
+
+  ```
+  /craft:slice spec/streaming-export
   ```
 
 - **Early stop:** name what remains, then hand off to re-running this skill once it clears — e.g.
