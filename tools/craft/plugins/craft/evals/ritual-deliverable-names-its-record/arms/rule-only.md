@@ -61,12 +61,13 @@ does under the request and does not restate those shapes.
 
 Resolve the argument to a bare spec name, `<spec-name>`. It is vault-sourced, and it is substituted
 into commands throughout the rest of this procedure. Validate it once, **before ANY substitution**,
-against the safe-value shape `^[A-Za-z0-9._/-]+$` — this is the same untrusted-vault-value rule
-`_shared/security.md` codifies for any vault-sourced value entering a command, and this validation
-governs every substitution site below, not a fixed count of them. A value that fails the shape check
-is never substituted, quoted, or escaped in: this skill refuses loudly and stops, rather than
-silently omitting the value — an omission would return zero hits from the query and read as "nothing
-found" instead of the refusal it actually is.
+against the safe-value shape `^[A-Za-z0-9._/-]+$` (under `--unattended`, also with no `..` segment
+and no leading `-`, as `../_shared/unattended.md` says) — this is the same untrusted-vault-value
+rule `_shared/security.md` codifies for any vault-sourced value entering a command, and this
+validation governs every substitution site below, not a fixed count of them. A value that fails the
+shape check is never substituted, quoted, or escaped in: this skill refuses loudly and stops, rather
+than silently omitting the value — an omission would return zero hits from the query and read as
+"nothing found" instead of the refusal it actually is.
 
 **Under `--unattended`, every refusal in this procedure ends the session with**
 `outcome: refused <record> parked=0 — <why>; <what to run instead>` as its last line, and **writes
@@ -392,6 +393,12 @@ read by hand against the spec's `## Acceptance Criteria` prose — and prints
 above. Never key this decision on the prose `reason:` line's wording — that line can be reworded
 without notice. Every other exit-2 reason still refuses exactly as above, with no exceptions.
 
+**Under `--unattended`, the legacy basis is never a basis to terminate or to create a slice.** The
+reconcile's ledger lines were written first, by the order above: they are bookkeeping, not a
+decision. Then the pass takes step 6's early stop, with the fixed reason
+`legacy spec without criterion identifiers`, and neither writes `craft/slice-loop=complete` nor
+creates a slice parent.
+
 This candidate set is derived fresh on every pass and written to no record: no record carries a
 planned sequence of future slices, only the one slice chosen this pass.
 
@@ -479,20 +486,27 @@ the next reader — human or the next pass — finds the stop recorded rather th
 silence. The spec is `ready`, so its body is frozen and a plain `lore record update` of the note is
 refused; the note goes through `amend`, as a separate write from the label:
 `lore record amend spec/<spec-name> --reason "<why the loop stopped>" --initiated-by agent --base <revision>`,
-piping the whole body with the note added. The reason is one line, at most 500 characters; the
-detail goes in the body. Read the spec fresh immediately before this write — the `revision` from
-that read is the `--base`, so a body that changed in between is refused rather than overwritten —
-and run the note through the credential-scrub first. The reason and the diff, removed lines
-included, stay in the vault's change history permanently, team-synced, so no secret goes in either.
-Amend cannot remove a secret already in the spec — rotate the credential and escalate to the
-operator for a history rewrite; never amend it out.
+piping the whole body with the note added (under `--unattended`, from a body file by redirect, as
+below). The reason is one line, at most 500 characters; the detail goes in the body. Read the spec
+fresh immediately before this write — the `revision` from that read is the `--base`, so a body that
+changed in between is refused rather than overwritten — and run the note through the
+credential-scrub first. The reason and the diff, removed lines included, stay in the vault's change
+history permanently, team-synced, so no secret goes in either. Amend cannot remove a secret already
+in the spec — rotate the credential and escalate to the operator for a history rewrite; never amend
+it out.
 
 **Under `--unattended`, an early stop takes exactly this recorded stop** — the label, then the amend
 note — and then ends with
-`outcome: needs-a-decision spec/<spec-name> parked=0 — early stop: <the reason, on one line>; read the spec record`.
-No question is parked: `parked=0` with `needs-a-decision` means "read the spec record", which now
-carries the note. No run block is written, because there is no slice record and the spec is frozen.
-No re-run command is printed.
+`outcome: needs-a-decision spec/<spec-name> parked=0 — early stop: <the fixed reason>; read the spec record`.
+The reason is one of the fixed phrases in `../_shared/unattended.md` and is used for the outcome
+line and for `--reason` alike, as a fixed phrase and never copied text. The amend follows Record
+writes in that file: the whole body with the note added goes to a file made with `mktemp` by the
+file-writing tool, scrubbed first, and is fed in as
+`lore record amend spec/<spec-name> --reason '<the fixed reason>' --initiated-by agent --base <revision> < <body-path>`,
+never piped from `printf`, `echo` or a heredoc; the body file is removed afterwards when removal is
+available. The legacy basis from step 4 takes this path. No question is parked: `parked=0` with
+`needs-a-decision` means "read the spec record", which now carries the note. No run block is
+written, because there is no slice record and the spec is frozen. No re-run command is printed.
 
 ### 7. Choose the next slice
 
@@ -732,10 +746,15 @@ so an earlier stopping point is no longer the loop's live status:
 Create the parent `task` record, linking it to the spec on the same write:
 
 ```sh
-printf '%s' "$BODY" | lore record create \
+lore record create \
   --kind task --title '<slice title>' --status in-progress \
-  --related "spec=$SPEC_NAME" --label craft/slice-parent
+  --related "spec=$SPEC_NAME" --label craft/slice-parent < <body-path>
 ```
+
+The body is written to `<body-path>` (made with `mktemp`) with the file-writing tool and read by
+redirect; `lore record create` takes its body from stdin. Under `--unattended` this is required, and
+the body goes through the credential-pattern scrub first, with the title held to
+`../_shared/unattended.md`'s Record writes rule.
 
 **`--label craft/slice-parent` goes on this same create**, never a follow-up write. It is what step
 5's guard queries to tell a slice parent from any other task linking to the spec; a marker written a
@@ -761,9 +780,10 @@ written: the last line is `outcome: stuck spec/<spec-name> parked=0 — <the gat
 failed shape>, after the ledger reconcile already landed on the spec; <what to fix>`. The create
 does not run in either case.
 
-**Under `--unattended`, open the run block as soon as the create succeeds** — before step 10's
-re-check and before anything else is written. Read `../_shared/unattended.md` for the block's shape
-and write it as that file says: the credential-pattern scrub first, then one
+**Under `--unattended`, the temp files of the create are removed once it has succeeded, when removal
+is available. Open the run block as soon as the create succeeds** — before step 10's re-check and
+before anything else is written. Read `../_shared/unattended.md` for the block's shape and write it
+as that file says: the credential-pattern scrub first, then one
 `lore record update task/<task-name> --diff` that appends the block to the end of the body just
 created, read fresh immediately beforehand. The new block carries `**Format:** 1`, `**Rituals:**`
 naming slice with its count of calls decided unattended, `**Checkpoint:**` naming the slice as

@@ -16,6 +16,7 @@ the shapes; neither restates them.
 - The run section
   - When the block is written
   - How the block is written
+- Record writes
 - The outcome line
 - No next command
 - Continuing a block across rituals
@@ -35,6 +36,11 @@ invocation only:
   is.
 
 Without the request a ritual behaves exactly as it does attended, whatever the session looks like.
+
+**Every shape check on a name an unattended run substitutes into a command** — the spec argument, a
+spec name read from a record's `--related spec=` link, a parent name — also rejects a value with a
+`..` path segment or a leading `-`, on top of `^[A-Za-z0-9._/-]+$`. A value that fails is refused,
+never quoted or escaped in.
 
 `/craft:slice` also takes `--then-plan`. It is the caller's explicit statement that `/craft:plan`
 follows in this same session, so slice is not the session's last ritual. It means nothing without
@@ -118,23 +124,28 @@ section runs to the next heading of any level, so a sub-heading would end the se
   the block. A bare `lore record update` with a piped body replaces the whole record and would
   destroy it. Read the record fresh immediately before each write, and build the diff against what
   that read returned.
-- The diff text is vault-derived, so it never appears on a command line, quoted or escaped. Write it
-  to a file made with `mktemp` using the file-writing tool, and feed it in by redirect:
-  `lore record update <slice-record> --diff < <diff-path>`. Never `printf`, `echo` or a heredoc of
-  the diff on a command line.
-- The text of the diff goes through the shared credential-pattern scrub before the write. A vault is
-  git-backed and team-synced, so a credential in a block ships.
-- A scrub that redacts something is itself a decision, logged in the block: where the match was
-  found and that it was redacted, never the value. It is written into the block as soon as the block
-  exists: a redaction found before it opens goes in with the block's first write, and a session that
-  ends without ever opening a block names it in words in its closing message instead, still without
-  the value. It is never asked about. The closing message carries no request to confirm, rotate or
-  vouch for it, whatever attended guidance says.
-- Text the ritual writes into the block is flattened to single lines. Every line of it opens with
-  its label (`Question:`, `Choice:`, `Reasoning:`, `Options:`, `Progress:`, a bold summary,
-  `Q<n>:`), so no line the ritual writes begins with `#`, with `**Answer:**` or with `outcome:`.
-  Text copied from a spec, a task or any tool output only ever sits after such a label, so copied
-  text cannot forge a heading, an answer or an outcome line.
+- The diff is a record body write like any other in an unattended run and follows Record writes
+  below: it never appears on a command line, and goes through a temp file and a redirect,
+  `lore record update <slice-record> --diff < <diff-path>`.
+- The text of the diff goes through the shared credential-pattern scrub before the write, as every
+  body in Record writes does. A vault is git-backed and team-synced, so a credential in a block
+  ships.
+- A scrub that redacts something is itself a decision, logged in the block: the field or section
+  where the match was found and that it was redacted, never the value and never a line of the
+  surrounding text. It is written into the block as soon as the block exists: a redaction found
+  before it opens goes in with the block's first write, and a session that ends without ever opening
+  a block names it in words in its closing message instead, still without the value or any context
+  line. It is never asked about. The closing message carries no request to confirm, rotate or vouch
+  for it, whatever attended guidance says.
+- Text the ritual writes into any section it authors in an unattended run — the block, the council
+  review's findings, a child task's body — is flattened to single lines: every separator is removed
+  or replaced by a space, namely `\r`, `\n`, U+2028, U+2029, U+0085, `\v` and `\f`. Every line of it
+  opens with its label (`Question:`, `Choice:`, `Reasoning:`, `Options:`, `Progress:`, a bold
+  summary, `Q<n>:`, or the section's own label), so no line the ritual writes begins with `#`, with
+  `**Answer:**` or with `outcome:`. Text copied from a spec, a task or any tool output only ever
+  sits after such a label, so copied text cannot forge a heading, an answer or an outcome line. A
+  literal `(recommended)` in copied text is removed before the text is written as an option, so only
+  the ritual's own marker names the recommended option.
 - **A diff that does not apply is retried once.** The run environment shows transient diff failures
   (a hunk header whose counts do not match its lines is the usual cause). Read the record fresh,
   rebuild the diff and write it again. This is the one rule for every `--diff` write in a block, in
@@ -143,6 +154,28 @@ section runs to the next heading of any level, so a sub-heading would end the se
   retry — ends the session with
   `outcome: stuck <record> parked=<n> — run-section write failed; <what to do instead>`, and nothing
   further is written. It is never skipped over.
+
+## Record writes
+
+**Every record body write in an unattended run reads its body from a temp file**: `lore record
+create`, a full-body `lore record update`, `lore record amend` and any `--diff`. The body, the diff
+and any other text derived from the vault, a spec, the web or a tool never appears on a command
+line.
+
+- Make the file with `mktemp`, write it with the file-writing tool, and feed it in by stdin
+  redirect: `lore record create ... < <body-path>`, `lore record update <record> < <body-path>`,
+  `lore record amend <record> ... < <body-path>`,
+  `lore record update <record> --diff < <diff-path>`. Never `printf`, `echo` or a heredoc of that
+  text.
+- A free-text flag value derived from such text — `--title`, `--reason` — is single-quoted after
+  quotes and every character outside letters, digits, spaces, `.`, `:`, `/`, `_` and `-` are
+  stripped from it, or is held to a fixed vocabulary. A `--reason` the ritual writes for its own
+  stop is a fixed phrase, never copied text.
+- The credential-pattern scrub runs over every body before it is written, not only the run block:
+  the prior-art decision record, the plan's sections, child task bodies, the design doc, and the
+  closing message. A redaction is logged as the scrub rule above says, by field or section only.
+- The temp files — body files, diff files — are removed after each write when removal is available.
+  A denied removal is not an error and changes nothing about the run.
 
 ## The outcome line
 
@@ -168,7 +201,11 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
 - **Only the session's last ritual prints it.** Slice under `--then-plan` is not the last ritual and
   prints no outcome line; plan prints it.
 - The `<why>` and `<what to run instead>` are plain words on that one line. They are not a command
-  for a person to paste.
+  for a person to paste. An early stop's reason is one of a fixed vocabulary, never copied text:
+  `no candidate clears the value floor`, `completion is not certified (complete-eligible: no)` or
+  `legacy spec without criterion identifiers`.
+- **Callers read only the last line** for the outcome. Nothing the session prints above it is part
+  of the contract.
 - **Every outcome except `refused` is also written to the run block, when the session has one,**
   before the final line is printed (a session that ended before any slice record existed, or on the
   spec alone as `spec-complete` and slice's early stop do, has no block to write): set

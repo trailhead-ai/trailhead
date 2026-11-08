@@ -56,12 +56,14 @@ before anything is written, and before the run block is opened. Take the argumen
 flag. It is honoured only when all of these hold; any other case is a refusal:
 
 1. It is a single value, and its name (a leading `task/` removed) matches the safe-value shape
-   `^[A-Za-z0-9._/-]+$` (`_shared/security.md`). A topic, free text, a missing argument or a value
-   that fails the shape never resolves.
+   `^[A-Za-z0-9._/-]+$` (`_shared/security.md`) and has no `..` segment and no leading `-`. A topic,
+   free text, a missing argument or a value that fails the shape never resolves.
 2. It resolves to an existing `task` record that is a slice parent: it carries the label
    `craft/slice-parent`, its status is not `done`, `dropped` or `superseded`, and it is linked to a
    spec with `--related spec=`.
-3. The linked spec exists and its status is `ready`.
+3. The linked spec exists and its status is `ready`. The spec name is read from the task's
+   `--related spec=` link and checked up front with the same shape as the argument, before any
+   substitution of it into a command; a name that fails the check is a refusal.
 
 **A refusal ends the session with**
 `outcome: refused <kind/name> parked=0 — <why>; <what to run instead>` **and writes nothing**: no
@@ -92,16 +94,19 @@ attended.
 - **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, read
   fresh immediately beforehand, after the credential scrub (`_shared/security.md`) has run over the
   text to be written. The same scrub runs before step 8's full-body parent write and before every
-  later write to the parent. When an update reports that the diff did not apply, read the record
-  fresh and rebuild the diff once, as `_shared/unattended.md` says; a write that still fails, or
-  fails for any other reason, ends the session with
+  later write to the parent. Each of those bodies and diffs reaches `lore` from a temp file by stdin
+  redirect, never on a command line, and the file is removed after the write when removal is
+  available (`_shared/unattended.md`, Record writes). When an update reports that the diff did not
+  apply, read the record fresh and rebuild the diff once, as `_shared/unattended.md` says; a write
+  that still fails, or fails for any other reason, ends the session with
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
   `_shared/unattended.md` says. Plan parks at exactly three stops, each marked *parked* below: a
   Clarify question whose answer would change the spec, a council Critical whose disposition would be
-  `bounced-back-to-spec`, and a security-lens Critical the plan cannot close by editing itself.
-  Every other stop marked *reserved* below still ends `stuck`.
+  `bounced-back-to-spec`, and a Critical that concerns security, credentials or data loss or that
+  the plan cannot close by editing itself. Every other stop marked *reserved* below still ends
+  `stuck`.
 - **A `stuck` exit is written to the block too.** Every `stuck` exit below, other than a failed
   run-section write, first sets `**Outcome:** stuck` and brings `**Checkpoint:**` up to date with
   one more edit confined to the block (read fresh, scrubbed), and only then prints the `outcome:
@@ -111,12 +116,12 @@ attended.
   saying what choosing it costs, the recommended option marked with the literal word `(recommended)`
   at the end of that one option and no other text in the brackets (the reason goes in what it
   costs), and the run's progress so far, in the shape `_shared/unattended.md` fixes. Flatten the
-  text to single lines. Then set the block's `**Checkpoint:**`, `**Rituals:**` count and
-  `**Outcome:** needs-a-decision`, and end the session with
-  `outcome: needs-a-decision task/<parent-name> parked=<n>` and nothing after it. Parking edits
-  neither the spec nor the slice record's status, writes no `**Answer:**` line, asks nothing and
-  prints no `/craft:execute` or `/craft:brainstorm` command. Nothing more is attempted once a
-  question is parked: working on past it is out of scope in this version.
+  text to single lines, removing a literal `(recommended)` from any copied text first. Then set the
+  block's `**Checkpoint:**`, `**Rituals:**` count and `**Outcome:** needs-a-decision`, and end the
+  session with `outcome: needs-a-decision task/<parent-name> parked=<n>` and nothing after it.
+  Parking edits neither the spec nor the slice record's status, writes no `**Answer:**` line, asks
+  nothing and prints no `/craft:execute` or `/craft:brainstorm` command. Nothing more is attempted
+  once a question is parked: working on past it is out of scope in this version.
 - **The end.** The write that sets `**Outcome:** plan-ready` also brings the `**Rituals:**` count of
   plan's decisions up to date. The session's last line is
   `outcome: plan-ready task/<parent-name> parked=0` and nothing follows it. No `/craft:execute`
@@ -294,9 +299,16 @@ is assigned, never after.
    ```sh
    TITLE="<capability>: <candidate>"
    SLUG="<capability-slug>"
-   printf '%s' "$BODY" | lore record create --kind decision --title "$TITLE" \
-     --label "craft/prior-art=$SLUG"
+   lore record create --kind decision --title "$TITLE" \
+     --label "craft/prior-art=$SLUG" < <body-path>
    ```
+
+The body is written to `<body-path>` (made with `mktemp`) with the file-writing tool and read by
+redirect, never put on a command line; `lore record create` takes its body from stdin. **Under
+`--unattended` this is required**: the body is built from web search text, so it goes through the
+credential-pattern scrub first and then follows `_shared/unattended.md`'s Record writes rule, the
+temp file removed after the write when removal is available. The title keeps only the characters the
+rule above allows and is single-quoted there.
 
 Apply the same discipline to the cross-link: assign the sibling's id to a variable and quote it at
 the point of use, never interpolated into the command text —
@@ -390,27 +402,49 @@ vault-sourced values, so validate it against the safe-value shape `^[A-Za-z0-9._
 (`_shared/security.md`'s untrusted-input rule) before substitution — a failing value refuses loudly
 rather than being silently omitted; that validation governs this label's value.
 
+**Under `--unattended`, run these checks before the label is written, and before anything below
+touches git.** The path is rejected when it has a `..` segment, a leading `/` or a leading `-`, or
+when it does not match that shape; `<repo>` is rejected unless it is an existing directory that is a
+git work tree (`git -C <repo> rev-parse --is-inside-work-tree` prints `true`) and does not start
+with `-`. A rejected value is never substituted, quoted or escaped in, and nothing further is
+written: the run ends `outcome: stuck task/<parent-name> parked=<n> — the design-doc path or
+repository failed validation; fix the parent's design-doc target`, with the fixed reason and no
+copied text. That is `stuck` rather than `refused` because the run block, written earlier, has
+already landed (`_shared/unattended.md`: a stop that comes after a write is not a refusal). The run
+block gets `**Outcome:** stuck` and `**Checkpoint:**` first.
+
 Once the label is recorded, commit the design doc in the plan's target repository — the camp member
 this plan builds against (the same repository the label's path is relative to; in vanilla usage, the
 current repo). Run every git command below as `git -C <repo>` so the workspace root is never the cwd
 that decides. The commit lands on the branch that repository is on; when that is the repository's
-default branch, ask the user before committing (under `--unattended`, do not ask: commit it locally
-as written below and log the call as a decision — the doc is a plan artifact that execute carries
-forward, and nothing is pushed). Execute carries this commit onto the task branch it cuts, so the
-doc reaches the build whichever branch it lands on here. First the skip test: when
-`git -C <repo> ls-files --error-unmatch <path>` exits 0 and
+default branch, ask the user before committing (under `--unattended`, never commit on the default
+branch: it is not asked and not logged as a decision to commit there — see below). Execute carries
+this commit onto the task branch it cuts, so the doc reaches the build whichever branch it lands on
+here.
+
+**Under `--unattended`, a run on the repository's default branch commits nothing.** The default
+branch is the one `git -C <repo> symbolic-ref --short refs/remotes/origin/HEAD` names with its
+`origin/` prefix removed, or `main` or `master` when that is unset. When
+`git -C <repo> branch --show-current` equals it, the run ends
+`outcome: stuck task/<parent-name> parked=<n> — the design doc would land on the default branch; move the plan to a task branch`
+with nothing further written (no label, no stage, no commit; the run block gets `**Outcome:**
+stuck` and `**Checkpoint:**` first). It is `stuck` and not `refused` because the run block and the
+design doc written before this step have already landed, as the run section says; run these checks
+before the label write above so that no label lands either. Nothing is ever pushed. First the skip
+test: when `git -C <repo> ls-files --error-unmatch -- <path>` exits 0 and
 `git -C <repo> diff --quiet HEAD -- <path>` exits 0, the file is tracked and unchanged at HEAD and
 there is nothing to commit — skip the rest. Otherwise stage exactly that validated path
-(`git -C <repo> add <path>`, never `git add -A`) and commit only that path, so anything else already
-staged is left where it is:
-`git -C <repo> commit -S --only -m "docs(<repo-name>): design doc for <parent-name>" -- <path>`,
-where `<repo-name>` is the target repository's name. A tracked-and-modified file takes the same
-path. When the commit itself fails — no signing key, a rejecting hook — stop and report the error:
-the doc stays uncommitted, and execute's preflight will refuse to build until it is committed, so
-the failure is fixed here, not worked around there (under `--unattended`, a failed commit or a path
-that fails the shape check ends `outcome: stuck task/<parent-name> parked=<n> — <what failed>; <what
-to do instead>` with nothing pushed; the run block gets `**Outcome:** stuck` and `**Checkpoint:**`,
-and nothing further is written). After this step, `git -C <repo> status` shows nothing for the
+(`git -C <repo> add -- <path>`, never `git add -A`) and commit only that path, so anything else
+already staged is left where it is:
+`git -C <repo> commit -S --only -m "docs(<repo-name>): design doc for <parent-name>" -- <path>` (the
+`--` before the path is required in every one of these git commands), where `<repo-name>` is the
+target repository's name. A tracked-and-modified file takes the same path. When the commit itself
+fails — no signing key, a rejecting hook — stop and report the error: the doc stays uncommitted, and
+execute's preflight will refuse to build until it is committed, so the failure is fixed here, not
+worked around there (under `--unattended`, a failed commit or a path that fails the shape check ends
+`outcome: stuck task/<parent-name> parked=<n> — <what failed>; <what to do
+instead>` with nothing pushed; the run block gets `**Outcome:** stuck` and `**Checkpoint:**`, and
+nothing further is written). After this step, `git -C <repo> status` shows nothing for the
 design-doc path and the path is tracked at HEAD.
 
 When the parent carries no `## Enumerated states` section, this step does nothing — no document, no
@@ -484,12 +518,13 @@ that existing parent, exactly as the topic-rooted path does below.
 
 1. **Write the parent task.**
    - *Topic-rooted:* render craft's parent-task body template
-     (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then pipe it in —
-     `printf '%s' "$BODY" | lore record create --kind task --title "<topic>" --status ready`. This
-     stores the plan as a searchable lore `task` record, linkable from session notes and future
-     planning. Before creating it, check whether the resolved spec already has an open slice parent
-     — validate `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any
-     vault-sourced value entering a command before it is substituted into this query:
+     (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then feed it in —
+     `lore record create --kind task --title '<topic>' --status ready < <body-path>`, the body
+     written to a `mktemp` file with the file-writing tool and read by redirect. This stores the
+     plan as a searchable lore `task` record, linkable from session notes and future planning.
+     Before creating it, check whether the resolved spec already has an open slice parent — validate
+     `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any vault-sourced
+     value entering a command before it is substituted into this query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
      rather than about any task linked to the spec — a follow-up or a coordination task carries
@@ -509,16 +544,25 @@ that existing parent, exactly as the topic-rooted path does below.
      `craft/design-doc` label already on the parent from an earlier interrupted pass meaningful.
      Read the record fresh immediately before this write so the run block is current, and, under
      `--unattended`, run the credential scrub over the combined body first (the plan text is vault
-     material that ships). Render the same template sections, append them after the preserved
-     sections, then write the combined body — never `lore record create`, which would produce the
-     second parent this path exists to avoid.
+     material that ships), write the combined body to a `mktemp` file with the file-writing tool and
+     feed it in by redirect, `lore record update <parent-name> < <body-path>`, as
+     `_shared/unattended.md`'s Record writes rule says, and remove the file afterwards when removal
+     is available. Render the same template sections, append them after the preserved sections, then
+     write the combined body — never `lore record create`, which would produce the second parent
+     this path exists to avoid.
 2. **Create each child task.** Render craft's child-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the parent
-   (the slice parent, on the slice-rooted path) and ordered after any task it builds on — `printf
-   '%s' "$TASK_BODY" | lore record create --kind task --title "<task topic>" --status ready --parent
-   <parent-name> --depends-on <earlier-task-name>`. Create children at `ready`; the `depends-on`
-   edges — not the status — gate which are runnable, so a later task stays un-runnable until its
-   dependencies are `done`. Omit `--depends-on` for tasks with no predecessor.
+   (the slice parent, on the slice-rooted path) and ordered after any task it builds on — `lore
+   record create --kind task --title '<task topic>' --status ready --parent <parent-name>
+   --depends-on <earlier-task-name> < <body-path>`, the body written to a `mktemp` file with the
+   file-writing tool and read by redirect. Under `--unattended` this is required: the child body is
+   plan text derived from vault and web material, so it is scrubbed first, flattened to labelled
+   single lines where it is a ritual-written section (`_shared/unattended.md`), and the task topic
+   in `--title` is single-quoted after quotes and every character outside letters, digits, spaces,
+   `.`, `:`, `/`, `_` and `-` are stripped from it; the file is removed after each create when
+   removal is available. Create children at `ready`; the `depends-on` edges — not the status — gate
+   which are runnable, so a later task stays un-runnable until its dependencies are `done`. Omit
+   `--depends-on` for tasks with no predecessor.
 3. **Verify the graph** with `lore task graph <parent-name>` — confirm the containment subtree,
    `depends-on` edges, and per-task statuses match your task ordering before handing off.
 
@@ -684,26 +728,26 @@ For each Critical finding, the user assigns one of:
 
 Important and Minor findings do NOT require dispositions — they are logged for the audit trail only.
 
-**Under `--unattended`, the disposition of a Critical whose resolution does not change the spec is
-decided on your own recommendation**, not put to the operator: `resolved` (edit the plan inline to
-address it, which is the default when the plan can close it), `accepted-as-risk: <reason>` or
-`disputed: <reason>`. Log each as a decision (the finding, the disposition, the reasoning) in the
-run block as it is made, and mark it in the persisted `## Council Review` line with
-`(decided unattended)` after the disposition, as in
-`` — *Disposition:* `resolved` (decided unattended) ``. **A Critical raised by the security lens is
-only ever `resolved` in the plan — never accepted as risk and never disputed unattended.** When it
-cannot be closed by editing the plan, it is a *parked* stop, like a finding that changes the spec
-(`bounced-back-to-spec`): never decided. Park it as the Unattended request section says, with the
-Critical as the question, options such as changing the spec or the plan's scope, accepting the risk
-or reshaping the slice (each with what it costs), and your recommendation marked. In the persisted
-`## Council Review`, a Critical that changes the spec is recorded with the disposition
-`bounced-back-to-spec`; a security-lens Critical the plan cannot close is left undispositioned.
-Neither is marked `(decided unattended)`. Write that `## Council Review` section (Persistence,
-below) first, then park: the section is the last write before the question. Edit neither the spec
-nor the slice's status, and end on `outcome: needs-a-decision task/<parent-name> parked=<n>`. A
-non-zero exit of `maturity_bars.py` still refuses the dispatch, and under `--unattended` ends
-`outcome: stuck task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the
-remedy in words>`, after setting `**Outcome:** stuck` and `**Checkpoint:**` on the run block.
+**Under `--unattended`, a council Critical is only ever `resolved` or parked.** A Critical whose
+resolution does not change the spec is `resolved` when the plan can close it by an edit, and that
+decision is logged in the run block as it is made (the finding, the plan edit that closes it, the
+reasoning) and marked in the persisted `## Council Review` line with `(decided unattended)` after
+the disposition, as in `` — *Disposition:* `resolved` (decided unattended) ``. **`accepted-as-risk`
+and `disputed` are never used unattended, for any lens.** A Critical whose content concerns
+security, credentials or data loss is parked even when an edit seems to close it, whichever lens
+raised it. A Critical the plan cannot close by editing itself is a *parked* stop too, like a finding
+that changes the spec (`bounced-back-to-spec`): never decided. Park it as the Unattended request
+section says, with the Critical as the question, options such as changing the spec or the plan's
+scope, accepting the risk or reshaping the slice (each with what it costs), and your recommendation
+marked. In the persisted `## Council Review`, a Critical that changes the spec is recorded with the
+disposition `bounced-back-to-spec`; any other parked Critical is left undispositioned. The findings
+the section carries are flattened to labelled single lines, as `_shared/unattended.md` says. Neither
+is marked `(decided unattended)`. Write that `## Council Review` section (Persistence, below) first,
+then park: the section is the last write before the question. Edit neither the spec nor the slice's
+status, and end on `outcome: needs-a-decision task/<parent-name> parked=<n>`. A non-zero exit of
+`maturity_bars.py` still refuses the dispatch, and under `--unattended` ends `outcome: stuck
+task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the remedy in
+words>`, after setting `**Outcome:** stuck` and `**Checkpoint:**` on the run block.
 
 **Every write to the parent after step 8 is a `lore record update <parent-name> --diff` edit**, read
 fresh immediately beforehand and confined to the lines it changes: this step's `## Council Review`
