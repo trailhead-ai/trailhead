@@ -189,9 +189,9 @@ def test_ac9_non_task_refusal_does_not_offer_a_reopen_route(tmp_path):
 
 
 @pytest.mark.parametrize("kind,status,passes,not_passes", [
-    ("spec", "ready", ["## Slices", "## Follow-ups"], ["## Driver run"]),
-    ("task", "done", ["## Driver run"], ["## Slices", "## Follow-ups"]),
-    ("decision", "active", [], ["## Slices", "## Follow-ups", "## Driver run"]),
+    ("spec", "ready", ["## Slices", "## Follow-ups", "## Waiting"], ["## Driver run"]),
+    ("task", "done", ["## Driver run"], ["## Slices", "## Follow-ups", "## Waiting"]),
+    ("decision", "active", [], ["## Slices", "## Follow-ups", "## Waiting", "## Driver run"]),
 ])
 def test_ac9_refusal_names_only_the_kinds_own_plain_update_section(
     tmp_path, kind, status, passes, not_passes
@@ -622,3 +622,17 @@ def test_terminator_only_difference_names_the_terminator(tmp_path):
     rid = _create(vault, state, "decision", "active", body="# T\n\nline one\n")
     r = _update(vault, state, rid, body="# T\n\nline one")
     assert "authored-content line 3 differs only in its line terminator" in r.stderr
+
+
+def test_ready_spec_waiting_plus_authored_change_is_refused_naming_every_pipeline_section(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "spec", "ready", body=SPEC)
+    before = _snapshot(vault)
+    mixed = SPEC.replace("intro text", "intro TEXT") + "\n## Waiting\n\n- entry\n"
+
+    r = _update(vault, state, rid, mixed, ["--base", _revision(vault, state, rid)])
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert "## Slices" in r.stderr and "## Follow-ups" in r.stderr and "## Waiting" in r.stderr
+    assert _snapshot(vault) == before

@@ -23,7 +23,8 @@ for _path in (str(SCRIPTS_DIR), str(_LORE_PLUGIN)):
 
 import candidate_set  # noqa: E402
 import covers_gate  # noqa: E402
-import followups  # noqa: E402
+import markdown_section  # noqa: E402
+import waiting  # noqa: E402
 from lore.record import sections  # noqa: E402
 
 CORPUS = {
@@ -74,12 +75,19 @@ CORPUS = {
 }
 
 
-HEADINGS = ("## Slices", "## Follow-ups")
+HEADINGS = ("## Slices", "## Follow-ups", "## Waiting")
 
 
 def _body_for(heading: str, body: str) -> str:
     if heading == "## Slices":
         return body
+    if heading == "## Waiting":
+        return (
+            body.replace("Sliſes", "Waitıng")
+            .replace("SLICES", "WAITING")
+            .replace("slices", "waiting")
+            .replace("Slices", "Waiting")
+        )
     return (
         body.replace("Sliſes", "Follow-upſ")
         .replace("SLICES", "FOLLOW-UPS")
@@ -100,7 +108,7 @@ def _craft_start(heading: str, body: str) -> int | None:
             candidate_set._DUPLICATE_SLICES_HEADING_REASON_CODE,
         )
         return None if after is None else after - 1
-    located = followups._section_range(lines, masked)
+    located = markdown_section.section_range(lines, masked, heading, "duplicate")
     return None if located is None else located[0]
 
 
@@ -139,3 +147,47 @@ def _craft_outcome(heading: str, body: str) -> str:
 )
 def test_craft_finder_reaches_each_outcome_the_parity_corpus_relies_on(heading, name, outcome):
     assert _craft_outcome(heading, _body_for(heading, CORPUS[name])) == outcome
+
+
+END_CORPUS = {
+    "h3": "## {h}\n- a\n### Note\nafter\n",
+    "h1": "## {h}\n- a\n# Top\nafter\n",
+    "h6": "## {h}\n- a\n###### Deep\nafter\n",
+    "h2": "## {h}\n- a\n## Other\nafter\n",
+    "indented-3": "## {h}\n- a\n   ### Note\nafter\n",
+    "indented-4": "## {h}\n- a\n    ### Note\nafter\n",
+    "bare-hashes": "## {h}\n- a\n###\nafter\n",
+    "seven-hashes": "## {h}\n- a\n####### x\nafter\n",
+    "no-space": "## {h}\n- a\n#tag\nafter\n",
+    "fenced": "## {h}\n```\n### Note\n```\nafter\n",
+    "commented": "## {h}\n<!--\n### Note\n-->\nafter\n",
+    "unterminated-fence": "## {h}\n```\n### Note\n",
+    "crlf": "## {h}\r\n- a\r\n### Note\r\nafter\r\n",
+    "to-eof": "## {h}\n- a\n",
+}
+
+
+@pytest.mark.parametrize("heading", ["## Follow-ups", "## Waiting"])
+@pytest.mark.parametrize("name", sorted(END_CORPUS))
+def test_lore_and_craft_agree_where_the_section_ends(heading, name):
+    body = END_CORPUS[name].replace("{h}", heading[3:])
+    lines = covers_gate._COMMONMARK_LINE_RE.split(body)
+    craft_start, craft_end = markdown_section.section_range(
+        lines, covers_gate._mask_fenced_lines(lines), heading, "duplicate"
+    )
+    lore_lines = sections._split_lines(body)
+    (lore_start,) = _lore_starts(heading, body)
+    assert craft_start == lore_start
+    # craft's split yields a trailing empty line after a final newline; lore's does not
+    lore_end = sections._section_end(lore_lines, sections._mask(lore_lines), lore_start)
+    assert min(craft_end, len(lore_lines)) == lore_end
+
+
+def test_a_heading_inside_the_waiting_section_leaves_what_follows_authored_in_both():
+    entry = "- **AC7.** set aside\n  - waits on: x\n  - 2026-11-03 waiting: p\n"
+    body = f"# S\n\n## Waiting\n\n{entry}\n### Note\n\nauthored text\n"
+    kept = sections.authored_content("spec", body)
+    assert "authored text" in kept and "### Note" in kept and "AC7" not in kept
+    assert [e.criterion_id for e in waiting.parse_waiting(body)] == ["AC7"]
+    after = body + "\n- **AC8.** set aside\n  - waits on: y\n  - 2026-11-03 waiting: p\n"
+    assert [e.criterion_id for e in waiting.parse_waiting(after)] == ["AC7"]

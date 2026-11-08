@@ -31,8 +31,8 @@ behaviour is False. Any field not belonging to the entry's kind is refused.
 
 The section starts after the one unmasked `## Waiting` heading (found with
 covers_gate's `_find_unique_heading`, case-insensitive, anchored at line start,
-exactly as `## Slices` is) and ends at the next unmasked line starting with
-`## `. Fenced blocks and HTML comments are masked with covers_gate's
+exactly as `## Slices` is) and ends at the next unmasked ATX heading of any
+level (matching lore's section end). Fenced blocks and HTML comments are masked with covers_gate's
 `_mask_fenced_lines` and contribute no entry; a `## Waiting` heading inside a
 fence is not the section. A body with no heading has zero entries.
 
@@ -43,12 +43,19 @@ comment opened in the section and never closed (it would hide the rest of the
 section); an unmarked prose line; a malformed entry or field line; an entry
 with no history; an unknown kind or status; a malformed date; a field the kind
 requires missing, or one it forbids present, or one given twice; a bad
-`changed behaviour`; a bad building slice; a criterion id given twice.
+`changed behaviour`; a bad building slice; an entry whose key -- criterion id and building slice, or none for a
+set-aside criterion -- is given twice.
 Limits inherited from covers_gate's masker (setext headings, lenient fences,
 lookalike headings) apply here exactly as they do to `## Slices`.
 
 Entry text is untrusted vault data and is returned as written: callers must
 clean it before display.
+
+Besides `parse_waiting`, the section's position helpers are bound here to
+`HEADING` (each raises `DuplicateHeadingError` on a second unmasked heading):
+    excise_section(body) -> str      the body without the section
+    has_section(body) -> bool        whether the section heading is present
+    section_is_last(body) -> bool    whether only blank lines follow the section
 """
 
 from __future__ import annotations
@@ -57,18 +64,15 @@ import re
 import sys
 from dataclasses import dataclass
 from datetime import date
+from functools import partial
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from covers_gate import (  # noqa: E402
-    _COMMONMARK_LINE_RE,
-    DuplicateHeadingError,
-    _find_unique_heading,
-    _mask_fenced_lines,
-)
+import markdown_section  # noqa: E402
+from covers_gate import DuplicateHeadingError, _mask_fenced_lines  # noqa: E402
 
 REASON_CODES = frozenset(
     {
@@ -95,8 +99,17 @@ REASON_CODES = frozenset(
 KINDS = ("pending check", "set aside")
 STATUSES = ("waiting", "passed", "failed", "released")
 
-_HEADING = "## Waiting"
-_HEADING_RE = re.compile(r"^## Waiting$", re.IGNORECASE)
+HEADING = "## Waiting"
+DUPLICATE_HEADING_REASON_CODE = "duplicate-heading"
+excise_section = partial(
+    markdown_section.excise_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+has_section = partial(
+    markdown_section.has_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+section_is_last = partial(
+    markdown_section.section_is_last, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
 _ENTRY_RE = re.compile(r"^- \*\*(AC[1-9][0-9]{0,8})\.\*\* (.+)$")
 _FIELD_RE = re.compile(r"^  - (check|how|changed behaviour|waits on): ?(.*)$")
 _HISTORY_RE = re.compile(r"^  - (\d\S*) (\S+): ?(.*)$")
@@ -124,6 +137,11 @@ class WaitingEntry:
     history: tuple[tuple[str, str, str], ...]
 
     @property
+    def key(self) -> tuple[str, str | None]:
+        """(criterion id, bare building slice id or None for a set-aside criterion)."""
+        return self.criterion_id, self.building_slice
+
+    @property
     def status(self) -> str:
         return self.history[-1][1]
 
@@ -146,13 +164,8 @@ def _valid_date(text: str) -> bool:
     return True
 
 
-def _section_lines(lines: list[str], masked: list[bool], start: int) -> list[str]:
-    end = len(lines)
-    for i in range(start, len(lines)):
-        if not masked[i] and lines[i].startswith("## "):
-            end = i
-            break
-    section = lines[start:end]
+def _section_lines(lines: list[str], start: int, end: int) -> list[str]:
+    section = lines[start + 1 : end]
     # A sentinel line is masked only if a fence or comment is still open.
     section_masked = _mask_fenced_lines(section + ["sentinel"])
     if section_masked[-1]:
@@ -217,7 +230,7 @@ class _Draft:
 def _open_entry(criterion_id: str, rest: str) -> _Draft:
     kind, sep, slice_text = rest.strip().partition(_KIND_SEPARATOR)
     if kind not in KINDS:
-        raise WaitingParseError("unknown-kind", f"{criterion_id}: unknown kind {kind!r}")
+        raise WaitingParseError("unknown-kind", f"{criterion_id}: unknown kind {kind[:60]!r}")
     if kind == "set aside":
         if sep:
             raise WaitingParseError(
@@ -234,30 +247,33 @@ def _open_entry(criterion_id: str, rest: str) -> _Draft:
 
 
 def parse_waiting(body: str) -> list[WaitingEntry]:
-    lines = _COMMONMARK_LINE_RE.split(body)
-    masked = _mask_fenced_lines(lines)
+    lines, masked = markdown_section.split_body(body)
     try:
-        start = _find_unique_heading(
-            lines, masked, _HEADING_RE, _HEADING, "duplicate-heading"
+        located = markdown_section.section_range(
+            lines, masked, HEADING, DUPLICATE_HEADING_REASON_CODE
         )
     except DuplicateHeadingError as exc:
         raise WaitingParseError("duplicate-heading", str(exc)) from exc
-    if start is None:
+    if located is None:
         return []
 
     drafts: list[_Draft] = []
-    seen: set[str] = set()
-    for raw in _section_lines(lines, masked, start):
+    seen: set[tuple[str, str | None]] = set()
+    for raw in _section_lines(lines, *located):
         line = raw.rstrip()
         if not line.strip():
             continue
         entry = _ENTRY_RE.match(line)
         if entry:
-            cid = entry.group(1)
-            if cid in seen:
-                raise WaitingParseError("duplicate-entry", f"{cid} appears twice")
-            seen.add(cid)
-            drafts.append(_open_entry(cid, entry.group(2)))
+            draft = _open_entry(entry.group(1), entry.group(2))
+            key = (draft.criterion_id, draft.building_slice)
+            if key in seen:
+                where = f"under task/{key[1]}" if key[1] else "set aside"
+                raise WaitingParseError(
+                    "duplicate-entry", f"{key[0]} appears twice, {where}"
+                )
+            seen.add(key)
+            drafts.append(draft)
             continue
         if not line.startswith((" ", "-")):
             raise WaitingParseError("unmarked-prose", f"unmarked line: {line[:60]!r}")
@@ -285,11 +301,11 @@ def parse_waiting(body: str) -> list[WaitingEntry]:
             when, status, words = hist.groups()
             if not _valid_date(when):
                 raise WaitingParseError(
-                    "malformed-date", f"{draft.criterion_id}: bad date {when!r}"
+                    "malformed-date", f"{draft.criterion_id}: bad date {when[:60]!r}"
                 )
             if status not in STATUSES:
                 raise WaitingParseError(
-                    "unknown-status", f"{draft.criterion_id}: unknown status {status!r}"
+                    "unknown-status", f"{draft.criterion_id}: unknown status {status[:60]!r}"
                 )
             draft.history.append((when, status, words.strip()))
             continue

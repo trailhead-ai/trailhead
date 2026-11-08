@@ -1980,7 +1980,7 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
 # from being met by hiding flags (``argparse.SUPPRESS``) rather than by writing
 # the prose once.
 
-_HELP_BYTE_BUDGETS = {"record create": 3300, "record update": 3650}
+_HELP_BYTE_BUDGETS = {"record create": 3300, "record update": 3720}
 
 # Every long option rendered in each verb's ``--help`` today. A trim may
 # reword a help string but may not remove a flag from the listing.
