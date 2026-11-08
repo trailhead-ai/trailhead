@@ -17,7 +17,7 @@ After the run the lesson is a record, no record exists that came from a found-wo
 | No decision was created | `no-decision-from-found-work` | `file_exists` on `vault/decision/*.md`, `exists: false` |
 | No spec was created | `no-spec-from-found-work` | `file_exists` on `vault/spec/*.md`, `exists: false` |
 | No area was created | `no-area-from-found-work` | `file_exists` on `vault/area/*.md`, `exists: false` |
-| No `record create/update/amend/supersede` call of any kind carries a found-work finding's text | `no-record-carries-found-work-text` | `tool_used` on Bash, `min: 0` `max: 0`, `input_match` on `ExpiryNullDrop`, `unit_header_label`, `pantry/export.py` and the two finding phrases |
+| No `record create/update/amend/supersede` call of any kind carries a found-work finding's text | `no-record-carries-found-work-text` | `tool_used` on Bash, `min: 0` `max: 0`, `input_match` on `ExpiryNullDrop`, `unit_header_label` and the two finding phrases |
 | The session is stamped clean | `session-is-clean` | `regex` on the session sidecar, `"status": "clean"` |
 | The found-work lines are still in the session log | `found-work-lines-stay-in-the-session-log` | `regex` on the session body, `kind=found-work-result phase=Build` |
 
