@@ -96,8 +96,21 @@ attended.
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
-  `_shared/unattended.md` says. Plan parks nothing in this version: the stops marked *reserved*
-  below are the ones that will.
+  `_shared/unattended.md` says. Plan parks at exactly three stops, each marked *parked* below: a
+  Clarify question whose answer would change the spec, a council Critical whose disposition would be
+  `bounced-back-to-spec`, and a security-lens Critical the plan cannot close by editing itself.
+  Every other stop marked *reserved* below still ends `stuck`.
+- **How a stop is parked.** Write the question into the run block as its own edit (read fresh,
+  scrubbed, confined to the block): a `Q<n>` entry with the question, two or more options each
+  saying what choosing it costs, the recommended option marked with the literal word `(recommended)`
+  at the end of that one option and no other text in the brackets (the reason goes in what it
+  costs), and the run's progress so far, in the shape `_shared/unattended.md` fixes. Flatten the
+  text to single lines. Then set the block's `**Checkpoint:**`, `**Rituals:**` count and
+  `**Outcome:** needs-a-decision`, and end the session with
+  `outcome: needs-a-decision task/<parent-name> parked=<n>` and nothing after it. Parking edits
+  neither the spec nor the slice record's status, writes no `**Answer:**` line, asks nothing and
+  prints no `/craft:execute` or `/craft:brainstorm` command. Nothing more is attempted once a
+  question is parked: working on past it is out of scope in this version.
 - **The end.** The write that sets `**Outcome:** plan-ready` also brings the `**Rituals:**` count of
   plan's decisions up to date. The session's last line is
   `outcome: plan-ready task/<parent-name> parked=0` and nothing follows it. No `/craft:execute`
@@ -192,10 +205,14 @@ question, the choice, the reasoning) before moving on. Nothing is put to the ope
 code lives, which repository or package the work goes in, what a term the spec leaves undefined
 should mean for this slice, which library, which names — all of these are task-level and are decided
 and logged, never a reason to stop. **Only a question that would change the spec's objectives,
-acceptance criteria or non-goals is the bounce-back, and it is a *reserved* stop — it is never
-decided unattended.** Write nothing further and end with `outcome: stuck task/<parent-name> parked=0
-— a question that changes the spec is not decided unattended; read the plan's question and take it
-to the spec`.
+acceptance criteria or non-goals is the bounce-back, and it is a *parked* stop — it is never decided
+unattended.** Park it as the Unattended request section says: the question is whether the spec
+should change, the options are the ways to settle that (for instance, change the spec so the slice's
+claim holds; reshape or drop the slice so the spec stands), each with what it costs, with the option
+you would recommend marked. Progress says what the run finished before the stop (the exploration and
+the block) and that planning stopped there. Do not plan around the conflict, do not reinterpret the
+spec's wording so the question goes away, and do not ask the user. End on
+`outcome: needs-a-decision task/<parent-name> parked=<n>`.
 
 ### 3. Propose Approaches
 
@@ -667,12 +684,16 @@ run block as it is made, and mark it in the persisted `## Council Review` line w
 `(decided unattended)` after the disposition, as in
 `` — *Disposition:* `resolved` (decided unattended) ``. **A Critical raised by the security lens is
 only ever `resolved` in the plan — never accepted as risk and never disputed unattended.** When it
-cannot be closed by editing the plan, it is a *reserved* stop, like a finding that changes the spec
-(`bounced-back-to-spec`): never decided. Write nothing further, leave the Critical undispositioned,
-and end with `outcome: stuck task/<parent-name> parked=0 — a council Critical that is not decided
-unattended is open; read the plan's Council Review and decide it by hand`. A non-zero exit of
-`maturity_bars.py` still refuses the dispatch, and under `--unattended` ends `outcome: stuck
-task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the remedy in words>`.
+cannot be closed by editing the plan, it is a *parked* stop, like a finding that changes the spec
+(`bounced-back-to-spec`): never decided. Park it as the Unattended request section says, with the
+Critical as the question, options such as changing the spec or the plan's scope, accepting the risk
+or reshaping the slice (each with what it costs), and your recommendation marked. In the persisted
+`## Council Review`, a Critical that changes the spec is recorded with the disposition
+`bounced-back-to-spec`; a security-lens Critical the plan cannot close is left undispositioned.
+Neither is marked `(decided unattended)`. Edit neither the spec nor the slice's status, and end on
+`outcome: needs-a-decision task/<parent-name> parked=<n>`. A non-zero exit of `maturity_bars.py`
+still refuses the dispatch, and under `--unattended` ends `outcome: stuck task/<parent-name>
+parked=<n> — council dispatch refused (<reason-code>); <the remedy in words>`.
 
 **Persistence:** append a `## Council Review` section to the parent task's body capturing all
 findings and the disposition for each Critical. Each Critical disposition is exactly one of

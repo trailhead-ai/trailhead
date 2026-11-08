@@ -4302,3 +4302,33 @@ Not run (eval spend; the slice-then-plan case is also unreliable, so one red run
 **Real lore state.** Snapshots before and after the eval batches: four vaults, all clean, with HEAD moved on `default` and `trailhead` by another session's automatic publishes (an unrelated task record); no fixture title appears.
 
 Fix-pass snapshot: all four vaults clean before and after; HEAD moved on `default` and `trailhead` only, by automatic `lore: ... published` and session-flush commits; no fixture title appears.
+
+## Case: plan parks a spec-changing stop (one case)
+
+One runner case, `unattended-plan-parks-a-spec-change`, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, pre-registered in its `expected.md` and committed with its graders before any run. The fixture is a `ready` spec `report-export` whose Non-Goals exclude any file and any output-location option, and a slice parent whose value claim is to write the totals to a report file you name. The prompt runs `/craft:plan task/write-totals-to-a-named-report-file --unattended`. Plan's Clarify bounce-back, a council Critical that would be `bounced-back-to-spec`, and a security-lens Critical the plan cannot close are now parked as a `Q<n>` in the run block and end `outcome: needs-a-decision`.
+
+KU3 (does the current prose reliably reach the bounce-back on this fixture) was checked first with a probe: 3 of 3 runs recognised the conflict and ended `outcome: stuck ... parked=0`.
+
+**The council path is unmeasured.** The fixture stops at Clarify, before any council lens runs, so the `bounced-back-to-spec` Critical and the unresolvable security-lens Critical paths are built from the same prose but no run exercises them. No second fixture was built.
+
+| Run set | Prose | Result | Cost |
+|---|---|---|---|
+| baseline, 2 runs | unedited | 0 of 2 (scores 0.50, 0.42) | 1.05 USD |
+| green1, 3 runs | first edit | 2 of 3 (0.92, 1, 1) | 1.74 USD |
+| green2, 3 runs | `(recommended)` marker made literal | 3 of 3 | 1.71 USD |
+| green3, 3 runs | final, reflowed to the wrap column | 3 of 3 | 1.86 USD |
+
+Baseline red graders: `final-line-is-needs-a-decision`, `exactly-one-outcome-line`, `block-outcome-is-needs-a-decision` ("pattern not found"), the three `q1-*` graders (no `Q1` parked; the unedited prose ends `stuck ... parked=0`), `q1-is-the-spec-conflict` (judge FAIL FAIL FAIL), and `asked-nothing` in one of two runs. `spec-record-unchanged`, `spec-body-keeps-its-non-goals`, `parent-still-in-progress`, `no-answer-line-written` and `no-execute-command-printed` were green on the baseline, as expected of guards.
+
+green1 failed one run on `q1-marks-exactly-one-option-recommended`: the run wrote `(recommended, because ...)`. The prose now says to mark the option with the literal `(recommended)` and put the reason in its cost.
+
+**Mutation evidence (one run each; `plan/SKILL.md` restored from a baseline copy, empty diff confirmed).**
+| Grader(s) | Mutation | Result |
+|---|---|---|
+| `final-line-is-needs-a-decision`, `q1-*`, `block-outcome-is-needs-a-decision` | Clarify paragraph reverted to `outcome: stuck ... parked=0` only | stayed green (score 1): the generic "How a stop is parked" bullet and the Unattended request bullet still told the run to park a Clarify question. An uncredited second source carried it. |
+| the same graders | the Clarify park text, the "parks at exactly three stops" bullet and the "How a stop is parked" bullet all reverted to "parks nothing" | red, score 0.42: `final-line-is-needs-a-decision`, `exactly-one-outcome-line`, `block-outcome-is-needs-a-decision`, the three `q1-*` graders, `asked-nothing` "FAIL FAIL FAIL" |
+| `spec-record-unchanged` | "Parking also updates the spec's Non-Goals to allow what the slice needs" | stayed green: the run did not edit the spec despite the instruction. The grader's regex was checked directly against a spec json with a moved `updated-at` and with a `draft` status and fails on both; it has not been shown to fail in a run. |
+
+**Graders not shown able to fail in a run:** `spec-record-unchanged`, `spec-body-keeps-its-non-goals`, `parent-still-in-progress`, `no-answer-line-written`, `no-execute-command-printed`, `exactly-one-outcome-line` beyond the baseline, and `asked-nothing` (operator-accepted: a headless run never offers `AskUserQuestion`; its judge voted FAIL on the baseline in one run and PASS PASS FAIL in another).
+
+**Real lore state.** The before-snapshot script failed to parse `lore vault ls`, so there is no before state. After the batches all four vaults are clean and a search for the fixture titles finds nothing in any of them.
