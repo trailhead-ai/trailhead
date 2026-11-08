@@ -256,9 +256,11 @@ def _validate_hunk_counts(hunk: _Hunk) -> None:
             f"Hunk {hunk.header!r}: parsed {old_seen}/{hunk.old_count} old lines "
             f"and {new_seen}/{hunk.new_count} new lines — the diff appears to use "
             f"the concatenated-no-newline format difflib emits when both the "
-            f"deleted and inserted lines lack a trailing newline. This format is "
-            f"ambiguous and cannot be applied safely. Regenerate the diff from "
-            f"content with a trailing newline."
+            f"deleted and inserted lines lack a trailing newline, or a context "
+            f"line is missing (a context line must begin with a space; an empty "
+            f"line inside a hunk counts as a blank context line only while the "
+            f"hunk is still open). Such a diff is ambiguous and cannot be applied "
+            f"safely. Regenerate the diff from content with a trailing newline."
         )
 
 
@@ -269,7 +271,11 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     line ending (``\\n`` / ``\\r\\n`` / none). File-header (``--- ``/``+++ ``) lines
     before the first hunk and between hunks are skipped; inside a hunk the header
     counts decide where the body ends, so a body line beginning ``-- `` or ``++ ``
-    is kept. Raises :class:`DiffFormatError` on the concatenated-no-newline
+    is kept. While a hunk is still open (parsed old or new count below the
+    header's), a line that is empty apart from its line ending is a blank context
+    line whose leading space was dropped, and is read as ``" "`` plus that line
+    ending, as GNU patch does; once the counts are met an empty line is ignored.
+    Raises :class:`DiffFormatError` on the concatenated-no-newline
     edge case (via :func:`_validate_hunk_counts`) and on a bare hunk header — see
     :class:`DiffFormatError` for both triggers.
     """
@@ -279,9 +285,11 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
     # O(1) per line. Only outside an open hunk does a ``--- `` / ``+++ `` line
     # mean a file header; inside one it is a body line beginning ``-- `` / ``++ ``.
     old_seen = new_seen = 0
+    prev_raw = "\n"
 
     for lineno, raw in enumerate(diff.splitlines(keepends=True), start=1):
         raw_stripped = raw.rstrip("\r\n")
+        was_prev_raw, prev_raw = prev_raw, raw
         m = _HUNK_HEADER_RE.match(raw_stripped)
         if m:
             if current is not None:
@@ -322,6 +330,11 @@ def _parse_hunks(diff: str) -> list[_Hunk]:
                 if current.lines:
                     current.lines[-1] = current.lines[-1].removesuffix("\n")
                 continue
+            if hunk_is_open and not raw_stripped and was_prev_raw.endswith(("\n", "\r")):
+                # A "\n" straight after a line that ended in another
+                # splitlines() boundary (\x0c, \x85, \u2028 ...) is that
+                # line's own "\n", not a blank line of its own.
+                raw = " " + raw
             if raw and raw[0] in (" ", "-", "+"):
                 current.lines.append(raw)
                 if raw[0] != "+":
