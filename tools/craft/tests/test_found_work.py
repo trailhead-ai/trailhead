@@ -336,7 +336,7 @@ def test_a_line_break_in_the_title_cannot_forge_a_second_decision_line(capsys, s
 def test_the_field_separator_in_any_field_is_escaped(capsys):
     lore = FakeLore()
     doc = decision(
-        finding={"title": "a | b", "where": ["src/a | b.py"]},
+        finding={"title": "a | b", "where": ["src/a.py"]},
         reason="r | parent: task/Y",
     )
     code, _, err = run_decide(doc, lore, capsys)
@@ -384,8 +384,14 @@ def test_a_security_finding_replaced_text_reaches_the_failure_print(capsys):
 
 @pytest.mark.parametrize(
     "path",
-    ["/etc/passwd", "../x.py", "a/../b.py", "-rf", "a\x00b.py", "a\\b.py"],
-    ids=["absolute", "dotdot-leading", "dotdot-inner", "leading-dash", "nul", "backslash"],
+    [
+        "/etc/passwd", "../x.py", "a/../b.py", "-rf", "a\x00b.py", "a\\b.py",
+        " /etc/passwd", "\t-rf", "\u200b../secret", "\u200b/etc/passwd", "src/a.py ", "a|b.py",
+    ],
+    ids=[
+        "absolute", "dotdot-leading", "dotdot-inner", "leading-dash", "nul", "backslash",
+        "padded-absolute", "tab-dash", "zero-width-dotdot", "zero-width-absolute", "trailing-space", "pipe",
+    ],
 )
 def test_a_where_path_outside_the_repository_is_refused(capsys, path):
     lore = FakeLore()
@@ -610,8 +616,8 @@ def test_report_gives_the_failed_write_what_to_do_not_only_what_happened(capsys)
     seed(lore, "deferred", "task/A", "Other", "spec/S#F2", result="failed", code="some-unlisted-code")
     _, out, _ = run_report("task/A", lore, capsys)
     lines = out.splitlines()
-    assert "make it a task" in lines[1]
-    assert "file it by hand" in lines[2]
+    assert "Flush will file it as a task" in lines[1]
+    assert "Flush will file it as a task" in lines[2]
 
 
 def test_report_gives_no_brainstorm_command_for_a_result_that_is_not_a_task(capsys):
@@ -650,3 +656,139 @@ def test_report_ignores_decision_and_result_lines_with_extra_fields(capsys):
     )
     _, out, _ = run_report("task/A", lore, capsys)
     assert out.splitlines() == ["Folded into this build: T2, because x."]
+
+
+# --- retry after a failed write -------------------------------------------------
+
+
+def flaky_handlers(outcomes):
+    """A `deferred` handler whose write returns the next outcome each call."""
+    calls = []
+
+    def write(d, r, rec):
+        calls.append(d.title)
+        return outcomes.pop(0)
+
+    return {"deferred": fw.Handler(prepare=lambda d, r: "spec/S#F1", write=write)}, calls
+
+
+def test_a_retry_after_a_failed_write_writes_again_and_exits_0(capsys):
+    lore = FakeLore()
+    handlers, calls = flaky_handlers([fw.WriteResult("spec/S#F1", "stale-base"), fw.WriteResult("spec/S#F1")])
+    doc = decision(decision="deferred")
+    code, _, _ = run_decide(doc, lore, capsys, handlers=handlers)
+    assert code == 3
+    code, out, err = run_decide(doc, lore, capsys, handlers=handlers)
+    assert code == 0, err
+    assert len(calls) == 2
+    assert out.startswith("found-work-result: written | parent: task/X")
+    assert len(lore.bodies("found-work-result")) == 2
+
+
+def test_a_written_result_is_replayed_only_for_the_same_decision_kind(capsys):
+    lore = FakeLore()
+    handlers, calls = flaky_handlers([fw.WriteResult("spec/S#F1")])
+    handlers["dropped"] = fw.HANDLERS["dropped"]
+    run_decide(decision(decision="deferred"), lore, capsys, handlers=handlers)
+    code, out, err = run_decide(decision(decision="dropped"), lore, capsys, handlers=handlers)
+    assert code == 0, err
+    assert [b.split(" | ")[0] for b in lore.bodies("found-work")] == ["found-work: deferred", "found-work: dropped"]
+    assert len(calls) == 1
+
+
+def test_the_report_after_a_recovered_retry_shows_the_finding_once_and_not_under_the_operator(capsys):
+    lore = FakeLore()
+    handlers, _ = flaky_handlers([fw.WriteResult("spec/S#F1", "stale-base"), fw.WriteResult("spec/S#F1")])
+    doc = decision(decision="deferred", finding={"title": "Defer me"})
+    run_decide(doc, lore, capsys, handlers=handlers)
+    run_decide(doc, lore, capsys, handlers=handlers)
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert fw.NEEDS_OPERATOR_HEADING not in out
+    assert out.count("Defer me") == 1
+    assert out.startswith("Deferred to spec/S#F1: Defer me")
+    assert "discard it at flush" in out
+
+
+def test_a_retried_folded_decision_is_reported_once(capsys):
+    lore = FakeLore()
+    seed(lore, "folded", "task/X", "Fold me", "task/X", result=None)
+    seed(lore, "folded", "task/X", "Fold me", "task/X", result="written")
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert out.count("Folded into this build: Fold me") == 1
+    assert fw.NEEDS_OPERATOR_HEADING not in out
+
+
+def test_a_decision_whose_result_was_lost_and_then_retried_leaves_no_stale_item(capsys):
+    lore = FakeLore()
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result=None)
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result="written")
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert "Result not logged" not in out and fw.NEEDS_OPERATOR_HEADING not in out
+
+
+def test_a_failed_write_that_was_never_retried_stays_under_the_operator_and_says_flush_files_it(capsys):
+    lore = FakeLore()
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result="failed", code="stale-base")
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert out.startswith(fw.NEEDS_OPERATOR_HEADING)
+    assert "Flush will file it as a task" in out
+
+
+# --- security findings carry a location only ------------------------------------
+
+SEC_TITLE = "SQL injection via ' OR 1=1 -- in name param"
+SEC_REASON = "attacker sends ' OR 1=1 -- to the name param"
+
+
+def security_doc(kind="deferred"):
+    return decision(
+        decision=kind,
+        reason=SEC_REASON,
+        finding={
+            "title": SEC_TITLE, "security": True, "where": ["export/csv.py:10"],
+            "what": "SQLI-DETAIL", "found": "EXPLOIT-PATH",
+        },
+    )
+
+
+def test_a_security_finding_logs_neither_its_title_nor_its_reason(capsys):
+    lore = FakeLore()
+    handlers, _ = flaky_handlers([fw.WriteResult("spec/S#F1")])
+    code, out, err = run_decide(security_doc(), lore, capsys, handlers=handlers)
+    assert code == 0, err
+    _, rep, _ = run_report("task/X", lore, capsys)
+    everything = lore.log() + out + err + rep
+    for leaked in ("injection", "OR 1=1", "attacker", "name param"):
+        assert leaked not in everything
+    assert "Security finding at export/csv.py:10" in lore.bodies("found-work")[0]
+
+
+def test_a_security_finding_keeps_the_task_body_free_of_its_title_and_reason(capsys):
+    lore = FakeLore()
+    seen = {}
+
+    def write(d, r, rec):
+        seen["body"] = fw._task_body(d, fw._found_work_key(d), False)
+        seen["title"] = d.title
+        return fw.WriteResult("task/new")
+
+    handlers = {"separate": fw.Handler(prepare=lambda d, r: d.parent, write=write)}
+    code, _, err = run_decide(security_doc("separate"), lore, capsys, handlers=handlers)
+    assert code == 0, err
+    assert "injection" not in seen["body"] + seen["title"] and "attacker" not in seen["body"]
+
+
+def test_a_security_finding_retry_is_still_idempotent(capsys):
+    lore = FakeLore()
+    run_decide(security_doc("folded"), lore, capsys)
+    code, _, err = run_decide(security_doc("folded"), lore, capsys)
+    assert code == 0, err
+    assert len(lore.bodies("found-work")) == 1
+
+
+def test_a_dropped_security_finding_still_satisfies_drop_without_reason(capsys):
+    lore = FakeLore()
+    code, out, err = run_decide(security_doc("dropped"), lore, capsys)
+    assert code == 0, err
+    assert "attacker" not in lore.log()
+    assert not lore.bodies("found-work")[0].endswith("why: -")

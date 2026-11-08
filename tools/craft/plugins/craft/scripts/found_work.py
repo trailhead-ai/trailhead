@@ -44,9 +44,16 @@ Validation (refusals, exit 1, `reason-code:` on stderr):
     is absolute, has a `..` segment, starts with `-`, or holds NUL or a
     backslash), drop-without-reason, security-detail-without-location (a
     `security: true` finding needs a `path:line` in `where`).
-A security finding has its `found` replaced with a fixed "security finding — see
-location" and its `what` with "security finding — see <where paths, line included>",
-before anything is scrubbed, captured or printed; no finding text survives.
+A `where` path is checked in the form it is stored (scrubbed and neutralized), and a
+path that neutralizing would change (padding, format characters, `|`) is refused as
+`path-outside-repository`; a credential-shaped path is accepted with the secret redacted.
+A security finding is reduced to its locations before anything is scrubbed, captured or
+printed: `found` becomes "security finding — see location", `what` "security finding —
+see <where paths, line included>", `title` "Security finding at <where paths>", and a
+non-empty `reason` that same fixed "security finding — see location" sentence (still
+non-empty, so a dropped security finding keeps its reason). Only the `where` paths and
+those fixed sentences survive. Two security findings at the same locations of one parent
+therefore share an idempotency key.
 
 Scrub: `criterion_gate.scrub_credential_shaped` runs over every text field
 (title, what, each where path, found, reason). The scrub is a best-effort regex
@@ -96,24 +103,27 @@ and is followed by a result line):
     readback-failed, spec-unreadable, lookup-failed, gate-refused, plus
     `GATE_CODES`.
 
-Idempotency: a log that already pairs a decision line for the same parent, title
-and `where` with a result line makes `decide` print that result line and write
-and capture nothing.
+Idempotency: a log that already pairs a decision line of the SAME kind, parent, title
+and `where` with a `written` result line makes `decide` print that result line and
+write and capture nothing. A `failed` result never short-circuits: the retry runs the
+write again (and its fallback `task` candidate from the first failure stays in the log;
+`report` tells the operator to discard it at flush). A different decision kind on the
+same parent, title and `where` is a new decision, logged and written in its own right.
 
 Exit codes for `decide`:
     0  done — the result line is printed on stdout.
     1  refused input — `reason-code:` on stderr, nothing captured.
-    2  capture-failed — nothing written; the scrubbed finding is printed in full
-       on stdout so the caller can carry it into its report. Also used when the
-       decision landed but its result line could not be captured (the result
-       line is printed instead).
+    2  capture-failed — the decision line was not captured, nothing written; the
+       scrubbed finding is printed in full on stdout so the caller can carry it
+       into its report. Also used when the write ran but its result line could not
+       be captured (the result line is printed instead; the write may have landed).
     3  write-failed: the write returned a reason-code; a `failed` result line is captured and printed.
 
 `report --parent <id>` reads the session log (`lore session show`), parses only
 well-formed lines, from entries of the right kind, whose parent equals the
 argument exactly, and shape-checks every id before printing it. Output: first,
-under `NEEDS_OPERATOR_HEADING`, each `failed` result marked not written (what
-happened, what to do) and each brainstorm task with its
+under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
+written (what happened, what to do; flush files it as a task) and each brainstorm task with its
 `/craft:brainstorm task/<id>` command; then each decision as a plain sentence;
 or exactly `NO_DECISIONS_LINE`. A session that does not exist yet reads as no
 decisions; any other failure to read it exits 2 `session-unreadable` rather than
@@ -190,9 +200,11 @@ EXIT_WRITE_FAILED = 3
 
 KNOWN_DECISIONS = ("folded", "deferred", "separate", "brainstorm", "dropped")
 NEEDS_OPERATOR_HEADING = "Needs the operator:"
+RECOVERED_NOTE = " An earlier attempt failed and left a task candidate; discard it at flush."
 NO_DECISIONS_LINE = "The build made no decisions about found work."
 SECURITY_REPLACEMENT_PREFIX = "security finding — see"
 SECURITY_REPLACEMENT = SECURITY_REPLACEMENT_PREFIX + " location"
+SECURITY_TITLE_PREFIX = "Security finding at"
 LORE_TIMEOUT_SECONDS = 60
 
 _GATE = _SCRIPT_DIR / "followups_gate.py"
@@ -523,16 +535,20 @@ def build_decision(raw: str) -> Decision:
     for label, value in (("parent", parent), ("spec", spec)):
         if not _ID_RE.fullmatch(value):
             raise Refusal(f"{label} id must match {_ID_RE.pattern}", "unsafe-id")
-    for path in where_raw:
-        if not _path_ok(path):
+    where = tuple(_clean(w) for w in where_raw)
+    for raw_path, path in zip(where_raw, where):
+        if _neutralize(raw_path) != raw_path or not _path_ok(path):
             raise Refusal("every where path must be repository-relative", "path-outside-repository")
     if kind == "dropped" and not reason:
         raise Refusal("a dropped decision needs a reason", "drop-without-reason")
     if security:
         if not any(_LOCATION_RE.fullmatch(w) for w in where_raw):
             raise Refusal("a security finding needs a path:line location in where", "security-detail-without-location")
-        what = f"{SECURITY_REPLACEMENT_PREFIX} {', '.join(where_raw)}"
+        what = f"{SECURITY_REPLACEMENT_PREFIX} {', '.join(where)}"
         found = SECURITY_REPLACEMENT
+        title = f"{SECURITY_TITLE_PREFIX} {', '.join(where)}"
+        if reason:
+            reason = SECURITY_REPLACEMENT
 
     return Decision(
         kind=kind,
@@ -540,7 +556,7 @@ def build_decision(raw: str) -> Decision:
         spec=spec,
         title=_clean(title),
         what=_clean(what),
-        where=tuple(_clean(w) for w in where_raw),
+        where=where,
         found=_clean(found),
         security=security,
         reason=_clean(reason),
@@ -678,7 +694,13 @@ def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler
         log = None
     if log:
         for e in log:
-            if e.parent == d.parent and e.title == d.title and e.where == d.where_text and e.result_line:
+            if (
+                e.kind == d.kind
+                and e.parent == d.parent
+                and e.title == d.title
+                and e.where == d.where_text
+                and e.result_status == "written"
+            ):
                 return EXIT_DONE, e.result_line
 
     record = handler.prepare(d, runner)
@@ -699,12 +721,12 @@ def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler
 _FAILURE_GUIDE = {
     "shared-layer-prior": (
         "the spec lives in a shared vault, which this build cannot write to.",
-        "Add the entry to the spec by hand, or make it a task.",
+        "Flush will file it as a task instead.",
     ),
 }
 _FAILURE_DEFAULT = (
     "the write did not land.",
-    "Look at the finding in the session log and file it by hand.",
+    "Flush will file it as a task. If you retry the decision and it writes, discard that task candidate.",
 )
 
 
@@ -731,6 +753,15 @@ def report(parent: str, runner, session_id: str | None) -> str:
         return NO_DECISIONS_LINE
     operator: list[str] = []
     plain: list[str] = []
+    recovered: set[int] = set()
+    latest: dict[tuple[str, str, str], Logged] = {}
+    for e in entries:
+        key = (e.kind, e.title, e.where)
+        prior = latest.get(key)
+        if prior is not None and prior.result_status == "failed" and e.result_status == "written":
+            recovered.add(id(e))
+        latest[key] = e
+    entries = [e for e in entries if latest[(e.kind, e.title, e.where)] is e]
     for e in entries:
         if e.result_status == "failed":
             what, todo = _FAILURE_GUIDE.get(e.result_code, _FAILURE_DEFAULT)
@@ -742,7 +773,7 @@ def report(parent: str, runner, session_id: str | None) -> str:
         else:
             if e.kind == "brainstorm" and e.result_record and _TASK_RECORD_RE.fullmatch(e.result_record):
                 operator.append(f"Needs a brainstorm: {e.title}. Run `/craft:brainstorm {e.result_record}`.")
-            plain.append(_sentence(e))
+            plain.append(_sentence(e) + (RECOVERED_NOTE if id(e) in recovered else ""))
     lines: list[str] = []
     if operator:
         lines += [NEEDS_OPERATOR_HEADING, *operator, ""]

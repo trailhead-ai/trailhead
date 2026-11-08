@@ -417,6 +417,27 @@ def test_a_deferral_composed_against_a_read_another_write_has_since_changed_is_r
     assert len(cands) == 1 and "Handle the empty case" in cands[0]
 
 
+def test_retrying_a_deferral_after_a_stale_base_refusal_writes_the_entry(seam):
+    spec_id = make_spec(seam)
+
+    def change_spec(argv, stdin):
+        if argv[:2] == ["session", "candidate"] and "found-work" in argv and "found-work-result" not in argv:
+            row = "| 1 | task/one | done |"
+            body = show(seam, spec_id)["body"].replace(row, row + "\n| 2 | task/two | open |")
+            assert seam.lore("record", "update", spec_id, stdin=body).returncode == 0
+        return None
+
+    code, out, _ = go(seam, deferral(), RealLore(seam, before=change_spec))
+    assert code == 3 and reason_code_of(out) == "stale-base"
+    code, out, err = go(seam, deferral())
+    assert code == 0, err
+    assert out.strip().startswith("found-work-result: written")
+    assert [e.id for e in _entries(seam, spec_id)] == ["F1"]
+    report = seam.report("task/X")
+    assert report.returncode == 0 and "Needs the operator" not in report.stdout
+    assert report.stdout.count("Handle the empty case") == 1
+
+
 def test_a_deferral_into_a_spec_read_from_a_shared_layer_is_refused(seam):
     spec_id = make_spec(seam)
     before_body = show(seam, spec_id)["body"]
