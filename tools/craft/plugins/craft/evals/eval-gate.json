@@ -13,6 +13,7 @@
       "Bash(mktemp)",
       "Bash(mktemp *)",
       "Bash(./gather)",
+      "Bash(*/scripts/found_work.py *)",
       "Bash(*/scripts/covers_gate.py *)",
       "Bash(printf *)",
       "Bash(*/scripts/migration_bar.py)",
