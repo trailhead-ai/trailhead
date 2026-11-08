@@ -4196,3 +4196,20 @@ Fix pass on the review closing handoff after the whole-change review. One new ru
 **Live arm.** `ritual-deliverable-names-its-record/arms/review-treatment.md` was rebuilt from the edited `review/SKILL.md`. No other live arm sources `review/SKILL.md` or `_shared/security.md`; `execute-rule-only.md` sources `_shared/execute.md`, not security.
 
 **Not measured.** One malformed id, one model tier, three runs; the early-stop slice/review divergence is unchanged (slice's handoff on a stopped loop is a logged follow-up). Cost: baseline 0.64, fix batches 1.18, re-runs about 2.75 USD.
+
+---
+
+## Case: build-triages-found-work, build-records-a-security-finding-by-location, unlinked-build-keeps-capturing-candidates
+
+`plugins/craft/evals/<case>/` — three runner cases for the "Found work" section of `skills/_shared/execute.md`. Each has an `expected.md` written before any run. The seeded spec `export-invoices` and parent task `export-csv-build` are linked (cases 1 and 2) or unlinked (case 3); `fixtures/review.md` is the Phase 3 review. The scaffold also writes `./bin/lore`, a shim over `./lore`, because `found_work.py` runs a bare `lore` and the sandbox hides the operator's PATH; the prompt tells the agent to put `bin` first on `PATH` for that command.
+
+**Status: no graded run has been recorded.** Baseline and treatment batches are outstanding.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-08 | treatment smoke, `build-triages-found-work` | 1 | **void** (scaffold failed after 532 s, exit null) | no agent turn ran |
+| 2026-11-08 | control, existing `review-hands-a-running-loop-back-to-slice` | 1 | **void** (0.5, "timed out after 300s", 750 s wall) | the same environment cannot complete a known-good case, so the scaffold failure above is not attributed to the new case |
+
+Checked outside the runner: the scaffold, run by hand under a throwaway `HOME`, builds the vault and `bin/lore`; `found_work.py decide --session-id <id>` with `PATH="$PWD/bin:$PATH"` writes an open `F1` entry into the seeded spec and the decision and result lines into `vault/session/<id>.md`. Graders are written against that state. They have not been run against hand-written passing and failing runs, and no llm grader has been checked.
+
+Limitations: the grader set is untested against any run, the baseline arm (the unedited `execute.md`, hash `92afd6900a5d52bf0ca4fc09b251d8b9781c2803`) has not been measured, and nothing here says the prose changes agent behaviour.

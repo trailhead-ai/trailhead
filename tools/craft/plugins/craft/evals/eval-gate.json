@@ -11,7 +11,8 @@
       "Bash(*/scripts/candidate_set.py *)",
       "Bash(mktemp)",
       "Bash(mktemp *)",
-      "Bash(./gather)"
+      "Bash(./gather)",
+      "Bash(*/scripts/found_work.py *)"
     ],
     "max_cost_usd": 3.5
   },
@@ -89,6 +90,21 @@
     "checks-prints-the-gathered-list": {
       "measures": [
         "skills/checks/SKILL.md"
+      ]
+    },
+    "build-triages-found-work": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "build-records-a-security-finding-by-location": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "unlinked-build-keeps-capturing-candidates": {
+      "measures": [
+        "skills/_shared/execute.md"
       ]
     }
   }
