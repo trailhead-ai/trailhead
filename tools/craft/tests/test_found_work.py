@@ -284,7 +284,6 @@ def test_the_public_scrub_name_redacts_credentials():
     "field,doc_edit",
     [
         ("title", lambda: decision(finding={"title": f"T {SECRET}"})),
-        ("where", lambda: decision(finding={"where": [f"src/{SECRET}.py"]})),
         ("reason", lambda: decision(reason=f"R {SECRET}")),
     ],
 )
@@ -792,3 +791,139 @@ def test_a_dropped_security_finding_still_satisfies_drop_without_reason(capsys):
     assert code == 0, err
     assert "attacker" not in lore.log()
     assert not lore.bodies("found-work")[0].endswith("why: -")
+
+
+# --- paths are validated, never redacted ----------------------------------------
+
+DEEP = "tools/craft/plugins/craft/scripts/followups.py"
+
+
+def test_a_deep_repository_path_survives_intact_into_the_decision_line(capsys):
+    lore = FakeLore()
+    where = [f"{DEEP}:10", "tools/craft/tests/test_followups_gate.py"]
+    code, _, err = run_decide(decision(finding={"where": where}), lore, capsys)
+    assert code == 0, err
+    assert f"where: {DEEP}:10, tools/craft/tests/test_followups_gate.py |" in lore.bodies("found-work")[0]
+
+
+def test_two_security_findings_in_different_deep_files_are_two_distinct_writes(capsys):
+    lore = FakeLore()
+    other = "tools/craft/plugins/craft/scripts/found_work.py:20"
+    new_task = fw.Handler(prepare=lambda d, r: d.parent, write=lambda d, r, rec: fw.WriteResult("task/new"))
+    handlers = {"separate": new_task}
+    for path in (f"{DEEP}:10", other):
+        doc = decision(decision="separate", finding={"security": True, "where": [path]})
+        code, _, err = run_decide(doc, lore, capsys, handlers=handlers)
+        assert code == 0, err
+    lines = lore.bodies("found-work")
+    assert len(lines) == 2
+    assert f"Security finding at {DEEP}:10 " in lines[0]
+    assert "scripts/found_work.py:20 " in lines[1]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "my file.py", "$(id).py", "`id`.py", "~/x.py", "a/b$.py", "src/a.py:", "src/a.py:1-", "src/a.py:1:2",
+        "src/a.py:x", "src/a.py\n", "src/*.py", "a;b.py", "src/a.py:-3", "é.py",
+    ],
+)
+def test_a_path_outside_the_safe_shape_is_refused_and_nothing_is_captured(capsys, path):
+    lore = FakeLore()
+    code, _, err = run_decide(decision(finding={"where": [path]}), lore, capsys)
+    assert code == 1
+    assert reason_of(err) == "path-outside-repository"
+    assert lore.entries == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [f"src/{SECRET}.py", "secret:12", "ghp_" + "a" * 36 + "/x.py", "src/" + "A1b2" * 9 + ".py"],
+    ids=["vendor-prefix", "secret-colon", "github-token", "long-entropy-segment"],
+)
+def test_a_credential_shaped_path_is_refused_not_redacted(capsys, path):
+    lore = FakeLore()
+    code, out, err = run_decide(decision(finding={"where": [path]}), lore, capsys)
+    assert code == 1
+    assert reason_of(err) == "credential-in-path"
+    assert lore.entries == []
+    assert SECRET not in out + err
+
+
+def test_a_security_finding_location_check_runs_on_the_validated_paths(capsys):
+    lore = FakeLore()
+    code, _, err = run_decide(decision(finding={"security": True, "where": [DEEP]}), lore, capsys)
+    assert code == 1
+    assert reason_of(err) == "security-detail-without-location"
+
+
+# --- security titles: a discriminator that reveals nothing ------------------------
+
+
+def _security_title(capsys, raw_title, where="export/csv.py:10"):
+    lore = FakeLore()
+    run_decide(decision(finding={"security": True, "title": raw_title, "where": [where]}), lore, capsys)
+    return lore, lore.bodies("found-work")[0].split(" | finding: ")[1].split(" | where:")[0]
+
+
+def test_two_security_findings_at_one_location_with_different_titles_are_distinct_decisions(capsys):
+    lore = FakeLore()
+    handlers, _ = flaky_handlers([fw.WriteResult("spec/S#F1"), fw.WriteResult("spec/S#F2")])
+    for title in ("first problem", "second problem"):
+        finding = {"security": True, "title": title, "where": ["export/csv.py:10"]}
+        code, _, err = run_decide(decision(decision="deferred", finding=finding), lore, capsys, handlers=handlers)
+        assert code == 0, err
+    titles = [b.split(" | finding: ")[1].split(" | where:")[0] for b in lore.bodies("found-work")]
+    assert len(titles) == 2 and titles[0] != titles[1]
+    assert all(t.startswith("Security finding at export/csv.py:10 (ref ") for t in titles)
+    assert "first" not in lore.log() and "second" not in lore.log()
+
+
+def test_the_same_security_title_gets_the_same_discriminator_and_is_idempotent(capsys):
+    lore = FakeLore()
+    doc = decision(finding={"security": True, "title": "same problem", "where": ["export/csv.py:10"]})
+    run_decide(doc, lore, capsys)
+    code, _, err = run_decide(doc, lore, capsys)
+    assert code == 0, err
+    assert len(lore.bodies("found-work")) == 1
+
+
+# --- retry bookkeeping ----------------------------------------------------------
+
+
+def test_repeated_failed_attempts_capture_one_fallback_candidate(capsys):
+    lore = FakeLore()
+    failed = fw.WriteResult("spec/S#F1", "stale-base")
+    handlers, _ = flaky_handlers([failed, failed, fw.WriteResult("spec/S#F1")])
+    doc = decision(decision="deferred")
+    assert run_decide(doc, lore, capsys, handlers=handlers)[0] == 3
+    assert run_decide(doc, lore, capsys, handlers=handlers)[0] == 3
+    assert len(lore.bodies("task")) == 1
+    assert run_decide(doc, lore, capsys, handlers=handlers)[0] == 0
+    assert len(lore.bodies("task")) == 1
+
+
+def test_a_failed_write_for_a_different_where_still_captures_its_own_fallback(capsys):
+    lore = FakeLore()
+    handlers, _ = flaky_handlers([fw.WriteResult("spec/S#F1", "stale-base"), fw.WriteResult("spec/S#F1", "stale-base")])
+    run_decide(decision(decision="deferred"), lore, capsys, handlers=handlers)
+    run_decide(decision(decision="deferred", finding={"where": ["src/other.py"]}), lore, capsys, handlers=handlers)
+    assert len(lore.bodies("task")) == 2
+
+
+def test_the_report_tells_the_operator_to_discard_the_candidate_when_a_write_follows_failed_then_lost(capsys):
+    lore = FakeLore()
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result="failed", code="stale-base")
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result=None)
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result="written")
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert "discard it at flush" in out
+    assert fw.NEEDS_OPERATOR_HEADING not in out
+
+
+def test_the_report_gives_no_discard_note_when_no_attempt_failed(capsys):
+    lore = FakeLore()
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result=None)
+    seed(lore, "deferred", "task/X", "Defer me", "spec/S#F1", result="written")
+    _, out, _ = run_report("task/X", lore, capsys)
+    assert "discard it at flush" not in out

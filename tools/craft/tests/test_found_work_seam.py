@@ -545,23 +545,20 @@ def test_brainstorm_creates_a_task_labelled_for_brainstorm_that_report_prints_th
     assert f"Run `/craft:brainstorm {task_id}`." in r.stdout
 
 
-@pytest.mark.parametrize("field", ["title", "what", "found", "where"])
+@pytest.mark.parametrize("field", ["title", "what", "found"])
 def test_a_credential_in_any_field_is_redacted_in_the_written_entry(seam, field):
     spec_id = make_spec(seam)
-    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
-    code, out, err = go(seam, deferral(finding={field: value}))
-    assert code == (3 if field == "where" else 0), err
+    code, out, err = go(seam, deferral(finding={field: f"leak {SECRET}"}))
+    assert code == 0, err
     assert SECRET not in show(seam, spec_id)["body"]
     assert SECRET not in seam.session_text()
-    if field != "where":
-        assert "leak [redacted]" in show(seam, spec_id)["body"]
+    assert "leak [redacted]" in show(seam, spec_id)["body"]
 
 
 @pytest.mark.parametrize("kind", ["separate", "brainstorm"])
-@pytest.mark.parametrize("field", ["title", "what", "found", "where"])
+@pytest.mark.parametrize("field", ["title", "what", "found"])
 def test_a_credential_in_any_field_is_redacted_in_the_created_task(seam, kind, field):
-    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
-    code, out, err = go(seam, task_decision(kind, finding={field: value}))
+    code, out, err = go(seam, task_decision(kind, finding={field: f"leak {SECRET}"}))
     assert code == 0, err
     task_id = out.strip().split("record: ")[1].split(" |")[0]
     assert SECRET not in json.dumps(show(seam, task_id))
@@ -577,7 +574,7 @@ def test_a_credential_in_the_reason_is_redacted_in_the_created_task(seam):
     assert "because [redacted]" in show(seam, task_id)["body"]
 
 
-@pytest.mark.parametrize("field", ["title", "what", "found", "where", "reason"])
+@pytest.mark.parametrize("field", ["title", "what", "found", "reason"])
 def test_a_credential_in_any_field_is_redacted_in_the_fallback_candidate(seam, field):
     make_spec(seam)
 
@@ -586,8 +583,7 @@ def test_a_credential_in_any_field_is_redacted_in_the_fallback_candidate(seam, f
             return _failed(argv)
         return None
 
-    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
-    doc = deferral(reason=f"because {SECRET}") if field == "reason" else deferral(finding={field: value})
+    doc = deferral(reason=f"because {SECRET}") if field == "reason" else deferral(finding={field: f"leak {SECRET}"})
     code, out, err = go(seam, doc, RealLore(seam, before=before))
     assert code == 3
     cands = task_candidates(seam)
@@ -867,3 +863,52 @@ def test_retrying_a_path_line_deferral_after_a_lost_result_returns_the_same_entr
     assert code == 0, err
     assert out.strip().endswith("record: spec/fixture-spec#F1 | reason-code: none")
     assert [e.id for e in _entries(seam, spec_id)] == ["F1"]
+
+
+DEEP = "tools/craft/plugins/craft/scripts/followups.py"
+
+
+def test_a_deep_path_reaches_the_decision_line_the_entry_and_the_task_intact(seam):
+    spec_id = make_spec(seam)
+    code, out, err = go(seam, deferral(finding={"where": [f"{DEEP}:10"]}))
+    assert code == 0, err
+    assert [e.where for e in _entries(seam, spec_id)] == [(DEEP,)]
+    assert f"where: {DEEP}:10 |" in _decision_lines(seam)[0]
+    code, out, err = go(seam, task_decision(finding={"where": [f"{DEEP}:10"]}))
+    assert code == 0, err
+    task_id = out.strip().split("record: ")[1].split(" |")[0]
+    assert f"`{DEEP}:10`" in show(seam, task_id)["body"]
+
+
+def test_two_security_findings_in_different_deep_files_make_two_tasks(seam):
+    for path in (f"{DEEP}:10", "tools/craft/plugins/craft/scripts/found_work.py:20"):
+        code, out, err = go(seam, task_decision(finding={"security": True, "where": [path]}))
+        assert code == 0, err
+    assert len(all_tasks(seam)) == 2
+
+
+def test_two_security_findings_at_one_location_make_two_tasks_and_a_retry_makes_none(seam):
+    def sec(title):
+        return task_decision(finding={"security": True, "title": title, "where": ["export/csv.py:10"]})
+
+    for title in ("first problem", "second problem", "first problem"):
+        code, out, err = go(seam, sec(title))
+        assert code == 0, err
+    assert len(all_tasks(seam)) == 2
+    assert "first problem" not in seam.session_text() + json.dumps(seam.records(), default=str)
+
+
+def test_a_brainstorm_after_a_separate_decision_is_its_own_task(seam):
+    code, first, err = go(seam, task_decision("separate"))
+    assert code == 0, err
+    code, second, err = go(seam, task_decision("brainstorm"))
+    assert code == 0, err
+    assert len(all_tasks(seam)) == 2
+    assert first.split("record: ")[1].split(" |")[0] != second.split("record: ")[1].split(" |")[0]
+
+
+def test_a_lost_result_retry_after_a_separate_decision_does_not_reuse_it_for_a_brainstorm(seam):
+    go(seam, task_decision("separate"), RealLore(seam, before=_lose_result_capture))
+    code, out, err = go(seam, task_decision("brainstorm"))
+    assert code == 0, err
+    assert len(all_tasks(seam)) == 2

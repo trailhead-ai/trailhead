@@ -6,8 +6,7 @@ Usage:
     found_work.py decide [--session-id ID] < decision.json
     found_work.py report --parent <task id> [--session-id ID]
 
-`decide` reads ONE JSON document on stdin — never a command-line argument, so no
-finding text ever appears on a command line:
+`decide` reads ONE JSON document on stdin — never a command-line argument:
 
     {"decision": "folded"|"deferred"|"separate"|"brainstorm"|"dropped",
      "parent": "task/<id>", "spec": "spec/<id>",
@@ -40,26 +39,31 @@ candidate body, one line, every field neutralized:
 
 Validation (refusals, exit 1, `reason-code:` on stderr):
     malformed-input, no-spec (missing or empty `spec`), unsafe-id (parent or spec
-    outside `^[A-Za-z0-9._/-]+$`), path-outside-repository (a `where` path that
-    is absolute, has a `..` segment, starts with `-`, or holds NUL or a
-    backslash), drop-without-reason, security-detail-without-location (a
-    `security: true` finding needs a `path:line` in `where`).
-A `where` path is checked in the form it is stored (scrubbed and neutralized), and a
-path that neutralizing would change (padding, format characters, `|`) is refused as
-`path-outside-repository`; a credential-shaped path is accepted with the secret redacted.
+    outside `^[A-Za-z0-9._/-]+$`), path-outside-repository (a `where` entry that is
+    not `^[A-Za-z0-9._/-]+(:<line>(-<line>)?)?$`, is absolute, starts with `-`, or has a
+    `..` segment), credential-in-path (a `where` path a credential pattern matches),
+    drop-without-reason, security-detail-without-location (a `security: true` finding
+    needs a `path:line` in `where`).
+A `where` path is validated in its raw form and is never scrubbed or rewritten: the
+high-entropy scrub would redact any deep path, so a path is either stored exactly as given
+or the decision is refused before anything is captured.
 A security finding is reduced to its locations before anything is scrubbed, captured or
 printed: `found` becomes "security finding — see location", `what` "security finding —
-see <where paths, line included>", `title` "Security finding at <where paths>", and a
-non-empty `reason` that same fixed "security finding — see location" sentence (still
-non-empty, so a dropped security finding keeps its reason). Only the `where` paths and
-those fixed sentences survive. Two security findings at the same locations of one parent
-therefore share an idempotency key.
+see <where paths, line included>", `title` "Security finding at <where paths> (ref <8 hex
+digits of the raw title's sha256>)", and a non-empty `reason` that same fixed "security
+finding — see location" sentence (still non-empty, so a dropped security finding keeps
+its reason). Only the `where` paths, the digest and those fixed sentences survive. The
+digest keeps two findings at one location apart while a retry of the same finding keeps
+its key.
 
 Scrub: `criterion_gate.scrub_credential_shaped` runs over every text field
-(title, what, each where path, found, reason). The scrub is a best-effort regex
-list, not a guarantee that no secret survives; the security posture is that no
-finding text is ever placed on a command line, and security findings carry a
-location only. Neutralize: control characters, line breaks and other Unicode
+(title, what, found, reason) of a non-security finding; a security finding's fields are
+built only from validated paths and fixed text, so they are neutralized but not scrubbed. The
+scrub is a best-effort regex list, not a guarantee that no secret survives. The security
+posture is that the body of every record and every log line is written through stdin, and
+the only finding text on a command line is the scrubbed, neutralized title (`record create
+--title=<title>`, no shell); security findings carry a location only. Neutralize: control
+characters, line breaks and other Unicode
 separators collapse to a space and every `|` is escaped to `\\|`, so no field can
 end a line or forge a field.
 
@@ -89,11 +93,11 @@ and is followed by a result line):
     passed to `record create` as the single argv element `--title=<title>` (no
     shell); the body travels on stdin. The created task's id is the one line
     `record create` prints on stdout, accepted only if it is `task/<slug>`.
-    A task body ends with `found-work-key: <digest of parent, title, where>`.
+    A task body ends with `found-work-key: <digest of kind, parent, title, where>`.
     Retry after a lost result capture: a `deferred` retry finds the open entry
     with the same title and `where` already in the spec and returns it; a
-    `separate`/`brainstorm` retry finds the task through `lore search --json`
-    on that key and returns it. Neither writes a second time. A search that
+    `separate`/`brainstorm` retry finds the task of the same kind through
+    `lore search --json` on that key and returns it. Neither writes a second time. A search that
     fails refuses the create (`lookup-failed`) rather than risk a second task.
     A failed write exits 3, captures a `failed` result line whose `reason-code:`
     is always from `REASON_CODES` (the gate's code when it is one of
@@ -106,8 +110,9 @@ and is followed by a result line):
 Idempotency: a log that already pairs a decision line of the SAME kind, parent, title
 and `where` with a `written` result line makes `decide` print that result line and
 write and capture nothing. A `failed` result never short-circuits: the retry runs the
-write again (and its fallback `task` candidate from the first failure stays in the log;
-`report` tells the operator to discard it at flush). A different decision kind on the
+write again (the first failure's fallback `task` candidate stays in the log, a repeat
+failure of the same kind, parent, title and `where` adds no second one, and `report`
+tells the operator to discard it at flush). A different decision kind on the
 same parent, title and `where` is a new decision, logged and written in its own right.
 
 Exit codes for `decide`:
@@ -179,6 +184,7 @@ REASON_CODES = frozenset(
     {
         "malformed-input",
         "no-spec",
+        "credential-in-path",
         "unsafe-id",
         "security-detail-without-location",
         "capture-failed",
@@ -216,6 +222,7 @@ _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
 _CODE_RE = re.compile(r"[a-z0-9-]+")
 _LOCATION_RE = re.compile(r".+:[0-9]+(?:-[0-9]+)?")
+_PATH_SHAPE_RE = re.compile(r"[A-Za-z0-9._/-]+(?::[0-9]+(?:-[0-9]+)?)?")
 _LINE_SUFFIX_RE = re.compile(r":[0-9]+(?:-[0-9]+)?$")
 _ENTRY_HEADER_RE = re.compile(r"- candidate \S+ kind=(\S+) phase=\S+")
 _NEUTRALIZE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Zs"}
@@ -314,8 +321,6 @@ class _Deferral:
     def prepare(self, d: Decision, runner) -> str:
         if not _SPEC_RECORD_RE.fullmatch(d.spec):
             raise Refusal("a deferred decision needs spec: spec/<id>", "unsafe-id")
-        if any(":" in path for path in d.entry_where):
-            raise Refusal("a where path may carry only a trailing :<line> or :<line>-<line>", "path-outside-repository")
         self.prior = None
         self.entry_id = None
         self.existing = None
@@ -371,7 +376,7 @@ class _Deferral:
 
 
 def _found_work_key(d: Decision) -> str:
-    return hashlib.sha256("\0".join([d.parent, d.title, d.where_text]).encode("utf-8")).hexdigest()[:24]
+    return hashlib.sha256("\0".join([d.kind, d.parent, d.title, d.where_text]).encode("utf-8")).hexdigest()[:24]
 
 
 def _task_body(d: Decision, key: str, brainstorm: bool) -> str:
@@ -481,15 +486,15 @@ def _clean(text: str) -> str:
     return _neutralize(scrub_credential_shaped(text))
 
 
-def _path_ok(path: str) -> bool:
-    return not (
-        not path
-        or path.startswith("/")
-        or path.startswith("-")
-        or "\x00" in path
-        or "\\" in path
-        or ".." in path.split("/")
-    )
+def _check_path(path: str) -> None:
+    if (
+        not _PATH_SHAPE_RE.fullmatch(path)
+        or path.startswith(("/", "-"))
+        or ".." in _LINE_SUFFIX_RE.sub("", path).split("/")
+    ):
+        raise Refusal("every where path must be repository-relative", "path-outside-repository")
+    if any(scrub_credential_shaped(segment) != segment for segment in path.split("/")):
+        raise Refusal("a where path must not look like a credential", "credential-in-path")
 
 
 def _str_field(value, name: str, default: str = "") -> str:
@@ -535,10 +540,9 @@ def build_decision(raw: str) -> Decision:
     for label, value in (("parent", parent), ("spec", spec)):
         if not _ID_RE.fullmatch(value):
             raise Refusal(f"{label} id must match {_ID_RE.pattern}", "unsafe-id")
-    where = tuple(_clean(w) for w in where_raw)
-    for raw_path, path in zip(where_raw, where):
-        if _neutralize(raw_path) != raw_path or not _path_ok(path):
-            raise Refusal("every where path must be repository-relative", "path-outside-repository")
+    for path in where_raw:
+        _check_path(path)
+    where = tuple(where_raw)
     if kind == "dropped" and not reason:
         raise Refusal("a dropped decision needs a reason", "drop-without-reason")
     if security:
@@ -546,20 +550,22 @@ def build_decision(raw: str) -> Decision:
             raise Refusal("a security finding needs a path:line location in where", "security-detail-without-location")
         what = f"{SECURITY_REPLACEMENT_PREFIX} {', '.join(where)}"
         found = SECURITY_REPLACEMENT
-        title = f"{SECURITY_TITLE_PREFIX} {', '.join(where)}"
+        digest = hashlib.sha256(title.encode("utf-8")).hexdigest()[:8]
+        title = f"{SECURITY_TITLE_PREFIX} {', '.join(where)} (ref {digest})"
         if reason:
             reason = SECURITY_REPLACEMENT
 
+    clean = _neutralize if security else _clean
     return Decision(
         kind=kind,
         parent=parent,
         spec=spec,
-        title=_clean(title),
-        what=_clean(what),
+        title=clean(title),
+        what=clean(what),
         where=where,
-        found=_clean(found),
+        found=clean(found),
         security=security,
-        reason=_clean(reason),
+        reason=clean(reason),
     )
 
 
@@ -684,6 +690,14 @@ def _capture(runner, kind: str, line: str, session_id: str | None) -> bool:
     return done.returncode == 0
 
 
+def _already_failed(log: list[Logged] | None, d: Decision) -> bool:
+    return any(
+        e.result_status == "failed"
+        and (e.kind, e.parent, e.title, e.where) == (d.kind, d.parent, d.title, d.where_text)
+        for e in log or []
+    )
+
+
 def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler]) -> tuple[int, str]:
     d = build_decision(raw)
     handler = handlers[d.kind]
@@ -708,7 +722,7 @@ def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler
         return EXIT_CAPTURE_FAILED, finding_text(d)
 
     outcome = handler.write(d, runner, record)
-    if outcome.reason_code:
+    if outcome.reason_code and not _already_failed(log, d):
         _capture(runner, "task", fallback_text(d, outcome.reason_code), session_id)
     line = result_line(d, outcome.record or record, outcome.reason_code)
     if not _capture(runner, "found-work-result", line, session_id):
@@ -755,11 +769,13 @@ def report(parent: str, runner, session_id: str | None) -> str:
     plain: list[str] = []
     recovered: set[int] = set()
     latest: dict[tuple[str, str, str], Logged] = {}
+    failed_before: set[tuple[str, str, str]] = set()
     for e in entries:
         key = (e.kind, e.title, e.where)
-        prior = latest.get(key)
-        if prior is not None and prior.result_status == "failed" and e.result_status == "written":
+        if key in failed_before and e.result_status == "written":
             recovered.add(id(e))
+        if e.result_status == "failed":
+            failed_before.add(key)
         latest[key] = e
     entries = [e for e in entries if latest[(e.kind, e.title, e.where)] is e]
     for e in entries:

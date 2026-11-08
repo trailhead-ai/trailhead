@@ -12,7 +12,8 @@
       "Bash(mktemp)",
       "Bash(mktemp *)",
       "Bash(./gather)",
-      "Bash(*/scripts/found_work.py *)"
+      "Bash(*/scripts/found_work.py *)",
+      "Write"
     ],
     "max_cost_usd": 3.5
   },

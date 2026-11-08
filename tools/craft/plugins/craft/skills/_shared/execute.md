@@ -1287,21 +1287,25 @@ are `task/<id>` and `spec/<id>`, `where` is a list of repository-relative paths 
 where a line is known; a follow-up entry stores the bare path and the decision log keeps the line),
 and `reason` says why. Set `security` to true for a security finding and give its `path:line` in
 `where`: the script then records the location only, never the finding's detail. Leave `what` and
-`found` out of that document, so a quoted credential or exploit string never reaches a command. A
-`folded` or `dropped` decision writes nothing beyond the log; make the fix only after the script
-exits 0. A retry after an error sends the same document again; the script returns an earlier
-`written` result instead of writing twice, and runs the write again after a `failed` one.
+`found` out of that document and give a security finding a generic `title` and `reason` too (the
+script replaces them anyway), so a quoted credential or exploit string never reaches a command.
+Write the document with a file-write tool to a temporary file outside the repository, never with a
+shell heredoc or `echo`. A `folded` or `dropped` decision writes nothing beyond the log; make the
+fix only after the script exits 0. A retry after an error sends the same document again; the script
+returns an earlier `written` result instead of writing twice, and runs the write again after a
+`failed` one.
 
 Exit codes: `0` done, the result line is printed. `1` the input was refused; the `reason-code:` line
 on stderr says why (`reason-code: no-spec` when the parent has no spec link, `reason-code:
-drop-without-reason` when a drop gave none), so correct the document and send it again. `2` the
-decision line could not be logged, nothing was written, and the script prints the scrubbed finding,
-which the controller carries into the completion report; or the write ran and only its result line
-could not be logged, in which case the script prints the result line and the write may have landed,
-so send the same document again to settle it. `3` the write failed; the script has logged the
-failure and captured the finding as a task candidate, so it is not lost and flush files it, and the
-report lists it (`reason-code: stale-base` means the spec changed after it was read; send the same
-document again, and if it then writes, discard that task candidate at flush).
+drop-without-reason` when a drop gave none, `reason-code: credential-in-path` when a path looks like
+a credential), so correct the document and send it again. `2` the decision line could not be logged,
+nothing was written, and the script prints the scrubbed finding, which the controller carries into
+the completion report; or the write ran and only its result line could not be logged, in which case
+the script prints the result line and the write may have landed, so send the same document again to
+settle it. `3` the write failed; the script has logged the failure and captured the finding as a
+task candidate, so it is not lost and flush files it, and the report lists it
+(`reason-code: stale-base` means the spec changed after it was read; send the same document again,
+and if it then writes, discard that task candidate at flush).
 
 **The completion report** begins with what needs the operator, and nothing, no summary or preamble,
 comes before it: the finding text from every exit `2`, carried as printed, and the
