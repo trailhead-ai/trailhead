@@ -72,12 +72,24 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   nothing": the runner does not split a command at a redirection, so `printf ... > <path>` is
   allowed by it and writes wherever the sandbox permits. The `Write` grant is unscoped by path as
   well.
-- The last two grants, `Bash(*/scripts/migration_bar.py)` and `Bash(*/scripts/migration_bar.py *)`,
+- The next two grants, `Bash(*/scripts/migration_bar.py)` and `Bash(*/scripts/migration_bar.py *)`,
   are for the plan ritual's migration-suppression step, which pipes the spec body into
   `migration_bar.py` and reads the printed directive. One covers the bare call and one the call with
   arguments, as `Bash(mktemp)` and `Bash(mktemp *)` do.
+- The `pending_check.py *` and `observation_gate.py` grants are for the close's manual-check
+  discharge in `skills/_shared/execute.md`, run by the cases `close-defers-an-unconfirmed-check`,
+  `stale-write-leaves-the-slice-open` and `one-failed-check-saves-nothing`. `pending_check.py *`
+  runs the pending-check writer and its `describe` and `verify` modes; its leading `*` has the same
+  shape as the script grants above, so it admits any single command whose text contains
+  `<anything>/scripts/pending_check.py <anything>`. `observation_gate.py` takes no argument, and
+  the grant admits exactly that. Those cases write their entries file with the file-write tool
+  under the runner block's bare `Write` grant, which applies to every craft case and is not
+  confined by the sandbox; a smoke run found that the runner honours a path-scoped `Edit(...)`
+  rule for the file-write tool (`Edit(//private/tmp/e-*/**)` on macOS) where a path-scoped
+  `Write(...)` rule is denied, so the bare grant can be narrowed to the run directory once every
+  case that relies on it is checked under the narrower rule.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
-  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`) matches any single command that ends in
+  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `pending_check.py`) matches any single command that ends in
   or contains that script path, whatever program runs it. So the set of commands a case can run is
   bounded by the runner's sandbox, not by these patterns. The grants shape only the eval runner;
   they are never installed and change nothing for a real install. Anchoring them is a runner change,
