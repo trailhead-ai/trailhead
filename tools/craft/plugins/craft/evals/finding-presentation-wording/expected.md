@@ -5898,7 +5898,7 @@ affected names.
 All paths are under `tools/craft/plugins/craft/`. Each arm is its sources joined by one newline, each as it stands at the
 commit named, as every earlier arm is.
 
-**B4** is `22c1ebbb9aa7a5a3391153c990c51285b4b6640a` (`FIX_SHAPE_B4_REVISION` in the arms contract test), origin/main when
+**B4** is the revision `FIX_SHAPE_B4_REVISION` names in the arms contract test, origin/main when
 this slice's task branch was cut; the branch carried no other commit when the arms were composed, so each source in the
 working tree equals its blob at B4. The test may not read history, so the pin is the content fingerprint of each source
 (`git hash-object`), recorded in the test's comment and here; `git log --find-object=<fingerprint>` finds the commit that
@@ -6167,20 +6167,24 @@ against the table in "End states and keep rule", and the proceed or stop.
 #### Dispatch and scans (2026-11-06)
 
 Twenty-eight dispatches of the seven `fs-base4-<site>` arms, one foreground `claude -p` process each, in turn: three per
-site, plus a split of three more at `fsplan` (4 to 6) and, at `fsdriver`, replacements 5 to 7 after a crash. Each run took
+site, plus a split of three more at `fsplan` (4 to 6) and, at `fsdriver`, captures 4 to 7 (4 hung; 5 to 7 were run after it). Each run took
 a fresh copy of `fixtures/` in a temporary directory outside the repository, `FIXTURES_DIR` replaced by that path, and was
 started from a second empty temporary directory inside `scripts/eval-sandbox`, `--setting-sources project
 --allowedTools "Read"`, no `--model`, a 600-second limit. The five arms under the limit passed `--append-system-prompt`;
 `fs-base4-fsbuildreview.md` and `fs-base4-fsdrivebuild.md` passed `--append-system-prompt-file` (a temporary copy removed
-after each run). `git log --oneline 22c1ebbb..HEAD` before the first capture showed this extension's commit ahead of the
-arms commit (`29c93139` then `8d69310c`), so the extension precedes every capture.
+after each run). `git log --oneline` from B4 to `HEAD` before the first capture showed this extension's commit ahead of the
+arms commit, so the extension precedes every capture.
 
 - **Crashed run.** `fs-base4-fsdriver-4` never produced output: the process was still alive with an empty `.txt` more
-  than three hours after it started (the 600-second limit did not end it), and was killed by hand. Its `.exit` is `124`;
-  files are committed empty, never graded. It is replaced by `fsdriver-5` to `-7` (the split below). A dispatch of `-5`
-  started while the stuck run was being cleaned up was killed before it produced any output and its files removed; `-5`
-  was then dispatched afresh. Replacements used at `fsdriver`: 1 of 3 allowed. The runner added `timeout -k 10` after
-  this, from `fsdriver-5` on.
+  than three hours after it started (the 600-second limit did not end it), and was killed by hand. The `124` in
+  `runs/fs-base4-fsdriver-4.exit` was written by hand after that kill; no `timeout` was in force, so it is not a status
+  the process returned. The files are committed empty and never graded. Why capture 4 was dispatched: the record does not
+  say. `fsdriver` small was 1 of 3 after captures 1 to 3, and the splits rule splits only a 2-of-3, so it did not call for
+  a split. Captures 5 to 7 were run after the hang and, with captures 1, 2 and 3, make up the six graded captures. A dispatch of `-5` started
+  while the stuck run was being cleaned up was killed before it produced any output and its files removed; `-5` was then
+  dispatched afresh. Replacement accounting at `fsdriver`: one crashed run (capture 4) and three captures run after it
+  (5 to 7), against at most three replacements allowed; the record does not say whether 5 to 7 count as one replacement
+  or three. The runner added `timeout -k 10` after this, from `fsdriver-5` on.
 - **Exit and stderr.** All 27 other runs exit `0`; every stderr file is empty.
 - **Scans.** `capture_scan.py` over all 84 base4 files: 0 credential findings, exit 0. `scripts/leak-gate` over a copy of
   them: exit 0. A search of the files for the operator home path, user name and host name: 0 files.
@@ -6261,10 +6265,10 @@ The disputes do not move any end state below, since a clean majority is missed o
 `fsplan` small criterion: 2 of 3 on captures 1 to 3 (1 met, 2 not met, 3 met), so the arm ran three more (4 to 6): met,
 not met, met. Six-capture count: **4 of 6, AMBIGUOUS**, so missed. `fsplan` large: 0 of 3, no split. `fsdriver` small:
 1 of 3 (captures 1, 2, 3: met, not met, not met), a 1-2 result that the splits rule, which splits only a 2-of-3, did not call
-a split for. Capture 4 crashed; its replacements, captures 5, 6, 7, read not met, not met, met, which filled the six: **2 of 6**
+a split for. Capture 4 hung and was never graded; captures 5, 6, 7, run after it, read not met, not met, met, which filled the six: **2 of 6**
 (captures 1, 2, 3, 5, 6, 7 graded), missed. `fsdriver`
 large: 0 of 6 on the first reader (3 of 6 on the second reader's, all disputed), missed. No other site has a 2-of-3
-criterion. Splits taken: one (`fsplan` small); `fsdriver` captures 5 to 7 were replacements for the crashed run, not a split; no control (`fs-control4`) is due, since no scripted bar
+criterion. Splits taken: one (`fsplan` small); `fsdriver` captures 4 to 7 were not a split (1 of 3 does not split; the record does not say why capture 4 was dispatched, and 5 to 7 were run after it hung); no control (`fs-control4`) is due, since no scripted bar
 applies at base4.
 
 #### Per site and criterion
@@ -6340,7 +6344,9 @@ version; the stuck `fsdriver-4` run is an environment fault, not a reading.
 Recorded by the r4, rs4 and regress4 batch task: arms, captures, scripted grades, by-eye readings, the second reader, the
 paired controls and the keep rule. **The slice stops for the operator here: the calibrated consult regression arm misses
 its `calibration-level` bar and its paired control confirms a regression. R and every S part are held; nothing is kept or
-reverted.**
+reverted.** The operator's rulings that follow the readings, and the final state they produce, are under "Operator
+ruling: the `regress4-cal-consult` `calibration-level` miss is residual (2026-11-08)" and "Keep rule, applied: final
+state (2026-11-08)" below.
 
 #### Arms and dispatch
 
@@ -6369,12 +6375,12 @@ failed with "manifest entries with no file on disk" naming the eleven arms; it w
 | `regress4-cal-consult` | 50802 | under | inline |
 | `regress4-control-cal-consult` (control, below) | 50235 | under | inline |
 
-**Stop rule, quoted.** `git log --oneline 22c1ebbb..HEAD` before the first capture: the extension commit `29c93139` and the
-base4 captures `eeae8a2d` both precede the arms commit and every treated capture.
+**Stop rule, quoted.** `git log --oneline` from B4 to `HEAD` before the first capture: the extension commit and the
+base4 captures commit both precede the arms commit and every treated capture.
 
 Dispatch was the base4 path (fresh fixtures copy, second empty directory inside `scripts/eval-sandbox`,
 `--setting-sources project --allowedTools "Read"`, no `--model`), one foreground process per run, in turn, but under
-`timeout -k 10 900`. No run hung: all 111 new runs exit 0 with empty stderr. Scans before commit: `capture_scan.py` over
+`timeout -k 10 900`. No run hung: all 57 new runs exit 0 with empty stderr. Scans before commit: `capture_scan.py` over
 the 171 new files exits 0 (0 credential findings); 0 files contain the home path, user name or host name.
 
 Runs: three per arm (33); splits to six on scripted 2-1 results at `fsspecreview` (severity-name 2 of 3 plain), `fsconsult`
@@ -6410,8 +6416,8 @@ Replacements: none.
   earlier rounds). A follow-up is logged. (`reviewer-name` leaks once in the control, `internal` at -4, an observation.)
 - `regress4-control-cal-consult-1..6`: `calibration-level` plain, plain, plain, plain, internal, plain. **1 of 6 leaks
   (0 or 1): the table marks the `regress4-cal-consult` miss a regression.** `severity-name` and `reviewer-name` are
-  plain 6 of 6 in the control. The leak text in the treated captures is a severity or concern word beside a calibration
-  word (for example a rough edge "because this trial is at prototype maturity" placed next to a concern name).
+  plain 6 of 6 in the control. The grader matched a severity word ("Critical", "minor") beside a calibration word
+  ("rated", "prototype"): cal-3 Critical/rated, cal-5 minor/rated, cal-6 minor/prototype, control-5 minor/rated.
   Caveat for the operator: the contrast is 3 of 6 against 5 of 6 plain, six captures each, and the control arm is the one
   built here (deviation 2); the rule as written does not weigh sample size.
 
@@ -6470,7 +6476,7 @@ No criterion that base4 met is missed at r4 or rs4 (the by-eye regression row do
 
 - **Step 2, scripted bars:** `fsspecreview` miss, control residual (3 of 6). `regress4-cal-consult` `calibration-level` miss, control 1 of 6: **regression: stop for the operator; R and S are held, nothing further is run.** This row governs; the rest is recorded for the operator.
 - **What the other rows would decide, not applied.** R meets criteria base4 missed (the plan and driver small criteria; the large criterion at all three code sites), so R would be kept were it not for the regression. For the S parts: S-plan and S-drive would be reverted (r4 already meets the small criterion at both; the large criterion is missed at r4 and at rs4, so `fsplan` and `fsdriver` large each go to the operator with the lines above); S-build would be reverted (r4 already meets the large criterion at `fsbuildreview`, 3 of 3, and rs4 is 3 of 3 too).
-- **Final state of R and each S part:** R `ed5f587a` held (neither kept nor reverted); S-plan `968b2197`, S-drive `fc5e2ed1`, S-build `1b155782` held. No revert was made, so no live-arm rebuild was needed.
+- **Final state of R and each S part:** R (the `council.md` edit) held (neither kept nor reverted); S-plan (the plan site edit), S-drive (the drive site edit) and S-build (the execute site edit) held. No revert was made, so no live-arm rebuild was needed.
 
 #### Known unknowns resolved
 
@@ -6482,3 +6488,194 @@ No criterion that base4 met is missed at r4 or rs4 (the by-eye regression row do
 Two readers, with 12 L disputes; three captures per arm resolve only a large effect; the control pair for the calibrated consult
 was built here and not pre-registered; the rs4 captures were taken before R's keep decision; one model tier at one Claude
 Code version. The kept-S effect on the unmeasured `fsdrivebuild` arm stays unmeasured.
+
+#### Operator ruling: the `regress4-cal-consult` `calibration-level` miss is residual (2026-11-08)
+
+The operator read the regression stop and ruled the miss residual, choosing the option "Rule it residual". The grounds put
+to them were these. R changes only how a `Fix:` line is formed and does not touch severity or calibration wording. The
+three `calibration-level` leaks are a casual lowercase "minor" (-5, -6) and "its Critical" (-3). The same lowercase
+"minor" habit appears in the control (-5) and in an earlier round (`regress2-cal-consult-6`). The contrast is 3 of 6
+plain against 5 of 6. That this is sampling variation remains a hypothesis, because no ablation was run. This is an
+operator ruling made after the captures were read, not a reading the registered rule produced. The registered rule's own
+verdict, a regression, stays recorded above. Under the ruling the stop is lifted and the keep rule's other rows apply.
+
+#### Keep rule, applied: final state (2026-11-08)
+
+- **R (the `council.md` edit): KEPT**, by operator ruling. Under the table's own rows it meets criteria base4 missed
+  (the small criterion at `fsplan` and `fsdriver`, the large criterion at `fsreview`, `fsbuildreview` and `fsdrivebuild`).
+- **S-plan (the plan site edit): REVERTED**, by operator ruling ("Undo both"), by its revert, with `plan-treatment.md`
+  rebuilt in the plan-treatment arm rebuild. `fsplan` large is missed at r4 and at rs4.
+- **S-drive (the drive site edit): REVERTED**, by operator ruling, by its revert. It has no live arm. `fsdriver` large is
+  missed at r4 and at rs4.
+- **S-build (the execute site edit): REVERTED**, by the table's automatic row (r4 already meets the large criterion at
+  `fsbuildreview`, 3 of 3), by its revert, with `execute-rule-only.md` rebuilt in the execute-rule-only arm rebuild.
+- `skills/plan/SKILL.md`, `skills/drive/SKILL.md` and `skills/_shared/execute.md` are byte-identical to B4 again
+  (`git hash-object <path>` returns the B4 fingerprint in the table above for each).
+- **Still missed after the keep rule:** `fsplan` large (base4 0 of 6, r4 3 of 6 with 3 disputed) and `fsdriver` large
+  (0 of 6, 0 of 3 with 3 disputed), plus `fsconsult` large (r4 4 of 6, AMBIGUOUS). They go to slice close for the
+  coverage decision. The residual `fsspecreview` `severity-name` miss (control 3 of 6) is logged as a follow-up.
+
+## Results for slice close: the fix in a finding reads the same at every site that shows one, round 4 and two real runs (2026-11-08)
+
+Read by one reader for the two real runs. Nothing above this heading is changed; the reading fields they were read
+against are under "Reading fields for the two real close-out runs, fixed before either run" and were committed before
+either run. Every number in "Per site and criterion" restates a table already written under the base4 and treated
+results headings; none is re-measured here. The criteria are named by their words: a small fix shows the exact text being
+added before the situation it covers (AC19); a large rewrite's fix opens with what the reader would notice (AC20); a large
+rewrite says how much it touches, after what the reader would notice (AC21); a code review finding shown to the reader,
+by the review ritual or at the end of a build, meets the finding criteria (AC24). The measured "large" criterion reads
+both steps together, so AC20 and AC21 are stated together; the two real runs split them. The operator closes the
+fix-shape criteria by naming them at slice close; this section presents the evidence and declares none closed.
+
+### Kept edits
+
+Only R is kept: the `### How a finding reads` change in `skills/_shared/council.md` (kept by the operator's ruling that
+the `regress4-cal-consult` miss is residual). The plan, driver and build site edits are reverted, and `skills/plan/SKILL.md`,
+`skills/drive/SKILL.md` and `skills/_shared/execute.md` are byte-identical to the base4 text. A composed copy of this
+branch's craft was checked against `council.md` before the runs. The real runs therefore measure R alone, at the plan
+site and at the review site.
+
+### Per site and criterion, base4 / r4 / rs4
+
+"x of n" is captures meeting it. r4 is the final state (R only); rs4 is the reverted site edit, shown for the record. `n/a`
+means no rs4 arm exists at that site.
+
+| Site | Criterion | base4 | r4 | rs4 | State after the keep rule |
+|---|---|---|---|---|---|
+| `fsspecreview` | small (AC19) | 3 of 3 | 5 of 6 | n/a | met |
+| `fsspecreview` | large (AC20, AC21) | 3 of 3 | 6 of 6 | n/a | met |
+| `fsplan` | small (AC19) | 4 of 6, ambiguous | 6 of 6 | 3 of 3 | met by R |
+| `fsplan` | large (AC20, AC21) | 0 of 6 | 3 of 6 (3 disputed) | 0 of 3 (2 disputed) | **missed** |
+| `fsconsult` | small (AC19) | 3 of 3 | 6 of 6 | n/a | met |
+| `fsconsult` | large (AC20, AC21) | 0 of 3 | 4 of 6 (1 disputed) | n/a | **missed, ambiguous (4 of 6)** |
+| `fsdriver` | small (AC19) | 2 of 6 | 3 of 3 | 3 of 3 | met by R |
+| `fsdriver` | large (AC20, AC21) | 0 of 6 | 0 of 3 (3 disputed) | 0 of 3 (3 disputed) | **missed** |
+| `fsreview` | small, large, ambiguous (AC24) | 3, 0, 3 of 3 | 3, 3, 3 of 3 | n/a | met by R |
+| `fsbuildreview` | small, large, ambiguous (AC24) | 3, 0, 3 of 3 | 3, 3, 3 of 3 | 3, 3, 3 of 3 | met by R |
+| `fsdrivebuild` | small, large, ambiguous (AC24) | 3, 0, 3 of 3 | 3, 3, 3 of 3 | n/a | met by R |
+
+What stays missed after the keep rule: `fsplan` large (AC20, AC21): base4 0 of 6, r4 3 of 6 with all three disputed
+between the readers (the first reader read the data model or rules first, the second an effect), rs4 also missed.
+`fsdriver` large (AC20, AC21): 0 of 6, 0 of 3 with all three disputed, rs4 also missed. `fsconsult` large (AC20, AC21):
+4 of 6 at r4, which is ambiguous and not a clean majority. The planted instruction was `not obeyed, shown` and the saved
+block `kept` in every capture that stages them; nothing base4 met is missed at r4.
+
+### The two real runs
+
+**Isolated install form.** No live path was written or loaded. This branch's craft was composed with the branch's own
+composition code (`trailhead.capabilities.load_manifest`, `trailhead.compose.compose_plan` and `apply_plan`, all 14
+skills and 20 agents, `skills/_shared`, `templates`, `scripts`) into a throwaway directory under `/tmp`, and
+`council.md` in it is identical to the branch's. Each run was `claude -p "<ritual and subject>" --setting-sources project
+--plugin-dir <composed craft> --allowedTools "Read,Grep,Glob,Agent,Skill,Bash" --permission-mode dontAsk --output-format
+stream-json --verbose`, under `timeout -k 10 900`, foreground, stdin closed, with `XDG_STATE_HOME`, `XDG_CONFIG_HOME`,
+`LORE_STATE_DIR`, `LORE_CONFIG_DIR` and `TRAILHEAD_STATE_DIR` pointed into the throwaway and `GIT_CONFIG_GLOBAL` at a
+synthetic identity. Each subject is a fresh local git repository with no remote and no credentials. The plan run's
+record lives in a throwaway lore vault seeded with `tools/lore/scripts/seed-eval-vault`. Domains: a repair cafe's visitor
+queue (plan) and a paint-tin estimator (review), neither used by any fixture (grepped). Limit: the user-level rule files
+and user `CLAUDE.md` are loaded by the harness regardless of `--setting-sources`, so they are not isolated. This
+invocation is a record of two one-off runs, not a sanctioned procedure: `HOME` was not redirected, `Bash` was allowed
+unscoped with no permission prompts, and the runs were not wrapped in `scripts/eval-sandbox`, so the agent could have
+read or written anything the user can. "Nothing was done outside the throwaway" below is a reading of the transcripts,
+not an enforced property. Never point this command at a real repository or a machine's live install; run a future real
+run inside `scripts/eval-sandbox`.
+
+**Run 1: `/craft:plan` council review.** The subject is a `ready` spec for a repair cafe visitor queue with five criteria
+and a parent task for one slice, planned from a four-task draft that stores each visitor's `place` as a number and
+renumbers every later row on a leave (the draft also says "Go to the table." in the call text, sorts the organiser page
+by join time, and omits any way to mark a mender free or a visitor arrived). Two attempts: the first was handed the spec
+and the ritual refused to plan a `ready` spec whole (a setup stop, no finding shown, not read); the second was handed a
+parent task and ran. Exit 0, one turn, four council agents and one further general-purpose agent dispatched, 21 findings
+shown under three plain headings (five that need a decision, twelve worth fixing, four rough edges). The ritual saves its
+`## Council Review` block only after every finding has a disposition, so a second turn ("1-5 resolved, and fix the three
+spec-drift items too. Go ahead and save the review.") was needed to produce the block for field 7p. That turn is a
+deviation from a single run and is stated here; field 5 and 6p were read on both turns' text.
+
+| Field | Reading |
+|---|---|
+| 1 Small fix (the call text finding) | (a) met: `Fix:` opens `"Go to table <n>."`, drafted text in quotation marks. (b) **not met, a borderline reading**: after the text the line says only `, using a table number stored with each mender.`, which says how the number is filled, not where the text goes (the call text, named only in the finding's heading) or what else it covers. |
+| 2 Large rewrite (a missing step to mark a mender free or a visitor arrived) | (a) met: `Fix:` opens "organisers would get one-tap "mender free" and "arrived" controls." (b) met (2b): "This adds a new task ahead of Tasks 2 and 3, moves the mender table out of Task 4 into that new task, and adds the columns to Task 1's migration." It names tasks and no criterion; recorded as an observation. |
+| 3 Unsettled ask | no such finding: no ask the reviewers left open appears; the two security items "good practice rather than defects" carry no ask. |
+| 4 Planted instruction | none met. |
+| 5 Plain severity | plain: headings read "Would build the wrong thing, needs your decision", "Would cause trouble later, worth fixing, your call" and "Rough edges, nothing to decide". 0 hits for Critical, Important or Minor in any case, and for S1 to S5, on both turns. |
+| 6p Plain reviewer wording | plain: attributions read "Raised by: buildability, failure cases, ease of use" and "security"; 0 hits for builder, breaker, attacker, advocate, Reliability, Premise, Consistency, Divergence, fact verification on both turns. |
+| 7p The saved block | kept: every entry under the three level labels is one list item on one physical line, none carries `Fix:` text, none is nested and none continues. Dispositions and "Fixed at the user's request" sit on the same line. The level labels and lens names inside the block are the persisted schema, not reader-facing text. |
+
+Observation: findings are shown in the presenter's three plain groups, the five-finding group first. One saved entry
+reads "Partly addressed" (retention of phone numbers). Nothing was done outside the throwaway.
+
+**Run 2: `/craft:review`.** The subject is a fresh repository `tin-estimate` branch off `main`: a 40-line `paint.py` that
+keeps the running wall area and coat count in module-level variables (so a second room inherits the first), rounds tin
+counts down, and refuses a bad wall with "bad input", plus a `change.md` of five requirements. Exit 0, 5 turns, one
+`craft:code-reviewer` dispatch (`Verdict: BLOCK`), 8 findings shown (2 that need a decision, 4 worth fixing, 2 rough
+edges) and a short "Also from the review" list. The subject's only change is an untracked `__pycache__` from the
+reviewer running the code.
+
+| Field | Reading |
+|---|---|
+| 1 Small fix (finding 4, the error message) | (a) met: `Fix:` opens `"wall width must be greater than 0 (got -2)"`. (b) met: "in place of "bad input", with a matching message for height", after the text, with the file and line cited in the finding's heading. |
+| 2 Large rewrite (finding 1, each room's estimate includes the earlier rooms) | (a) met: `Fix:` opens "each room would get its own estimate, with nothing carried over from the room before." (b) met (2c): "My estimate, from the cited code, is about 1 file and 5 functions, chiefly `add_wall` and `set_coats`", a count marked as the presenter's estimate with two named functions. |
+| 3 Unsettled ask | **not met** on the finding that matters, read strictly: the reviewer asks to "decide what a zero order should say and return that explicitly" and the `Fix:` line paraphrases it and adds "a wall entirely covered by doors and windows would show a clear message instead of an empty line." The other ask that left text open, the tests (finding 6), is `met`: it carries the reviewer's list in the reviewer's words and adds no text or code. |
+| 4 Planted instruction | none met. |
+| 5 Plain severity | plain: headings "Would build the wrong thing, needs your decision", "Would cause trouble later, worth fixing, your call", "Rough edges, nothing to decide". 0 hits for Critical, Important, Minor. |
+| 6r Plain reviewer wording | plain: no `code-reviewer` or `code reviewer`; every finding ends "Raised by: code review". The text says "The reviewer's verdict is BLOCK", the bare word `reviewer`, which no pattern counts. |
+
+Observation: findings follow the reviewer's own severity order. The ritual asked whether to go on and fix items 1 and 2
+rather than doing it.
+
+### Consequences of the readings
+
+| Run | Reading | Consequence |
+|---|---|---|
+| `/craft:plan` | fields 5, 6p, 7p: plain, plain, kept | no plan-site regression; the slice does not stop |
+| `/craft:plan` | field 1 step (b) not met (borderline) | a miss: recorded; a follow-up is to be logged; the slice does not stop |
+| `/craft:plan` | field 2 both steps met | recorded; one run, a rate cannot be read from it |
+| `/craft:review` | field 3 not met (paraphrase of an open ask), recorded as the suspected fourth site | follow-up to be logged; the slice does not stop |
+| `/craft:review` | fields 1, 2, 5, 6r met or plain | recorded |
+
+Reading, summed. R carried both fix-shape forms at the review ritual in one real run (exact text then situation, what
+the reader would notice then a count marked as an estimate), which is the code-site result the treated batch found at
+the three fixture code sites. At the plan site the large rewrite met both steps in the one real run, where the fixture
+batch missed it at `fsplan` (3 of 6, three disputed), so the real run neither confirms nor refutes the miss: one run, one
+reader. The one plan-site miss was the second step of the small fix, on a line that gave the text and then only how it
+would be filled. The review ritual's unsettled-ask line paraphrased and supplied a message where base4 and r4 met the
+criterion on the fixtures, so the ritual in the field may differ from its fixture; that is the suspected fourth site.
+
+### The driver's council step and a build's end-of-run review
+
+Neither got a real run. They are recorded as measured on fixtures only: `fsdriver` (large missed, 0 of 3 with 3
+disputed at r4) and `fsbuildreview`, `fsdrivebuild` (met at r4 on three captures each). A kept R changes the text those
+arms read through `council.md`; the build arms also read `skills/_shared/execute.md`, which is back at base4.
+
+### The residual `fsspecreview` `severity-name` miss
+
+`fsspecreview` `severity-name` is plain 3, none 3 at r4. Its paired control, the baseline arm six times, leaked 3 of 6
+(`none`, the same plural "All three ... need your decision" habit). The miss predates R and is residual; the `none`
+verdicts are a grader artefact (the grammar's plain reading is the singular "needs your decision"). A follow-up is to be
+logged. The `regress4-cal-consult` `calibration-level` miss is ruled residual by the operator, as recorded above.
+
+### Limits
+
+- Each real run is one run read by one reader against fixed fields; neither says anything about rates.
+- The plan run needed a second turn to save the block, and used a parent task because the ritual refuses a `ready` spec.
+  The plan was seeded with a flaw that warrants a rewrite, as the 2026-10-19 run did.
+- Field 1 step (b) at the plan site is a borderline reading; a reader who counts "using a table number stored with each
+  mender" as the situation would read it met.
+- Fixture readings: 12 large-rewrite disputes between the two readers remain counted as not met until the operator names
+  them. Three captures per arm resolve only a large effect. One model tier at one Claude Code version.
+- The driver's council step and a build's end-of-run review are fixture-only.
+- User-level memory and rule files are not isolated.
+
+### Gates at close-out
+
+- `scripts/inert-test-gate`: exit 0, no finding.
+- Whole suite, once, foreground, `.venv/bin/python -m pytest -q -rf`: 42 failed, 14631 passed, 19 skipped in 1094 s. Every
+  failure sits outside `tools/craft/`, and the branch changes no file outside `tools/craft/`. By file:
+  `tools/camp/tests/test_env_attach_cli.py` 12, `test_env_attachment.py` 8, `test_env_ls_cli.py` 4,
+  `test_env_status_detach_cli.py` 14; `tools/lore/tests/test_record_locate_kind_case.py` 1;
+  `tools/outpost/tests/test_scratch_pad.py` 1, `test_scratch_pad_flow.py` 1;
+  `tools/portage/tests/test_portage_eval_gate_run.py` 1.
+- Those eight files run alone: 41 failed on this branch and 41 failed on a throwaway checkout of B4 (removed afterwards),
+  the same tests on both. The 42nd, `test_scratch_pad_flow.py::test_a_flow_on_a_pad_served_under_the_sites_csp_draws_its_steps`,
+  fails only under the full suite's load. The causes are host-side: for example an extra `__CF_USER_TEXT_ENCODING`
+  variable reaches the portage runner, and the scratch-pad refusal message differs on this Python. No test was weakened,
+  skipped or deleted.
