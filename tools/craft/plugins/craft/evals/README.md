@@ -67,11 +67,14 @@ the costs below.
   to a templated `mktemp`, which `mktemp *` allows anywhere the sandbox can write. It
   creates files and never overwrites them. There is no `rm` grant, so the ritual's temp-file
   cleanup is denied and left to fail harmlessly.
-- The last two grants, `Bash(*/scripts/covers_gate.py *)` and `Bash(printf *)`, are for the slice
-  ritual's materialization path: the covers gate runs on the drafted coverage list, and the new
-  record's body (and the `--diff` block edits) reach `lore record create` / `update` through
-  `printf ... | ./lore ...`. Without them a run that chooses a slice stops before writing it.
-  `printf *` is a command grant like `mktemp *`: it prints to the pipe and writes nothing itself.
+- The two grants after those, `Bash(*/scripts/covers_gate.py *)` and `Bash(printf *)`, are for the
+  slice and plan rituals' record creation: the covers gate runs on the drafted coverage list, and a
+  new record's body reaches `lore record create` through `printf ... | ./lore ...`. The block
+  `--diff` edits do not use `printf`: the diff text is vault-derived, so it is written to a temp
+  file with the file-writing tool and redirected in (`./lore record update <record> --diff <
+  <diff-path>`), never put on a command line. Without these grants a run that chooses a slice stops
+  before writing it. `printf *` is a command grant like `mktemp *`: it prints to the pipe and writes
+  nothing itself.
 - A consult run takes about 2 minutes and about 0.75 USD (its limits are
   `allowed_tools: [Skill, Agent, Read, Glob, Grep]`, `max_turns: 30`,
   `timeout_seconds: 420`). A review-case run takes about 0.2 to 0.35 USD. The

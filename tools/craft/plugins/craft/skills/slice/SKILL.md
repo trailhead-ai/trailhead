@@ -48,6 +48,7 @@ does under the request and does not restate those shapes.
 - **`--then-plan` is the caller's explicit statement that `/craft:plan` follows in this same
   session.** It means nothing without `--unattended`. Under both, this skill is not the session's
   last ritual, so it prints no outcome line and leaves its run block open for plan to continue.
+  Plain `--unattended`, without `--then-plan`, ends with this skill's own outcome line.
 - **Under the request this skill asks the operator nothing.** Every stop below names what it does
   instead: refuse with a typed outcome line, stop and record, or decide on its own recommendation
   and log the decision.
@@ -297,13 +298,16 @@ backfills is unchanged, only when it is written moves:
    attended order does. Every other non-zero exit refuses: remove every temp file made here (the
    body, the parent-coverage file, the state file), write nothing, and end with the refused outcome
    line. Nothing has touched the spec, so there is nothing to undo.
-5. **Only when both gates exit 0, write.** Read the spec fresh once more; if its body differs from
-   the one step 1 started from, discard the composed body and start again at step 1, since another
-   writer got in between. Otherwise pipe the composed body back with a bare
-   `lore record update spec/<spec-name> < <body-path>` (the same full-body write as above, skipped
-   when the reconcile had nothing to add), then remove the temp files. A write that fails is not a
-   refusal: it ends the session `outcome: stuck spec/<spec-name> parked=0 — the ledger write failed;
-   re-run`, as `../_shared/unattended.md` says of any failed write.
+5. **Write when both gates have passed.** The ledger gate passes on exit 0. The candidate-set gate
+   passes on exit 0, or on the one carve-out of step 4 (exit 2 with
+   `reason-code: zero-criterion-identifiers`), so a legacy spec's composed lines are written too.
+   Read the spec fresh once more; if its body differs from the one step 1 started from, discard the
+   composed body and start again at step 1, since another writer got in between. Otherwise pipe the
+   composed body back with a bare `lore record update spec/<spec-name> < <body-path>` (the same
+   full-body write as above, skipped when the reconcile had nothing to add), then remove the temp
+   files. A write that fails is not a refusal: it ends the session `outcome: stuck spec/<spec-name>
+   parked=0 — the ledger write failed; re-run`, as `../_shared/unattended.md` says of any failed
+   write.
 
 A re-run after any of these stops starts clean: nothing is written before the gates pass, and once
 the write has landed a re-run finds a current ledger and has nothing to append.
@@ -413,7 +417,11 @@ invocation of this skill.
 **Under `--unattended`, an open slice is a refusal, not a question:** the last line is
 `outcome: refused spec/<spec-name> parked=0 — a slice is already open on this spec (<its task id>); <resume or drop it>`,
 with the remedy written as words. Nothing is written, and nothing is dropped on the operator's
-behalf. A search failure here refuses the same way, naming the failure.
+behalf. A search failure here refuses the same way, naming the failure. This guard has already run
+once at the top of step 4, so a hit here after step 4's reconcile write has landed is a concurrent
+slice: the session has written, so it is not a refusal, and the last line is `outcome: stuck
+spec/<spec-name> parked=0 — a slice is already open on this spec (<its task id>), after the ledger
+reconcile already landed; <resume or drop it>`.
 
 **The query is scoped to labelled slice parents — `has:label.craft.slice-parent`, the marker step 9
 writes at materialization.** A task linked to the spec that is not a slice parent does not block

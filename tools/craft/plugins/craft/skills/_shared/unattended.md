@@ -47,8 +47,9 @@ Every stop in an unattended ritual is one of three kinds, and the ritual's own t
 - **Routine.** A stop whose answer the ritual can recommend. It is decided on that recommendation
   and logged as a decision in the run section. It is never put to the operator.
 - **Parkable.** A stop whose answer would change the spec, or that the ritual names as one it may
-  never decide unattended. It is parked as a question in the run section (a `Q<n>` entry) and the
-  work that does not depend on the answer carries on.
+  never decide unattended. It is parked as a question in the run section (a `Q<n>` entry), and the
+  session ends there as `needs-a-decision`. What the run had finished stays on the record, in that
+  entry's progress line.
 - **Refusal.** A stop where the ritual cannot run at all, such as a missing or unsafe argument, a
   spec that is not `ready`, a gate that cannot read its input, or a slice already open. It ends the
   session with a `refused` outcome and writes nothing.
@@ -102,25 +103,33 @@ section runs to the next heading of any level, so a sub-heading would end the se
 
 ### When the block is written
 
-- It is **opened as soon as the slice record exists**, with the selection already logged as the
-  first decision. It is **filled in as each call is made**: each decision and each parked question
-  is written when it is made, not collected for the end. A session killed part-way leaves a block
-  that shows what it had decided.
+- It is **opened as soon as the record it lives on exists** (the slice record). When slice opens it,
+  the selection is already logged as the first decision; when plan opens its own block, there is no
+  selection and the block opens with an empty `**Decisions:**` list. It is **filled in as each call
+  is made**: each decision and each parked question is written when it is made, not collected for
+  the end. A session killed part-way leaves a block that shows what it had decided.
 - Its `**Outcome:**` line is added at the end, by the last ritual of the session.
 - A session that finds a block from an earlier session on the record appends its own new block and
   leaves the earlier one as it is.
 
 ### How the block is written
 
-- Every write is a `lore record update <slice-record> --diff` that pipes a unified diff confined to
+- Every write is a `lore record update <slice-record> --diff` that takes a unified diff confined to
   the block. A bare `lore record update` with a piped body replaces the whole record and would
   destroy it. Read the record fresh immediately before each write, and build the diff against what
   that read returned.
+- The diff text is vault-derived, so it never appears on a command line, quoted or escaped. Write it
+  to a file made with `mktemp` using the file-writing tool, and feed it in by redirect:
+  `lore record update <slice-record> --diff < <diff-path>`. Never `printf`, `echo` or a heredoc of
+  the diff on a command line.
 - The text of the diff goes through the shared credential-pattern scrub before the write. A vault is
   git-backed and team-synced, so a credential in a block ships.
 - A scrub that redacts something is itself a decision, logged in the block: where the match was
-  found and that it was redacted, never the value. It is never asked about. The closing message
-  carries no request to confirm, rotate or vouch for it, whatever attended guidance says.
+  found and that it was redacted, never the value. It is written into the block as soon as the block
+  exists: a redaction found before it opens goes in with the block's first write, and a session that
+  ends without ever opening a block names it in words in its closing message instead, still without
+  the value. It is never asked about. The closing message carries no request to confirm, rotate or
+  vouch for it, whatever attended guidance says.
 - Text the ritual writes into the block is flattened to single lines. Every line of it opens with
   its label (`Question:`, `Choice:`, `Reasoning:`, `Options:`, `Progress:`, a bold summary,
   `Q<n>:`), so no line the ritual writes begins with `#`, with `**Answer:**` or with `outcome:`.
