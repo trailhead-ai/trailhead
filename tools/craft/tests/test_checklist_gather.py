@@ -247,6 +247,19 @@ def test_many_entries_count_each_kind_and_leave_out_a_kind_with_zero(capsys):
     assert go(capsys, only_aside)[1].splitlines()[0] == "2 set-aside criteria waiting, in 1 spec."
 
 
+def test_one_criterion_under_two_building_slices_renders_both_entries(capsys):
+    fake = FakeLore(["alpha"])
+    fake.add("alpha", "s", spec_body(
+        pending("AC32", slice_="first", check="first attempt"),
+        pending("AC32", slice_="second", check="second attempt"),
+    ))
+    code, out, _ = go(capsys, fake)
+    assert code == 0
+    assert out.splitlines()[0] == "2 checks waiting, in 1 spec."
+    assert "first attempt" in out and "second attempt" in out
+    assert out.count("Checkout collects billing details.") == 2
+
+
 def test_blocks_are_numbered_and_ordered_by_vault_then_spec_then_set_date(capsys):
     fake = FakeLore(["beta", "alpha"])
     fake.add("beta", "aaa", spec_body(pending("AC32", check="beta-aaa")))

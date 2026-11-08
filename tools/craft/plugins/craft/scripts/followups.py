@@ -35,18 +35,15 @@ from __future__ import annotations
 import re
 import sys
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-from covers_gate import (  # noqa: E402
-    _COMMONMARK_LINE_RE,
-    DuplicateHeadingError,  # noqa: F401  (re-exported: followups.DuplicateHeadingError)
-    _find_unique_heading,
-    _mask_fenced_lines,
-)
+import markdown_section  # noqa: E402
+from covers_gate import DuplicateHeadingError  # noqa: E402,F401  (re-exported: followups.DuplicateHeadingError)
 
 HEADING = "## Follow-ups"
 DUPLICATE_HEADING_REASON_CODE = "duplicate-followups-heading"
@@ -56,8 +53,6 @@ MALFORMED_TASK_ID = "malformed-task-id"
 PATH_OUTSIDE_REPOSITORY = "path-outside-repository"
 DROP_WITHOUT_REASON = "drop-without-reason"
 
-_HEADING_RE = re.compile(r"^## Follow-ups$", re.IGNORECASE)
-_ATX_HEADING_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|\Z)")
 _ENTRY_RE = re.compile(r"^- \*\*(F[1-9][0-9]*)\.\*\* (\S.*)$")
 _ENTRY_START_RE = re.compile(r"^- ")
 _FIELD_RE = re.compile(r"^ {2,}- ([a-z]+):(.*)$")
@@ -98,51 +93,15 @@ class Entry:
     from_: str | None
 
 
-def _split(body: str) -> tuple[list[str], list[bool]]:
-    lines = _COMMONMARK_LINE_RE.split(body)
-    return lines, _mask_fenced_lines(lines)
-
-
-def _section_range(lines: list[str], masked: list[bool]) -> tuple[int, int] | None:
-    """(heading index, exclusive end index) of the section, or None."""
-    after = _find_unique_heading(
-        lines, masked, _HEADING_RE, HEADING, DUPLICATE_HEADING_REASON_CODE
-    )
-    if after is None:
-        return None
-    end = len(lines)
-    for j in range(after, len(lines)):
-        if not masked[j] and _ATX_HEADING_RE.match(lines[j]):
-            end = j
-            break
-    return after - 1, end
-
-
-def excise_section(body: str) -> str:
-    """The body without the section, lines joined by LF and trailing blank
-    lines dropped (never trailing whitespace within an authored line), so a
-    section appended at the end leaves the rest equal to the body it was
-    appended to."""
-    lines, masked = _split(body)
-    located = _section_range(lines, masked)
-    if located is not None:
-        start, end = located
-        lines = lines[:start] + lines[end:]
-    while lines and lines[-1] == "":
-        lines.pop()
-    return "\n".join(lines)
-
-
-def has_section(body: str) -> bool:
-    lines, masked = _split(body)
-    return _section_range(lines, masked) is not None
-
-
-def section_is_last(body: str) -> bool:
-    """True when the section is absent or only blank lines follow it."""
-    lines, masked = _split(body)
-    located = _section_range(lines, masked)
-    return located is None or all(not line.strip() for line in lines[located[1]:])
+excise_section = partial(
+    markdown_section.excise_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+has_section = partial(
+    markdown_section.has_section, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
+section_is_last = partial(
+    markdown_section.section_is_last, heading=HEADING, duplicate_code=DUPLICATE_HEADING_REASON_CODE
+)
 
 
 def _check_task_id(value: str, entry_id: str, field: str) -> None:
@@ -228,8 +187,8 @@ def parse_followups(body: str) -> list[Entry]:
     """Entries of the `## Follow-ups` section in document order; none when the
     section is absent. Raises FollowupsError on a grammar violation and
     DuplicateHeadingError on a second unmasked heading."""
-    lines, masked = _split(body)
-    located = _section_range(lines, masked)
+    lines, masked = markdown_section.split_body(body)
+    located = markdown_section.section_range(lines, masked, HEADING, DUPLICATE_HEADING_REASON_CODE)
     if located is None:
         return []
     start, end = located
