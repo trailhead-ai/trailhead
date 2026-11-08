@@ -19,6 +19,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -86,11 +87,18 @@ def test_new_session_with_window_creates_and_reads_back_a_real_first_window(
 
     assert isinstance(result, NewWindowResult)
 
-    listed = _sock_run(
-        sock, "list-windows", "-t", f"={session}", "-F", "#{window_id}\t#{window_name}\t#{pane_current_path}"
-    )
-    assert listed.returncode == 0, listed.stderr
-    rows = [line.split("\t") for line in listed.stdout.splitlines()]
+    # `pane_current_path` is derived from the pane's process, which can still
+    # be mid-spawn right after creation, so poll rather than read once.
+    deadline = time.monotonic() + 5.0
+    while True:
+        listed = _sock_run(
+            sock, "list-windows", "-t", f"={session}", "-F", "#{window_id}\t#{window_name}\t#{pane_current_path}"
+        )
+        assert listed.returncode == 0, listed.stderr
+        rows = [line.split("\t") for line in listed.stdout.splitlines()]
+        if [r[2] for r in rows] == [str(ws_dir.resolve())] or time.monotonic() >= deadline:
+            break
+        time.sleep(0.05)
     assert len(rows) == 1, "the created session must hold exactly one window"
     window_id, window_name, current_path = rows[0]
 
