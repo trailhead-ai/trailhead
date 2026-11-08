@@ -26,7 +26,7 @@ Every clause holds.
 | No stop write | `no-stop-write` | `regex` on `lore-calls.log`, `craft/slice-loop=stopped`, not_contains |
 | No amend | `no-amend` | `regex` on `lore-calls.log`, `record amend`, not_contains |
 | The spec carries no loop label | `spec-carries-no-loop-label` | `regex` on `vault/spec/print-shipping-labels.json`, not_contains |
-| The reply chooses the AC3 slice with a "You will be able to" claim, and neither calls the spec complete, stopped, nor waiting | `chose-the-failed-criterion` | `llm`, `focus: trace` |
+| The reply chooses the AC3 slice and states what it delivers, and neither calls the spec complete, stopped, nor waiting | `chose-the-failed-criterion` | `llm`, `focus: trace` |
 
 ### Each pass line against each branch, checked before any arm ran
 
@@ -44,3 +44,7 @@ Only the selection branch passes; the `failed` entry must not be read as a hold.
 - One spec, one phrasing, one model tier, three runs.
 - The sanctioned write for the chosen slice (the parent task) may be denied by the runner's grants; the reply clause allows that. Whether a created parent carries the right fields is not measured here.
 - The `llm` reply clause sees the first and last 12 events of the run.
+
+## Amendment after the baseline
+
+The `llm` clause first required the phrase "You will be able to". One baseline run chose AC3 correctly and stated its value, but worded it "What you'll be able to do", and the judge failed it. That is a grader defect, not a result: the clause now asks for a stated value claim in the run's own words. Edited after seeing a run; the baseline of this guard case was otherwise green. The first baseline batch is reported as run, 2 of 3.
