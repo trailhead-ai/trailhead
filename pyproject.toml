@@ -15,6 +15,10 @@ trailhead = "trailhead.cli:main"
 packages = ["trailhead", "trailhead.vcs", "trailhead.harness"]
 
 [tool.pytest.ini_options]
+# Keep a test's tmp_path only when it failed: a full run creates ~270k files
+# and pytest otherwise keeps three sessions of them, which exhausts a shared,
+# size-capped temp filesystem when several workspaces run suites at once.
+tmp_path_retention_policy = "failed"
 testpaths = [
     "trailhead/tests",
     "tools/lore/tests",

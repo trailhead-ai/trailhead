@@ -722,7 +722,11 @@ class TestClaudeCodeSessionTranscriptStoredUnder:
         real_scandir = os.scandir
 
         def recording(path="."):
-            listed.append(Path(path))
+            # os.scandir also accepts a directory file descriptor, which
+            # pytest's own tmp_path cleanup passes; only paths are listings
+            # the subject could have made.
+            if not isinstance(path, int):
+                listed.append(Path(path))
             return real_scandir(path)
 
         monkeypatch.setattr(os, "scandir", recording)
