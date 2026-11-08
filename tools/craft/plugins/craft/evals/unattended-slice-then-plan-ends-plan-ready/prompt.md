@@ -1,7 +1,7 @@
 ---
 allowed_tools: [Skill, Read, Glob, Grep, Agent, Write]
 max_turns: 120
-timeout_seconds: 900
+timeout_seconds: 1500
 ---
 Run `/craft:slice spec/report-export --unattended --then-plan`, then run `/craft:plan` on the slice it chose with `--unattended`, in this same session.
 
