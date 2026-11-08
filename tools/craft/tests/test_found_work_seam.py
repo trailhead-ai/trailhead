@@ -7,6 +7,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,17 @@ from lore_tests_conftest_for_found_work_seam import (  # noqa: E402,F401
     _publish_spawn_guard,
     make_vault,
 )
+
+_SCRIPTS = _SCRIPT.parent
+if str(_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS))
+
+import followups  # noqa: E402
+
+_fw_spec = importlib.util.spec_from_file_location("found_work_seam_under_test", _SCRIPT)
+fw = importlib.util.module_from_spec(_fw_spec)
+sys.modules["found_work_seam_under_test"] = fw
+_fw_spec.loader.exec_module(fw)
 
 SID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 SECRET = "AKIAABCDEFGHIJKLMNOP"
@@ -180,3 +192,591 @@ def test_a_decision_capture_that_writes_then_exits_non_zero_is_capture_failed_wi
     assert "title: Handle the empty case" in r.stdout
     lines = found_work_lines(seam.session_text())
     assert len(lines) == 1 and lines[0].startswith("found-work: folded")
+
+
+# --- the writing paths: deferred / separate / brainstorm ----------------------
+#
+# The spec fixture is shaped like the real corpus: a `ready` spec with objectives,
+# acceptance criteria under sub-headings, a table, a fenced block and a `## Slices`
+# ledger as the last section, and no `## Follow-ups`.
+
+SPEC_BODY = """# Fixture spec
+
+## Problem
+
+Building a slice turns up work the slices did not plan for.
+
+## Acceptance Criteria
+
+### Found work during a build
+
+- **AC1.** A finding is decided before it is acted on.
+- **AC2.** A deferral is written to the spec.
+
+| Term | Meaning |
+| ---- | ------- |
+| slice | one vertical cut |
+
+```
+## Follow-ups
+(not a heading: inside a fence)
+```
+
+## Slices
+
+| Slice | Task | Status |
+| ----- | ---- | ------ |
+| 1 | task/one | done |
+"""
+
+SECTION = """
+## Follow-ups
+
+- **F1.** First thing
+  - status: open
+  - what: the first thing
+  - where: `src/a.py`
+  - found: during review
+- **F2.** Second thing
+  - status: dropped: not worth it
+  - what: the second thing
+  - where: `src/b.py`
+  - found: during review
+"""
+
+
+class RealLore:
+    """The real `lore` CLI over the throwaway vault, as the `runner` found_work takes.
+    `before(argv, stdin)` may answer a call instead of lore; `after(argv, stdin, done)`
+    may replace or follow a call."""
+
+    def __init__(self, seam, before=None, after=None):
+        self.seam, self.before, self.after, self.calls = seam, before, after, []
+
+    def __call__(self, argv, stdin=None):
+        self.calls.append((list(argv), stdin))
+        if self.before:
+            answered = self.before(argv, stdin)
+            if answered is not None:
+                return answered
+        done = self.seam.lore(*argv, stdin=stdin)
+        return self.after(argv, stdin, done) if self.after else done
+
+    def calls_with(self, *words):
+        return [a for a, _ in self.calls if list(a[: len(words)]) == list(words)]
+
+
+def _lore(self, *args, stdin=None):
+    return subprocess.run(
+        ["lore", *args], capture_output=True, text=True, env=self.env, input=stdin, cwd=str(self.tmp_path)
+    )
+
+
+Seam.lore = _lore
+
+
+def _failed(argv, rc=1, err="error: no"):
+    return subprocess.CompletedProcess(argv, rc, "", err)
+
+
+def make_spec(seam, body=SPEC_BODY, title="Fixture spec"):
+    done = seam.lore("record", "create", "--kind", "spec", "--title", title, "--status", "ready", stdin=body)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def show(seam, record_id):
+    done = seam.lore("record", "show", record_id, "--json")
+    assert done.returncode == 0, done.stderr
+    return json.loads(done.stdout)
+
+
+def go(seam, doc, lore=None, *extra):
+    lore = lore or RealLore(seam)
+    stdin = doc if isinstance(doc, str) else json.dumps(doc)
+    import io
+    import contextlib
+
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = fw.main(["decide", "--session-id", SID, *extra], stdin=stdin, runner=lore)
+    return code, out.getvalue(), err.getvalue()
+
+
+def deferral(**over):
+    base = {"decision": "deferred", "spec": "spec/fixture-spec", "reason": "it would balloon this slice"}
+    return decision(**{**base, **over})
+
+
+def task_decision(kind="separate", **over):
+    base = {"decision": kind, "spec": "spec/fixture-spec", "reason": "it belongs elsewhere"}
+    return decision(**{**base, **over})
+
+
+def reason_code_of(out):
+    code = out.strip().rsplit("reason-code: ", 1)[1]
+    assert code in fw.REASON_CODES, code
+    return code
+
+
+def result_lines(seam):
+    return [ln for ln in found_work_lines(seam.session_text()) if ln.startswith("found-work-result")]
+
+
+def task_candidates(seam):
+    text = seam.session_text()
+    return [m for m in re.findall(r"kind=task phase=Build\n((?:  .*\n?)+)", text)]
+
+
+def all_tasks(seam):
+    return [k[: -len(".md")] for k in seam.records() if k.startswith("task/") and k.endswith(".md")]
+
+
+def test_the_first_deferral_creates_the_section_at_the_end_as_f1_and_changes_nothing_else(seam):
+    spec_id = make_spec(seam)
+    before = show(seam, spec_id)
+    code, out, err = go(seam, deferral())
+    assert code == 0, err
+    after = show(seam, spec_id)
+    entries = followups.parse_followups(after["body"])
+    assert [(e.id, e.title, e.status_kind, e.what, e.where, e.found, e.from_) for e in entries] == [
+        ("F1", "Handle the empty case", "open", "w", ("src/a.py",), "f", None)
+    ]
+    assert after["body"].startswith(before["body"])
+    assert followups.excise_section(after["body"]) == followups.excise_section(before["body"])
+    assert after["body"][len(before["body"]):].startswith("\n## Follow-ups\n\n- **F1.** Handle the empty case\n")
+    assert result_lines(seam) == [out.strip()]
+    assert out.strip().endswith("record: spec/fixture-spec#F1 | reason-code: none")
+    decision_line = [ln for ln in found_work_lines(seam.session_text()) if ln.startswith("found-work: ")][0]
+    assert "record: spec/fixture-spec#F1" in decision_line
+
+
+def test_a_second_deferral_gets_f2(seam):
+    spec_id = make_spec(seam)
+    go(seam, deferral())
+    code, out, err = go(seam, deferral(finding={"title": "Another thing"}))
+    assert code == 0, err
+    assert [e.id for e in followups.parse_followups(show(seam, spec_id)["body"])] == ["F1", "F2"]
+    assert "record: spec/fixture-spec#F2" in out
+
+
+def test_a_deferral_never_reuses_the_id_of_a_dropped_entry(seam):
+    spec_id = make_spec(seam, SPEC_BODY + SECTION)
+    code, out, err = go(seam, deferral(finding={"title": "A later thing"}))
+    assert code == 0, err
+    assert [(e.id, e.status_kind) for e in followups.parse_followups(show(seam, spec_id)["body"])] == [
+        ("F1", "open"),
+        ("F2", "dropped"),
+        ("F3", "open"),
+    ]
+    assert "record: spec/fixture-spec#F3" in out
+
+
+def test_a_deferral_into_an_existing_section_leaves_the_rest_of_the_spec_alone(seam):
+    spec_id = make_spec(seam, SPEC_BODY + SECTION)
+    before = show(seam, spec_id)["body"]
+    code, _, err = go(seam, deferral(finding={"title": "A later thing"}))
+    assert code == 0, err
+    after = show(seam, spec_id)["body"]
+    assert followups.excise_section(after) == followups.excise_section(before)
+    assert after.startswith(before.rstrip("\n"))
+
+
+def test_a_deferral_into_a_section_followed_by_another_heading_lands_inside_the_section(seam):
+    tail = "\n## Appendix\n\nnotes stay below the section\n"
+    spec_id = make_spec(seam, SPEC_BODY + SECTION + tail)
+    before = show(seam, spec_id)["body"]
+    code, out, err = go(seam, deferral(finding={"title": "A later thing"}))
+    assert code == 0, err
+    after = show(seam, spec_id)["body"]
+    assert [e.id for e in followups.parse_followups(after)] == ["F1", "F2", "F3"]
+    assert after.endswith(tail)
+    assert followups.excise_section(after) == followups.excise_section(before)
+
+
+def test_a_deferral_composed_against_a_read_another_write_has_since_changed_is_refused(seam):
+    spec_id = make_spec(seam)
+    changed = {}
+
+    def before(argv, stdin):
+        if argv[:2] == ["session", "candidate"] and "found-work" in argv and "found-work-result" not in argv:
+            row = "| 1 | task/one | done |"
+            body = show(seam, spec_id)["body"].replace(row, row + "\n| 2 | task/two | open |")
+            done = seam.lore("record", "update", spec_id, stdin=body)
+            assert done.returncode == 0, done.stderr
+            changed["body"] = show(seam, spec_id)["body"]
+        return None
+
+    code, out, err = go(seam, deferral(), RealLore(seam, before=before))
+    assert code == 3
+    assert reason_code_of(out) == "stale-base"
+    assert out.strip().startswith("found-work-result: failed")
+    assert show(seam, spec_id)["body"] == changed["body"]
+    assert not followups.has_section(changed["body"])
+    cands = task_candidates(seam)
+    assert len(cands) == 1 and "Handle the empty case" in cands[0]
+
+
+def test_a_deferral_into_a_spec_read_from_a_shared_layer_is_refused(seam):
+    spec_id = make_spec(seam)
+    before_body = show(seam, spec_id)["body"]
+
+    def after(argv, stdin, done):
+        if argv[:2] == ["record", "show"] and "--json" in argv:
+            doc = json.loads(done.stdout)
+            doc["layer"] = "shared"
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+        return done
+
+    lore = RealLore(seam, after=after)
+    code, out, err = go(seam, deferral(), lore)
+    assert code == 3
+    assert reason_code_of(out) == "shared-layer-prior"
+    assert show(seam, spec_id)["body"] == before_body
+    assert lore.calls_with("record", "update") == []
+    assert len(task_candidates(seam)) == 1
+
+
+def test_a_write_that_lands_but_does_not_read_back_as_the_new_entry_fails(seam):
+    spec_id = make_spec(seam)
+    state = {"updated": False}
+
+    def after(argv, stdin, done):
+        if argv[:2] == ["record", "update"]:
+            state["updated"] = True
+        if argv[:2] == ["record", "show"] and state["updated"]:
+            doc = json.loads(done.stdout)
+            doc["body"] = SPEC_BODY
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+        return done
+
+    code, out, err = go(seam, deferral(), RealLore(seam, after=after))
+    assert code == 3
+    assert reason_code_of(out) == "readback-failed"
+    assert followups.parse_followups(show(seam, spec_id)["body"])[0].id == "F1"
+    assert len(task_candidates(seam)) == 1
+
+
+def test_a_gate_refusal_is_relayed_by_its_reason_code_and_writes_nothing(seam):
+    spec_id = make_spec(seam)
+    before_body = show(seam, spec_id)["body"]
+    lore = RealLore(seam)
+    code, out, err = go(seam, deferral(finding={"where": []}), lore)
+    assert code == 3
+    assert reason_code_of(out) == "malformed-entry"
+    assert show(seam, spec_id)["body"] == before_body
+    assert lore.calls_with("record", "update") == []
+    assert len(task_candidates(seam)) == 1
+
+
+def test_an_unreadable_spec_fails_the_deferral_without_a_write(seam):
+    lore = RealLore(seam)
+    code, out, err = go(seam, deferral(), lore)
+    assert code == 3
+    assert reason_code_of(out) == "spec-unreadable"
+    assert "record: spec/fixture-spec |" in out
+    assert lore.calls_with("record", "update") == []
+    assert len(task_candidates(seam)) == 1
+
+
+def test_a_lore_update_failure_is_a_fixed_reason_code_never_lores_free_text(seam):
+    make_spec(seam)
+
+    def before(argv, stdin):
+        if argv[:2] == ["record", "update"]:
+            return _failed(argv, 1, "error: disk exploded, token AKIAABCDEFGHIJKLMNOP leaked")
+        return None
+
+    code, out, err = go(seam, deferral(), RealLore(seam, before=before))
+    assert code == 3
+    assert reason_code_of(out) == "write-failed"
+    assert "exploded" not in seam.session_text() and SECRET not in seam.session_text()
+
+
+def test_separate_creates_an_open_task_with_no_spec_relation_and_the_finding_where(seam):
+    code, out, err = go(seam, task_decision(finding={"where": ["src/a.py", "src/b.py"]}))
+    assert code == 0, err
+    task_id = out.strip().split("record: ")[1].split(" |")[0]
+    assert re.fullmatch(r"task/[a-z0-9-]+", task_id)
+    doc = show(seam, task_id)
+    assert doc["sidecar"]["status"] == "open"
+    assert doc["sidecar"]["title"] == "Handle the empty case"
+    assert "labels" not in doc["sidecar"] or "route" not in doc["sidecar"]["labels"]
+    assert not any(k.startswith("related") for k in doc["sidecar"])
+    assert "spec/fixture-spec" not in json.dumps(doc["sidecar"])
+    assert "src/a.py" in doc["body"] and "src/b.py" in doc["body"]
+    assert "what: w\n" in doc["body"] and "found: f\n" in doc["body"]
+    assert "task/X" in doc["body"]
+    assert "needs a brainstorm" not in doc["body"]
+
+
+def test_brainstorm_creates_a_task_labelled_for_brainstorm_that_report_prints_the_command_for(seam):
+    code, out, err = go(seam, task_decision("brainstorm"))
+    assert code == 0, err
+    task_id = out.strip().split("record: ")[1].split(" |")[0]
+    doc = show(seam, task_id)
+    assert doc["sidecar"]["labels"]["route"] == "brainstorm"
+    assert doc["sidecar"]["status"] == "open"
+    assert "needs a brainstorm before it can be built" in doc["body"]
+    assert not any(k.startswith("related") for k in doc["sidecar"])
+    r = seam.report("task/X")
+    assert r.returncode == 0, r.stderr
+    assert f"Run `/craft:brainstorm {task_id}`." in r.stdout
+
+
+@pytest.mark.parametrize("field", ["title", "what", "found", "where"])
+def test_a_credential_in_any_field_is_redacted_in_the_written_entry(seam, field):
+    spec_id = make_spec(seam)
+    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
+    code, out, err = go(seam, deferral(finding={field: value}))
+    assert code == (3 if field == "where" else 0), err
+    assert SECRET not in show(seam, spec_id)["body"]
+    assert SECRET not in seam.session_text()
+    if field != "where":
+        assert "leak [redacted]" in show(seam, spec_id)["body"]
+
+
+@pytest.mark.parametrize("kind", ["separate", "brainstorm"])
+@pytest.mark.parametrize("field", ["title", "what", "found", "where"])
+def test_a_credential_in_any_field_is_redacted_in_the_created_task(seam, kind, field):
+    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
+    code, out, err = go(seam, task_decision(kind, finding={field: value}))
+    assert code == 0, err
+    task_id = out.strip().split("record: ")[1].split(" |")[0]
+    assert SECRET not in json.dumps(show(seam, task_id))
+    assert SECRET not in seam.session_text()
+    assert SECRET not in "".join(seam.records().keys())
+
+
+def test_a_credential_in_the_reason_is_redacted_in_the_created_task(seam):
+    code, out, err = go(seam, task_decision(reason=f"because {SECRET}"))
+    assert code == 0, err
+    task_id = out.strip().split("record: ")[1].split(" |")[0]
+    assert SECRET not in json.dumps(show(seam, task_id))
+    assert "because [redacted]" in show(seam, task_id)["body"]
+
+
+@pytest.mark.parametrize("field", ["title", "what", "found", "where", "reason"])
+def test_a_credential_in_any_field_is_redacted_in_the_fallback_candidate(seam, field):
+    make_spec(seam)
+
+    def before(argv, stdin):
+        if argv[:2] == ["record", "update"]:
+            return _failed(argv)
+        return None
+
+    value = [f"src/{SECRET}.py"] if field == "where" else f"leak {SECRET}"
+    doc = deferral(reason=f"because {SECRET}") if field == "reason" else deferral(finding={field: value})
+    code, out, err = go(seam, doc, RealLore(seam, before=before))
+    assert code == 3
+    cands = task_candidates(seam)
+    assert len(cands) == 1 and SECRET not in cands[0]
+    assert SECRET not in seam.session_text()
+
+
+@pytest.mark.parametrize("make_doc", [deferral, task_decision, lambda **kw: task_decision("brainstorm", **kw)])
+def test_when_the_decision_capture_fails_nothing_is_written(seam, make_doc):
+    spec_id = make_spec(seam)
+    before_body = show(seam, spec_id)["body"]
+    tasks_before = all_tasks(seam)
+
+    def before(argv, stdin):
+        if argv[:2] == ["session", "candidate"] and "found-work" in argv:
+            return _failed(argv)
+        return None
+
+    lore = RealLore(seam, before=before)
+    code, out, err = go(seam, make_doc(), lore)
+    assert code == 2
+    assert "reason-code: capture-failed" in err
+    assert lore.calls_with("record", "update") == [] and lore.calls_with("record", "create") == []
+    assert show(seam, spec_id)["body"] == before_body
+    assert all_tasks(seam) == tasks_before
+
+
+@pytest.mark.parametrize("make_doc", [deferral, task_decision, lambda **kw: task_decision("brainstorm", **kw)])
+def test_a_failed_write_exits_3_with_a_failed_result_and_a_task_candidate(seam, make_doc):
+    make_spec(seam)
+
+    def before(argv, stdin):
+        if argv[:2] in (["record", "update"], ["record", "create"]):
+            return _failed(argv, 1, "error: free text with | pipes and\nnewlines")
+        return None
+
+    code, out, err = go(seam, make_doc(), RealLore(seam, before=before))
+    assert code == 3
+    assert out.strip().startswith("found-work-result: failed | parent: task/X")
+    assert reason_code_of(out) == "write-failed"
+    assert "free text" not in seam.session_text()
+    cands = task_candidates(seam)
+    assert len(cands) == 1 and "Handle the empty case" in cands[0] and "src/a.py" in cands[0]
+
+
+def test_a_create_that_exits_non_zero_is_a_failed_write_whatever_it_printed(seam):
+    def before(argv, stdin):
+        if argv[:2] == ["record", "create"]:
+            return subprocess.CompletedProcess(argv, 1, "task/looks-fine\n", "error: nope")
+        return None
+
+    code, out, err = go(seam, task_decision(), RealLore(seam, before=before))
+    assert code == 3
+    assert reason_code_of(out) == "write-failed"
+
+
+def test_a_create_that_prints_two_ids_is_a_failed_write(seam):
+    def before(argv, stdin):
+        if argv[:2] == ["record", "create"]:
+            return subprocess.CompletedProcess(argv, 0, "task/a\ntask/b\n", "")
+        return None
+
+    code, out, err = go(seam, task_decision(), RealLore(seam, before=before))
+    assert code == 3
+    assert reason_code_of(out) == "write-failed"
+
+
+def test_a_task_lookup_failure_fails_the_write_instead_of_risking_a_second_task(seam):
+    def before(argv, stdin):
+        if argv[:1] == ["search"]:
+            return _failed(argv)
+        return None
+
+    lore = RealLore(seam, before=before)
+    code, out, err = go(seam, task_decision(), lore)
+    assert code == 3
+    assert reason_code_of(out) == "lookup-failed"
+    assert lore.calls_with("record", "create") == []
+
+
+def test_create_output_that_is_not_one_task_id_is_a_failed_write(seam):
+    def after(argv, stdin, done):
+        if argv[:2] == ["record", "create"]:
+            return subprocess.CompletedProcess(argv, 0, "task/ok; rm -rf\n", "")
+        return done
+
+    code, out, err = go(seam, task_decision(), RealLore(seam, after=after))
+    assert code == 3
+    assert reason_code_of(out) == "write-failed"
+
+
+def test_no_finding_text_reaches_a_command_line_but_the_neutralized_title_as_one_element(seam):
+    make_spec(seam)
+    finding = {"title": "Odd -title; $(x) `y`", "what": "WHATMARK", "found": "FOUNDMARK", "where": ["src/WHEREMARK.py"]}
+    docs = (
+        deferral(finding=finding),
+        task_decision(finding=finding, parent="task/P2"),
+        task_decision("brainstorm", finding=finding, parent="task/P3"),
+    )
+    for doc in docs:
+        lore = RealLore(seam)
+        code, out, err = go(seam, doc, lore)
+        assert code == 0, err
+        assert lore.calls_with("record", "update") or lore.calls_with("record", "create")
+        for argv, _ in lore.calls:
+            joined = " ".join(argv)
+            assert not any(m in joined for m in ("WHATMARK", "FOUNDMARK", "WHEREMARK", "it would balloon"))
+            if "Odd" in joined:
+                assert argv[:2] == ["record", "create"]
+                assert [a for a in argv if "Odd" in a] == ["--title=Odd -title; $(x) `y`"]
+
+
+def test_retrying_a_deferral_after_a_written_result_adds_no_second_entry(seam):
+    spec_id = make_spec(seam)
+    first = go(seam, deferral())
+    second = go(seam, deferral())
+    assert second[0] == 0 and second[1] == first[1]
+    assert [e.id for e in followups.parse_followups(show(seam, spec_id)["body"])] == ["F1"]
+    assert len(found_work_lines(seam.session_text())) == 2
+
+
+@pytest.mark.parametrize("kind", ["separate", "brainstorm"])
+def test_retrying_a_task_decision_after_a_written_result_adds_no_second_task(seam, kind):
+    first = go(seam, task_decision(kind))
+    second = go(seam, task_decision(kind))
+    assert second[0] == 0 and second[1] == first[1]
+    assert len(all_tasks(seam)) == 1
+    assert len(found_work_lines(seam.session_text())) == 2
+
+
+def _lose_result_capture(argv, stdin):
+    if argv[:2] == ["session", "candidate"] and "found-work-result" in argv:
+        return _failed(argv)
+    return None
+
+
+def test_retrying_a_deferral_whose_result_capture_was_lost_returns_the_same_entry(seam):
+    spec_id = make_spec(seam)
+    code, out, _ = go(seam, deferral(), RealLore(seam, before=_lose_result_capture))
+    assert code == 2 and "#F1" in out
+    code, out, err = go(seam, deferral())
+    assert code == 0, err
+    assert out.strip().endswith("record: spec/fixture-spec#F1 | reason-code: none")
+    assert [e.id for e in followups.parse_followups(show(seam, spec_id)["body"])] == ["F1"]
+
+
+@pytest.mark.parametrize("kind", ["separate", "brainstorm"])
+def test_retrying_a_task_decision_whose_result_capture_was_lost_returns_the_same_task(seam, kind):
+    code, out, _ = go(seam, task_decision(kind), RealLore(seam, before=_lose_result_capture))
+    assert code == 2
+    first_id = out.strip().split("record: ")[1].split(" |")[0]
+    code, out, err = go(seam, task_decision(kind))
+    assert code == 0, err
+    assert f"record: {first_id} |" in out
+    assert all_tasks(seam) == [first_id]
+
+
+@pytest.mark.parametrize(
+    "other",
+    [{"finding": {"title": "A different finding"}}, {"finding": {"where": ["src/other.py"]}}, {"parent": "task/Y"}],
+    ids=["title", "where", "parent"],
+)
+def test_a_lost_result_retry_matches_parent_title_and_where_of_the_task(seam, other):
+    go(seam, task_decision(), RealLore(seam, before=_lose_result_capture))
+    code, out, err = go(seam, task_decision(**other))
+    assert code == 0, err
+    assert len(all_tasks(seam)) == 2
+
+
+def test_a_task_that_only_mentions_the_key_in_prose_is_not_the_prior_task(seam):
+    key = fw._found_work_key(
+        fw.build_decision(json.dumps(task_decision()))
+    )
+    done = seam.lore(
+        "record", "create", "--kind", "task", "--title=Unrelated", "--status", "open", stdin=f"we saw {key} once\n"
+    )
+    assert done.returncode == 0, done.stderr
+    code, out, err = go(seam, task_decision())
+    assert code == 0, err
+    assert len(all_tasks(seam)) == 2
+    assert "record: task/unrelated" not in out
+
+
+def test_a_deferred_decision_needs_a_spec_record_id_and_captures_nothing(seam):
+    lore = RealLore(seam)
+    code, out, err = go(seam, deferral(spec="story/fixture"), lore)
+    assert code == 1
+    assert "reason-code: unsafe-id" in err
+    assert lore.calls_with("session", "candidate") == []
+
+
+@pytest.mark.parametrize(
+    "other", [{"where": ["src/other.py"]}, {"title": "A different finding"}], ids=["where", "title"]
+)
+def test_a_deferral_retry_after_a_lost_result_matches_title_and_where(seam, other):
+    spec_id = make_spec(seam)
+    go(seam, deferral(), RealLore(seam, before=_lose_result_capture))
+    code, out, err = go(seam, deferral(finding=other))
+    assert code == 0, err
+    assert [e.id for e in followups.parse_followups(show(seam, spec_id)["body"])] == ["F1", "F2"]
+
+
+def test_a_dropped_entry_with_the_same_title_and_where_is_not_the_prior_deferral(seam):
+    dropped = SECTION.replace("First thing", "Handle the empty case").replace("src/a.py", "src/a.py")
+    dropped = dropped.replace("status: open", "status: dropped: not worth it", 1)
+    spec_id = make_spec(seam, SPEC_BODY + dropped)
+    code, out, err = go(seam, deferral())
+    assert code == 0, err
+    assert [(e.id, e.status_kind) for e in followups.parse_followups(show(seam, spec_id)["body"])] == [
+        ("F1", "dropped"),
+        ("F2", "dropped"),
+        ("F3", "open"),
+    ]

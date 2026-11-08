@@ -23,8 +23,8 @@ runs before the capture and returns the record the decision concerns (the
 decision line's `record:`); `write(decision, runner, record)` runs only after the
 decision line was captured with exit 0 and returns a `WriteResult`. `folded` and
 `dropped` write nothing: their `written` result names the build's parent task.
-`deferred`, `separate` and `brainstorm` are refused `not-implemented` until a
-handler for them is registered in `HANDLERS`. The `runner` is
+`deferred`, `separate` and `brainstorm` carry the writing handlers described under
+"Writing paths". The `runner` is
 `runner(argv, stdin=None) -> subprocess.CompletedProcess` running `lore <argv>`;
 tests inject a fake.
 
@@ -43,7 +43,7 @@ Validation (refusals, exit 1, `reason-code:` on stderr):
     outside `^[A-Za-z0-9._/-]+$`), path-outside-repository (a `where` path that
     is absolute, has a `..` segment, starts with `-`, or holds NUL or a
     backslash), drop-without-reason, security-detail-without-location (a
-    `security: true` finding needs a `path:line` in `where`), not-implemented.
+    `security: true` finding needs a `path:line` in `where`).
 A security finding has its `what` and `found` replaced with a fixed
 "security finding — see location" before anything is scrubbed, captured or
 printed.
@@ -56,6 +56,39 @@ location only. Neutralize: control characters, line breaks and other Unicode
 separators collapse to a space and every `|` is escaped to `\\|`, so no field can
 end a line or forge a field.
 
+Writing paths (each runs only after the decision line was captured with exit 0
+and is followed by a result line):
+    deferred   `lore record show spec/<id> --json` is read BEFORE the capture; the
+               next `F<n>` (one above the highest id present, dropped entries
+               included; `F1` when absent) is the decision line's
+               `record: spec/<id>#F<n>`. The entry (`status: open`, `what`, `where`,
+               `found`, no `from`) is appended to the body read then, creating
+               `## Follow-ups` at the end when absent, certified with
+               `followups_gate.py --prior` (the gate's `base:` is the write's
+               `--base`), written with `lore record update spec/<id> --base`, then
+               read back and parsed. A spec that changed after the read is refused
+               by lore's `--base` check (`stale-base`).
+    separate   `lore record create --kind task --status open`, no spec relation.
+    brainstorm the same plus `--label route=brainstorm` and a body that says the
+               work needs a brainstorm before it can be built.
+    The only finding text on a command line is the scrubbed, neutralized title,
+    passed to `record create` as the single argv element `--title=<title>` (no
+    shell); the body travels on stdin. The created task's id is the one line
+    `record create` prints on stdout, accepted only if it is `task/<slug>`.
+    A task body ends with `found-work-key: <digest of parent, title, where>`.
+    Retry after a lost result capture: a `deferred` retry finds the open entry
+    with the same title and `where` already in the spec and returns it; a
+    `separate`/`brainstorm` retry finds the task through `lore search --json`
+    on that key and returns it. Neither writes a second time. A search that
+    fails refuses the create (`lookup-failed`) rather than risk a second task.
+    A failed write exits 3, captures a `failed` result line whose `reason-code:`
+    is always from `REASON_CODES` (the gate's code when it is one of
+    `GATE_CODES`, otherwise a fixed code of this script; lore's free text is
+    never echoed) and also captures the finding as an ordinary `--kind task`
+    candidate so flush files it. Write-failure codes: stale-base, write-failed,
+    readback-failed, spec-unreadable, lookup-failed, gate-refused, plus
+    `GATE_CODES`.
+
 Idempotency: a log that already pairs a decision line for the same parent, title
 and `where` with a result line makes `decide` print that result line and write
 and capture nothing.
@@ -67,8 +100,7 @@ Exit codes for `decide`:
        on stdout so the caller can carry it into its report. Also used when the
        decision landed but its result line could not be captured (the result
        line is printed instead).
-    3  write-failed (reserved for write handlers): the write returned a
-       reason-code; a `failed` result line is captured and printed.
+    3  write-failed: the write returned a reason-code; a `failed` result line is captured and printed.
 
 `report --parent <id>` reads the session log (`lore session show`), parses only
 well-formed lines, from entries of the right kind, whose parent equals the
@@ -84,10 +116,12 @@ claiming there were none.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import subprocess
 import sys
+import tempfile
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
@@ -97,20 +131,49 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+import followups  # noqa: E402
 from criterion_gate import scrub_credential_shaped  # noqa: E402
+
+GATE_CODES = frozenset(
+    {
+        "removed-entry",
+        "duplicate-entry-id",
+        "drop-without-reason",
+        "settled-entry-changed",
+        "entry-origin-changed",
+        "malformed-entry",
+        "malformed-task-id",
+        "path-outside-repository",
+        "duplicate-followups-heading",
+        "change-outside-followups",
+        "section-not-at-end",
+        "empty-stdin",
+        "non-utf8-stdin",
+        "stdin-too-large",
+        "unterminated-masked-region",
+        "unreadable-prior",
+        "malformed-prior",
+        "shared-layer-prior",
+        "malformed-prior-section",
+    }
+)
 
 REASON_CODES = frozenset(
     {
         "malformed-input",
         "no-spec",
         "unsafe-id",
-        "path-outside-repository",
-        "drop-without-reason",
         "security-detail-without-location",
-        "not-implemented",
         "capture-failed",
         "session-unreadable",
+        "stale-base",
+        "write-failed",
+        "readback-failed",
+        "spec-unreadable",
+        "lookup-failed",
+        "gate-refused",
     }
+    | GATE_CODES
 )
 
 EXIT_DONE = 0
@@ -124,6 +187,11 @@ NO_DECISIONS_LINE = "The build made no decisions about found work."
 SECURITY_REPLACEMENT = "security finding — see location"
 LORE_TIMEOUT_SECONDS = 60
 
+_GATE = _SCRIPT_DIR / "followups_gate.py"
+_GATE_CODE_RE = re.compile(r"^followups-gate: reason-code: ([a-z0-9-]+)$", re.MULTILINE)
+_BASE_RE = re.compile(r"base: ([0-9a-f]{64})")
+_SPEC_RECORD_RE = re.compile(r"spec/[A-Za-z0-9._-]+")
+_NEW_TASK_RE = re.compile(r"task/[A-Za-z0-9._-]+")
 _ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
 _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
@@ -173,13 +241,197 @@ class Handler:
     write: Callable[[Decision, Callable, str], WriteResult]
 
 
+def _failure(record: str, code: str) -> WriteResult:
+    assert code in REASON_CODES, code
+    return WriteResult(record, code)
+
+
+def _lore_failure_code(done: subprocess.CompletedProcess) -> str:
+    return "stale-base" if "changed after you read it" in (done.stderr or "") else "write-failed"
+
+
+def _run_gate(prior_json: str, proposed: str) -> tuple[str | None, str | None]:
+    """(base revision, None) when certified, else (None, reason-code)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        prior = Path(tmp) / "prior.json"
+        prior.write_text(prior_json, encoding="utf-8")
+        try:
+            done = subprocess.run(
+                [sys.executable, str(_GATE), "--prior", str(prior)],
+                input=proposed, capture_output=True, text=True, timeout=LORE_TIMEOUT_SECONDS, shell=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None, "gate-refused"
+    if done.returncode == 0:
+        m = _BASE_RE.fullmatch(done.stdout.strip())
+        return (m.group(1), None) if m else (None, "gate-refused")
+    m = _GATE_CODE_RE.search(done.stderr or "")
+    return None, (m.group(1) if m and m.group(1) in GATE_CODES else "gate-refused")
+
+
+def _read_record(runner, spec: str) -> tuple[dict, str] | None:
+    done = _call(runner, ["record", "show", spec, "--json"])
+    if done.returncode != 0:
+        return None
+    try:
+        doc = json.loads(done.stdout)
+    except ValueError:
+        return None
+    if not isinstance(doc, dict) or not all(isinstance(doc.get(k), str) for k in ("body", "revision", "layer")):
+        return None
+    return doc, done.stdout
+
+
+def _entry_text(d: Decision, entry_id: str) -> str:
+    where = ", ".join(f"`{w}`" for w in d.where)
+    return "\n".join(
+        [
+            f"- **{entry_id}.** {d.title}",
+            "  - status: open",
+            f"  - what: {d.what or d.title}",
+            f"  - where: {where}",
+            f"  - found: {d.found or 'while building ' + d.parent}",
+        ]
+    )
+
+
+def _with_entry(body: str, entry: str) -> str:
+    lines, masked = followups._split(body)
+    located = followups._section_range(lines, masked)
+    if located is None:
+        return body.rstrip("\n") + "\n\n" + followups.HEADING + "\n\n" + entry + "\n"
+    end = located[1]
+    while end > located[0] + 1 and not lines[end - 1].strip():
+        end -= 1
+    return "\n".join([*lines[:end], entry, *lines[end:]])
+
+
+class _Deferral:
+    """`deferred`: the spec is read in `prepare` (before the decision capture) and
+    the body, revision and `F<n>` it yielded are what `write` composes from."""
+
+    def prepare(self, d: Decision, runner) -> str:
+        if not _SPEC_RECORD_RE.fullmatch(d.spec):
+            raise Refusal("a deferred decision needs spec: spec/<id>", "unsafe-id")
+        self.prior = None
+        self.entry_id = None
+        self.existing = None
+        read = _read_record(runner, d.spec)
+        if read is None:
+            return d.spec
+        self.prior, self.prior_json = read
+        try:
+            entries = followups.parse_followups(self.prior["body"])
+        except (followups.FollowupsError, followups.DuplicateHeadingError):
+            return d.spec
+        for e in entries:
+            if e.status_kind == "open" and e.title == d.title and set(e.where) == set(d.where):
+                self.existing = f"{d.spec}#{e.id}"
+                return self.existing
+        top = max((int(e.id[1:]) for e in entries), default=0)
+        self.entry_id = f"F{top + 1}"
+        return f"{d.spec}#{self.entry_id}"
+
+    def write(self, d: Decision, runner, record: str) -> WriteResult:
+        if self.existing:
+            return WriteResult(self.existing)
+        if self.prior is None:
+            return _failure(record, "spec-unreadable")
+        if self.entry_id is None:
+            return _failure(record, "malformed-prior-section")
+        proposed = _with_entry(self.prior["body"], _entry_text(d, self.entry_id))
+        base, code = _run_gate(self.prior_json, proposed)
+        if code:
+            return _failure(record, code)
+        done = _call(runner, ["record", "update", d.spec, "--base", base], proposed)
+        if done.returncode != 0:
+            return _failure(record, _lore_failure_code(done))
+        after = _read_record(runner, d.spec)
+        try:
+            landed = {e.id: e for e in followups.parse_followups(after[0]["body"])} if after else {}
+        except (followups.FollowupsError, followups.DuplicateHeadingError):
+            landed = {}
+        entry = landed.get(self.entry_id)
+        if not (entry and entry.status_kind == "open" and entry.title == d.title):
+            return _failure(record, "readback-failed")
+        return WriteResult(record)
+
+
+def _found_work_key(d: Decision) -> str:
+    return hashlib.sha256("\0".join([d.parent, d.title, d.where_text]).encode("utf-8")).hexdigest()[:24]
+
+
+def _task_body(d: Decision, key: str, brainstorm: bool) -> str:
+    lines = [f"Found while building {d.parent} (spec {d.spec}).", ""]
+    if brainstorm:
+        lines += ["This work needs a brainstorm before it can be built.", ""]
+    lines += [
+        f"what: {d.what or d.title}",
+        f"where: {', '.join(f'`{w}`' for w in d.where) or '-'}",
+        f"found: {d.found or '-'}",
+        f"why: {d.why_text}",
+        "",
+        f"found-work-key: {key}",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+class _TaskWriter:
+    """`separate` / `brainstorm`: one open task, no spec relation."""
+
+    def __init__(self, brainstorm: bool):
+        self.brainstorm = brainstorm
+
+    def prepare(self, d: Decision, runner) -> str:
+        self.existing = None
+        self.lookup_failed = False
+        key = _found_work_key(d)
+        done = _call(runner, ["search", "--json", f"kind:task {key}"])
+        try:
+            hits = json.loads(done.stdout)["hits"] if done.returncode == 0 else None
+        except (ValueError, KeyError, TypeError):
+            hits = None
+        if not isinstance(hits, list):
+            self.lookup_failed = True
+            return d.parent
+        for hit in hits:
+            if not isinstance(hit, dict):
+                continue
+            slug = str(hit.get("id", "")).rstrip("/").rsplit("/", 1)[-1]
+            found = f"task/{slug}"
+            if not _NEW_TASK_RE.fullmatch(found):
+                continue
+            read = _read_record(runner, found)
+            if read and f"found-work-key: {key}" in read[0]["body"].splitlines():
+                self.existing = found
+        return d.parent
+
+    def write(self, d: Decision, runner, record: str) -> WriteResult:
+        if self.existing:
+            return WriteResult(self.existing)
+        if self.lookup_failed:
+            return _failure(record, "lookup-failed")
+        argv = ["record", "create", "--kind", "task", f"--title={d.title}", "--status", "open"]
+        if self.brainstorm:
+            argv += ["--label", "route=brainstorm"]
+        done = _call(runner, argv, _task_body(d, _found_work_key(d), self.brainstorm))
+        out = [ln for ln in (done.stdout or "").splitlines() if ln.strip()]
+        if done.returncode != 0 or len(out) != 1 or not _NEW_TASK_RE.fullmatch(out[0].strip()):
+            return _failure(record, "write-failed")
+        return WriteResult(out[0].strip())
+
+
 def _no_write(decision: Decision, runner, record: str) -> WriteResult:
     return WriteResult(record)
 
 
+_deferral = _Deferral()
 HANDLERS: dict[str, Handler] = {
     "folded": Handler(prepare=lambda d, r: d.parent, write=_no_write),
     "dropped": Handler(prepare=lambda d, r: d.parent, write=_no_write),
+    "deferred": Handler(prepare=_deferral.prepare, write=_deferral.write),
+    "separate": Handler(prepare=(_sep := _TaskWriter(False)).prepare, write=_sep.write),
+    "brainstorm": Handler(prepare=(_brain := _TaskWriter(True)).prepare, write=_brain.write),
 }
 
 
@@ -324,6 +576,20 @@ def finding_text(d: Decision) -> str:
     )
 
 
+def fallback_text(d: Decision, reason_code: str) -> str:
+    return "\n".join(
+        [
+            f"Found work was not written ({reason_code}); file it as a follow-up task.",
+            f"title: {d.title}",
+            f"what: {d.what}",
+            f"where: {d.where_text}",
+            f"found: {d.found}",
+            f"decided: {d.kind}, from {d.parent} (spec {d.spec})",
+            f"why: {d.why_text}",
+        ]
+    )
+
+
 # --- reading the log ----------------------------------------------------------
 
 
@@ -401,9 +667,7 @@ def _capture(runner, kind: str, line: str, session_id: str | None) -> bool:
 
 def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler]) -> tuple[int, str]:
     d = build_decision(raw)
-    handler = handlers.get(d.kind)
-    if handler is None:
-        raise Refusal(f"the {d.kind} decision cannot be carried out yet", "not-implemented")
+    handler = handlers[d.kind]
 
     try:
         log = _read_log(runner, session_id)
@@ -419,6 +683,8 @@ def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler
         return EXIT_CAPTURE_FAILED, finding_text(d)
 
     outcome = handler.write(d, runner, record)
+    if outcome.reason_code:
+        _capture(runner, "task", fallback_text(d, outcome.reason_code), session_id)
     line = result_line(d, outcome.record or record, outcome.reason_code)
     if not _capture(runner, "found-work-result", line, session_id):
         return EXIT_CAPTURE_FAILED, line

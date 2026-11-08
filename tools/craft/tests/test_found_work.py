@@ -182,15 +182,6 @@ def test_a_decision_with_no_spec_is_refused_and_nothing_is_captured(capsys, spec
     assert lore.entries == []
 
 
-@pytest.mark.parametrize("decision_name", ["deferred", "separate", "brainstorm"])
-def test_writing_decisions_are_refused_until_their_writers_exist(capsys, decision_name):
-    lore = FakeLore()
-    code, _, err = run_decide(decision(decision=decision_name), lore, capsys)
-    assert code == 1
-    assert reason_of(err) == "not-implemented"
-    assert lore.entries == []
-
-
 @pytest.mark.parametrize("bad", ["not json", "[]", '{"decision": "folded"}', json.dumps(decision(decision="nope"))])
 def test_malformed_input_is_refused(capsys, bad):
     lore = FakeLore()
@@ -429,14 +420,13 @@ def test_every_emitted_reason_code_is_in_the_exported_collection(capsys):
         decision(finding={"where": ["/x"]}),
         decision(decision="dropped", reason=""),
         decision(finding={"security": True}),
-        decision(decision="deferred"),
         "garbage",
     ):
         _, _, err = run_decide(doc, FakeLore(), capsys)
         seen.add(reason_of(err))
     _, _, err = run_decide(decision(), FakeLore(fail_kinds={"found-work"}), capsys)
     seen.add(reason_of(err))
-    assert len(seen) == 8
+    assert len(seen) == 7
     assert seen <= set(fw.REASON_CODES)
 
 
