@@ -41,7 +41,8 @@ the waiting attach is refused naming that attachment, or failed and ended what i
 waiting attach goes ahead.
 
 The lock file is opened without following a symlink and is created readable and writable by its
-owner only. Every camp install and checkout carrying this change, run by the same user from any
+owner only. Once opened it must be a regular file owned by the user running camp; a FIFO, a device
+or another user's file at that path is refused the same way an unopenable one is. Every camp install and checkout carrying this change, run by the same user from any
 directory, uses the same state directory, so the lock covers attaches started by different checkouts
 too.
 
@@ -132,7 +133,8 @@ attached perseus/levr/main on ports 5173 8080 8443; its health was not checked
 ```
 
 An attach with nothing to race takes the lock at once. Its output, exit status and every refusal are
-unchanged. If the lock file cannot be opened (camp's state directory is unwritable), attach is
+unchanged. If the lock file cannot be opened (camp's state directory is unwritable) or is not a
+regular file owned by the user (`not a regular file`, `owned by another user`), attach is
 refused before starting anything:
 
 ```
