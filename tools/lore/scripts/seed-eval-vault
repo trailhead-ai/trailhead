@@ -23,6 +23,12 @@ file. In the current working directory the script:
    wrapper puts the copy on ``PYTHONPATH`` and execs this checkout's lore CLI
    under the symlink-resolved interpreter that ran this script.
 
+A ``session.json`` beside ``records.json`` seeds a dirty session as well. It is a
+JSON object ``{"session_id": "<guid>", "candidates": [{kind, phase, body}, ...]}``;
+after the records, each candidate is captured through ``lore session candidate
+--session-id <guid>``, so the session record is the CLI's own and a run reads it
+back with the same ``--session-id``. Without that file no session is seeded.
+
 Nothing is written unless every refusal check passes, and every record's status is
 checked against its kind's vocabulary up front. It refuses (stderr
 ``seed-eval-vault: <message>``, non-zero exit) when ``records.json`` is missing
@@ -106,6 +112,41 @@ def load_records(path: Path) -> list[dict[str, str]]:
         check_related(where, record.get("related", []), seeded)
         seeded.add((record["kind"], _kebab(title)))
     return records
+
+
+SESSION_FIELDS = ("kind", "phase", "body")
+
+
+def load_session(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        session = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise Refusal(f"cannot read session file {path}: {exc.strerror or exc}") from exc
+    except ValueError as exc:
+        raise Refusal(f"session file {path} is not valid JSON: {exc}") from exc
+    if not isinstance(session, dict):
+        raise Refusal(f"session file {path} must hold a JSON object")
+    unknown = sorted(set(session) - {"session_id", "candidates"})
+    if unknown:
+        raise Refusal(f"session file has unknown field(s): {', '.join(map(repr, unknown))}")
+    if not isinstance(session.get("session_id"), str) or not session["session_id"].strip():
+        raise Refusal("session file needs a non-empty string 'session_id'")
+    candidates = session.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise Refusal("session file needs a non-empty list 'candidates'")
+    for index, candidate in enumerate(candidates):
+        where = f"session candidate {index}"
+        if not isinstance(candidate, dict):
+            raise Refusal(f"{where} must be an object with {', '.join(SESSION_FIELDS)}")
+        extra = sorted(set(candidate) - set(SESSION_FIELDS))
+        if extra:
+            raise Refusal(f"{where} has unknown field(s): {', '.join(map(repr, extra))}")
+        for field in SESSION_FIELDS:
+            if not isinstance(candidate.get(field), str) or not candidate[field].strip():
+                raise Refusal(f"{where} needs a non-empty string {field!r}")
+    return session
 
 
 def check_related(where: str, related: object, seeded: set[tuple[str, str]]) -> None:
@@ -222,6 +263,7 @@ def write_wrapper(cwd: Path, python: str, tracked: list[Path]) -> None:
 def seed(records_path: Path) -> None:
     cwd = Path.cwd()
     records = load_records(records_path)
+    session = load_session(records_path.with_name("session.json"))
     check_environment(cwd)
     tracked = tracked_trailhead_files()
     python = os.path.realpath(sys.executable)
@@ -242,6 +284,16 @@ def seed(records_path: Path) -> None:
             stdin=record["body"],
         )
     write_wrapper(cwd, python, tracked)
+    if session:
+        for candidate in session["candidates"]:
+            run_lore(
+                python,
+                "session", "candidate",
+                "--session-id", session["session_id"],
+                "--kind", candidate["kind"],
+                "--phase", candidate["phase"],
+                stdin=candidate["body"],
+            )
 
 
 def main(argv: list[str]) -> int:

@@ -872,3 +872,74 @@ def test_unknown_field_is_refused_and_creates_nothing(sandbox):
     assert "relatedd" in result.stderr
     assert snapshot(sandbox / "home" / "cwd") == {}
     assert home_snapshot(sandbox) == {}
+
+
+SESSION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+SESSION = {
+    "session_id": SESSION_ID,
+    "candidates": [
+        {"kind": "found-work", "phase": "Build", "body": "found-work: deferred | finding: one"},
+        {"kind": "lesson", "phase": "Build", "body": "A lesson worth keeping."},
+    ],
+}
+
+
+def write_session(sandbox: Path, session) -> Path:
+    path = sandbox / "session.json"
+    path.write_text(session if isinstance(session, str) else json.dumps(session), encoding="utf-8")
+    return path
+
+
+def session_show(sandbox: Path, key: str = SESSION_ID) -> dict:
+    result = seeded_lore(sandbox, "session", "show", "--session-id", key, "--json")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_session_json_beside_records_seeds_a_dirty_session_holding_each_candidate(sandbox):
+    write_session(sandbox, SESSION)
+    result = seed(sandbox, [ADR])
+    assert result.returncode == 0, result.stderr
+
+    shown = session_show(sandbox)
+
+    assert shown["sidecar"]["status"] == "dirty"
+    assert "kind=found-work phase=Build" in shown["body"]
+    assert "  found-work: deferred | finding: one" in shown["body"]
+    assert "kind=lesson phase=Build" in shown["body"]
+    assert "  A lesson worth keeping." in shown["body"]
+
+
+def test_session_is_keyed_by_the_declared_session_id(sandbox):
+    write_session(sandbox, {**SESSION, "session_id": "11111111-2222-4333-8444-555555555555"})
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    assert seeded_lore(sandbox, "session", "show", "--session-id", SESSION_ID, "--json").returncode != 0
+    assert session_show(sandbox, "11111111-2222-4333-8444-555555555555")["sidecar"]["status"] == "dirty"
+
+
+def test_no_session_json_seeds_no_session(sandbox):
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    assert seeded_lore(sandbox, "session", "show", "--session-id", SESSION_ID, "--json").returncode != 0
+
+
+@pytest.mark.parametrize(
+    "session,named",
+    [
+        ("not json", "not valid JSON"),
+        ([], "must hold a JSON object"),
+        ({"candidates": []}, "session_id"),
+        ({"session_id": SESSION_ID}, "candidates"),
+        ({"session_id": SESSION_ID, "candidates": [{"kind": "x", "phase": "Build"}]}, "body"),
+        ({"session_id": SESSION_ID, "candidates": [{"kind": "x", "phase": "Build", "body": "b", "extra": 1}]}, "extra"),
+    ],
+)
+def test_malformed_session_json_is_refused_before_anything_is_written(sandbox, session, named):
+    write_session(sandbox, session)
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert named in result.stderr
+    assert not (sandbox / "home" / "cwd" / "vault").exists()
+    assert not (sandbox / "home" / "cwd" / "lore").exists()
