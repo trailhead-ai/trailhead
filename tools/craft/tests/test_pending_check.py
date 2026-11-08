@@ -398,6 +398,61 @@ def test_parent_write_failure_with_changed_revision_is_stale_parent(entries_file
     assert "re-run" in err
 
 
+def test_a_parent_that_stops_qualifying_after_the_spec_write_is_parent_not_finished_exit_2(
+    entries_file, capsys
+):
+    fake = FakeLore()
+
+    def parent_closed_elsewhere(f):
+        f.records[f"task/{PARENT}"]["sidecar"]["status"] = "completed"
+
+    fake.after_update[f"spec/{SPEC}"] = parent_closed_elsewhere
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "parent-not-finished"
+    assert "spec entry already landed" in err and "re-run" in err
+    assert fake.update_ids() == [f"spec/{SPEC}"]
+    assert len(waiting.parse_waiting(fake.body(f"spec/{SPEC}"))) == 1
+    assert fake.body(f"task/{PARENT}") == PARENT_BODY
+
+
+def test_a_spec_write_that_timed_out_but_landed_continues_to_the_parent(entries_file, capsys):
+    fake = FakeLore()
+    real = fake.runner
+
+    def timing_out(argv, stdin=None):
+        if argv[:2] == ["record", "update"] and argv[2] == f"spec/{SPEC}":
+            real(argv, stdin=stdin)
+            raise subprocess.TimeoutExpired(argv, 1)
+        return real(argv, stdin=stdin)
+
+    fake.runner = timing_out
+
+    rc, out, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 0, err
+    assert out.splitlines() == ["pending: AC2", "spec: written", "parent: updated"]
+    assert fake.update_ids() == [f"spec/{SPEC}", f"task/{PARENT}"]
+
+
+@pytest.mark.parametrize(
+    "parent_body",
+    [
+        PARENT_BODY + "\n**Partially covers:** AC1\n**Partially covers:** AC2\n",
+        PARENT_BODY.replace("## Criterion observations", "```\n## Criterion observations"),
+    ],
+    ids=["duplicate-partially-covers", "unterminated-fence"],
+)
+def test_an_unreadable_parent_is_refused_exit_2_with_no_writes(parent_body, entries_file, capsys):
+    fake = FakeLore(parent_body=parent_body)
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "unreadable-parent"
+    assert fake.updates() == []
+
+
 def test_parent_revision_is_read_again_after_the_spec_write_and_that_one_is_the_base(
     entries_file, capsys
 ):

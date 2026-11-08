@@ -30,18 +30,22 @@ is the slice parent touched.
        appended (creating `## Waiting` at the end of the body), and the proposed body
        is certified in-process by `waiting_gate.certify` against the body it was
        composed from; a refusal exits with the gate's own code and writes nothing.
-    4. The spec is written with `lore record update --base <revision read>`. A failed
-       write re-reads the revision: changed -> `stale-spec`, unchanged ->
-       `spec-write-failed`. The parent is never touched on either.
+    4. The spec is written with `lore record update --base <revision read>`. After a failed or
+       timed-out write the spec is read again: when every entry this run proposed is
+       present under its key with status `waiting`, the write is treated as landed and
+       the parent is finished. Otherwise the revision decides: changed -> `stale-spec`,
+       unchanged -> `spec-write-failed`, and the parent is never touched.
     5. The parent is read again (never the first read's body or revision), each
        pending identifier moves from `**Covers:**` to `**Partially covers:**` (the
        `**Covers:**` line is dropped when it empties), the two lists are certified by
        `covers_gate.main` run in-process against the spec body now on the vault, each
        `manual-check` line becomes `pending-check` with evidence
        `waiting entry on spec/<n>; <original evidence>`, and the parent is written with
-       `--base <revision of this read>`. A failure here exits 2 (`stale-parent` /
-       `parent-write-failed`, or any refusal) and says the spec entry already landed:
-       a re-run completes the close.
+       `--base <revision of this read>`. Every refusal here exits 2 and says the spec
+       entry already landed: `stale-parent` / `parent-write-failed` for a write that did
+       not take, `parent-not-finished` for any other refusal (the parent no longer
+       qualifies, cannot be read, or its covers lists are refused). A re-run completes
+       the close.
 
 Stdout on success: one `pending: ACn` per entry, then `spec: written|already-present`
 and `parent: updated|already-updated`. Entry text is never echoed in a `reason:` line.
@@ -60,7 +64,7 @@ Reason codes of this script: invalid-name, invalid-arguments, invalid-entries,
 invalid-criteria, multiline-entry-text, not-a-slice-parent,
 not-an-unconfirmed-manual-check, entry-already-answered, pending-check-without-entry,
 spec-not-found, parent-not-found, spec-write-failed, stale-spec, parent-write-failed,
-stale-parent, unreadable-parent, covers-refused, plus `waiting_gate`'s, `covers_gate`'s
+stale-parent, parent-not-finished, unreadable-parent, covers-refused, plus `waiting_gate`'s, `covers_gate`'s
 and `followup_gather`'s own codes (lore-missing, lore-timeout, lore-failed, ...).
 
 The shared layer is refused (`shared-layer-prior`): `show` XML-escapes its bodies, so a
@@ -102,6 +106,7 @@ _ENTRY_KEYS = {"criterion", "check", "how", "changed_behaviour"}
 _LINE_BREAKS = "\n\r\x0b\x0c\x85\u2028\u2029"
 _PENDING = "pending-check"
 _MANUAL = "manual-check"
+_PARENT_WRITE_CODES = ("stale-parent", "parent-write-failed")
 _HISTORY_WORDS = "closed with this check not yet carried out"
 
 
@@ -360,6 +365,21 @@ def _revision_changed(runner, vault: str, record_id: str, revision: str, missing
         return False
 
 
+def _landed_body(runner, vault: str, spec_id: str, missing: list[dict], parent: str) -> str | None:
+    """The spec body when a write that reported failure had in fact committed every
+    entry this run proposed (each present under its key, still `waiting`), else None."""
+    try:
+        body = _read(runner, vault, spec_id, "spec-not-found")[1]
+        present = _spec_entries(body)
+    except Refusal:
+        return None
+    for item in missing:
+        existing = present.get((item["criterion"], parent))
+        if existing is None or existing.status != "waiting":
+            return None
+    return body
+
+
 def _certify_covers(spec_body: str, covers: list[str], partial: list[str]) -> None:
     argv = []
     if covers:
@@ -441,18 +461,24 @@ def write_mode(args, runner) -> int:
         _precertify_covers(state, moving, args.spec, proposed)
         done = _write(runner, _update_argv(spec_id, vault, spec_rev), proposed)
         if done is None or done.returncode != 0:
-            if _revision_changed(runner, vault, spec_id, spec_rev, "spec-not-found"):
-                raise Refusal(f"{spec_id} changed after it was read", "stale-spec", 2)
-            raise Refusal(f"lore could not write {spec_id}", "spec-write-failed", 2)
+            landed = _landed_body(runner, vault, spec_id, missing, args.parent)
+            if landed is None:
+                if _revision_changed(runner, vault, spec_id, spec_rev, "spec-not-found"):
+                    raise Refusal(f"{spec_id} changed after it was read", "stale-spec", 2)
+                raise Refusal(f"lore could not write {spec_id}", "spec-write-failed", 2)
+            proposed = landed
         spec_body, spec_status = proposed, "written"
 
     try:
         parent_status = _finish_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
     except Refusal as r:
+        code, exit_code = r.reason_code, r.exit_code
+        if code not in _PARENT_WRITE_CODES:
+            code, exit_code = "parent-not-finished", 2
         raise Refusal(
             f"{r} — the spec entry already landed on {spec_id}; a re-run completes the close",
-            r.reason_code,
-            r.exit_code,
+            code,
+            exit_code,
         )
     for criterion in criteria:
         print(f"pending: {criterion}")
