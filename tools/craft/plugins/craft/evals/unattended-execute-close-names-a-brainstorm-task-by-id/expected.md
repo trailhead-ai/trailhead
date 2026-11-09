@@ -33,3 +33,7 @@ Branches: today's prose (carries the script's report as printed, including "Run 
 ## Limitations
 
 One brainstorm decision; the failed-write and `exit 2` lines of the script's report are not exercised. One fixture, one model tier, three runs.
+
+## Fixture amended after the scored runs (2026-11-09)
+
+The baseline (3 runs) and a first treatment batch (3 runs) both failed `names-the-brainstorm-task-by-id` in every run. A kept trace of one treatment run showed why: the run called `found_work.py report --parent ...` without `--session-id`, which the script answers with `session-unreadable`, so it never saw the brainstorm task. In a live session the script finds the session through the environment. The scaffold's `./scripts/found_work.py` wrapper now exports `CLAUDE_CODE_SESSION_ID` (the id the prompt names). No grader changed. Both arms are re-run on the amended fixture, the baseline on the unedited prose; the earlier runs are not counted.

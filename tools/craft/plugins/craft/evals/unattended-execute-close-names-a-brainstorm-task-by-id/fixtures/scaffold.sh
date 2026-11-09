@@ -131,6 +131,13 @@ chmod +x git
 : > lore-calls.log
 : > script-lore-calls.log
 : > pending-check-entries.log
+# The session's id reaches the script the way it does in a live session: through the environment.
+cat > scripts/found_work.py <<'EOW'
+#!/bin/sh
+here=$(cd "$(dirname "$0")/.." && pwd)
+printf '%s\n' "found_work.py $*" >> "$here/lore-calls.log"
+CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee PATH="$here/bin:$PATH" exec "$here/py-home/bin/python3" "$here/real-scripts/found_work.py" "$@"
+EOW
 cat > decision.json <<'EOJ'
 {"decision":"brainstorm","parent":"task/export-invoices-as-csv","spec":"spec/export-invoices","finding":{"title":"Streaming export design","what":"Accounts with millions of invoices need a streaming export; no approach is agreed and it spans storage, queueing and the API.","where":["export/"],"found":"re-review"},"reason":"too open for any slice"}
 EOJ
