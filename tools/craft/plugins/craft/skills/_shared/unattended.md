@@ -194,7 +194,7 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
 - `<kind>` is one of `plan-ready`, `slice-chosen`, `pr-ready`, `stuck`, `needs-a-decision`,
   `waiting`, `spec-complete`, `refused`.
 - `<kind/name>` is the record the session ended on: the slice record for `plan-ready` and
-  `slice-chosen`, the spec for `spec-complete`, `needs-a-decision` from an early stop, and a refusal
+  `slice-chosen`, the spec for `spec-complete` and `waiting`, `needs-a-decision` from an early stop, and a refusal
   on a spec.
 - `parked=<n>` counts the questions parked in this session. `needs-a-decision` with `parked=0` means
   "read the spec record for why the run stopped", not "answer a question".
@@ -208,7 +208,7 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
   of the contract.
 - **Every outcome except `refused` is also written to the run block, when the session has one,**
   before the final line is printed (a session that ended before any slice record existed, or on the
-  spec alone as `spec-complete` and slice's early stop do, has no block to write): set
+  spec alone as `spec-complete`, `waiting` and slice's early stop do, has no block to write): set
   `**Outcome:** <kind>` and bring `**Checkpoint:**` up to date with one more confined edit, after
   the credential scrub. That includes `stuck`. Only a failed run-section write skips it, since the
   block cannot be written to.

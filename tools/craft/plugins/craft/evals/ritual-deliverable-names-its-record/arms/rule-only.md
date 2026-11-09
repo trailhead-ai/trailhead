@@ -507,6 +507,13 @@ and the early-stop recording below both give way to it:
 - Print the waiting count and the command that lists them, `/craft:checks`, so a driver that halts
   here is never silent about why. The handoff is in the Outcome section.
 
+**Under `--unattended`, the waiting branch reports the outcome and nothing else.** It still writes
+nothing, and the last line is `outcome: waiting spec/<spec-name> parked=0`. No `/craft:checks`
+command is printed (no fenced command block and no line that begins with a slash command), and no
+`## Unattended run` block is written: no slice record exists on this path, and the spec is frozen.
+The report above the outcome line says, in prose, how many criteria wait on checks and names each
+with the `describe` words.
+
 **Early stop's entry condition:** this path is also where an empty candidate set whose union is not
 certified complete (`complete-eligible: no`) routes, per the paragraph above — completion cannot be
 certified from it either — except that an empty candidate set with `waiting:` naming a criterion
