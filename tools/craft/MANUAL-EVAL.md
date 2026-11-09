@@ -4444,3 +4444,30 @@ Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-o
 **Not measured.** The question is never put to a person, so the case does not show that the draft `check` and `how` appear in the "Not yet" choice, that criterion words come from `describe`, or that the `mktemp` entries file is removed (no `rm` grant). One spec, one phrasing, one model tier, three runs per case; only `stale-spec` is exercised among the failure codes.
 
 **Why the runner block grants Write.** The prose has the session write the entries file (a JSON list) at a `mktemp` path, and the runner's single-command Bash rule gives it no redirection or `tee` to do so. Without Write the "Not yet" arm cannot reach the writer. The grant applies to every craft case in the run, which is the price of the arm; the other craft cases' prompts name their own `allowed_tools` and none of the earlier ones was changed.
+
+## Case: close-asks-nothing-when-no-one-is-there, no-ask-close-switches-to-the-task-branch and no-ask-close-refuses-a-dirty-tree
+
+Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs per arm, `-j 3` (three runs at once so a batch fits the tool's ceiling), run on the operator's own login, measuring `skills/_shared/execute.md` Phase 6's no-ask close: the no-ask discharge, the `blocked` to `in-progress` move, branch recovery, and the no-ask completion report. Each `expected.md` was committed alone, with every arm and its bar, before the case was built. All three share one seeded spec and slice parent (AC2 a `manual-check` observation with no attestation, AC3 no observation and a manual-check trailer) and a git repository with a bare `origin.git` in the run directory; the runner block gained eight `git` grants, named in the corpus README.
+
+Prose fingerprints (`git hash-object`): unedited `execute.md` `fabc65f42457ac2fb10659d675ad36cc2d3bc043`, unedited `status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`; edited `execute.md` `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`, edited `status-ownership.md` `37d1f06b814f13f9a9cebd0877cc038807582823`.
+
+### Results
+
+| Arm | Prose | Result | Bar |
+|---|---|---|---|
+| 1. `close-asks-nothing-when-no-one-is-there`, baseline | unedited | **red**, 0 of 3, score 0.38 every run: `writer-ran`, `writer-verify-gate-close`, both entries clauses, `spec-carries-both-entries`, `parent-is-done`, `hands-off-to-checks` and `reply-reports-the-drafted-checks` failed in all three; 1.70 USD | expected red: met |
+| 2. same case, treatment | edited | 3 of 3 at 1.0; 2.07 USD | 3 of 3: met |
+| 3a. `no-ask-close-switches-to-the-task-branch`, treatment | edited | 3 of 3 at 1.0; 1.94 USD | 3 of 3: met |
+| 3a'. same, on the unedited prose (not pre-registered; a mutation check of the recovery paragraph) | unedited | 1 of 3 at 1.0; the other two failed `parent-is-done` (and in one, `writer-ran` and `hands-off-to-checks`); 2.31 USD | not a bar |
+| 3b. `no-ask-close-refuses-a-dirty-tree`, treatment | edited | 3 of 3 at 1.0; 1.35 USD | 3 of 3: met |
+| 3b'. same, on the unedited prose (mutation check) | unedited | 0 of 3 (0.57, 0.71, 0.57): `parent-in-progress` and `reply-refuses-and-reports-the-move` failed in all three, `stuck-ran` in two; 2.14 USD | not a bar |
+| 4. `close-defers-an-unconfirmed-check`, regression (attended) | edited | 3 of 3 at 1.0; 2.25 USD | 3 of 3: met |
+| `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing` (pins that must not change) | edited | 3 of 3 at 1.0 each; 1.54 and 1.25 USD | unchanged: met |
+
+No rerun was needed. Total spend about 16.8 USD.
+
+**Baseline red, read from the run.** Arm 1's baseline agent did not ask the question. It read "no-ask close" as an instruction not to ask, ran the observation gate, which refused AC3 (no observation), refused the close, declined to attest AC2 and declined to put either check on the list. So the red reason is the second one pre-registered ("never runs the writer"), and `no-question-asked` passed in the baseline; the case detects the missing discharge, not an asked question. The prompt carries the caller phrase because the prose defines it; a baseline that did not know it would likely have asked.
+
+**Branch arm is a weaker detector.** On the unedited prose one run of three switched to the task branch and closed unaided (3a'), so `no-ask-close-switches-to-the-task-branch` is red on the baseline in two of three runs, not three. It is a guard with partial detection power. The dirty-tree arm is a clean detector.
+
+**Not measured.** The order of the switch against the push step: the agent's `git` calls are not logged, only `.git/HEAD` at the end. The `blocked` to `in-progress` move is measured only in the dirty-tree arm; the driver's in-progress parent is never moved and no arm shows that. The question is never put to a person in any arm. `status-ownership.md`'s new `blocked → in-progress` edge is prose with no runner route beyond these cases; no consistency test reads that file's content. One spec, one phrasing, one model tier, three runs per arm. The real lore state was hashed before and after the batches and did not change.

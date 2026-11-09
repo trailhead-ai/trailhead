@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: no-ask-close-refuses-a-dirty-tree
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

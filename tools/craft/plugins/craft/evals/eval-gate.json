@@ -19,7 +19,15 @@
       "Bash(*/scripts/migration_bar.py)",
       "Bash(*/scripts/migration_bar.py *)",
       "Bash(*/scripts/pending_check.py *)",
-      "Bash(*/scripts/observation_gate.py)"
+      "Bash(*/scripts/observation_gate.py)",
+      "Bash(git status *)",
+      "Bash(git log *)",
+      "Bash(git switch *)",
+      "Bash(git fetch *)",
+      "Bash(git symbolic-ref *)",
+      "Bash(git branch *)",
+      "Bash(git push *)",
+      "Bash(git rev-parse *)"
     ],
     "max_cost_usd": 10
   },
@@ -202,6 +210,21 @@
       ]
     },
     "one-failed-check-saves-nothing": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "close-asks-nothing-when-no-one-is-there": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-switches-to-the-task-branch": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-refuses-a-dirty-tree": {
       "measures": [
         "skills/_shared/execute.md"
       ]
