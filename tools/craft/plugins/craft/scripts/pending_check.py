@@ -5,6 +5,7 @@ Usage:
     pending_check.py --spec <n> --parent <n> --entries <path> [--vault <v>]
     pending_check.py verify --spec <n> --parent <n> [--vault <v>]
     pending_check.py describe --spec <n> --criteria AC2,AC5 [--vault <v>]
+    pending_check.py stuck --spec <n> --parent <n> [--vault <v>]
 
 `--entries` names a JSON list of `{criterion, check, how, changed_behaviour}` objects
 (`changed_behaviour` a bool, judged by the closing session). The file is the caller's;
@@ -59,6 +60,24 @@ and a parent write that did not, it skips the spec and writes the parent.
 identifiers. `describe` prints `ACn: <criterion words>` for each requested criterion,
 cleaned with the check list's display cleaner (`checklist_gather._clean`).
 
+`stuck` decides, from vault state alone, whether the parent's build is finished and its only
+unmet close condition is one or more unconfirmed manual checks. Exit 0 prints
+`stuck: ACn, ...` (numeric order): the identifiers a close would move to pending checks,
+including an identifier an earlier close already moved to `**Partially covers:**` with a
+`pending-check` line while the parent never reached `done` (the writer's re-run finishes it).
+Exit 1 prints one of `STUCK_REASON_CODES`: not-a-slice-parent (not labelled, not related to
+the spec, or a status other than in-progress / blocked), push-failed (the parent carries
+`craft/push=failed`), build-unfinished (a child not `done`, a `## End Phases` line before the
+close unticked, the close already ticked, or no such checklist), close-gap-not-a-manual-check
+(a covered identifier with no observation whose spec trailer is not manual check),
+no-unconfirmed-manual-check (nothing to move), lore-too-old (`record update --help` does not
+accept `--base`; probed first, after the name shape check, and nothing else is called).
+Exit 2 is a read failure; every caller treats exit 2 as "not stuck". No criterion or record
+text appears in a `reason:` line. `unconfirmed_manual_checks` is the eligibility rule: a
+covered identifier is an unconfirmed manual check when it has a `manual-check` observation and
+no attestation, or has no observation and the spec's `*Verified by:*` trailer for it
+normalizes to manual check (`criterion_gate._check_trailer`).
+
 Exit codes: 0 done; 1 refused (stable `reason-code:`); 2 could not complete.
 Reason codes of this script: invalid-name, invalid-arguments, invalid-entries,
 invalid-criteria, multiline-entry-text, not-a-slice-parent,
@@ -91,6 +110,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 import checklist_gather  # noqa: E402
 import covers_gate  # noqa: E402
+import criterion_gate  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import markdown_section  # noqa: E402
 import observation_gate as obs  # noqa: E402
@@ -107,6 +127,19 @@ _LINE_BREAKS = "\n\r\x0b\x0c\x85\u2028\u2029"
 _PENDING = "pending-check"
 _MANUAL = "manual-check"
 _PARENT_WRITE_CODES = ("stale-parent", "parent-write-failed")
+STUCK_REASON_CODES = (
+    "not-a-slice-parent",
+    "build-unfinished",
+    "close-gap-not-a-manual-check",
+    "no-unconfirmed-manual-check",
+    "push-failed",
+    "lore-too-old",
+)
+_STUCK_STATUSES = ("in-progress", "blocked")
+_END_PHASES_HEADING = "## End Phases"
+_DUPLICATE_END_PHASES_CODE = "duplicate-end-phases-section"
+_PHASE_LINE_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]\s+Phase\s+([0-9]+)\b")
+_CLOSE_PHASE = 6
 _HISTORY_WORDS = "closed with this check not yet carried out"
 
 
@@ -530,8 +563,157 @@ def describe_mode(args, runner) -> int:
     return 0
 
 
+def _end_phases_finished(state: _Parent) -> bool:
+    """Every phase before the close ticked (Phase 5 among them) and the close not."""
+    try:
+        located = markdown_section.section_range(
+            state.lines, state.masked, _END_PHASES_HEADING, _DUPLICATE_END_PHASES_CODE
+        )
+    except covers_gate.DuplicateHeadingError:
+        raise Refusal("the parent has more than one '## End Phases' section", "unreadable-parent", 2)
+    if located is None:
+        return False
+    start, end = located
+    phases: dict[int, list[bool]] = {}
+    for i in range(start + 1, end):
+        m = None if state.masked[i] else _PHASE_LINE_RE.match(state.lines[i])
+        if m:
+            phases.setdefault(int(m.group(2)), []).append(m.group(1) != " ")
+    before = [ticked for n, marks in phases.items() if n < _CLOSE_PHASE for ticked in marks]
+    return (
+        _CLOSE_PHASE - 1 in phases
+        and all(before)
+        and phases.get(_CLOSE_PHASE) == [False]
+    )
+
+
+def _criterion_methods(spec_body: str) -> dict[str, str | None]:
+    """Each declared criterion's trailer method (None when its trailer is not one method)."""
+    try:
+        entries = covers_gate.parse_criteria_with_text(spec_body)
+    except (ValueError, RecursionError):
+        raise Refusal("the spec's criteria cannot be read unambiguously", "unreadable-spec", 2)
+    return {
+        identifier: criterion_gate._check_trailer(text)[1]
+        for identifier, text in entries
+        if identifier is not None
+    }
+
+
+def unconfirmed_manual_checks(parent_body: str, spec_body: str) -> tuple[list[str], list[str]]:
+    """(unconfirmed manual checks, close gaps) among the parent's covered identifiers, each
+    in numeric order. A covered identifier is an unconfirmed manual check when it has a
+    `manual-check` observation and no attestation, or no observation and its spec trailer
+    normalizes to manual check; one already moved to `**Partially covers:**` under a
+    `pending-check` observation counts too (a close that did not finish). A covered
+    identifier with no observation and any other trailer is a close gap."""
+    state = _Parent(parent_body)
+    methods = _criterion_methods(spec_body)
+    unconfirmed: list[str] = []
+    gaps: list[str] = []
+    for criterion in state.covers:
+        observed = state.observations.get(criterion)
+        if observed is None:
+            (unconfirmed if methods.get(criterion) == _MANUAL else gaps).append(criterion)
+        elif observed[0] == _MANUAL and not obs._is_meaningfully_nonempty(
+            state.attestations.get(criterion, "")
+        ):
+            unconfirmed.append(criterion)
+    unconfirmed += [c for c in state.partial if state.observations.get(c, ("", ""))[0] == _PENDING]
+    return sorted(unconfirmed, key=_criterion_number), sorted(gaps, key=_criterion_number)
+
+
+def _criterion_number(criterion: str) -> int:
+    return int(criterion[2:])
+
+
+def _children_statuses(runner, vault: str, parent: str) -> list[str]:
+    try:
+        rows = gather._call_json(runner, ["task", "list", "--vault", vault, "--json"])
+    except gather.GatherError as err:
+        raise _refusal_from(err)
+    named = (
+        {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
+        if isinstance(rows, list)
+        else {}
+    )
+    row = named.get(parent)
+    children = row.get("children") if row else None
+    if not isinstance(children, list):
+        raise Refusal(f"lore's task list does not hold task/{parent}", "malformed-sidecar", 2)
+    statuses = []
+    for child in children:
+        status = named.get(child, {}).get("status") if isinstance(child, str) else None
+        if not isinstance(status, str):
+            raise Refusal("lore's task list does not describe every child of the parent", "malformed-sidecar", 2)
+        statuses.append(status)
+    return statuses
+
+
+def _refuse_stuck(reason: str, code: str) -> Refusal:
+    assert code in STUCK_REASON_CODES, code
+    return Refusal(reason, code, 1)
+
+
+def _read_or_fail(runner, vault: str, record_id: str, missing_code: str, **kwargs):
+    try:
+        return _read(runner, vault, record_id, missing_code, **kwargs)
+    except Refusal as r:
+        if r.reason_code == missing_code:
+            raise Refusal(str(r), r.reason_code, 2)
+        raise
+
+
+def stuck_mode(args, runner) -> int:
+    _check_names(args.spec, args.parent, args.vault)
+    try:
+        probe = gather._call(runner, ["record", "update", "--help"])
+    except gather.GatherError as err:
+        raise _refusal_from(err)
+    if probe.returncode != 0:
+        raise Refusal("lore could not describe 'record update'", "lore-failed", 2)
+    if "--base" not in probe.stdout:
+        raise _refuse_stuck("this lore's 'record update' has no --base, so no close could write", "lore-too-old")
+    vault = _resolve_vault(runner, args.spec, args.vault)
+    sidecar, parent_body, _, _ = _read_or_fail(runner, vault, f"task/{args.parent}", "parent-not-found")
+    related = sidecar.get("related")
+    specs = related.get("spec") if isinstance(related, dict) else None
+    linked = {v.removeprefix("spec/") for v in specs if isinstance(v, str)} if isinstance(specs, list) else set()
+    labels = gather._labels(sidecar)
+    if (
+        sidecar.get("kind") != "task"
+        or sidecar.get("status") not in _STUCK_STATUSES
+        or gather.SLICE_LABEL not in labels
+        or args.spec not in linked
+    ):
+        raise _refuse_stuck(
+            "the parent is not an in-progress or blocked slice parent related to this spec", "not-a-slice-parent"
+        )
+    if labels.get("craft/push") == "failed":
+        raise _refuse_stuck("the parent's last push failed and needs settling by hand", "push-failed")
+    unfinished = _refuse_stuck("the parent's build is not finished", "build-unfinished")
+    if any(status != "done" for status in _children_statuses(runner, vault, args.parent)):
+        raise unfinished
+    if not _end_phases_finished(_Parent(parent_body)):
+        raise unfinished
+    _, spec_body, _, layer = _read_or_fail(
+        runner, vault, f"spec/{args.spec}", "spec-not-found", personal_only=False
+    )
+    if layer == "shared":
+        spec_body = checklist_gather._unescape(spec_body)
+    unconfirmed, gaps = unconfirmed_manual_checks(parent_body, spec_body)
+    if gaps:
+        raise _refuse_stuck(
+            "a covered criterion has no observation and is not a manual check", "close-gap-not-a-manual-check"
+        )
+    if not unconfirmed:
+        raise _refuse_stuck("no covered criterion is an unconfirmed manual check", "no-unconfirmed-manual-check")
+    print(f"stuck: {', '.join(unconfirmed)}")
+    return 0
+
+
 def _parse(argv: list[str]):
-    mode = argv[0] if argv and argv[0] in ("verify", "describe") else "write"
+    mode = argv[0] if argv and argv[0] in ("verify", "describe", "stuck") else "write"
     ap = _Parser(prog="pending_check.py", description=__doc__.splitlines()[0])
     ap.add_argument("--spec", required=True)
     ap.add_argument("--vault")
@@ -549,7 +731,7 @@ def main(argv: list[str], runner=None) -> int:
     runner = runner or lore_runner
     try:
         mode, args = _parse(argv)
-        return {"write": write_mode, "verify": verify_mode, "describe": describe_mode}[mode](args, runner)
+        return {"write": write_mode, "verify": verify_mode, "describe": describe_mode, "stuck": stuck_mode}[mode](args, runner)
     except Refusal as r:
         return emit_refusal(PROG, r)
 
