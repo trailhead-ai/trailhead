@@ -438,3 +438,66 @@ as a follow-up).
 - The kept-state cleanup (`rm -rf`) is denied in the sandbox and is not exercised.
 - Runners 2.1.303 (pinned, since pruned by the Claude updater) and 2.1.308 on this host; the canary was also run on 2.1.306 and 2.1.307.
 
+
+## Case: the unattended PR step ends on the slice record
+
+`plugins/portage/evals/unattended-pr-step-*` — six runner cases driving `/portage:pull_request create --unattended task/count-words`
+(`stops-at-ready`, `never-merges`, `ends-stuck-on-a-blocked-monitor`, `reruns-after-a-stuck-run`, `ends-stuck-on-a-failed-block-write`,
+`refuses-without-a-record`), built from one shared scaffold (`evals/pr-step-scaffold.sh`). All six are mapped in `eval-gate.json` to
+`skills/pull_request/SKILL.md`, `agents/updater.md` and `agents/monitor.md`. The verdicts were committed before any scored run.
+
+**Under test:** the unattended branch of the skill, the one-line `create` fix in the updater, and monitor's `stop_at_ready` and outcome-file
+behaviour as the skill dispatches it. Baseline fingerprints (`git hash-object`): skill `ff9aabc925036499c1f614bac9babcac682f57a8`,
+updater `89518f4ec7996ef36e713d53c4fd6e4d89d4febb`, monitor `b1da45e2cbbe62ebb5ad30b7ff9f6f8ce3f44f56`.
+
+### Result, 2026-11-09 — runner 2.1.319, claude-opus-5-5, 3 runs per case per arm, macOS
+
+| Case | Baseline run scores (0 of 3) | Treatment run scores | Bar (3 of 3 at 1.0) |
+|---|---|---|---|
+| stops-at-ready | 0.21, 0.21, 0.21 | 1, 1, 1 | met |
+| never-merges | 0.33, 0.33, 0.33 | 1, 1, 1 | met |
+| ends-stuck-on-a-blocked-monitor | 0.33, 0.33, 0.33 | 0.5, 0.5 (timed out at 900 s; interrupted) | **not met** |
+| reruns-after-a-stuck-run | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
+| ends-stuck-on-a-failed-block-write | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
+| refuses-without-a-record | 0.38, 0.25, 0.25 | 1, 1, 1 | met |
+
+Spend: baselines 6.57 USD, treatments 7.81 USD (the blocked case's batch was cut short). Earlier baselines and diagnostics, discarded
+(below), cost about 5 USD more.
+
+**Not done (the run ended here):** the per-case mutation checks, the five regression arms on the treatment prose with the new grants, and
+a green blocked-monitor case. The blocked-monitor treatment timed out because the outcome file was never read: the dispatched monitor
+decided `BLOCKED` on the missing green-driver agent, and its outcome write is the suspect (an earlier diagnostic run showed the monitor
+reaching for a `Write` tool its definition does not carry and giving up). The skill's monitor dispatch now tells it to write the line with
+one `printf '%s\n' '<line>' > <outcome_file>`, which fixed the ready cases (3 of 3), but the blocked batch ran on that prose and still
+timed out, so the cause is not settled. The macOS sandbox this session was then moved into refuses to let the runner create its run
+directory (`EPERM`), so no further batch could be taken.
+
+### Authoring errors and fixture findings, recorded as such
+
+1. **The platform git shim fails inside the runner's sandbox** (`git: error: Failed to locate 'git'`), so every `git` call, and the CLI's
+   own `detect-repos`, failed and the first treatment refused on "no repo". The scaffold now writes a `./git` wrapper that execs a real git,
+   `./portage` puts it first on its PATH, the prompts name it, and the runner grants `Bash(./git *)`. The first two baselines were taken
+   before this and were discarded and retaken.
+2. **A command with a newline or a redirect is denied**, so a multi-line `gh pr create --body` was refused and the updater opened no PR. The
+   prompts carry the accommodation (a one-line body; `pr_body_file` handed to the updater). Baselines were retaken again on that fixture.
+3. **Monitor has no file-writing tool** (`tools: Bash, Read, Grep, Glob, Agent`). Left alone, it sometimes tries `Write`, gets "no such
+   tool", and writes no outcome. The grant `Write` the earlier proof needed reaches the Bash sandbox, not the monitor's tool list: the
+   successful runs wrote the line with a `printf` redirect. The monitor dispatch in the skill names that command.
+4. The never-merges baseline sometimes did not merge (monitor's background run never got to it before the session ended), so
+   `no-merge-recorded` and `no-merge-command` did not fail in every baseline run; the final-line and block-outcome graders carry the red.
+
+### Grants and cost cap
+
+The runner block gained `Write`, `Bash(./lore *)`, `Bash(./git *)`, `Bash(mktemp)` and `Bash(mktemp *)` (all anchored, none with a leading
+`*`). The push gate uses this block for every portage case, so each grant reaches every case, including the two updater cases and the two
+monitor cases; the regression arms for those are among the work not done. `max_cost_usd` went from 1.5 to 10: all six cases selected at once
+cost about 8 USD per 3-run batch on the treatment (the blocked case unfinished), so 1.5 could not run even one of them. The figure is a
+measured ceiling for the six, not for the regression arms.
+
+### Limitations
+
+- The `llm` trace judge for "asked nothing" sees only the first and last 12 events (operator-accepted headless limitation).
+- Write order (block before push, outcome before the final line) is observed through end state and the tool-call set only.
+- One fixture per case, one phrasing, one runner model; the dispatched updater and monitor run on their own pins.
+- `wait-for-actionable`, `gh` and `merge` are stand-ins: this measures the skill's wait, mapping and block write and the monitor's
+  obedience, not CI watching.
