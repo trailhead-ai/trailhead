@@ -194,8 +194,8 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
 - `<kind>` is one of `plan-ready`, `slice-chosen`, `pr-ready`, `stuck`, `needs-a-decision`,
   `waiting`, `spec-complete`, `refused`.
 - `<kind/name>` is the record the session ended on: the slice record for `plan-ready` and
-  `slice-chosen`, the spec for `spec-complete` and `waiting`, `needs-a-decision` from an early stop, and a refusal
-  on a spec.
+  `slice-chosen`, the spec for `spec-complete` and `waiting`, `needs-a-decision` from an early stop,
+  and a refusal on a spec.
 - `parked=<n>` counts the questions parked in this session. `needs-a-decision` with `parked=0` means
   "read the spec record for why the run stopped", not "answer a question".
 - **Only the session's last ritual prints it.** Slice under `--then-plan` is not the last ritual and

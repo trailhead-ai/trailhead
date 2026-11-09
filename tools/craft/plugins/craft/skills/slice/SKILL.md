@@ -533,13 +533,12 @@ piping the whole body with the note added (under `--unattended`, from a body fil
 below). The note goes before any `## Waiting` section, never at the end of the body, where that
 section may now sit: a note after its entries is unmarked prose inside it, which the waiting parser
 rejects and every later candidate-set pass then refuses as `malformed-waiting-section`. The reason
-is one line, at most 500 characters; the detail goes in the body. Read the spec
-fresh immediately before this write — the `revision` from that read is the `--base`, so a body that
-changed in between is refused rather than overwritten — and run the note through the
-credential-scrub first. The reason and the diff, removed lines included, stay in the vault's change
-history permanently, team-synced, so no secret goes in either. Amend cannot remove a secret already
-in the spec — rotate the credential and escalate to the operator for a history rewrite; never amend
-it out.
+is one line, at most 500 characters; the detail goes in the body. Read the spec fresh immediately
+before this write — the `revision` from that read is the `--base`, so a body that changed in between
+is refused rather than overwritten — and run the note through the credential-scrub first. The reason
+and the diff, removed lines included, stay in the vault's change history permanently, team-synced,
+so no secret goes in either. Amend cannot remove a secret already in the spec — rotate the
+credential and escalate to the operator for a history rewrite; never amend it out.
 
 **Under `--unattended`, an early stop takes exactly this recorded stop** — the label, then the amend
 note — and then ends with
