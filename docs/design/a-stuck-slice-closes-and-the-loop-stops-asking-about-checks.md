@@ -49,7 +49,8 @@ See the list any time with:
 
 After this block the pass reports exactly what it reports today — the termination basis, the chosen
 slice and its value claim, or an early stop. A slice task that was set aside as `blocked` because of
-this check is closed the same way; the report says nothing different for it.
+this check is closed the same way: the pass moves it back to in progress first, because the build's
+close only runs on a slice in progress, and the report says nothing different for it.
 
 Under `--unattended` the same close runs and is logged as a decision in the run section rather than
 reported to anyone; the pass's outcome line is unchanged.
@@ -80,7 +81,9 @@ names the failure, never closing anything on a guess.
 
 The pass found a stuck slice and ran its close, but the write of the waiting entry to the spec was
 refused or failed. Nothing on the slice task was changed and it did not close — so it is still open,
-and the pass refuses to choose a new slice. The report names the criterion and the reason in the
+and the pass refuses to choose a new slice. (A slice that had been set aside as `blocked` was moved
+back to in progress before the close ran, and stays in progress: a slice whose close is still owed
+is in progress, and the next pass tries again.) The report names the criterion and the reason in the
 gate's own vocabulary, never by echoing the text it refused:
 
 ```
