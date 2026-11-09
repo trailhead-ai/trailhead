@@ -782,3 +782,63 @@ def test_readme_retired_verb_table_check_catches_a_wrong_target() -> None:
     )
     with pytest.raises(AssertionError):
         _check_retired_verb_table(fixture)
+
+
+# ---------------------------------------------------------------------------
+# The README's links into the environments guide, and its attach transcript's
+# waiting line — both checked against what the code and the guide produce.
+# ---------------------------------------------------------------------------
+
+_GUIDE = README.parent / "docs" / "environments.md"
+_GUIDE_LINK = re.compile(r"\]\((?:\./)?docs/environments\.md(?:#([^)\s]*))?\)")
+_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
+
+
+def _github_slugs(markdown: str) -> set[str]:
+    """The anchors GitHub generates for *markdown*'s headings (outside code fences):
+    lowercased, punctuation other than hyphens and underscores dropped, spaces
+    turned into hyphens, a repeated heading suffixed `-1`, `-2`, …."""
+    seen: dict[str, int] = {}
+    slugs: set[str] = set()
+    for heading in re.findall(r"^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", _FENCE.sub("", markdown), re.MULTILINE):
+        base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
+        count = seen.get(base, 0)
+        seen[base] = count + 1
+        slugs.add(base if count == 0 else f"{base}-{count}")
+    return slugs
+
+
+def _anchors_unresolved(readme: str, guide: str) -> list[str]:
+    slugs = _github_slugs(guide)
+    return [a for a in _GUIDE_LINK.findall(readme) if a and a not in slugs]
+
+
+def test_every_readme_link_into_the_guide_names_a_heading_the_guide_has() -> None:
+    assert _GUIDE.is_file()
+    text = README.read_text()
+    assert _GUIDE_LINK.search(text), "README links to docs/environments.md nowhere"
+    assert _anchors_unresolved(text, _GUIDE.read_text()) == []
+
+
+def test_the_link_check_catches_a_wrong_anchor_and_a_renamed_heading() -> None:
+    guide = "# Guide\n\n## A Mac host\n\n### The `contract`\n"
+    assert _github_slugs(guide) == {"guide", "a-mac-host", "the-contract"}
+    assert _anchors_unresolved("[x](docs/environments.md#a-mac-host)", guide) == []
+    assert _anchors_unresolved("[x](docs/environments.md#a-mac-hostt)", guide) == ["a-mac-hostt"]
+    assert _anchors_unresolved(
+        "[x](docs/environments.md#a-mac-host)", guide.replace("A Mac host", "A Mac machine")
+    ) == ["a-mac-host"]
+
+
+def test_the_readme_attach_transcript_carries_the_line_a_waiting_attach_prints(
+    capsys: pytest.CaptureFixture,
+) -> None:
+    from camp.cli.env import _say_waiting
+
+    _say_waiting()
+    waiting = capsys.readouterr().err.strip()
+    assert waiting
+    transcript = [
+        line.strip() for block in _FENCE.findall(README.read_text()) for line in block.splitlines()
+    ]
+    assert waiting in transcript

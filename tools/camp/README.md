@@ -227,7 +227,8 @@ self_name = "sunrise"
 order, plus this machine. Each name must be a `[hosts.<name>]` table in the
 same file, or this machine's own `self_name`; an undeclared name, or one
 listed twice, is refused naming the file and the entry. Only `camp env` reads
-the key, so a mistake in it never breaks another verb:
+the key, so a mistake in it never breaks another verb. Setting a machine up to be
+read is covered in [Preparing an environment host](docs/environments.md#preparing-an-environment-host):
 
 ```toml
 self_name = "sunrise"
@@ -433,26 +434,13 @@ as before; when the process table cannot be read it says
 `camp env: could not tell whether anything is attached: <why>` on stderr and lists anyway.
 
 On a Mac, `Docker is not installed` can also mean `docker` is not on the PATH a
-non-interactive ssh command gets, even though it works in your terminal.
+non-interactive ssh command gets; the fix is in [A Mac host](docs/environments.md#a-mac-host).
 
-A project's environments appear only once its containers carry the contract: the
-labels `camp.env.group` (the group) and `camp.env.name` (the environment's name),
-and a container name of the group, then `-env-`, then the name, such as
-`levr-env-main`. Group and name are lowercase letters, digits and hyphens. A
-container that carries both labels under any other name is skipped. An existing
-container gains the labels only by being rebuilt.
-
-Camp also reads each environment's published ports from Docker. A running
-environment's container may publish ports only on the loopback address, over tcp,
-with both the host port and the container port between 1024 and 65535: Docker
-renders those as `127.0.0.1:<host port>-><container port>/tcp`, comma separated.
-A stopped container publishes nothing, and that is fine. Camp reads
-`127.0.0.1:28081->8081/tcp, 127.0.0.1:28080->8080/tcp` as the pairs (container
-port, host port) `(8080, 28080)` and `(8081, 28081)`, in container-port order.
-Anything else on any container carrying both labels, a skipped one included (a
-port published on all interfaces, on an IPv6 address, over udp, as a range, or
-outside that span, or the same container port published twice in one record), makes the
-whole machine `unreadable`, and the reason names the line and the defect, not the value.
+A project's environments appear only once its containers follow camp's contract
+(labels, container name and published ports). It is written down once, in
+[Environments in camp](docs/environments.md), which also covers
+[checking an adoption](docs/environments.md#checking-an-adoption) and
+[what an `unreadable:` line means](docs/environments.md#if-you-see-something-else).
 
 ## Attaching an environment
 
@@ -460,13 +448,16 @@ whole machine `unreadable`, and the reason names the line and the defect, not th
 camp env attach NAME              # a bare name, resolved across this machine and every opted-in host
 camp env attach HOST/NAME         # that host only, opted in or not
 camp env attach HOST/GROUP/NAME   # that host, that group
+camp env attach local/NAME        # this machine only (also <self_name>/NAME)
 ```
 
-Puts one remote environment on this machine's localhost. An environment publishes each
+Puts one environment, on a remote host or on this machine, on this machine's localhost. An environment publishes each
 of its ports on its own machine's loopback; its **standard ports** are the container
 side of those mappings (`127.0.0.1:18080->8080/tcp` is reached here at
-`localhost:8080`). Attaching starts one background `ssh` forward that holds every
-standard port on 127.0.0.1 and carries it to the published port on the host:
+`localhost:8080`). Attaching starts one background process that holds every
+standard port on 127.0.0.1 and carries it to the published port: for an environment on
+a host, an `ssh` forward; for one on this machine, a relay that camp starts itself and that
+needs no `ssh`:
 
 ```
 $ camp env attach main
@@ -479,8 +470,10 @@ config for that host (`LocalForward`, `RemoteForward`, `DynamicForward`) rides a
 the attachment, and if one of its ports is busy, attach fails on that port. Camp does not check the environment's health: a running container with a
 forward in front of it can still be failing behind it. Like `ls`, attach ignores the
 current camp group. A bare name must match exactly one environment on every machine
-that could have it; a name on this machine, or `local/NAME`, is refused (attaching an
-environment on this machine is not supported yet).
+that could have it. An environment on this machine is attached as `local/NAME`, as
+`<self_name>/NAME`, or by a bare name found only here, and its attachment is named
+`local/<group>/<name>`. A bare name found here and on a host is refused as ambiguous, and
+the refusal offers `local/NAME` beside the host forms.
 
 There is one attachment per machine, because a machine has one set of standard ports.
 Attach assumes a single-user machine: the forward listens on 127.0.0.1, and any local user can
@@ -510,6 +503,15 @@ forward: <ssh's line>`. If anything goes wrong after the forward started, includ
 interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
 one, and says so if it could not.
 
+Two attaches started together end with one attachment: the other waits for it, then refuses
+as above.
+
+```
+$ camp env attach main
+camp env: another attach is starting; waiting for it to finish
+camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
+```
+
 A bare name reads this machine and every opted-in host at the same time. An interrupt
 while attach is reading machines (a bare name or `HOST/NAME`) prints `camp env:
 interrupted`, exits `130` and ends every `ssh` and `docker` started for the reads, before
@@ -524,11 +526,11 @@ camp env detach                   # end it and free its ports
 
 Both read only the process table, so they work from any directory and recognise an
 attachment whichever camp checkout or install made it. `status` prints one `attached:`
-line per recognised forward, or `nothing attached` (exit `0`). It does not check the
+line per recognised forward or relay (a relay is named `local/<group>/<name>`), or `nothing attached` (exit `0`). It does not check the
 environment's health, so an attachment whose environment has since stopped still reads
 attached until it is detached. When the table cannot be read it says
 `camp env: cannot tell what is attached: <why>` on stderr and exits `1`, rather than
-claiming nothing is attached. `detach` ends every recognised forward (asking first, then
+claiming nothing is attached. `detach` ends every recognised forward or relay (asking first, then
 forcing one that has not ended within two seconds) and waits up to 3s for each of its
 ports to bind free again. If a forward cannot be ended, or a port is still held by
 something else, it says which, and by what, on stderr and exits `1`. If the process table
