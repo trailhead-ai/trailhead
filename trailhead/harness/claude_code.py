@@ -862,6 +862,13 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 #   (the denial wins), so that launch is refused. Reads and network destinations
 #   cannot be narrowed this way, so a profile that asks for one the user-level
 #   configuration forbids is refused too.
+# * A user-level ``sandbox.excludedCommands`` entry runs OUTSIDE the sandbox and cannot be
+#   removed by a session (lists union), so each one is also denied as a ``Bash()``
+#   permission rule: a denial beats any allowance at every scope, so the command is
+#   refused rather than run unconfined.
+# * The directory the session starts in is writable and trusted, so a session could
+#   rewrite the project settings, hooks, agents and MCP config a later launch honours.
+#   ``<directory>/.claude`` and ``<directory>/.mcp.json`` are therefore always denied.
 # * Anything unreadable about the user-level configuration is a refusal, never a guess.
 #
 # Path conventions differ by key: ``sandbox.filesystem.*`` takes absolute or ``~/``
@@ -922,6 +929,9 @@ class _UserSettings:
         self.deny_write = self._strings(path, fs, "denyWrite", "sandbox.filesystem.denyWrite") or []
         self.allowed_domains = self._strings(
             path, net, "allowedDomains", "sandbox.network.allowedDomains"
+        )
+        self.excluded_commands = (
+            self._strings(path, sandbox, "excludedCommands", "sandbox.excludedCommands") or []
         )
         deny_read = self._strings(path, fs, "denyRead", "sandbox.filesystem.denyRead") or []
         rules = self._strings(path, permissions, "deny", "permissions.deny") or []
@@ -1945,7 +1955,11 @@ class ClaudeCodeHarness(Harness):
             launch_dir,
         )
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
-        deny_write = _derive_write_confinement(user, roots)
+        deny_write = [
+            str(launch_dir / ".claude"),
+            str(launch_dir / ".mcp.json"),
+            *_derive_write_confinement(user, roots),
+        ]
         hosts = profile.profile.network_allowed_hosts
         _check_reads_and_network(user, roots, hosts)
 
@@ -1962,7 +1976,10 @@ class ClaudeCodeHarness(Harness):
                 },
                 "network": {"allowedDomains": list(hosts)},
             },
-            "permissions": {"deny": [f"Read(/{p}/**)" for p in denied_reads]},
+            "permissions": {
+                "deny": [f"Read(/{p}/**)" for p in denied_reads]
+                + [f"Bash({command})" for command in user.excluded_commands]
+            },
             "enabledMcpjsonServers": list(profile.profile.mcp_servers),
         }
         if profile.profile.model is not None:

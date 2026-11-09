@@ -89,6 +89,12 @@ def _hub_roots(env) -> tuple[str, str, str]:
     return tuple(str(p) for p in r.writable)  # hub-home, lore-state, cache
 
 
+def _protected(env) -> list[str]:
+    """The hub's own future-settings paths, which the hub may never write."""
+    home = _hub_roots(env)[0]
+    return [f"{home}/.claude", f"{home}/.mcp.json"]
+
+
 def _user_allowing_hub(env) -> dict:
     home, lore, cache = _hub_roots(env)
     return _user_sandbox(allowWrite=[".", cache, lore])
@@ -103,7 +109,16 @@ def test_hub_profile_within_the_users_write_list_launches_and_denies_nothing(tmp
     start = _start(env)
     fs = _settings_of(start)["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == []
+    assert fs["denyWrite"] == _protected(env)
+
+
+def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_path):
+    first, second = _fence(tmp_path / "one"), _fence(tmp_path / "two")
+    for env in (first, second):
+        deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
+        home = _hub_roots(env)[0]
+        assert deny == [f"{home}/.claude", f"{home}/.mcp.json"]
+    assert _protected(first) != _protected(second)
 
 
 def test_user_writable_root_outside_the_hub_roots_is_derived_into_denywrite(tmp_path):
@@ -112,7 +127,7 @@ def test_user_writable_root_outside_the_hub_roots_is_derived_into_denywrite(tmp_
     extra = str(tmp_path.resolve() / "elsewhere")
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, extra]))
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
-    assert fs["denyWrite"] == [extra]
+    assert fs["denyWrite"] == [*_protected(env), extra]
     assert not set(fs["denyWrite"]) & set(fs["allowWrite"])
 
 
@@ -125,7 +140,7 @@ def test_user_write_entry_is_resolved_before_it_is_compared_to_a_hub_root(tmp_pa
     _write_user_settings(
         env, _user_sandbox(allowWrite=[".", str(alias / Path(cache).name), lore])
     )
-    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == []
+    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == _protected(env)
 
 
 def test_hub_write_root_the_users_list_does_not_cover_is_refused_naming_it(tmp_path):
@@ -152,7 +167,7 @@ def test_user_write_entry_sharing_only_a_string_prefix_with_a_hub_root_is_not_an
     home, lore, cache = _hub_roots(env)
     sibling = home + "-sibling"
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, sibling]))
-    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [sibling]
+    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [*_protected(env), sibling]
 
 
 def test_user_deny_write_covering_a_hub_root_is_refused_naming_the_entry(tmp_path):
@@ -242,7 +257,7 @@ def test_with_no_user_sandbox_block_the_profiles_own_narrowing_still_applies(tmp
         _write_user_settings(env, content)
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == []
+    assert fs["denyWrite"] == _protected(env)
 
 
 @pytest.mark.parametrize(
@@ -358,6 +373,37 @@ def test_settings_place_resolved_paths_under_the_keys_claude_reads(tmp_path):
     assert sandbox["network"]["allowedDomains"] == []
     assert "model" not in settings
     assert settings["enabledMcpjsonServers"] == []
+
+
+def _bash_denies(start: SessionStart) -> list[str]:
+    return [r for r in _settings_of(start)["permissions"]["deny"] if r.startswith("Bash(")]
+
+
+def test_no_user_exclusions_adds_no_bash_deny_rules(tmp_path):
+    env = _fence(tmp_path)
+    _write_user_settings(env, {"sandbox": {"enabled": True, "excludedCommands": []}})
+    assert _bash_denies(_start(env)) == []
+    _write_user_settings(env, {})
+    assert _bash_denies(_start(env)) == []
+
+
+def test_each_user_unsandboxed_command_exemption_is_denied_in_the_session(tmp_path):
+    env = _fence(tmp_path)
+    exclusions = ["claude plugin eval *", "portage eval-gate *"]
+    settings = _user_allowing_hub(env)
+    settings["sandbox"]["excludedCommands"] = exclusions
+    _write_user_settings(env, settings)
+    start = _start(env)
+    assert _bash_denies(start) == [f"Bash({e})" for e in exclusions]
+    assert len(_settings_of(start)["permissions"]["deny"]) == 1 + len(exclusions)
+
+
+@pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
+def test_malformed_user_excluded_commands_refuse_the_launch(tmp_path, bad):
+    env = _fence(tmp_path)
+    _write_user_settings(env, {"sandbox": {"enabled": True, "excludedCommands": bad}})
+    with pytest.raises(HarnessError, match="excludedCommands"):
+        _start(env)
 
 
 def test_model_and_mcp_servers_in_the_profile_reach_the_settings(tmp_path):
@@ -691,12 +737,16 @@ def _mock_anthropic(command: str):
     return f"http://127.0.0.1:{server.server_address[1]}", seen, server.shutdown
 
 
-@pytest.mark.skipif(
+_LIVE_SKIP = pytest.mark.skipif(
     os.environ.get("TRAILHEAD_LIVE_CONFINEMENT") != "1" or not _claude_present(),
     reason="opt-in live confinement test: set TRAILHEAD_LIVE_CONFINEMENT=1 outside any sandbox "
     "with the harness binary on PATH",
 )
-def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path):
+
+
+def _live_hub_run(tmp_path, command_for, excluded=()):
+    """Start the hub profile for real against a mock API that has the model run one Bash
+    command. Returns (tool results as JSON text, completed process, paths)."""
     env = _fence(tmp_path)
     home, lore, cache = _hub_roots(env)
     token_store = _resolved(env).paths["token-store"]
@@ -711,19 +761,14 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
         env,
         {"sandbox": {"enabled": True, "failIfUnavailable": True,
                      "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
+                     "excludedCommands": list(excluded),
                      "filesystem": {"allowWrite": [".", cache, lore, str(outside)]}}},
     )
     start = _start(env, interactive=False, prompt="go")
-    command = (
-        f"(echo x > {home}/ok && echo HOME=ok || echo HOME=denied); "
-        f"(echo x > {lore}/ok && echo LORE=ok || echo LORE=denied); "
-        f"(echo x > {cache}/ok && echo CACHE=ok || echo CACHE=denied); "
-        f"(echo x > {outside}/no && echo OUTSIDE=ok || echo OUTSIDE=denied); "
-        f"(cat {token_store}/token && echo TOKEN=readable || echo TOKEN=denied)"
-    )
-    url, seen, shutdown = _mock_anthropic(command)
+    paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store)
+    url, seen, shutdown = _mock_anthropic(command_for(paths))
     try:
-        child_env = {k: v for k, v in env.items()}
+        child_env = dict(env)
         child_env.update(ANTHROPIC_API_KEY="sk-fake", ANTHROPIC_BASE_URL=url,
                          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1")
         argv = [CLAUDE_BIN, *start.argv[1:], "--no-session-persistence"]
@@ -731,8 +776,35 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
                               timeout=180, stdin=subprocess.DEVNULL)
     finally:
         shutdown()
-    result = json.dumps(seen)
+    return json.dumps(seen), proc, paths
+
+
+@_LIVE_SKIP
+def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path):
+    def command(p):
+        return (
+            f"(echo x > {p['home']}/ok && echo HOME=ok || echo HOME=denied); "
+            f"(echo x > {p['lore']}/ok && echo LORE=ok || echo LORE=denied); "
+            f"(echo x > {p['cache']}/ok && echo CACHE=ok || echo CACHE=denied); "
+            f"(echo x > {p['outside']}/no && echo OUTSIDE=ok || echo OUTSIDE=denied); "
+            f"(mkdir -p {p['home']}/.claude && echo x > {p['home']}/.claude/settings.json "
+            f"&& echo OWNCFG=ok || echo OWNCFG=denied); "
+            f"(cat {p['token_store']}/token && echo TOKEN=readable || echo TOKEN=denied)"
+        )
+
+    result, proc, _ = _live_hub_run(tmp_path, command)
     assert proc.returncode == 0, proc.stderr[-500:]
     assert "HOME=ok" in result and "LORE=ok" in result and "CACHE=ok" in result  # positive control
     assert "OUTSIDE=denied" in result
+    assert "OWNCFG=denied" in result
     assert "TOKEN=denied" in result and "TOPSECRET" not in result
+
+
+@_LIVE_SKIP
+def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_path):
+    result, proc, paths = _live_hub_run(
+        tmp_path, lambda p: f"touch {p['home']}/excluded-ran", excluded=["touch *"]
+    )
+    assert proc.returncode == 0, proc.stderr[-500:]
+    assert not (paths["home"] / "excluded-ran").exists()
+    assert '"is_error": true' in result
