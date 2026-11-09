@@ -845,7 +845,12 @@ class Tmux:
         )
 
     def respawn_first_pane(
-        self, name: str, *, timeout: float | None = None
+        self,
+        name: str,
+        *,
+        command: Sequence[str] = (),
+        cwd: object = None,
+        timeout: float | None = None,
     ) -> subprocess.CompletedProcess | None:
         """Kill and restart the shell in session *name*'s only pane
         (``tmux respawn-pane -k -t =<name>:``), so it starts again under the
@@ -858,9 +863,18 @@ class Tmux:
         it removes. The trailing ``:`` addresses the session's current
         window and pane — the only one a session just created has.
 
+        A non-empty *command* is what the restarted pane runs instead of the
+        login shell, through the :func:`_pane_argv` wrapper — the one every
+        other spawn site uses — so *cwd* (required then) is entered by the
+        wrapper and every element reaches the pane as one positional
+        argument, never re-parsed by a shell.
+
         Returns ``None`` when tmux could not be asked at all.
         """
-        return self._run(["respawn-pane", "-k", "-t", f"{target(name)}:"], timeout=timeout)
+        args = ["respawn-pane", "-k", "-t", f"{target(name)}:"]
+        if command:
+            args += ["-c", str(cwd), *_pane_argv(cwd, command)]
+        return self._run(args, timeout=timeout)
 
     def switch_client(
         self, name: str, *, timeout: float | None = None

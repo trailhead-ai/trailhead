@@ -153,6 +153,40 @@ def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
     return parser.parse_known_args(args)
 
 
+def split_new_command(args: list[str]) -> tuple[list[str], list[str]]:
+    """Split ``camp new``'s argv at the literal ``--`` that starts its
+    command: ``(camp's own arguments, the command's argv)``.
+
+    *args* is everything after the verb. The command is opaque — nothing in it
+    is ever read as one of camp's options, which is why every reader above
+    (the router's, the dry-run read, the handler's own parse) must be handed
+    only the first half.
+
+    A ``--`` is the command's delimiter only when a slug precedes it. With no
+    slug before it, ``--`` keeps the meaning it always had for argparse, ending
+    options so a dash-leading word that follows is read (and refused) as a
+    slug; and an empty command is no command. In both cases *args* comes back
+    whole with an empty command.
+    """
+    if "--" not in args:
+        return args, []
+    cut = args.index("--")
+    head, command = args[:cut], args[cut + 1 :]
+    if not command:
+        return args, []
+
+    from .group import _declare_creation_switches
+    from .parser import group_verb_parser
+
+    _, remainder = read_router_options("new", head)
+    parser = group_verb_parser("new", dry_run=True)
+    _declare_creation_switches(parser)
+    parser.add_argument("slug", nargs="?")
+    if parser.parse_args(remainder).slug is None:
+        return args, []
+    return head, command
+
+
 def read_dry_run_option(args: list[str], *, verb: str = "camp") -> bool:
     """Read ``--dry-run`` from *args* WITHOUT consuming it.
 
@@ -476,6 +510,13 @@ def main() -> None:
         _cmd_which()
         return
 
+    # `camp new <slug> -- <argv…>`: the command after `--` is opaque to every
+    # reader below, so it is set aside here and rejoined only for the handler.
+    new_command: list[str] = []
+    if argv and _resolve_verb(argv[0])[0] == "new":
+        head, new_command = split_new_command(argv[1:])
+        argv = [argv[0], *head]
+
     # Read (never consume) --dry-run; spine re-checks it on its own path. An
     # opaque payload is excluded from the argv read for the reason
     # `_OPAQUE_PAYLOAD_VERBS` exists: a `--dry-run` past the wrapped command is
@@ -751,6 +792,14 @@ def main() -> None:
         if host_name == "":
             print(f"camp {first}: {HOST_FLAG} requires a value", file=sys.stderr)
             sys.exit(1)
+        if new_command:
+            print(
+                f"camp {canonical}: a command cannot be combined with "
+                f"{HOST_FLAG} — cross-host creation forwards only camp's own "
+                "switches; run camp new on that host instead",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         # `_HOST_GROUP_VERBS` resolve their group locally and forward it, so
         # `--group` is their normal shape; for every other `_HOST_VERBS`
         # member no group is forwarded, and `--group` is a collision.
@@ -822,7 +871,8 @@ def main() -> None:
             print(f"camp: config error: {_cfg_err}", file=sys.stderr)
             sys.exit(1)
         if group is not None:
-            _dispatch_group_command(first, argv[1:], group, group_env, dry_run)
+            rest = argv[1:] + (["--", *new_command] if new_command else [])
+            _dispatch_group_command(first, rest, group, group_env, dry_run)
             return
 
     # Delegate everything else to the spine dispatcher (fallback / non-group cmds).

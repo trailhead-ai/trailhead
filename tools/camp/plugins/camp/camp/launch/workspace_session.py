@@ -5,15 +5,16 @@ a resolved workspace — a group, a slug, and the directory camp already
 provisioned for it — into a live tmux session: derive the name with
 :func:`~camp.launch.naming.workspace_session_name`, the same derivation
 `camp list` already uses, and create a detached session at that name, rooted
-at the workspace directory, holding one login-shell window. No harness argv —
-see the created-session section of
-``docs/design/the-door-creates-or-connects-a-workspace-session.md``. The
+at the workspace directory, holding one window: a login shell, or the argv
+the caller names. camp composes no harness argv — see the created-session
+section of ``docs/design/the-door-creates-or-connects-a-workspace-session.md``. The
 session does carry the group's account binding and the harness's scrub, as
 environment every pane it starts inherits; see "Marking a CREATED session"
 below.
 
-This is deliberately not a harness launch: the workspace session carries no
-harness command at all, only the workspace name and a login shell.
+This is deliberately not a harness launch: camp composes no harness command,
+so the workspace session carries only the workspace name and a login shell
+unless the caller names an argv.
 
 Three outcomes, not two
 ------------------------
@@ -78,7 +79,7 @@ import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Mapping
+from typing import TYPE_CHECKING, Mapping, Sequence
 
 from ..group.window_record import read_window_record, window_record_path_for
 from .eligibility import assert_not_a_credential_store
@@ -136,6 +137,7 @@ def create_workspace_session(
     env: Mapping[str, str] | None = None,
     tmux: Tmux | None = None,
     session_env: SessionEnvironment,
+    command: Sequence[str] = (),
 ) -> WorkspaceSessionResult:
     """Create the tmux session for the workspace at *slug* in *group_name*.
 
@@ -145,6 +147,15 @@ def create_workspace_session(
     tmux started that pane's shell before the session existed to carry
     anything, so without the restart it alone would keep whatever the tmux
     server handed it.
+
+    A non-empty *command* is the argv the first pane runs instead of the
+    login shell. It always goes through that restart, whether or not the
+    environment states anything, because the restart is the one point after
+    the session is marked: a command started by the create itself would run
+    before the `@camp_*` marks exist and its session-start capture would
+    find an unmarked session. The restart passes the argv through
+    :func:`~camp.launch.tmux.Tmux.respawn_first_pane`'s pane wrapper, so camp
+    composes nothing and no shell re-parses an element.
 
     Raises :class:`~camp.launch.session.LaunchError` (via
     :func:`~camp.launch.eligibility.assert_not_a_credential_store`) before
@@ -169,8 +180,8 @@ def create_workspace_session(
         failure = _mark_session(tmux, name, group_name, slug, session_env)
         if failure is not None:
             return failure
-        if session_env.removals or session_env.assignments:
-            answer = tmux.respawn_first_pane(name)
+        if command or session_env.removals or session_env.assignments:
+            answer = tmux.respawn_first_pane(name, command=command, cwd=workspace_dir)
             if answer is None or answer.returncode != 0:
                 return _abandon_half_marked_session(
                     tmux, name, "restart the session's first pane", answer
@@ -340,6 +351,7 @@ def create_or_connect_workspace_session(
     tmux: Tmux,
     harness=None,
     group: dict | None,
+    command: Sequence[str] = (),
 ) -> DoorProbe:
     """Probe for the workspace's session and create — or resurrect — it
     when there is none.
@@ -409,6 +421,12 @@ def create_or_connect_workspace_session(
     — the resurrection planner needs it to resolve the same account binding
     the session itself carries, so a resurrected conversation's
     resume line points at the account it actually ran under.
+
+    *command* is the argv the first pane of a session THIS call creates runs
+    (see :func:`create_workspace_session`). It is honoured on the plain create
+    arm only: a connect, a resurrection and a failed create never start it,
+    and the caller learns that from the state alone —
+    :data:`DoorState.CREATED` is the one state in which it ran.
     """
     # Deferred: `resurrect.py` imports from this module at its own top
     # level (see the module-level comment above the import block), so this
@@ -478,7 +496,13 @@ def create_or_connect_workspace_session(
 
     try:
         result = create_workspace_session(
-            group_name, slug, workspace_dir, env=env, tmux=tmux, session_env=session_env
+            group_name,
+            slug,
+            workspace_dir,
+            env=env,
+            tmux=tmux,
+            session_env=session_env,
+            command=command,
         )
     except LaunchError as exc:
         return _create_refused_probe(name, exc)

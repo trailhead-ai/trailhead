@@ -16,10 +16,12 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
-from .dispatch import _BIN_DIR
+from .dispatch import _BIN_DIR, split_new_command
 from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
+    from typing import NoReturn
+
     from ..host.config import Host
 
 
@@ -368,9 +370,9 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> [--no-attach] [--no-session] [--activate] [--json] —
-    create or re-enter a workspace, then go through the same door `camp
-    attach` opens onto its tmux session.
+    """camp new <slug> [--no-attach] [--no-session] [--activate] [--json]
+    [-- <argv…>] — create or re-enter a workspace, then go through the same
+    door `camp attach` opens onto its tmux session.
 
     NEW slug: bring_up_workspace — synchronous seed (workspace dir + manifest with
     each member pending) + a DETACHED provisioner (camp setup --background) that runs
@@ -405,6 +407,23 @@ def _cmd_new_group_cli(
     `--launch` flag, and argparse's own unrecognized-argument handling
     refuses one.
 
+    `-- <argv…>` names the command the session's first pane runs instead of the
+    login shell. camp stays ignorant of what it is: the argv is never read as
+    one of camp's options (`split_new_command` sets it aside before any
+    reader sees it), never composed, and never passed through a shell — every
+    element reaches the pane as one positional argument, under the session's
+    environment (the group's account binding and the harness scrub) at the
+    workspace root. The session is marked before it starts, so a harness
+    started this way is recorded by the existing session-start capture. When
+    it exits its pane closes like any tmux pane; camp adds no keep-alive. It
+    is honoured only when this call creates the session: a command given with
+    `--no-session`, with `--host`, or for a workspace that already exists is
+    refused before anything is touched, and when the door connects to a
+    session instead (it raced into existence, or the workspace-only outcome
+    was reached) the command runs nowhere — the outcome says so
+    (`command_started` under `--json`, a stderr line otherwise) and the exit
+    status is non-zero. Without a command nothing about the outcome changes.
+
     `--activate` triggers every member's activate-phase work at creation time —
     the non-interactive path to what `camp activate <member>` triggers
     interactively. It waits (bounded) for boot-readiness first — an
@@ -423,7 +442,7 @@ def _cmd_new_group_cli(
     from ..spine import _resolve_slug, _die
     from ..provision.provision import bring_up_workspace
     from ..group.manifest import workspace_dir, manifest_path_for
-
+    args, command = split_new_command(args)
     parser = group_verb_parser("new", dry_run=True)
     _declare_creation_switches(parser)
     parser.add_argument("slug", nargs="?")
@@ -446,6 +465,18 @@ def _cmd_new_group_cli(
         _die(f"camp new: group {group_name!r} has no members")
 
     ws_dir = workspace_dir(group_name, slug, env=env)
+
+    # A command is honoured only when this call creates the workspace's
+    # session, so every refusal is decided here — before the bring-up below
+    # writes the workspace, before the headline, before `--activate` runs
+    # anything, and before the dry-run answer.
+    if command and no_session:
+        _die("camp new: a command cannot be combined with --no-session — it starts in the session's first pane")
+    if command and manifest_path_for(group_name, slug, env=env).exists():
+        _die(
+            f"camp new: workspace {slug!r} already exists — a command starts only "
+            "in the session of a workspace this call creates"
+        )
 
     if dry_run:
         print(
@@ -514,11 +545,18 @@ def _cmd_new_group_cli(
         interactive=interactive,
         harness=harness_for(group),
         group=group,
+        command=command,
     )
 
 
 def _workspace_only_payload(
-    *, slug: str, group_name: str, ws_dir, session_error: str, refused: bool
+    *,
+    slug: str,
+    group_name: str,
+    ws_dir,
+    session_error: str,
+    refused: bool,
+    command_started: bool | None = None,
 ) -> dict:
     """The `--json` object for `camp new`'s workspace-only outcome — the
     workspace exists but its tmux session does not. `outcome` is
@@ -529,8 +567,10 @@ def _workspace_only_payload(
     without parsing `session_error`'s free text. Same key set either way;
     the sole place this key set is assembled — every call site in
     `_door_dispatch_for_new` builds the object here, never ad hoc.
+    *command_started* adds the `command_started` key when `camp new` was
+    given a command (`None` leaves the object as it is without one).
     """
-    return {
+    payload = {
         "ok": True,
         "outcome": "workspace-only-refused" if refused else "workspace-only",
         "slug": slug,
@@ -540,6 +580,9 @@ def _workspace_only_payload(
         "attached": False,
         "session_error": session_error,
     }
+    if command_started is not None:
+        payload["command_started"] = command_started
+    return payload
 
 
 def _report_workspace_only(
@@ -551,6 +594,7 @@ def _report_workspace_only(
     derived_name: str,
     session_error: str,
     refused: bool = False,
+    command_started: bool | None = None,
 ) -> None:
     """Report `camp new`'s workspace-only outcome and return — never exits
     and never raises. The workspace is real and usable, so this is success
@@ -569,6 +613,7 @@ def _report_workspace_only(
                     ws_dir=ws_dir,
                     session_error=session_error,
                     refused=refused,
+                    command_started=command_started,
                 )
             )
         )
@@ -584,6 +629,16 @@ def _report_workspace_only(
     )
 
 
+def _refuse_unstarted_command(reason: str | None) -> "NoReturn":
+    """The one line `camp new` adds, and the non-zero exit, when it was given a
+    command and the door did not create the session — the command ran nowhere,
+    so the effect the caller asked for did not happen."""
+    from ..launch.recovery import printable_path
+
+    print(printable_path(f"camp new: command not started — {reason}"), file=sys.stderr)
+    sys.exit(1)
+
+
 def _door_dispatch_for_new(
     *,
     group_name: str,
@@ -594,6 +649,7 @@ def _door_dispatch_for_new(
     interactive: bool,
     harness=None,
     group: dict | None = None,
+    command: list[str] | None = None,
 ) -> None:
     """Create, connect, or resurrect the workspace's tmux session and, when
     *interactive*, hand the terminal over — `camp new`'s own door dispatch.
@@ -635,9 +691,18 @@ def _door_dispatch_for_new(
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
+    command = command or []
     probe = create_or_connect_workspace_session(
-        group_name, slug, ws_dir, env=resolved_env, tmux=tmux, harness=harness, group=group
+        group_name,
+        slug,
+        ws_dir,
+        env=resolved_env,
+        tmux=tmux,
+        harness=harness,
+        group=group,
+        command=command,
     )
+    started = probe.state is DoorState.CREATED
 
     if probe.state in (
         DoorState.TMUX_UNANSWERED,
@@ -653,7 +718,10 @@ def _door_dispatch_for_new(
             derived_name=probe.session_name,
             session_error=probe.reason,
             refused=probe.state in (DoorState.CREATE_REFUSED, DoorState.RECORD_UNREADABLE),
+            command_started=False if command else None,
         )
+        if command:
+            _refuse_unstarted_command(probe.reason)
         return
 
     from .session import _door_success_outcome
@@ -663,14 +731,22 @@ def _door_dispatch_for_new(
         slug=slug,
         group=group_name,
         workspace_path=ws_dir,
-        interactive=interactive,
+        interactive=interactive and (started or not command),
     )
 
     if as_json:
-        print(json.dumps(render_json(outcome)))
+        payload = render_json(outcome)
+        if command:
+            payload["command_started"] = started
+        print(json.dumps(payload))
     else:
         print(str(ws_dir))
         print(render_human(outcome), file=sys.stderr)
+
+    if command and not started:
+        _refuse_unstarted_command(
+            "this call did not create the workspace's session, so there was no first pane to start it in"
+        )
 
     if not interactive:
         return

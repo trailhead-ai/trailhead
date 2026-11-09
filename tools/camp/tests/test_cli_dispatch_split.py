@@ -721,3 +721,115 @@ def test_sessions_and_kill_never_reach_a_raising_tmux_double(
     assert capsys.readouterr().err == (
         f"camp {verb}: this command has been replaced — use 'camp {replacement}' instead.\n"
     )
+
+
+# ---------------------------------------------------------------------------
+# `camp new <slug> -- <argv…>`: the argv after `--` is opaque to the router.
+# ---------------------------------------------------------------------------
+
+_STUB_GROUP = {"group": {"name": "g"}, "members": [{"name": "m"}]}
+
+
+@pytest.fixture()
+def new_router(monkeypatch: pytest.MonkeyPatch, hosts_env: dict[str, str]):
+    """`main()` with its group resolution stubbed and every downstream
+    handler replaced by a recorder, so what the router decided is visible:
+    which handler ran, with which argv and dry-run answer."""
+    dispatch = _dispatch_module()
+    for k, v in hosts_env.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(dispatch, "_TRAILHEAD_PATHS_OK", True)
+    calls: dict[str, list] = {"group": [], "host": [], "all_groups": []}
+    monkeypatch.setattr(dispatch, "_resolve_group_for_command", lambda argv: (_STUB_GROUP, {}))
+    monkeypatch.setattr(
+        dispatch, "_dispatch_group_command", lambda *a: calls["group"].append(a)
+    )
+    monkeypatch.setattr(dispatch, "_dispatch_host_command", lambda *a: calls["host"].append(a))
+    monkeypatch.setattr(
+        dispatch, "_dispatch_all_groups_command", lambda *a: calls["all_groups"].append(a)
+    )
+
+    def run(*argv: str) -> int:
+        monkeypatch.setattr(sys, "argv", ["camp", *argv])
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            return exc.code if isinstance(exc.code, int) else 1
+        return 0
+
+    return run, calls
+
+
+@pytest.mark.parametrize(
+    "token_argv",
+    [["-g"], ["--all-groups"], ["--host", "andromeda"], ["--dry-run"]],
+    ids=["g", "all-groups", "host", "dry-run"],
+)
+def test_a_camp_option_after_double_dash_is_the_commands_not_the_routers(
+    new_router, token_argv: list[str]
+) -> None:
+    run, calls = new_router
+
+    code = run("new", "ws1", "--no-attach", "--", "tool", *token_argv)
+
+    assert code == 0
+    assert calls["host"] == [] and calls["all_groups"] == []
+    ((cmd, rest, _group, _env, dry_run),) = calls["group"]
+    assert cmd == "new" and dry_run is False
+    assert rest == ["ws1", "--no-attach", "--", "tool", *token_argv]
+
+
+@pytest.mark.parametrize("token_argv", [["-g"], ["--all-groups"]], ids=["g", "all-groups"])
+def test_widening_before_the_double_dash_is_read_by_the_router_and_refused(
+    new_router, token_argv: list[str], capsys: pytest.CaptureFixture
+) -> None:
+    run, calls = new_router
+
+    code = run("new", "ws1", *token_argv)
+
+    assert code == 1
+    assert "has no meaning here" in capsys.readouterr().err
+    assert calls["group"] == []
+
+
+def test_host_before_the_double_dash_is_read_by_the_router_and_routes_to_the_host(
+    new_router,
+) -> None:
+    run, calls = new_router
+
+    run("new", "ws1", "--host", "andromeda")
+
+    assert calls["group"] == []
+    ((canonical, _host, host_name, rest, _timeout, _dry),) = calls["host"]
+    assert (canonical, host_name, rest) == ("new", "andromeda", ["ws1"])
+
+
+def test_dry_run_before_the_double_dash_is_read_and_after_it_is_not(new_router) -> None:
+    run, calls = new_router
+
+    run("new", "ws1", "--dry-run")
+    run("new", "ws1", "--", "tool", "--dry-run")
+
+    assert [c[4] for c in calls["group"]] == [True, False]
+
+
+def test_a_command_with_host_is_refused_in_one_line_before_any_machine_is_contacted(
+    new_router, capsys: pytest.CaptureFixture
+) -> None:
+    run, calls = new_router
+
+    code = run("new", "ws1", "--host", "andromeda", "--", "tool")
+
+    err = capsys.readouterr().err
+    assert code == 1
+    assert len(err.strip().splitlines()) == 1 and "--host" in err
+    assert calls["host"] == [] and calls["group"] == []
+
+
+def test_double_dash_with_no_slug_before_it_still_ends_options_for_the_slug(new_router) -> None:
+    run, calls = new_router
+
+    run("new", "--", "-x")
+
+    ((_cmd, rest, *_),) = calls["group"]
+    assert rest == ["--", "-x"], "no slug before `--`: nothing is a command, the old meaning holds"

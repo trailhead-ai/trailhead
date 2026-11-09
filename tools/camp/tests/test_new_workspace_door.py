@@ -127,6 +127,8 @@ class _DoorTmux:
         self.set_option_calls: list[dict[str, object]] = []
         self.set_environment_calls: list[tuple[str, tuple]] = []
         self.respawn_calls: list[str] = []
+        self.respawn_commands: list[tuple[str, ...]] = []
+        self.events: list[str] = []
         self.list_windows_calls: list[str] = []
 
     def list_windows(self, name: str):
@@ -168,14 +170,17 @@ class _DoorTmux:
 
     def set_option(self, target, key, value, *, timeout=None):
         self.set_option_calls.append({"target": target, "key": key, "value": value})
+        self.events.append("set_option")
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def set_environment(self, name, operand, *, env=None, timeout=None):
         self.set_environment_calls.append((name, tuple(operand)))
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
-    def respawn_first_pane(self, name, *, timeout=None):
+    def respawn_first_pane(self, name, *, command=(), cwd=None, timeout=None):
         self.respawn_calls.append(name)
+        self.respawn_commands.append(tuple(command))
+        self.events.append("respawn_first_pane")
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
     def switch_client(self, name: str):
@@ -1013,3 +1018,276 @@ def test_new_against_a_running_session_with_a_stale_record_prints_dropped_on_std
     assert "dropped @9" in captured.err
     reread = read_window_record(window_record_path_for(ws_dir))
     assert [e.window_id for e in reread.entries] == []
+
+
+# ---------------------------------------------------------------------------
+# `camp new <slug> -- <argv…>`: the command the first pane runs
+# ---------------------------------------------------------------------------
+
+_COMMANDS = [
+    ["claude", "--settings", "/tmp/s.json", "--teammate-mode", "tmux"],
+    ["sh", "-c", 'echo "$1"; sleep 30', "sh", "a b", "it's", "$(id)", "x;y"],
+]
+_COMMAND_IDS = ["harness-launch", "hostile-elements"]
+
+
+def _manifest_bytes(group_env, slug: str) -> bytes:
+    from camp.group.manifest import manifest_path_for
+
+    return manifest_path_for("g", slug, env=group_env["env"]).read_bytes()
+
+
+@pytest.mark.parametrize("command", _COMMANDS, ids=_COMMAND_IDS)
+def test_a_command_starts_the_first_pane_with_exactly_that_argv_after_the_session_is_marked(
+    camp_cli, group_env, monkeypatch, command
+):
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+
+    camp_cli._cmd_new_group_cli(
+        ["feat-c", "--no-attach", "--", *command], g["group"], g["env"], dry_run=False
+    )
+
+    assert tmux.respawn_commands == [tuple(command)]
+    assert tmux.respawn_calls == [_derived_name("g", "feat-c")]
+    assert tmux.events.index("respawn_first_pane") > max(
+        i for i, e in enumerate(tmux.events) if e == "set_option"
+    ), "the session is marked before the command starts"
+
+
+def test_the_first_pane_call_differs_with_and_without_a_command_only_in_the_argv(
+    camp_cli, group_env, monkeypatch
+):
+    g = group_env
+    with_command = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, with_command)
+    camp_cli._cmd_new_group_cli(
+        ["feat-w", "--no-attach", "--", "tool", "arg"], g["group"], g["env"], dry_run=False
+    )
+    without = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, without)
+    camp_cli._cmd_new_group_cli(["feat-n", "--no-attach"], g["group"], g["env"], dry_run=False)
+
+    assert without.respawn_commands == [()]
+    assert with_command.respawn_commands == [("tool", "arg")]
+    assert [e for e in with_command.events if e != "respawn_first_pane"] == [
+        e for e in without.events if e != "respawn_first_pane"
+    ]
+
+
+def test_a_command_created_session_reports_command_started_true_in_json(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    _wire_tmux(monkeypatch, _DoorTmux(present=False))
+
+    camp_cli._cmd_new_group_cli(
+        ["feat-j", "--json", "--", "tool"], g["group"], g["env"], dry_run=False
+    )
+
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["outcome"] == "created"
+    assert payload["command_started"] is True
+
+
+def test_the_command_is_opaque_to_the_handlers_own_flags(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    tokens = ["tool", "-g", "--host", "x", "--dry-run", "--json"]
+
+    camp_cli._cmd_new_group_cli(
+        ["feat-o", "--no-attach", "--", *tokens], g["group"], g["env"], dry_run=False
+    )
+
+    captured = capsys.readouterr()
+    assert tmux.respawn_commands == [tuple(tokens)], "the command receives every token"
+    assert captured.out.strip().endswith("/feat-o"), "--json after -- never switched the output"
+    assert not captured.out.lstrip().startswith("{")
+
+
+def test_a_json_flag_before_the_double_dash_is_still_read_by_camp(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    _wire_tmux(monkeypatch, _DoorTmux(present=False))
+
+    camp_cli._cmd_new_group_cli(
+        ["feat-o2", "--json", "--", "tool"], g["group"], g["env"], dry_run=False
+    )
+
+    assert json.loads(capsys.readouterr().out)["slug"] == "feat-o2"
+
+
+@pytest.mark.parametrize(
+    "tmux_kwargs, why",
+    [
+        ({"present": False, "create_returncode": 1, "create_stderr": "duplicate session: x\n",
+          "reprobe": True}, "race"),
+        ({"present": False, "create_returncode": 1, "create_stderr": "boom\n"}, "create-failed"),
+        ({"present": True}, "already-connected"),
+        ({"present": None}, "tmux-unanswered"),
+    ],
+    ids=["duplicate-race", "failed-create", "connected", "unanswered"],
+)
+def test_a_command_the_door_did_not_start_exits_nonzero_and_reports_it(
+    camp_cli, group_env, monkeypatch, capsys, tmux_kwargs, why
+):
+    g = group_env
+    tmux = _DoorTmux(**tmux_kwargs)
+    _wire_tmux(monkeypatch, tmux)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-ns", "--json", "--", "tool", "arg"],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert tmux.respawn_commands == [] or all(c == () for c in tmux.respawn_commands), (
+        "no pane receives the argv"
+    )
+    assert json.loads(captured.out)["command_started"] is False
+
+
+def test_the_plain_form_of_a_command_not_started_says_so_on_stderr_and_exits_nonzero(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    _wire_tmux(monkeypatch, _DoorTmux(present=True))
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-p", "--", "tool"], g["group"], g["env"], dry_run=False
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert any("command not started" in line for line in captured.err.splitlines())
+    assert captured.out.strip().endswith("/feat-p")
+
+
+@pytest.mark.parametrize(
+    "tmux_kwargs",
+    [
+        {"present": False, "create_returncode": 1, "create_stderr": "duplicate session: x\n",
+         "reprobe": True},
+        {"present": False, "create_returncode": 1, "create_stderr": "boom\n"},
+    ],
+    ids=["duplicate-race", "failed-create"],
+)
+def test_without_a_command_the_same_outcomes_still_exit_zero_with_todays_object(
+    camp_cli, group_env, monkeypatch, capsys, tmux_kwargs
+):
+    g = group_env
+    _wire_tmux(monkeypatch, _DoorTmux(**tmux_kwargs))
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-z", "--json"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code == 0
+    assert "command_started" not in json.loads(capsys.readouterr().out)
+
+
+def _record_activations(monkeypatch) -> list:
+    import camp.cli.session as cli_session
+
+    seen: list = []
+    monkeypatch.setattr(cli_session, "trigger_activate_phase_work", lambda *a, **k: seen.append(a))
+    return seen
+
+
+def test_a_command_with_no_session_is_refused_with_one_line_and_nothing_created(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    from camp.group.manifest import manifest_path_for
+
+    g = group_env
+    _wire_tmux(monkeypatch, _RaisingTmux())
+    activations = _record_activations(monkeypatch)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-r", "--no-session", "--activate", "--", "tool"],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert len(captured.err.strip().splitlines()) == 1
+    assert "--no-session" in captured.err
+    assert not manifest_path_for("g", "feat-r", env=g["env"]).exists()
+    assert not manifest_path_for("g", "feat-r", env=g["env"]).parent.exists()
+    assert activations == []
+
+
+def test_a_command_against_an_existing_workspace_is_refused_and_touches_nothing(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    camp_cli._cmd_new_group_cli(["feat-e", "--no-session"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()
+    before = _manifest_bytes(g, "feat-e")
+    tmux = _DoorTmux(present=False)
+    _wire_tmux(monkeypatch, tmux)
+    activations = _record_activations(monkeypatch)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-e", "--activate", "--", "tool"],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert len(captured.err.strip().splitlines()) == 1
+    assert "already exists" in captured.err
+    assert _manifest_bytes(g, "feat-e") == before
+    assert tmux.has_session_calls == [] and tmux.new_session_calls == []
+    assert activations == []
+
+
+def test_a_command_is_refused_before_the_dry_run_answer_for_an_existing_workspace(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    camp_cli._cmd_new_group_cli(["feat-d", "--no-session"], g["group"], g["env"], dry_run=False)
+    capsys.readouterr()
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-d", "--", "tool"], g["group"], g["env"], dry_run=True
+    )
+
+    assert code != 0
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_a_command_not_started_never_hands_the_terminal_over(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    tmux = _DoorTmux(present=True)
+    _wire_tmux(monkeypatch, tmux)
+    _raising_handoff(monkeypatch)
+    monkeypatch.setattr(sys, "stdin", _FakeTTY())
+    monkeypatch.setattr(sys, "stdout", _FakeTTY())
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-h", "--", "tool"], g["group"], g["env"], dry_run=False
+    )
+
+    assert code != 0
+    assert tmux.switch_client_calls == []
+    assert "command not started" in capsys.readouterr().err

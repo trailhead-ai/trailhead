@@ -27,6 +27,7 @@ camp new <slug>      # create or enter a workspace, then attach to its tmux sess
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
 camp new <slug> --no-session # create or enter the workspace only — no tmux session
 camp new <slug> --host <name>  # create or enter it on a declared machine, then attach there
+camp new <slug> --no-attach -- <argv…>  # create it, and run that argv as the session's first pane
 camp pwd <slug>      # print workspace path
 camp list            # table of workspaces: sessions, last touched (alias: ls)
 camp status          # show git + drift status

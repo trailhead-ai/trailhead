@@ -110,6 +110,19 @@ lives on the session and how each conversation is recorded.
 
 The door's job is to put the operator in the workspace; what they run there is theirs.
 
+A caller that needs a specific command running there names it when it creates the workspace:
+`camp new <slug> [flags] -- <argv…>`. The session is created and marked as above, then its
+first pane is restarted running that argv — through the same argv-safe pane wrapper
+resurrection uses, so every element arrives as one positional argument, at the workspace root,
+under the session environment. camp still composes no harness argv: the caller names what runs,
+the argv is opaque to camp's own option parsing, and camp adds no keep-alive, so the pane closes
+when the command exits. The command is honoured only when this call creates the session. A
+command given with `--no-session`, with `--host`, or for a workspace that already exists is
+refused before anything is touched. If the door connects to a session instead (another camp
+created it first) or reaches the workspace-only outcome, the command runs nowhere and `camp new`
+says so — `command_started: false` under `--json`, a stderr line otherwise — and exits non-zero,
+because the effect the caller asked for did not happen.
+
 ## Creation cannot race into a second session
 
 `tmux new-session -d -s <name>` refuses an existing name rather than making a second session:

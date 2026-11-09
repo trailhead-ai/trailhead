@@ -67,6 +67,7 @@ class _FakeTmux:
         self.calls: list[dict[str, object]] = []
         self.set_option_calls: list[dict[str, object]] = []
         self.killed: list[str] = []
+        self.respawned: list[dict[str, object]] = []
         #: Every session-shaping call in the order it was made, so a test can
         #: pin that the first pane restarts only AFTER the environment it must
         #: start under has been stated.
@@ -103,8 +104,9 @@ class _FakeTmux:
             )
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
-    def respawn_first_pane(self, name, *, timeout=None):
+    def respawn_first_pane(self, name, *, command=(), cwd=None, timeout=None):
         self.events.append(("respawn_first_pane", name))
+        self.respawned.append({"command": tuple(command), "cwd": cwd})
         if self._respawn_answer is None:
             return None
         if self._respawn_answer != "ok":
@@ -375,7 +377,7 @@ class _FakeDoorTmux:
         self.set_environment_calls.append((name, tuple(operand)))
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
-    def respawn_first_pane(self, name, *, timeout=None):
+    def respawn_first_pane(self, name, *, command=(), cwd=None, timeout=None):
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
 def test_a_credential_store_launch_error_during_create_folds_into_create_refused_not_a_traceback(
@@ -1099,6 +1101,45 @@ def test_a_session_with_nothing_to_state_is_not_restarted(tmp_path):
 
     assert result.outcome is WorkspaceSessionOutcome.CREATED
     assert tmux.events == []
+
+
+def test_a_command_restarts_the_first_pane_even_with_no_environment_to_state(tmp_path):
+    """The command starts at the restart, which is after the session is
+    marked, so it takes that restart whether or not an environment is stated."""
+    from camp.launch.session import SessionEnvironment
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux()
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux,
+        session_env=SessionEnvironment(), command=("tool", "a b"),
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.CREATED
+    assert tmux.respawned == [{"command": ("tool", "a b"), "cwd": ws}]
+
+
+@pytest.mark.parametrize("answer", ["tmux: can't find pane", None])
+def test_a_command_whose_pane_tmux_would_not_restart_fails_the_create_and_kills_the_session(
+    tmp_path, answer
+):
+    from camp.launch.session import SessionEnvironment
+    from camp.launch.workspace_session import WorkspaceSessionOutcome, create_workspace_session
+
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    tmux = _FakeTmux(respawn_answer=answer)
+
+    result = create_workspace_session(
+        "g", "slug", ws, env={"HOME": str(tmp_path)}, tmux=tmux,
+        session_env=SessionEnvironment(), command=("tool",),
+    )
+
+    assert result.outcome is WorkspaceSessionOutcome.FAILED
+    assert tmux.killed == [result.session_name]
 
 
 @pytest.mark.parametrize("refused", ["CLAUDECODE", "CLAUDE_CONFIG_DIR"])

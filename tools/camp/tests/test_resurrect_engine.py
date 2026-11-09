@@ -139,7 +139,7 @@ class _FakeTmux:
         self.set_environment_calls.append((name, tuple(operand)))
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
-    def respawn_first_pane(self, name, *, timeout=None):
+    def respawn_first_pane(self, name, *, command=(), cwd=None, timeout=None):
         self.respawn_calls.append(name)
         return subprocess.CompletedProcess(args=["tmux"], returncode=0, stdout="", stderr="")
 
