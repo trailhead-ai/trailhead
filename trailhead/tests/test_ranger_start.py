@@ -67,7 +67,9 @@ def _write_credential(env, value=CREDENTIAL):
 
 
 class _Stub:
-    def __init__(self, *, health="outpost", status=200, body=None, delay=0.0):
+    def __init__(self, *, health="outpost", status=200, body=None, delay=0.0, location=None):
+        self.location = location
+        self.gets: list[str] = []
         self.health = health
         self.status = status
         self.body = body if body is not None else {"started": True, "socket": "outpost-hubs", "target": "hub-x"}
@@ -80,6 +82,7 @@ class _Stub:
                 pass
 
             def do_GET(self):
+                stub.gets.append(self.path)
                 if self.path == "/health" and isinstance(stub.health, (dict, list)):
                     payload = json.dumps(stub.health).encode()
                     ctype = "application/json"
@@ -101,6 +104,8 @@ class _Stub:
                 try:
                     self.send_response(stub.status)
                     self.send_header("Content-Type", "application/json")
+                    if stub.location:
+                        self.send_header("Location", stub.location)
                     self.send_header("Content-Length", str(len(payload)))
                     self.end_headers()
                     self.wfile.write(payload)
@@ -243,6 +248,36 @@ def test_json_listener_without_outpost_health_shape_is_down(tmp_path, stub, caps
     assert "restart" not in err
 
 
+def test_proxy_environment_is_ignored(tmp_path, stub, monkeypatch):
+    proxy = stub()
+    for var in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.setenv(var, f"http://127.0.0.1:{proxy.port}")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub()
+    rc, ex = _start(env, port=s.port)
+    assert rc == 0 and len(ex.calls) == 1
+    assert s.posts == [("/operator/hubs/acme/start", f"Bearer {CREDENTIAL}")]
+    assert proxy.posts == [] and proxy.gets == []
+
+
+def test_redirect_is_refused_and_header_never_resent(tmp_path, stub, capsys):
+    target = stub()
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub(status=307, location=f"http://127.0.0.1:{target.port}/operator/hubs/acme/start")
+    rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
+    assert rc != 0 and ex.calls == []
+    assert target.posts == []
+    assert len(s.posts) == 1
+    assert "redirect" in err
+
+
 def test_hub_exited_at_launch_prints_output(tmp_path, stub, capsys):
     env = _env(tmp_path)
     _configure(env, "acme")
@@ -374,32 +409,49 @@ def test_start_route_matches_contract_fixture(tmp_path, stub):
 def test_real_tmux_attach_then_detach_leaves_session(tmp_path):
     sock = f"ranger-smoke-{uuid.uuid4().hex[:8]}"
     env = {k: v for k, v in os.environ.items() if k != "TMUX"}
+    env["TERM"] = "xterm-256color"
     base = ["tmux", "-L", sock]
     argv = tmux_attach_argv("smoke")
     argv[argv.index("-L") + 1] = sock
+    pid = None
     try:
-        subprocess.run(base + ["new-session", "-d", "-s", "hub-smoke", "sleep 60"], check=True, env=env)
+        subprocess.run(
+            base + ["new-session", "-d", "-s", "hub-smoke", "sleep 60"], check=True, env=env, timeout=15
+        )
         pid, fd = pty.fork()
         if pid == 0:
-            os.execvpe(argv[0], argv, env)
+            try:
+                os.execvpe(argv[0], argv, env)
+            finally:
+                os._exit(127)
         time.sleep(1.0)
         os.write(fd, b"\x02d")
-        deadline = time.time() + 5
-        done = False
-        while time.time() < deadline and not done:
+        deadline = time.time() + 10
+        exited = False
+        while time.time() < deadline and not exited:
             if select.select([fd], [], [], 0.2)[0]:
                 try:
-                    if not os.read(fd, 4096):
-                        done = True
+                    os.read(fd, 4096)
                 except OSError:
-                    done = True
+                    pass
             wpid, _ = os.waitpid(pid, os.WNOHANG)
-            if wpid == pid:
-                done = True
-        assert done, "client did not detach"
+            exited = wpid == pid
+        if exited:
+            pid = None
+        assert exited, "client did not detach within 10s"
         listed = subprocess.run(
-            base + ["list-sessions", "-F", "#{session_name}"], capture_output=True, text=True, env=env
+            base + ["list-sessions", "-F", "#{session_name}"],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=15,
         )
         assert "hub-smoke" in listed.stdout.split()
     finally:
-        subprocess.run(base + ["kill-server"], env=env, capture_output=True)
+        if pid is not None:
+            try:
+                os.kill(pid, 9)
+                os.waitpid(pid, 0)
+            except (OSError, ChildProcessError):
+                pass
+        subprocess.run(base + ["kill-server"], env=env, capture_output=True, timeout=15)

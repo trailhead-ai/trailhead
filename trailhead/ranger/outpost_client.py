@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from trailhead.launch_profile import validate_account
-from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT, _probe_health
+from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 from trailhead.paths import state_dir
 
 HUB_SOCKET = "outpost-hubs"
@@ -20,13 +20,27 @@ class OutpostRefusal(Exception):
     """A plain, human-readable reason the hub could not be started."""
 
 
+class _RefuseRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise OutpostRefusal(f"Outpost answered with a redirect (HTTP {code}); refusing to follow it")
+
+
+def _opener() -> urllib.request.OpenerDirector:
+    """Loopback-only opener: ignores proxy environment variables and never follows redirects."""
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _RefuseRedirect)
+
+
 def tmux_attach_argv(account: str) -> list[str]:
     validate_account(account)
     return ["tmux", "-L", HUB_SOCKET, "attach-session", "-t", f"=hub-{account}"]
 
 
 def outpost_answering(port: int = DAEMON_PORT) -> bool:
-    health = _probe_health(port, 1.0)
+    try:
+        with _opener().open(f"http://{DAEMON_HOST}:{port}/health", timeout=1.0) as resp:
+            health = json.loads(resp.read())
+    except (urllib.error.URLError, OSError, ValueError, OutpostRefusal):
+        return False
     return (
         isinstance(health, dict)
         and health.get("ok") is True
@@ -73,7 +87,7 @@ def start_hub(
         headers={"Authorization": f"Bearer {credential}"},
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout):
+        with _opener().open(request, timeout=timeout):
             return
     except urllib.error.HTTPError as exc:
         body = _body(exc)
