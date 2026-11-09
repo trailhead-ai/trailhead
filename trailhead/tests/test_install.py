@@ -373,6 +373,24 @@ class TestShellenvGuidance:
         assert path_line, "PATH guidance line should print"
         assert "trailhead" in path_line
 
+    def test_path_line_names_ranger_when_its_shim_is_built(self, tmp_path, capsys):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), quiet=True)
+        assert "ranger" in m["pathint"].call_args[0][0]
+        path_line = next((ln for ln in capsys.readouterr().out.splitlines() if "on your PATH" in ln), "")
+        assert "ranger" in path_line
+
+    def test_path_line_omits_ranger_when_no_shim_is_built(self, tmp_path, capsys):
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.trailhead_bin_executable", return_value=True
+        ):
+            run_install(
+                env=_env(tmp_path), no_camp=True, no_lore=True, no_portage=True, quiet=True
+            )
+        m["pathint"].assert_not_called()
+        path_line = next((ln for ln in capsys.readouterr().out.splitlines() if "on your PATH" in ln), "")
+        assert path_line and "ranger" not in path_line
+
     def test_omits_trailhead_when_bin_not_executable(self, tmp_path, capsys):
         with _patched(detected=True), patch(
             "trailhead.install.trailhead_bin_executable", return_value=False

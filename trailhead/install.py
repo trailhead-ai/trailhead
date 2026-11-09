@@ -456,6 +456,8 @@ def _print_human_summary(
     # actually built — a failed build, or no resolvable CLI binaries, means
     # they must not be named in the "on your PATH" promise.
     path_clis = clis if shim_dir is not None else []
+    if shim_dir is not None and _RANGER_BIN.exists():
+        path_clis = [*path_clis, "ranger"]
     commands = list(path_clis)
     if trailhead_available:
         commands.append("trailhead")
