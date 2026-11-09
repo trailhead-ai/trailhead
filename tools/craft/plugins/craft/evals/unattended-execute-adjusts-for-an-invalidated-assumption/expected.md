@@ -26,3 +26,7 @@ Every clause holds: [`child-body-updated-with-the-reason`] the child's body carr
 
 - "The update carries the reason" is a regex over the child's body for reason vocabulary the seed lacks; it cannot tell a good reason from a bad one. "Names the invalidated assumption" is a regex over the decision's `Question:` line.
 - One fixture, one phrasing, one model tier. The run is bounded to the decision and its writes.
+
+## Grader amended after scored runs (2026-11-09)
+
+`graders/no-git-command-issued.md` matched `\bgit\b`; it now matches `\bgit\b[^"]*\b(switch|checkout|branch|cherry-pick|fetch|worktree|commit|push)\b` (the pattern the refine case uses). Why: the kept traces show a run's vault listing, `find vault trailhead -maxdepth 4 -not -path "*/.git/*"`, tripped the old pattern with no git command issued; it failed one run in three in each of three batches. Checked offline against that serialized tool input: the new pattern does not match it, and does match `git switch -c x origin/main` and `git checkout -b x`. The change only narrows what fails; it was made after scored runs and no earlier score is restated.

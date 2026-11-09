@@ -5028,6 +5028,7 @@ Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opu
 | `unattended-execute-parks-a-design-change` | treatment 1 (outcome line carried a reason) | 3 | 1 of 3 (0.92, 0.92, 1.0) | 2.08 USD |
 | same | treatment 2 (final-message sentence added) | 3 | 2 of 3 (0.92 `asked-nothing` FAIL PASS FAIL, 1.0, 1.0) | 2.13 USD |
 | same | treatment 2, permitted rerun | 3 | 2 of 3 (0.92 `no-git-command-issued`, 1.0, 1.0) | 2.13 USD |
+| same | treatment 2, amended `no-git-command-issued` grader (rerun on the current prose, 2026-11-09) | 3 | **3 of 3 at 1.0** (the `asked-nothing` judge voted PASS FAIL PASS on one run and still passed) | 2.25 USD |
 | `unattended-execute-adjusts-for-an-invalidated-assumption` | treatment, original fixture | 3 | 0 of 3 (0.9, 0.5, 0.5) | 2.52 USD |
 | same | treatment, corrected fixture | 3 | 2 of 3 (1.0, 1.0, 0.9 `no-git-command-issued`) | 2.34 USD |
 | same | treatment, corrected fixture, permitted rerun | 3 | **3 of 3 at 1.0** | 2.59 USD |
@@ -5037,7 +5038,7 @@ Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opu
 **Findings.**
 - Treatment 1 failed on the outcome line: the first prose ended the parked line with ` — <reason>`, but the shared contract gives a park (`needs-a-decision` from the loop) the plain `outcome: <kind> <kind/name> parked=<n>` shape, and the pre-registered grader follows the contract. The prose was corrected, not the grader.
 - The park case's `asked-nothing` judge voted FAIL on final messages that said "needs a decision from you" or "write an answer under Q1"; a sentence now says a park's final message reports what was parked and asks for nothing. One later run still drew FAIL PASS FAIL on a message that asks nothing (judge noise on the operator-accepted headless judge).
-- **Grader defect (reported, not fixed):** `no-git-command-issued` matches `\bgit\b`, which also matches a run's `find ... -not -path "*/.git/*"` over the vault (read from the kept traces). It failed 1 run in 3 in each of three batches although no git command ran. The park case therefore did **not** reach 3 of 3 at 1.0 on any batch; its record graders and outcome-line graders passed in all 9 treatment-2 and rerun runs, and the only misses were that grader once and the judge once.
+- **Grader defect (fixed after the scored runs; see the amendment note below):** `no-git-command-issued` matches `\bgit\b`, which also matches a run's `find ... -not -path "*/.git/*"` over the vault (read from the kept traces). It failed 1 run in 3 in each of three batches although no git command ran. The park case therefore did **not** reach 3 of 3 at 1.0 on any batch; its record graders and outcome-line graders passed in all 9 treatment-2 and rerun runs, and the only misses were that grader once and the judge once.
 - **Fixture defect (fixed, both arms rerun):** the adjusts case's spec said both counters read through `io_utils.read_text`, so the prover's local fix contradicted the spec and 2 of 3 treatment runs rightly parked it. The adjusts scaffold's spec now says the loader is the default and a counter it cannot serve may open the file itself.
 - **The adjusts case does not discriminate.** On the corrected fixture the baseline passes 3 of 3: the attended step 2 options and the shared contract already make a run decide and log a local fix. The baseline-expected-red clause is not met for this case; the case is a guard that the new prose does not over-park.
 
@@ -5052,4 +5053,6 @@ Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opu
 
 **Real lore state.** After the batches all four vaults were clean and a search for the fixture titles finds nothing (no before-snapshot was taken ahead of the debug batch).
 
-Total eval spend about 29.7 USD.
+**Grader amendment (2026-11-09).** In the park and adjusts cases, `no-git-command-issued` changed from `\bgit\b` to `\bgit\b[^"]*\b(switch|checkout|branch|cherry-pick|fetch|worktree|commit|push)\b`, the pattern the refine case uses, after the scored runs above. Evidence: the kept traces carry the tool input as JSON, and the failing runs' `find vault trailhead -maxdepth 4 -not -path "*/.git/*"` matched the old pattern with no git command issued. Checked offline on that serialized input: the new pattern does not match it and does match `git switch -c x origin/main` and `git checkout -b x`. The change only narrows what fails, so the earlier rows are not restated, and the adjusts case was not rerun. Each case's `expected.md` carries the same note. The park case then ran on the current prose: 3 of 3 at 1.0, a rerun under the amended grader.
+
+Total eval spend about 32.0 USD.

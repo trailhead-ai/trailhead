@@ -27,3 +27,7 @@ Every clause holds: [`q1-has-two-options-each-with-a-cost-and-a-progress-line`] 
 - The order "park written before the outcome line" is observed only through the end state (both `Q1` and the block outcome on the record when the line is printed); no grader sees write order.
 - "Exactly one option recommended" counts the `(recommended)` marker in `Q1`'s options line; it cannot tell whether the marked option is the right one.
 - One fixture, one phrasing, one model tier.
+
+## Grader amended after scored runs (2026-11-09)
+
+`graders/no-git-command-issued.md` matched `\bgit\b`; it now matches `\bgit\b[^"]*\b(switch|checkout|branch|cherry-pick|fetch|worktree|commit|push)\b` (the pattern the refine case uses). Why: the kept traces show a run's vault listing, `find vault trailhead -maxdepth 4 -not -path "*/.git/*"`, tripped the old pattern with no git command issued; it failed one run in three in each of three batches. Checked offline against that serialized tool input: the new pattern does not match it, and does match `git switch -c x origin/main` and `git checkout -b x`. The change only narrows what fails; it was made after scored runs and no earlier score is restated.
