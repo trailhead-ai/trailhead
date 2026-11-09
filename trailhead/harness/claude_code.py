@@ -1965,14 +1965,24 @@ class ClaudeCodeHarness(Harness):
         ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
         written after every refusal check has passed. Never execs.
 
-        Raises :class:`HarnessError` for a profile that would widen the user-level
-        settings, an unreadable or malformed user-level settings or ``.claude.json``,
-        a profile that may prompt, and a prompt that would parse as a flag.
+        *directory* must be an existing directory: a launcher that cannot enter it (tmux
+        falls back to ``$HOME``) would run the session in a directory the sandbox always
+        lets it write. A missing or non-directory *directory* is refused before anything
+        is written.
+
+        Raises :class:`HarnessError` for a *directory* that is not an existing directory,
+        a profile that would widen the user-level settings, an unreadable or malformed
+        user-level settings or ``.claude.json``, a profile that may prompt, and a prompt that would parse as a flag.
         """
         if not profile.profile.never_prompt:
             raise HarnessError("session_start only starts never-prompt profiles")
         if prompt and prompt.startswith("-"):
             raise HarnessError("the prompt starts with '-', so it would be read as a flag")
+        if not Path(directory).is_dir():
+            raise HarnessError(
+                f"the hub home {directory} is not an existing directory; "
+                "run `ranger setup --account <A>` for this hub's account to create it"
+            )
         source = env if env is not None else dict(os.environ)
         env_set = self.session_launch_env_set(account, env=source)
         env_unset = self.session_launch_env_unset()

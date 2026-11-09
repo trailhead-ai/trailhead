@@ -370,6 +370,52 @@ def test_a_refused_launch_does_not_touch_the_trust_file(tmp_path):
     assert json.loads(config.read_text()) == {"keep": 1}
 
 
+# -- the hub home must be an existing directory ------------------------------
+
+
+def _start_in(env, directory):
+    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    return ClaudeCodeHarness().session_start(
+        _resolved(env), directory, None, interactive=True, account=None, env=env
+    )
+
+
+def test_a_present_hub_home_launches(tmp_path):
+    env = _fence(tmp_path)
+    home = hub_home("a", env=env, platform="linux")
+    home.mkdir(parents=True)
+    assert _start_in(env, home) is not None
+
+
+@pytest.mark.parametrize("kind", ["absent", "regular-file"])
+def test_a_hub_home_that_is_not_a_directory_is_refused_naming_the_setup_fix_and_seeds_no_trust(
+    tmp_path, kind
+):
+    env = _fence(tmp_path)
+    home = hub_home("a", env=env, platform="linux")
+    if kind == "regular-file":
+        home.parent.mkdir(parents=True)
+        home.write_text("not a directory")
+    config = Path(env["HOME"]) / ".claude.json"
+    Path(env["HOME"]).mkdir(parents=True)
+    config.write_text('{"keep": 1}')
+    with pytest.raises(HarnessError, match=r"ranger setup --account <A>") as excinfo:
+        _start_in(env, home)
+    assert str(home) in str(excinfo.value)
+    assert json.loads(config.read_text()) == {"keep": 1}
+
+
+def test_cli_refuses_a_missing_hub_home_with_a_clean_message(tmp_path, monkeypatch, capsys):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    shutil.rmtree(hub_home("a", env=env), ignore_errors=True)
+    _write_user_settings(env, _user_allowing_hub(env))
+    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "ranger setup --account <A>" in captured.err
+
+
 # -- posture and account binding --------------------------------------------
 
 
