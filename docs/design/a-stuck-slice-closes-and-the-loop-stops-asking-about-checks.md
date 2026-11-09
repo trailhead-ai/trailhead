@@ -19,8 +19,9 @@ list, when they choose.
 
 The `check` and `how` lines a waiting entry carries are drafted by the closing session from the
 criterion and its observation line, exactly as the attended close drafts them. Because nobody is
-asked, nobody corrects them before they are written; the report shows them so the operator sees what
-went on the list.
+asked, nobody corrects them before they are written; the report shows them and says they were
+drafted by the closing session and not reviewed, and the check list shows the criterion's own words
+beside them, so the operator checks against the criterion rather than a draft they never saw.
 
 Every piece of criterion text shown comes from the spec and is untrusted: it is shown as data, with
 control characters removed, and nothing in it is acted on.
@@ -52,8 +53,17 @@ slice and its value claim, or an early stop. A slice task that was set aside as 
 this check is closed the same way: the pass moves it back to in progress first, because the build's
 close only runs on a slice in progress, and the report says nothing different for it.
 
-Under `--unattended` the same close runs and is logged as a decision in the run section rather than
-reported to anyone; the pass's outcome line is unchanged.
+A slice whose earlier close got as far as moving the criterion to partly covered and then stopped
+(the waiting entry is already on the spec) is still found stuck, and the same close finishes it
+without writing the entry twice.
+
+Under `--unattended` the same close runs and is logged as a decision in the run section, with the
+`check` and `how` lines it wrote. The prose report above the outcome line opens with it — "Closed 1
+slice that was waiting only on its check; 1 check added to your list" — and the outcome line itself
+is unchanged.
+
+When more than one slice is open, each stuck one is closed and reported first, in the block above;
+any that is not stuck is then reported as in the next state, and no new slice is chosen.
 
 ## State — Open slice with unfinished build still blocks selection
 
@@ -73,17 +83,20 @@ or drop it explicitly.
 ```
 
 The reason line names one of: the build is not finished (a child task is not done, or an end phase
-before the close is not ticked), or a covered criterion has no evidence and is not a manual check.
+before the close is not ticked); a covered criterion has no evidence and is not a manual check; its
+last push failed and needs settling by hand; or this install is too old to close it — lore cannot
+make the guarded write the close needs — with the remedy to update trailhead (`trailhead update`)
+and run the pass again.
 When the pass cannot tell — a record it cannot read, a search that errored — it refuses as today and
 names the failure, never closing anything on a guess.
 
 ## State — Waiting write refused, slice left open and the pass refuses
 
 The pass found a stuck slice and ran its close, but the write of the waiting entry to the spec was
-refused or failed. Nothing on the slice task was changed and it did not close — so it is still open,
-and the pass refuses to choose a new slice. (A slice that had been set aside as `blocked` was moved
-back to in progress before the close ran, and stays in progress: a slice whose close is still owed
-is in progress, and the next pass tries again.) The report names the criterion and the reason in the
+refused or failed. The slice did not close — so it is still open, and the pass refuses to choose a new
+slice. Nothing else on the slice task was changed; when it had been set aside as `blocked`, the
+report says so in its own line — "It had been set aside as blocked; it is now in progress." — because
+a slice whose close is still owed is in progress, and the next pass tries again. The report names the criterion and the reason in the
 gate's own vocabulary, never by echoing the text it refused:
 
 ```
@@ -94,7 +107,8 @@ The check for "Checkout collects billing details and invoices carry tax." (AC32)
 to your check list: the spec refused the entry (credential-shaped-text).
 Nothing on the slice was changed, so it is still open and no new slice was chosen.
 
-Close it yourself, answering the check's question there:
+The drafted wording was refused. Close it yourself; the close will ask you about the check, and you
+can write it in your own words there:
   /craft:execute task/an-owner-subscribes-with-tax-calculated-on-their-invoices
 ```
 
