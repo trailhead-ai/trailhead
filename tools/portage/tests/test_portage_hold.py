@@ -134,3 +134,26 @@ def test_hold_is_keyed_by_repo_too(tmp_path, monkeypatch, repo):
     dispatch.main(["hold", str(other), "feat"])
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
     assert spy.merge_attempted()
+
+
+def _detach(repo):
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True)
+
+
+def test_unreadable_branch_with_a_hold_on_the_repo_refuses_before_any_gh_call(
+    tmp_path, monkeypatch, repo, capsys
+):
+    dispatch.main(["hold", str(repo), "feat"])
+    _detach(repo)
+    capsys.readouterr()
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert spy.calls == []
+    assert "held" in err and "portage release" in err
+
+
+def test_unreadable_branch_without_any_hold_on_the_repo_proceeds(tmp_path, monkeypatch, repo):
+    _detach(repo)
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    assert spy.merge_attempted()
