@@ -37,6 +37,9 @@ from camp.launch.eligibility import CREDENTIAL_DENY_ENTRIES  # noqa: E402
 from camp.spine import cmd_help  # noqa: E402
 from camp.workspace.verb_taxonomy import LEGACY_REDIRECTS  # noqa: E402
 
+from ._markdown_anchors import CODE_FENCE as _FENCE  # noqa: E402
+from ._markdown_anchors import github_slugs as _github_slugs  # noqa: E402
+
 README = Path(__file__).resolve().parents[1] / "README.md"
 
 _TOML_BLOCK = re.compile(r"```toml\n(.*?)```", re.DOTALL)
@@ -791,21 +794,6 @@ def test_readme_retired_verb_table_check_catches_a_wrong_target() -> None:
 
 _GUIDE = README.parent / "docs" / "environments.md"
 _GUIDE_LINK = re.compile(r"\]\((?:\./)?docs/environments\.md(?:#([^)\s]*))?\)")
-_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
-
-
-def _github_slugs(markdown: str) -> set[str]:
-    """The anchors GitHub generates for *markdown*'s headings (outside code fences):
-    lowercased, punctuation other than hyphens and underscores dropped, spaces
-    turned into hyphens, a repeated heading suffixed `-1`, `-2`, …."""
-    seen: dict[str, int] = {}
-    slugs: set[str] = set()
-    for heading in re.findall(r"^#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$", _FENCE.sub("", markdown), re.MULTILINE):
-        base = re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-")
-        count = seen.get(base, 0)
-        seen[base] = count + 1
-        slugs.add(base if count == 0 else f"{base}-{count}")
-    return slugs
 
 
 def _anchors_unresolved(readme: str, guide: str) -> list[str]:
@@ -842,3 +830,33 @@ def test_the_readme_attach_transcript_carries_the_line_a_waiting_attach_prints(
         line.strip() for block in _FENCE.findall(README.read_text()) for line in block.splitlines()
     ]
     assert waiting in transcript
+
+
+_PLACEHOLDERS = {"HOST": "perseus", "GROUP": "levr", "NAME": "main"}
+
+
+def _documented_attach_targets() -> list[str]:
+    section = README.read_text().split("## Attaching an environment\n", 1)[1]
+    usage = _FENCE.search(section)
+    assert usage, "the Attaching section has no usage block"
+    targets = []
+    for line in usage.group(1).splitlines():
+        words = line.split("#", 1)[0].split()
+        assert words[:3] == ["camp", "env", "attach"], line
+        targets.append("/".join(_PLACEHOLDERS.get(part, part) for part in words[3].split("/")))
+    return targets
+
+
+def test_every_documented_attach_target_form_parses_under_the_real_parser() -> None:
+    from camp.env.resolve import parse_target
+
+    targets = _documented_attach_targets()
+    assert targets
+    for text in targets:
+        parse_target(text)
+
+
+def test_the_documented_attach_targets_include_this_machine_with_a_group() -> None:
+    from camp.env.resolve import Target, parse_target
+
+    assert Target("local", "levr", "main") in [parse_target(t) for t in _documented_attach_targets()]

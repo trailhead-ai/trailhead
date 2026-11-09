@@ -25,6 +25,10 @@ Command: docker ps -a --filter name=<probe> --format '{{json .Ports}}'
 Container: alpine, -p 127.0.0.1:28080-28081:8080-8081 -p 127.0.0.1:28090:9090 -p 127.0.0.1:28095:9095/udp
   env_inventory_ports_docker_desktop_4_97_0.txt          perseus, Docker Desktop 4.97.0, server 29.9.2 (running via `docker run -d --rm`, stopped via `docker create`)
   env_inventory_ports_docker_engine_29_8_0_linux.txt     andromeda, Docker Engine 29.8.0 (same two commands)
+  env_inventory_ports_same_port_range_docker_desktop_29_9_2.txt
+      perseus, Docker Desktop server 29.9.2, one line, a running alpine container created with
+      -p 127.0.0.1:28080:28080 -p 127.0.0.1:28081:28081 -p 127.0.0.1:28090:8090. Where host port equals container port,
+      consecutive ports are merged into one range entry (28080-28081->28080-28081); 28090->8090 is not merged.
 
 env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@perseus)
   andromeda Linux, OpenSSH_9.6p1 Ubuntu-3ubuntu13.20, OpenSSL 3.0.13; destination perseus over Tailscale SSH.

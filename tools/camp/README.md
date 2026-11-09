@@ -449,6 +449,7 @@ camp env attach NAME              # a bare name, resolved across this machine an
 camp env attach HOST/NAME         # that host only, opted in or not
 camp env attach HOST/GROUP/NAME   # that host, that group
 camp env attach local/NAME        # this machine only (also <self_name>/NAME)
+camp env attach local/GROUP/NAME  # this machine, that group
 ```
 
 Puts one environment, on a remote host or on this machine, on this machine's localhost. An environment publishes each
@@ -476,14 +477,14 @@ that could have it. An environment on this machine is attached as `local/NAME`, 
 the refusal offers `local/NAME` beside the host forms.
 
 There is one attachment per machine, because a machine has one set of standard ports.
-Attach assumes a single-user machine: the forward listens on 127.0.0.1, and any local user can
-connect there and reach the environment through your ssh session (inherent to `ssh -L`), so do
+Attach assumes a single-user machine: the forward or relay listens on 127.0.0.1, so any local user can
+connect there and reach the environment (through your ssh session, for a forward: inherent to `ssh -L`), so do
 not attach on a machine other people log in to.
 Attach checks, in order: that nothing is attached (before any host is read), the target,
 that the environment is running and publishes ports, and that every standard port is
 free on 127.0.0.1 and ::1, and off Linux on 0.0.0.0 and :: too (bound with `SO_REUSEADDR`,
 as ssh binds, so a port only in TIME_WAIT is free). It then starts the forward and finds it again in the
-process table by a fresh id. Nothing is written to disk; the forward carries a
+process table by a fresh id. The only file attach creates is the lock `env-attach.lock` in camp's state directory; the forward carries a
 `-o Tag=camp-env:<id>:<host>/<group>/<name>` option, and a forward whose link has died
 ends on its own within about 45 seconds. Each refusal exits `1` with one line on stderr
 and starts nothing:
@@ -503,14 +504,21 @@ forward: <ssh's line>`. If anything goes wrong after the forward started, includ
 interrupt (exit `130`), camp ends the forward carrying that attach's id, and only that
 one, and says so if it could not.
 
-Two attaches started together end with one attachment: the other waits for it, then refuses
-as above.
+Two attaches started together end with one attachment: the second waits for the first to finish.
+If the first attached, the second refuses as above; if the first failed and ended what it started,
+the second goes on to attach.
 
 ```
 $ camp env attach main
 camp env: another attach is starting; waiting for it to finish
 camp env: perseus/levr/main is attached; run camp env detach before attaching another (a forward whose link has died ends on its own within about 45s)
 ```
+
+A waiting attach gives up after the connect timeout plus thirty seconds, starting nothing, with
+`camp env: another attach is still starting; wait for it to finish, then try again`.
+
+If a port is taken in the moment between the check and a local relay's bind, the relay releases
+what it bound and attach says `camp env: attach failed: port 8080 is held by node (pid 4242); stop it, then attach again`.
 
 A bare name reads this machine and every opted-in host at the same time. An interrupt
 while attach is reading machines (a bare name or `HOST/NAME`) prints `camp env:
