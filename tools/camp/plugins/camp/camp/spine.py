@@ -491,7 +491,10 @@ def cmd_help(args: list[str]) -> None:
         "camp — group worktree orchestration\n"
         "\n"
         "Usage:\n"
-        + _wrap_usage("camp new <slug>", group_module.creation_switch_flags())
+        + _wrap_usage(
+            "camp new <slug>",
+            [*group_module.creation_switch_flags(), "--created-by <value>"],
+        )
         + "                                    Create or enter a workspace for a slug,\n"
         "                                    then create/connect its tmux session and\n"
         "                                    attach (unless --no-attach); --no-session\n"

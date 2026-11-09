@@ -54,7 +54,9 @@ from ..gitutil import _git, _git_is_dirty
 from ..group.config import tasks_in_phase
 from ..group.manifest import (
     ManifestError,
+    carry_forward_created_by,
     carry_forward_owner,
+    created_by_of,
     manifest_path_for,
     owner_of,
     read_central_manifest,
@@ -660,6 +662,7 @@ def reconcile_worktree(
             prior_tasks: dict[str, dict[str, Any]] = {}
             prior_state: dict[str, dict[str, Any]] = {}
             prior_owner: str | None = None
+            prior_created_by: str | None = None
             if mpath.is_file():
                 try:
                     prior_manifest = read_central_manifest(mpath)
@@ -681,6 +684,7 @@ def reconcile_worktree(
                         prior_owner = owner_of(prior_manifest)
                     except ManifestError:
                         prior_owner = None
+                    prior_created_by = created_by_of(prior_manifest)
 
             # -- Phase 2: Run provision-phase tasks per member in parallel.
             #
@@ -775,6 +779,7 @@ def reconcile_worktree(
             # clears ownership itself, only preserves whatever was already
             # recorded. Absent when the prior manifest never recorded one.
             carry_forward_owner(manifest_data, prior_owner)
+            carry_forward_created_by(manifest_data, prior_created_by)
             write_central_manifest(mpath, manifest_data)
 
     return {

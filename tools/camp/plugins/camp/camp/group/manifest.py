@@ -54,6 +54,15 @@ Schema (v1):
         # carry an owner forward fails loudly on its first write instead of
         # shipping silently.
         "owner": "<declared host name, or absent>",
+        # An opaque string naming whoever asked for this workspace, stamped
+        # at seed time from `camp new --created-by <value>`. camp stores it
+        # verbatim and never interprets it. Absent when no value was given and
+        # on every manifest written before this key existed — read it via
+        # manifest.created_by_of, which reads a missing or non-string value
+        # as None ("not recorded"). Once recorded it is never changed; every
+        # writer that rebuilds the manifest from a fixed key set preserves it
+        # via manifest.carry_forward_created_by.
+        "created_by": "<opaque creator string, or absent>",
     }
 """
 
@@ -431,6 +440,29 @@ def carry_forward_owner(manifest_data: dict[str, Any], prior_owner: str | None) 
     if prior_owner is None:
         return
     manifest_data.setdefault("owner", prior_owner)
+
+
+def created_by_of(manifest: dict[str, Any]) -> str | None:
+    """Return the opaque creator recorded on the workspace, or None.
+
+    A missing key and a non-string value both read as None ("not recorded"):
+    the creator is only ever compared and listed, never a value camp acts on,
+    so a malformed one degrades rather than failing the reader.
+    """
+    created_by = manifest.get("created_by")
+    return created_by if isinstance(created_by, str) else None
+
+
+def carry_forward_created_by(manifest_data: dict[str, Any], prior: str | None) -> None:
+    """Preserve *prior* into *manifest_data* ahead of a manifest rebuild.
+
+    Same posture as `carry_forward_owner`: when *prior* is None no
+    "created_by" key is added at all, and one the caller already placed in
+    *manifest_data* is never overwritten by a stale prior value.
+    """
+    if prior is None:
+        return
+    manifest_data.setdefault("created_by", prior)
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:

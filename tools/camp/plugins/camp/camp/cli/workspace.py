@@ -34,6 +34,7 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
             "state": e.get("state"),
             "window_count": e.get("window_count"),
             "tmux_session": e.get("tmux_session"),
+            "created_by": e.get("created_by"),
         }
         for e in entries
     ]

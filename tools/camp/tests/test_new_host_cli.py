@@ -559,3 +559,28 @@ def test_attach_ref_the_far_rule_would_refuse_never_reaches_the_handoff(
 ) -> None:
     code = _run(["attach", "a;b", "--host", "andromeda", "--group", "g"], monkeypatch)
     _refused(env, capsys, code, "'a;b'", prefix="camp attach: ")
+
+
+# --created-by is a local-only value; the cross-host forwarder is switches-only ---
+
+
+@pytest.mark.parametrize(
+    "spelling", [["--created-by", "abc"], ["--created-by=abc"]], ids=["spaced", "equals"]
+)
+def test_created_by_with_host_is_refused_naming_both_flags_before_any_handoff(
+    env: Env, monkeypatch, capsys, spelling
+) -> None:
+    code = _run(
+        ["new", "ws1", "--host", "andromeda", "--group", "g", *spelling], monkeypatch
+    )
+    err = _refused(env, capsys, code)
+    assert err.count("\n") == 1, err
+    assert "--created-by" in err and "--host" in err, err
+
+
+def test_the_same_host_call_without_created_by_still_reaches_the_handoff(
+    env: Env, monkeypatch
+) -> None:
+    code = _run(["new", "ws1", "--host", "andromeda", "--group", "g"], monkeypatch)
+    assert code == 0
+    assert _remote_tail(env) == "camp new ws1 --group g"

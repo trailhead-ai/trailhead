@@ -280,6 +280,7 @@ class TestListJson:
         "window_count",
         "tmux_session",
         "last_touched",
+        "created_by",
     }
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
@@ -328,6 +329,7 @@ class TestListJson:
             "window_count",
             "tmux_session",
             "last_touched",
+            "created_by",
         }
         assert "host" not in rows[0]
 
@@ -592,6 +594,7 @@ class TestListAllGroups:
             "window_count",
             "tmux_session",
             "last_touched",
+            "created_by",
         }
         assert rows[0]["ok"] is True
 
@@ -1438,3 +1441,109 @@ class TestSiblingGroupSessionsAreNotLeftovers:
         assert matching[0]["slug"] == "deadbeef"
         assert matching[0]["state"] == "running"
         assert matching[0]["window_count"] == 3
+
+
+# ---------------------------------------------------------------------------
+# created_by — the opaque creator a manifest records, shown on every JSON row
+# ---------------------------------------------------------------------------
+
+
+def _set_manifest_key(group_name: str, slug: str, key: str, value, *, env: dict) -> None:
+    """Rewrite a seeded manifest on disk with *key* set to *value*."""
+    from camp.group.manifest import manifest_path_for
+
+    mpath = manifest_path_for(group_name, slug, env=env)
+    data = json.loads(mpath.read_text(encoding="utf-8"))
+    data[key] = value
+    mpath.write_text(json.dumps(data), encoding="utf-8")
+
+
+class TestListJsonCreatedBy:
+    def test_group_scoped_rows_show_the_creator_string_or_null(
+        self, camp_cli, tmp_path, capsys
+    ):
+        group = _make_group("crgrp")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("crgrp", "made", env=env)
+        _seed_manifest("crgrp", "bare", env=env)
+        _set_manifest_key("crgrp", "made", "created_by", "sess-1 $(x)", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
+
+        by_slug = {r["slug"]: r for r in json.loads(capsys.readouterr().out)}
+        assert by_slug["made"]["created_by"] == "sess-1 $(x)"
+        assert by_slug["bare"]["created_by"] is None
+
+    def test_a_non_string_on_disk_value_lists_as_null_without_failing(
+        self, camp_cli, tmp_path, capsys
+    ):
+        group = _make_group("crgrp2")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        _seed_manifest("crgrp2", "odd", env=env)
+        _seed_manifest("crgrp2", "fine", env=env)
+        _set_manifest_key("crgrp2", "odd", "created_by", 42, env=env)
+        _set_manifest_key("crgrp2", "fine", "created_by", "ok", env=env)
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=_FakeTmux())
+
+        by_slug = {r["slug"]: r for r in json.loads(capsys.readouterr().out)}
+        assert by_slug["odd"]["created_by"] is None
+        assert by_slug["fine"]["created_by"] == "ok"
+
+    def test_the_unmanaged_count_row_carries_created_by_null(
+        self, camp_cli, tmp_path, capsys
+    ):
+        from camp.launch.stop import SessionListing, TmuxSession
+
+        group = _make_group("crgrp3")
+        env = {"CAMP_STATE_DIR": str(tmp_path / "state")}
+        tmux = _FakeTmux(
+            SessionListing(sessions=(TmuxSession(name="camp-old-a1b2c3d4", windows=1),))
+        )
+
+        camp_cli._cmd_ls_group_cli(["--json"], group, env, tmux=tmux)
+
+        summary = [r for r in json.loads(capsys.readouterr().out) if "unmanaged_count" in r]
+        assert len(summary) == 1
+        assert "created_by" in summary[0]
+        assert summary[0]["created_by"] is None
+
+    def test_local_group_answer_rows_carry_the_creator(
+        self, tmp_path, monkeypatch
+    ):
+        """The `-g` local half (`local_list_answer`, not `render_workspace_list`)."""
+        from camp.cli.workspace import local_list_answer
+
+        state = tmp_path / "state"
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state))
+        env = {"CAMP_STATE_DIR": str(state)}
+        group = _make_group("crgrp4")
+        _seed_manifest("crgrp4", "made", env=env)
+        _seed_manifest("crgrp4", "bare", env=env)
+        _set_manifest_key("crgrp4", "made", "created_by", "abc", env=env)
+
+        rows, _notices, _code = local_list_answer(group, all_groups=False)
+
+        by_slug = {r["slug"]: r for r in rows}
+        assert by_slug["made"]["created_by"] == "abc"
+        assert by_slug["bare"]["created_by"] is None
+
+    def test_local_all_groups_answer_rows_carry_the_creator(
+        self, tmp_path, monkeypatch
+    ):
+        """The `-a` local half."""
+        from camp.cli.workspace import local_list_answer
+
+        config_dir, state_dir = _write_config_group(tmp_path, "crgrp5")
+        monkeypatch.setenv("CAMP_CONFIG_DIR", str(config_dir))
+        monkeypatch.setenv("CAMP_STATE_DIR", str(state_dir))
+        env = {"CAMP_STATE_DIR": str(state_dir)}
+        _seed_manifest("crgrp5", "made", env=env)
+        _seed_manifest("crgrp5", "bare", env=env)
+        _set_manifest_key("crgrp5", "made", "created_by", "xyz", env=env)
+
+        rows, _notices, _code = local_list_answer(_make_group("crgrp5"), all_groups=True)
+
+        by_slug = {r["slug"]: r for r in rows}
+        assert by_slug["made"]["created_by"] == "xyz"
+        assert by_slug["bare"]["created_by"] is None

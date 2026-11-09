@@ -26,6 +26,7 @@ camp groups          # list every configured group (any cwd)
 camp new <slug>      # create or enter a workspace, then attach to its tmux session
 camp new <slug> --no-attach  # create or enter + its session, leave this terminal alone
 camp new <slug> --no-session # create or enter the workspace only — no tmux session
+camp new <slug> --created-by <value>  # record an opaque creator string (shown by camp list --json)
 camp new <slug> --host <name>  # create or enter it on a declared machine, then attach there
 camp pwd <slug>      # print workspace path
 camp list            # table of workspaces: sessions, last touched (alias: ls)

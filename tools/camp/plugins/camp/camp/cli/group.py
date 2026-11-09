@@ -345,7 +345,10 @@ def _cmd_new_host_cli(
                 "is not a store_true switch and cannot be forwarded"
             )
     parser.add_argument("slugs", nargs="*")
+    parser.add_argument("--created-by", dest="created_by", default=None)
     parsed = parser.parse_args(args)
+    if parsed.created_by is not None:
+        parser.die("--created-by cannot be used with --host")
     slug = require_one_raw_slug("new", parsed.slugs)
     env = dict(os.environ)
     group_name = resolve_cross_host_group("new", parsed.group, env)
@@ -368,7 +371,8 @@ def _cmd_new_group_cli(
     env: dict[str, str] | None,
     dry_run: bool,
 ) -> None:
-    """camp new <slug> [--no-attach] [--no-session] [--activate] [--json] —
+    """camp new <slug> [--no-attach] [--no-session] [--activate] [--json]
+    [--created-by <value>] —
     create or re-enter a workspace, then go through the same door `camp
     attach` opens onto its tmux session.
 
@@ -398,6 +402,12 @@ def _cmd_new_group_cli(
     `--no-attach` creates the workspace and its session but never touches the
     exec or `switch-client` seam — `attached` is reported `false`.
 
+    `--created-by <value>` records an opaque creator string on a NEW
+    workspace's manifest (`created_by`, shown by `camp list --json`); camp
+    never interprets it. An empty value is refused. On an existing workspace
+    the flag is refused unless it equals the recorded value, so a creator is
+    never added or changed afterwards. It is local-only: `--host` refuses it.
+
     `--no-session` skips the door entirely: no tmux session, and `--json`
     prints only `{"workspace": <path>}`.
 
@@ -422,10 +432,17 @@ def _cmd_new_group_cli(
     """
     from ..spine import _resolve_slug, _die
     from ..provision.provision import bring_up_workspace
-    from ..group.manifest import workspace_dir, manifest_path_for
+    from ..group.manifest import (
+        ManifestError,
+        created_by_of,
+        manifest_path_for,
+        read_central_manifest,
+        workspace_dir,
+    )
 
     parser = group_verb_parser("new", dry_run=True)
     _declare_creation_switches(parser)
+    parser.add_argument("--created-by", dest="created_by", default=None)
     parser.add_argument("slug", nargs="?")
     parsed = parser.parse_args(args)
 
@@ -438,6 +455,10 @@ def _cmd_new_group_cli(
     if parsed.slug is None:
         print("camp new: a slug is required\n  usage: camp new <slug>", file=sys.stderr)
         sys.exit(1)
+
+    created_by = parsed.created_by
+    if created_by == "":
+        _die("camp new: --created-by requires a non-empty value")
 
     slug = _resolve_slug(parsed.slug, context="new")
 
@@ -461,12 +482,26 @@ def _cmd_new_group_cli(
     # `camp remove` would die on its fail-fast manifest read — unrecoverable via the
     # CLI. Keying on the manifest re-seeds such a partial dir instead (bring_up is
     # idempotent: seed_pending_workspace mkdir's exist_ok and merges prior states).
-    if manifest_path_for(group_name, slug, env=env).exists():
+    mpath = manifest_path_for(group_name, slug, env=env)
+    if mpath.exists():
+        # The creator is recorded once, at creation: a re-entry may repeat the
+        # recorded value (a dispatcher retrying a crashed `camp new`) but
+        # never set, change or add one.
+        if created_by is not None:
+            try:
+                recorded = created_by_of(read_central_manifest(mpath))
+            except ManifestError:
+                recorded = None
+            if recorded != created_by:
+                _die(
+                    f"camp new: workspace {slug!r} already exists with a different "
+                    "creator; --created-by cannot change or add one"
+                )
         # Healthy existing workspace: re-enter without re-provisioning or clobbering.
         headline = f"re-entered workspace {slug!r}"
     else:
         try:
-            bring_up_workspace(group, slug, env=env)
+            bring_up_workspace(group, slug, env=env, created_by=created_by)
         except Exception as e:
             _die(f"camp new: workspace bring-up failed: {e}")
         headline = f"created workspace {slug!r} — provisioning in the background"

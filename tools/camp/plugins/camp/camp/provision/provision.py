@@ -32,7 +32,9 @@ from typing import Any
 
 from ..group.manifest import (
     ManifestError,
+    carry_forward_created_by,
     carry_forward_owner,
+    created_by_of,
     manifest_path_for,
     owner_of,
     work_state_for_new_entry,
@@ -126,6 +128,7 @@ def seed_pending_workspace(
     *,
     env: dict[str, str] | None = None,
     owner: str | None = None,
+    created_by: str | None = None,
 ) -> Path:
     """Create the workspace dir + seed the manifest with every member pending.
 
@@ -147,6 +150,10 @@ def seed_pending_workspace(
     receiving side) passes owner= explicitly to stamp that name instead; it
     is used only when there is no prior owner to carry forward, same as the
     self-stamped default.
+
+    *created_by* is the opaque creator `camp new --created-by` stamps; like
+    the owner it is written only on a workspace that never recorded one, and
+    a prior value is carried forward unchanged.
     """
     from . import reconcile
     from ..group.manifest import read_central_manifest, reconcile_lock
@@ -169,6 +176,7 @@ def seed_pending_workspace(
 
         existing_states: dict[str, dict[str, Any]] = {}
         prior_owner: str | None = None
+        prior_created_by: str | None = None
         if mpath.is_file():
             try:
                 prior = read_central_manifest(mpath)
@@ -185,6 +193,7 @@ def seed_pending_workspace(
                     prior_owner = owner_of(prior)
                 except ManifestError:
                     prior_owner = None
+                prior_created_by = created_by_of(prior)
 
         member_entries: list[dict[str, Any]] = []
         for member in group["members"]:
@@ -221,6 +230,9 @@ def seed_pending_workspace(
             declared = owner if owner is not None else _declared_owner(env)
             if declared is not None:
                 manifest_data["owner"] = declared
+        carry_forward_created_by(manifest_data, prior_created_by)
+        if "created_by" not in manifest_data and created_by is not None:
+            manifest_data["created_by"] = created_by
         write_central_manifest(mpath, manifest_data)
     return mpath
 
@@ -254,6 +266,7 @@ def bring_up_workspace(
     *,
     env: dict[str, str] | None = None,
     profile: Any | None = None,
+    created_by: str | None = None,
 ) -> Path:
     """camp ai bring-up: seed pending members + write workspace docs + spawn provisioner.
 
@@ -280,7 +293,7 @@ def bring_up_workspace(
         profile = resolve_harness_profile(group)
 
     group_name = group["group"]["name"]
-    mpath = seed_pending_workspace(group, slug, env=env)
+    mpath = seed_pending_workspace(group, slug, env=env, created_by=created_by)
     ws_dir = workspace_dir(group_name, slug, env=env)
 
     write_workspace_doc(ws_dir, group, slug, profile=profile)

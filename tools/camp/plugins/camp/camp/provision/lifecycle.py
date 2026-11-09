@@ -26,6 +26,7 @@ from ..gitutil import _git_branch_drift, _git_is_dirty, _git_out, _git_repo_stat
 from ..group.resolve import central_state_dir
 from ..group.manifest import (
     ManifestError,
+    created_by_of,
     manifest_path_for,
     read_central_manifest,
     reconcile_lock,
@@ -286,6 +287,7 @@ def cmd_ls_group(
                 "group": data.get("group", ""),
                 "workspace_path": ws_path,
                 "tmux_session": workspace_session_name(group_name, slug_name),
+                "created_by": created_by_of(data),
             }
         )
         workspaces.append(Workspace(group=group_name, slug=slug_name, path=ws_path))
@@ -354,6 +356,7 @@ _LIST_JSON_KEYS = (
     "window_count",
     "tmux_session",
     "last_touched",
+    "created_by",
 )
 
 
@@ -466,6 +469,7 @@ def render_workspace_list(
                 "window_count": e.get("window_count"),
                 "tmux_session": e.get("tmux_session"),
                 "last_touched": to_iso_utc(e.get("last_touched")),
+                "created_by": e.get("created_by"),
             }
             for e in entries
         ]
