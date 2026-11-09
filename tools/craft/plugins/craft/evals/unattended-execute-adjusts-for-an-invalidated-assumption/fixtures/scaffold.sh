@@ -24,7 +24,7 @@ Operators need counts for the text files the nightly job leaves behind.
 
 ## Chosen mechanism
 
-Both counters read each file through the workspace loader `io_utils.read_text` and count what it returns.
+The file-reading mechanism for this slice is the workspace loader `io_utils`: by default a counter reads its file through `io_utils.read_text` and counts what it returns. A counter whose files the loader cannot read may open the file itself.
 '
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Word count tool' --status ready >/dev/null
 BLOCK='**Value claim:** You can count the words in a text file.

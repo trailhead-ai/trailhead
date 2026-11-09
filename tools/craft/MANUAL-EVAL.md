@@ -5011,3 +5011,45 @@ Five runner cases, `claude plugin eval` with `--ablation none`, model `claude-op
 ### Refine case, fresh batch after the closing-message fix
 
 Execute's unattended branch gained one sentence: a ritual's final message under the request states what happened and what to run next in words and poses no question, asks for no answer, no confirmation and no reply; a question refine left on the record is reported as the record's content. `execute-rule-only.md` was rebuilt. A first fresh batch ran by mistake on the unchanged prose (the edit had not applied): 2 of 3, the third run again a diff with wrong hunk counts ending `stuck — run-section write failed`; it is not a measurement of the fix and is not counted. The batch on the edited prose, 3 runs, `claude-opus-5-5`, same grants: **3 of 3, every grader 1.0** (final line, section on the task, block opened and closed `needs-a-decision`, task still `open`, no executor, no cut, `asked-nothing` 3 of 3). Cost about 3.5 USD. The earlier 2 of 3 results stand as recorded above; the diff-hunk failure is the shared contract's known fragility and was not iterated on.
+
+## Case: execute's loop stops under the unattended request (two cases)
+
+Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, each pre-registered in its `expected.md` before any scored run. Baseline prose fingerprints (`git hash-object`): `_shared/execute.md` `8b624539946ea8caa9a0e806d1d7ef1c3a668073`, `_shared/unattended.md` `3ab326d3381936bc8b34de9ed0f22cba7d20d225`, `execute/SKILL.md` `654b9976493d76660857b4fb86546bcb260f5cea`; only `_shared/execute.md` differs in the treatment. Every capture ran under `timeout 2400`.
+
+**An earlier set of measurements on a Linux host is void.** That runner (2.1.319) gave the sandboxed Bash a read-only working directory, so every record-state grader failed whatever the prose said, and its baseline red could not be told from the sandbox red. These numbers are from the macOS host. A one-run debug batch of the park case on the treatment prose first confirmed that `./lore record update --diff` and `mktemp` succeed in the sandbox (the Q1 and block-outcome graders passed).
+
+**Leak check (before any run).** The seeded parent carries `## Unattended run` with an empty `**Decisions:**` and no `Q`, no `Outcome`; the seeded child holds none of the adjusts case's tripwire words; the prover report and spec sit outside the graded files. Clean.
+
+| Case | Arm | Runs | Result | Cost |
+|---|---|---|---|---|
+| `unattended-execute-parks-a-design-change` | baseline | 3 | 0 of 3, 0.77 each: `final-line-is-needs-a-decision-parked-1`, `exactly-one-outcome-line`, `asked-nothing` fail (the unedited prose parks Q1 and the block outcome but prints no outcome line) | 2.34 USD |
+| `unattended-execute-adjusts-for-an-invalidated-assumption` | baseline, original fixture | 3 | 1 of 3 (1.0, 0.4, 0.4) | 2.99 USD |
+| same | baseline, corrected fixture | 3 | **3 of 3 at 1.0** | 2.64 USD |
+| `unattended-execute-parks-a-design-change` | treatment 1 (outcome line carried a reason) | 3 | 1 of 3 (0.92, 0.92, 1.0) | 2.08 USD |
+| same | treatment 2 (final-message sentence added) | 3 | 2 of 3 (0.92 `asked-nothing` FAIL PASS FAIL, 1.0, 1.0) | 2.13 USD |
+| same | treatment 2, permitted rerun | 3 | 2 of 3 (0.92 `no-git-command-issued`, 1.0, 1.0) | 2.13 USD |
+| `unattended-execute-adjusts-for-an-invalidated-assumption` | treatment, original fixture | 3 | 0 of 3 (0.9, 0.5, 0.5) | 2.52 USD |
+| same | treatment, corrected fixture | 3 | 2 of 3 (1.0, 1.0, 0.9 `no-git-command-issued`) | 2.34 USD |
+| same | treatment, corrected fixture, permitted rerun | 3 | **3 of 3 at 1.0** | 2.59 USD |
+| `build-triages-found-work` | regression, treatment | 3 | 3 of 3 | 3.49 USD |
+| `unattended-execute-refuses-a-held-slice` | regression, treatment | 3 | 3 of 3 | 1.54 USD |
+
+**Findings.**
+- Treatment 1 failed on the outcome line: the first prose ended the parked line with ` — <reason>`, but the shared contract gives a park (`needs-a-decision` from the loop) the plain `outcome: <kind> <kind/name> parked=<n>` shape, and the pre-registered grader follows the contract. The prose was corrected, not the grader.
+- The park case's `asked-nothing` judge voted FAIL on final messages that said "needs a decision from you" or "write an answer under Q1"; a sentence now says a park's final message reports what was parked and asks for nothing. One later run still drew FAIL PASS FAIL on a message that asks nothing (judge noise on the operator-accepted headless judge).
+- **Grader defect (reported, not fixed):** `no-git-command-issued` matches `\bgit\b`, which also matches a run's `find ... -not -path "*/.git/*"` over the vault (read from the kept traces). It failed 1 run in 3 in each of three batches although no git command ran. The park case therefore did **not** reach 3 of 3 at 1.0 on any batch; its record graders and outcome-line graders passed in all 9 treatment-2 and rerun runs, and the only misses were that grader once and the judge once.
+- **Fixture defect (fixed, both arms rerun):** the adjusts case's spec said both counters read through `io_utils.read_text`, so the prover's local fix contradicted the spec and 2 of 3 treatment runs rightly parked it. The adjusts scaffold's spec now says the loader is the default and a counter it cannot serve may open the file itself.
+- **The adjusts case does not discriminate.** On the corrected fixture the baseline passes 3 of 3: the attended step 2 options and the shared contract already make a run decide and log a local fix. The baseline-expected-red clause is not met for this case; the case is a guard that the new prose does not over-park.
+
+**Mutation checks (one run each; `_shared/execute.md` restored from a scratch copy, empty diff).**
+| Contract line | Mutation | Result |
+|---|---|---|
+| park: Q1, block outcome, last line, no `blocked` write | the two `INVALIDATED` design-change and plan-is-wrong bullets deleted from `### Loop stops` | stayed 0.92 (only `asked-nothing`): the step 2 pointer, the Handling sections and the shared contract still carried the park. Third explanation |
+| same | the whole `### Loop stops` subsection deleted | 0.77: `final-line-is-needs-a-decision-parked-1`, `exactly-one-outcome-line`, `asked-nothing` fail. Binds, as a whole |
+| adjusts: child updated with the reason, decision logged, no park | the in-slice `INVALIDATED` bullet deleted | stayed green (0.9, the `.git` grader false positive only): redundant with attended step 2 and the shared contract, matching the green baseline |
+
+**Not observed by any case:** the executor `BLOCKED` "plan is wrong" park, the `stuck` end, the NEEDS_CONTEXT and DONE_WITH_CONCERNS handling, the logged-not-applied correction and the temp-file bodies for metrics, unknowns and design notes. They rest on the prose and review.
+
+**Real lore state.** After the batches all four vaults were clean and a search for the fixture titles finds nothing (no before-snapshot was taken ahead of the debug batch).
+
+Total eval spend about 29.7 USD.

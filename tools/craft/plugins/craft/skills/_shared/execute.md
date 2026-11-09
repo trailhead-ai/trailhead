@@ -292,6 +292,46 @@ paragraph and without a `/portage:pull_request` command, and the session prints 
 PR step prints it. Any run that ends before the close ends the session on its own outcome line,
 whatever `--then-pr` asked for: the PR step is not run.
 
+### Loop stops
+
+Under the request the per-task loop asks the operator nothing. The sites below point here; each is
+decided, parked or ended as stated, and every block entry they write goes through the credential
+scrub and the single-line flattening rule, from a temp file, as [The run block](#the-run-block)
+says.
+
+- **Assumption-prover `INVALIDATED`, the fix stays inside the slice** (one child's approach changes,
+  or a child the slice does not need is dropped): routine. Decide it on the report's own
+  recommendation, update that child exactly as options 1 and 3 of [Handling Assumption-Prover
+  Status](#handling-assumption-prover-status) prescribe (the reason in the same write), log one
+  numbered decision in the block (`Question:` names the invalidated assumption, then `Choice:` and
+  `Reasoning:`), bring the `**Rituals:**` count and `**Checkpoint:**` up to date in the same edit,
+  and continue the loop. Nothing is parked and no `blocked` status is written.
+- **Assumption-prover `INVALIDATED`, a design change** (several children, the spec's chosen
+  mechanism, replanning, or dropping the slice): parkable. Dispatch no `planner` and ask nothing.
+  Park it as one `Q<n>` in the block (`Options:` each with what it costs, one marked
+  `(recommended)`, and a `Progress:` line naming what the run finished and left undone), set
+  `**Outcome:** needs-a-decision` and the checkpoint in the same edit, and only then print
+  `outcome: needs-a-decision task/<name> parked=<n>`, a line with no reason after it. The parent
+  keeps its status: no `blocked` write. The run never writes the `**Answer:**` line. When it is
+  unclear which of the two cases a report is, it is the design change. For either park, above the
+  outcome line the final message says what was parked and where the question sits on the record, as
+  a report: it does not say the run needs a decision from the reader and gives no instruction to
+  answer, confirm or reply.
+- **Executor `BLOCKED` with "plan is wrong":** parked the same way, ending
+  `outcome: needs-a-decision task/<name> parked=<n>`, with no reason after it.
+- **`BLOCKED` (executor or prover) that the procedure's own remedies cannot clear** (more context,
+  `troubleshooter`, `model: "opus"`, a split): the run ends `stuck`. The block records what was
+  tried and observed, `**Outcome:** stuck` and the checkpoint are written first, and the line is
+  `outcome: stuck task/<name> parked=<n> — a blocked task the remedies did not clear; read the run block`.
+  No `blocked` write.
+- **`NEEDS_CONTEXT` (prover or executor) and `DONE_WITH_CONCERNS`:** handled exactly as attended;
+  each call that is a judgment call is logged as a decision.
+- **A finding that a different record is wrong, with a known fix** (step 4): logged as a decision
+  (the record, what is wrong, the known fix) and neither applied nor asked about.
+- **Splitting, appending, and the step 5 writes** (metrics row, unknowns, design notes) are
+  unchanged, except that each body or diff comes from a temp file per the contract's Record writes
+  rule, and a split or append is a routine call logged as a decision.
+
 ## The Loop
 
 A plan is a parent `task` record whose tasks are child `task` records wired with `parent`
@@ -667,7 +707,8 @@ up, and surprises.
 - **INVALIDATED:** pause, report to user, reassess. The design may need to change. Do NOT proceed to
   build — see [Handling Assumption-Prover Status](#handling-assumption-prover-status). **If the run
   ends here:** write `blocked` on the plan (`task/<parent-name>`) — see [Blocked-Path
-  Write](#blocked-path-write).
+  Write](#blocked-path-write). **Under `--unattended`, nothing is paused and no one is asked:**
+  decide it or park it as [Loop stops](#loop-stops) says.
 - **Surprises:** if the prover discovered new unknowns, add them to the plan. Decide whether they
   block the current task or a future one.
 
@@ -824,7 +865,8 @@ the whole-change phases in [After All Tasks](#after-all-tasks), not dropped enti
 
 A finding that a different record is wrong, with a known fix, is not a task. Present it to the
 operator and apply it once accepted, as the section "Corrections to other records" of the shared
-council contract defines.
+council contract defines. Under `--unattended` it is neither presented nor applied: log it as [Loop
+stops](#loop-stops) says.
 
 ### 5. Update the task graph
 
@@ -1813,6 +1855,10 @@ work. Carry the script's output as printed.
 
 ## Blocked-Path Write
 
+Under `--unattended` this section is not reached: a stop never writes `blocked` and never edits a
+status (see [The run block](#the-run-block)); it is parked or ends `stuck` as [Loop
+stops](#loop-stops) says.
+
 Every escalation site through this procedure that cannot resolve in-session ends the same way:
 something — a task or the parent plan — takes `blocked`. Each one writes it the same way, against
 whichever record the escalation is against —
@@ -1862,6 +1908,11 @@ troubleshooting, architecture) where fresh eyes matter.
 
 ## Handling Assumption-Prover Status
 
+**Under `--unattended`, the options below are not put to the operator.** An `INVALIDATED` whose fix
+stays inside the slice is option 1 or 3, decided and logged; one that is a design change (option 2)
+is parked and ends the session; a `BLOCKED` the remedies cannot clear ends `stuck`; none of them
+writes `blocked`. See [Loop stops](#loop-stops).
+
 **VALIDATED:** Proceed to build the task.
 
 **INVALIDATED:** Do NOT build. Report to user with the evidence. Options:
@@ -1893,6 +1944,10 @@ Write](#blocked-path-write).
 
 ## Handling Executor Status
 
+**Under `--unattended`, nothing below is escalated to the operator:** "plan is wrong" is parked and
+any other `BLOCKED` the remedies cannot clear ends `stuck`, with no `blocked` write. See [Loop
+stops](#loop-stops).
+
 **DONE:** Proceed to review.
 
 **DONE_WITH_CONCERNS:** Read concerns. If about correctness/scope, address before review. If
@@ -1917,7 +1972,9 @@ work is a finding: decide it as [Found work](#found-work) says before acting on 
 
 **Never:**
 - Build a task before its unknown is resolved
-- Proceed after an invalidated assumption without user input
+- Proceed after an invalidated assumption without user input (attended; under `--unattended` the
+  call is decided or parked as [Loop stops](#loop-stops) says, and nothing is built on the invalid
+  assumption either way)
 - Skip review for medium+ changes
 - Dispatch multiple *executor* subagents in parallel on the same task (they'll conflict on the same
   files). Parallel dispatch is fine when the agents operate on independent scopes — e.g. one checker
