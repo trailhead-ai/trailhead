@@ -7,6 +7,7 @@ Usage:
     found_work.py report --parent <task id> [--session-id ID]
     found_work.py entries --spec spec/<id> (--folded-into task/<id> --vault NAME | --open)
     found_work.py entry [--session-id ID] [--vault NAME] < transition.json
+    found_work.py reopen-abandoned --spec spec/<id> [--session-id ID] [--vault NAME]
 
 `decide` reads ONE JSON document on stdin — never a command-line argument:
 
@@ -1185,6 +1186,69 @@ def _check_move(m: Move, kind: str) -> None:
         raise Refusal(f"a {kind} needs a reason", "reason-required")
 
 
+# --- reopen-abandoned ---------------------------------------------------------
+
+ENDED_STATUSES = ("dropped", "superseded", "done")
+_RESULT_CODE_RE = re.compile(r"reason-code: ([a-z0-9-]+)\s*$", re.MULTILINE)
+
+
+def _task_status(runner, task: str, vault: str | None) -> str | None:
+    """The status of `task` as lore reports it, or None when it cannot be read or is not a status."""
+    done = _call(runner, ["record", "show", task, "--json", *(["--vault", vault] if vault else [])])
+    try:
+        doc = json.loads(done.stdout) if done.returncode == 0 else None
+    except ValueError:
+        return None
+    sidecar = doc.get("sidecar") if isinstance(doc, dict) else None
+    status = sidecar.get("status") if isinstance(sidecar, dict) else None
+    return status if isinstance(status, str) and _STATUS_RE.fullmatch(status) else None
+
+
+def reopen_abandoned(
+    spec: str, runner, session_id: str | None, *, vault: str | None = None, retry_command: str | None = None
+) -> tuple[int, str, list[str]]:
+    """Reopen every entry folded into a task that ended `dropped`, `superseded` or `done`, in one composed
+    write through `reopen_entries`. Returns (exit code, stdout text, stderr lines). A task
+    that cannot be read leaves its entries folded and is reported `lookup-failed` after the rest are done."""
+    read = _read_record(runner, spec)
+    if read is None:
+        raise Refusal("the spec could not be read", "spec-unreadable")
+    try:
+        entries = followups.parse_followups(read[0]["body"])
+    except followups.FollowupsError as exc:
+        raise Refusal(str(exc), exc.reason_code)
+    except followups.DuplicateHeadingError:
+        raise Refusal("the spec has two Follow-ups headings", "duplicate-followups-heading")
+    folded = [e for e in entries if e.status_kind == "folded"]
+    tasks = list(dict.fromkeys(e.status_detail for e in folded))
+    ended: dict[str, str] = {}
+    unreadable: list[str] = []
+    for task in tasks:
+        status = _task_status(runner, task, vault) if _TASK_RECORD_RE.fullmatch(task) else None
+        if status is None:
+            unreadable.append(task)
+        elif status in ENDED_STATUSES:
+            ended[task] = status
+    pairs = [
+        (e.status_detail, e.id, f"its slice {e.status_detail} ended {ended[e.status_detail]} without building it")
+        for e in folded
+        if e.status_detail in ended
+    ]
+    code, text, err = EXIT_DONE, "", []
+    if pairs:
+        code, text = reopen_entries(spec, pairs, runner, session_id, retry_command=retry_command)
+        if code != EXIT_DONE:
+            found = _RESULT_CODE_RE.findall(text)
+            err.append(f"reason-code: {found[0] if found else 'capture-failed'}")
+            if text.startswith("reason: "):
+                err, text = text.splitlines()[:1] + err, ""
+    if unreadable:
+        err += [f"reason: {t} could not be read" for t in unreadable] + ["reason-code: lookup-failed"]
+        if code == EXIT_DONE:
+            code = EXIT_LOOKUP_FAILED
+    return code, text, err
+
+
 def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     """(spec, moves, the validated document) from the `entry` stdin document."""
     try:
@@ -1261,7 +1325,39 @@ def _parser() -> argparse.ArgumentParser:
     t = sub.add_parser("entry")
     t.add_argument("--session-id", default=None)
     t.add_argument("--vault", default=None)
+    a = sub.add_parser("reopen-abandoned")
+    a.add_argument("--spec", required=True)
+    a.add_argument("--session-id", default=None)
+    a.add_argument("--vault", default=None)
     return p
+
+
+def _reopen_abandoned_command(args, runner) -> int:
+    if not _SPEC_RECORD_RE.fullmatch(args.spec):
+        raise Refusal("spec must be spec/<id>", "unsafe-id")
+    if args.vault is not None and not _NAME_RE.fullmatch(args.vault):
+        raise Refusal("--vault must be a vault name", "malformed-input")
+    script = shlex.quote(str(Path(__file__).resolve()))
+    parts = ["python3", script, "reopen-abandoned", "--spec", shlex.quote(args.spec)]
+    if args.session_id:
+        parts += ["--session-id", shlex.quote(args.session_id)]
+    if args.vault:
+        parts += ["--vault", shlex.quote(args.vault)]
+    try:
+        code, text, err = reopen_abandoned(
+            args.spec, runner, args.session_id, vault=args.vault, retry_command=" ".join(parts)
+        )
+    except Refusal as r:
+        if r.reason_code not in LOOKUP_CODES and r.reason_code not in GATE_CODES:
+            raise
+        print(f"reason: {r}", file=sys.stderr)
+        print(f"reason-code: {r.reason_code}", file=sys.stderr)
+        return EXIT_LOOKUP_FAILED
+    if text:
+        print(text)
+    for line in err:
+        print(line, file=sys.stderr)
+    return code
 
 
 def _entries_command(args, runner) -> int:
@@ -1300,6 +1396,8 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
             return code
         if args.command == "entries":
             return _entries_command(args, runner)
+        if args.command == "reopen-abandoned":
+            return _reopen_abandoned_command(args, runner)
         if args.command == "entry":
             return _entry_command(args, sys.stdin.read() if stdin is None else stdin, runner)
         if not _ID_RE.fullmatch(args.parent):

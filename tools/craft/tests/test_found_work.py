@@ -1831,3 +1831,246 @@ def test_parse_log_pairs_each_entry_result_with_the_entry_it_names_when_titles_m
     log = dec(1) + dec(2) + res(1, "failed", "stale-base") + res(2, "written", "none")
     paired = [(e.record, e.result_status) for e in fw.parse_log(log)]
     assert paired == [("spec/S#F1", "failed"), ("spec/S#F2", "written")]
+
+
+# --- reopen_entries: the reason it is given is sanitized here ---------------------
+
+
+def _folded_one():
+    return EntryLore(spec_body(entry_md(1, title="First", status="folded into task/P")))
+
+
+def test_reopen_entries_scrubs_a_credential_shaped_reason_in_every_line_it_logs_and_prints():
+    lore = _folded_one()
+    code, out = fw.reopen_entries("spec/S", [("task/P", "F1", f"because {SECRET}")], lore, SID)
+    assert code == 0, out
+    assert lore.bodies("found-work")[0].endswith("why: because [redacted]")
+    assert SECRET not in json.dumps(lore.entries) + out
+
+
+@pytest.mark.parametrize("sep", ["\n", "\r\n", "\x1b"])
+def test_reopen_entries_cannot_be_made_to_forge_a_second_decision_line_by_a_reason(sep):
+    forged = "found-work: entry-done | parent: task/Y | record: spec/S#F2 | finding: boom | where: - | why: x"
+    lore = _folded_one()
+    code, out = fw.reopen_entries("spec/S", [("task/P", "F1", f"real{sep}{forged}")], lore, SID)
+    assert code == 0, out
+    (line,) = lore.bodies("found-work")
+    assert "\n" not in line and "\r" not in line
+    assert [(e.kind, e.parent) for e in fw.parse_log(lore.log())] == [("entry-reopened", "task/P")]
+
+
+def test_reopen_entries_escapes_the_field_separator_in_a_reason():
+    lore = _folded_one()
+    fw.reopen_entries("spec/S", [("task/P", "F1", "a | parent: task/Y | b")], lore, SID)
+    (e,) = fw.parse_log(lore.log())
+    assert e.parent == "task/P" and e.why == "a \\| parent: task/Y \\| b"
+
+
+# --- reopen-abandoned ------------------------------------------------------------
+
+
+class AbandonLore(EntryLore):
+    """EntryLore whose `record show task/..` answers the task's status from its sidecar."""
+
+    def __init__(self, spec, statuses=None, unreadable=(), **kw):
+        super().__init__(spec, **kw)
+        self.statuses = statuses or {}
+        self.unreadable = set(unreadable)
+        self.task_reads = []
+
+    def __call__(self, argv, stdin=None):
+        if argv[:2] == ["record", "show"] and argv[2].startswith("task/"):
+            self.calls.append((list(argv), stdin))
+            self.task_reads.append(list(argv))
+            name = argv[2][5:]
+            if name in self.unreadable or name not in self.statuses:
+                return subprocess.CompletedProcess(argv, 1, "", "boom")
+            doc = {"body": "# T\n", "revision": REV, "layer": "personal", "sidecar": {"status": self.statuses[name]}}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(doc), "")
+        return super().__call__(argv, stdin)
+
+
+def run_abandoned(lore, capsys, *extra, vault=True, spec="spec/S"):
+    args = ["reopen-abandoned", "--spec", spec, "--session-id", SID, *(["--vault", "v"] if vault else []), *extra]
+    code = fw.main(args, runner=lore)
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def folded_spec(*pairs):
+    """pairs: (entry number, task name it is folded into)."""
+    return spec_body(*(entry_md(n, title=f"Entry {n}", status=f"folded into task/{t}") for n, t in pairs))
+
+
+def decision_for(n, task, status):
+    return (
+        f"found-work: entry-reopened | parent: task/{task} | record: spec/S#F{n} | finding: Entry {n}"
+        f" | where: src/a.py | why: its slice task/{task} ended {status} without building it"
+    )
+
+
+@pytest.mark.parametrize("status", ["dropped", "superseded", "done"])
+def test_an_entry_folded_into_a_task_that_ended_returns_to_open_with_the_fixed_reason(capsys, status):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": status})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 0, err
+    assert statuses(lore.spec) == {"F1": ("open", None)}
+    assert lore.bodies("found-work") == [decision_for(1, "P", status)]
+    assert out.splitlines() == [
+        "found-work-result: written | parent: task/P | finding: Entry 1 | record: spec/S#F1 | reason-code: none"
+    ]
+    assert err == ""
+
+
+@pytest.mark.parametrize("status", ["in-progress", "ready", "open", "blocked"])
+def test_an_entry_folded_into_a_task_still_going_is_untouched_and_the_ended_one_beside_it_is_reopened(capsys, status):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "Q")), statuses={"P": status, "Q": "dropped"})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 0, err
+    assert statuses(lore.spec) == {"F1": ("folded", "task/P"), "F2": ("open", None)}
+    assert lore.bodies("found-work") == [decision_for(2, "Q", "dropped")]
+
+
+def test_entries_folded_into_two_different_dropped_tasks_are_reopened_in_one_write_and_both_logged(capsys):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "Q"), (3, "P")), statuses={"P": "dropped", "Q": "dropped"})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 0, err
+    assert len(lore.update_calls()) == 1
+    assert statuses(lore.spec) == {"F1": ("open", None), "F2": ("open", None), "F3": ("open", None)}
+    assert lore.bodies("found-work") == [
+        decision_for(1, "P", "dropped"), decision_for(2, "Q", "dropped"), decision_for(3, "P", "dropped")
+    ]
+    assert len(out.splitlines()) == 3
+
+
+def test_every_reopen_is_logged_before_the_write_and_its_result_after(capsys):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "Q")), statuses={"P": "dropped", "Q": "done"})
+    run_abandoned(lore, capsys)
+    assert lore.events == ["capture:found-work"] * 2 + ["update"] + ["capture:found-work-result"] * 2
+
+
+def test_each_task_is_read_once_with_the_vault_however_many_entries_are_folded_into_it(capsys):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "P"), (3, "Q")), statuses={"P": "dropped", "Q": "dropped"})
+    run_abandoned(lore, capsys)
+    assert sorted(lore.task_reads) == [
+        ["record", "show", "task/P", "--json", "--vault", "v"],
+        ["record", "show", "task/Q", "--json", "--vault", "v"],
+    ]
+
+
+def test_without_a_vault_the_task_lookup_carries_no_vault_flag(capsys):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"})
+    code, out, err = run_abandoned(lore, capsys, vault=False)
+    assert code == 0, err
+    assert lore.task_reads == [["record", "show", "task/P", "--json"]]
+
+
+def test_a_task_that_cannot_be_read_keeps_its_entry_folded_reopens_the_others_and_exits_2(capsys):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "Q")), statuses={"Q": "dropped"}, unreadable={"P"})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2
+    assert statuses(lore.spec) == {"F1": ("folded", "task/P"), "F2": ("open", None)}
+    assert lore.bodies("found-work") == [decision_for(2, "Q", "dropped")]
+    assert "found-work-result: written" in out and "task/P" not in out.replace("parent: task/Q", "")
+    assert reason_of(err) == "lookup-failed"
+    assert "task/P" in err
+
+
+def test_every_task_unreadable_writes_and_logs_nothing_and_exits_2(capsys):
+    lore = AbandonLore(folded_spec((1, "P"), (2, "Q")), unreadable={"P", "Q"})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2 and out == ""
+    assert lore.update_calls() == [] and lore.entries == []
+    assert reason_of(err) == "lookup-failed"
+    assert "task/P" in err and "task/Q" in err
+
+
+@pytest.mark.parametrize("status", ["Dropped", "do ne", "done\nopen", "", "dropped; rm"])
+def test_a_status_that_is_not_a_status_is_a_failed_lookup_never_a_reopen(capsys, status):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": status})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2 and out == ""
+    assert lore.update_calls() == [] and lore.entries == []
+    assert reason_of(err) == "lookup-failed"
+
+
+@pytest.mark.parametrize("body", [
+    "# Spec\n\nintro, no follow-ups section\n",
+    spec_body(entry_md(1, status="open"), entry_md(2, status="done by task/P"), entry_md(3, status="dropped: no")),
+])
+def test_a_spec_with_no_section_or_no_folded_entries_prints_nothing_and_writes_nothing(capsys, body):
+    lore = AbandonLore(body, statuses={"P": "dropped"})
+    code, out, err = run_abandoned(lore, capsys)
+    assert (code, out, err) == (0, "", "")
+    assert lore.update_calls() == [] and lore.entries == [] and lore.task_reads == []
+
+
+def test_an_unreadable_spec_exits_2_spec_unreadable_and_reads_no_task(capsys):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"}, spec_rc=1)
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2 and out == ""
+    assert reason_of(err) == "spec-unreadable"
+    assert lore.task_reads == []
+
+
+def test_a_malformed_followups_section_exits_with_the_parsers_reason_code(capsys):
+    lore = AbandonLore(SPEC_BODY_HEAD + "- **F1.** T\n  - status: bogus\n", statuses={})
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2 and reason_of(err) == "malformed-entry"
+
+
+@pytest.mark.parametrize("mode,exit_code,reason", [
+    ("fail", 3, "write-failed"), ("drop-write", 3, "readback-failed"), ("stale", 3, "stale-base"),
+])
+def test_a_failed_write_exits_with_its_code_and_a_reason_code_on_stderr(capsys, mode, exit_code, reason):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"}, update_mode=mode)
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == exit_code
+    assert reason_of(err) == reason
+    assert "found-work-result: failed" in out
+    assert "retry: " in out and "reopen-abandoned" in out and "--spec spec/S" in out
+
+
+def test_a_failed_decision_capture_exits_2_capture_failed_and_writes_nothing(capsys):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"}, fail_nth_capture=1)
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2 and reason_of(err) == "capture-failed"
+    assert lore.update_calls() == []
+
+
+def test_a_write_failure_and_an_unreadable_task_together_report_the_write_failure_code(capsys):
+    lore = AbandonLore(
+        folded_spec((1, "P"), (2, "Q")), statuses={"Q": "dropped"}, unreadable={"P"}, update_mode="fail"
+    )
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 3
+    assert sorted(ln[len("reason-code: "):] for ln in err.splitlines() if ln.startswith("reason-code: ")) == [
+        "lookup-failed", "write-failed"]
+
+
+@pytest.mark.parametrize("args", [
+    ["--vault", "bad name"], ["--spec", "spec/a b"],
+])
+def test_reopen_abandoned_refuses_unusable_arguments_and_reads_nothing(capsys, args):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"})
+    argv = ["reopen-abandoned", "--spec", "spec/S", *args]
+    if args[0] == "--spec":
+        argv = ["reopen-abandoned", *args]
+    code = fw.main(argv, runner=lore)
+    out = capsys.readouterr()
+    assert code == 1 and out.out == ""
+    assert reason_of(out.err) in ("unsafe-id", "malformed-input")
+    assert lore.calls == []
+
+
+def test_the_printed_retry_command_is_a_reopen_abandoned_invocation_that_completes_the_work(capsys):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"}, update_mode="stale")
+    code, out, err = run_abandoned(lore, capsys)
+    (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
+    import shlex
+    argv = shlex.split(retry[len("retry: "):])
+    assert argv[1].endswith("found_work.py") and argv[2:] == [
+        "reopen-abandoned", "--spec", "spec/S", "--session-id", SID, "--vault", "v"]
+    lore.update_mode = "ok"
+    assert fw.main(argv[2:], runner=lore) == 0
+    assert statuses(lore.spec) == {"F1": ("open", None)}
