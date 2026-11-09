@@ -1,0 +1,29 @@
+These four findings were still open after the one re-review round. Each one is a call for you to make. Under this procedure there's no further review loop, so nothing more is sent out unless you say so.
+
+## Would build the wrong thing, needs your decision
+
+**1. `fs-kiln/unload.py:3`: a hotter firing is shown as ready while the kiln is still too hot to open.**
+I recommend storing the cool-down time on each firing record and removing the per-kiln table. Without that, the board can tell someone to open a kiln before it's safe.
+Worst case: the change says cool-down depends on how the firing ran, not only on which kiln it was in. The code uses a flat `COOL_HOURS = {"large": 18, "small": 10}` instead. A firing that ran hotter in the large kiln still gets 18 hours, and at that point the board lists it as `ready to unload`.
+Fix: the board would list a firing only once its own cool-down has passed, not just the usual time for its kiln. One caveat: the board is built only from the firing records and the current time, so every firing record would have to carry its cool-down hours. My estimate, from the cited code, is about 2 files and 3 functions, mainly `cool_hours` and `unload_time`, plus the test's sample firing.
+*Raised by: code review*
+
+## Would cause trouble later, worth fixing, your call
+
+**2. `fs-kiln/unload.py:17`: a firing that finishes cooling at the current minute is left off the board.**
+I recommend counting it as ready, which is what the change asks for. Otherwise the board is a minute late every time.
+Worst case: the check is `unload_time(firing) < now`. A small-kiln firing started at 08:00 becomes ready at 18:00, but a board built at 18:00 leaves it off. It only shows up on the next build after that.
+Fix: `if unload_time(firing) <= now:` at line 17. A firing whose cool-down ends at this minute then counts as ready.
+*Raised by: code review*
+
+## Rough edges, nothing to decide
+
+**3. `fs-kiln/test_unload.py:9`: the only test is one small-kiln firing that cooled hours ago.** I recommend adding test cases for the situations in findings 1 and 2.
+Worst case: neither the exact-minute case nor the hotter-firing case is tested, so either fix could later break without any test failing.
+Fix: as the reviewer wrote it, "cover the edge the other findings touch".
+*Raised by: code review*
+
+**4. `fs-kiln/unload.py:25`: the board line doesn't say when the firing became ready.** I recommend adding the time, as the change asks.
+Worst case: the board shows `Mugs: ready to unload` with no time on it, but the committee asked for each line to give the time the firing became ready.
+Fix: as the reviewer wrote it, "the board line gives no time for when the firing became ready; add it".
+*Raised by: code review*

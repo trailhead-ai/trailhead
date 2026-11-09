@@ -1,0 +1,43 @@
+**The spec review (gauntlet): detail on the three findings that need your decision**
+
+---
+
+**Anyone holding a forwarded confirmation email can cancel the booking (C1)**
+*Proposed outcome: fixed in the spec.* Raised by: security.
+
+Should a cancellation need confirming by the member who made the booking? I recommend yes. Without it, a member can lose their firing to someone they forwarded their confirmation email to.
+
+Worst case: The spec says "A member can cancel a booking up to 24 hours before its day. The day is freed and offered to the first member on that kiln's standby list." (AC3). It never says how a cancel is tied to the member who booked. A member forwards their confirmation email to a friend, or it gets passed around a group chat, and whoever holds it cancels the booking. The day goes to the next person on the standby list, and the member who booked turns up with their work to find the slot gone.
+
+Fix: replace the cancellation rule (AC3) in full with this text:
+
+> **AC3.** A member can cancel a booking up to 24 hours before its day. The cancel takes effect only once it is confirmed through a link sent to the email address the booking was made with. Once confirmed, the day is freed and offered to the first member on that kiln's standby list.
+
+---
+
+**The spec books the whole kiln for a day, but a firing holds several members' work (C2)**
+*Proposed outcome: needs a rewrite (`record-only`).* Raised by: right problem.
+
+Should members book shelf space in a firing instead of the whole kiln for a day? I recommend rewriting the booking rules around shelf space. Booking the whole kiln would build a system that makes the studio's waiting times worse.
+
+Worst case: The spec says "A kiln holds one firing per day. A second booking for the same kiln and day is refused and the next free day is offered instead." (AC2). In practice a firing is a load of several members' work, and a kiln is full when its shelves are full, not when someone has claimed the day. One member books the large kiln for a single bowl, the system turns away everyone else who wanted that firing, and members wait weeks for a day while kilns fire half-empty. The review couldn't tell from the spec how often firings are shared, and you'll know that better than the passes did. If firings at this studio really are one member each, dispute or answer this finding with that fact.
+
+Fix: members would book shelves in a named firing and see how much space is left, and a firing would close when its shelves are taken, not when its day is claimed. This rewrites the Objectives and four criteria: booking a firing (AC1), the one-firing-per-day rule (AC2), the cancellation rule (AC3, so a cancel frees shelves rather than the day) and the evening reminder (AC5, so it covers the member's share of the load).
+Prescription: change the booked unit from "kiln + day" to "shelf space in a kiln's firing". State how many shelves each kiln has. Refuse a request only when the firing has no shelves left, and offer the next firing that does. Rewrite the standby offer in the cancellation rule (AC3) to offer the freed shelves.
+
+---
+
+**Members aren't told when they book that the shelves must be loaded by 8 am (C3)**
+*Proposed outcome: fixed in the spec.* Raised by: ease of use.
+
+Should the 8 am loading time be in the confirmation email as well as the night-before reminder? I recommend adding it, so members know the deadline when they make their plans, not only the evening before.
+
+Worst case: The spec says "A member books a firing by giving a name, an email address, the kiln (large or small) and a day, and receives a confirmation email stating the booking." (AC1). That email states only the booking. A member plans to drop their work off at 9, finds the kiln already packed, and loses the firing.
+
+Fix: add "and that work must be on the shelves by 8 am on the day" to the end of the confirmation email's wording in the booking criterion (AC1).
+
+Caveat that affects whether to take this fix: the spec already says "The evening before a firing, the member receives a reminder listing what must be on the shelves by 8 am." (AC5). So the deadline isn't missing altogether. It arrives late, and only once. A member who misses or loses that one evening email has nothing else telling them. The fix is still cheap and still worth making, but the worst case is less likely than the reviewer suggested.
+
+---
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

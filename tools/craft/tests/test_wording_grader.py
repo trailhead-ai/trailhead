@@ -2189,6 +2189,90 @@ FINDING_CAPTURE_VERDICTS.update(
     }
 )
 
+# The base4 batch (the fix-shape round-4 baselines, `fs-base4-*`): the contract as shipped. Every capture reads plain on
+# every check its site runs and kept on persisted-levels, bar three. `fs-base4-fsplan-1` says "the Critical dispositions
+# are still open" in its reader-facing text. The first two spec review captures state no severity reading at all. The
+# `fsplan` arm ran six captures after a split of its small criterion; the `fsdriver` arm's fourth dispatch hung with
+# no output, so it has no verdict (an empty capture is never graded), and captures 5 to 7 were run after it.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"fs-base4-{site}-{n}": _plain_verdicts(site)
+            for site, runs in (
+                ("fsspecreview", (3,)),
+                ("fsplan", (2, 3, 4, 5, 6)),
+                ("fsconsult", (1, 2, 3)),
+                ("fsdriver", (1, 2, 3, 5, 6, 7)),
+                ("fsreview", (1, 2, 3)),
+                ("fsbuildreview", (1, 2, 3)),
+                ("fsdrivebuild", (1, 2, 3)),
+            )
+            for n in runs
+        },
+        "fs-base4-fsplan-1": {"severity-name": "internal", "reviewer-name": "plain", "persisted-levels": "kept"},
+        "fs-base4-fsspecreview-1": {"severity-name": "none", "reviewer-name": "plain"},
+        "fs-base4-fsspecreview-2": {"severity-name": "none", "reviewer-name": "plain"},
+    }
+)
+
+# The round 4 treated batch: `fs-r4-*` (the repaired shared rule alone), `fs-rs4-*` (the repaired rule plus one site's
+# framing edit), `regress4-cal-consult-*` (the calibrated consult regression with the repaired rule), and the paired
+# controls `fs-control4-fsspecreview-*` and `regress4-control-cal-consult-*` (the same compositions with the rule as
+# shipped). Every capture reads plain on every check its site runs and kept on persisted-levels, bar the ones below.
+# `fsspecreview` (r4 and its control) writes "All three ... need your decision" and so reads `none` on severity-name,
+# and its control's fourth capture also names a reviewer; `fs-r4-fsconsult-2` writes "Critical 1" and "Minor 3" in its
+# reader-facing text; three of the six `regress4-cal-consult` captures and one control capture put a severity word
+# beside a calibration word. The `fsspecreview` and `fsconsult` r4 arms and the calibrated arm ran six captures after
+# a 2-1 split on a scripted check, and `fsplan` r4 ran six after a 2-1 split of its large criterion.
+FINDING_CAPTURE_VERDICTS.update(
+    {
+        **{
+            f"{arm}-{site}-{n}": _plain_verdicts(site)
+            for arm, site, runs in (
+                ("fs-r4", "fsspecreview", (2, 3, 4)),
+                ("fs-r4", "fsplan", (1, 2, 3, 4, 5, 6)),
+                ("fs-r4", "fsconsult", (1, 3, 4, 5, 6)),
+                ("fs-r4", "fsdriver", (1, 2, 3)),
+                ("fs-r4", "fsreview", (1, 2, 3)),
+                ("fs-r4", "fsbuildreview", (1, 2, 3)),
+                ("fs-r4", "fsdrivebuild", (1, 2, 3)),
+                ("fs-rs4", "fsplan", (1, 2, 3)),
+                ("fs-rs4", "fsdriver", (1, 2, 3)),
+                ("fs-rs4", "fsbuildreview", (1, 2, 3)),
+                ("fs-control4", "fsspecreview", (1, 2, 3)),
+            )
+            for n in runs
+        },
+        **{
+            f"fs-r4-fsspecreview-{n}": {"severity-name": "none", "reviewer-name": "plain"} for n in (1, 5, 6)
+        },
+        **{
+            f"fs-control4-fsspecreview-{n}": {"severity-name": "none", "reviewer-name": "plain"} for n in (5, 6)
+        },
+        "fs-control4-fsspecreview-4": {"severity-name": "none", "reviewer-name": "internal"},
+        "fs-r4-fsconsult-2": {"severity-name": "internal", "reviewer-name": "plain"},
+        **{
+            f"regress4-cal-consult-{n}": _plain_verdicts("consult-calibrated")
+            for n in (1, 2, 4)
+        },
+        "regress4-cal-consult-3": {
+            "calibration-level": "internal", "severity-name": "internal", "reviewer-name": "plain"
+        },
+        **{
+            f"regress4-cal-consult-{n}": {
+                "calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"
+            }
+            for n in (5, 6)
+        },
+        **{
+            f"regress4-control-cal-consult-{n}": _plain_verdicts("consult-calibrated") for n in (1, 2, 3, 4, 6)
+        },
+        "regress4-control-cal-consult-5": {
+            "calibration-level": "internal", "severity-name": "plain", "reviewer-name": "plain"
+        },
+    }
+)
+
 PW_FIXTURES = FINDING_CASE / "fixtures"
 PW_SPEC = PW_FIXTURES / "pw-spec.md"
 _STAGED_REPLY_RE = re.compile(r"accept (C\d+) as a risk: (.+?), dispute (C\d+): (.+?), otherwise go")
@@ -2273,12 +2357,15 @@ def test_every_pwsaved_capture_grades_its_saved_section_to_its_mapped_verdicts(s
 
 
 def _site(stem):
-    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`
-    and `regress3-cal-`) belong to `consult-calibrated`; `summary-guard-specreview-open-` captures belong to
-    `specreview` and every other `summary-guard-specreview-` capture to `fsspecreview`; a capture with
+    """The site a capture belongs to. The calibrated consult's arms (`precal-`, `cal-`, `regress-cal-`, `regress2-cal-`,
+    `regress3-cal-`, `regress4-cal-` and `regress4-control-cal-`) belong to `consult-calibrated`;
+    `summary-guard-specreview-open-` captures belong to `specreview` and every other
+    `summary-guard-specreview-` capture to `fsspecreview`; a capture with
     `-pwsaved-hostile-` in its name belongs to `pwsaved`. Every other capture belongs to the segment before its run
     number."""
-    if stem.startswith(("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-")):
+    if stem.startswith(
+        ("precal-", "cal-", "regress-cal-", "regress2-cal-", "regress3-cal-", "regress4-cal-", "regress4-control-cal-")
+    ):
         return "consult-calibrated"
     if stem.startswith("summary-guard-specreview-open-"):
         return "specreview"
@@ -2292,8 +2379,25 @@ def _site(stem):
 FINDING_CAPTURES = sorted(p for p in FINDING_RUNS.glob("*.txt") if not p.name.endswith(".stderr.txt"))
 
 
+def assert_empty_capture_exited_nonzero(capture):
+    """An empty capture is accepted only when its sibling `.exit` exists and holds a non-zero integer."""
+    exit_file = capture.with_suffix(".exit")
+    assert exit_file.exists(), f"{capture.name} is empty and has no .exit file"
+    content = exit_file.read_text(encoding="utf-8")
+    try:
+        status = int(content.strip())
+    except ValueError:
+        raise AssertionError(
+            f"{capture.name} is empty and its .exit is not a non-zero integer (.exit content {content!r})"
+        ) from None
+    assert status != 0, f"{capture.name} is empty but its run exited 0 (.exit content {content!r})"
+
+
 @pytest.mark.parametrize("capture", FINDING_CAPTURES, ids=lambda p: p.stem)
 def test_every_finding_capture_grades_to_its_mapped_verdicts_against_its_sites_reports(capture):
+    if capture.stat().st_size == 0:
+        assert_empty_capture_exited_nonzero(capture)
+        return
     assert capture.stem in FINDING_CAPTURE_VERDICTS, f"{capture.name} is not in the capture-to-verdict table"
     site = _site(capture.stem)
     assert set(FINDING_CAPTURE_VERDICTS[capture.stem]) == set(SITE_CHECKS[site])
@@ -2304,6 +2408,40 @@ def test_every_finding_capture_grades_to_its_mapped_verdicts_against_its_sites_r
         result = run_grader(args, capture.read_bytes())
         assert result.stdout.decode("utf-8") == f"{check}: {verdict}\n", (capture.name, result.stderr)
         assert result.returncode == (0 if verdict in PASSING else 1)
+
+
+def _empty_capture(tmp_path, exit_content):
+    capture = tmp_path / "x-1.txt"
+    capture.write_bytes(b"")
+    if exit_content is not None:
+        capture.with_suffix(".exit").write_text(exit_content, encoding="utf-8")
+    return capture
+
+
+def test_an_empty_capture_with_a_nonzero_integer_exit_passes(tmp_path):
+    assert_empty_capture_exited_nonzero(_empty_capture(tmp_path, "124\n"))
+
+
+@pytest.mark.parametrize(
+    ("exit_content", "reason"),
+    [
+        (None, "has no .exit file"),
+        ("0", "exited 0"),
+        ("00", "exited 0"),
+        ("", "not a non-zero integer"),
+        ("  \n", "not a non-zero integer"),
+        ("abc", "not a non-zero integer"),
+    ],
+    ids=["missing", "zero", "double-zero", "empty", "whitespace", "non-numeric"],
+)
+def test_an_empty_capture_whose_exit_is_not_a_nonzero_integer_fails_loudly(tmp_path, exit_content, reason):
+    capture = _empty_capture(tmp_path, exit_content)
+    with pytest.raises(AssertionError) as raised:
+        assert_empty_capture_exited_nonzero(capture)
+    assert capture.name in str(raised.value)
+    assert reason in str(raised.value)
+    if exit_content is not None:
+        assert repr(exit_content) in str(raised.value)
 
 
 # --- review-name, outcome-word, finding-id, stamp-form and override-mapping -------------------

@@ -1,0 +1,53 @@
+**Maturity:** `maturity: prototype (basis: stamp)`. The trial is marked as a prototype, so worries about migration, rollback, failure visibility and effects on other users of the data are rated as rough edges at most. **Waiver:** backwards compatibility is waived by the Non-Goal `Waives: backwards compatibility — the paper booking sheets are not carried over to the new page.`; without it this would be rough edges, nothing to decide. No reviewer raised backwards compatibility, so the waiver removes no finding.
+
+---
+
+The panel kept returning to one weakness: the trial uses a shared spreadsheet that more than one hand writes to at once. The form adds rows, the volunteer sorts and deletes rows on Friday evening, and nothing in between checks that a lane still has room. That produces both problems that need your decision. Two members can both be confirmed for the last place in a lane. A booking made while the volunteer is tidying can vanish without the member being told. The other findings are about what members experience around a booking. They aren't told clearly that it went through, they can't cancel, and members who won't or can't use the page need a way to book. Separately, phone numbers are exposed to anyone who has the sheet's link.
+
+The two serious findings hold up, and they are concrete. About 60 members compete for 40 places, so the last places in a lane will be contested every week, not once in a while. And the Friday tidy-up is part of the plan as written, not a guess. Neither problem exists with a small database behind the form, which is exactly the choice the committee is weighing. The ease-of-use reviewer marked "members might find the page harder than paper" as needing your decision. I've moved it down to worth fixing, your call: it describes no specific thing going wrong and guesses at how members will react. Its real point, that some members need a paper route, stands. The rough edges about moving data at the end of term and returning to paper mid-term are minor because this is a one-term prototype.
+
+My recommendation is to put sign-ups in a small database from the start. Have the form check that a lane has room before confirming, and give the volunteer a read-only view or an export instead of a sheet they edit. That fixes both serious findings and keeps phone numbers out of a link anyone can pass on. If the committee still prefers the spreadsheet, it is workable only under three conditions. The form must be the only thing that writes to it. It must check the lane count before confirming. The Friday tidy-up must happen on a copy, after sign-ups close. At that point you have rebuilt a database's guarantees by hand. Either way, show members their lane and time on screen after booking, add a cancel link, and keep the paper sheet pinned up for the term. The paper sheet also gives the club a way back if the trial goes badly.
+
+---
+
+### Would build the wrong thing, needs your decision
+
+**1. Two members can be confirmed for the last place in a lane.** Decide whether the form checks a lane's count before confirming. I recommend it does, which a small database does naturally. Otherwise members turn up for places they don't have. In the worst case, two members submit for the eighth place in lane 3 a moment apart. The spreadsheet takes both rows and both get a confirmation. On Saturday one of them finds the lane full.
+Fix: a member would only ever be confirmed for a place that is still free. This changes how the form saves a booking: it writes one booking at a time and refuses once a lane holds eight.
+*Raised by: buildability*
+
+**2. The Friday tidy-up can delete a booking without telling the member.** Decide whether the volunteer's tidy-up can run while sign-ups are open. I recommend it can't, or a member arrives for a lane they never held. In the worst case, the volunteer sorts or prunes rows on Friday evening while a member is booking. The new row is overwritten or deleted and the member still believes they are booked.
+Fix: bookings made on Friday evening would survive the tidy-up. With a database, the volunteer works from a read-only view and never edits bookings directly. With a spreadsheet, the tidy-up runs on a copy that is swapped in after the form closes.
+*Raised by: failure cases*
+
+### Would cause trouble later, worth fixing, your call
+
+**3. Some members won't be able to book on the page, or won't want to.** Decide whether to keep a paper route for the term. I recommend keeping one, or members without a phone are shut out of Saturday swimming. In the worst case, a regular who doesn't book online finds every lane full of online bookings and has no way to get a place.
+Fix: members who don't use the page could still sign up on paper, and the club newsletter would explain how the page works. The volunteer copies the paper names into the bookings before Saturday.
+*Raised by: ease of use. This was moved down from "needs your decision" because it named no specific failure and guessed at how members will behave.*
+
+**4. Members can't tell whether a booking went through.** Decide whether the page shows the booking back after saving. I recommend it does, or members submit twice when the page is slow. In the worst case, the save is slow, the member sees nothing, taps again, and holds two places while someone else is turned away.
+Fix: after booking, a member would see their own booking on screen, naming the lane and the time, so they know it's real and don't resubmit.
+*Raised by: failure cases, security (2 reviewers)*
+
+**5. Anyone with the sheet's link can read every member's phone number.** Decide where phone numbers are kept. I recommend keeping them off anything shared by link. In the worst case, the link gets forwarded in a club group chat and everyone's phone number goes with it.
+Fix: phone numbers would be visible only to the volunteer. Keep them in the database, or out of the shared sheet, and share the sheet only with the volunteer.
+*Raised by: security*
+
+**6. Nobody removes a booking when a member cancels.** Decide how cancellations work. I recommend a cancel link, or cancelled places stay held while lanes look full. In the worst case, a member drops out on Thursday, their place stays taken, and another member is turned away for a lane with a free spot.
+Fix: a member would be able to cancel with a cancel link sent with their confirmation, and the place would reopen at once.
+*Raised by: buildability*
+
+### Rough edges, nothing to decide
+
+**7. Sign-ups will have to be copied by hand when the trial ends.** This concerns migration and backfill. It's a rough edge with nothing to decide, because this trial is at prototype maturity. Write down the column layout now so the December copy is easy.
+Fix: the column layout recorded in the trial's notes.
+*Raised by: buildability*
+
+**8. Going back to paper mid-term means re-entering that week's bookings.** This concerns rollback and reversibility. It's a rough edge with nothing to decide, because this trial is at prototype maturity. The paper sheet in finding 3 already covers it.
+Fix: the paper sheet kept pinned up, at least for the first week.
+*Raised by: failure cases*
+
+**9. The button says "submit".** It should say what it does.
+Fix: `"book my lane"` instead of `"submit"` on the sign-up button.
+*Raised by: ease of use*

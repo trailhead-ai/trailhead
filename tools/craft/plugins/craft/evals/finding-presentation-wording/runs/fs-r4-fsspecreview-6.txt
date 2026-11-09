@@ -1,0 +1,41 @@
+The spec review: detail on the three decisions
+
+**1. Anyone holding a forwarded confirmation email can cancel the booking (C1)**: proposed outcome, fixed in the spec.
+
+Should a member have to confirm a cancellation before it takes effect? I recommend yes, because as written anyone who has a copy of the confirmation email can cancel a member's firing.
+
+The spec says "A member can cancel a booking up to 24 hours before its day. The day is freed and offered to the first member on that kiln's standby list." (AC3). It never says how a cancellation is linked to the member who made the booking. Members do pass confirmation emails around, for example to a friend sharing the trip. If one of those people cancels, the day goes straight to the first person on standby. The member turns up with their work and finds their firing has gone to someone else. The calendar of every change (AC6) will show the cancellation, but it can't show who made it.
+
+Fix: `The cancellation takes effect only once the member confirms it from a link sent at that moment to the email address the booking was made with.` This sentence goes into AC3 after its first sentence, so a copy of the old confirmation email is no longer enough to cancel. The whole criterion would then read:
+
+> **AC3.** A member can cancel a booking up to 24 hours before its day. The cancellation takes effect only once the member confirms it from a link sent at that moment to the email address the booking was made with. The day is freed and offered to the first member on that kiln's standby list.
+
+*Raised by: security.*
+
+---
+
+**2. A booking takes the whole kiln for a day (C2)**: proposed outcome, needs a rewrite (`record-only`).
+
+Should members book space on a kiln's shelves rather than the whole kiln for a day? I recommend yes. A firing usually carries several members' work, and the spec as written lets one bowl hold a kiln for a whole day while everyone else waits.
+
+The spec says "A kiln holds one firing per day. A second booking for the same kiln and day is refused and the next free day is offered instead." (AC2). It also has a member book "a firing by giving a name, an email address, the kiln (large or small) and a day" (AC1). In practice a kiln is full when its shelves are full, not when someone has claimed its day. The spec's own Problem says members "regularly turn up with work for the same firing". That reads as normal kiln sharing, not a fault. Built as written, the first member to book a day blocks everyone else, a kiln fires half empty, and the wait for a slot grows. The membership register lists 112 members, not the "about 90" the spec assumes, which makes the wait longer.
+
+Fix: members would book shelf space in a firing, and could share a firing until its shelves are full, instead of each taking a kiln for the day. This rewrites the Problem, the Objectives, that booking criterion (AC1), the one-firing-per-day rule (AC2) and the cancellation criterion (AC3), and changes what each of them counts. One caveat: the pass that raised this didn't know how often firings are actually shared at this studio. If a firing really is one member's work, reply `answer C2:` followed by what you know, and I'll re-adjudicate.
+
+*Raised by: right problem.*
+
+---
+
+**3. Members aren't told when they book that their work must be on the shelves by 8 am (C3)**: proposed outcome, fixed in the spec.
+
+Should the confirmation email give the 8 am loading time? I recommend yes, because otherwise a member can plan their day around the booking without knowing they have to arrive early.
+
+The confirmation (AC1) only states the booking. The 8 am deadline first appears in "The evening before a firing, the member receives a reminder listing what must be on the shelves by 8 am." (AC5). That reminder does carry the time, so the gap is narrower than the original finding put it. But a member who booked weeks earlier, and who misses or never receives that one evening email, arrives at 9. By then the kiln is packed and they've lost the firing. The failure-cases pass found a second way to get there: a mistyped address means the reminder never arrives at all.
+
+Fix: `, including that the work must be on the kiln's shelves by 8 am on the day` goes at the end of AC1, after "receives a confirmation email stating the booking". The member then learns the deadline when they book, not only the night before.
+
+*Raised by: ease of use.*
+
+---
+
+Reply go, or dispute C2: <why>, accept C2 as a risk: <why>, answer C2: <what you know>.

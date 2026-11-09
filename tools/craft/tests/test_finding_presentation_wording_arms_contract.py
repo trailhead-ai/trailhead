@@ -98,6 +98,31 @@ PLAIN_WORDS_B3_REVISION = "aaebfe5e78f26bbbd2f7044949caaac38311a047"
 # the commit that introduced the `skills/gauntlet/SKILL.md` those arms carry.
 PLAIN_WORDS_EDIT3_REVISION = "2c84ecaa42982aa16a76df31fbfa66bf691395fd"
 
+# origin/main when the fix-shape round 4 task branch was cut: every `fs-base4` arm reads every source here. The sources'
+# `git hash-object` values at that commit, which stay checkable without history: `rules.md`
+# 81162064b03191116a24bbc81b216ea02eb5d6fb, `skills/gauntlet/SKILL.md` 3b7a0b2592a6df5ec8dc78a65395aa8e5c123081,
+# `skills/gauntlet/dispositions.md` 6e4ddfb110154cbf72096ec78dbd2f84c5d2a74a, `skills/plan/SKILL.md`
+# dbbfe87c797940a0c0325c50c9e50a590654f029, `skills/consult/SKILL.md` 8e074a91c1c734fbecb52af7101178a89f22df4e,
+# `skills/drive/SKILL.md` 09003e2305b9a38e58350689c4e7f110c824ee3f, `skills/review/SKILL.md`
+# 5cdf5f4f91fad5267d8809ba458bc92f6294989b, `skills/execute/SKILL.md` bffe525c2e0d7718ed356e4bc96282a85cd09c9f,
+# `skills/_shared/execute.md` 92afd6900a5d52bf0ca4fc09b251d8b9781c2803, `skills/_shared/council.md`
+# 36b96b92946374335ce487859867c65e468e0754.
+FIX_SHAPE_B4_REVISION = "22c1ebbb9aa7a5a3391153c990c51285b4b6640a"
+
+# The commit repairing the shared finding rule in `skills/_shared/council.md` (commit R): every `fs-r4` and `fs-rs4` arm
+# and `regress4-cal-consult` read `council.md` from here. Its `git hash-object` value, which stays checkable without
+# history: 5ade5f2b16e972fff6ca07fd1435e9b5e5dac649.
+FIX_SHAPE_R_REVISION = "ed5f587aa123fe497057ebe66d75207316a684f4"
+
+# The commits carrying each site's own framing edit (the S parts): an `fs-rs4` arm reads that site's one file from here
+# and every other source as its `fs-r4` arm does. `skills/plan/SKILL.md` at the plan commit has `git hash-object`
+# c061c0924283f707c663a11bb81d10b52becc281; `skills/drive/SKILL.md` at the driver commit
+# 5f482d13cad23794e35263e6f64f1226f8f344fb; `skills/_shared/execute.md` at the build commit
+# 030d5a51e7fb6671a4b3fec1154f3b6ca7c9f81d.
+FIX_SHAPE_S_PLAN_REVISION = "968b219747c25a2e618c73c9bb36741d6459c9a4"
+FIX_SHAPE_S_DRIVE_REVISION = "fc5e2ed1a6ce7fce87a117b70c3a66c22aa2fd06"
+FIX_SHAPE_S_BUILD_REVISION = "1b15578273411d45ff8ca6e76d54a498a87d347d"
+
 PLUGIN = "tools/craft/plugins/craft"
 RULES = f"{PLUGIN}/rules.md"
 COUNCIL = f"{PLUGIN}/skills/_shared/council.md"
@@ -241,30 +266,60 @@ FS_SITE_SOURCES: dict[str, list[str]] = {
     "fsdrivebuild": [RULES, DRIVE_SKILL, EXECUTE_PROCEDURE],
 }
 
-# Each fix-shape round's arm prefix and the `council.md` revision its arms read; every other source of a fix-shape
-# arm is at the fix-shape baseline.
+# Each fix-shape round's arm prefix, the revision its arms read every source but `council.md` from, and the revision
+# they read `council.md` from.
 FS_ROUNDS = {
-    "fs-baseline": FIX_SHAPE_BASELINE_REVISION,
-    "fs-treated": FIX_SHAPE_EDIT_REVISION,
-    "fs-treated2": FIX_SHAPE_SHARPENED_REVISION,
+    "fs-baseline": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_BASELINE_REVISION),
+    "fs-treated": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_EDIT_REVISION),
+    "fs-treated2": (FIX_SHAPE_BASELINE_REVISION, FIX_SHAPE_SHARPENED_REVISION),
+    "fs-base4": (FIX_SHAPE_B4_REVISION, FIX_SHAPE_B4_REVISION),
+    "fs-r4": (FIX_SHAPE_B4_REVISION, FIX_SHAPE_R_REVISION),
 }
 
 ARM_SOURCES.update(
     {
         f"{prefix}-{site}.md": [
-            *[(path, FIX_SHAPE_BASELINE_REVISION) for path in paths],
+            *[(path, site_revision) for path in paths],
             (COUNCIL, council_revision),
         ]
-        for prefix, council_revision in FS_ROUNDS.items()
+        for prefix, (site_revision, council_revision) in FS_ROUNDS.items()
         for site, paths in FS_SITE_SOURCES.items()
     }
 )
+
+
+def _moved(arm: str, source: Source) -> list[Source]:
+    """`arm`'s sources with the one at `source`'s path read from `source`'s revision instead."""
+    return [source if path == source[0] else (path, revision) for path, revision in ARM_SOURCES[arm]]
+
+
+# Each site-framing arm and the one ritual file it reads from that site's commit; every other source is the
+# `fs-r4` arm's.
+FS_RS4_SOURCES: dict[str, Source] = {
+    "fsplan": (PLAN_SKILL, FIX_SHAPE_S_PLAN_REVISION),
+    "fsdriver": (DRIVE_SKILL, FIX_SHAPE_S_DRIVE_REVISION),
+    "fsbuildreview": (EXECUTE_PROCEDURE, FIX_SHAPE_S_BUILD_REVISION),
+}
+
+ARM_SOURCES.update({f"fs-rs4-{site}.md": _moved(f"fs-r4-{site}.md", moved) for site, moved in FS_RS4_SOURCES.items()})
 
 # The calibrated consult regression arms: the `cal-consult` composition with `council.md` at each fix-shape edit.
 ARM_SOURCES["regress-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),
     (CONSULT_SKILL, CAL_REVISION),
     (COUNCIL, FIX_SHAPE_EDIT_REVISION),
+]
+ARM_SOURCES["regress4-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_R_REVISION),
+]
+# The paired control for `regress4-cal-consult`: the same composition with `council.md` at `FIX_SHAPE_B4_REVISION`, so
+# the two differ only by the rule repair.
+ARM_SOURCES["regress4-control-cal-consult.md"] = [
+    (RULES, BASELINE_REVISION),
+    (CONSULT_SKILL, CAL_REVISION),
+    (COUNCIL, FIX_SHAPE_B4_REVISION),
 ]
 ARM_SOURCES["regress2-cal-consult.md"] = [
     (RULES, BASELINE_REVISION),
@@ -283,10 +338,7 @@ FIX_SHAPE_FALLBACKS: dict[str, Source] = {
 
 ARM_SOURCES.update(
     {
-        f"fs-fallback-{site}.md": [
-            fallback if path == fallback[0] else (path, revision)
-            for path, revision in ARM_SOURCES[f"fs-treated2-{site}.md"]
-        ]
+        f"fs-fallback-{site}.md": _moved(f"fs-treated2-{site}.md", fallback)
         for site, fallback in FIX_SHAPE_FALLBACKS.items()
     }
 )
@@ -299,10 +351,7 @@ CONSULT_REWORDED_ARMS = {
 
 ARM_SOURCES.update(
     {
-        arm: [
-            (path, CONSULT_REWORDING_REVISION if path == CONSULT_SKILL else revision)
-            for path, revision in ARM_SOURCES[predecessor]
-        ]
+        arm: _moved(predecessor, (CONSULT_SKILL, CONSULT_REWORDING_REVISION))
         for arm, predecessor in CONSULT_REWORDED_ARMS.items()
     }
 )

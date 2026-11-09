@@ -1,0 +1,107 @@
+The council review of this slice's plan is back. Two problems would build the wrong thing and need your decision, so the run stops at the plan phase under `plan-critical`. I haven't asked you to approve the plan and I haven't started the build.
+
+Resolved maturity: `maturity: production (basis: stamp)`. No concern was waived and no waiver went unrecognised.
+
+**What the reviews found.** Two themes stand out. The first is Task 1's numbered place in line. Every booking has a `turn` number, and every later number is renumbered on a cancellation. That is where the spec's goal that "a booking and its reminder reach the right member" breaks. Both the buildability and failure-case reviews traced the same double-booking to it. The second is that the evening reminder job can fail with nobody noticing. Around those sit smaller gaps in how cancelling works: the link acts the moment it is opened, gives no confirmation, and leaves the offered member on the standby list. There are also a few data-handling notes.
+
+**Whether it holds.** The renumbering finding is solid because it follows directly from what Task 1 says. It also hides a mismatch with the spec. Task 1 claims "a kiln holds one firing per day; a second booking for the same kiln and day is refused and the next free day is offered instead" (AC2), but what it describes is a queue of turns, not that refusal. The failure-case review rated the silent reminder job as worth fixing. At this spec's production maturity, a failure nobody sees in production is a decision, and it meets that review's own bar for a decision, so I rated it as one. The ease-of-use review's "members may find the booking page confusing" names no concrete failure, so I moved it down to worth fixing. Its "release" wording note cites a word the plan never uses. The security findings stand, with the reviewer's own caveat that no sign-in design exists yet. One more thing no reviewer flagged as a gap: Task 3 never states the cutoff in "a member can cancel a booking up to 24 hours before its day" (AC3). The failure-case review's boundary-test note only touches it.
+
+**What to do.** Rebuild Task 1 around the booked day, with one booking per kiln per day, and drop the stored turn. That removes the race and brings in the refusal required by that same one-firing-per-day rule (AC2). Give the 18:00 job a signal the technician will see. Rework Task 3 so that cancelling asks for confirmation, confirms when it's done, takes the offered member off the standby list, and enforces the 24-hour cutoff for cancellations (AC3). Fix the reminder wording to name the 8 am deadline. Whether to take these is your call. I've recorded the findings only.
+
+### Would build the wrong thing, needs your decision
+
+**Bookings keep a place-in-line number that is renumbered on every cancellation.** I recommend dropping it. As written, two members can be told the same firing is theirs.
+Worst case: a member cancels at the moment the 18:00 reminder job is reading bookings. Two rows end up with the same `turn`, both members get a reminder for the same firing, and one of them loads a kiln they don't hold. Renumbering also overwrites the history the spec wants every calendar change checkable against.
+Fix: each firing would belong to exactly one member on one day, and a second request for that kiln and day would be refused with the next free day offered. This rewrites Task 1, and with it the plan's coverage of one-firing-per-day booking (AC2).
+*Raised by: buildability, failure cases.*
+
+**Nothing tells anyone when the evening reminder job didn't run.** I recommend adding a signal. Without one, reminders can stop for days unnoticed.
+Worst case: the 18:00 job fails, no member is reminded, and the first anyone hears of it is a missed firing. A reminder the evening before each firing is exactly what the spec promises (AC5). The reviewer rated this worth fixing. This spec is at production maturity, where a production failure nobody can see needs your decision, so I rated it here.
+Fix: the technician would get an email when the reminders have gone out each evening, and another by 19:00 if they haven't. This touches Task 2.
+*Raised by: failure cases.*
+
+### Would cause trouble later, worth fixing, your call
+
+**The cancellation link cancels as soon as it's opened, whoever opens it.** I recommend a confirm step. A forwarded email or a mail scanner that follows links can cancel someone's firing.
+Worst case: a member's mail filter follows the link, the booking is cancelled, and the day goes to the standby list without the member knowing.
+Fix: opening the link would show a page asking the member to confirm, and nothing would be cancelled until they did. This touches Task 3.
+*Raised by: security.*
+
+**The reminder doesn't say the shelves must be loaded by 8 am.** I recommend adding it. The spec requires it, and members will otherwise lose firings.
+Worst case: a member arrives at 9, finds the kiln already packed, and loses the firing. The spec requires a reminder "listing what must be on the shelves by 8 am" (AC5).
+Fix: `"with the list of what must be on the shelves by 8 am"` replaces "with the list of what goes on the shelves" in Task 2.
+*Raised by: ease of use.*
+
+**A member offered a freed day stays on the standby list.** I recommend that the offer take them off it. Otherwise one member collects several offers while others wait.
+Worst case: the next cancellation offers the same member a second day ahead of everyone behind them.
+Fix: a member offered a freed day would leave that kiln's standby list. This touches Task 3.
+*Raised by: buildability.*
+
+**Cancelling gives no confirmation.** I recommend confirming on screen and by email, so a member who clicked by mistake knows where they stand.
+Worst case: a member cancels by accident, can't tell whether the booking still stands, and turns up to a day already given away.
+Fix: the member would see, and be emailed, a one-line note that the booking is cancelled. This touches Task 3.
+*Raised by: ease of use.*
+
+**The membership spreadsheet with 90 names and email addresses will sit on the technician's laptop.** I recommend deleting it once the load is checked.
+Worst case: the laptop is lost or shared, and every member's contact details go with it.
+Fix: as the reviewer wrote it, "delete it once the load is verified and say so in the task."
+*Raised by: security.*
+
+**Members may find the booking page confusing at first.** This names no concrete way a member gets stuck. The reviewer raised it as needing your decision, and I moved it down for that reason.
+Worst case: the reviewer gave none.
+Fix: as the reviewer wrote it, "add a help page."
+*Raised by: ease of use.*
+
+### Rough edges, nothing to decide
+
+**The reason a technician types for a lock appears on the calendar every member can read, and may carry personal detail.** I recommend keeping personal detail out of what members see.
+Fix: the reviewer names the exposure and proposes no change.
+*Raised by: security.*
+
+**No test covers a cancellation made exactly 24 hours before the day.** I recommend adding one once Task 3 states the cutoff for cancellations (AC3).
+Fix: as the reviewer wrote it, a test for "a cancellation made exactly 24 hours before the booked day."
+*Raised by: failure cases.*
+
+**Tasks 2 and 5 both format dates for display.** I recommend sharing one helper.
+Fix: as the reviewer wrote it, "share one helper."
+*Raised by: buildability.*
+
+**The calendar is said to call a freed day a "release", which reads as jargon.** The plan never uses that word, so this may not apply.
+Fix: the reviewer proposes no replacement word.
+*Raised by: ease of use.*
+
+No corrections to other records came out of this review.
+
+**What happens now.** The run stops here under `plan-critical`, with no retry, in this order:
+
+1. I append the section below to the slice parent.
+2. I write the `## Driver run` checkpoint with `**Phase:** plan`.
+3. I create a `blocked` escalation task as a child of the slice parent. It points at the plan record's `## Council Review` section for these two decision items and makes no recommendation about them.
+
+The branch has no commits yet, so there's no draft PR. The escalation task's id comes back from that create. Once you've decided both items, the resume command is `/craft:drive spec/` followed by this spec's record name. That name isn't in the files I was given, so I can't fill it in here. Resuming continues from the plan checkpoint and first checks that this escalation has been answered.
+
+```markdown
+## Council Review
+
+*Reviewed at:* 2026-11-06
+*Members dispatched:* builder, breaker, attacker, advocate
+*Maturity:* production (basis: stamp)
+
+*Critical:*
+- Task 1 stored `turn` renumbered on cancel races the 18:00 reminder read; two members told the same firing is theirs; Task 1 also describes a turn queue rather than AC2's same-kiln-same-day refusal (builder, breaker)
+- 18:00 reminder job has no success/failure signal; reminders stop silently until a firing is missed (breaker; raised Important, rated Critical as production failure visibility at production maturity)
+
+*Important:*
+- Task 3 cancellation link cancels on open with nothing tying it to the recipient; forwarded mail or link-following scanner cancels the firing (attacker)
+- Task 2 reminder omits the 8 am shelf deadline AC5 requires; members arrive after the kiln is packed (advocate)
+- Task 3 standby offer does not remove the offered member from the standby list; same member offered repeat days (builder)
+- Cancellation gives no on-screen or emailed confirmation (advocate)
+- Membership spreadsheet (90 names and emails) left on technician laptop after load; no deletion step (attacker)
+- Booking page may confuse members; no concrete failure named (advocate; raised Critical, downgraded as speculative)
+
+*Minor:*
+- Lock reason shown on member-readable calendar may carry personal detail (attacker)
+- No test for cancellation exactly 24 hours before the booked day; Task 3 does not state AC3's 24-hour cutoff (breaker)
+- Tasks 2 and 5 duplicate date display formatting (builder)
+- Calendar wording "release" called jargon; term does not appear in the plan (advocate)
+```
