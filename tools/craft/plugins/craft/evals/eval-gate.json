@@ -190,6 +190,11 @@
       "measures": [
         "skills/plan/SKILL.md"
       ]
+    },
+    "build-close-marks-folded-entries": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
     }
   }
 }

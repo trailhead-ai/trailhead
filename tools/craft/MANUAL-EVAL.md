@@ -4450,3 +4450,28 @@ Total spend about $32.9, including the two failed first-treatment and the mis-sp
 **Finding on the registered baseline bar.** The bar "the unedited `plan/SKILL.md` fails the F1, F2 and F3 graders" is not met as a run on the full plugin: an agent that is planning a slice parent whose body says `**Folds:**` finds the slice and script documentation in the same plugin and performs the re-fold and reopen unaided, so the F2 and F3 graders pass there. What only the plan prose produced in those runs is the `Resolves spec/<spec>#F<n>: <title>` Delivers form and the closing-message report; the F1, F2 and F3 graders fail on a plugin without the fold machinery.
 
 **Limitations.** One spec, one phrasing, one model tier. Child `Resolves` lines are read from the bodies written, not from created records. The failure paths (failed re-fold or reopen) are not exercised by a run. The boundary between a fold that balloons and one that does not is not probed.
+
+## Case: build-close-marks-folded-entries
+
+One runner case for the final sweep over folded entries in `skills/_shared/execute.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` and a slice parent `task/count-lines` whose `**Folds:**` line names F1 and F2, both `folded into` the parent; one child, `task/count-lines-build`, is `done` and its Delivers carries `Resolves spec/tally-report#F1: ...`; F2 is named by no child. A seeded `review.md` (PASS, no findings) stands for the whole-change review. The run carries execute from the Phase 5 final sweep through the completion report. Edited prose fingerprint (`git hash-object`): `ab73fa55477a11df26958155f15b3a8c6a299fad`; unedited baseline prose `6967612a5e610d22a0bbc9122172eb5df2fdea11`.
+
+**Status: measured.** Treatment 3 of 3; the six graders are red on the pre-feature plugin; the unedited-`execute.md` baseline is fully green (the behaviour is reachable without the build prose); the three regression cases pass.
+
+Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`, grants as in `eval-gate.json` (no grant added), each invocation under `timeout 580`, `TMPDIR` a fresh directory under `~/.cache`, plugin copies for the baselines carrying `trailhead/`, `tools/lore/{plugins,scripts}` and a `git init`.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-09 | baseline A, only `execute.md` unedited (`6967612a...`) | 1 | 1.0; 1 of 1 pass | green on every grader, F1 and F2 included: the agent found `slice/SKILL.md`, `plan/SKILL.md` and the `found_work.py` docstring in the same plugin and did the `done` and `reopen` unaided. 65 s, $0.66 |
+| 2026-11-09 | baseline B, plugin as it stood before this feature (`slice/SKILL.md`, `plan/SKILL.md`, `execute.md`, `found_work.py` from the merge base) | 1 | 0.0; 0 of 1 | red on all six graders. 60 s, $0.65 |
+| 2026-11-09 | treatment, final prose | 3 (`-j 1`) | 1.0 x3; 3 of 3 pass | 147 s, $1.51 |
+| 2026-11-09 | regression, `build-triages-found-work` | 1 | 1.0; 1 of 1 pass | 116 s, $1.04 |
+| 2026-11-09 | regression, `build-records-a-security-finding-by-location` | 1 | 1.0; 1 of 1 pass | 117 s, $1.19 |
+| 2026-11-09 | regression, `unlinked-build-keeps-capturing-candidates` | 1 | 1.0; 1 of 1 pass | 94 s, $1.04 |
+
+Total spend about $6.1.
+
+**Graders shown red on a state where the behaviour is absent.** All six, on baseline B: `f1-is-done-by-the-parent`, `f2-is-open-again`, `f1-done-and-f2-reopen-decisions-are-logged`, `f2-reopen-decision-carries-a-not-built-reason`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. No grader holds when nothing happens, so none is a guard.
+
+**Finding on the registered baseline bar.** The bar "the unedited `execute.md` fails the F1 and F2 graders" is not met on the full plugin (baseline A, one run): the slice and plan prose and the script docstring in the same plugin teach the `done` and `reopen` transitions, so an agent given a folded-entry fixture performs them unaided. As with the planning case, the case is a guard against the build prose regressing and a detector only against a plugin without the fold machinery. The case cannot show that the new `execute.md` text is what caused the behaviour. Not probed: a child named by an entry but not yet `done`, a review that did not pass, and the sweep failure path (exit 2 or 3, retry command).
+
+**Limitations.** One spec, one phrasing, one model tier, one baseline run per arm, three treatment runs. The review and the child's `done` status are seeded, not built. The real lore state was snapshotted around the batches: only `index.sqlite` and the trailhead vault's publish log changed, and neither names a fixture title.
