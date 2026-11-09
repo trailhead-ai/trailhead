@@ -187,8 +187,8 @@
     "unlinked-build-keeps-capturing-candidates": {
       "measures": [
         "skills/_shared/execute.md"
-        ]
-      },
+      ]
+    },
     "waiting-checks-hold-the-loop-open": {
       "measures": [
         "skills/slice/SKILL.md"
@@ -226,6 +226,30 @@
     },
     "no-ask-close-refuses-a-dirty-tree": {
       "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-ends-a-slice-without-asking-about-its-check": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint": {
+      "measures": [
+        "skills/drive/SKILL.md",
         "skills/_shared/execute.md"
       ]
     }
