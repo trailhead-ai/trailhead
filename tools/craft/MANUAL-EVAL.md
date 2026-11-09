@@ -4420,3 +4420,33 @@ Total spend about $22.8 (a further 1-run `--keep-temp` diagnostic, $1.13, is inc
 **Graders shown red on a state where the behaviour is absent.** The baseline run shows `f1-is-folded-into-the-new-parent`, `f3-is-reopened`, `fold-decision-is-logged`, `reopen-decision-names-the-dropped-task`, `each-decision-precedes-its-result`, `parent-body-names-the-fold` and `outcome-reports-the-decisions` red. The rest were checked offline against fixture states built with the real scaffold and `found_work.py` (graders' regexes run in Python, not the runner): F2 folded instead of F1 turns `f2-stays-open` red (and `f1-is-folded-into-the-new-parent`); F1 folded into the dropped task turns `f1-is-folded-into-the-new-parent` red; fold without a reopen turns `f3-is-reopened`, `reopen-decision-names-the-dropped-task` and `each-decision-precedes-its-result` red. `report-names-the-fold-with-its-path` is red on the baseline by absence of any fold sentence; on a fold sentence without the path it was shown red offline (2026-11-08, the grader's pattern run in Python over constructed final messages): `Folded spec/tally-report#F1 into this slice because it touches the same code.` is red, the same sentence naming `tally/export.py` is red, the sentence with `tally/counter.py` only on a later line is red, and `... (overlaps tally/counter.py).` is green.
 
 **Limitations.** One spec, one phrasing, one model tier. No grader observes that the step 8 statement preceded the parent write (see `expected.md`'s revision note). The failure paths (failed `reopen-abandoned`, failed fold and its retry command) are not exercised by a run. The drop-path sentence in step 5 is not exercised by any case.
+
+## Case: planning-builds-each-folded-entry-into-a-task-or-reopens-it
+
+One runner case for the slice-rooted fold handling of `skills/plan/SKILL.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` (AC1 closed by a done slice) and a slice parent `task/count-lines` whose `**Folds:**` line names F1, F2 and F3: F1 (small, `tally/counter.py`) and F2 (a return-contract change across six files) are `folded into` the parent and F3 (small, `tally/cli.py`) is still `open`, run as `/craft:plan task/count-lines --unattended`. Edited prose fingerprint (`git hash-object`): `db9c207a3c873351cb540858122db03353719125`; unedited baseline prose `5fff0b645746f2f15e60e264d5422f77990bac60`.
+
+**Status: measured.** Treatment 3 of 3 on the final prose and graders; the F1, F2 and F3 graders are red on the pre-feature plugin; the unedited-`plan/SKILL.md` baseline is partly green (see below); the two runnable regression cases pass.
+
+Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`, grants as in `eval-gate.json` plus `Write` (no grant added to the file), each invocation under `timeout 580`, `TMPDIR` a fresh directory under `~/.cache`.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-09 | smoke, `--allow-tools` mis-split | 1 | not scored | the grants were word-split wrongly, so `Write` was withheld; 20 s, $0.36 |
+| 2026-11-09 | baseline (unedited `plan/SKILL.md`), first prompt that named `found_work.py` subcommands | 1 | 0.64; 0 of 1 | the run re-folded F3 and reopened F2 itself; red on the three `Write` graders and the reopen reason. 362 s, $2.93 |
+| 2026-11-09 | baseline, prompt without the command names | 1 | 0.55; 0 of 1 | same: the agent grepped the plugin for `Folds:`, read `slice/SKILL.md` and `found_work.py`, then did the folds. 324 s, $3.03 |
+| 2026-11-09 | treatment, prompt that did not name `entry` and `report` | 3 | 0.55, 0.64, 0.55; 0 of 3 | the prose ran (re-fold, reopen, report) but the decision lines landed in another session (authoring error), and `f2-is-named-by-no-child` could not pass without `min: 0`. 284 s, $6.95 |
+| 2026-11-09 | treatment, final prompt and graders, final prose | 3 (`-j 3`) | 1.0 x3; 3 of 3 pass | 329 s, $7.23 |
+| 2026-11-09 | baseline on the final case, unedited `plan/SKILL.md` in a plugin copy (`trailhead/`, `tools/lore/{plugins,scripts}`, `git init`) | 1 | 0.82; 0 of 1 | red: `f1-is-named-by-a-child` (the run wrote `Resolves spec/tally-report#F1.` with no title) and `closing-message-reports-the-decisions`; green on F2 open and F3 folded because the agent found `slice/SKILL.md` and `found_work.py`. 418 s, $3.08 |
+| 2026-11-09 | baseline on the final case, plugin as it stood before this feature (merge-base `tools/craft/plugins/craft`, copy as above) | 1 | 0.27; 0 of 1 | red: `f1-is-named-by-a-child`, `f2-stays-open`, `f3-is-folded-into-the-parent`, `f3-is-named-by-a-child`, `f2-reopen-decision-carries-a-balloon-reason`, `f3-fold-decision-is-logged`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. 524 s, $4.19 |
+| 2026-11-09 | regression, `plan-keeps-an-earlier-run-section`, final prose | 1 | 1.0; 1 of 1 pass | 268 s, $2.32 |
+| 2026-11-09 | regression, `unattended-slice-then-plan-ends-plan-ready`, final prose | 1 | 1.0; 1 of 1 pass | 346 s, $2.82 |
+
+`prototype-plan-carries-no-migration` is a legacy hand-shaped case (no `case.yaml`; the runner does not run it); `tools/craft/tests/test_plan_migration_bar_contract.py` passes unchanged on the edited skill.
+
+Total spend about $32.9, including the two failed first-treatment and the mis-split smoke batches.
+
+**Graders shown red on a state where the behaviour is absent.** On the pre-feature plugin run: `f1-is-named-by-a-child`, `f3-is-named-by-a-child`, `f2-stays-open`, `f3-is-folded-into-the-parent`, `f2-reopen-decision-carries-a-balloon-reason`, `f3-fold-decision-is-logged`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. `f1-stays-folded` and `f2-is-named-by-no-child` are guards that hold when nothing happens and are not shown red. `final-line-is-plan-ready` is green on every arm.
+
+**Finding on the registered baseline bar.** The bar "the unedited `plan/SKILL.md` fails the F1, F2 and F3 graders" is not met as a run on the full plugin: an agent that is planning a slice parent whose body says `**Folds:**` finds the slice and script documentation in the same plugin and performs the re-fold and reopen unaided, so the F2 and F3 graders pass there. What only the plan prose produced in those runs is the `Resolves spec/<spec>#F<n>: <title>` Delivers form and the closing-message report; the F1, F2 and F3 graders fail on a plugin without the fold machinery.
+
+**Limitations.** One spec, one phrasing, one model tier. Child `Resolves` lines are read from the bodies written, not from created records. The failure paths (failed re-fold or reopen) are not exercised by a run. The boundary between a fold that balloons and one that does not is not probed.

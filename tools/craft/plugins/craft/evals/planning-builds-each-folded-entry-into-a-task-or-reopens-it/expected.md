@@ -49,3 +49,13 @@ Every clause holds.
 - The `llm` trace judge sees only the first and last events of a run, so nothing here grades a mid-run statement; the session-log order of decision line and result line is the deterministic proxy for "decided before it writes".
 - Seeding the session with a fixed id and passing it to the scripts is the eval's own device: a real run does not pass `--session-id`.
 - The failure paths (a failed re-fold, a failed reopen and its retry command) are not exercised; the script's tests cover the commands.
+
+## Addendum 2026-11-09: revisions and evidence after the first runs
+
+Authored after seeing runs; the pre-registered sections above are unchanged.
+
+- **Prompt.** The first prompt told the run to pass the session id to "every command that takes it" and so did not reach `entry` and `report`; the decision lines went to another session (three treatment runs, 0.55, 0.64, 0.55). The final prompt names `found_work.py` `entry` and `report` as the slice case's does. Authoring error in the case, not a prose result.
+- **Graders.** `f2-is-named-by-no-child` needed `min: 0` beside `max: 0` (the runner defaults `min` to 1, so the grader could not pass); the balloon-reason pattern also accepts `every`, `across` and `beyond`, because a run wrote "changes every counting function and touches ... beyond the slice".
+- **The unedited-`plan/SKILL.md` baseline is not a state where the behaviour is absent.** Run on the full plugin with only `plan/SKILL.md` unedited (fingerprint `5fff0b645746f2f15e60e264d5422f77990bac60`), the agent greps the plugin for `Folds:` / `folded into`, reads `slice/SKILL.md` and the `found_work.py` header, and performs the re-fold of F3 and the reopen of F2 itself: `f2-stays-open` and `f3-is-folded-into-the-parent` pass there. What the plan prose adds on top is the `Resolves spec/<spec>#F<n>: <title>` form in a child's Delivers, the closing-message report and the confirmation read. The F1, F2 and F3 graders are shown red on a second baseline: the plugin as it stood before this feature (no `entry` subcommand in `found_work.py`, no fold prose in `slice/SKILL.md` or the build), with the same case.
+- Treatment, 3 runs: 3 of 3 pass. Regression: `plan-keeps-an-earlier-run-section` and `unattended-slice-then-plan-ends-plan-ready` pass; `prototype-plan-carries-no-migration` is a legacy hand-shaped case with no `case.yaml`, which the runner does not run.
+- `f1-stays-folded` and `f2-is-named-by-no-child` hold when nothing happens, so no run shows them red.
