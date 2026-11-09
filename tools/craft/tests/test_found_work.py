@@ -1275,3 +1275,559 @@ def test_entries_refuses_an_unsafe_spec_id(capsys):
     code = fw.main(["entries", "--spec", "spec/a b", "--open"], runner=EntriesLore())
     out = capsys.readouterr()
     assert code == 1 and reason_of(out.err) == "unsafe-id"
+
+
+# --- entry: fold / done / reopen ------------------------------------------------
+
+REV = "a" * 64
+
+
+class EntryLore(FakeLore):
+    """FakeLore plus a mutable spec (`record show`/`record update --base`), a task
+    listing and task bodies. `update_mode`: "ok", "stale" (lore's --base refusal),
+    "fail", "land-then-fail" (the body lands, then lore exits non-zero),
+    "drop-write" (lore says ok but the body does not change)."""
+
+    def __init__(self, spec_body, tasks=None, task_bodies=None, update_mode="ok", layer="personal",
+                 fail_nth_capture=None, nth_writes_then_fails=False, list_rc=0, spec_rc=0, **kw):
+        super().__init__(**kw)
+        self.spec = spec_body
+        self.tasks = tasks or {}
+        self.task_bodies = task_bodies or {}
+        self.update_mode = update_mode
+        self.layer = layer
+        self.rev = 0
+        self.fail_nth_capture = fail_nth_capture
+        self.nth_writes_then_fails = nth_writes_then_fails
+        self.captures = 0
+        self.updates = []
+        self.list_rc = list_rc
+        self.spec_rc = spec_rc
+
+    def _revision(self):
+        return f"{self.rev:064x}" if self.rev else REV
+
+    def __call__(self, argv, stdin=None):
+        def done(rc, out="", err=""):
+            return subprocess.CompletedProcess(argv, rc, out, err)
+
+        if argv[:2] == ["session", "candidate"]:
+            self.captures += 1
+            if self.fail_nth_capture == self.captures:
+                if self.nth_writes_then_fails:
+                    self.calls.append((list(argv), stdin))
+                    self.events.append("capture:" + argv[argv.index("--kind") + 1])
+                    self.entries.append((argv[argv.index("--kind") + 1], stdin))
+                return done(1, "", "error: no session key")
+            return super().__call__(argv, stdin)
+        if argv[:2] == ["record", "show"] and argv[2].startswith("spec/"):
+            self.calls.append((list(argv), stdin))
+            if self.spec_rc:
+                return done(1, "", "boom")
+            return done(0, json.dumps({"body": self.spec, "revision": self._revision(), "layer": self.layer}))
+        if argv[:2] == ["record", "update"]:
+            self.calls.append((list(argv), stdin))
+            self.events.append("update")
+            self.updates.append((list(argv), stdin))
+            if self.update_mode == "stale":
+                return done(1, "", "error: the record changed after you read it")
+            if self.update_mode == "fail":
+                return done(1, "", "error: disk")
+            if self.update_mode != "drop-write":
+                self.spec = stdin
+                self.rev += 1
+            if self.update_mode == "land-then-fail":
+                return done(1, "", "error: index failed")
+            return done(0)
+        if argv[:2] == ["task", "list"]:
+            self.calls.append((list(argv), stdin))
+            assert argv[2:] == ["--vault", "v", "--json"], argv
+            if self.list_rc:
+                return done(1, "", "boom")
+            return done(0, json.dumps([
+                {"name": n, "status": st, "parent": par, "children": []} for n, (st, par) in self.tasks.items()
+            ]))
+        if argv[:2] == ["record", "show"] and argv[2].startswith("task/"):
+            self.calls.append((list(argv), stdin))
+            name = argv[2][5:]
+            if name not in self.task_bodies:
+                return done(1, "", "boom")
+            return done(0, json.dumps({"body": self.task_bodies[name], "revision": REV, "layer": "personal"}))
+        return super().__call__(argv, stdin)
+
+    def update_calls(self):
+        return self.updates
+
+
+def transition(kind="fold", entries=("F1",), **over):
+    doc = {"transition": kind, "parent": "task/P", "spec": "spec/S", "entries": list(entries),
+           "reason": "it touches the same code"}
+    doc.update(over)
+    return doc
+
+
+def run_entry(doc, lore, capsys, *extra, vault=True):
+    stdin = doc if isinstance(doc, str) else json.dumps(doc)
+    args = ["entry", "--session-id", SID, *(["--vault", "v"] if vault else []), *extra]
+    code = fw.main(args, stdin=stdin, runner=lore)
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def two_open():
+    return spec_body(entry_md(1, title="First"), entry_md(2, title="Second", where=("src/b.py", "src/c.py")),
+                     entry_md(3, title="Bystander"))
+
+
+BUILT = {"c1": ("done", "P")}
+BUILT_BODIES = {"c1": task_body("Resolves spec/S#F1: First\nResolves spec/S#F2: Second")}
+
+
+def statuses(body):
+    import followups as fu
+    return {e.id: (e.status_kind, e.status_detail) for e in fu.parse_followups(body)}
+
+
+def changed_lines(before, after):
+    b, a = before.split("\n"), after.split("\n")
+    assert len(a) == len(b)
+    return [(x, y) for x, y in zip(b, a) if x != y]
+
+
+TRANSITIONS = [
+    ("fold", "open", ("folded", "task/P"), "  - status: folded into task/P", "entry-folded"),
+    ("done", "folded into task/P", ("done", "task/P"), "  - status: done by task/P", "entry-done"),
+    ("reopen", "folded into task/P", ("open", None), "  - status: open", "entry-reopened"),
+]
+
+
+@pytest.mark.parametrize("kind,prior,expected,line,decision_kind", TRANSITIONS)
+def test_each_transition_changes_exactly_the_named_entries_status_lines(
+    capsys, kind, prior, expected, line, decision_kind
+):
+    body = spec_body(entry_md(1, title="First", status=prior), entry_md(2, title="Bystander"),
+                     entry_md(3, title="Third", status=prior))
+    delivers = "Resolves spec/S#F1: First\nResolves spec/S#F3: Third"
+    lore = EntryLore(body, tasks=BUILT, task_bodies={"c1": task_body(delivers)})
+    code, out, err = run_entry(transition(kind, ("F1", "F3")), lore, capsys)
+    assert code == 0, err
+    diff = changed_lines(body, lore.spec)
+    assert [y for _, y in diff] == [line, line]
+    assert statuses(lore.spec) == {"F1": expected, "F2": ("open", None), "F3": expected}
+    assert [ln.split(" | ")[0] for ln in lore.bodies("found-work")] == [f"found-work: {decision_kind}"] * 2
+
+
+def test_a_batch_of_two_writes_once_and_logs_two_decision_lines_and_two_result_lines(capsys):
+    lore = EntryLore(two_open())
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 0, err
+    assert len(lore.update_calls()) == 1
+    decisions = lore.bodies("found-work")
+    assert decisions == [
+        "found-work: entry-folded | parent: task/P | record: spec/S#F1 | finding: First | where: src/a.py"
+        " | why: it touches the same code",
+        "found-work: entry-folded | parent: task/P | record: spec/S#F2 | finding: Second | where: src/b.py, src/c.py"
+        " | why: it touches the same code",
+    ]
+    results = [
+        "found-work-result: written | parent: task/P | finding: First | record: spec/S#F1 | reason-code: none",
+        "found-work-result: written | parent: task/P | finding: Second | record: spec/S#F2 | reason-code: none",
+    ]
+    assert lore.bodies("found-work-result") == results
+    assert out.splitlines() == results
+
+
+def test_every_decision_line_is_captured_before_the_write_and_every_result_after_it(capsys):
+    lore = EntryLore(two_open())
+    run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert lore.events == ["capture:found-work"] * 2 + ["update"] + ["capture:found-work-result"] * 2
+
+
+def test_the_update_is_certified_by_the_gate_and_written_with_its_base(capsys):
+    lore = EntryLore(two_open())
+    run_entry(transition("fold", ("F1",)), lore, capsys)
+    ((argv, stdin),) = lore.update_calls()
+    assert argv == ["record", "update", "spec/S", "--base", REV]
+    assert stdin == lore.spec
+
+
+@pytest.mark.parametrize("mode", ["fail", "write-then-fail"])
+def test_a_capture_that_fails_on_the_second_of_two_entries_writes_nothing(capsys, mode):
+    lore = EntryLore(two_open(), fail_nth_capture=2, nth_writes_then_fails=(mode == "write-then-fail"))
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 2
+    assert lore.update_calls() == []
+    assert "reason-code: capture-failed" in err
+    assert lore.bodies("found-work-result") == []
+    assert "nothing was written" in out
+    assert statuses(lore.spec)["F1"] == ("open", None)
+
+
+def test_a_failed_first_capture_logs_nothing_and_writes_nothing(capsys):
+    lore = EntryLore(two_open(), fail_nth_capture=1)
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 2
+    assert lore.update_calls() == [] and lore.entries == []
+
+
+def done_lore(tasks, bodies, entry_status="folded into task/P"):
+    return EntryLore(spec_body(entry_md(1, title="First", status=entry_status)), tasks=tasks, task_bodies=bodies)
+
+
+@pytest.mark.parametrize("tasks,bodies", [
+    ({}, {}),
+    ({"c1": ("done", "P")}, {"c1": task_body("Something else entirely")}),
+    ({"c1": ("ready", "P")}, {"c1": task_body("Resolves spec/S#F1: First")}),
+    ({"c1": ("done", "OTHER")}, {"c1": task_body("Resolves spec/S#F1: First")}),
+], ids=["no-child", "child-names-another-entry", "naming-child-not-done", "naming-child-of-another-parent"])
+def test_done_refuses_entry_not_built(capsys, tasks, bodies):
+    lore = done_lore(tasks, bodies)
+    code, out, err = run_entry(transition("done"), lore, capsys)
+    assert code == 1
+    assert reason_of(err) == "entry-not-built"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_done_succeeds_when_a_done_child_of_this_parent_names_the_entry(capsys):
+    lore = done_lore({"c1": ("done", "P")}, {"c1": task_body("Resolves spec/S#F1: First")})
+    code, out, err = run_entry(transition("done"), lore, capsys)
+    assert code == 0, err
+    assert statuses(lore.spec)["F1"] == ("done", "task/P")
+
+
+def test_done_in_a_batch_is_refused_whole_when_one_entry_is_not_built(capsys):
+    body = spec_body(entry_md(1, title="First", status="folded into task/P"),
+                     entry_md(2, title="Second", status="folded into task/P"))
+    lore = EntryLore(body, tasks={"c1": ("done", "P")}, task_bodies={"c1": task_body("Resolves spec/S#F1: First")})
+    code, out, err = run_entry(transition("done", ("F1", "F2")), lore, capsys)
+    assert code == 1 and reason_of(err) == "entry-not-built"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_done_without_a_vault_is_malformed_input_and_nothing_is_read_or_captured(capsys):
+    lore = done_lore({"c1": ("done", "P")}, {"c1": task_body("Resolves spec/S#F1: First")})
+    code, out, err = run_entry(transition("done"), lore, capsys, vault=False)
+    assert code == 1 and reason_of(err) == "malformed-input"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_done_with_an_unreadable_task_listing_fails_closed_with_exit_2(capsys):
+    lore = EntryLore(spec_body(entry_md(1, status="folded into task/P")), list_rc=1)
+    code, out, err = run_entry(transition("done"), lore, capsys)
+    assert code == 2 and reason_of(err) == "lookup-failed"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_an_unreadable_spec_fails_closed_with_exit_2(capsys):
+    lore = EntryLore(two_open(), spec_rc=1)
+    code, out, err = run_entry(transition("fold"), lore, capsys)
+    assert code == 2 and reason_of(err) == "spec-unreadable"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+WRONG_PRIOR = [
+    ("fold", "folded into task/OTHER", "entry-not-open"),
+    ("fold", "done by task/OTHER", "entry-not-open"),
+    ("fold", "dropped: not worth it", "entry-not-open"),
+    ("done", "folded into task/OTHER", "entry-not-folded-here"),
+    ("reopen", "folded into task/OTHER", "entry-not-folded-here"),
+    ("done", "open", "entry-not-folded-here"),
+    ("done", "dropped: no", "entry-not-folded-here"),
+    ("reopen", "done by task/P", "entry-not-folded-here"),
+    ("reopen", "dropped: no", "entry-not-folded-here"),
+]
+
+
+@pytest.mark.parametrize("kind,status,code_", WRONG_PRIOR)
+def test_a_wrong_prior_status_is_refused_with_its_code_and_nothing_captured_or_written(capsys, kind, status, code_):
+    lore = EntryLore(spec_body(entry_md(1, status=status)), tasks=BUILT, task_bodies=BUILT_BODIES)
+    code, out, err = run_entry(transition(kind), lore, capsys)
+    assert code == 1
+    assert reason_of(err) == code_
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+@pytest.mark.parametrize("kind", ["fold", "done", "reopen"])
+def test_an_unknown_entry_is_refused_unknown_entry(capsys, kind):
+    lore = EntryLore(two_open(), tasks=BUILT, task_bodies=BUILT_BODIES)
+    code, out, err = run_entry(transition(kind, ("F9",)), lore, capsys)
+    assert code == 1 and reason_of(err) == "unknown-entry"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_one_wrong_entry_refuses_the_whole_batch(capsys):
+    body = spec_body(entry_md(1), entry_md(2, status="folded into task/OTHER"))
+    lore = EntryLore(body)
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 1 and reason_of(err) == "entry-not-open"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+@pytest.mark.parametrize("kind,status", [
+    ("fold", "folded into task/P"), ("done", "done by task/P"), ("reopen", "open"),
+])
+def test_a_transition_re_run_on_an_entry_in_its_target_state_is_written_with_no_capture_and_no_write(
+    capsys, kind, status
+):
+    lore = EntryLore(spec_body(entry_md(1, title="First", status=status)), tasks={}, task_bodies={})
+    code, out, err = run_entry(transition(kind), lore, capsys)
+    assert code == 0, err
+    assert out.splitlines() == [
+        "found-work-result: written | parent: task/P | finding: First | record: spec/S#F1 | reason-code: none"
+    ]
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_a_batch_with_one_entry_already_in_the_target_state_captures_and_writes_only_the_other(capsys):
+    body = spec_body(entry_md(1, title="First", status="folded into task/P"), entry_md(2, title="Second"))
+    lore = EntryLore(body)
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 0, err
+    assert len(lore.bodies("found-work")) == 1 and "spec/S#F2" in lore.bodies("found-work")[0]
+    assert len(out.splitlines()) == 2 and all("written" in ln for ln in out.splitlines())
+    assert statuses(lore.spec)["F2"] == ("folded", "task/P")
+
+
+def test_a_retry_after_a_partial_run_that_failed_the_write_succeeds(capsys):
+    lore = EntryLore(two_open(), update_mode="land-then-fail")
+    code, _, _ = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 3
+    lore.entries.clear()
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 0, err
+    assert lore.entries == []
+
+
+def test_a_spec_changed_between_read_and_write_is_refused_stale_base_with_a_retry_command(capsys):
+    lore = EntryLore(two_open(), update_mode="stale")
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 3
+    lines = out.splitlines()
+    assert lines[0] == (
+        "found-work-result: failed | parent: task/P | finding: First | record: spec/S#F1 | reason-code: stale-base"
+    )
+    assert statuses(lore.spec)["F1"] == ("open", None)
+    assert lore.bodies("found-work-result") == [lines[0]]
+    (retry,) = [ln for ln in lines if ln.startswith("retry: ")]
+    assert "found_work.py entry --session-id " + SID + " --vault v" in retry
+
+
+def test_the_printed_retry_command_runs_as_pasted_and_completes_the_transition(capsys, tmp_path):
+    lore = EntryLore(two_open(), update_mode="stale")
+    _, out, _ = run_entry(transition("fold", ("F1",), reason="why 'quoted'"), lore, capsys)
+    (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
+    import shlex
+    argv = shlex.split(retry[len("retry: "):])
+    assert argv[:2] == ["printf", "%s"]
+    doc = json.loads(argv[2])
+    assert doc == transition("fold", ("F1",), reason="why 'quoted'")
+    assert argv[3] == "|"
+    lore.update_mode = "ok"
+    code = fw.main(argv[argv.index("entry"):], stdin=argv[2], runner=lore)
+    assert code == 0
+    assert statuses(lore.spec)["F1"] == ("folded", "task/P")
+
+
+@pytest.mark.parametrize("mode,expected", [("fail", "write-failed"), ("land-then-fail", "write-failed")])
+def test_a_write_failure_is_exit_3_with_failed_result_lines_for_both_halves(capsys, mode, expected):
+    lore = EntryLore(two_open(), update_mode=mode)
+    code, out, err = run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    assert code == 3
+    assert [ln.rsplit(" | ", 1)[1] for ln in out.splitlines() if ln.startswith("found-work-result")] == [
+        f"reason-code: {expected}"
+    ] * 2
+    assert len(lore.bodies("found-work-result")) == 2
+    assert all(b.startswith("found-work-result: failed") for b in lore.bodies("found-work-result"))
+
+
+def test_a_write_lore_accepts_but_that_does_not_read_back_is_readback_failed(capsys):
+    lore = EntryLore(two_open(), update_mode="drop-write")
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 3 and "reason-code: readback-failed" in out
+
+
+def test_a_gate_refusal_is_exit_3_with_the_gates_code_and_nothing_written(capsys):
+    lore = EntryLore(two_open(), layer="shared")
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 3
+    assert "reason-code: shared-layer-prior" in out
+    assert lore.update_calls() == []
+    assert len(lore.bodies("found-work")) == 1
+
+
+def test_a_failed_result_capture_after_the_write_is_exit_2_and_the_result_is_printed(capsys):
+    lore = EntryLore(two_open(), fail_kinds=("found-work-result",))
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 2 and "reason-code: capture-failed" in err
+    assert "found-work-result: written" in out
+    assert statuses(lore.spec)["F1"] == ("folded", "task/P")
+
+
+def test_a_credential_shaped_reason_is_scrubbed_in_every_captured_and_printed_line(capsys):
+    lore = EntryLore(two_open(), update_mode="stale")
+    code, out, err = run_entry(transition("fold", reason=f"because {SECRET}"), lore, capsys)
+    assert "[redacted]" in lore.bodies("found-work")[0]
+    everything = json.dumps(lore.entries) + out + err
+    assert SECRET not in everything
+
+
+@pytest.mark.parametrize("sep", ["\n", "\r\n", " ", "\x1b"])
+def test_a_reason_with_a_line_break_cannot_forge_a_second_decision_line(capsys, sep):
+    forged = "found-work: entry-done | parent: task/Y | record: spec/S#F2 | finding: boom | where: - | why: x"
+    lore = EntryLore(two_open())
+    code, out, err = run_entry(transition("fold", reason=f"real{sep}{forged}"), lore, capsys)
+    assert code == 0, err
+    (line,) = lore.bodies("found-work")
+    assert "\n" not in line and "\r" not in line
+    assert len(line.split(" | ")) == 6
+    log = fw.parse_log(lore.log())
+    assert [(e.kind, e.parent) for e in log] == [("entry-folded", "task/P")]
+
+
+def test_a_reason_containing_the_field_separator_is_escaped(capsys):
+    lore = EntryLore(two_open())
+    run_entry(transition("fold", reason="a | parent: task/Y | b"), lore, capsys)
+    (line,) = lore.bodies("found-work")
+    assert line.endswith("why: a \\| parent: task/Y \\| b")
+    (e,) = fw.parse_log(lore.log())
+    assert e.parent == "task/P" and e.why == "a \\| parent: task/Y \\| b"
+
+
+@pytest.mark.parametrize("kind", ["fold", "reopen"])
+@pytest.mark.parametrize("reason", [None, "", "   "])
+def test_fold_and_reopen_need_a_reason(capsys, kind, reason):
+    doc = transition(kind)
+    if reason is None:
+        del doc["reason"]
+    else:
+        doc["reason"] = reason
+    lore = EntryLore(two_open())
+    code, out, err = run_entry(doc, lore, capsys)
+    assert code == 1 and reason_of(err) == "reason-required"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
+def test_done_needs_no_reason_and_logs_a_dash(capsys):
+    lore = done_lore({"c1": ("done", "P")}, {"c1": task_body("Resolves spec/S#F1: First")})
+    doc = transition("done")
+    del doc["reason"]
+    code, out, err = run_entry(doc, lore, capsys)
+    assert code == 0, err
+    assert lore.bodies("found-work")[0].endswith("| why: -")
+
+
+@pytest.mark.parametrize("doc,code_", [
+    ("not json", "malformed-input"),
+    ("[]", "malformed-input"),
+    (transition("bogus"), "malformed-input"),
+    (transition(entries=[]), "malformed-input"),
+    (transition(entries="F1"), "malformed-input"),
+    (transition(entries=["F1", "F1"]), "malformed-input"),
+    (transition(entries=["1"]), "malformed-input"),
+    (transition(entries=["F0"]), "malformed-input"),
+    (transition(entries=["F1; rm"]), "malformed-input"),
+    (transition(reason=3), "malformed-input"),
+    (transition(parent=3), "malformed-input"),
+    (transition(parent="task/a b"), "unsafe-id"),
+    (transition(parent="spec/S"), "unsafe-id"),
+    (transition(spec="spec/a b"), "unsafe-id"),
+    (transition(spec="task/S"), "unsafe-id"),
+    (transition(spec=""), "no-spec"),
+])
+def test_a_malformed_transition_is_refused_and_nothing_is_read_captured_or_written(capsys, doc, code_):
+    lore = EntryLore(two_open())
+    code, out, err = run_entry(doc, lore, capsys)
+    assert code == 1 and reason_of(err) == code_
+    assert lore.calls == [] and lore.update_calls() == []
+
+
+def test_reopen_across_several_parents_composes_one_body_and_does_one_write(capsys):
+    body = spec_body(entry_md(1, title="First", status="folded into task/P"),
+                     entry_md(2, title="Second", status="folded into task/Q"), entry_md(3, title="Third"))
+    lore = EntryLore(body)
+    code, out = fw.reopen_entries(
+        "spec/S", [("task/P", "F1", "slice dropped"), ("task/Q", "F2", "slice superseded")], lore, SID
+    )
+    assert code == 0, out
+    assert len(lore.update_calls()) == 1
+    assert statuses(lore.spec) == {"F1": ("open", None), "F2": ("open", None), "F3": ("open", None)}
+    assert lore.bodies("found-work") == [
+        "found-work: entry-reopened | parent: task/P | record: spec/S#F1 | finding: First | where: src/a.py"
+        " | why: slice dropped",
+        "found-work: entry-reopened | parent: task/Q | record: spec/S#F2 | finding: Second | where: src/a.py"
+        " | why: slice superseded",
+    ]
+    assert len(out.splitlines()) == 2
+
+
+def test_reopen_entries_refuses_an_entry_folded_into_a_different_task_than_named(capsys):
+    lore = EntryLore(spec_body(entry_md(1, status="folded into task/Q")))
+    code, out = fw.reopen_entries("spec/S", [("task/P", "F1", "gone")], lore, SID)
+    assert code == 1 and "reason-code: entry-not-folded-here" in out
+    assert lore.update_calls() == [] and lore.entries == []
+
+
+# --- report: the three entry kinds -------------------------------------------------
+
+
+def test_report_prints_each_entry_kind_as_its_sentence(capsys):
+    lore = EntryLore(spec_body(entry_md(1, title="First"), entry_md(2, title="Second", status="folded into task/P"),
+                               entry_md(3, title="Third", status="folded into task/P")),
+                     tasks={"c1": ("done", "P")}, task_bodies={"c1": task_body("Resolves spec/S#F2: Second")})
+    run_entry(transition("fold", ("F1",)), lore, capsys)
+    run_entry(transition("done", ("F2",), reason="built"), lore, capsys)
+    run_entry(transition("reopen", ("F3",), reason="it ballooned"), lore, capsys)
+    _, out, _ = run_report("task/P", lore, capsys, "--session-id", SID)
+    assert out.splitlines() == [
+        "Folded spec/S#F1 into this slice: First, because it touches the same code.",
+        "Marked spec/S#F2 done by this slice: Second.",
+        "Returned spec/S#F3 to open: Third, because it ballooned.",
+    ]
+
+
+def test_report_pairs_each_entry_result_with_its_own_entry_even_when_titles_match(capsys):
+    body = spec_body(entry_md(1, title="Same"), entry_md(2, title="Same"))
+    lore = EntryLore(body, update_mode="stale")
+    run_entry(transition("fold", ("F1", "F2")), lore, capsys)
+    lore.update_mode = "ok"
+    lore.entries = [(k, b) for k, b in lore.entries if k == "found-work"]
+    run_entry(transition("fold", ("F1",)), lore, capsys)
+    _, out, _ = run_report("task/P", lore, capsys, "--session-id", SID)
+    assert "Folded spec/S#F1 into this slice: Same" in out
+
+
+def test_report_gives_a_failed_entry_write_the_retry_guidance_not_the_flush_one(capsys):
+    lore = EntryLore(two_open(), update_mode="stale")
+    run_entry(transition("fold", ("F1",)), lore, capsys)
+    _, out, _ = run_report("task/P", lore, capsys, "--session-id", SID)
+    assert out.splitlines()[0] == fw.NEEDS_OPERATOR_HEADING
+    assert "Not written: First (entry-folded)" in out
+    assert "Re-run the entry transition" in out
+    assert "file it as a task" not in out
+
+
+def test_report_with_no_entry_decisions_still_prints_the_no_decisions_line(capsys):
+    _, out, _ = run_report("task/P", EntryLore(two_open()), capsys, "--session-id", SID)
+    assert out.strip() == fw.NO_DECISIONS_LINE
+
+
+def test_parse_log_pairs_each_entry_result_with_the_entry_it_names_when_titles_match():
+    def cand(kind, line):
+        return f"- candidate 2026-11-07T00:00:00Z kind={kind} phase=Build\n  {line}\n"
+
+    def dec(n):
+        return cand(
+            "found-work",
+            f"found-work: entry-folded | parent: task/P | record: spec/S#F{n} | finding: Same | where: a.py | why: r",
+        )
+
+    def res(n, status, code):
+        return cand(
+            "found-work-result",
+            f"found-work-result: {status} | parent: task/P | finding: Same | record: spec/S#F{n}"
+            f" | reason-code: {code}",
+        )
+
+    log = dec(1) + dec(2) + res(1, "failed", "stale-base") + res(2, "written", "none")
+    paired = [(e.record, e.result_status) for e in fw.parse_log(log)]
+    assert paired == [("spec/S#F1", "failed"), ("spec/S#F2", "written")]

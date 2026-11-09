@@ -912,3 +912,62 @@ def test_a_lost_result_retry_after_a_separate_decision_does_not_reuse_it_for_a_b
     code, out, err = go(seam, task_decision("brainstorm"))
     assert code == 0, err
     assert len(all_tasks(seam)) == 2
+
+
+# --- entry: fold then done through lore's --base check ---------------------------
+
+
+def make_task(seam, title, body, status, parent=None):
+    argv = ["record", "create", "--kind", "task", "--title", title, "--status", status]
+    if parent:
+        argv += ["--parent", parent.split("/", 1)[1]]
+    done = seam.lore(*argv, stdin=body)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def transition_doc(kind, entries, parent, **over):
+    return {"transition": kind, "parent": parent, "spec": "spec/fixture-spec", "entries": entries,
+            "reason": "it touches the same code", **over}
+
+
+def run_entry_cli(seam, doc, vault="default"):
+    return seam.script("entry", "--session-id", SID, "--vault", vault, stdin=json.dumps(doc))
+
+
+def test_a_fold_then_a_done_land_on_a_ready_spec_through_lores_base_check_and_read_back(seam):
+    spec_id = make_spec(seam, SPEC_BODY + SECTION.replace("status: dropped: not worth it", "status: open"))
+    assert show(seam, spec_id)["sidecar"]["status"] == "ready"
+    parent = make_task(seam, "Slice parent", "the slice\n", "in-progress")
+    delivers = "# T\n\n**Delivers:** Resolves spec/fixture-spec#F1: First thing\n"
+    make_task(seam, "Build the first thing", delivers, "done", parent)
+    before = show(seam, spec_id)["body"]
+
+    fold = run_entry_cli(seam, transition_doc("fold", ["F1", "F2"], parent))
+    assert fold.returncode == 0, fold.stderr
+    assert [ln.split(" | ")[0] for ln in fold.stdout.splitlines()] == ["found-work-result: written"] * 2
+    folded = show(seam, spec_id)["body"]
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(folded)} == {
+        "F1": ("folded", parent), "F2": ("folded", parent)}
+    assert followups.excise_section(folded) == followups.excise_section(before)
+
+    done = run_entry_cli(seam, transition_doc("done", ["F1"], parent, reason=""))
+    assert done.returncode == 0, done.stderr
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(show(seam, spec_id)["body"])} == {
+        "F1": ("done", parent), "F2": ("folded", parent)}
+
+    unbuilt = run_entry_cli(seam, transition_doc("done", ["F2"], parent))
+    assert unbuilt.returncode == 1
+    assert "reason-code: entry-not-built" in unbuilt.stderr
+
+    log = found_work_lines(seam.session_text())
+    assert [ln.split(" | ")[0] for ln in log] == (
+        ["found-work: entry-folded"] * 2 + ["found-work-result: written"] * 2
+        + ["found-work: entry-done", "found-work-result: written"]
+    )
+    report = seam.report(parent)
+    assert report.stdout.splitlines() == [
+        "Folded spec/fixture-spec#F1 into this slice: First thing, because it touches the same code.",
+        "Folded spec/fixture-spec#F2 into this slice: Second thing, because it touches the same code.",
+        "Marked spec/fixture-spec#F1 done by this slice: First thing.",
+    ]
