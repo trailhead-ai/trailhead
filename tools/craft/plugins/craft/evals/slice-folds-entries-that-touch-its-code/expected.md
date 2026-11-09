@@ -51,3 +51,10 @@ Every clause holds.
 ## Revision after the first treatment runs
 
 Authored after seeing runs, so recorded as a revision and not as the original plan. The first draft graded the statement with an `llm` trace grader, `statement-names-the-fold-before-the-parent`. On the edited prose it voted FAIL on 5 of 6 verdicts across 3 runs while every deterministic grader passed, because the statement sits in the middle of the trace, outside the first and last 12 events the judge sees. It was replaced by the `regex` grader `report-names-the-fold-with-its-path` in the table above. The prompt was also changed: the first treatment batch scored 0.44 to 0.67 because the session-log graders read `vault/session/<id>.md` while the run's `found_work.py` calls had not been given the session id, so the decision lines went to another session. The prompt now tells the agent to add `--session-id` to the `found_work.py` commands that take it. Both are authoring errors in the case, not prose results.
+
+## Addendum 2026-11-08: evidence gaps closed after the case was final
+
+Authored after the runs above; the pre-registered sections are unchanged.
+
+- Baseline on the final case: one run of the final prompt and graders on the unedited prose (fingerprint `6b90445d031d197fadff8f9c4b9274cdb74e46b7`, rebuilt as an untracked temp copy of the plugin) scored 0.11. Red: `each-decision-precedes-its-result`, `f1-is-folded-into-the-new-parent`, `f3-is-reopened`, `fold-decision-is-logged`, `outcome-reports-the-decisions`, `parent-body-names-the-fold`, `reopen-decision-names-the-dropped-task` and `report-names-the-fold-with-its-path`. Green, as registered: `f2-stays-open`.
+- `report-names-the-fold-with-its-path` shown red on a present fold sentence: run offline over constructed final messages, it is red on `Folded spec/tally-report#F1 into this slice` with no path, red with the wrong path (`tally/export.py`), red with `tally/counter.py` only on a later line, and green with `tally/counter.py` on the sentence's line.
