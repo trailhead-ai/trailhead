@@ -27,5 +27,6 @@ Predicted baseline (red): no `outcome:` line and no block outcome.
 - One fixture, one phrasing, one model tier for the runner; the dispatched updater and monitor run on their own pins.
 - Monitor's outcome line is written by the background monitor through the runner's `Write` grant; the real `wait-for-actionable`, `gh` and `merge` are stand-ins, so this measures the skill's wait, mapping and block write and monitor's obedience, not the CI watch itself.
 - Write order ("block before push", "outcome written before the final line") is observed through end state and the tool-call set only.
+- Sandbox accommodations carried in every prompt, which the prose cannot provide itself: a command containing a newline or a redirect is denied, so `gh pr create` takes a one-line body and the updater is handed `pr_body_file` (the saved current body, `pr-description.md`); the prompt also asks that the note be passed on to every dispatched agent.
 - The credential scrub of the block diff, the temp-file route for the diff and the one retry of a non-applying diff are not graded.
 - Whether monitor ends `BLOCKED` or `STOPPED` on this fixture is the monitor's call; both map to `stuck`, and the case does not distinguish them.

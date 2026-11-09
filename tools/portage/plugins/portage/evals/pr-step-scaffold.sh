@@ -60,6 +60,7 @@ JSON
 } > "$W/group.toml"
 echo "$MONITOR_MODE" > "$W/.monitor-mode"
 echo "$PR_COMMENT" > "$W/.pr-comment"
+printf "Original body\n" > "$W/pr-description.md"
 [ "$PR_STATE" = "existing" ] && : > "$W/.pr-exists"
 
 cat > "$W/gh" <<'GH'
