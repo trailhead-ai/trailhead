@@ -59,6 +59,9 @@ docker run -d --name acme-env-main \
 Replace `alpine sleep 3600` with your image and command. Keep the example minimal: no `--privileged`, no mount of
 `/var/run/docker.sock`, and no port published outside `127.0.0.1`.
 
+The blocks after this one show what camp refuses. Read them; run them only on a scratch machine, never on a host you have
+opted in, and remove what they create with `docker rm -f acme-env-main acme-helper acme-env-idle`.
+
 Not allowed: a port published on all interfaces (no address in front of the host port).
 
 ```sh camp-env-counter-example
@@ -156,7 +159,8 @@ Run it on the machine to see what camp will see, then run `camp env ls local` to
 
 To probe a remote host before you opt it in for real, use a scratch config directory and a throwaway container, then remove it so
 no phantom environment stays in anyone's listing. Replace `builder.example.com` with the host's ssh name and `camp_bin` with the
-path of camp on it. Save this as `~/.cache/camp-probe/hosts.toml`:
+path of camp on it. Verify the host key first, as step 5 of [Preparing an environment host](#preparing-an-environment-host)
+says: the probe's ssh commands run `docker` there as the ssh user. Save this as `~/.cache/camp-probe/hosts.toml`:
 
 ```toml camp-env-probe-hosts
 env_hosts = ["builder"]
@@ -175,7 +179,7 @@ env CAMP_CONFIG_DIR=$HOME/.cache/camp-probe camp env ls builder
 ssh builder.example.com docker rm -f probe-env-check
 ```
 
-The listing should be this, and the last line removes the probe container:
+The listing should be this. The last line removes the probe container; run it even if the listing fails:
 
 ```text camp-env-probe-listing
 builder
@@ -218,7 +222,8 @@ you run `camp env`. Its `~/.config/camp/hosts.toml` declares the environment hos
 4. On the reading machine: set up ssh keys. Camp connects with `BatchMode=yes`, so it never prompts for a password or passphrase;
    load the key into an agent or use a key without a passphrase.
 5. Verify the host key once, out of band, before the first connect. Camp pins `StrictHostKeyChecking=yes`, so the key must
-   already be in the reading machine's `known_hosts`. On the environment host, print its fingerprint with
+   already be in the reading machine's `known_hosts`. On the environment host, at its console or over a channel other than the
+connection you are verifying, print its fingerprint with
    `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`. On the reading machine run `ssh <the declared ssh destination>` once,
    exactly the `ssh` value from `hosts.toml` because `known_hosts` is keyed by what ssh connects to, and compare the fingerprint
    ssh shows against that one before you answer `yes`. Do not work around the pin with `accept-new`, `no`, or a blind
@@ -226,10 +231,11 @@ you run `camp env`. Its `~/.config/camp/hosts.toml` declares the environment hos
 6. On a Mac environment host, put `docker` on the PATH of a non-interactive ssh command. Check from the reading machine with
    `ssh <the declared ssh destination> command -v docker`. If it prints nothing, open an interactive terminal on the host, run
    `command -v docker`, and add the directory it prints: Homebrew's is `/opt/homebrew/bin`, and Docker Desktop's installer uses
-   `/usr/local/bin` or `~/.docker/bin`. For a fish login shell, put `fish_add_path -g <dir>` in `~/.config/fish/config.fish`,
+   `/usr/local/bin` or `~/.docker/bin`. Add it after the system directories, so nothing in a user-writable directory shadows a
+system command. For a fish login shell, put `fish_add_path -g --append <dir>` in `~/.config/fish/config.fish`,
    outside the `if status is-interactive` block; do not run bare `fish_add_path`, which stores the setting in fish's universal-variable store; keeping
    it in `config.fish` leaves it declared, visible, and reproducible. For zsh, add
-   `export PATH=<dir>:$PATH` to `~/.zshenv`.
+   `export PATH=$PATH:<dir>` to `~/.zshenv`.
 7. On the reading machine: add the host to `env_hosts`, the top-level list `camp env ls` reads. Each entry is a declared
    `[hosts.<name>]`.
 
@@ -250,7 +256,8 @@ Docker Desktop runs inside a logged-in user's session, so after a reboot a Mac h
 in. Automatic login fixes that, with a cost: it is unavailable while FileVault is on (Apple: when FileVault is turned on, manual
 login is required, see [Apple's login-settings article](https://support.apple.com/en-us/102316)), and it weakens physical
 security, since anyone with the machine in hand reaches the logged-in session. It fits a dedicated, physically controlled host.
-The alternative is to log in once at the machine after each reboot.
+Do not turn FileVault off to get automatic login: that leaves the disk unencrypted, and automatic login keeps the account
+password on the machine. The alternative is to log in once at the machine after each reboot.
 
 ## Using environments
 
