@@ -909,14 +909,14 @@ through the same `--diff` edit confined to the block.
 ## Outcome
 
 **Report the pass's found-work decisions first, whenever it made any.** When step 4 or step 5
-reopened entries, or step 9 folded them, run
+reopened entries, step 9 folded them, or a `reopen-abandoned` pass only marked entries done, run
 `${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<id>` once for the new slice
 parent and once for each `task/<id>` that `reopen-abandoned` printed as a `parent:`, and put the
 sentences it prints in your closing message, above any outcome line, as printed — a sentence left in
-an earlier message does not count — for example "Folded spec/x#F2 into this slice: …" and "Returned
-spec/x#F2 to open: …". Any failure step 4 or step 9 reported, with its reason-code and retry
-command, goes in the same report. A pass that made no found-work decision runs nothing here and
-reports nothing about it.
+an earlier message does not count — for example "Folded spec/x#F2 into this slice: …", "Returned
+spec/x#F2 to open: …" and "Marked spec/x#F1 done by this slice: <title>.". Any failure step 4 or
+step 9 reported, with its reason-code and retry command, goes in the same report. A pass that made
+no found-work decision runs nothing here and reports nothing about it.
 
 **Under `--unattended`, the handoff below does not apply.** Report the chosen slice, its value claim
 and the new parent task's record id in prose, then finish the run block and end:

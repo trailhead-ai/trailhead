@@ -306,6 +306,9 @@ _ENTRY_LINE_RE = re.compile(r"^- \*\*(F[1-9][0-9]*)\.\*\* ")
 _STATUS_RE = re.compile(r"[a-z][a-z-]*")
 _DELIVERS_RE = re.compile(r"^\*\*Delivers:\*\*")
 _SECTION_END_RE = re.compile(r"^(?:\*\*[^*\n]+:\*\*|#{1,6} )")
+_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+_RESOLVES_LINE_RE = re.compile(r"^\s*(?:[-*]\s+)*Resolves[ \t]+(?P<spec>[^\s#]+)#(?P<entry>[A-Za-z0-9]+)(?::|\s*$)")
+_ARG_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 _NEUTRALIZE_CATEGORIES = {"Cc", "Cf", "Zl", "Zp", "Zs"}
 
 
@@ -383,7 +386,7 @@ def _run_gate(prior_json: str, proposed: str) -> tuple[str | None, str | None]:
 
 
 def _read_record(runner, spec: str, vault: str | None = None) -> tuple[dict, str] | None:
-    done = _call(runner, ["record", "show", spec, "--json", *(["--vault", vault] if vault else [])])
+    done = _call(runner, ["record", "show", spec, "--json", *_vault_args(vault)])
     if done.returncode != 0:
         return None
     try:
@@ -550,7 +553,11 @@ def _call(runner, argv: list[str], stdin: str | None = None) -> subprocess.Compl
 
 
 def _session_args(session_id: str | None) -> list[str]:
-    return ["--session-id", session_id] if session_id else []
+    return [f"--session-id={session_id}"] if session_id else []
+
+
+def _vault_args(vault: str | None) -> list[str]:
+    return [f"--vault={vault}"] if vault else []
 
 
 # --- validate / scrub / neutralize -------------------------------------------
@@ -563,7 +570,21 @@ def _neutralize(text: str) -> str:
     return " ".join(collapsed.split()).replace("|", "\\|")
 
 
+def _strip_invisible(text: str) -> str:
+    """`text` without the characters that can sit inside a credential without changing how it reads: format, control
+    and non-ASCII space/separator characters. Plain ASCII whitespace stays, so words are not fused."""
+    return "".join(
+        ch for ch in text
+        if not (unicodedata.category(ch) in _NEUTRALIZE_CATEGORIES and not (ch.isascii() and ch.isspace()))
+    )
+
+
 def _clean(text: str) -> str:
+    collapsed = _strip_invisible(text)
+    if collapsed != text:
+        scrubbed = scrub_credential_shaped(collapsed)
+        if scrubbed != collapsed:
+            return _neutralize(scrubbed)
     return _neutralize(scrub_credential_shaped(text))
 
 
@@ -576,6 +597,13 @@ def _check_path(path: str) -> None:
         raise Refusal("every where path must be repository-relative", "path-outside-repository")
     if any(scrub_credential_shaped(segment) != segment for segment in path.split("/")):
         raise Refusal("a where path must not look like a credential", "credential-in-path")
+
+
+def _redact_where(path: str) -> str:
+    """`path` with each credential-shaped segment replaced, for a path read from the vault rather than refused."""
+    return "/".join(
+        "[redacted]" if scrub_credential_shaped(segment) != segment else segment for segment in path.split("/")
+    )
 
 
 def _str_field(value, name: str, default: str = "") -> str:
@@ -922,7 +950,7 @@ def _read_entries(runner, spec: str, vault: str | None = None) -> tuple[list[fol
     try:
         entries = followups.parse_followups(read[0]["body"])
     except followups.FollowupsError as exc:
-        raise Refusal(str(exc), exc.reason_code)
+        raise Refusal(f"the follow-ups section is malformed ({exc.reason_code})", exc.reason_code)
     except followups.DuplicateHeadingError:
         raise Refusal("the spec has two Follow-ups headings", "duplicate-followups-heading")
     return entries, read[0], read[1]
@@ -942,9 +970,22 @@ def _delivers_text(body: str) -> str:
 
 
 def names_entry(task_body: str, spec: str, entry_id: str) -> bool:
-    """True when the task body's `**Delivers:**` text carries `Resolves <spec>#<entry_id>`."""
-    pattern = rf"(?<![A-Za-z0-9._/-])Resolves\s+{re.escape(spec)}#{re.escape(entry_id)}(?![A-Za-z0-9])"
-    return re.search(pattern, _delivers_text(task_body)) is not None
+    """True when a line of the task body's `**Delivers:**` text begins, after the field label and any list markers,
+    with `Resolves <spec>#<entry_id>` followed by `:` or the end of the line. Only that leading token is read, so
+    text after it (an entry title copied from the vault) names nothing; lines inside a code fence are skipped."""
+    fenced = False
+    for i, line in enumerate(_delivers_text(task_body).splitlines()):
+        if i == 0:
+            line = _DELIVERS_RE.sub("", line)
+        if _FENCE_RE.match(line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        m = _RESOLVES_LINE_RE.match(line)
+        if m and (m["spec"], m["entry"]) == (spec, entry_id):
+            return True
+    return False
 
 
 def _lookup_failed(what: str) -> Refusal:
@@ -952,7 +993,7 @@ def _lookup_failed(what: str) -> Refusal:
 
 
 def _children_of(runner, vault: str, parent: str) -> list[tuple[str, str]]:
-    done = _call(runner, ["task", "list", "--vault", vault, "--json"])
+    done = _call(runner, ["task", "list", f"--vault={vault}", "--json"])
     try:
         listing = json.loads(done.stdout) if done.returncode == 0 else None
     except ValueError:
@@ -989,7 +1030,7 @@ def _named_by(
 
 
 def _render_entry(e: followups.Entry, named_by: list[tuple[str, str]] | None) -> list[str]:
-    lines = [e.id, f"  where: {', '.join(e.where)}"]
+    lines = [e.id, f"  where: {', '.join(_redact_where(w) for w in e.where)}"]
     if named_by is not None:
         lines.append(f"  named-by: {', '.join(f'{task} ({status})' for task, status in named_by) or 'none'}")
     lines += [
@@ -1046,7 +1087,7 @@ class Planned:
             spec="",
             title=_clean(self.entry.title),
             what="",
-            where=self.entry.where,
+            where=tuple(_redact_where(w) for w in self.entry.where),
             found="",
             security=False,
             reason=self.move.reason,
@@ -1163,7 +1204,7 @@ def apply_moves(
         base, code = _run_gate(doc_json, proposed)
         if not code:
             done = _call(
-                runner, ["record", "update", spec, "--base", base, *(["--vault", vault] if vault else [])], proposed
+                runner, ["record", "update", spec, "--base", base, *_vault_args(vault)], proposed
             )
             code = _lore_failure_code(done) if done.returncode != 0 else None
         if not code and not _readback_ok(runner, spec, planned, vault):
@@ -1225,7 +1266,7 @@ _RESULT_CODE_RE = re.compile(r"reason-code: ([a-z0-9-]+)\s*$", re.MULTILINE)
 
 def _task_status(runner, task: str, vault: str | None) -> str | None:
     """The status of `task` as lore reports it, or None when it cannot be read or is not a status."""
-    done = _call(runner, ["record", "show", task, "--json", *(["--vault", vault] if vault else [])])
+    done = _call(runner, ["record", "show", task, "--json", *_vault_args(vault)])
     try:
         doc = json.loads(done.stdout) if done.returncode == 0 else None
     except ValueError:
@@ -1349,8 +1390,6 @@ def retry_command_for(doc: dict, session_id: str | None, vault: str | None) -> s
 def _entry_command(args, raw: str, runner) -> int:
     spec, moves, doc = build_moves(raw)
     vault = args.vault
-    if vault is not None and not _NAME_RE.fullmatch(vault):
-        raise Refusal("--vault must be a vault name", "malformed-input")
     retry = retry_command_for(doc, args.session_id, vault)
     code, text = apply_moves(spec, moves, runner, args.session_id, vault=vault, retry_command=retry)
     print(text)
@@ -1393,8 +1432,6 @@ def _parser() -> argparse.ArgumentParser:
 def _reopen_abandoned_command(args, runner) -> int:
     if not _SPEC_RECORD_RE.fullmatch(args.spec):
         raise Refusal("spec must be spec/<id>", "unsafe-id")
-    if args.vault is not None and not _NAME_RE.fullmatch(args.vault):
-        raise Refusal("--vault must be a vault name", "malformed-input")
     retry = _rerun_command(["reopen-abandoned", "--spec", args.spec], args.session_id, args.vault)
     code, text, err = reopen_abandoned(args.spec, runner, args.session_id, vault=args.vault, retry_command=retry)
     if text:
@@ -1412,7 +1449,7 @@ def _entries_command(args, runner) -> int:
     if args.folded_into is not None:
         if not _TASK_RECORD_RE.fullmatch(args.folded_into):
             raise Refusal("--folded-into must be task/<id>", "unsafe-id")
-        if not (args.vault and _NAME_RE.fullmatch(args.vault)):
+        if not args.vault:
             raise Refusal("--folded-into needs --vault NAME", "malformed-input")
     print(list_entries(args.spec, runner, folded_into=args.folded_into, vault=args.vault))
     return EXIT_DONE
@@ -1433,6 +1470,13 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
     args = None
     try:
         args = _parser().parse_args(argv)
+        for flag, attr in (("--vault", "vault"), ("--session-id", "session_id")):
+            value = getattr(args, attr, None)
+            if value is not None and not _ARG_RE.fullmatch(value):
+                raise Refusal(
+                    f"{flag} must start with a letter or digit and use only letters, digits, '.', '_' and '-'",
+                    "malformed-input",
+                )
         if args.command == "decide":
             raw = sys.stdin.read() if stdin is None else stdin
             code, text = decide(raw, runner, args.session_id, handlers)

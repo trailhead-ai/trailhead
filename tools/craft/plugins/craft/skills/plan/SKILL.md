@@ -557,10 +557,13 @@ on, and what test behaviors prove the task works.
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced.
 
-- **Make it part of a task.** Name it in that child's **Delivers** as
+- **Make it part of a task.** Name it in that child's **Delivers** on a line of its own that begins
   `Resolves spec/<spec-name>#F<n>: <title>`, with the title as `entries` printed it, flattened to
-  one line. This exact form is what `entries` reads back as `named-by`: nothing else records that a
-  task builds the entry, and the build marks an entry done only when a finished child names it. The
+  one line and with any `Resolves ` token removed from it (or write the line without a title; the
+  title is for display only). One entry per line, never inside a code fence and never after other
+  text on the line. This exact form is what `entries` reads back as `named-by`: only a token at the
+  start of a line counts, and nothing after it on that line does. Nothing else records that a task
+  builds the entry, and the build marks an entry done only when a finished child names it. The
   child's test contract covers the entry's behaviour, and its **Files** include the entry's `where`
   paths that the child changes. An entry may ride a task that already exists for the slice's own
   criteria, or share a task with a neighbouring entry; it needs no task of its own.
@@ -651,9 +654,9 @@ that existing parent, exactly as the topic-rooted path does below.
    whatever that line names. Then, before presenting, run step 1's
    `entries --spec spec/<spec-name> --folded-into task/<parent-name> --vault <vault>` once more and
    confirm every entry it still lists shows a child on its `named-by` line and not `none`. An entry
-   showing `none` is placed now: correct that child's **Delivers** to the `Resolves` form (an update
-   to the child's body), or reopen the entry as step 7 says, and run the read again until none shows
-   `none`.
+   showing `none` is placed now: correct that child's **Delivers** to the own-line `Resolves` form
+   (an update to the child's body), or reopen the entry as step 7 says, and run the read again until
+   none shows `none`.
 
 If the `lore` CLI is not on PATH, write the parent plan and its task bodies to a `plans/` directory
 in your vault manually, mirroring the template shapes.

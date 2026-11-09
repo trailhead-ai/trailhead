@@ -42,3 +42,7 @@ Every clause holds.
 - The failure paths (a sweep that exits 2 or 3, and its retry command) are not exercised by a run; the script's tests cover the commands.
 - Seeding the session with a fixed id and passing it to the scripts is the eval's own device: a real run does not pass `--session-id`.
 - `f2-is-open-again` holds only if the agent acts, since F2 starts folded; the two decision graders and the report grader likewise. No grader here is a guard that holds when nothing happens.
+
+## Addendum 2026-11-09
+
+The seeded done child's **Delivers** now carries `Resolves spec/tally-report#F1: Close the file the counting helper opens.` on its own line, after the sentence about what the tool prints, instead of in the same sentence. `names_entry` accepts a `Resolves` token only at the start of a line, so a mid-sentence token no longer names an entry. The pre-registered sections above are unchanged.
