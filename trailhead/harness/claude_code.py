@@ -211,7 +211,7 @@ def _directories_munging_to(key: str) -> list[Path]:
 
 
 #: Bounded head-scan limits for extracting a session's start cwd out of a
-#: transcript (see :func:`_extract_transcript_cwd`). Real transcripts run to
+#: transcript (see :func:`_scan_transcript_head`). Real transcripts run to
 #: hundreds of megabytes, so this seam must never read one in full:
 #: ``_CWD_SCAN_MAX_LINES`` bounds how many leading records are inspected, and
 #: ``_CWD_SCAN_MAX_LINE_BYTES`` skips any single record too large to be a
@@ -288,11 +288,6 @@ def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
     except OSError:
         return None, False
     return None, False
-
-
-def _extract_transcript_cwd(path: Path) -> Path | None:
-    """The cwd recorded near the start of a transcript, or ``None``."""
-    return _scan_transcript_head(path)[0]
 
 
 def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
@@ -1357,7 +1352,7 @@ class ClaudeCodeHarness(Harness):
             except OSError:
                 existing_paths = []
             for existing in existing_paths:
-                other_cwd = _extract_transcript_cwd(existing)
+                other_cwd, _ = _scan_transcript_head(existing)
                 if other_cwd is not None and other_cwd.resolve() != resolved:
                     raise HarnessError(
                         f"session_transcript_destination: projects key {munged!r} "
@@ -1515,7 +1510,7 @@ class ClaudeCodeHarness(Harness):
     # A project directory's NAME is not consulted for anything but locating the
     # file: it is a lossy munge of a launch cwd ('/' and '.' both collapse to
     # '-'), so it cannot be reversed into a real path. The cwd this method
-    # returns always comes from :func:`_extract_transcript_cwd` reading the
+    # returns always comes from :func:`_scan_transcript_head` reading the
     # transcript's own content, never from the directory name.
 
     def session_transcripts(
