@@ -896,6 +896,8 @@ Then complete the ritual:
   the assumptions, decisions and lessons are captured here.
 - **Settle the entries folded into the parent** when the run's parent is linked to a spec: each is
   marked done or returned to open, as [Found work](#found-work) says, before the parent goes `done`.
+  A settling call that fails does not hold the close: the entry stays folded, is listed under what
+  needs the operator, and the parent still closes `done`.
 - **Record criterion observations, as evidence arrives.** For each identifier the parent's
   `**Covers:**` field names, once that criterion's evidence is actually in hand — a green automated
   assertion, a design-doc state section confirmed accurate, or an operator's manual check — append a
@@ -1405,10 +1407,11 @@ parent has no spec link, or that finds no entries folded into the parent (the sc
 entries are folded into task/<parent-name>`), settles nothing and closes as it always has.
 
 When a call exits `2` or `3`, or the listing exits `2`, the entry stays folded, which is the honest
-state: the next slice pass's `reopen-abandoned` returns it to open. List it in the completion report
-among what needs the operator, with the reason it was not built and the `retry:` line the script
-printed on exit `3`, which runs as printed. Do not close the parent as if the entry were settled,
-and do not retry in a loop.
+state, and the failure does not hold the close: the parent still closes `done`, and because the
+parent is then `done` the next slice pass's `reopen-abandoned` returns the entry to open. List it in
+the completion report among what needs the operator, with the reason it was not built and the
+`retry:` line the script printed on exit `3`, which runs as printed. Do not report the entry as
+settled, and do not retry in a loop.
 
 **The completion report** begins with what needs the operator, and nothing, no summary or preamble,
 comes before it: the finding text from every exit `2`, carried as printed, and the

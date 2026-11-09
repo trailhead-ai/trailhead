@@ -1084,6 +1084,28 @@ def test_named_by_lists_a_child_whose_delivers_resolves_the_entry_with_its_statu
     assert named_by(out, "F2") == "task/c1 (ready)"
 
 
+class VaultScopedLore(EntriesLore):
+    """A child task body answers only when the read names the vault the listing came from."""
+
+    def __call__(self, argv, stdin=None):
+        if argv[:2] == ["record", "show"] and argv[2].startswith("task/") and argv[3:] != ["--json", "--vault", "v"]:
+            self.calls.append(list(argv))
+            return subprocess.CompletedProcess(argv, 1, "", "no such record in the default vault")
+        return super().__call__(argv, stdin)
+
+
+def test_named_by_reads_each_child_body_from_the_vault_its_listing_came_from(capsys):
+    lore = VaultScopedLore(
+        spec=spec_body(entry_md(2, status="folded into task/P")),
+        tasks={"c1": ("ready", "P")},
+        bodies={"c1": task_body("Resolves spec/S#F2: Tidy the parser", "")},
+    )
+    code, out, err = run_entries(lore, capsys, *folded_args())
+    assert code == 0, err
+    assert named_by(out, "F2") == "task/c1 (ready)"
+    assert ["record", "show", "task/c1", "--json", "--vault", "v"] in lore.calls
+
+
 def test_named_by_is_none_when_no_child_names_the_entry(capsys):
     code, out, err = run_named({"c1": "Does something else"}, capsys)
     assert code == 0, err
@@ -1598,6 +1620,14 @@ def test_a_retry_after_a_partial_run_that_failed_the_write_succeeds(capsys):
     assert lore.entries == []
 
 
+def test_a_malformed_followups_section_is_refused_exit_1_with_the_parsers_code_and_nothing_captured(capsys):
+    lore = EntryLore(SPEC_BODY_HEAD + "- **F1.** T\n  - status: bogus\n")
+    code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
+    assert code == 1 and out == ""
+    assert reason_of(err) == "malformed-entry"
+    assert lore.entries == [] and lore.update_calls() == []
+
+
 def test_a_spec_changed_between_read_and_write_is_refused_stale_base_with_a_retry_command(capsys):
     lore = EntryLore(two_open(), update_mode="stale")
     code, out, err = run_entry(transition("fold", ("F1",)), lore, capsys)
@@ -1626,6 +1656,29 @@ def test_the_printed_retry_command_runs_as_pasted_and_completes_the_transition(c
     code = fw.main(argv[argv.index("entry"):], stdin=argv[2], runner=lore)
     assert code == 0
     assert statuses(lore.spec)["F1"] == ("folded", "task/P")
+
+
+@pytest.mark.parametrize("reason", ["a | b", "a || b | c", "tab\there"])
+def test_the_retry_logs_the_same_why_as_the_original_run(capsys, reason):
+    import shlex
+    lore = EntryLore(two_open(), update_mode="stale")
+    _, out, _ = run_entry(transition("fold", ("F1",), reason=reason), lore, capsys)
+    (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
+    argv = shlex.split(retry[len("retry: "):])
+    (first,) = lore.bodies("found-work")
+    lore.entries.clear()
+    lore.update_mode = "ok"
+    assert fw.main(argv[argv.index("entry"):], stdin=argv[2], runner=lore) == 0
+    (second,) = lore.bodies("found-work")
+    assert second.rsplit(" | why: ", 1)[1] == first.rsplit(" | why: ", 1)[1]
+
+
+def test_the_retry_command_never_carries_a_raw_credential(capsys):
+    secret = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+    lore = EntryLore(two_open(), update_mode="stale")
+    _, out, _ = run_entry(transition("fold", ("F1",), reason=f"token {secret} leaked"), lore, capsys)
+    (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
+    assert secret not in retry
 
 
 @pytest.mark.parametrize("mode,expected", [("fail", "write-failed"), ("land-then-fail", "write-failed")])
@@ -2036,6 +2089,15 @@ def test_a_failed_decision_capture_exits_2_capture_failed_and_writes_nothing(cap
     code, out, err = run_abandoned(lore, capsys)
     assert code == 2 and reason_of(err) == "capture-failed"
     assert lore.update_calls() == []
+
+
+def test_a_failed_result_capture_exits_2_capture_failed_with_the_written_result_line_printed(capsys):
+    lore = AbandonLore(folded_spec((1, "P")), statuses={"P": "dropped"}, fail_nth_capture=2)
+    code, out, err = run_abandoned(lore, capsys)
+    assert code == 2
+    assert reason_of(err) == "capture-failed"
+    assert statuses(lore.spec) == {"F1": ("open", None)}
+    assert "found-work-result: written" in out
 
 
 def test_a_write_failure_and_an_unreadable_task_together_report_the_write_failure_code(capsys):

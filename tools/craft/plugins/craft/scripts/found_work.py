@@ -367,8 +367,8 @@ def _run_gate(prior_json: str, proposed: str) -> tuple[str | None, str | None]:
     return None, (m.group(1) if m and m.group(1) in GATE_CODES else "gate-refused")
 
 
-def _read_record(runner, spec: str) -> tuple[dict, str] | None:
-    done = _call(runner, ["record", "show", spec, "--json"])
+def _read_record(runner, spec: str, vault: str | None = None) -> tuple[dict, str] | None:
+    done = _call(runner, ["record", "show", spec, "--json", *(["--vault", vault] if vault else [])])
     if done.returncode != 0:
         return None
     try:
@@ -958,7 +958,7 @@ def _named_by(
     if not folded:
         return named
     for name, status in _children_of(runner, vault, parent[len("task/"):]):
-        read = _read_record(runner, f"task/{name}")
+        read = _read_record(runner, f"task/{name}", vault)
         if read is None:
             raise _lookup_failed(f"task/{name}")
         for e in folded:
@@ -1228,7 +1228,7 @@ def reopen_abandoned(
     if pairs:
         code, text = reopen_entries(spec, pairs, runner, session_id, retry_command=retry_command)
         if code != EXIT_DONE:
-            found = _RESULT_CODE_RE.findall(text)
+            found = [c for c in _RESULT_CODE_RE.findall(text) if c != "none"]
             err.append(f"reason-code: {found[0] if found else 'capture-failed'}")
             if text.startswith("reason: "):
                 err, text = text.splitlines()[:1] + err, ""
@@ -1265,7 +1265,8 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     moves = [Move(kind, parent, i, _clean(reason)) for i in ids]
     for m in moves:
         _check_move(m)
-    return spec, moves, {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": moves[0].reason}
+    scrubbed = scrub_credential_shaped(reason)
+    return spec, moves, {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": scrubbed}
 
 
 def _rerun_command(args: list[str], session_id: str | None, vault: str | None) -> str:
