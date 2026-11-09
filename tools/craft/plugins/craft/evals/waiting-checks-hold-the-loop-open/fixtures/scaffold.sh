@@ -11,6 +11,24 @@ base=$("$py" -c 'import sys; print(sys.base_prefix)')
 cp -R "$base" py-home
 printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 chmod +x lore
+mkdir -p bin scripts
+cp -r "$repo/tools/craft/plugins/craft/scripts" real-scripts
+rm -rf real-scripts/__pycache__
+# bin/lore is what the plugin's scripts reach as `lore`; their calls go to a log of their own.
+cat > bin/lore <<'EOW'
+#!/bin/sh
+here=$(cd "$(dirname "$0")/.." && pwd)
+printf '%s\n' "$*" >> "$here/script-lore-calls.log"
+LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
+EOW
+# scripts/pending_check.py runs the plugin's own writer against bin/lore.
+cat > scripts/pending_check.py <<'EOW'
+#!/bin/sh
+here=$(cd "$(dirname "$0")/.." && pwd)
+printf '%s\n' "pending_check.py $*" >> "$here/lore-calls.log"
+PATH="$here/bin:$PATH" exec "$here/py-home/bin/python3" "$here/real-scripts/pending_check.py" "$@"
+EOW
+chmod +x bin/lore scripts/pending_check.py
 printf "# CLAUDE.md\n\n## Project Maturity\n\nearly\n" > CLAUDE.md
 SPEC='# Print shipping labels
 
