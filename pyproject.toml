@@ -10,9 +10,10 @@ dependencies = []
 
 [project.scripts]
 trailhead = "trailhead.cli:main"
+ranger = "trailhead.ranger.cli:main"
 
 [tool.setuptools]
-packages = ["trailhead", "trailhead.vcs", "trailhead.harness"]
+packages = ["trailhead", "trailhead.vcs", "trailhead.harness", "trailhead.ranger"]
 
 [tool.pytest.ini_options]
 # Keep a test's tmp_path only when it failed: a full run creates ~270k files
