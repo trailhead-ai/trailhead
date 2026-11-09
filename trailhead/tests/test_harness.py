@@ -1670,6 +1670,53 @@ class TestClaudeCodeSessionTranscripts:
         (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
         assert row.resumable is True
 
+    def test_a_team_record_behind_an_overlong_first_line_stays_resumable(self, tmp_path):
+        from trailhead.harness import claude_code as cc
+
+        claude_dir = tmp_path / ".claude"
+        overlong = json.dumps(
+            {"cwd": str(tmp_path / "elsewhere"), "pad": "x" * cc._CWD_SCAN_MAX_LINE_BYTES}
+        )
+        self._write(
+            claude_dir,
+            "p",
+            "sess",
+            [overlong, json.dumps({"cwd": str(tmp_path), "teamName": "squad"})],
+        )
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.cwd == tmp_path.resolve()
+        assert row.resumable is True
+
+    def test_a_team_record_behind_an_undecodable_first_line_stays_resumable(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(
+            claude_dir,
+            "p",
+            "sess",
+            ["{not json", json.dumps({"cwd": str(tmp_path), "teamName": "squad"})],
+        )
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.cwd == tmp_path.resolve()
+        assert row.resumable is True
+
+    @pytest.mark.parametrize(
+        ("line_bytes", "resumable"),
+        [(65536, False), (65537, True)],
+    )
+    def test_a_team_record_must_end_within_the_first_64_kib(
+        self, tmp_path, line_bytes, resumable
+    ):
+        claude_dir = tmp_path / ".claude"
+        base = json.dumps({"cwd": str(tmp_path), "teamName": "squad", "pad": ""})
+        record = json.dumps(
+            {"cwd": str(tmp_path), "teamName": "squad", "pad": "x" * (line_bytes - 1 - len(base))}
+        )
+        assert len(record) + 1 == line_bytes
+        self._write(claude_dir, "p", "sess", [record])
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.cwd == tmp_path.resolve()
+        assert row.resumable is resumable
+
     def test_a_transcript_with_no_cwd_still_yields_a_resumable_row_with_no_cwd(self, tmp_path):
         claude_dir = tmp_path / ".claude"
         self._write(claude_dir, "p", "sess", [json.dumps({"teamName": "squad"})])

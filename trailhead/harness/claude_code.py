@@ -225,6 +225,10 @@ def _directories_munging_to(key: str) -> list[Path]:
 _CWD_SCAN_MAX_LINES = 200
 _CWD_SCAN_MAX_LINE_BYTES = 1_000_000
 
+#: A team verdict is only trusted when the record carrying it ends within this
+#: many bytes of the file's start (see :func:`_scan_transcript_head`).
+_TEAM_SCAN_MAX_BYTES = 64 * 1024
+
 
 def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
     """Step past the tail of a line that exceeded the byte cap.
@@ -247,12 +251,20 @@ def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
     The first decoded dict carrying a non-empty string ``cwd`` ends the scan;
     the result is that cwd and whether the same record carries a non-empty
     string ``teamName`` (a team member's transcript, which Claude Code's own
-    resume listing drops). Only that first cwd-bearing record is consulted,
-    deliberately narrower than Claude Code's own ``/resume`` filter, which
-    matches a non-empty ``teamName`` anywhere in the first 64 KiB, so this
-    check errs toward blocking. A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
+    resume listing drops). A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
     skipped without being decoded, so a huge early line can never win over a
     plain one further down within the window.
+
+    The team verdict is deliberately stricter than the cwd answer: the record
+    is reported as a team member only when its ``teamName`` sits on the first
+    cwd-bearing record, no line was skipped ahead of it (over the byte cap, or
+    not decodable as JSON), and that record ends within the first
+    ``_TEAM_SCAN_MAX_BYTES`` (64 KiB) of the file. Any other head reads as not
+    a team member. An undecided or ambiguous head must read as resumable,
+    because a non-resumable answer lets a parked session stop blocking an
+    irreversible workspace removal. Claude Code's own ``/resume`` matches
+    ``teamName`` anywhere in the first 64 KiB, so this rule is strictly
+    narrower.
 
     The cap bounds the READ, not just the decode: no single call takes more
     than ``_CWD_SCAN_MAX_LINE_BYTES + 1`` bytes, so a corrupt transcript
@@ -266,6 +278,7 @@ def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
     """
     try:
         with path.open("rb") as f:
+            skipped_a_line = False
             for _ in range(_CWD_SCAN_MAX_LINES):
                 # Read WITH the cap, not merely check it afterwards: an
                 # unbounded readline() materializes the whole record first, so
@@ -277,16 +290,23 @@ def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
                 if len(line) > _CWD_SCAN_MAX_LINE_BYTES:
                     if not line.endswith(b"\n"):
                         _skip_rest_of_overlong_line(f)
+                    skipped_a_line = True
                     continue
                 try:
                     record = json.loads(line)
                 except ValueError:
+                    skipped_a_line = True
                     continue
                 if isinstance(record, dict):
                     cwd = record.get("cwd")
                     if isinstance(cwd, str) and cwd:
                         team_name = record.get("teamName")
-                        is_team_member = isinstance(team_name, str) and bool(team_name)
+                        is_team_member = (
+                            isinstance(team_name, str)
+                            and bool(team_name)
+                            and not skipped_a_line
+                            and f.tell() <= _TEAM_SCAN_MAX_BYTES
+                        )
                         return Path(cwd), is_team_member
     except OSError:
         return None, False
