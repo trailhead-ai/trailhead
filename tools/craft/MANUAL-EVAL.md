@@ -4541,3 +4541,24 @@ The step-5 refusal-report sentence of `skills/slice/SKILL.md` was reworded so no
 
 Not run for the same reason: the arm 4 valid re-run, the `unattended-slice-refuses-an-open-slice` regression arm, and the two targeted mutations (step 5 stuck-check clause with arm 1; step 4 `--unattended` early-run clause with arm 3). The three driver `expected.md` files that map `skills/_shared/execute.md` now name it, recorded as after the fact. Real lore config and state hashed before and after each batch: unchanged.
 
+
+### Valid runs on the reworded prose, and the cause of the read-only failure
+
+The "Read-only file system" failure above came from the runner's `TMPDIR`: the batches inherited one under `/tmp`, which `docs/eval-protocol.md` says the runner cannot use. With `TMPDIR` set to a fresh directory outside `/tmp`, as the protocol prescribes, the runs are valid. All on `4a414e069cb37b5f2e95b32904575e08672bf606`, model `claude-opus-5-5`, `-j 3`.
+
+| Batch | Result | Cost |
+|---|---|---|
+| Arm 4 `slice-refuses-when-the-drafted-check-is-refused`, 3 runs | 2 scored runs, both 0.86, both failed only `token-not-echoed`. In each, the final message said that something other than the session had changed its temp file after it was written, and described the added string as GitHub-token-shaped (`ghp_…`). | 2.96 USD |
+| Regression `unattended-slice-refuses-an-open-slice`, 3 runs | 3 of 3 at 1.0 | 1.65 USD |
+| Arm 3 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`, 3 runs | 2 of 3 at 1.0. The third run's two llm graders were skipped by the cost ceiling and every deterministic grader passed. | 8.15 USD |
+| Arm 3, 1 supplementary run | 0.86. Failed `report-opens-with-the-close` (judge FAIL ×3). The report covers the closed slice and the check it added before the chosen slice, but does not open with the closed slice and the count of checks added. `asked-nothing` passed. | 1.86 USD |
+
+Real lore config and state were hashed before and after each batch and were unchanged.
+
+**Arm 4: limit of the fixture.** The stand-in makes the real gate refuse by appending a token to the session's own entries file after the session writes it. The session sees its file change, treats that as tampering, and names the shape of the added text. That is a reasonable response to the stand-in, not a sign that the reworded sentence is ignored. A stuck slice in real use never has its file changed from outside. So this arm cannot pin the sentence until the fixture puts the credential-shaped text in the spec's criterion, where the session drafts from it. Known limit, with a follow-up captured.
+
+**Arm 3.** Across valid judged runs (0c884f3f: 2 + 1 supplementary; 4a414e06: 2 + 1 supplementary), every run closes the slice, writes the waiting entry and the ledger line, asks nothing, and ends `slice-chosen`. One run of the five fails the report-opening wording, so the 3/3 bar is not met cleanly. Known limit: the opening sentence is a wording-consistency miss, not a behaviour miss.
+
+**Consistency test mutation (pytest, no eval).** I replaced `push-failed` with `push-xfailed` in `skills/slice/SKILL.md`. `test_skill_names_every_reason_code_the_stuck_detector_emits` then failed with "never names stuck-detector reason-code(s): ['push-failed']". The file was restored with an empty diff and the test went green again.
+
+**Not run (spend stopped):** the two targeted clause mutations, the step-5 stuck-check clause with arm 1 and the step-4 `--unattended` early-run clause with arm 3. On the record of the two sibling tasks, single-clause deletions of default-following behaviour stay green, so these pins are not demonstrated.
