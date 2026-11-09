@@ -374,6 +374,42 @@
       "measures": [
         "skills/_shared/execute.md"
       ]
+    },
+    "unattended-execute-refuses-without-then-pr": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refuses-a-held-slice": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refuses-an-unplanned-slice": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "execute-without-request-is-not-unattended": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refines-a-standalone-task-unattended": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "skills/_shared/refine.md"
+      ]
     }
   }
 }
