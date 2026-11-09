@@ -33,3 +33,7 @@ Targeted mutation: delete only the `--unattended` early-run clause at the top of
 ## Limitations
 
 The run section is graded from the Write calls the run made, not from the record (the record's name is the agent's choice). One fixture, three runs, one model tier.
+
+## Deviations from pre-registration (2026-11-09)
+
+Treatment batch t3 ran on `skills/slice/SKILL.md` fingerprint `0c884f3f8096552854258ed202a30ce674fa4e23`. Its third run scored 0.71 only because the batch's `--max-cost-usd 6` ceiling skipped the two `llm` graders ("skipped: cost ceiling"); every deterministic grader passed. That is a harness limit, not a prose result. The ceiling was raised to 9 and one further run (t3b, same prose fingerprint) was taken in place of a full-batch rerun, to stay inside the spend cap: 1 of 1 at 1.0. Counted: 3 runs at 1.0 over two invocations, 2 plus 1. The targeted mutation was not run (spend cap).

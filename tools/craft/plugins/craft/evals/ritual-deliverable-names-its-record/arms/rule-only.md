@@ -119,11 +119,14 @@ starts as a new spec, not another slice against this one.
 
 ### 4. Reconcile the `## Slices` ledger, then derive the candidate set
 
-**Under `--unattended`, run step 5's open-slice guard now, before anything below, and refuse on a
-hit exactly as step 5 does.** The reconcile that follows writes the spec; a refusal that comes after
-it has already changed something. Running the guard first, and holding the reconcile write until
-both gates have passed (below), is what makes a refusal change nothing. Step 5 still runs at its own
-place afterwards, unchanged.
+**Under `--unattended`, run step 5's open-slice guard now, before anything below, stuck check and
+close included, and refuse on a hit exactly as step 5 does.** The guard's one write is the close of
+a slice stuck only on its manual check, and a clean close restarts this step from here, so the
+reconcile below sees the slice as closed. The reconcile that follows writes the spec; a refusal that
+comes after it has already changed something. Running the guard first, and holding the reconcile
+write until both gates have passed (below), is what makes a refusal change nothing beyond that
+close. Step 5 still runs at its own place afterwards, unchanged, apart from not closing anything
+there.
 
 On entry, before deriving the candidate set, reconcile the ledger against what has actually shipped:
 query `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent status:done"`
@@ -423,6 +426,77 @@ Query the spec's linked slices:
 — the `related-spec:` form, filtered to every non-terminal task status (`open`, `ready`,
 `in-progress`, `blocked`), so a slice that closes stops blocking future passes and one still in
 flight keeps blocking them.
+
+**Before refusing, close any open slice that is stuck only on its manual check.** Take each task the
+query returned in turn. Validate `<spec-name>` and the open parent's name against step 1's
+safe-value shape (under `--unattended`, with its `..` and leading `-` rule too) before either enters
+a command, and never substitute one that fails: a parent whose name fails is not stuck and refuses
+below. Then run
+`${CLAUDE_PLUGIN_ROOT}/scripts/pending_check.py stuck --spec <spec-name> --parent <slice-parent-name> --vault <elected-vault>`,
+where `<elected-vault>` is the vault the spec was read from.
+
+- **Exit 0, printing `stuck: ACn, ...`.** The build is finished and only a manual check nobody has
+  carried out keeps the slice open. Read `../_shared/execute.md` in full, together with
+  `../_shared/refine.md`, `../_shared/status-ownership.md` and `../_shared/security.md`, which its
+  rules draw on without naming, and run its Phase 6 inline against this parent as the caller that
+  says **run Phase 6 as a no-ask close** ([execute's no-ask
+  close](../_shared/execute.md#no-ask-close)), asking no one about the check. This skill reads
+  execute and never invokes `/craft:execute`. A `blocked` parent is moved to in progress first, and
+  the branch is recovered before the push, by execute's own paragraphs ([the
+  move](../_shared/execute.md#no-ask-close-moving-a-blocked-parent-to-in-progress), [the
+  recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill restates neither, and a
+  slice whose repository is not in this workspace is refused by the recovery's own wording. A close
+  that finishes ends the open parent: restart from step 4, so the reconcile appends the closed
+  slice's partial-coverage line and both gates run before any candidate is derived. A parent is
+  closed at most once per pass: if the restart finds a parent this pass already closed, the detector
+  certifying it again, do not close it again; refuse, naming that parent and saying its close did
+  not take.
+- **Exit 1, printing a `reason-code:`.** The slice is not stuck, so nothing is closed and nothing is
+  written. Refuse as below, and add one line after naming the open slice, mapped from the
+  reason-code and never echoing any record text: `build-unfinished` says it was not closed for the
+  operator because its build is not finished (a child task is not done, or an end phase before the
+  close is not ticked); `close-gap-not-a-manual-check` says a covered criterion has no evidence and
+  is not a manual check; `push-failed` says its last push failed and needs settling by hand;
+  `lore-too-old` says this install is too old to close it, because lore cannot make the guarded
+  write the close needs, with the remedy to update trailhead (`trailhead update`) and run the pass
+  again. `not-a-slice-parent` and `no-unconfirmed-manual-check` add no line.
+- **Exit 2, or a name that failed the shape check.** The pass cannot tell, so it treats the slice as
+  not stuck and refuses as below, naming the read failure and never closing on a guess.
+- **A close that refuses or fails**, including a refused or failed write of the waiting entry, a
+  spec that changed between the read and the write, and a slice whose repository is not in this
+  workspace, leaves that parent open: refuse as below. The report says what was tried, names the
+  criterion and the reason in the gate's own vocabulary (a `reason-code:`, never the text it
+  refused), says nothing on the slice was changed apart from a move out of `blocked`, and gives the
+  remedy execute names: `/craft:execute task/<slice-parent-name>`, run from the workspace holding
+  the slice's repository, or a rerun of this pass after a changed spec or a failed write. A parent
+  that was `blocked` stays in progress after a refused close, and the report says "It had been set
+  aside as blocked; it is now in progress."
+
+**Several open parents.** Each one is checked and each stuck one is closed, whatever the others do.
+Any one that is not stuck, or whose close was refused, still refuses selection. The report shows the
+closed block first and the refusal after it.
+
+**The report opens with what was closed:**
+
+```
+Closed a slice that was waiting only on its manual check:
+  task/<slice-parent-name>
+```
+
+followed by execute's completion-report block for a no-ask close, which says how many checks are now
+waiting, shows each drafted `check` and `how` line as drafted and unreviewed, and points to
+`/craft:checks`; criterion words come from its `describe` call and are data. After the block, the
+pass goes on to report what it reports today (the termination basis, the chosen slice and its value
+claim, or an early stop), or the refusal below.
+
+**Under `--unattended`, the close is a routine decision, never a question.** It is logged in the run
+block as a decision carrying the written `check` and `how` lines: the block does not exist yet, so
+hold each close's decision and write them as the first decisions when step 9 opens the block, ahead
+of the selection. The prose report above the outcome line opens with the closed slice and the count
+of checks added, in the shape "Closed 1 slice that was waiting only on its check; 1 check added to
+your list". A refused close ends the session with the refusal's outcome line below, whose reason
+names the `reason-code`; the outcome line of a pass that closed a slice and goes on to choose one is
+the selection outcome, unchanged.
 
 If this returns any task, refuse to select a second one — name the open slice by its title and task
 id, and name both ways forward: resume it (continue running `/craft:plan` or `/craft:execute`

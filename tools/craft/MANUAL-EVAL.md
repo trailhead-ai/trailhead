@@ -4514,3 +4514,18 @@ Each was one edit to the shipped prose, 3 runs of the target arm:
 - Arm 3 (paired control): the subsection's exit-1 bullet rewritten to treat exit 1 like `stuck:` and close anyway. Green 3 of 3. The runs ran the detector, read the rewritten instruction and quoted it, and declined to close an unfinished slice and handed it on to step 5, so the arm is carried by the agent's own judgement about the unfinished child task and does not bind the exit-1 clause.
 
 **What this shows.** Each targeted clause deletion left its arm green, and the one compound deletion reddened one run of three. The baseline runs show that `execute.md` alone does not carry the behaviour: on the unedited `drive/SKILL.md` they refused to enter the no-ask close, because the driver never says the phrase. So the behaviour as a whole is carried by the edited step 4 and step 9 prose together, but the per-clause pins are **not demonstrated**: no single clause has been shown to be what makes a graded run pass, and what carries the behaviour clause by clause is unestablished. Known limit: three runs per arm, one model tier, and these graders cannot separate the clauses.
+
+## The slice pass closes a stuck slice
+
+Prose: `skills/slice/SKILL.md`, baseline fingerprint `ad193edb75f5aec9f01a0bf9f33119fa1a70f9c9`, treatment `0c884f3f8096552854258ed202a30ce674fa4e23`. Model `claude-opus-5-5`, 3 runs, `-j 3`.
+
+| Arm | Baseline | Treatment |
+|---|---|---|
+| 1 `slice-closes-a-stuck-slice-and-chooses-the-next` | red, 3 of 3 at 0.17 (1.61 USD) | 3 of 3 at 1.0 (4.92 USD) |
+| 2 `slice-still-refuses-an-unfinished-open-slice` (paired control) | 0.6 x3, red only on `detector-ran` and `reason-line-not-closed-for-you`, as pre-registered (1.57 USD) | 3 of 3 at 1.0 (1.78 USD) |
+| 3 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next` | red, 0.14 x3 (1.76 USD) | 2 of 3, third run's llm graders skipped by the cost ceiling; one supplementary run 1.0 (6.99 + 2.31 USD) |
+| 4 `slice-refuses-when-the-drafted-check-is-refused` | red, 0.57 x3 (1.64 USD) | 2 of 3: run 2 failed `token-not-echoed` (3.28 USD); rerun not taken |
+| 5 `slice-refuses-when-the-slice-repository-is-not-here` | red, 0.6 x3 (1.50 USD) | 3 of 3 at 1.0 (3.06 USD) |
+| 6 `slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused` | red, 0.4 x3 (1.56 USD) | 3 of 3 at 1.0 (3.11 USD) |
+
+Total about 35.1 USD, the spend cap. Not run: the two targeted mutations (arms 1 and 3) and the regression run of `unattended-slice-refuses-an-open-slice`. Real lore config and state hashed before and after every batch: unchanged.
