@@ -5096,3 +5096,23 @@ Treatment prose fingerprint: `_shared/execute.md` `f5e2fd563fec5f195bd03f62235d0
 **Grant.** `Bash(./git *)` was added to the craft runner block for the push cases. Paired control `unattended-execute-refuses-a-held-slice`: 3 of 3 at 1.0 with the grant. The push cases ran a real `git push` to a local bare origin inside the runner sandbox; the sandbox blocks writing `.git/config`, so `--set-upstream` reports an error after the push lands, and runs report that.
 
 **Not measured:** the pre-push secret-scan stop, the writer and `verify` failure branch of the unattended manual-check discharge, a spec-gap park followed by Phases 4 and 5 (the prompt tells the run they are done), the fold's fix pass, a parent with no spec link. Spend about 46 USD.
+
+## Final-prose re-measure (execute's shared docs one hop apart)
+
+The unattended contract's load instruction moved out of `_shared/execute.md` into `execute/SKILL.md`, and the two shared documents now refer to each other and to the security rules in words, so a full-suite contract (`_shared` documents stay one hop apart) holds. Moving the instruction changes what an agent reads, so the execute cases were re-run on the final prose. `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants the `runner` block of `eval-gate.json` unchanged, case directories and graders unchanged. The `execute-rule-only.md` live arm was rebuilt.
+
+Final prose fingerprints (`git hash-object`): `_shared/execute.md` `323a7f4da8c7e849c262fcc9827a0eb566deecf6`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`.
+
+| Case | Batch 1 | Permitted rerun | Verdict |
+|---|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | not needed | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refines-a-standalone-task-unattended` | 2 of 3 (0.89, 1, 1; `asked-nothing` judge PASS FAIL FAIL) | 3 of 3 at 1.0 | at bar on the rerun (earlier prose never reached it) |
+| `unattended-execute-parks-a-design-change` | 2 of 3 (1, 0.92, 1; `asked-nothing` judge FAIL FAIL PASS) | 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (end-phase detector) | 2 of 3 (1, 1, 0.88; `names-the-brainstorm-task-by-id` fails in one run) | 2 of 3 (0.88, 1, 1; same grader, one run) | **not at bar** |
+
+**Reading.** The three refusal cases and the guard are green on the first batch, so the load instruction landed where execute decides the mode. The refine and park cases show the same `asked-nothing` judge noise the earlier logs record and clear on the permitted rerun. The brainstorm detector misses the id in one run in three in both batches; on the earlier prose it read 2 of 3 and then 3 of 3 on its rerun, so this is the same one-in-three variation and no case went from green to red because of the move. It is reported as not at the 3 of 3 bar, not retried further. No prose was changed for it.
+
+Spend (runner list price plus judge votes): refusal cases and guard 5.8 USD, the refine case 6.8, the park case 4.8, the brainstorm case 5.0; about 22.4 USD in total.
