@@ -9,7 +9,12 @@ cp -r "$repo/tools/lore/plugins/lore/cli" "$repo/tools/lore/plugins/lore/lore" l
 [ -f "$repo/tools/lore/plugins/lore/_bootstrap.py" ] && cp "$repo/tools/lore/plugins/lore/_bootstrap.py" lore-plugin/ || true
 py=$(sed -n 's/.*exec \([^ ]*\) .*/\1/p' lore | head -1)
 base=$("$py" -c 'import sys; print(sys.base_prefix)')
-cp -R "$base" py-home
+# The runner's sandbox hides an interpreter installed under a home directory (uv's, on macOS), so the run
+# carries a copy of it; a system interpreter stays visible and is linked, not copied.
+case "$base" in
+  /Users/*|/home/*) cp -R "$base" py-home ;;
+  *) ln -s "$base" py-home ;;
+esac
 cp -r "$repo/tools/craft/plugins/craft/scripts" real-scripts
 rm -rf real-scripts/__pycache__
 # ./lore is the agent's own door to the vault; every call is logged by its arguments.
