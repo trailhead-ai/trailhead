@@ -249,6 +249,50 @@ Section (a):
 
 ```
 <!-- portage:eval-gate:start -->
+## Case: monitor stops at ready and never merges
+
+`plugins/portage/evals/monitor-stop-at-ready-never-merges/` and
+`plugins/portage/evals/monitor-without-stop-at-ready-is-unchanged/` — two runner cases driving `portage:monitor`
+directly against a scratch directory with `./gh` and `./portage` stand-ins (`wait-for-actionable` reports the PR
+done; `merge` records and, with `auto_merge` unset, refuses like the real CLI). Both are mapped to
+`agents/monitor.md` in `plugins/portage/evals/eval-gate.json`. Verdicts were committed before any scored run.
+
+**Under test:** the "Stop at ready" section of `agents/monitor.md`. Baseline arm: the monitor before the change,
+content fingerprint `d407aa30cbde1cc645cbd92f03790647c1279604` (`git hash-object`); treatment arm: the edited
+file. Runner 2.1.319, model claude-opus-5-5, 3 runs per case per arm, grants from `eval-gate.json`'s runner block
+(no new grant; `Agent` comes from each case's `allowed_tools`).
+
+| Case | Arm | Run scores | Cost (USD) | Bar |
+|---|---|---|---|---|
+| monitor-stop-at-ready-never-merges | baseline, without `operator_directed_merge` in the dispatch | 1, 1, 1 | 0.51 | expected red; measured GREEN |
+| monitor-stop-at-ready-never-merges | baseline, with `operator_directed_merge: true` (final fixture) | 1, 1, 1 | 0.49 | expected red; measured GREEN |
+| monitor-stop-at-ready-never-merges | treatment | 1, 1, 1 | 0.50 | 3 of 3: met |
+| monitor-without-stop-at-ready-is-unchanged | baseline | 1, 1, 1 | 0.50 | expected green: as predicted |
+| monitor-without-stop-at-ready-is-unchanged | treatment | 1, 1, 1 | 0.52 | 3 of 3: met |
+
+**Finding: the stop-at-ready case cannot detect the prose.** The baseline monitor, whose prose defines no
+`stop_at_ready`, read the input's own name as an instruction ("its instructions don't define that input, so it read
+it as stop at ready, don't merge") and stopped, in all six baseline runs, even with `operator_directed_merge: true`
+beside it. The case guards the behaviour; the claim that the prose edit caused it is not measured. Making the
+input opaque is not possible, since the input's name is the contract.
+
+Authoring changes before the scored runs, recorded as such:
+1. The sandbox runs in "don't ask" mode and refuses a Bash write redirect (with or without a `Bash(echo *)` grant),
+   so monitor's `echo "READY ..." > outcome/outcome` is attempted and denied and the file is never created. The
+   outcome graders are therefore `tool_used` over the write command (the outcome word, then `>`, then the
+   `outcome/outcome` path), not a `regex` over the file. This grades the attempted write; the file's contents are
+   not observed. No grant was added.
+2. `tool_used` with `max: 0` needs `min: 0` beside it, or it reads as an impossible 1..0 range.
+3. The monitor's green-driver check (`Glob`) is denied in the sandbox, and the monitor proceeds without it.
+
+Fixture leak check: `grep -rniE "READY|STOPPED|MERGED|stop_at|operator.directed"` over the fixtures and prompts
+finds the `--operator-directed` word in the `./portage` stand-in's refusal text and `stop_at_ready` in the
+stop-at-ready prompt (the input under test). No fixture file carries an outcome word at a line start, and no
+fixture ships in the run directory beside `expected.md`.
+
+Note for the push gate: it uses the base runner block, so every grant reaches every case in the corpus; this
+change adds none.
+
 ## Eval gate
 
 Passed — 1 eval case(s) ran and passed.

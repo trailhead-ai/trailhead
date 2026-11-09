@@ -1,7 +1,6 @@
 ---
-type: regex
-pattern: '^STOPPED\s+\S'
-target:
-  source: file
-  path: outcome/outcome
+type: tool_used
+tool: Bash
+input_match: 'STOPPED\s+[^>]+>\s*\S*outcome/outcome'
+min: 1
 ---
