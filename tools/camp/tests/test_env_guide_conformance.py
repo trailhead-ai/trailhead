@@ -41,8 +41,7 @@ from camp.host.config import HostConfigError, env_host_names, load_hosts, self_h
 from ._env_reply import record, reply  # noqa: E402
 
 GUIDE = Path(__file__).resolve().parents[1] / "docs" / "environments.md"
-FIXTURES = Path(__file__).parent / "fixtures"
-CAPTURE = FIXTURES / "env_inventory_guide_example_docker_desktop_29_9_2.txt"
+CAPTURE = Path(__file__).parent / "fixtures" / "env_inventory_guide_example_docker_desktop_29_9_2.txt"
 
 _FENCE = re.compile(r"^```(\w+) +(camp-env-[\w-]+)\n(.*?)^```$", re.MULTILINE | re.DOTALL)
 ROLES = (
@@ -204,14 +203,10 @@ def _table_rows() -> list[str]:
     return [ln.replace("\\|", "|") for ln in GUIDE.read_text(encoding="utf-8").splitlines() if ln.startswith("|")]
 
 
-def _kind(message: str) -> str:
-    return re.sub(r"line \d+", "line <N>", message)
-
-
 def _reason_for(text: str) -> str:
     with pytest.raises(Unreadable) as raised:
         parse_inventory(text)
-    return _kind(str(raised.value))
+    return re.sub(r"line \d+", "line <N>", str(raised.value))
 
 
 @pytest.mark.parametrize(
