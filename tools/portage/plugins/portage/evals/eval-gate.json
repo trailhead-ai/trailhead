@@ -49,6 +49,16 @@
       "measures": [
         "agents/monitor.md"
       ]
+    },
+    "monitor-stop-at-ready-never-merges": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "monitor-without-stop-at-ready-is-unchanged": {
+      "measures": [
+        "agents/monitor.md"
+      ]
     }
   }
 }
