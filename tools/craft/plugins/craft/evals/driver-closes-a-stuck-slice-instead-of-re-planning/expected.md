@@ -4,6 +4,8 @@
 
 Step 4 of `skills/drive/SKILL.md`, the open-parent branch with no `## Driver run` block: before treating an open slice parent as resumable, the driver runs `pending_check.py stuck --spec <n> --parent <n>`; on `stuck:` it runs execute's Phase 6 inline as a no-ask close against that parent, and on a clean close continues as though no parent were open, rather than proceeding to the single-repo check and plan phase against a slice whose build is finished.
 
+Recorded 2026-11-09, after the fact: the no-ask close this branch runs is the one `skills/_shared/execute.md` holds, so that file is also prose under test here and the case is mapped to it in `eval-gate.json`.
+
 ## Fixture
 
 The no-ask close fixture (spec `schedule-courier-pickups`, one slice parent `in-progress` covering AC1 to AC3, one child `done`, every end phase before Phase 6 ticked, AC2 and AC3 unconfirmed manual checks, task branch pushed, repository on `main`, clean). The parent carries no `## Driver run` block. The real `pending_check.py` runs behind a logging stand-in. The prompt is `/craft:drive spec/schedule-courier-pickups`, bounded: stop once step 4 has finished (an open slice closed by it, or step 4 handing on) and report which. The bound keeps the run out of steps 5 to 11; it names neither the detector nor the close.

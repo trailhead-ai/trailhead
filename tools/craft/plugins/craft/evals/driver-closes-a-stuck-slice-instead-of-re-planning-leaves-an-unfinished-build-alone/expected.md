@@ -4,6 +4,8 @@
 
 Step 4 of `skills/drive/SKILL.md`, the same open-parent branch as `driver-closes-a-stuck-slice-instead-of-re-planning`, when the detector does not certify the slice: `pending_check.py stuck` exits 1 with `build-unfinished` and the driver proceeds exactly as before, resuming the slice rather than closing it. This is a regression and paired control for the stuck arm.
 
+Recorded 2026-11-09, after the fact: the no-ask close this branch runs is the one `skills/_shared/execute.md` holds, so that file is also prose under test here and the case is mapped to it in `eval-gate.json`.
+
 ## Fixture
 
 The stuck-arm fixture, except one child task of the slice parent is `ready`, not `done`. The prompt and its bound are the stuck arm's.

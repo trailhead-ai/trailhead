@@ -465,12 +465,13 @@ where `<elected-vault>` is the vault the spec was read from.
 - **A close that refuses or fails**, including a refused or failed write of the waiting entry, a
   spec that changed between the read and the write, and a slice whose repository is not in this
   workspace, leaves that parent open: refuse as below. The report says what was tried, names the
-  criterion and the reason in the gate's own vocabulary (a `reason-code:`, never the text it
-  refused), says nothing on the slice was changed apart from a move out of `blocked`, and gives the
-  remedy execute names: `/craft:execute task/<slice-parent-name>`, run from the workspace holding
-  the slice's repository, or a rerun of this pass after a changed spec or a failed write. A parent
-  that was `blocked` stays in progress after a refused close, and the report says "It had been set
-  aside as blocked; it is now in progress."
+  criterion and the reason in the gate's own vocabulary (a `reason-code:`; none of the text it
+  refused reaches the report, not a prefix, a fragment or a description of its shape), says nothing
+  on the slice was changed apart from a move out of `blocked`, and gives the remedy execute names:
+  `/craft:execute task/<slice-parent-name>`, run from the workspace holding the slice's repository,
+  or a rerun of this pass after a changed spec or a failed write. A parent that was `blocked` stays
+  in progress after a refused close, and the report says "It had been set aside as blocked; it is
+  now in progress."
 
 **Several open parents.** Each one is checked and each stuck one is closed, whatever the others do.
 Any one that is not stuck, or whose close was refused, still refuses selection. The report shows the

@@ -4,6 +4,8 @@
 
 Step 4 of `skills/drive/SKILL.md`, the open-parent branch where a `## Driver run` block is present: the driver runs `pending_check.py stuck` on the parent before reading the block's `**Phase:**` and re-entering at the phase after it. On `stuck:` it closes the slice (execute's Phase 6 inline, no-ask) instead of resuming into the PR tail.
 
+Recorded 2026-11-09, after the fact: the no-ask close this branch runs is the one `skills/_shared/execute.md` holds, so that file is also prose under test here and the case is mapped to it in `eval-gate.json`.
+
 ## Fixture
 
 The stuck-arm fixture (one child `done`, end phases before Phase 6 ticked, AC2 and AC3 unconfirmed manual checks) plus a `## Driver run` block recording `**Phase:** build`, as a run that died inside the build's close would leave. The prompt and its bound are the stuck arm's.

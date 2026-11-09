@@ -4529,3 +4529,15 @@ Prose: `skills/slice/SKILL.md`, baseline fingerprint `ad193edb75f5aec9f01a0bf9f3
 | 6 `slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused` | red, 0.4 x3 (1.56 USD) | 3 of 3 at 1.0 (3.11 USD) |
 
 Total about 35.1 USD, the spend cap. Not run: the two targeted mutations (arms 1 and 3) and the regression run of `unattended-slice-refuses-an-open-slice`. Real lore config and state hashed before and after every batch: unchanged.
+
+### Follow-up: credential-echo wording fix (not yet evidenced)
+
+The step-5 refusal-report sentence of `skills/slice/SKILL.md` was reworded so none of the refused text reaches the report (not a prefix, a fragment or a description of its shape); fingerprint before `0c884f3f8096552854258ed202a30ce674fa4e23`, after `4a414e069cb37b5f2e95b32904575e08672bf606`. The sentence lives in the slice skill, not `_shared/execute.md`, whose own wording for a `credential-shaped-text` refusal already says only that the drafted wording was refused. No grader changed.
+
+| Batch | Prose | Result | Cost |
+|---|---|---|---|
+| Arm 4 re-run, 3 runs | `4a414e06...` | invalid: eval child could not write in its sandbox ("Read-only file system"), 0.57 x3 with `detector-ran` and `writer-ran` failing | 1.55 USD |
+| Arm 4 diagnostic, 1 run, `--keep-temp` | `4a414e06...` | same failure, confirmed in the trace | 0.53 USD |
+
+Not run for the same reason: the arm 4 valid re-run, the `unattended-slice-refuses-an-open-slice` regression arm, and the two targeted mutations (step 5 stuck-check clause with arm 1; step 4 `--unattended` early-run clause with arm 3). The three driver `expected.md` files that map `skills/_shared/execute.md` now name it, recorded as after the fact. Real lore config and state hashed before and after each batch: unchanged.
+
