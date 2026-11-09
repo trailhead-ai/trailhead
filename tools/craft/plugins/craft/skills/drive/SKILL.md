@@ -105,16 +105,19 @@ fresh invocation would, with no distinct resume mode to enter. Defer to the slic
 choose and materialize one.
 
 **An open parent exists with no checkpoint yet.** The query above found a slice parent whose body
-carries no `## Driver run` block — it has never had any phase confirmed complete. Skip the slice
-ritual below entirely; re-running it would only hit its own step 5 refusal against this same parent.
-Proceed straight to step 5's single-repo check against this parent, as though selection had just
-completed in this same run.
+carries no `## Driver run` block — it has never had any phase confirmed complete. Run [the stuck
+check](#the-stuck-check-on-an-open-parent) on it first, before anything below. When that check does
+not close the slice, skip the slice ritual below entirely; re-running it would only hit its own step
+5 refusal against this same parent. Proceed straight to step 5's single-repo check against this
+parent, as though selection had just completed in this same run.
 
-**A block is present.** Skip the slice ritual below entirely — selection already happened, and
-re-running it would only hit its own step 5 refusal. Read its `**Phase:**` field and re-enter at the
-phase after the one recorded, walking the fixed order select → plan → build → pr-tail → slice-close.
-A block recording `slice-close` names a finished run — there is no phase after it to resume into,
-and the driver reports the slice already closed rather than resuming anything.
+**A block is present.** Run [the stuck check](#the-stuck-check-on-an-open-parent) on the parent
+first, before reading the block's phase. When that check does not close the slice, skip the slice
+ritual below entirely — selection already happened, and re-running it would only hit its own step 5
+refusal. Read its `**Phase:**` field and re-enter at the phase after the one recorded, walking the
+fixed order select → plan → build → pr-tail → slice-close. A block recording `slice-close` names a
+finished run — there is no phase after it to resume into, and the driver reports the slice already
+closed rather than resuming anything.
 
 **Resuming into the build phase specifically** — whether because the recorded phase is `plan` and
 build is next, or the recorded phase is already `build` and the run died mid-dispatch — first check
@@ -137,6 +140,30 @@ following the escalation contract below — this step names the trigger and the 
 escalation record's full mechanics are defined once in that contract, not restated here, matching
 the multi-repo escalation below. Only once the branch is confirmed clean — no `craft/branch` label
 yet, or the label names a branch carrying no commits — does the driver proceed into the build phase.
+
+#### The stuck check on an open parent
+
+Both open-parent branches above run this before any resume logic: the block's phase, the escalation
+search, and the branch check all come after it. Validate `<spec-name>` and the open parent's name
+against the safe-value shape from step 1 before either enters a command, and never substitute one
+that fails. Then run
+`${CLAUDE_PLUGIN_ROOT}/scripts/pending_check.py stuck --spec <spec-name> --parent <slice-parent-name> --vault <elected-vault>`.
+
+- **Exit 0, printing `stuck: ACn, ...`.** The build is finished and only a manual check nobody has
+  carried out keeps the slice open, so there is nothing to resume or re-plan. Read
+  `../_shared/execute.md` and the documents step 9 reads alongside it, then run its Phase 6 inline
+  against this parent as the caller that says **run Phase 6 as a no-ask close** — asking no one
+  about the check. A `blocked` parent is moved to in progress first, and the branch is recovered
+  before the push, by execute's own paragraphs ([the
+  move](../_shared/execute.md#no-ask-close-moving-a-blocked-parent-to-in-progress), [the
+  recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill never restates either.
+  A close that finishes ends the open parent: continue as though none were open, under "No open
+  parent exists" above. A close that refuses or fails, including a refused or failed write of the
+  waiting entry, escalates under the `build-failed` trigger, following the escalation contract
+  below, with no retry.
+- **Exit 1, or exit 2.** Exit 1 prints a `reason-code:` and means the slice is not stuck; exit 2 is
+  a read failure and is treated the same. Proceed exactly as the branch above says, as though this
+  check had not run.
 
 #### Defer to the slice ritual — read it, don't invoke it
 
@@ -401,14 +428,22 @@ escalate-via-park, which writes a question onto a record nobody is waiting on. T
 dispatches `assumption-prover`, `executor`, and `drift-gate` as its own controller loop prescribes;
 those are its dispatches, not the driver's, and each stays synchronous.
 
+The one exception is the check discharge in Phase 6. The driver never stops for a check (AC14), so
+this phase runs its Phase 6 as the caller that says **run Phase 6 as a no-ask close**, per
+[execute's no-ask close](../_shared/execute.md#no-ask-close): a slice covering a manual check
+closes, every check not yet carried out goes on the check list, and the run ends at the slice
+boundary as a completed slice. Its completion report carries the wording for a driver caller, and
+this skill never restates it.
+
 **The checkpoint at this boundary is written before and after the build phase**: the `## Driver run`
 block recording `**Phase:** plan` already written at step 8 is the before-checkpoint, and writing
 the block recording `**Phase:** build` here is the after-checkpoint — so a crash inside the build
 phase is distinguishable from a crash before it. Then continue into the PR tail — step 10 below.
 
 If the shared procedure cannot complete the slice — its own escalation contract resolves to a stop,
-or the operator ends the run — escalate under the `build-failed` trigger, following the escalation
-contract below, with no retry.
+the operator ends the run, or the no-ask close refuses or fails, including a refused or failed write
+of a waiting entry — escalate under the `build-failed` trigger, following the escalation contract
+below, with no retry.
 
 ### 10. Dispatch the PR tail
 
