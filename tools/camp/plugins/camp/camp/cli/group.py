@@ -431,7 +431,7 @@ def _cmd_new_group_cli(
     `--activate` — the door waits on nothing) skips its wait and says so.
     """
     from ..spine import _resolve_slug, _die
-    from ..provision.provision import bring_up_workspace
+    from ..provision.provision import CreatorConflict, bring_up_workspace
     from ..group.manifest import (
         ManifestError,
         created_by_of,
@@ -490,18 +490,28 @@ def _cmd_new_group_cli(
         if created_by is not None:
             try:
                 recorded = created_by_of(read_central_manifest(mpath))
-            except ManifestError:
-                recorded = None
-            if recorded != created_by:
+            except (ManifestError, UnicodeDecodeError):
                 _die(
-                    f"camp new: workspace {slug!r} already exists with a different "
-                    "creator; --created-by cannot change or add one"
+                    f"camp new: workspace {slug!r} already exists with an unreadable "
+                    "manifest; --created-by cannot be verified"
+                )
+            if recorded != created_by:
+                cause = (
+                    "no recorded creator"
+                    if recorded is None
+                    else "a different creator"
+                )
+                _die(
+                    f"camp new: workspace {slug!r} already exists with {cause}; "
+                    "--created-by cannot change or add one"
                 )
         # Healthy existing workspace: re-enter without re-provisioning or clobbering.
         headline = f"re-entered workspace {slug!r}"
     else:
         try:
             bring_up_workspace(group, slug, env=env, created_by=created_by)
+        except CreatorConflict as e:
+            _die(f"camp new: {e}")
         except Exception as e:
             _die(f"camp new: workspace bring-up failed: {e}")
         headline = f"created workspace {slug!r} — provisioning in the background"

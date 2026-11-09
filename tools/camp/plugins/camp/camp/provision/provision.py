@@ -122,6 +122,10 @@ def _declared_owner(env: dict[str, str] | None) -> str | None:
         return None
 
 
+class CreatorConflict(Exception):
+    """A requested creator differs from the one a workspace already records."""
+
+
 def seed_pending_workspace(
     group: dict[str, Any],
     slug: str,
@@ -152,8 +156,10 @@ def seed_pending_workspace(
     self-stamped default.
 
     *created_by* is the opaque creator `camp new --created-by` stamps; like
-    the owner it is written only on a workspace that never recorded one, and
-    a prior value is carried forward unchanged.
+    the owner a prior value is carried forward unchanged, but unlike the owner
+    it is written only when no manifest existed: a request that differs from
+    the recorded creator (or any request against a manifest with none) raises
+    CreatorConflict under the slug lock and writes nothing.
     """
     from . import reconcile
     from ..group.manifest import read_central_manifest, reconcile_lock
@@ -177,7 +183,8 @@ def seed_pending_workspace(
         existing_states: dict[str, dict[str, Any]] = {}
         prior_owner: str | None = None
         prior_created_by: str | None = None
-        if mpath.is_file():
+        had_manifest = mpath.is_file()
+        if had_manifest:
             try:
                 prior = read_central_manifest(mpath)
             except Exception:
@@ -231,8 +238,19 @@ def seed_pending_workspace(
             if declared is not None:
                 manifest_data["owner"] = declared
         carry_forward_created_by(manifest_data, prior_created_by)
-        if "created_by" not in manifest_data and created_by is not None:
-            manifest_data["created_by"] = created_by
+        if created_by is not None:
+            if not had_manifest:
+                manifest_data["created_by"] = created_by
+            elif prior_created_by != created_by:
+                raise CreatorConflict(
+                    f"workspace {slug!r} already exists with "
+                    + (
+                        "a different creator"
+                        if prior_created_by is not None
+                        else "no recorded creator"
+                    )
+                    + "; --created-by cannot change or add one"
+                )
         write_central_manifest(mpath, manifest_data)
     return mpath
 

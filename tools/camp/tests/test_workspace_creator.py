@@ -135,13 +135,13 @@ class TestCarriedForwardAtEveryRebuild:
         reconcile_worktree(ws["group"], "feat", env=ws["env"])
         assert _read(ws, "feat")["created_by"] == "abc"
 
-    def test_rerunning_the_seed_keeps_it_and_never_restamps(self, ws):
+    def test_rerunning_the_seed_keeps_it(self, ws):
         from camp.provision.provision import seed_pending_workspace
 
         _new(ws, "feat", "--created-by", "abc")
         seed_pending_workspace(ws["group"], "feat", env=ws["env"])
         assert _read(ws, "feat")["created_by"] == "abc"
-        seed_pending_workspace(ws["group"], "feat", env=ws["env"], created_by="other")
+        seed_pending_workspace(ws["group"], "feat", env=ws["env"], created_by="abc")
         assert _read(ws, "feat")["created_by"] == "abc"
 
     def test_rerunning_setup_keeps_it(self, ws):
@@ -225,3 +225,101 @@ class TestReentry:
         _new(ws, "feat", no_session=False)
         assert "re-entered workspace" in capsys.readouterr().err
         assert _read(ws, "feat")["created_by"] == "abc"
+
+
+class TestSeedRefusesToAddOrChangeACreator:
+    def _seed(self, ws, **kw):
+        from camp.provision.provision import seed_pending_workspace
+
+        return seed_pending_workspace(ws["group"], "feat", env=ws["env"], **kw)
+
+    def test_a_workspace_with_no_creator_refuses_one(self, ws):
+        self._seed(ws)
+        before = _mpath(ws, "feat").read_bytes()
+        with pytest.raises(Exception, match="creator"):
+            self._seed(ws, created_by="S")
+        assert _mpath(ws, "feat").read_bytes() == before
+
+    def test_a_different_creator_is_refused(self, ws):
+        self._seed(ws, created_by="A")
+        before = _mpath(ws, "feat").read_bytes()
+        with pytest.raises(Exception, match="creator"):
+            self._seed(ws, created_by="B")
+        assert _mpath(ws, "feat").read_bytes() == before
+
+    def test_the_same_creator_succeeds_and_is_kept(self, ws):
+        self._seed(ws, created_by="A")
+        self._seed(ws, created_by="A")
+        assert _read(ws, "feat")["created_by"] == "A"
+
+    def test_no_creator_requested_keeps_the_recorded_one(self, ws):
+        self._seed(ws, created_by="A")
+        self._seed(ws)
+        assert _read(ws, "feat")["created_by"] == "A"
+
+    def test_bring_up_refuses_the_same_way(self, ws):
+        from camp.provision.provision import bring_up_workspace
+
+        self._seed(ws)
+        before = _mpath(ws, "feat").read_bytes()
+        with pytest.raises(Exception, match="creator"):
+            bring_up_workspace(ws["group"], "feat", env=ws["env"], created_by="S")
+        assert _mpath(ws, "feat").read_bytes() == before
+
+
+class TestRaceThroughTheCli:
+    def test_a_manifest_seeded_after_the_exists_check_is_refused_cleanly(
+        self, ws, capsys, monkeypatch
+    ):
+        from camp.cli import group as group_cli
+        import camp.provision.provision as provision
+        from camp.provision.provision import seed_pending_workspace
+
+        real = provision.bring_up_workspace
+
+        def racing(group, slug, **kw):
+            seed_pending_workspace(group, slug, env=kw.get("env"))
+            return real(group, slug, **kw)
+
+        monkeypatch.setattr(provision, "bring_up_workspace", racing)
+        door = []
+        monkeypatch.setattr(group_cli, "_door_dispatch_for_new", lambda **kw: door.append(kw))
+        capsys.readouterr()
+        with pytest.raises(SystemExit) as exc:
+            _new(ws, "feat", "--created-by", "S", no_session=False)
+        assert exc.value.code not in (0, None)
+        err = capsys.readouterr().err
+        assert err.count("\n") == 1 and "already exists" in err and "creator" in err
+        assert "bring-up failed" not in err
+        assert "created_by" not in _read(ws, "feat")
+        assert door == []
+
+
+class TestReentryRefusalNamesItsCause:
+    @pytest.fixture(autouse=True)
+    def _door(self, monkeypatch):
+        from camp.cli import group as group_cli
+
+        monkeypatch.setattr(group_cli, "_door_dispatch_for_new", lambda **kw: None)
+
+    def _err(self, ws, capsys):
+        capsys.readouterr()
+        with pytest.raises(SystemExit):
+            _new(ws, "feat", "--created-by", "S", no_session=False)
+        err = capsys.readouterr().err
+        assert err.count("\n") == 1
+        assert "Traceback" not in err
+        return err
+
+    def test_a_different_recorded_creator(self, ws, capsys):
+        _new(ws, "feat", "--created-by", "A")
+        assert "different creator" in self._err(ws, capsys)
+
+    def test_no_recorded_creator(self, ws, capsys):
+        _new(ws, "feat")
+        assert "no recorded creator" in self._err(ws, capsys)
+
+    def test_an_unreadable_manifest(self, ws, capsys):
+        _new(ws, "feat")
+        _mpath(ws, "feat").write_bytes(b"\xff\xfe\x00bad")
+        assert "unreadable" in self._err(ws, capsys)

@@ -405,8 +405,9 @@ def render_workspace_list(
         `workspace_row_cells`) so a stray control character cannot forge a
         second row.
       - --json: a list of {ok, slug, branch, workspace_path, group, state,
-        window_count, tmux_session, last_touched} dicts (the fixed
+        window_count, tmux_session, last_touched, created_by} dicts (the fixed
         _LIST_JSON_KEYS schema — `last_touched` an ISO-8601 UTC string or
+        `null`; `created_by` the recorded creator string or
         `null`), every success row carrying `ok: true`; empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
