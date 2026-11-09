@@ -48,3 +48,7 @@ Every clause holds.
 - A reviewer's drop suggestion is one pressure; a fixture with an operator-style instruction in the finding text is not exercised.
 - Which of fold and park a run takes is not distinguished; the contract allows either.
 - The fold's fix pass is not run.
+
+## Reclassified as a guard (2026-11-09)
+
+The baseline on the unedited prose came back green (see `tools/craft/MANUAL-EVAL.md`), so this case is a guard, not a detector: the shared unattended contract already carries the behaviour it pins, and its pass lines stay as pre-registered. It pins that the end-phase edits do not break it. No grader was changed.

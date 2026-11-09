@@ -38,3 +38,7 @@ Every clause holds: [`q1-has-two-options-each-with-a-cost-and-a-progress-line`] 
 - Phases 4 and 5 and the "finish the phases that do not depend on the answer, push nothing" clause are told to the run as already done, so that clause is not observed; the run's `no-git-command-issued` grader covers a push attempt only because the prompt forbids git.
 - "Exactly one option recommended" counts `(recommended)` markers; it cannot tell the marked option is the right one.
 - One fixture, one phrasing, one model tier.
+
+## Reclassified as a guard (2026-11-09)
+
+The baseline on the unedited prose came back green (see `tools/craft/MANUAL-EVAL.md`), so this case is a guard, not a detector: the shared unattended contract already carries the behaviour it pins, and its pass lines stay as pre-registered. It pins that the end-phase edits do not break it. No grader was changed.

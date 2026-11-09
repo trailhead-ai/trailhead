@@ -57,3 +57,7 @@ Branches: today's prose (surfaces the findings; the decisions may be logged thro
 - The order "decision before write" is observed through the session note's line order, not a write timestamp.
 - A grader reads that a block entry's `Choice:` names the decision; it cannot tell the reasoning is sound.
 - The fold's fix pass is not run (no code, no agent), so the case does not show that a fold goes through the Phase 1 gate or gets no further review.
+
+## Reclassified as a guard (2026-11-09)
+
+The baseline on the unedited prose came back green (see `tools/craft/MANUAL-EVAL.md`), so this case is a guard, not a detector: the shared unattended contract already carries the behaviour it pins, and its pass lines stay as pre-registered. It pins that the end-phase edits do not break it. No grader was changed.

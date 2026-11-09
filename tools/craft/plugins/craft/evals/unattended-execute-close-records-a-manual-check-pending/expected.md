@@ -52,3 +52,7 @@ The graders were run offline against the end state a hand-run of the real writer
 - `changed_behaviour` and the drafted `check`/`how` are judged by the run; the graders read that they are present, not that they are good.
 - The `mktemp` entries file's removal is not pinned: the runner grants no `rm`.
 - The completion report's manual-check block is not graded here.
+
+## Reclassified as a guard (2026-11-09)
+
+The baseline on the unedited prose came back green (see `tools/craft/MANUAL-EVAL.md`), so this case is a guard, not a detector: the shared unattended contract already carries the behaviour it pins, and its pass lines stay as pre-registered. It pins that the end-phase edits do not break it. No grader was changed.

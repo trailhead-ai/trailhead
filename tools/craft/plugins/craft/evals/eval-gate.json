@@ -452,6 +452,24 @@
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "unattended-execute-close-names-a-brainstorm-task-by-id": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-ends-stuck-on-the-default-branch": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-ends-stuck-on-a-failed-push": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }
