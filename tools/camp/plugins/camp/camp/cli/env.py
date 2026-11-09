@@ -16,14 +16,21 @@ is not a host name and a second argument are refused before anything is printed.
 ``camp env attach TARGET`` puts one environment on this machine's localhost, holding each of its
 standard ports on 127.0.0.1. For an environment on a remote host that is one background ``ssh``
 forward; for an environment on this machine (``local/NAME``, ``<self_name>/NAME`` or a bare name
-found only here) it is a relay, a background process camp starts itself that carries each
-connection to the environment's published port. It checks, in order, that nothing is attached,
-resolves the target, refuses a stopped or port-less environment and a held standard port, starts
-the forward or relay, and finds it again by its fresh attach id in the process table. Once it has
-been started, every way out (a failed start, one that is not found, an exception, an interrupt)
-ends the forward or relay carrying that id and no other; for a relay it also ends the process
-handle it started, found in the table or not. A standard port taken between the probe and the
-relay's bind is refused naming its holder.
+found only here) it is a relay, a background process camp starts itself that carries each connection
+to the environment's published port. It refuses at once, reading no machine, when something is
+attached; otherwise it resolves the target, then takes the attach lock: an exclusive ``flock`` on
+``env-attach.lock`` in camp's state directory that every attach by this user takes. Under the lock
+it checks again that nothing is attached, refuses a stopped or port-less environment and a held
+standard port, starts the forward or relay, and finds it again by its fresh attach id in the process
+table, so two attaches started together end with one attachment and the other is refused before it
+starts or binds anything. The lock is released when attach returns, not when the attachment ends. An
+attach that finds the lock held says so once on stderr and waits at most the hosts file's connect
+timeout plus ``LOCK_WAIT_MARGIN_SECONDS``, then refuses having started nothing; a lock file that
+cannot be opened is refused the same way, and an interrupt while waiting exits 130. Once it has been
+started, every way out (a failed start, one that is not found, an exception, an interrupt) ends the
+forward or relay carrying that id and no other; for a relay it also ends the process handle it
+started, found in the table or not. A standard port taken between the probe and the relay's bind is
+refused naming its holder.
 
 A bare name reads this machine and every opted-in host at the same time. An interrupt while attach
 is reading machines (a bare name or ``HOST/NAME``) ends every ssh and docker started for the reads,
@@ -35,6 +42,7 @@ detach ends them and waits for their ports to bind free. ``camp env ls`` opens w
 """
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import subprocess
@@ -58,6 +66,7 @@ from ..env.attachment import (
     tag_for,
 )
 from ..env.contract import Environment
+from ..env.lock import LockBusy, LockUnavailable, attach_lock, attach_lock_path
 from ..env.read import (
     DOCKER_NOT_INSTALLED,
     DOCKER_NOT_RUNNING,
@@ -79,6 +88,9 @@ PORTS_FREE_SECONDS = 3.0
 RELAY_READY_SECONDS = 10.0
 #: Seconds ``ssh -f`` may run beyond its connect timeout before the attach gives up on it.
 START_MARGIN_SECONDS = 20.0
+#: Seconds beyond the hosts file's connect timeout that an attach waits for the attach lock: the
+#: longest an attach holding it can take to start a forward and find it.
+LOCK_WAIT_MARGIN_SECONDS = 30.0
 _KEEP_ALIVE_NOTE = "a forward whose link has died ends on its own within about 45s"
 _SETTLE_POLL_SECONDS = 0.05
 
@@ -401,9 +413,56 @@ def _attach_forward(hosts, outcome, environment: Environment, attach_id: str, ta
         raise
 
 
+def _refuse_if_attached() -> None:
+    """Refuse, naming it, when a forward or relay is attached (the dead-link note only for a
+    forward); refuse when the process table cannot be read."""
+    try:
+        current = attachments()
+    except (Unverifiable, Untaggable) as error:
+        prefix = "could not tell whether anything is attached: " if isinstance(error, Unverifiable) else ""
+        _refuse(f"{prefix}{error}")
+    if current:
+        first = current[0]
+        note = f" ({_KEEP_ALIVE_NOTE})" if first.kind == "forward" else ""
+        _refuse(
+            f"{display_name(first.host, first.group, first.name)} is attached;"
+            f" run camp env detach before attaching another{note}"
+        )
+
+
+def _say_waiting() -> None:
+    print("camp env: another attach is starting; waiting for it to finish", file=sys.stderr, flush=True)
+
+
+def _take_attach_lock(held: contextlib.ExitStack, connect_timeout: float) -> None:
+    """Take the attach lock onto *held*, waiting at most the connect timeout plus
+    ``LOCK_WAIT_MARGIN_SECONDS``. Refuses, starting nothing, when the wait runs out or the lock file
+    cannot be located or opened; an interrupt while waiting exits 130."""
+    from trailhead.paths import PathResolutionError
+
+    try:
+        held.enter_context(
+            attach_lock(
+                attach_lock_path(), timeout=connect_timeout + LOCK_WAIT_MARGIN_SECONDS, on_wait=_say_waiting
+            )
+        )
+    except PathResolutionError as error:
+        _refuse(f"cannot take the attach lock ({printable_line(str(error))}); nothing was started")
+    except LockBusy:
+        _refuse("another attach is still starting; wait for it to finish, then try again")
+    except LockUnavailable as error:
+        _refuse(
+            f"cannot take the attach lock at {printable_line(str(error.path))}"
+            f" ({printable_line(error.reason)}); nothing was started"
+        )
+    except KeyboardInterrupt:
+        print("camp env: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
+
+
 def _cmd_env_attach(args: list[str]) -> None:
     from ..env.read import ProcessSet, read_local, read_remote
-    from ..env.resolve import LOCAL, Refused, TargetError, parse_target, resolve
+    from ..env.resolve import Refused, TargetError, parse_target, resolve
 
     parser = CampParser(verb="env attach")
     parser.add_argument("target", nargs="*")
@@ -417,18 +476,7 @@ def _cmd_env_attach(args: list[str]) -> None:
         print(f"camp env: {error}\n{_ATTACH_USAGE}", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        current = attachments()
-    except (Unverifiable, Untaggable) as error:
-        prefix = "could not tell whether anything is attached: " if isinstance(error, Unverifiable) else ""
-        _refuse(f"{prefix}{error}")
-    if current:
-        first = current[0]
-        note = f" ({_KEEP_ALIVE_NOTE})" if first.kind == "forward" else ""
-        _refuse(
-            f"{display_name(first.host, first.group, first.name)} is attached;"
-            f" run camp env detach before attaching another{note}"
-        )
+    _refuse_if_attached()
 
     hosts, opted_in, self_name, connect_timeout = _load_machines()
     hosts_file = _hosts_file()
@@ -453,6 +501,19 @@ def _cmd_env_attach(args: list[str]) -> None:
     if isinstance(outcome, Refused):
         _refuse(outcome.message)
 
+    with contextlib.ExitStack() as held:
+        _take_attach_lock(held, connect_timeout)
+        _refuse_if_attached()
+        _start_attachment(hosts, outcome, connect_timeout)
+    environment: Environment = outcome.environment
+    print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
+
+
+def _start_attachment(hosts, outcome, connect_timeout: float) -> None:
+    """The part of attach that runs under the attach lock once nothing is found attached: refuse a
+    stopped or port-less environment and a held standard port, then start the forward or relay."""
+    from ..env.resolve import LOCAL
+
     environment: Environment = outcome.environment
     shown = display_name(outcome.host, environment.group, environment.name)
     if environment.state != "running":
@@ -470,7 +531,6 @@ def _cmd_env_attach(args: list[str]) -> None:
         _attach_relay(environment, attach_id, tag)
     else:
         _attach_forward(hosts, outcome, environment, attach_id, tag, connect_timeout)
-    print(f"attached {attached_summary(outcome.host, environment.group, environment.name, environment.ports)}")
 
 
 def _read_attachments() -> "list[Attachment]":

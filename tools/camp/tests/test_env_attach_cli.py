@@ -23,18 +23,27 @@ test has its own tag namespace and free high ports, and the rig ends whatever it
   blocks a remote attach (no dead-link note) and a forward blocks a local one (with it); a name found here and
   on a host is ambiguous; an environment gone before the relay starts still attaches and closes connections;
   an interrupt, a failure and a relay hidden from the process table all end the relay camp started.
+- The attach lock (a race, run as concurrent camp processes against the rig): two simultaneous attaches of
+  any kind and any environment end with exactly one attachment; the loser is refused with the
+  already-attached message naming the winner, started no forward or relay and holds none of its ports. A
+  lone attach prints what it always did, with no waiting line, and leaves `env-attach.lock` empty. A held
+  lock prints the waiting line once; past the bound the attach refuses and starts nothing, released
+  within the bound it attaches. An unopenable lock file refuses naming path and reason. An interrupt
+  while waiting exits 130 and starts nothing. In each, the winner's forward is left running.
 """
 
 from __future__ import annotations
 
 import os
 import re
+import select
 import signal
 import socket
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -347,7 +356,7 @@ def test_an_interrupt_while_ending_a_forward_that_is_not_running_exits_130_witho
 
     def attachments_once_interrupted():
         calls.append(1)
-        if len(calls) == 2:
+        if len(calls) == 3:
             raise KeyboardInterrupt
         return real()
 
@@ -528,7 +537,7 @@ def test_failure_cleanup_ends_only_this_attachs_forward(rig: AttachRig) -> None:
 
 def test_a_failed_attach_says_so_when_it_could_not_end_its_forward(rig: AttachRig) -> None:
     attached_rig(rig)
-    rig.break_ps_after(1)
+    rig.break_ps_after(2)
 
     done = rig.attach("perseus/levr/main")
 
@@ -931,7 +940,7 @@ def test_a_relay_attach_that_cannot_read_the_process_table_ends_the_relay_and_sa
 
     def unreadable_once_the_relay_runs():
         calls.append(1)
-        if len(calls) > 1:
+        if len(calls) > 2:
             raise _unverifiable("ps broke")
         return real_attachments()
 
@@ -1040,3 +1049,345 @@ def test_a_relay_hidden_from_the_process_table_fails_the_attach_and_is_ended_thr
     (handle,) = handles
     assert handle.returncode is not None
     assert_nothing_held(rig, env)
+
+
+# --- the attach lock ----------------------------------------------------------------------------
+
+WAITING = "camp env: another attach is starting; waiting for it to finish\n"
+STILL_STARTING = "camp env: another attach is still starting; wait for it to finish, then try again\n"
+FORWARD_NOTE = " (a forward whose link has died ends on its own within about 45s)"
+
+
+def lock_file(rig: AttachRig) -> Path:
+    return rig.state_dir / "env-attach.lock"
+
+
+def refusal(shown: str, *, note: bool) -> str:
+    suffix = FORWARD_NOTE if note else ""
+    return f"camp env: {shown} is attached; run camp env detach before attaching another{suffix}\n"
+
+
+def race(rig: AttachRig, *targets: str) -> "list[tuple[str, int, str, str]]":
+    """Start `camp env attach` for each target at once; each target's (target, exit, stdout, stderr)."""
+    procs = [(t, rig.popen_camp("env", "attach", t)) for t in targets]
+    done = []
+    for target, proc in procs:
+        out, err = proc.communicate(timeout=60)
+        done.append((target, proc.returncode, out, err))
+    return done
+
+
+def refused_as(stderr: str, shown: str, *, note: bool) -> bool:
+    """Whether *stderr* is the already-attached refusal naming *shown*, after the waiting line a loser
+    that met the held lock prints first."""
+    return stderr.removeprefix(WAITING) == refusal(shown, note=note)
+
+
+def one_winner(done) -> "tuple[tuple, tuple]":
+    winners = [d for d in done if d[1] == 0]
+    losers = [d for d in done if d[1] != 0]
+    assert len(winners) == 1, done
+    assert len(losers) == 1, done
+    return winners[0], losers[0]
+
+
+def test_two_simultaneous_attaches_of_one_remote_environment_end_with_one_attachment(rig: AttachRig) -> None:
+    env = attached_rig(rig, "main")
+    rig.configure(parent_delay=1.5)
+
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/main"))
+
+    assert winner[2] == success_line("perseus", env)
+    assert loser[3] == WAITING + refusal("perseus/levr/main", note=True)
+    assert len(rig.forwards()) == 1
+    assert len(rig.tagged_pids()) == 1
+    status = rig.camp("env", "status").stdout
+    assert status.count("attached:") == 1
+    assert status.startswith("attached: perseus/levr/main")
+
+
+def test_the_loser_of_two_remote_attaches_to_different_environments_starts_no_forward_and_holds_no_port(
+    rig: AttachRig,
+) -> None:
+    main = attached_rig(rig, "main")
+    other = rig.environment("other")
+    rig.host_inventory("perseus", main, other)
+    rig.configure(parent_delay=1.5)
+
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/other"))
+
+    won, lost = (main, other) if winner[0].endswith("main") else (other, main)
+    assert winner[2] == success_line("perseus", won)
+    assert loser[3] == WAITING + refusal(f"perseus/levr/{won.name}", note=True)
+    assert len(rig.forwards()) == 1
+    assert len(rig.tagged_pids()) == 1
+    assert all(port_is_free(p) for p in lost.standard_ports)
+    assert [ask(p) for p in won.standard_ports] == [f"{won.name}-{i}" for i in range(3)]
+
+
+def test_a_remote_attach_and_a_local_attach_started_together_end_with_one_attachment_naming_the_winner(
+    rig: AttachRig,
+) -> None:
+    remote = attached_rig(rig, "main")
+    local = local_rig(rig, "main")
+    rig.configure(parent_delay=1.5)
+    rig.delay_ps(0.5)
+
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "local/levr/main"))
+
+    remote_won = winner[0].startswith("perseus")
+    won, lost = (remote, local) if remote_won else (local, remote)
+    assert winner[2] == success_line("perseus" if remote_won else "local", won)
+    assert loser[3].startswith(WAITING), loser
+    assert refused_as(loser[3], "perseus/levr/main" if remote_won else "local/levr/main", note=remote_won), loser
+    assert len(rig.tagged_pids()) == 1
+    assert len(rig.forwards()) == (1 if remote_won else 0)
+    assert all(port_is_free(p) for p in lost.standard_ports)
+    assert [ask(p) for p in won.standard_ports] == ["main-0", "main-1", "main-2"]
+
+
+@pytest.mark.parametrize("same_environment", [True, False])
+def test_two_local_attaches_started_together_end_with_one_relay_and_no_stray_one(
+    rig: AttachRig, same_environment: bool
+) -> None:
+    main = local_rig(rig, "main")
+    other = main
+    if not same_environment:
+        other = rig.environment("other")
+        rig.docker_inventory(main, other)
+    second = "local/levr/main" if same_environment else "local/levr/other"
+    rig.delay_ps(0.5)
+
+    winner, loser = one_winner(race(rig, "local/levr/main", second))
+
+    won, lost = (main, other) if winner[0].endswith("main") else (other, main)
+    assert winner[2] == success_line("local", won)
+    assert loser[3].startswith(WAITING), loser
+    assert refused_as(loser[3], f"local/levr/{won.name}", note=False), loser
+    assert len(rig.tagged_pids()) == 1
+    if not same_environment:
+        assert all(port_is_free(p) for p in lost.standard_ports)
+    assert rig.camp("env", "status").stdout.count("attached:") == 1
+
+
+def test_a_lone_attach_prints_what_it_always_did_leaves_the_lock_file_empty_and_detaches(rig: AttachRig) -> None:
+    env = attached_rig(rig)
+
+    done = rig.attach("perseus/levr/main")
+
+    assert (done.returncode, done.stdout, done.stderr) == (0, success_line("perseus", env), "")
+    assert lock_file(rig).read_bytes() == b""
+    assert rig.camp("env", "status").stdout.startswith("attached: perseus/levr/main")
+    assert rig.camp("env", "detach").returncode == 0
+    assert rig.tagged_pids() == []
+
+
+def hold_lock(path: Path):
+    """Hold the attach lock at *path* in a thread until the returned function is called."""
+    from camp.env.lock import attach_lock
+
+    held, release = threading.Event(), threading.Event()
+
+    def hold() -> None:
+        with attach_lock(path, timeout=5):
+            held.set()
+            release.wait(30)
+
+    thread = threading.Thread(target=hold, daemon=True)
+    thread.start()
+    assert held.wait(5)
+
+    def let_go() -> None:
+        release.set()
+        thread.join(5)
+
+    return let_go
+
+
+def short_connect_timeout(rig: AttachRig) -> None:
+    rig.write_hosts_file(
+        'env_hosts = ["perseus"]\nconnect_timeout = 1\n\n[hosts.perseus]\nssh = "tduffield@perseus"\n'
+    )
+
+
+def attach_in_process(rig: AttachRig, monkeypatch: pytest.MonkeyPatch, margin: float) -> None:
+    from camp.cli import env as env_cli
+
+    for key, value in rig.environ().items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(env_cli, "LOCK_WAIT_MARGIN_SECONDS", margin)
+    env_cli._cmd_env_attach(["perseus/levr/main"])
+
+
+def test_an_attach_whose_lock_wait_runs_out_says_so_starts_nothing_and_says_it_waited(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    attached_rig(rig)
+    short_connect_timeout(rig)
+    let_go = hold_lock(lock_file(rig))
+    started = time.monotonic()
+    try:
+        with pytest.raises(SystemExit) as exit_:
+            attach_in_process(rig, monkeypatch, margin=0.3)
+    finally:
+        let_go()
+
+    assert exit_.value.code == 1
+    assert 1.2 < time.monotonic() - started < 5
+    assert capsys.readouterr().err == WAITING + STILL_STARTING
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
+def test_an_attach_that_gets_the_lock_before_the_bound_attaches_and_says_it_waited(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    env = attached_rig(rig)
+    short_connect_timeout(rig)
+    let_go = hold_lock(lock_file(rig))
+    threading.Timer(0.7, let_go).start()
+
+    attach_in_process(rig, monkeypatch, margin=0.3)
+
+    captured = capsys.readouterr()
+    assert captured.out == success_line("perseus", env)
+    assert captured.err == WAITING
+    assert len(rig.tagged_pids()) == 1
+
+
+def test_a_lock_wait_that_runs_out_leaves_the_winner_still_attaching_untouched(
+    rig: AttachRig, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    from camp.cli import env as env_cli
+
+    env = attached_rig(rig)
+    short_connect_timeout(rig)
+    rig.configure(parent_delay=3.0)
+    real = env_cli.attachments
+    calls: list[int] = []
+
+    def attachments_then_wait_for_the_winner_to_start():
+        found = real()
+        calls.append(1)
+        if len(calls) == 1:
+            wait_for(lambda: len(rig.forwards()) == 1)
+        return found
+
+    monkeypatch.setattr(env_cli, "attachments", attachments_then_wait_for_the_winner_to_start)
+    winner = rig.popen_camp("env", "attach", "perseus/levr/main")
+
+    with pytest.raises(SystemExit) as exit_:
+        attach_in_process(rig, monkeypatch, margin=0.3)
+
+    assert exit_.value.code == 1
+    assert capsys.readouterr().err == WAITING + STILL_STARTING
+    started = set(rig.tagged_pids())
+    out, _ = winner.communicate(timeout=30)
+    assert (winner.returncode, out) == (0, success_line("perseus", env))
+    assert len(rig.forwards()) == 1
+    (still_running,) = rig.tagged_pids()
+    assert still_running in started
+    monkeypatch.undo()
+    assert rig.camp("env", "status").stdout.startswith("attached: perseus/levr/main")
+
+
+def test_a_lock_file_that_cannot_be_opened_refuses_naming_it_and_starts_nothing(rig: AttachRig, tmp_path: Path) -> None:
+    attached_rig(rig)
+    blocker = tmp_path / "a-regular-file"
+    blocker.write_text("")
+    where = blocker / "state"
+
+    done = rig.attach("perseus/levr/main", CAMP_STATE_DIR=str(where))
+
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == (
+        f"camp env: cannot take the attach lock at {where / 'env-attach.lock'} (Not a directory);"
+        " nothing was started\n"
+    )
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
+def test_a_fifo_planted_at_the_lock_path_refuses_naming_it_and_starts_nothing(rig: AttachRig, tmp_path: Path) -> None:
+    attached_rig(rig)
+    state = tmp_path / "state"
+    state.mkdir()
+    lock = state / "env-attach.lock"
+    os.mkfifo(lock, 0o600)
+
+    done = rig.attach("perseus/levr/main", CAMP_STATE_DIR=str(state))
+
+    assert done.returncode == 1
+    assert done.stdout == ""
+    assert done.stderr == (
+        f"camp env: cannot take the attach lock at {lock} (not a regular file); nothing was started\n"
+    )
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
+@pytest.mark.parametrize("variable", ["CAMP_STATE_DIR", "XDG_STATE_HOME"])
+def test_a_relative_state_directory_refuses_cleanly_and_starts_nothing(rig: AttachRig, variable: str) -> None:
+    attached_rig(rig)
+    environ = {"CAMP_STATE_DIR": "", "XDG_STATE_HOME": "", variable: "relative/state"}
+
+    done = rig.attach("perseus/levr/main", **environ)
+
+    assert "Traceback" not in done.stderr
+    assert done.returncode == 1
+    assert done.stdout == ""
+    lines = done.stderr.splitlines()
+    assert len(lines) == 1
+    assert lines[0].startswith("camp env: cannot take the attach lock (")
+    assert lines[0].endswith("); nothing was started")
+    assert variable in lines[0]
+    assert rig.forwards() == []
+    assert rig.tagged_pids() == []
+
+
+def test_the_path_in_a_cannot_take_the_lock_refusal_has_its_control_characters_removed(
+    rig: AttachRig, tmp_path: Path
+) -> None:
+    attached_rig(rig)
+    blocker = tmp_path / "a\x1b[31mfile"
+    blocker.write_text("")
+
+    done = rig.attach("perseus/levr/main", CAMP_STATE_DIR=str(blocker / "state"))
+
+    assert done.returncode == 1
+    assert "\x1b" not in done.stderr
+    assert done.stderr == (
+        f"camp env: cannot take the attach lock at {tmp_path / 'a[31mfile' / 'state' / 'env-attach.lock'}"
+        " (Not a directory); nothing was started\n"
+    )
+    assert rig.forwards() == []
+
+
+def test_an_interrupt_while_waiting_for_the_lock_exits_130_starts_nothing_and_leaves_the_winner(
+    rig: AttachRig,
+) -> None:
+    env = attached_rig(rig)
+    rig.configure(parent_delay=3.0)
+    first = rig.popen_camp("env", "attach", "perseus/levr/main")
+    second = rig.popen_camp("env", "attach", "perseus/levr/main")
+    waiting = None
+    deadline = time.monotonic() + 30
+    while waiting is None and time.monotonic() < deadline:
+        ready, _, _ = select.select([first.stderr, second.stderr], [], [], 0.1)
+        waiting = ready[0] if ready else None
+    assert waiting is not None, "neither attach reported waiting for the lock"
+    loser, winner = (first, second) if waiting is first.stderr else (second, first)
+    assert loser.stderr.readline() == WAITING
+    wait_for(lambda: rig.tagged_pids())
+
+    loser.send_signal(signal.SIGINT)
+    out, err = loser.communicate(timeout=10)
+
+    assert loser.returncode == 130
+    assert (out, err) == ("", "camp env: interrupted\n")
+    wout, werr = winner.communicate(timeout=30)
+    assert (winner.returncode, wout, werr) == (0, success_line("perseus", env), "")
+    assert len(rig.forwards()) == 1
+    assert len(rig.tagged_pids()) == 1
+    assert rig.camp("env", "status").stdout.startswith("attached: perseus/levr/main")
