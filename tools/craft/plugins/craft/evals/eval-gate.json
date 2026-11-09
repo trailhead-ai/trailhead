@@ -17,7 +17,9 @@
       "Bash(*/scripts/covers_gate.py *)",
       "Bash(printf *)",
       "Bash(*/scripts/migration_bar.py)",
-      "Bash(*/scripts/migration_bar.py *)"
+      "Bash(*/scripts/migration_bar.py *)",
+      "Bash(*/scripts/pending_check.py *)",
+      "Bash(*/scripts/observation_gate.py)"
     ],
     "max_cost_usd": 10
   },
