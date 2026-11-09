@@ -433,7 +433,15 @@ def _cmd_new_group_cli(
     session instead (it raced into existence, or the workspace-only outcome
     was reached) the command runs nowhere — the outcome says so
     (`command_started` under `--json`, a stderr line otherwise) and the exit
-    status is non-zero. Without a command nothing about the outcome changes.
+    status is non-zero. A command whose first element is empty or begins with
+    `-` is refused too, before anything is touched: the pane wrapper ends in
+    `exec "$@"`, which `sh` option-parses when its first word leads with a
+    dash (`exec -c env` would run `env` with a cleared environment); later
+    elements may lead with a dash freely. `command_started: true` means tmux
+    accepted the first-pane restart with the command, not that the program
+    ran successfully — a missing binary makes the pane, and with it the
+    session, exit with no keep-alive. Without a command nothing about the
+    outcome changes.
 
     `--activate` triggers every member's activate-phase work at creation time —
     the non-interactive path to what `camp activate <member>` triggers
@@ -480,6 +488,11 @@ def _cmd_new_group_cli(
     # anything, and before the dry-run answer.
     if command and no_session:
         _die("camp new: a command cannot be combined with --no-session — it starts in the session's first pane")
+    if command and (command[0] == "" or command[0].startswith("-")):
+        _die(
+            f"camp new: the command's first element {command[0]!r} is empty or begins with '-' — "
+            "the pane's exec would read it as an option; name the program first"
+        )
     if command and manifest_path_for(group_name, slug, env=env).exists():
         _die(
             f"camp new: workspace {slug!r} already exists — a command starts only "
@@ -578,7 +591,9 @@ def _workspace_only_payload(
     *command_started* adds the `command_started` key when `camp new` was
     given a command (`None` leaves the object as it is without one); the
     command not having started also makes `ok` false, agreeing with the
-    non-zero exit that case takes.
+    non-zero exit that case takes. `command_started: true` (set by the
+    caller in `_door_dispatch_for_new`) means tmux accepted the first-pane
+    restart with the command, not that the program ran successfully.
     """
     payload = {
         "ok": True,
@@ -692,7 +707,8 @@ def _door_dispatch_for_new(
     `camp attach` refuses — `_report_workspace_only`'s own `refused`
     flag keeps the policy and record-unreadable cases distinguishable in
     what is reported, even though none of the four exit non-zero without a
-    command. Every
+    command. `command_started: true` means tmux accepted the first-pane
+    restart with the command, not that the program ran successfully. Every
     success — created, connected, or resurrected — goes through
     `cli.session._door_success_outcome`, the fold `camp attach` shares, so
     the reconciliation and resurrection lines reach stderr before the

@@ -118,10 +118,14 @@ under the session environment. camp still composes no harness argv: the caller n
 the argv is opaque to camp's own option parsing, and camp adds no keep-alive, so the pane closes
 when the command exits. The command is honoured only when this call creates the session. A
 command given with `--no-session`, with `--host`, or for a workspace that already exists is
-refused before anything is touched. If the door connects to a session instead (another camp
+refused before anything is touched, as is a command whose first element is empty or begins
+with `-` (the pane wrapper's `exec "$@"` would option-parse it; later elements may begin with
+`-`). If the door connects to a session instead (another camp
 created it first) or reaches the workspace-only outcome, the command runs nowhere and `camp new`
 says so — `command_started: false` under `--json`, a stderr line otherwise — and exits non-zero,
 because the effect the caller asked for did not happen.
+`command_started: true` means tmux accepted the first-pane restart with the command, not that the
+program ran successfully: a missing binary makes the pane, and with it the session, exit.
 
 ## Creation cannot race into a second session
 

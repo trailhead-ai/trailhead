@@ -1235,6 +1235,53 @@ def test_a_command_with_no_session_is_refused_with_one_line_and_nothing_created(
     assert activations == []
 
 
+@pytest.mark.parametrize(
+    "command",
+    [["-c", "env"], ["-a", "x"], ["--", "x"], ["-x"], [""]],
+    ids=["dash-c", "dash-a", "double-dash", "dash-x", "empty"],
+)
+def test_a_command_whose_first_element_is_dash_leading_or_empty_is_refused_and_nothing_created(
+    camp_cli, group_env, monkeypatch, capsys, command
+):
+    from camp.group.manifest import manifest_path_for, workspace_dir
+
+    g = group_env
+    _wire_tmux(monkeypatch, _RaisingTmux())
+    activations = _record_activations(monkeypatch)
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli,
+        ["feat-d", "--activate", "--", *command],
+        g["group"],
+        g["env"],
+        dry_run=False,
+    )
+
+    captured = capsys.readouterr()
+    assert code != 0
+    assert captured.out == ""
+    assert len(captured.err.strip().splitlines()) == 1
+    assert "first element" in captured.err
+    assert not manifest_path_for("g", "feat-d", env=g["env"]).exists()
+    assert not workspace_dir("g", "feat-d", env=g["env"]).exists()
+    assert activations == []
+
+
+def test_a_dash_leading_first_command_element_is_refused_before_the_dry_run_answer(
+    camp_cli, group_env, monkeypatch, capsys
+):
+    g = group_env
+    _wire_tmux(monkeypatch, _RaisingTmux())
+
+    code = _run_capturing_exit(
+        camp_cli._cmd_new_group_cli, ["feat-d", "--", "-c", "env"], g["group"], g["env"], dry_run=True
+    )
+
+    err = capsys.readouterr().err
+    assert code != 0
+    assert "dry-run" not in err
+
+
 def test_a_command_against_an_existing_workspace_is_refused_and_touches_nothing(
     camp_cli, group_env, monkeypatch, capsys
 ):
