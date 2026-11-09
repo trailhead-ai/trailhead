@@ -676,9 +676,10 @@ def _claude_present() -> bool:
     return shutil.which(CLAUDE_BIN) is not None
 
 
-def _mock_anthropic(command: str):
+def _mock_anthropic(commands: list[str]):
     """A 127.0.0.1 server speaking just enough of the Messages API to have the model run
-    one Bash command, then finish. Returns (url, tool_results, shutdown)."""
+    each of *commands* as its own Bash tool call, in order, then finish. Returns
+    (url, tool_results, shutdown); ``tool_results`` holds one entry per command."""
     seen: list = []
 
     def sse(events):
@@ -694,14 +695,16 @@ def _mock_anthropic(command: str):
              {"type": "message_stop"}]
         )
 
-    tool_turn = message(
-        [{"type": "content_block_start", "index": 0,
-          "content_block": {"type": "tool_use", "id": "toolu_1", "name": "Bash", "input": {}}},
-         {"type": "content_block_delta", "index": 0,
-          "delta": {"type": "input_json_delta", "partial_json": json.dumps({"command": command})}},
-         {"type": "content_block_stop", "index": 0}],
-        "tool_use",
-    )
+    def tool_turn(command: str, n: int) -> bytes:
+        return message(
+            [{"type": "content_block_start", "index": 0,
+              "content_block": {"type": "tool_use", "id": f"toolu_{n}", "name": "Bash", "input": {}}},
+             {"type": "content_block_delta", "index": 0,
+              "delta": {"type": "input_json_delta", "partial_json": json.dumps({"command": command})}},
+             {"type": "content_block_stop", "index": 0}],
+            "tool_use",
+        )
+
     done_turn = message(
         [{"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
          {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "done"}},
@@ -720,11 +723,10 @@ def _mock_anthropic(command: str):
                 for b in m["content"] if b.get("type") == "tool_result"
             ]
             has_bash = any(t.get("name") == "Bash" for t in body.get("tools") or [])
-            if results:
+            if has_bash:
                 seen[:] = results
-                out = done_turn
-            elif has_bash:
-                out = tool_turn
+            if has_bash and len(results) < len(commands):
+                out = tool_turn(commands[len(results)], len(results))
             else:
                 out = done_turn
             self.send_response(200)
@@ -744,14 +746,15 @@ _LIVE_SKIP = pytest.mark.skipif(
 )
 
 
-def _live_hub_run(tmp_path, command_for, excluded=()):
-    """Start the hub profile for real against a mock API that has the model run one Bash
-    command. Returns (tool results as JSON text, completed process, paths)."""
+def _live_hub_run(tmp_path, commands_for, excluded=()):
+    """Start the hub profile for real against a mock API that has the model run each command
+    as its own Bash call (a permission denial of one call must not hide the others).
+    Returns (per-command tool results, completed process, paths)."""
     env = _fence(tmp_path)
-    home, lore, cache = _hub_roots(env)
+    home, lore, cache = (Path(p) for p in _hub_roots(env))
     token_store = _resolved(env).paths["token-store"]
     for d in (lore, cache, token_store):
-        Path(d).mkdir(parents=True, exist_ok=True)
+        d.mkdir(parents=True, exist_ok=True)
     (token_store / "token").write_text("TOPSECRET")
     outside = tmp_path.resolve() / "outside"
     outside.mkdir()
@@ -762,11 +765,12 @@ def _live_hub_run(tmp_path, command_for, excluded=()):
         {"sandbox": {"enabled": True, "failIfUnavailable": True,
                      "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
                      "excludedCommands": list(excluded),
-                     "filesystem": {"allowWrite": [".", cache, lore, str(outside)]}}},
+                     "filesystem": {"allowWrite": [".", str(cache), str(lore), str(outside)]}}},
     )
     start = _start(env, interactive=False, prompt="go")
     paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store)
-    url, seen, shutdown = _mock_anthropic(command_for(paths))
+    commands = commands_for(paths)
+    url, seen, shutdown = _mock_anthropic(commands)
     try:
         child_env = dict(env)
         child_env.update(ANTHROPIC_API_KEY="sk-fake", ANTHROPIC_BASE_URL=url,
@@ -776,35 +780,46 @@ def _live_hub_run(tmp_path, command_for, excluded=()):
                               timeout=180, stdin=subprocess.DEVNULL)
     finally:
         shutdown()
-    return json.dumps(seen), proc, paths
+    assert proc.returncode == 0, proc.stderr[-500:]
+    assert len(seen) == len(commands), f"expected {len(commands)} tool results, got {seen}"
+    return list(seen), proc, paths
+
+
+def _refused(result: dict) -> bool:
+    return result.get("is_error") is True
 
 
 @_LIVE_SKIP
 def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path):
-    def command(p):
-        return (
-            f"(echo x > {p['home']}/ok && echo HOME=ok || echo HOME=denied); "
-            f"(echo x > {p['lore']}/ok && echo LORE=ok || echo LORE=denied); "
-            f"(echo x > {p['cache']}/ok && echo CACHE=ok || echo CACHE=denied); "
-            f"(echo x > {p['outside']}/no && echo OUTSIDE=ok || echo OUTSIDE=denied); "
-            f"(mkdir -p {p['home']}/.claude && echo x > {p['home']}/.claude/settings.json "
-            f"&& echo OWNCFG=ok || echo OWNCFG=denied); "
-            f"(cat {p['token_store']}/token && echo TOKEN=readable || echo TOKEN=denied)"
-        )
+    def commands(p):
+        return [
+            f"echo x > {p['home']}/ok",
+            f"echo x > {p['lore']}/ok",
+            f"echo x > {p['cache']}/ok",
+            f"echo x > {p['outside']}/no",
+            f"mkdir -p {p['home']}/.claude && echo x > {p['home']}/.claude/settings.json",
+            f"cat {p['token_store']}/token",
+            f"head -c 1 {p['token_store']}/token",
+            f"python3 -c \"print(open('{p['token_store']}/token').read())\"",
+        ]
 
-    result, proc, _ = _live_hub_run(tmp_path, command)
-    assert proc.returncode == 0, proc.stderr[-500:]
-    assert "HOME=ok" in result and "LORE=ok" in result and "CACHE=ok" in result  # positive control
-    assert "OUTSIDE=denied" in result
-    assert "OWNCFG=denied" in result
-    assert "TOKEN=denied" in result and "TOPSECRET" not in result
+    results, _, paths = _live_hub_run(tmp_path, commands)
+    home_w, lore_w, cache_w, outside_w, own_cfg, cat_tok, head_tok, py_tok = results
+    assert not any(map(_refused, (home_w, lore_w, cache_w)))  # positive controls
+    assert (paths["home"] / "ok").exists() and (paths["lore"] / "ok").exists()
+    assert (paths["cache"] / "ok").exists()
+    assert _refused(outside_w) and not (paths["outside"] / "no").exists()
+    assert _refused(own_cfg) and not (paths["home"] / ".claude" / "settings.json").exists()
+    # cat is refused by the permission rule; head and python dodge that pattern, so their
+    # refusal is the sandbox read denial
+    assert _refused(cat_tok) and _refused(head_tok) and _refused(py_tok)
+    assert "TOPSECRET" not in json.dumps(results)
 
 
 @_LIVE_SKIP
 def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_path):
-    result, proc, paths = _live_hub_run(
-        tmp_path, lambda p: f"touch {p['home']}/excluded-ran", excluded=["touch *"]
+    results, _, paths = _live_hub_run(
+        tmp_path, lambda p: [f"touch {p['home']}/excluded-ran"], excluded=["touch *"]
     )
-    assert proc.returncode == 0, proc.stderr[-500:]
+    assert _refused(results[0])
     assert not (paths["home"] / "excluded-ran").exists()
-    assert '"is_error": true' in result
