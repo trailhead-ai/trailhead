@@ -39,6 +39,10 @@
     "expected": "pipeline",
     "kind": "task"
   },
+  "task-first-unattended-run": {
+    "expected": "pipeline",
+    "kind": "task"
+  },
   "task-plan-edit-between-driver-runs": {
     "expected": "authored",
     "kind": "task"
@@ -47,7 +51,19 @@
     "expected": "pipeline",
     "kind": "task"
   },
+  "task-second-unattended-run-appended": {
+    "expected": "pipeline",
+    "kind": "task"
+  },
   "task-three-driver-runs-with-plan-between": {
+    "expected": "pipeline",
+    "kind": "task"
+  },
+  "task-unattended-run-appended-with-plan-edit": {
+    "expected": "authored",
+    "kind": "task"
+  },
+  "task-unattended-run-outcome-edited": {
     "expected": "pipeline",
     "kind": "task"
   }
