@@ -72,13 +72,13 @@ def _resolved(env: dict[str, str], profile: LaunchProfile = HUB_PROFILE):
     return resolve_profile(profile, "a", env=env, platform="linux")
 
 
-def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=None):
+def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=None, **extra):
     resolved = _resolved(env, profile)
     home = hub_home("a", env=env, platform="linux")
     home.mkdir(parents=True, exist_ok=True)
     Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
     return ClaudeCodeHarness().session_start(
-        resolved, home, prompt, interactive=interactive, account=account, env=env
+        resolved, home, prompt, interactive=interactive, account=account, env=env, **extra
     )
 
 
@@ -169,6 +169,46 @@ def test_a_user_entry_aliasing_system_temp_is_not_denied_but_other_entries_are(o
     deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
     assert os.path.realpath(tempfile.gettempdir()) not in deny
     assert other in deny
+
+
+def _deny_of(env, **extra) -> list[str]:
+    return _settings_of(_start(env, **extra))["sandbox"]["filesystem"]["denyWrite"]
+
+
+def test_tmuxs_socket_directory_under_allowed_system_temp_is_denied(off_temp):
+    env = _fence(off_temp)
+    _write_user_settings(env, _real_shaped_user(env, off_temp))
+    socket_dir = os.path.join(os.path.realpath("/tmp"), "tmux-4242")
+    assert socket_dir in _deny_of(env, uid=4242)
+
+
+def test_tmuxs_socket_directory_follows_the_uid(off_temp):
+    env = _fence(off_temp)
+    _write_user_settings(env, _real_shaped_user(env, off_temp))
+    tmp = os.path.realpath("/tmp")
+    first, second = _deny_of(env, uid=1), _deny_of(env, uid=2)
+    assert f"{tmp}/tmux-1" in first and f"{tmp}/tmux-2" not in first
+    assert f"{tmp}/tmux-2" in second and f"{tmp}/tmux-1" not in second
+
+
+def test_tmuxs_socket_directory_follows_tmux_tmpdir_when_it_is_under_an_allowed_root(off_temp):
+    env = _fence(off_temp)
+    home, lore, cache = _hub_roots(env)
+    socket_root = Path(lore) / "tmuxroot"
+    socket_root.mkdir(parents=True)
+    env["TMUX_TMPDIR"] = str(socket_root)
+    _write_user_settings(env, _real_shaped_user(env, off_temp))
+    deny = _deny_of(env, uid=7)
+    assert f"{os.path.realpath(socket_root)}/tmux-7" in deny
+    assert f"{os.path.realpath('/tmp')}/tmux-7" not in deny
+
+
+def test_tmuxs_socket_directory_outside_every_allowed_root_is_not_added(off_temp):
+    env = _fence(off_temp)
+    elsewhere = off_temp.resolve() / "sockets"
+    env["TMUX_TMPDIR"] = str(elsewhere)
+    _write_user_settings(env, _real_shaped_user(env, off_temp))
+    assert not [d for d in _deny_of(env, uid=7) if "tmux-" in d]
 
 
 def test_hub_profile_within_the_users_write_list_launches_and_denies_nothing(tmp_path):
@@ -883,11 +923,24 @@ _LIVE_SKIP = pytest.mark.skipif(
 )
 
 
-def _live_hub_run(tmp_path, commands_for, excluded=()):
+@pytest.fixture
+def tmux_root():
+    """A stand-in for the system temp a tmux server keeps its sockets under, outside tmp_path."""
+    root = Path(os.path.realpath(tempfile.mkdtemp(prefix="trailhead-tmux-", dir="/tmp")))
+    try:
+        yield root
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
+
+
+def _live_hub_run(tmp_path, tmux_root, commands_for, excluded=()):
     """Start the hub profile for real against a mock API that has the model run each command
     as its own Bash call (a permission denial of one call must not hide the others).
     Returns (per-command tool results, completed process, paths)."""
     env = _fence(tmp_path)
+    tmux_socket_dir = tmux_root / f"tmux-{os.getuid()}"
+    tmux_socket_dir.mkdir(mode=0o700)
+    env["TMUX_TMPDIR"] = str(tmux_root)
     home, lore, cache = (Path(p) for p in _hub_roots(env))
     token_store = _resolved(env).paths["token-store"]
     for d in (lore, cache, token_store):
@@ -906,7 +959,8 @@ def _live_hub_run(tmp_path, commands_for, excluded=()):
                                                   str(outside)]}}},
     )
     start = _start(env, interactive=False, prompt="go")
-    paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store)
+    paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store,
+                 tmux_root=tmux_root, tmux_socket_dir=tmux_socket_dir)
     commands = commands_for(paths)
     url, seen, shutdown = _mock_anthropic(commands)
     try:
@@ -928,12 +982,14 @@ def _refused(result: dict) -> bool:
 
 
 @_LIVE_SKIP
-def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path):
+def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path, tmux_root):
     def commands(p):
         return [
             f"echo x > {p['home']}/ok",
             f"echo x > {p['lore']}/ok",
             f"echo x > {p['cache']}/ok",
+            f"echo x > {p['tmux_root']}/scratch-ok",
+            f"echo x > {p['tmux_socket_dir']}/default",
             f"echo x > {p['outside']}/no",
             f"mkdir -p {p['home']}/.claude && echo x > {p['home']}/.claude/settings.json",
             f"cat {p['token_store']}/token",
@@ -941,9 +997,10 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
             f"python3 -c \"print(open('{p['token_store']}/token').read())\"",
         ]
 
-    results, _, paths = _live_hub_run(tmp_path, commands)
-    home_w, lore_w, cache_w, outside_w, own_cfg, cat_tok, head_tok, py_tok = results
-    assert not any(map(_refused, (home_w, lore_w, cache_w)))  # positive controls
+    results, _, paths = _live_hub_run(tmp_path, tmux_root, commands)
+    home_w, lore_w, cache_w, scratch_w, socket_w, outside_w, own_cfg, cat_tok, head_tok, py_tok = results
+    assert not any(map(_refused, (home_w, lore_w, cache_w, scratch_w)))  # positive controls
+    assert _refused(socket_w) and not (paths["tmux_socket_dir"] / "default").exists()
     assert (paths["home"] / "ok").exists() and (paths["lore"] / "ok").exists()
     assert (paths["cache"] / "ok").exists()
     assert _refused(outside_w) and not (paths["outside"] / "no").exists()
@@ -955,9 +1012,9 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
 
 
 @_LIVE_SKIP
-def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_path):
+def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_path, tmux_root):
     results, _, paths = _live_hub_run(
-        tmp_path, lambda p: [f"touch {p['home']}/excluded-ran"], excluded=["touch *"]
+        tmp_path, tmux_root, lambda p: [f"touch {p['home']}/excluded-ran"], excluded=["touch *"]
     )
     assert _refused(results[0])
     assert not (paths["home"] / "excluded-ran").exists()

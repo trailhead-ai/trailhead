@@ -984,8 +984,14 @@ class _UserSettings:
         return value
 
 
+def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
+    """The directory tmux keeps its default sockets in: ``<TMUX_TMPDIR or /tmp>/tmux-<uid>``,
+    symlink-free (``/tmp`` is ``/private/tmp`` on macOS)."""
+    return Path(os.path.realpath(Path(env.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{uid}"))
+
+
 def _derive_write_confinement(
-    user: _UserSettings, roots: list[Path]
+    user: _UserSettings, roots: list[Path], tmux_socket_dir: Path
 ) -> list[str]:
     """Check the profile's write roots against *user*; return the derived ``denyWrite``.
 
@@ -994,6 +1000,13 @@ def _derive_write_confinement(
     temp (``/tmp``, ``/private/tmp``, the platform temp dir) is shared scratch, not a
     confinement target, so a user entry resolving to it is never derived into the
     denial: a deny beats an allow, and it would break the session's own sandbox temp.
+
+    *tmux_socket_dir* sits inside that scratch, so a session could unlink the sockets of
+    the tmux server it runs in (or the operator's default one). It is denied whenever it
+    lies under a user-allowed root or the launch directory; outside those it is already
+    unwritable, so nothing is added there and the list never names a path the user did
+    not allow. A directory that contains a profile root is never denied, since the denial
+    would win over the root.
 
     Raises :class:`HarnessError` naming the offending entry when a profile root is
     not covered by the user's writable list or the launch directory, when a user-level writable root contains
@@ -1037,6 +1050,12 @@ def _derive_write_confinement(
         ):
             continue
         deny.append(str(resolved))
+    if (
+        (_covers(user.launch_dir, tmux_socket_dir) or any(_covers(r, tmux_socket_dir) for _, r in allowed))
+        and not any(_covers(tmux_socket_dir, root) for root in roots)
+        and str(tmux_socket_dir) not in deny
+    ):
+        deny.append(str(tmux_socket_dir))
     return deny
 
 
@@ -1943,6 +1962,7 @@ class ClaudeCodeHarness(Harness):
         interactive: bool,
         account: str | None,
         env: dict[str, str] | None = None,
+        uid: int | None = None,
     ) -> SessionStart:
         """Render *profile* into a confined, never-prompting ``claude`` launch.
 
@@ -1964,6 +1984,10 @@ class ClaudeCodeHarness(Harness):
         verbatim. The only side effect is the folder-trust record in the account's
         ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
         written after every refusal check has passed. Never execs.
+
+        The tmux socket directory (``$TMUX_TMPDIR`` from *env*, else ``/tmp``, then
+        ``tmux-<uid>``; *uid* defaults to the process's) joins ``denyWrite`` under the
+        conditions :func:`_derive_write_confinement` states.
 
         *directory* must be an existing directory: a launcher that cannot enter it (tmux
         falls back to ``$HOME``) would run the session in a directory the sandbox always
@@ -1998,7 +2022,9 @@ class ClaudeCodeHarness(Harness):
         deny_write = [
             str(launch_dir / ".claude"),
             str(launch_dir / ".mcp.json"),
-            *_derive_write_confinement(user, roots),
+            *_derive_write_confinement(
+                user, roots, _tmux_socket_dir(source, os.getuid() if uid is None else uid)
+            ),
         ]
         hosts = profile.profile.network_allowed_hosts
         _check_reads_and_network(user, roots, hosts)
