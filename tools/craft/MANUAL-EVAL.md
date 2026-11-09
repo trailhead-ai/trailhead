@@ -5072,3 +5072,27 @@ Five runner cases, pre-registered in their `expected.md` and committed before an
 **Finding.** The baselines are not red. The unedited prose, with the shared unattended contract, already decides and logs surviving findings, parks the spec gap as `Q1` with the outcome line, keeps a security finding folded or parked with its location only, and takes the pending path for a manual check without being asked. The only red runs fail for reasons other than the ones the cases were registered to detect, or are single-run variation. Spend about 11.7 USD.
 
 **Reclassification (2026-11-09).** After the baselines above came back green, the first four cases were reclassified as guards on the same grounds as the adjusts case: the shared unattended contract already carries the behaviours, so they pin that the end-phase edits do not break them. Their graders were not changed and each `expected.md` carries a dated note. Three discriminating cases were then pre-registered for the Delivers behaviours no case measured, with the rule that a baseline that comes back green drops the case and records it as a guard: `unattended-execute-close-ends-stuck-on-a-failed-push`, `unattended-execute-close-ends-stuck-on-the-default-branch` and `unattended-execute-close-names-a-brainstorm-task-by-id`. The pre-push secret-scan stop and the writer-failure branch are not measured.
+
+### Results of the end-phase cases (treatment, mutation, control)
+
+Treatment prose fingerprint: `_shared/execute.md` `f5e2fd563fec5f195bd03f62235d03261e98c9ae` (new subsection `### End-phase stops` plus a pointer at Phase 3, Phase 4, Found work, the push rule, the manual-check discharge and the completion report); `_shared/unattended.md` and `execute/SKILL.md` unchanged. The `execute-rule-only.md` live arm was rebuilt. Same runner settings and grants as above, 3 runs per batch.
+
+| Case | Baseline (unedited prose) | Treatment |
+|---|---|---|
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (new, detector) | first fixture: 0.88 x3 (`names-the-brainstorm-task-by-id` fails; `no-brainstorm-command` passed). After the fixture amendment below: 0.62 x3 (`names-the-brainstorm-task-by-id` fails every run, plus `no-outcome-line` or `asked-nothing`, and `parent-is-done`) | first batch 2 of 3 (0.88: id missing, on the first fixture, void); amended fixture: 2 of 3 (1.0, 0.88 id missing, 1.0), permitted rerun **3 of 3 at 1.0** (a rerun-green) |
+| `unattended-execute-close-ends-stuck-on-a-failed-push` (new) | 3 of 3 at 1.0: **green, so dropped and recorded as a guard, not retried** | 3 of 3 (guard stays green) |
+| `unattended-execute-close-ends-stuck-on-the-default-branch` (new) | 3 of 3 at 1.0: **green, dropped, guard, not retried** | 3 of 3 |
+| `unattended-execute-decides-surviving-findings` (guard) | 2 of 3 | 3 of 3 |
+| `unattended-execute-never-drops-a-security-finding` (guard) | 3 of 3 | 3 of 3 |
+| `unattended-execute-parks-a-spec-gap-finding` (guard) | 2 of 3 (one Q1 shape miss) | 2 of 3 twice (the `asked-nothing` judge voted FAIL on one run in each batch, 0.93; every record and outcome-line grader passed in all six runs): judge noise on the operator-accepted headless judge, as the sibling park case recorded; not at the 3 of 3 bar |
+| `unattended-execute-close-records-a-manual-check-pending` (guard) | 2 of 3 (the writer called twice in one run) | 3 of 3 |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard) | 3 of 3 | 3 of 3 |
+| `unattended-execute-refuses-a-held-slice` (paired control for the added `Bash(./git *)` grant) | not rerun | 3 of 3 at 1.0 |
+
+**Fixture amendment (2026-11-09).** The brainstorm case's first baseline and first treatment both failed the id clause in every run. A kept trace showed the run called `found_work.py report` without `--session-id`, which the script refuses, so the brainstorm task never reached the report. The scaffold's script wrapper now exports the session id through the environment, as a live session does. No grader changed; both arms were re-run on the amended fixture, the baseline on the unedited prose (restored from the committed file and re-fingerprinted `b23ab548...`), and the earlier runs are not counted.
+
+**Mutation checks.** The brainstorm case is the only detector, so its contract line is the only one mutated: both carriers of the behaviour were removed together (the completion-report bullet in `### End-phase stops` and the `Completion report` paragraph's added clause). Result, 2 runs: 0.88 each, `no-brainstorm-command` failed (the script's report carried `/craft:brainstorm` through). Restored from a scratch copy, empty diff. The guard cases' contract lines are not separately mutated: their baselines on the prose without any of the new text are the all-carriers-removed mutation, and it stayed green (third explanation: the shared unattended contract and the Found work section carry them).
+
+**Grant.** `Bash(./git *)` was added to the craft runner block for the push cases. Paired control `unattended-execute-refuses-a-held-slice`: 3 of 3 at 1.0 with the grant. The push cases ran a real `git push` to a local bare origin inside the runner sandbox; the sandbox blocks writing `.git/config`, so `--set-upstream` reports an error after the push lands, and runs report that.
+
+**Not measured:** the pre-push secret-scan stop, the writer and `verify` failure branch of the unattended manual-check discharge, a spec-gap park followed by Phases 4 and 5 (the prompt tells the run they are done), the fold's fix pass, a parent with no spec link. Spend about 46 USD.

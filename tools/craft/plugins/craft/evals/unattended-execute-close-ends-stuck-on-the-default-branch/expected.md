@@ -32,3 +32,7 @@ Branches: today's prose (reports the default-branch repo in words and leaves the
 ## Limitations
 
 The pre-push secret-scan stop is not measured (listed as unmeasured). One repository, one fixture, one model tier, three runs.
+
+## Dropped as a detector, kept as a guard (2026-11-09)
+
+The baseline on the unedited prose came back green in 3 of 3 runs, so under the registered rule this case is dropped as a detector and recorded as a guard, and not retried. Its pass lines and graders are unchanged. See `tools/craft/MANUAL-EVAL.md`.
