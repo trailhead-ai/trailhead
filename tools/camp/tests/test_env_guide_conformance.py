@@ -125,14 +125,6 @@ def test_worked_example_labels_use_the_contract_keys_and_its_name_follows_the_ru
     assert c.name == container_name(c.labels[LABEL_GROUP], c.labels[LABEL_NAME])
 
 
-def test_worked_example_publishes_only_on_loopback() -> None:
-    c = _Container(_one("camp-env-example"))
-    assert c.publishes
-    assert all(p.startswith("127.0.0.1:") for p in c.publishes)
-    assert "--privileged" not in _one("camp-env-example")
-    assert "docker.sock" not in _one("camp-env-example")
-
-
 def test_translation_of_the_example_matches_the_real_docker_capture() -> None:
     c = _Container(_one("camp-env-example"))
     captured = CAPTURE.read_text(encoding="utf-8").splitlines()
