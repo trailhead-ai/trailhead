@@ -4415,6 +4415,7 @@ Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`
 | 2026-11-08 | regression, `slice-spec-complete-hands-off-to-tidy-followups`, final prose | 1 | 1.0; 1 of 1 pass | 51 s, $0.68 |
 | 2026-11-08 | baseline re-run on the final case (final prompt with `--session-id`, final graders), unedited prose rebuilt from the pre-edit blob (`git hash-object` `6b90445d031d197fadff8f9c4b9274cdb74e46b7`) in an untracked temp copy of the plugin | 1 | 0.11; 0 of 1 pass | eight of nine graders red: `each-decision-precedes-its-result`, `f1-is-folded-into-the-new-parent`, `f3-is-reopened`, `fold-decision-is-logged`, `outcome-reports-the-decisions`, `parent-body-names-the-fold` (Write called 0x), `reopen-decision-names-the-dropped-task`, `report-names-the-fold-with-its-path`; `f2-stays-open` green as pre-registered. 41 turns, 89 s, $0.91 |
 | 2026-11-09 | regression after the `reopen-abandoned` reason-code wording (`slice/SKILL.md` fingerprint `5297ca05da5df5029e4612e8f7ce267ddee1a588`) | 1 | 1.0; 1 of 1 pass | every grader green. 48 turns, 129 s, $1.05 |
+| 2026-11-09 | regression after `reopen-abandoned` marks a built entry done (`slice/SKILL.md` fingerprint `29f12e4396dcb9b5349b38d277ffbcbc3ca0f865`) | 1 | 1.0; 1 of 1 pass | all nine graders green. 54 turns, 130 s, $1.15 |
 
 Total spend about $22.8 (a further 1-run `--keep-temp` diagnostic, $1.13, is included).
 
@@ -4469,6 +4470,7 @@ Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`
 | 2026-11-09 | regression, `build-records-a-security-finding-by-location` | 1 | 1.0; 1 of 1 pass | 117 s, $1.19 |
 | 2026-11-09 | regression, `unlinked-build-keeps-capturing-candidates` | 1 | 1.0; 1 of 1 pass | 94 s, $1.04 |
 | 2026-11-09 | regression after the sweep-failure-does-not-hold-the-close wording (`_shared/execute.md` fingerprint `c5d9411a42471b65541d769c3c739201b01f79c8`) | 1 | 1.0; 1 of 1 pass | every grader green. 54 s, $0.53 |
+| 2026-11-09 | regression after the failed-`done` wording (built, but not marked done; `_shared/execute.md` fingerprint `2f947422162dc935f2766b2354362556fd25a695`) | 1 | 1.0; 1 of 1 pass | all six graders green. 16 turns, 47 s, $0.50 |
 
 Total spend about $6.1.
 

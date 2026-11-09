@@ -1349,11 +1349,13 @@ parent has no spec link, or that finds no entries folded into the parent (the sc
 entries are folded into task/<parent-name>`), settles nothing and closes as it always has.
 
 When a call exits `2` or `3`, or the listing exits `2`, the entry stays folded, which is the honest
-state, and the failure does not hold the close: the parent still closes `done`, and because the
-parent is then `done` the next slice pass's `reopen-abandoned` returns the entry to open. List it in
-the completion report among what needs the operator, with the reason it was not built and the
-`retry:` line the script printed on exit `3`, which runs as printed. Do not report the entry as
-settled, and do not retry in a loop.
+state, and the failure does not hold the close: the parent still closes `done`. List it in the
+completion report among what needs the operator, with the `retry:` line the script printed on exit
+`3`, which runs as printed. A failed `done` call is listed as "built, but not marked done", since
+the entry was built and there is no reason it was not; a failed `reopen` call is listed with the
+reason it was not built. If the retry is not run, the parent is then `done`, so the next slice
+pass's `reopen-abandoned` settles the entry: it marks it done when a done child names it and returns
+it to open otherwise. Do not report the entry as settled, and do not retry in a loop.
 
 **The completion report** begins with what needs the operator, and nothing, no summary or preamble,
 comes before it: the finding text from every exit `2`, carried as printed, and the

@@ -331,19 +331,25 @@ certified, before the candidate set is derived, run:
 ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault>
 ```
 
-It reopens, in one write, every follow-up entry folded into a slice task now `dropped`, `superseded`
-or `done`, and prints one `found-work-result: written | parent: task/<id> | …` line per entry it
-reopened and nothing when there was none. Note each `parent: task/<id>` it prints: the outcome
-reports the decision under that task (see Outcome). A spec with no `## Follow-ups` section has
-nothing to reopen and prints nothing. A non-zero exit is not a refusal: report its `reason-code:`
-token (and the `retry:` line, when it prints one) in the outcome and carry on. Exit 2 is either a
-`lookup-failed`, where the entries of the tasks it could not read stay folded and the next pass
-retries them, or a `capture-failed`, where a decision line was not captured and nothing was written,
-or a result line was not captured after the write, which may have landed, so running the command
-again settles it; exit 3 is a write that failed. **Under `--unattended`, this runs right after the
-held write above has landed (or in its place when the reconcile had nothing to add), so a refusal at
-a gate still changes nothing;** once it has written, the session has written, and a later stop is
-`stuck`, not `refused`, as it is after the ledger write.
+In one write it settles every follow-up entry folded into a slice task now `dropped`, `superseded`
+or `done`. It reopens each entry of a `dropped` or `superseded` slice. For a `done` slice it marks
+`done by` that slice each entry a `done` child of it names, because the build built it, and reopens
+the rest. It prints one `found-work-result: written | parent: task/<id> | …` line per entry it
+settled, then a `marked done:` line and a `reopened:` line naming which entries took which move, and
+nothing when there was none. Note each `parent: task/<id>` it prints: the outcome reports the
+decision under that task (see Outcome). A spec with no `## Follow-ups` section has nothing to reopen
+and prints nothing. A non-zero exit is not a refusal: report its `reason-code:` token (and the
+`retry:` line, when it prints one) in the outcome and carry on. Exit 2 is one of: `spec-unreadable`,
+where the spec could not be read; one of the follow-ups section parser's own codes (such as
+`malformed-entry` or `duplicate-followups-heading`), where the section is malformed; a
+`lookup-failed`, where the entries of the tasks it could not read, or whose children it could not
+read, stay folded and the next pass retries them; or a `capture-failed`, where a decision line was
+not captured and nothing was written, or a result line was not captured after the write, which may
+have landed, so running the command again settles it; exit 3 is a write that failed. **Under
+`--unattended`, this runs right after the held write above has landed (or in its place when the
+reconcile had nothing to add), so a refusal at a gate still changes nothing;** once it has written,
+the session has written, and a later stop is `stuck`, not `refused`, as it is after the ledger
+write.
 
 Only now — with the ledger reconciled and certified — is the candidate set derived. Each Bash call
 is a fresh shell, so no shell variable survives from one to the next: carry the state file's path
