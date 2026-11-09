@@ -9,7 +9,7 @@ import urllib.request
 from pathlib import Path
 
 from trailhead.launch_profile import validate_account
-from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT, is_answering
+from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT, _probe_health
 from trailhead.paths import state_dir
 
 HUB_SOCKET = "outpost-hubs"
@@ -26,7 +26,13 @@ def tmux_attach_argv(account: str) -> list[str]:
 
 
 def outpost_answering(port: int = DAEMON_PORT) -> bool:
-    return is_answering(port)
+    health = _probe_health(port, 1.0)
+    return (
+        isinstance(health, dict)
+        and health.get("ok") is True
+        and isinstance(health.get("contract_version"), int)
+        and not isinstance(health.get("contract_version"), bool)
+    )
 
 
 def read_operator_credential(env: dict[str, str]) -> str:

@@ -80,7 +80,10 @@ class _Stub:
                 pass
 
             def do_GET(self):
-                if self.path == "/health" and stub.health == "outpost":
+                if self.path == "/health" and isinstance(stub.health, (dict, list)):
+                    payload = json.dumps(stub.health).encode()
+                    ctype = "application/json"
+                elif self.path == "/health" and stub.health == "outpost":
                     payload = json.dumps({"ok": True, "contract_version": 8}).encode()
                     ctype = "application/json"
                 else:
@@ -214,6 +217,30 @@ def test_non_outpost_listener_is_treated_as_down(tmp_path, stub, capsys):
     rc, ex = _start(env, port=s.port)
     assert rc != 0 and ex.calls == [] and s.posts == []
     assert "trailhead outpost start" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "health",
+    [
+        {},
+        {"ok": True},
+        {"contract_version": 8},
+        {"ok": False, "contract_version": 8},
+        {"ok": True, "contract_version": "8"},
+        {"ok": True, "contract_version": True},
+        [1, 2],
+    ],
+)
+def test_json_listener_without_outpost_health_shape_is_down(tmp_path, stub, capsys, health):
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    # no credential file: a read would raise the restart message instead
+    s = stub(health=health)
+    rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
+    assert rc != 0 and ex.calls == [] and s.posts == []
+    assert "trailhead outpost start" in err
+    assert "restart" not in err
 
 
 def test_hub_exited_at_launch_prints_output(tmp_path, stub, capsys):
