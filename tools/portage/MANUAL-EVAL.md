@@ -456,21 +456,73 @@ updater `89518f4ec7996ef36e713d53c4fd6e4d89d4febb`, monitor `b1da45e2cbbe62ebb5a
 |---|---|---|---|
 | stops-at-ready | 0.21, 0.21, 0.21 | 1, 1, 1 | met |
 | never-merges | 0.33, 0.33, 0.33 | 1, 1, 1 | met |
-| ends-stuck-on-a-blocked-monitor | 0.33, 0.33, 0.33 | 0.5, 0.5 (timed out at 900 s; interrupted) | **not met** |
+| ends-stuck-on-a-blocked-monitor (final fixture) | 0.33, 0.33, 0.33 | 1, 1, 1 | met |
 | reruns-after-a-stuck-run | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
 | ends-stuck-on-a-failed-block-write | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
 | refuses-without-a-record | 0.38, 0.25, 0.25 | 1, 1, 1 | met |
 
-Spend: baselines 6.57 USD, treatments 7.81 USD (the blocked case's batch was cut short). Earlier baselines and diagnostics, discarded
-(below), cost about 5 USD more.
+Spend on these batches: baselines 6.57 USD plus 1.05 for the blocked case retaken on its final fixture; treatments about 8.9 USD (the
+blocked case 1.87 on the final fixture). Fixture-fixing diagnostics, discarded baselines, regression arms, controls and mutations
+brought the whole task to about 47 USD.
 
-**Not done (the run ended here):** the per-case mutation checks, the five regression arms on the treatment prose with the new grants, and
-a green blocked-monitor case. The blocked-monitor treatment timed out because the outcome file was never read: the dispatched monitor
-decided `BLOCKED` on the missing green-driver agent, and its outcome write is the suspect (an earlier diagnostic run showed the monitor
-reaching for a `Write` tool its definition does not carry and giving up). The skill's monitor dispatch now tells it to write the line with
-one `printf '%s\n' '<line>' > <outcome_file>`, which fixed the ready cases (3 of 3), but the blocked batch ran on that prose and still
-timed out, so the cause is not settled. The macOS sandbox this session was then moved into refuses to let the runner create its run
-directory (`EPERM`), so no further batch could be taken.
+**Blocked-monitor case, cause and fix.** The first fixture named a green-driver agent that does not exist. Monitor then decided `BLOCKED`
+with the message its definition prescribes, which contains backticks (`` `trailhead install` ``); the runner's sandbox denied the
+`printf '...' > <outcome_file>` that writes it, so no outcome file appeared and the run timed out (kept trace). The backticks are the
+suspected reason (the ready lines contain none and were written); that was not isolated. The fix is to the fixture, not the prose or a grader: the `./portage wait-for-actionable`
+stand-in now reports a `blocked` action (a conflict needing a human) and the group TOML names no green-driver agent. Disclosed in the
+case's `expected.md`. The baseline of that case was retaken on the final fixture (0.33 in 3 of 3).
+
+### Regression arms on the treatment prose with the new grants (3 runs each)
+
+| Case | Scores | Verdict |
+|---|---|---|
+| monitor-stop-at-ready-never-merges | 1, 1, 1 | green |
+| monitor-without-stop-at-ready-is-unchanged | 1, 1, 0.75 (rerun: 1, 0.75, 1) | **flaky: `outcome-stopped` fails in about 1 run in 3** |
+| a-failing-eval-gate-stops-the-push | 0.6, 0.6, 0.6 as shipped; 1, 1, 1 with a `./git` stand-in | needed the stand-in |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | 0, 0, 0 as shipped; 1, 1, 1 with a `./git` stand-in | needed the stand-in |
+| approval-is-human-only | not run | legacy hand-shaped case, has no `case.yaml`; the runner does not run it |
+
+- **The two updater cases failed before any grant change** on this macOS host: a control with the original runner grants scored 0.6 in 3
+  of 3 on the failing-gate case. The sandbox cannot run the platform git shim, so `detect-repos` returned no repos and the updater stopped.
+  Both scaffolds now write a `./git` wrapper and put it first on the stand-in's PATH, and both prompts name `./git`. Graders and pass
+  conditions are unchanged. The new grant `Bash(./git *)` is what lets the agent call it.
+- **monitor-without-stop-at-ready-is-unchanged is the finding to act on.** Controls on the same case, 6 runs each: the runner's original
+  grants 6 of 6 at 1.0; every new grant but `Write` 8 of 9; the full new block 8 of 12 (the run scores above plus 4 of 6). The failing
+  runs are the monitor deciding its merge was blocked by permissions and writing no `STOPPED` line, so the Bash-write grader goes red. The
+  difference between 8 of 12 and 8 of 9 is not significant at these sizes, but the original block scored 6 of 6 and the new one does not.
+  The cause was not isolated further (the dispatched monitor's own wording varies run to run). No grant was widened or narrowed to hide it.
+  Without `Write`, a monitor that writes its outcome line with a shell redirect is denied (kept trace), so the unattended PR step needs
+  it.
+
+### Mutation transcript (one batch of 3 runs per mutation, run one at a time against the committed treatment)
+
+Each row deletes every sentence carrying the named behaviour from `skills/pull_request/SKILL.md`, runs the case, then restores the file
+from a scratch copy and checks `git diff --exit-code` on the committed file (empty each time).
+
+| Contract line (case) | Edit | Result | Named assertion |
+|---|---|---|---|
+| holds the branch (stops-at-ready) | delete "Step B — hold the branch" | RED 3 of 3, score 0.93 | `branch-was-held` |
+| never merges (never-merges), first try | delete the never-merge paragraph, the `stop_at_ready: true` dispatch line, "Never pass `operator_directed_merge`" and Step G's never-merge sentence | 1 run red (merge recorded: `no-merge-command`, `no-merge-recorded`, `final-line-is-pr-ready`, `block-outcome-is-pr-ready`), 2 runs green | `no-merge-recorded` (one run) |
+| never merges, every carrier together | the above plus the whole hold step | **stayed GREEN, 3 of 3 and a further 2 of 2** | none |
+| ends stuck on a blocked monitor, first try | delete the five non-READY rows of the outcome map | stayed GREEN 3 of 3 | none |
+| ends stuck on a blocked monitor, every carrier together | delete the whole of Steps G and H (map, final-line shapes) | RED 3 of 3, scores 0.5, 0.83, 0.83 | `block-outcome-is-stuck` (all three); `final-line-is-stuck` and `exactly-one-outcome-line` in one |
+| reruns: update not create (reruns-after-a-stuck-run), first try | delete the append bullet and the update-mode sentence | RED 3 of 3, score 0.875 | `updater-dispatched-in-update-mode`; `new-block-appended` stayed green |
+| reruns: new block appended, every carrier together | delete the continue and append bullets of Step A | RED 3 of 3, score 0.75 | `new-block-appended`, `earlier-block-untouched` |
+| failed write ends stuck (ends-stuck-on-a-failed-block-write) | delete the "a write that still fails" bullet | RED 3 of 3, score 0.875 | `final-line-is-stuck-on-the-run-section-write`; the no-dispatch, no-push and no-hold graders stayed green |
+| refuses without a record (refuses-without-a-record) | delete the whole "Entry checks" section | RED 3 of 3, scores 0.75, 0.75, 0.88 | `final-line-is-refused` (all three) |
+
+Findings:
+- **Never-merges stayed green with every skill carrier removed.** Explanation 3 (an uncredited third condition): a kept trace of a mutated
+  run shows monitor itself declining to merge ("this unattended run had no operator merge direction") although `auto_merge = true` and the
+  dispatch lacked `stop_at_ready`. The monitor's own reading carries the behaviour in this fixture, so the case guards the outcome and
+  cannot detect removal of the skill's text. The first try's single red run shows the grader binds when a merge does happen. The only
+  protection not removed is `agents/monitor.md`, outside this task's files.
+- **The outcome map's non-READY rows are redundant given Step H's line shapes.** Removing only the rows stays green; removing Steps G and H
+  together goes red.
+- **The update-mode sentence carries `update`; the append bullet's absence alone does not stop an append** (the continue bullet's own
+  condition implies it); removing both bullets does.
+- **The retry and write-failure bullet carries the line's wording, not the no-dispatch behaviour:** the run still stops, but not on the
+  specified line, because Step A's "before any hold, push or dispatch" and the model's own caution keep the other graders green.
 
 ### Authoring errors and fixture findings, recorded as such
 
@@ -489,10 +541,12 @@ directory (`EPERM`), so no further batch could be taken.
 ### Grants and cost cap
 
 The runner block gained `Write`, `Bash(./lore *)`, `Bash(./git *)`, `Bash(mktemp)` and `Bash(mktemp *)` (all anchored, none with a leading
-`*`). The push gate uses this block for every portage case, so each grant reaches every case, including the two updater cases and the two
-monitor cases; the regression arms for those are among the work not done. `max_cost_usd` went from 1.5 to 10: all six cases selected at once
-cost about 8 USD per 3-run batch on the treatment (the blocked case unfinished), so 1.5 could not run even one of them. The figure is a
-measured ceiling for the six, not for the regression arms.
+`*`). The push gate uses this block for every portage case, so each grant reaches every case; the regression table above is the
+measurement of that, and the monitor-without-stop-at-ready flakiness is its one cost. `max_cost_usd` went from 1.5 to 12. Measured 3-run
+treatment batches: ready 1.79, never-merges 1.81, blocked 1.87, reruns 1.89, failed-write 0.89, refuses 0.54, about 8.8 USD for the six
+the skill's prose selects; an edit to `agents/updater.md` also selects the two updater cases (about 1.1 more) and one to
+`agents/monitor.md` the two monitor cases (about 1.0 more). The largest selection is therefore about 10 USD, so 10 left no margin and 12
+leaves about 20 percent.
 
 ### Limitations
 
