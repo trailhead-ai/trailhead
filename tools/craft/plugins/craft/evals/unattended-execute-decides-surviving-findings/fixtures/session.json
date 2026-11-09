@@ -1,0 +1,1 @@
+{"session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", "candidates": [{"kind": "assumption", "phase": "Build", "body": "The exporter reads invoices through the invoice store."}]}
