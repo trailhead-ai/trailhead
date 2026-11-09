@@ -92,13 +92,14 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 from trailhead.harness.base import (
     AccountAuthentication,
@@ -107,8 +108,12 @@ from trailhead.harness.base import (
     Harness,
     HarnessError,
     SessionRecord,
+    SessionStart,
     SessionTranscript,
 )
+
+if TYPE_CHECKING:
+    from trailhead.launch_profile import ResolvedProfile
 
 _REGISTERED_MARKER = ".trailhead-registered"
 #: Ledger dir inside the composed tree holding one file per Claude config dir
@@ -841,6 +846,238 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
     home = env.get("HOME") or env.get("USERPROFILE")
     base = Path(home) if home else Path.home()
     return base / _CONFIG_FILENAME
+
+
+# -- confined session start ---------------------------------------------------
+#
+# ``session_start`` renders a resolved launch profile into session-only settings
+# passed inline by ``--settings`` (inline, so no file exists for the session to edit).
+# Session settings MERGE with the user-level ``settings.json`` rather than replace it:
+# lists union, and a denial wins over an allowance. That has two consequences this
+# section is built around:
+#
+# * A profile can only NARROW. Writes are narrowed by DERIVING ``denyWrite`` from every
+#   user-level writable root that is not one of the profile's roots. A user-level root
+#   that CONTAINS a profile root cannot be denied without denying the profile root too
+#   (the denial wins), so that launch is refused. Reads and network destinations
+#   cannot be narrowed this way, so a profile that asks for one the user-level
+#   configuration forbids is refused too.
+# * Anything unreadable about the user-level configuration is a refusal, never a guess.
+#
+# Path conventions differ by key: ``sandbox.filesystem.*`` takes absolute or ``~/``
+# paths, ``permissions.deny`` ``Read()`` rules take ``//abs/path``. The user-level file
+# is ``$CLAUDE_CONFIG_DIR/settings.json`` for a bound account, else ``~/.claude/settings.json``.
+
+_SETTINGS_FILENAME = "settings.json"
+_READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
+
+
+def _resolve_settings_path(entry: str, home: Path, launch_dir: Path) -> Path:
+    """A path as a settings entry spells it, made absolute and symlink-free.
+
+    ``~`` expands against *home*; ``.`` and any other relative entry are the launch
+    directory. Comparison is always on these resolved paths, by segment.
+    """
+    if entry == "~" or entry.startswith("~/"):
+        path = home / entry[2:]
+    else:
+        path = Path(entry)
+        if not path.is_absolute():
+            path = launch_dir / path
+    return Path(os.path.realpath(path))
+
+
+def _covers(parent: Path, child: Path) -> bool:
+    """True when *child* is *parent* or lies beneath it (whole path segments)."""
+    return child == parent or parent in child.parents
+
+
+def _host_allowed(host: str, allowed: list[str]) -> bool:
+    for entry in allowed:
+        if entry == host:
+            return True
+        if entry.startswith("*.") and host.endswith(entry[1:]):
+            return True
+    return False
+
+
+class _UserSettings:
+    """The parts of an account's user-level settings a launch must not widen."""
+
+    def __init__(self, path: Path, home: Path, launch_dir: Path) -> None:
+        self.path = path
+        data = self._load(path)
+        sandbox = data.get("sandbox", {})
+        if not isinstance(sandbox, dict):
+            raise HarnessError(f"{path}: 'sandbox' must be an object; refusing the launch")
+        if "enabled" in sandbox and not isinstance(sandbox["enabled"], bool):
+            raise HarnessError(
+                f"{path}: 'sandbox.enabled' must be true or false; the sandbox cannot be "
+                "confirmed, refusing the launch"
+            )
+        fs = self._section(path, sandbox, "filesystem")
+        net = self._section(path, sandbox, "network")
+        permissions = self._section(path, data, "permissions")
+        self.allow_write = self._strings(path, fs, "allowWrite", "sandbox.filesystem.allowWrite")
+        self.deny_write = self._strings(path, fs, "denyWrite", "sandbox.filesystem.denyWrite") or []
+        self.allowed_domains = self._strings(
+            path, net, "allowedDomains", "sandbox.network.allowedDomains"
+        )
+        deny_read = self._strings(path, fs, "denyRead", "sandbox.filesystem.denyRead") or []
+        rules = self._strings(path, permissions, "deny", "permissions.deny") or []
+        self.deny_read: list[tuple[str, Path]] = [
+            (entry, _resolve_settings_path(entry, home, launch_dir)) for entry in deny_read
+        ]
+        for rule in rules:
+            match = _READ_RULE_RE.match(rule)
+            if not match:
+                continue
+            spec = match.group("spec")
+            for tail in ("/**", "/*"):
+                if spec.endswith(tail):
+                    spec = spec[: -len(tail)]
+            spec = spec[1:] if spec.startswith("//") else spec
+            if spec.startswith("/") or spec.startswith("~/") or spec == "~":
+                self.deny_read.append((rule, _resolve_settings_path(spec, home, launch_dir)))
+        self.home, self.launch_dir = home, launch_dir
+
+    @staticmethod
+    def _load(path: Path) -> dict:
+        try:
+            text = path.read_text()
+        except FileNotFoundError:
+            return {}
+        except OSError as exc:
+            raise HarnessError(f"{path}: cannot read user-level settings ({exc}); refusing the launch") from exc
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"{path}: malformed user-level settings ({exc}); refusing the launch") from exc
+        if not isinstance(data, dict):
+            raise HarnessError(f"{path}: user-level settings must be a JSON object; refusing the launch")
+        return data
+
+    @staticmethod
+    def _section(path: Path, parent: dict, key: str) -> dict:
+        value = parent.get(key, {})
+        if not isinstance(value, dict):
+            raise HarnessError(f"{path}: {key!r} must be an object; refusing the launch")
+        return value
+
+    @staticmethod
+    def _strings(path: Path, parent: dict, key: str, label: str) -> list[str] | None:
+        if key not in parent:
+            return None
+        value = parent[key]
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise HarnessError(f"{path}: {label!r} must be a list of strings; refusing the launch")
+        return value
+
+
+def _derive_write_confinement(
+    user: _UserSettings, roots: list[Path]
+) -> list[str]:
+    """Check the profile's write roots against *user*; return the derived ``denyWrite``.
+
+    Raises :class:`HarnessError` naming the offending entry when a profile root is
+    not covered by the user's writable list, when a user-level writable root contains
+    a profile root (it cannot be narrowed without denying the profile root), or when
+    a user-level write denial covers a profile root.
+    """
+    for entry in user.deny_write:
+        denied = _resolve_settings_path(entry, user.home, user.launch_dir)
+        if any(_covers(denied, root) for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level write denial {entry!r} covers a path this "
+                "profile writes; refusing the launch"
+            )
+    if user.allow_write is None:
+        return []
+    allowed = [(e, _resolve_settings_path(e, user.home, user.launch_dir)) for e in user.allow_write]
+    for entry, resolved in allowed:
+        if any(resolved in root.parents for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level writable root {entry!r} contains a path this "
+                "profile writes, so it cannot be narrowed without denying that path; "
+                "refusing the launch"
+            )
+    for root in roots:
+        if not any(_covers(resolved, root) for _, resolved in allowed):
+            raise HarnessError(
+                f"the profile writes {root}, which {user.path} does not allow "
+                "(a profile may narrow the user-level settings, never widen them)"
+            )
+    deny: list[str] = []
+    for _, resolved in allowed:
+        if any(_covers(root, resolved) for root in roots) or str(resolved) in deny:
+            continue
+        deny.append(str(resolved))
+    return deny
+
+
+def _check_reads_and_network(
+    user: _UserSettings, roots: list[Path], hosts: tuple[str, ...]
+) -> None:
+    for entry, denied in user.deny_read:
+        if any(_covers(denied, root) for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level read denial {entry!r} covers a path this "
+                "profile allows; refusing the launch"
+            )
+    if user.allowed_domains is not None:
+        for host in hosts:
+            if not _host_allowed(host, user.allowed_domains):
+                raise HarnessError(
+                    f"the profile reaches {host!r}, which the network allow-list in "
+                    f"{user.path} does not include (a profile may narrow it, never widen it)"
+                )
+
+
+def _seed_folder_trust(config_file: Path, directory: Path) -> None:
+    """Mark *directory* trusted in *config_file* so the first-run trust prompt never fires.
+
+    Read, update ``projects[<directory>].hasTrustDialogAccepted``, atomic rename; every
+    other key survives. An absent file is created; a malformed one refuses.
+    """
+    if not config_file.parent.is_dir():
+        raise HarnessError(
+            f"{config_file.parent} does not exist, so {config_file.name} cannot be written; "
+            "refusing the launch"
+        )
+    try:
+        text = config_file.read_text()
+    except FileNotFoundError:
+        data: object = {}
+    except OSError as exc:
+        raise HarnessError(f"{config_file}: cannot read ({exc}); refusing the launch") from exc
+    else:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"{config_file}: malformed ({exc}); refusing the launch") from exc
+    projects = data.get("projects", {}) if isinstance(data, dict) else None
+    if not isinstance(data, dict) or not isinstance(projects, dict):
+        raise HarnessError(
+            f"{config_file}: expected a JSON object with an object 'projects'; refusing the launch"
+        )
+    entry = projects.get(str(directory), {})
+    if not isinstance(entry, dict):
+        raise HarnessError(f"{config_file}: project entry for {directory} is not an object")
+    projects[str(directory)] = {**entry, "hasTrustDialogAccepted": True}
+    data["projects"] = projects
+    tmp = config_file.with_name(f".{config_file.name}.trailhead-tmp")
+    try:
+        mode = stat.S_IMODE(config_file.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o600
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, config_file)
+    except OSError as exc:
+        tmp.unlink(missing_ok=True)
+        raise HarnessError(f"{config_file}: cannot write ({exc}); refusing the launch") from exc
 
 
 class ClaudeCodeHarness(Harness):
@@ -1661,6 +1898,95 @@ class ClaudeCodeHarness(Harness):
         config_dir = str(_account_dir(account, source))
         _refuse_conflicting_config_dirs({**source, "CLAUDE_CONFIG_DIR": config_dir})
         return {"CLAUDE_CONFIG_DIR": config_dir}
+
+    def session_start(
+        self,
+        profile: ResolvedProfile,
+        directory: Path,
+        prompt: str | None,
+        *,
+        interactive: bool,
+        account: str | None,
+        env: dict[str, str] | None = None,
+    ) -> SessionStart:
+        """Render *profile* into a confined, never-prompting ``claude`` launch.
+
+        See the section comment above ``_resolve_settings_path`` for how session
+        settings merge with the account's user-level settings and what that forces.
+
+        Posture: ``--permission-mode dontAsk`` (a refused action is reported to the
+        model and the session carries on); headless adds ``-p`` and
+        ``--permission-prompts none`` so nothing waits on an answer. The sandbox is
+        enabled with ``failIfUnavailable`` so a sandbox that cannot start fails loudly
+        instead of leaving ``dontAsk`` to refuse everything quietly.
+
+        Account binding is :meth:`session_launch_env_set` / :meth:`session_launch_env_unset`
+        verbatim. The only side effect is the folder-trust record in the account's
+        ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
+        written after every refusal check has passed. Never execs.
+
+        Raises :class:`HarnessError` for a profile that would widen the user-level
+        settings, an unreadable or malformed user-level settings or ``.claude.json``,
+        a profile that may prompt, and a prompt that would parse as a flag.
+        """
+        if not profile.profile.never_prompt:
+            raise HarnessError("session_start only starts never-prompt profiles")
+        if prompt and prompt.startswith("-"):
+            raise HarnessError("the prompt starts with '-', so it would be read as a flag")
+        source = env if env is not None else dict(os.environ)
+        env_set = self.session_launch_env_set(account, env=source)
+        env_unset = self.session_launch_env_unset()
+        config_dir = env_set.get("CLAUDE_CONFIG_DIR")
+        home = _account_home(source)
+        launch_dir = Path(os.path.realpath(directory))
+        user = _UserSettings(
+            (Path(config_dir) if config_dir else home / ".claude") / _SETTINGS_FILENAME,
+            home,
+            launch_dir,
+        )
+        roots = [Path(os.path.realpath(p)) for p in profile.writable]
+        deny_write = _derive_write_confinement(user, roots)
+        hosts = profile.profile.network_allowed_hosts
+        _check_reads_and_network(user, roots, hosts)
+
+        denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
+        settings: dict = {
+            "sandbox": {
+                "enabled": True,
+                "failIfUnavailable": True,
+                "allowUnsandboxedCommands": False,
+                "filesystem": {
+                    "allowWrite": [str(r) for r in roots],
+                    "denyWrite": deny_write,
+                    "denyRead": [str(p) for p in denied_reads],
+                },
+                "network": {"allowedDomains": list(hosts)},
+            },
+            "permissions": {"deny": [f"Read(/{p}/**)" for p in denied_reads]},
+            "enabledMcpjsonServers": list(profile.profile.mcp_servers),
+        }
+        if profile.profile.model is not None:
+            settings["model"] = profile.profile.model
+
+        config_file = (
+            Path(config_dir) / _CONFIG_FILENAME
+            if config_dir
+            else claude_config_file({k: v for k, v in source.items() if k != "CLAUDE_CONFIG_DIR"})
+        )
+        _seed_folder_trust(config_file, launch_dir)
+
+        argv = ["claude"]
+        if not interactive:
+            argv.append("-p")
+        argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
+        argv += ["--permission-mode", "dontAsk"]
+        if not interactive:
+            argv += ["--permission-prompts", "none"]
+        if profile.profile.effort is not None:
+            argv += ["--effort", profile.profile.effort]
+        if prompt:
+            argv.append(prompt)
+        return SessionStart(argv=argv, env_set=env_set, env_unset=env_unset)
 
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None

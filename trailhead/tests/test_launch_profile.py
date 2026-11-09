@@ -104,11 +104,6 @@ def test_two_accounts_resolve_to_disjoint_locations(tmp_path):
     )
 
 
-def test_resolved_hub_profile_requests_no_network_hosts(tmp_path):
-    r = resolve_profile(HUB_PROFILE, "a", env=_env(tmp_path), platform="linux")
-    assert r.profile.network_allowed_hosts == ()
-
-
 def test_cache_role_is_the_xdg_cache_home_itself_and_follows_its_override(tmp_path):
     env = _env(tmp_path)
     r = resolve_profile(HUB_PROFILE, "a", env=env, platform="darwin")

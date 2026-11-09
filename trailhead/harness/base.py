@@ -40,6 +40,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from trailhead.launch_profile import ResolvedProfile
 
 
 class HarnessError(Exception):
@@ -193,6 +197,21 @@ class EvalRunner:
 
     argv: list[str]
     env: dict[str, str]
+
+
+@dataclass(frozen=True)
+class SessionStart:
+    """How to start one confined session: the argv to exec and the env edits to apply.
+
+    ``env_unset`` names variables the exec-owning caller removes from the child's
+    environment first; ``env_set`` is then assigned on top — the same order
+    :meth:`Harness.session_launch_env_unset` / :meth:`Harness.session_launch_env_set`
+    document. The seam never execs.
+    """
+
+    argv: list[str]
+    env_set: dict[str, str]
+    env_unset: list[str]
 
 
 class Harness(ABC):
@@ -711,6 +730,44 @@ class Harness(ABC):
 
         Returns ``None`` only from this base default — the harness cannot launch
         sessions at all.
+        """
+        return None
+
+    def session_start(
+        self,
+        profile: ResolvedProfile,
+        directory: Path,
+        prompt: str | None,
+        *,
+        interactive: bool,
+        account: str | None,
+        env: dict[str, str] | None = None,
+    ) -> SessionStart | None:
+        """How to start a session confined to *profile* in *directory*, or ``None``.
+
+        ``profile`` is a resolved :class:`~trailhead.launch_profile.ResolvedProfile`:
+        what the session may write, read, reach and use. ``directory`` is where it
+        starts. ``prompt`` is its first instruction, or ``None``. ``interactive``
+        selects between a session a person attaches to and a headless one; either
+        way the session NEVER prompts for a permission — an action outside what the
+        profile allows is refused and the session carries on. ``account`` and ``env``
+        carry the same meaning as on :meth:`session_launch_env_set`; the returned
+        ``env_set`` / ``env_unset`` are that seam's answers for ``account``.
+
+        A profile may only NARROW what the account's own user-level configuration
+        already permits. An implementation RAISES :class:`HarnessError`, naming the
+        offending entry, when the profile would widen it, and when it cannot
+        establish what the user-level configuration permits or that the confinement
+        will be enforced. A refusal is never expressed by returning ``None``.
+
+        The seam never execs: the caller owns the spawn. An implementation's one
+        permitted side effect is the per-directory trust record a harness needs so
+        its own first-run trust prompt does not stop a never-prompt session; it is
+        written only after every refusal check has passed.
+
+        Returns ``None`` only from this base default — the harness cannot start
+        confined sessions, and a caller must treat that as a refusal, never as
+        "start it unconfined".
         """
         return None
 

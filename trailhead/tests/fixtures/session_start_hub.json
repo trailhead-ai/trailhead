@@ -1,0 +1,22 @@
+{
+  "argv": [
+    "claude",
+    "--settings",
+    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"deny\":[\"Read(/<ROOT>/fence/outpost-state/operator/**)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state/operator\"],\"denyWrite\":[\"<ROOT>/fence/scratch\"]},\"network\":{\"allowedDomains\":[]}}}",
+    "--permission-mode",
+    "dontAsk",
+    "--effort",
+    "medium"
+  ],
+  "env_set": {},
+  "env_unset": [
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CONFIG_DIR"
+  ],
+  "directory": "<ROOT>/fence/ranger-state/hubs/a"
+}

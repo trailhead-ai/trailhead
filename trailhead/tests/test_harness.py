@@ -305,6 +305,23 @@ class TestSessionTranscriptDestinationBaseDefault:
         assert _BareHarness().session_transcript_destination("sess-1", tmp_path) is None
 
 
+class TestSessionStartBaseDefault:
+    """A harness that does not override ``session_start`` cannot start a confined session;
+    it answers ``None`` so a caller refuses rather than starting one unconfined."""
+
+    def test_default_is_unsupported(self, tmp_path):
+        from trailhead.launch_profile import HUB_PROFILE, resolve_profile
+
+        env = {"HOME": str(tmp_path), "XDG_STATE_HOME": str(tmp_path / "s")}
+        profile = resolve_profile(HUB_PROFILE, "a", env=env, platform="linux")
+        assert (
+            _BareHarness().session_start(
+                profile, tmp_path, None, interactive=True, account=None, env=env
+            )
+            is None
+        )
+
+
 class TestRewriteTranscriptWorkspaceBaseDefault:
     """Same degrading-``False`` default as the neighbouring transcript seams: a
     harness with no rewrite concept must leave ``destination`` untouched."""
