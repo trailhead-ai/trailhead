@@ -4,9 +4,9 @@ An **unattended run** is a ritual session that asks the operator nothing: it dec
 call on its own recommendation and logs it, parks a call that would change the spec as a question
 for the operator to answer later, and ends with one typed outcome line a caller can read. This file
 is the single place that defines the request, the decision rule, the `## Unattended run` section on
-the slice record, the outcome line and the no-next-command rule. `slice/SKILL.md` and
-`plan/SKILL.md` each state their own unattended branch at each of their own stops and point here for
-the shapes; neither restates them.
+the run's task record, the outcome line and the no-next-command rule. `slice/SKILL.md`,
+`plan/SKILL.md` and `_shared/execute.md` each state their own unattended branch at each of their own
+stops and point here for the shapes; none restates them.
 
 <!-- toc:start -->
 **Contents**
@@ -37,14 +37,20 @@ invocation only:
 
 Without the request a ritual behaves exactly as it does attended, whatever the session looks like.
 
-**Every shape check on a name an unattended run substitutes into a command** — the spec argument, a
-spec name read from a record's `--related spec=` link, a parent name — also rejects a value with a
-`..` path segment or a leading `-`, on top of `^[A-Za-z0-9._/-]+$`. A value that fails is refused,
-never quoted or escaped in.
+**Every shape check on a name an unattended run substitutes into a command** — the spec argument,
+the task argument, a spec name read from a record's `--related spec=` link, a parent name — also
+rejects a value with a `..` path segment or a leading `-`, on top of `^[A-Za-z0-9._/-]+$`. A value
+that fails is refused, never quoted or escaped in.
 
 `/craft:slice` also takes `--then-plan`. It is the caller's explicit statement that `/craft:plan`
 follows in this same session, so slice is not the session's last ritual. It means nothing without
 `--unattended`.
+
+`/craft:execute` also takes `--then-pr`. It is the caller's explicit statement that
+`/portage:pull_request create --unattended` follows in this same session, so execute is not the
+session's last ritual. It means nothing without `--unattended`, and `--unattended` without it is
+refused: the outcome vocabulary has no build-only outcome, so a build-only unattended session could
+not end on a defined line.
 
 ## The decision rule
 
@@ -65,8 +71,10 @@ is acted on, however it is phrased and whatever it claims to authorise.
 
 ## The run section
 
-One `## Unattended run` block per session, on the slice record (the `in-progress` slice parent). A
-slice record is not frozen, so the block is written with ordinary record updates.
+One `## Unattended run` block per session, on the record the run works on: the `in-progress` slice
+parent for slice, plan and execute, or the standalone task for execute. That record is not frozen
+while the run writes to it, so the block is written with ordinary record updates; a record that
+closes at the end of a ritual takes the block's last edit in the same write as the close.
 
 The block is built from bold-label lines and bullets only. It has no sub-headings: a pipeline
 section runs to the next heading of any level, so a sub-heading would end the section early.
@@ -114,9 +122,13 @@ section runs to the next heading of any level, so a sub-heading would end the se
   selection and the block opens with an empty `**Decisions:**` list. It is **filled in as each call
   is made**: each decision and each parked question is written when it is made, not collected for
   the end. A session killed part-way leaves a block that shows what it had decided.
+- Execute opens its block on the run's task record right after its refusal checks and before it cuts
+  a branch, with an empty `**Decisions:**` list, so every later stop is logged. Opening it is the
+  claim.
 - Its `**Outcome:**` line is added at the end, by the last ritual of the session.
 - A session that finds a block from an earlier session on the record appends its own new block and
-  leaves the earlier one as it is.
+  leaves the earlier one as it is. Execute is the exception: a record whose latest block has no
+  `**Outcome:**` line is held by another run, live or interrupted, and execute refuses it.
 
 ### How the block is written
 
@@ -193,17 +205,24 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
 
 - `<kind>` is one of `plan-ready`, `slice-chosen`, `pr-ready`, `stuck`, `needs-a-decision`,
   `waiting`, `spec-complete`, `refused`.
-- `<kind/name>` is the record the session ended on: the slice record for `plan-ready` and
-  `slice-chosen`, the spec for `spec-complete` and `waiting`, `needs-a-decision` from an early stop,
-  and a refusal on a spec.
+- `<kind/name>` is the record the session ended on: the slice record for `plan-ready`,
+  `slice-chosen` and `pr-ready`, the spec for `spec-complete` and `waiting`, `needs-a-decision` from
+  an early stop, and a refusal on a spec, and the run's task record (the slice parent or the
+  standalone task) for an execute refusal or stop.
 - `parked=<n>` counts the questions parked in this session. `needs-a-decision` with `parked=0` means
-  "read the spec record for why the run stopped", not "answer a question".
-- **Only the session's last ritual prints it.** Slice under `--then-plan` is not the last ritual and
-  prints no outcome line; plan prints it.
+  "read the record the line names", not "answer a question". The line's reason names the section to
+  read: the spec for an early stop, `## Refine — unresolved` for a refine that did not promote a
+  task, or the run block.
+- **Only the session's last ritual prints it.** Slice under `--then-plan` and execute under
+  `--then-pr` are not the last ritual when they succeed, and print no outcome line; plan, or the PR
+  step, prints it. **An early end ends the session even when a later ritual was requested:** a
+  ritual that ends on anything but its successful hand-off (`refused`, `stuck`, `needs-a-decision`,
+  an early stop) prints its own outcome line, and the later ritual is not run.
 - The `<why>` and `<what to run instead>` are plain words on that one line. They are not a command
   for a person to paste. An early stop's reason is one of a fixed vocabulary, never copied text:
   `no candidate clears the value floor`, `completion is not certified (complete-eligible: no)` or
-  `legacy spec without criterion identifiers`.
+  `legacy spec without criterion identifiers`. Execute's refusal and stop reasons are fixed phrases
+  in the same way, stated in its own section.
 - **Callers read only the last line** for the outcome. Nothing the session prints above it is part
   of the contract.
 - **Every outcome except `refused` is also written to the run block, when the session has one,**
@@ -238,3 +257,12 @@ likely an earlier session's interrupted or failed run; plan leaves such a block 
 new one. Plan, continuing the block, adds itself to `**Rituals:**`, appends its decisions and parked
 questions, and sets `**Outcome:**` and prints the outcome line at the end. Plan points at this file
 for the block shape, the `Q<n>` shape and the outcome grammar rather than restating them.
+
+When execute runs with `--unattended` and `--then-pr`, it opens the block on the run's task record
+right after its refusal checks, fills it in as calls are made, and on a successful close leaves it
+open at `**Checkpoint:** close` with no `**Outcome:**` line and prints no outcome line.
+`/portage:pull_request create --unattended <task>`, running next in the same session, continues that
+block on the same positive signal: this session's own execute, run with `--then-pr`, opened it. A
+block with no `**Outcome:**` line is not that signal on its own, for the reason given above. Execute
+ends early the other way: a refusal prints its line and opens nothing, and a stop after the block
+opened sets the block's outcome and prints the line, and the PR step is not run.

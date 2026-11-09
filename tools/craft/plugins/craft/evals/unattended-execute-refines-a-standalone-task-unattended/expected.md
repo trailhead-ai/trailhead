@@ -20,8 +20,12 @@ Under `--unattended --then-pr`, `/craft:execute task/<name>` on an `open` standa
 
 ## Pass condition
 
-Every clause holds: [`final-line-is-needs-a-decision`] `outcome: needs-a-decision task/<name> parked=0 — <why>`; [`reason-names-the-section-to-read`] the reason names `Refine — unresolved`; [`refine-section-written-on-the-task`] the task body has the `## Refine — unresolved` heading (`source: file`); [`run-block-opened-on-the-task`] the body has a `## Unattended run` block with `**Rituals:** execute`; [`block-outcome-is-needs-a-decision`] the block's `**Outcome:**` is `needs-a-decision`; [`task-still-open`] the sidecar status is `open`; [`no-executor-dispatched`] no `Agent` call; [`no-git-command-issued`]; [`asked-nothing`].
+Every clause holds: [`final-line-is-needs-a-decision`] `outcome: needs-a-decision task/<name> parked=0 — <why>`; [`reason-names-the-section-to-read`] the reason names `Refine — unresolved`; [`refine-section-written-on-the-task`] the task body has the `## Refine — unresolved` heading (`source: file`); [`run-block-opened-on-the-task`] the body has a `## Unattended run` block with `**Rituals:** execute`; [`block-outcome-is-needs-a-decision`] the block's `**Outcome:**` is `needs-a-decision`; [`task-still-open`] the sidecar status is `open`; [`no-executor-dispatched`] no `Agent` call; [`no-git-command-issued`] no git command that cuts, switches, fetches or writes was run (refine may read the repository with `git ls-files`); [`asked-nothing`].
 
 ## Limitations
 
 - One non-promoting refine; the route outcomes (plan, brainstorm) share the outcome shape and are not run; whether refine escalates or routes is the model's call on this fixture, and both end on the same line. One fixture, one model tier.
+
+## Revisions before the treatment verdict
+
+- Authoring fixes made after the baseline batch and before any treatment run counted: the two graders that matched across a newline (`refine-section-written-on-the-task`, `run-block-opened-on-the-task`) were written with a real newline in a single-quoted YAML scalar, which the runner refused to load, so the first baseline batch scored nothing; they are rewritten with a `\n` escape and the baseline was re-run. After the first treatment batch, `no-git-command-issued` was narrowed from any `git` command to a branch-cutting or writing one, because refine itself reads the repository with `git ls-files` (all three treatment runs, and the baseline runs, tripped it on that read alone); the treatment was then re-run in full.
