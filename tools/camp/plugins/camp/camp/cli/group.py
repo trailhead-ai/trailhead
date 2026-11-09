@@ -576,7 +576,9 @@ def _workspace_only_payload(
     the sole place this key set is assembled — every call site in
     `_door_dispatch_for_new` builds the object here, never ad hoc.
     *command_started* adds the `command_started` key when `camp new` was
-    given a command (`None` leaves the object as it is without one).
+    given a command (`None` leaves the object as it is without one); the
+    command not having started also makes `ok` false, agreeing with the
+    non-zero exit that case takes.
     """
     payload = {
         "ok": True,
@@ -590,6 +592,7 @@ def _workspace_only_payload(
     }
     if command_started is not None:
         payload["command_started"] = command_started
+        payload["ok"] = command_started
     return payload
 
 
@@ -682,10 +685,14 @@ def _door_dispatch_for_new(
     posture: neither an unanswered tmux, nor a failed create, nor a create
     refused by policy, nor an unreadable window record is a refusal here,
     because the workspace was already created and is usable on disk, so all
-    four report through `_report_workspace_only` and return with exit 0,
-    where `camp attach` refuses — `_report_workspace_only`'s own `refused`
+    four report through `_report_workspace_only` and return with exit 0
+    when `camp new` was given no command (with one, they exit 1 and the
+    `--json` object carries `"ok": false` and `command_started: false`,
+    as does a connected or raced session that started nothing), where
+    `camp attach` refuses — `_report_workspace_only`'s own `refused`
     flag keeps the policy and record-unreadable cases distinguishable in
-    what is reported, even though none of the four exit non-zero. Every
+    what is reported, even though none of the four exit non-zero without a
+    command. Every
     success — created, connected, or resurrected — goes through
     `cli.session._door_success_outcome`, the fold `camp attach` shares, so
     the reconciliation and resurrection lines reach stderr before the
@@ -745,6 +752,7 @@ def _door_dispatch_for_new(
         payload = render_json(outcome)
         if command:
             payload["command_started"] = started
+            payload["ok"] = started
         print(json.dumps(payload))
     else:
         print(str(ws_dir))

@@ -1089,6 +1089,7 @@ def test_a_command_created_session_reports_command_started_true_in_json(
     payload = json.loads(capsys.readouterr().out)
     assert payload["outcome"] == "created"
     assert payload["command_started"] is True
+    assert payload["ok"] is True
 
 
 def test_the_command_is_opaque_to_the_handlers_own_flags(
@@ -1153,7 +1154,9 @@ def test_a_command_the_door_did_not_start_exits_nonzero_and_reports_it(
     assert tmux.respawn_commands == [] or all(c == () for c in tmux.respawn_commands), (
         "no pane receives the argv"
     )
-    assert json.loads(captured.out)["command_started"] is False
+    payload = json.loads(captured.out)
+    assert payload["command_started"] is False
+    assert payload["ok"] is False, "ok agrees with the non-zero exit"
 
 
 def test_the_plain_form_of_a_command_not_started_says_so_on_stderr_and_exits_nonzero(
@@ -1192,7 +1195,9 @@ def test_without_a_command_the_same_outcomes_still_exit_zero_with_todays_object(
     )
 
     assert code == 0
-    assert "command_started" not in json.loads(capsys.readouterr().out)
+    payload = json.loads(capsys.readouterr().out)
+    assert "command_started" not in payload
+    assert payload["ok"] is True
 
 
 def _record_activations(monkeypatch) -> list:

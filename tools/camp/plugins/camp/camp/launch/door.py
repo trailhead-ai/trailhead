@@ -208,7 +208,9 @@ def render_json(outcome: DoorOutcome) -> dict:
     """The `--json` object for a created, connected, or resurrected outcome.
 
     `windows` is present only for `Resurrected` — `Created` and `Connected`
-    have no windows to account for.
+    have no windows to account for. `ok` is always true here: a success
+    outcome is what this renders. `camp new` given a command that did not
+    start overrides it to false on its own copy of the object.
     """
     word = _render_word(outcome)
     payload = {

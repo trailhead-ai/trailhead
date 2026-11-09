@@ -1076,3 +1076,38 @@ def test_pane_window_answers_none_when_tmux_gives_no_usable_answer(monkeypatch, 
     monkeypatch.setattr(tmux_module.subprocess, "run", _run)
 
     assert tmux_module.Tmux().pane_window("%12") is None
+
+
+def test_respawn_first_pane_with_a_command_and_no_cwd_is_refused_before_tmux_is_asked(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def _run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _run)
+
+    with pytest.raises(ValueError, match="cwd"):
+        tmux_module.Tmux().respawn_first_pane("s", command=("tool", "arg"))
+
+    assert calls == []
+
+
+def test_respawn_first_pane_without_a_command_needs_no_cwd(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    calls: list[list[str]] = []
+
+    def _run(argv, **kwargs):
+        calls.append(list(argv))
+        return _completed(returncode=0)
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _run)
+
+    answer = tmux_module.Tmux().respawn_first_pane("s")
+
+    assert answer is not None and answer.returncode == 0
+    assert calls and calls[0][calls[0].index("respawn-pane") + 1 :][0] == "-k"
+    assert "-c" not in calls[0]

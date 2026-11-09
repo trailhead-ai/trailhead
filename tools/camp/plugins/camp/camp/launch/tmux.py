@@ -869,8 +869,12 @@ class Tmux:
         wrapper and every element reaches the pane as one positional
         argument, never re-parsed by a shell.
 
+        Raises :class:`ValueError` when a *command* is given without a *cwd*.
+
         Returns ``None`` when tmux could not be asked at all.
         """
+        if command and cwd is None:
+            raise ValueError("respawn_first_pane: a command needs a cwd to start in")
         args = ["respawn-pane", "-k", "-t", f"{target(name)}:"]
         if command:
             args += ["-c", str(cwd), *_pane_argv(cwd, command)]

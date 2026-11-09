@@ -762,8 +762,8 @@ def new_router(monkeypatch: pytest.MonkeyPatch, hosts_env: dict[str, str]):
 
 @pytest.mark.parametrize(
     "token_argv",
-    [["-g"], ["--all-groups"], ["--host", "andromeda"], ["--dry-run"]],
-    ids=["g", "all-groups", "host", "dry-run"],
+    [["-g"], ["--all-groups"], ["-a"], ["--all-hosts"], ["--host", "andromeda"], ["--dry-run"]],
+    ids=["g", "all-groups", "a", "all-hosts", "host", "dry-run"],
 )
 def test_a_camp_option_after_double_dash_is_the_commands_not_the_routers(
     new_router, token_argv: list[str]
@@ -779,7 +779,11 @@ def test_a_camp_option_after_double_dash_is_the_commands_not_the_routers(
     assert rest == ["ws1", "--no-attach", "--", "tool", *token_argv]
 
 
-@pytest.mark.parametrize("token_argv", [["-g"], ["--all-groups"]], ids=["g", "all-groups"])
+@pytest.mark.parametrize(
+    "token_argv",
+    [["-g"], ["--all-groups"], ["-a"], ["--all-hosts"]],
+    ids=["g", "all-groups", "a", "all-hosts"],
+)
 def test_widening_before_the_double_dash_is_read_by_the_router_and_refused(
     new_router, token_argv: list[str], capsys: pytest.CaptureFixture
 ) -> None:
