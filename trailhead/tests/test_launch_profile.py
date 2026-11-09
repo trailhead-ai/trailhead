@@ -18,7 +18,7 @@ from trailhead.launch_profile import (
     resolve_profile,
     validate_account,
 )
-from trailhead.paths import PathResolutionError
+from trailhead.paths import PathResolutionError, cache_home
 
 
 def _env(tmp_path: Path, **overrides: str) -> dict[str, str]:
@@ -37,7 +37,7 @@ def test_hub_profile_resolves_every_role_under_the_injected_roots(tmp_path):
     r = resolve_profile(HUB_PROFILE, "a", env=env, platform="linux")
     assert r.paths["hub-home"] == tmp_path / "xdg/state/ranger/hubs/a"
     assert r.paths["lore-state"] == tmp_path / "xdg/state/lore"
-    assert r.paths["cache"] == tmp_path / "xdg/cache/ranger/mirrors/a"
+    assert r.paths["cache"] == tmp_path / "xdg/cache"
     assert r.paths["token-store"] == tmp_path / "xdg/state/outpost/operator"
     assert all(p.is_absolute() for p in r.paths.values())
 
@@ -62,11 +62,15 @@ def test_changing_one_override_moves_exactly_the_roles_it_governs(tmp_path):
     for role in ("hub-home", "cache", "token-store"):
         assert lore[role] == base[role]
 
-    cache_env = _env(tmp_path, RANGER_CACHE_DIR=str(tmp_path / "c"))
+    cache_env = _env(tmp_path, XDG_CACHE_HOME=str(tmp_path / "c"))
     cache = resolve_profile(HUB_PROFILE, "a", env=cache_env, platform="linux").paths
-    assert cache["cache"] == tmp_path / "c/mirrors/a"
+    assert cache["cache"] == tmp_path / "c"
     for role in ("hub-home", "lore-state", "token-store"):
         assert cache[role] == base[role]
+
+    ranger_cache_env = _env(tmp_path, RANGER_CACHE_DIR=str(tmp_path / "rc"))
+    ranger_cache = resolve_profile(HUB_PROFILE, "a", env=ranger_cache_env, platform="linux").paths
+    assert ranger_cache == base
 
     tok_env = _env(tmp_path, OUTPOST_STATE_DIR=str(tmp_path / "op"))
     tok = resolve_profile(HUB_PROFILE, "a", env=tok_env, platform="linux").paths
@@ -82,7 +86,7 @@ def test_darwin_and_linux_resolve_to_xdg_never_library(tmp_path):
     assert darwin == linux
     home = tmp_path / "home"
     assert darwin["hub-home"] == home / ".local/state/ranger/hubs/a"
-    assert darwin["cache"] == home / ".cache/ranger/mirrors/a"
+    assert darwin["cache"] == home / ".cache"
     assert all("Library" not in str(p) for p in darwin.values())
 
 
@@ -90,12 +94,28 @@ def test_two_accounts_resolve_to_disjoint_locations(tmp_path):
     env = _env(tmp_path)
     a = resolve_profile(HUB_PROFILE, "a", env=env, platform="linux").paths
     b = resolve_profile(HUB_PROFILE, "b", env=env, platform="linux").paths
-    for role in ("hub-home", "cache"):
-        assert a[role] != b[role]
-        assert a[role] not in b[role].parents and b[role] not in a[role].parents
+    homes = (a["hub-home"], b["hub-home"])
+    assert homes[0] != homes[1]
+    assert homes[0] not in homes[1].parents and homes[1] not in homes[0].parents
+    ma, mb = mirrors_path("a", env=env, platform="linux"), mirrors_path("b", env=env, platform="linux")
+    assert ma != mb and ma not in mb.parents and mb not in ma.parents
     assert hub_config_path("a", env=env, platform="linux") != hub_config_path(
         "b", env=env, platform="linux"
     )
+
+
+def test_resolved_hub_profile_requests_no_network_hosts(tmp_path):
+    r = resolve_profile(HUB_PROFILE, "a", env=_env(tmp_path), platform="linux")
+    assert r.profile.network_allowed_hosts == ()
+
+
+def test_cache_role_is_the_xdg_cache_home_itself_and_follows_its_override(tmp_path):
+    env = _env(tmp_path)
+    r = resolve_profile(HUB_PROFILE, "a", env=env, platform="darwin")
+    assert r.paths["cache"] == cache_home(env=env, platform="darwin")
+    moved = _env(tmp_path, XDG_CACHE_HOME=str(tmp_path / "other"))
+    r2 = resolve_profile(HUB_PROFILE, "a", env=moved, platform="darwin")
+    assert r2.paths["cache"] == tmp_path / "other"
 
 
 def test_ranger_location_helpers(tmp_path):

@@ -18,7 +18,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from trailhead.paths import cache_dir, config_dir, state_dir
+from trailhead.paths import cache_dir, cache_home, config_dir, state_dir
 
 ROLE_HUB_HOME = "hub-home"
 ROLE_LORE_STATE = "lore-state"
@@ -80,7 +80,7 @@ def _token_store(account: str, env: dict[str, str] | None, platform: str | None)
 _ROLE_RESOLVERS = {
     ROLE_HUB_HOME: lambda a, e, p: hub_home(a, env=e, platform=p),
     ROLE_LORE_STATE: _lore_state,
-    ROLE_CACHE: lambda a, e, p: mirrors_path(a, env=e, platform=p),
+    ROLE_CACHE: lambda a, e, p: cache_home(env=e, platform=p),
     ROLE_TOKEN_STORE: _token_store,
 }
 
@@ -119,7 +119,7 @@ class ResolvedProfile:
 HUB_PROFILE = LaunchProfile(
     writable_roles=(ROLE_HUB_HOME, ROLE_LORE_STATE, ROLE_CACHE),
     read_denied_roles=(ROLE_TOKEN_STORE,),
-    network_allowed_hosts=("127.0.0.1", "localhost"),
+    network_allowed_hosts=(),
     mcp_servers=(),
     never_prompt=True,
     model=None,

@@ -19,6 +19,7 @@ import pytest
 from trailhead.paths import (
     PathResolutionError,
     cache_dir,
+    cache_home,
     config_dir,
     ensure_dir,
     state_dir,
@@ -449,3 +450,30 @@ class TestCampConsumerContract:
         returned = ensure_dir(resolved)
         assert resolved.exists()
         assert isinstance(returned, Path)
+
+
+class TestCacheHome:
+    """cache_home is the XDG cache root itself, not an app subdirectory."""
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_xdg_override_is_the_root(self, tmp_path, platform):
+        env = {"HOME": str(tmp_path), "XDG_CACHE_HOME": str(tmp_path / "xc")}
+        assert cache_home(platform=platform, env=env) == tmp_path / "xc"
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_default_is_dot_cache_never_library(self, tmp_path, platform):
+        env = {"HOME": str(tmp_path)}
+        assert cache_home(platform=platform, env=env) == tmp_path / ".cache"
+
+    def test_relative_override_refused(self, tmp_path):
+        env = {"HOME": str(tmp_path), "XDG_CACHE_HOME": "rel"}
+        with pytest.raises(PathResolutionError):
+            cache_home(platform="linux", env=env)
+
+    def test_missing_home_refused(self):
+        with pytest.raises(PathResolutionError):
+            cache_home(platform="linux", env={})
+
+    def test_creates_nothing(self, tmp_path):
+        cache_home(platform="linux", env={"HOME": str(tmp_path)})
+        assert list(tmp_path.iterdir()) == []
