@@ -1,0 +1,2 @@
+NAMES|STATE|group|name|PORTS
+"probe-env-main"|"running"|"probe"|"main"|"127.0.0.1:18173->5173/tcp, 127.0.0.1:18080->8080/tcp"

@@ -54,3 +54,8 @@ env_inventory_header_* and env_inventory_command.txt, env_inventory_records.txt 
   Header measured with the five-field command above on andromeda (Docker Engine 29.8.0) and perseus (Docker Desktop 4.97.0):
   both print `NAMES|STATE|group|name|PORTS`. The records file gains a `""` fifth
   field because its containers (k1probe-*) published no ports.
+
+env_inventory_guide_example_* (the reply of camp's inventory command to the guide's worked `docker run` example)
+  env_inventory_guide_example_docker_desktop_29_9_2.txt  perseus, Docker Desktop server 29.9.2: the `camp-env-example` block of tools/camp/docs/environments.md run verbatim
+    except that the group and container name were `probe` / `probe-env-main` instead of `acme` / `acme-env-main`; reply captured over ssh with INVENTORY_REMOTE_COMMAND,
+    then `docker rm -f probe-env-main` (confirmed none left). test_env_guide_conformance.py checks its own -p -> .Ports translation against the PORTS field.

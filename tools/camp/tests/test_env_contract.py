@@ -31,20 +31,14 @@ from camp.env.contract import (  # noqa: E402
     parse_inventory,
 )
 
+from ._env_reply import record as _record, reply as _reply  # noqa: E402
+
 FIXTURES = Path(__file__).parent / "fixtures"
 HEADER = INVENTORY_HEADER
 
 
 def _fixture(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
-
-
-def _record(*fields: object) -> str:
-    return "|".join(json.dumps(f, ensure_ascii=False) for f in fields)
-
-
-def _reply(*lines: str) -> str:
-    return "\n".join([HEADER, *lines]) + "\n"
 
 
 def _ok(group: str = "levr", name: str = "main", state: str = "running", ports: object = "") -> str:
