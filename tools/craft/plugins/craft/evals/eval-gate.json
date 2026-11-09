@@ -252,6 +252,43 @@
         "skills/drive/SKILL.md",
         "skills/_shared/execute.md"
       ]
+    },
+    "slice-closes-a-stuck-slice-and-chooses-the-next": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-still-refuses-an-unfinished-open-slice": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-refuses-when-the-drafted-check-is-refused": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-refuses-when-the-slice-repository-is-not-here": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-unattended-closes-a-stuck-slice-and-chooses-the-next": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }

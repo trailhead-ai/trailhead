@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: slice-refuses-when-the-slice-repository-is-not-here
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
