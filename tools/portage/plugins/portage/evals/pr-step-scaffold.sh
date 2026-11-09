@@ -94,7 +94,7 @@ cat > "$W/portage" <<PG
 #!/usr/bin/env bash
 W="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 echo "portage \$*" >> "\$W/portage.log"
-export TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp" PORTAGE_STATE_DIR="\$W/pstate"
+export PATH="\$W:\$PATH" TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp" PORTAGE_STATE_DIR="\$W/pstate"
 case "\${1:-}" in
   wait-for-actionable)
     if [ "\$(cat "\$W/.monitor-mode")" = "blocked" ]; then
@@ -122,7 +122,14 @@ for line in sys.stdin:
 '
 exit "\${PIPESTATUS[0]}"
 PG
-chmod +x "$W/gh" "$W/portage"
+# A git wrapper: in the runner's sandbox the platform git shim cannot locate its toolchain, so a stand-in
+# execs a real git binary by absolute path. ./portage puts it first on PATH for the CLI's own git calls.
+real_git=""
+for c in /Library/Developer/CommandLineTools/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git /usr/bin/git; do
+  [ -x "$c" ] && { real_git="$c"; break; }
+done
+printf '#!/bin/sh\nexec %s "$@"\n' "$real_git" > "$W/git"
+chmod +x "$W/gh" "$W/portage" "$W/git"
 
 # The seeded lore vault and a self-contained ./lore wrapper (a plugin sandbox sees only its own plugin).
 echo '[{"kind": "adr", "title": "Placeholder", "status": "active", "body": "# Placeholder\n\nNothing.\n"}]' > "$W/records.json"
