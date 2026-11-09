@@ -29,6 +29,10 @@ Container: alpine, -p 127.0.0.1:28080-28081:8080-8081 -p 127.0.0.1:28090:9090 -p
       perseus, Docker Desktop server 29.9.2, one line, a running alpine container created with
       -p 127.0.0.1:28080:28080 -p 127.0.0.1:28081:28081 -p 127.0.0.1:28090:8090. Where host port equals container port,
       consecutive ports are merged into one range entry (28080-28081->28080-28081); 28090->8090 is not merged.
+  env_inventory_ports_same_port_range_reordered_docker_desktop_29_9_2.txt
+      perseus, Docker Desktop server 29.9.2, one line, same container as the range capture above but created with
+      -p 127.0.0.1:28081:28081 -p 127.0.0.1:28090:8090 -p 127.0.0.1:28080:28080. Docker sorts the publishes before
+      it merges same-number runs, so the string is byte-identical to the in-order capture.
 
 env_forward_* (K2: ssh -f -N -L forward, captured on andromeda -> tduffield@perseus)
   andromeda Linux, OpenSSH_9.6p1 Ubuntu-3ubuntu13.20, OpenSSL 3.0.13; destination perseus over Tailscale SSH.

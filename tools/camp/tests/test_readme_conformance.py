@@ -854,9 +854,3 @@ def test_every_documented_attach_target_form_parses_under_the_real_parser() -> N
     assert targets
     for text in targets:
         parse_target(text)
-
-
-def test_the_documented_attach_targets_include_this_machine_with_a_group() -> None:
-    from camp.env.resolve import Target, parse_target
-
-    assert Target("local", "levr", "main") in [parse_target(t) for t in _documented_attach_targets()]

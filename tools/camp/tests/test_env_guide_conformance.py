@@ -47,6 +47,9 @@ GUIDE = Path(__file__).resolve().parents[1] / "docs" / "environments.md"
 README = GUIDE.parent.parent / "README.md"
 CAPTURE = Path(__file__).parent / "fixtures" / "env_inventory_guide_example_docker_desktop_29_9_2.txt"
 CAPTURE_RANGE = Path(__file__).parent / "fixtures" / "env_inventory_ports_same_port_range_docker_desktop_29_9_2.txt"
+CAPTURE_RANGE_REORDERED = (
+    Path(__file__).parent / "fixtures" / "env_inventory_ports_same_port_range_reordered_docker_desktop_29_9_2.txt"
+)
 
 _FENCE = re.compile(r"^```(\w+) +(camp-env-[\w-]+)\n(.*?)^```$", re.MULTILINE | re.DOTALL)
 
@@ -100,7 +103,7 @@ class _Container:
         if not self.running:
             return ""
         entries: list[list] = []
-        for spec in self.publishes:
+        for spec in sorted(self.publishes, key=lambda spec: spec.split(":")[-1]):
             *host, container = spec.split(":")
             published = host[-1]
             address = host[0] if len(host) == 2 else "0.0.0.0"
@@ -247,6 +250,12 @@ def test_real_docker_range_capture_is_unreadable_for_the_ports_reason() -> None:
 def test_translation_of_the_same_port_pair_reproduces_the_real_docker_range_format() -> None:
     c = _Container(_one("camp-env-counter-example-range"))
     assert c.ports() == json.loads(CAPTURE_RANGE.read_text(encoding="utf-8"))
+
+
+def test_translation_of_the_reordered_same_port_pair_reproduces_the_real_docker_range_format() -> None:
+    publishes = "-p 127.0.0.1:28081:28081 -p 127.0.0.1:28090:8090 -p 127.0.0.1:28080:28080"
+    c = _Container(f"docker run -d --name a-env-b {publishes} alpine")
+    assert c.ports() == json.loads(CAPTURE_RANGE_REORDERED.read_text(encoding="utf-8"))
 
 
 @pytest.mark.parametrize(

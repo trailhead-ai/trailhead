@@ -227,8 +227,8 @@ you run `camp env`. Its `~/.config/camp/hosts.toml` declares the environment hos
    `ssh <the declared ssh destination> command -v docker`. If it prints nothing, open an interactive terminal on the host, run
    `command -v docker`, and add the directory it prints: Homebrew's is `/opt/homebrew/bin`, and Docker Desktop's installer uses
    `/usr/local/bin` or `~/.docker/bin`. For a fish login shell, put `fish_add_path -g <dir>` in `~/.config/fish/config.fish`,
-   outside the `if status is-interactive` block; do not run bare `fish_add_path`, which writes a universal variable that your
-   interactive terminal sees and a non-interactive ssh command may not, hiding the missing entry. For zsh, add
+   outside the `if status is-interactive` block; do not run bare `fish_add_path`, which stores the setting in fish's universal-variable store; keeping
+   it in `config.fish` leaves it declared, visible, and reproducible. For zsh, add
    `export PATH=<dir>:$PATH` to `~/.zshenv`.
 7. On the reading machine: add the host to `env_hosts`, the top-level list `camp env ls` reads. Each entry is a declared
    `[hosts.<name>]`.
