@@ -1611,6 +1611,72 @@ class TestClaudeCodeSessionTranscripts:
         assert by_id["sess-b"].cwd == ws_b.resolve()
         assert by_id["sess-a"].cwd != decoy_source.resolve()
 
+    def test_a_lead_and_a_teammate_transcript_both_yield_rows_only_the_lead_resumable(
+        self, tmp_path
+    ):
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "p", "lead", [json.dumps({"cwd": str(tmp_path)})])
+        self._write(
+            claude_dir,
+            "p",
+            "mate",
+            [json.dumps({"cwd": str(tmp_path), "teamName": "squad"})],
+        )
+
+        rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        by_id = {r.session_id: r for r in rows}
+        assert set(by_id) == {"lead", "mate"}
+        assert by_id["lead"].resumable is True
+        assert by_id["mate"].resumable is False
+
+    @pytest.mark.parametrize("team_name", ["", None, 7, ["squad"], {"n": "squad"}])
+    def test_an_empty_or_non_string_team_name_stays_resumable(self, tmp_path, team_name):
+        claude_dir = tmp_path / ".claude"
+        self._write(
+            claude_dir,
+            "p",
+            "sess",
+            [json.dumps({"cwd": str(tmp_path), "teamName": team_name})],
+        )
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.resumable is True
+
+    def test_a_team_name_after_the_first_cwd_bearing_record_does_not_flip_it(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(
+            claude_dir,
+            "p",
+            "sess",
+            [
+                json.dumps({"type": "summary"}),
+                json.dumps({"cwd": str(tmp_path)}),
+                json.dumps({"cwd": str(tmp_path), "teamName": "squad"}),
+            ],
+        )
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.resumable is True
+
+    def test_a_team_name_on_a_record_without_a_cwd_does_not_mark_it(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(
+            claude_dir,
+            "p",
+            "sess",
+            [
+                json.dumps({"teamName": "squad"}),
+                json.dumps({"cwd": str(tmp_path)}),
+            ],
+        )
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.resumable is True
+
+    def test_a_transcript_with_no_cwd_still_yields_a_resumable_row_with_no_cwd(self, tmp_path):
+        claude_dir = tmp_path / ".claude"
+        self._write(claude_dir, "p", "sess", [json.dumps({"teamName": "squad"})])
+        (row,) = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))
+        assert row.cwd is None
+        assert row.resumable is True
+
     def test_a_walk_that_fails_midway_yields_what_it_found_rather_than_raising(
         self, tmp_path, monkeypatch
     ):

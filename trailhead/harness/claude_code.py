@@ -240,21 +240,24 @@ def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
             return
 
 
-def _extract_transcript_cwd(path: Path) -> Path | None:
-    """Bounded head-scan for the cwd recorded near the start of a transcript.
+def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
+    """Bounded head-scan for the cwd and team membership of a transcript.
 
-    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn,
-    and returns the first decoded dict's string ``cwd``. A line longer than
-    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped without being decoded, so a huge
-    early line can never win over a plain one further down within the window.
+    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn.
+    The first decoded dict carrying a non-empty string ``cwd`` ends the scan;
+    the result is that cwd and whether the same record carries a non-empty
+    string ``teamName`` (a team member's transcript, which Claude Code's own
+    resume listing drops). A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
+    skipped without being decoded, so a huge early line can never win over a
+    plain one further down within the window.
 
     The cap bounds the READ, not just the decode: no single call takes more
     than ``_CWD_SCAN_MAX_LINE_BYTES + 1`` bytes, so a corrupt transcript
     carrying no newline at all costs bounded memory instead of its full size.
 
-    Returns ``None`` — never raises — when the file cannot be opened, no line
-    within the window decodes to a JSON object, or no decoded object carries a
-    non-empty string ``cwd``. This is the seam's only source of an
+    Returns ``(None, False)`` — never raises — when the file cannot be opened,
+    no line within the window decodes to a JSON object, or no decoded object
+    carries a non-empty string ``cwd``. This is the seam's only source of an
     "unreadable/undecodable transcript" outcome; the caller turns that into a
     row with ``cwd=None`` rather than dropping the row.
     """
@@ -279,10 +282,17 @@ def _extract_transcript_cwd(path: Path) -> Path | None:
                 if isinstance(record, dict):
                     cwd = record.get("cwd")
                     if isinstance(cwd, str) and cwd:
-                        return Path(cwd)
+                        team_name = record.get("teamName")
+                        is_team_member = isinstance(team_name, str) and bool(team_name)
+                        return Path(cwd), is_team_member
     except OSError:
-        return None
-    return None
+        return None, False
+    return None, False
+
+
+def _extract_transcript_cwd(path: Path) -> Path | None:
+    """The cwd recorded near the start of a transcript, or ``None``."""
+    return _scan_transcript_head(path)[0]
 
 
 def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
@@ -1536,7 +1546,7 @@ class ClaudeCodeHarness(Harness):
             except OSError:
                 continue
 
-            raw_cwd = _extract_transcript_cwd(candidate)
+            raw_cwd, is_team_member = _scan_transcript_head(candidate)
             # A relative recorded cwd is dropped rather than resolved. Resolving
             # one anchors it at whatever directory camp happened to be invoked
             # from, which would make both the reported location and the launch
@@ -1559,6 +1569,7 @@ class ClaudeCodeHarness(Harness):
                     session_id=session_id,
                     cwd=cwd,
                     modified_at=datetime.fromtimestamp(mtime, tz=timezone.utc),
+                    resumable=not is_team_member,
                 )
             )
 
