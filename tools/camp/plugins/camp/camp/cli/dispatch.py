@@ -175,14 +175,10 @@ def split_new_command(args: list[str]) -> tuple[list[str], list[str]]:
     if not command:
         return args, []
 
-    from .group import _declare_creation_switches
-    from .parser import group_verb_parser
+    from .group import _local_new_parser
 
     _, remainder = read_router_options("new", head)
-    parser = group_verb_parser("new", dry_run=True)
-    _declare_creation_switches(parser)
-    parser.add_argument("slug", nargs="?")
-    if parser.parse_args(remainder).slug is None:
+    if _local_new_parser().parse_args(remainder).slug is None:
         return args, []
     return head, command
 

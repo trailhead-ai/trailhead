@@ -20,7 +20,7 @@ from .dispatch import _BIN_DIR, split_new_command
 from .parser import CampParser, group_verb_parser
 
 if TYPE_CHECKING:
-    from typing import NoReturn
+    from typing import NoReturn, Sequence
 
     from ..host.config import Host
 
@@ -296,6 +296,17 @@ def _declare_creation_switches(parser: argparse.ArgumentParser) -> list[argparse
     ]
 
 
+def _local_new_parser() -> argparse.ArgumentParser:
+    """The parser for local `camp new`'s own arguments — the creation
+    switches and an optional slug. The handler parses with it, and
+    `split_new_command` uses it to decide whether a slug precedes `--`, so
+    the two can never disagree about where the slug is."""
+    parser = group_verb_parser("new", dry_run=True)
+    _declare_creation_switches(parser)
+    parser.add_argument("slug", nargs="?")
+    return parser
+
+
 def creation_switch_flags() -> list[str]:
     """The option strings local creation declares, in declaration order —
     read from `_declare_creation_switches` so a listing of them cannot drift
@@ -443,10 +454,7 @@ def _cmd_new_group_cli(
     from ..provision.provision import bring_up_workspace
     from ..group.manifest import workspace_dir, manifest_path_for
     args, command = split_new_command(args)
-    parser = group_verb_parser("new", dry_run=True)
-    _declare_creation_switches(parser)
-    parser.add_argument("slug", nargs="?")
-    parsed = parser.parse_args(args)
+    parsed = _local_new_parser().parse_args(args)
 
     no_wait = parsed.no_wait
     activate = parsed.activate
@@ -649,7 +657,7 @@ def _door_dispatch_for_new(
     interactive: bool,
     harness=None,
     group: dict | None = None,
-    command: list[str] | None = None,
+    command: Sequence[str] = (),
 ) -> None:
     """Create, connect, or resurrect the workspace's tmux session and, when
     *interactive*, hand the terminal over — `camp new`'s own door dispatch.
@@ -691,7 +699,6 @@ def _door_dispatch_for_new(
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     tmux = Tmux()
-    command = command or []
     probe = create_or_connect_workspace_session(
         group_name,
         slug,
