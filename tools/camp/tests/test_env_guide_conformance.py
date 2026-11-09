@@ -50,6 +50,7 @@ CAPTURE_RANGE = Path(__file__).parent / "fixtures" / "env_inventory_ports_same_p
 CAPTURE_RANGE_REORDERED = (
     Path(__file__).parent / "fixtures" / "env_inventory_ports_same_port_range_reordered_docker_desktop_29_9_2.txt"
 )
+CAPTURE_SORT_ORDER = Path(__file__).parent / "fixtures" / "env_inventory_ports_sort_order_docker_desktop_29_9_2.txt"
 
 _FENCE = re.compile(r"^```(\w+) +(camp-env-[\w-]+)\n(.*?)^```$", re.MULTILINE | re.DOTALL)
 
@@ -102,18 +103,22 @@ class _Container:
     def ports(self) -> str:
         if not self.running:
             return ""
-        entries: list[list] = []
-        for spec in sorted(self.publishes, key=lambda spec: spec.split(":")[-1]):
+        groups: list[list] = []
+        mappings: list[list] = []
+        for spec in sorted(self.publishes, key=lambda spec: int(spec.split(":")[-1])):
             *host, container = spec.split(":")
             published = host[-1]
             address = host[0] if len(host) == 2 else "0.0.0.0"
             entry = [address, int(published), int(published), int(container), int(container)]
-            last = entries[-1] if entries else None
-            same_port = entry[1] == entry[3]
-            if last and same_port and last[0] == address and last[2] == last[4] and last[2] + 1 == entry[1]:
+            if entry[1] != entry[3]:
+                mappings.append(entry)
+                continue
+            last = groups[-1] if groups else None
+            if last and last[0] == address and last[2] + 1 == entry[1]:
                 last[2] = last[4] = entry[1]
             else:
-                entries.append(entry)
+                groups.append(entry)
+        entries = groups + mappings
         return ", ".join(_entry(*e) for e in entries)
 
     def record(self) -> str:
@@ -258,6 +263,12 @@ def test_translation_of_the_reordered_same_port_pair_reproduces_the_real_docker_
     assert c.ports() == json.loads(CAPTURE_RANGE_REORDERED.read_text(encoding="utf-8"))
 
 
+def test_translation_orders_entries_the_way_real_docker_prints_them() -> None:
+    publishes = "-p 127.0.0.1:20000:20000 -p 127.0.0.1:21000:10000 -p 127.0.0.1:22000:5000"
+    c = _Container(f"docker run -d --name a-env-b {publishes} alpine")
+    assert c.ports() == json.loads(CAPTURE_SORT_ORDER.read_text(encoding="utf-8"))
+
+
 @pytest.mark.parametrize(
     "flags",
     ["18080:8080 18081:8081", "28080:28080 28081:8081", "18080:18079 18081:18081"],
@@ -268,7 +279,8 @@ def test_translation_keeps_consecutive_ports_apart_unless_both_have_the_same_hos
 ) -> None:
     publishes = " ".join(f"-p 127.0.0.1:{spec}" for spec in flags.split())
     c = _Container(f"docker run -d --name a-env-b {publishes} alpine")
-    assert c.ports() == ", ".join(f"127.0.0.1:{h}->{k}/tcp" for h, k in (s.split(":") for s in flags.split()))
+    expected = sorted(f"127.0.0.1:{h}->{k}/tcp" for h, k in (s.split(":") for s in flags.split()))
+    assert sorted(c.ports().split(", ")) == expected
 
 
 def test_if_you_see_table_names_a_host_key_that_is_not_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
