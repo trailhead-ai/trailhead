@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from trailhead.vcs.github import (
     SidecarError,
 )
 
+from .. import holds
 from ..pairs import PairFormatError, split_pair
 from ..sidecar import parse_pr_token
 
@@ -152,6 +154,40 @@ def _add_merge(sub) -> None:
     p.set_defaults(func=cmd_merge)
 
 
+def _checked_out_branch(repo_path: str) -> str | None:
+    try:
+        r = subprocess.run(
+            ["git", "-C", repo_path, "symbolic-ref", "--short", "-q", "HEAD"],
+            capture_output=True, text=True, check=False,
+        )
+    except OSError:
+        return None
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def _held_branch_refusal(pr_pairs: list[PRPair]) -> str | None:
+    """Refusal message for the first pair whose head branch is held, else None.
+
+    Runs before any `gh` call. The head branch is the one checked out in the
+    pair's repo path (a camp worktree sits on the group branch); when it cannot
+    be read and the repo has any hold, the pair is refused rather than guessed at.
+    """
+    for pair in pr_pairs:
+        branch = _checked_out_branch(pair.repo_path)
+        if branch is not None and holds.BRANCH_PATTERN.fullmatch(branch):
+            if not holds.is_held(pair.repo_path, branch):
+                continue
+        elif not holds.has_any_hold(pair.repo_path):
+            continue
+        shown = branch or "<unreadable>"
+        return (
+            f"portage: merge refused — branch '{shown}' of {pair.repo_path} is held "
+            "(`portage hold`), so it is never merged from here. An operator lifts it with: "
+            f"portage release {pair.repo_path} {shown}"
+        )
+    return None
+
+
 def cmd_merge(args: argparse.Namespace) -> int:
     pr_pairs: list[PRPair] = []
     for pair_str in args.pairs:
@@ -170,6 +206,11 @@ def cmd_merge(args: argparse.Namespace) -> int:
             return 2
         repo_path, pr_number, member_name = parts[0], parts[1], parts[2]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
+
+    refusal = _held_branch_refusal(pr_pairs)
+    if refusal:
+        print(refusal, file=sys.stderr)
+        return 2
 
     try:
         result = get_provider().pr.merge(

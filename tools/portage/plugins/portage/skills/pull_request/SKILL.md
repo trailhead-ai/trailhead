@@ -269,6 +269,12 @@ Every camp group member is a peer — there is no privileged member.
 
    When `auto_merge = true`, the flag is unnecessary and has no effect.
 
+   `portage merge` also refuses (exit 2), before any `gh` call, a PR whose head branch
+   is held (`portage hold <repo> <branch>`) — whatever `auto_merge` says and with or
+   without `--operator-directed`. The refusal names the hold and the release command.
+   Report it and stop; never run `portage release` yourself — only the operator or the
+   orchestrator that placed the hold lifts it.
+
 3. **Report results.** If any failed, surface the reason and suggest next steps.
 
 4. **Clean up** after all PRs merge:

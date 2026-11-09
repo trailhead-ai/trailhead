@@ -46,6 +46,9 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `operator_directed_merge` — `true` only when the operator told the dispatching session to
   merge these PRs once they are ready (optional — absent means no such direction; see "Merge
   policy" below)
+- `stop_at_ready` — `true` only when the dispatcher wants the watch to end at ready rather
+  than merge (optional — absent means monitor behaves as described everywhere else in this
+  document; see "Stop at ready" below)
 
 The camp manifest (schema v1) lives at `manifest_path` and carries:
 `{schema_version:1, group, slug, branch, members:[{name, repo_root, worktree_path}]}`.
@@ -98,6 +101,24 @@ pre-creates it (mode 0700), so a missing directory means the
 caller's contract was violated, not something monitor should paper over with its own mkdir.
 A missing or empty outcome file is the caller's crashed signal; monitor's job is only to
 write the file, never to pre-create or clean it up.
+
+## Stop at ready
+
+Applies only when the dispatch carries `stop_at_ready: true`. Without it, ignore this section.
+
+With `stop_at_ready: true` this run **never merges**, whatever `[release].auto_merge` says:
+
+- Never call `portage merge`, with or without `--operator-directed`.
+- Never set, read, or act on `operator_directed_merge`; if the dispatch carries it, ignore it.
+- Run the watch loop as usual (rebase, `fix_ci`, `rerun_ci`, `review` actions, the 3-cycle
+  blocked threshold). Where the loop would merge ("When **all** PRs report `done`"), stop
+  instead.
+
+Once **every** PR in the set reports `done` (mergeable and clean, no bot review pending), write
+`READY <reason>` to `outcome_file` — the reason names the PRs and says they are ready and
+unmerged — then stop and return the report below with **Watch result:** `ready-to-merge`.
+Blocked after 3 fix cycles and a failed `green_driver_agent` check still write `BLOCKED <reason>`
+as usual. Never write `MERGED` in this mode.
 
 ## Green-driver dispatch
 
@@ -175,6 +196,8 @@ again (or stop, per that threshold) rather than looping back to `portage wait-fo
 keeps this loop's context lean. Then stop.
 
 ### Merge policy — `auto_merge` or the operator's direction is the gate
+
+(With `stop_at_ready: true` none of this applies: this run does not merge — see "Stop at ready".)
 
 `[release] auto_merge = true` in the group TOML is the operator's standing authorization to merge.
 With auto_merge enabled, a PR that reports `done` is merge-eligible as it stands.

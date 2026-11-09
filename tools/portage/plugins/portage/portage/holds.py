@@ -1,0 +1,90 @@
+"""Merge holds — the structural never-merge guard.
+
+A hold names one `(repo, branch)`. `portage merge` refuses any pair whose repo
+has that branch checked out while the hold exists (`cli/pr.py`), before any `gh`
+call and whatever `[release].auto_merge` or `--operator-directed` say. Only an
+operator or the orchestrator runs `portage release`; the unattended PR step never
+does.
+
+State lives under `<portage state dir>/holds/`, resolved through
+`trailhead.paths.state_dir` and never built by hand. One file per hold, named by
+a digest of the repo's real path and the branch, so no caller-supplied string
+becomes a path segment. Holding is idempotent: the same pair always names the
+same file.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+
+from trailhead import paths
+
+BRANCH_PATTERN = re.compile(r"[A-Za-z0-9._/-]+")
+
+
+class HoldError(ValueError):
+    """A hold/release request that is refused (invalid branch name)."""
+
+
+def validate_branch(branch: str) -> str:
+    if not BRANCH_PATTERN.fullmatch(branch):
+        raise HoldError(f"invalid branch name {branch!r}: must match ^[A-Za-z0-9._/-]+$")
+    return branch
+
+
+def _repo_key(repo: str) -> str:
+    return os.path.realpath(repo)
+
+
+def _holds_dir() -> Path:
+    return paths.state_dir("portage") / "holds"
+
+
+def _hold_file(repo: str, branch: str) -> Path:
+    digest = hashlib.sha256(f"{_repo_key(repo)}\0{branch}".encode()).hexdigest()
+    return _holds_dir() / f"{digest}.json"
+
+
+def hold(repo: str, branch: str) -> Path:
+    validate_branch(branch)
+    f = _hold_file(repo, branch)
+    paths.ensure_dir(f.parent)
+    tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"repo": _repo_key(repo), "branch": branch}), encoding="utf-8")
+    os.replace(tmp, f)
+    return f
+
+
+def release(repo: str, branch: str) -> bool:
+    """Clear the hold; return whether one existed."""
+    validate_branch(branch)
+    try:
+        _hold_file(repo, branch).unlink()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def is_held(repo: str, branch: str) -> bool:
+    return _hold_file(repo, branch).is_file()
+
+
+def has_any_hold(repo: str) -> bool:
+    """Whether any branch of `repo` is held (a fail-closed fallback when the
+    checked-out branch cannot be read)."""
+    key = _repo_key(repo)
+    try:
+        entries = list(_holds_dir().glob("*.json"))
+    except OSError:
+        return False
+    for f in entries:
+        try:
+            if json.loads(f.read_text(encoding="utf-8")).get("repo") == key:
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
