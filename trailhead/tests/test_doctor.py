@@ -726,7 +726,7 @@ class TestSupervisorPath:
     @pytest.mark.parametrize(
         "path_value, lacking",
         [
-            ("/usr/bin:/opt/cli", "trailhead"),
+            ("/usr/bin:/opt/cli", str(repo_root() / "bin")),
             (f"/usr/bin:{repo_root() / 'bin'}", "/opt/cli"),
         ],
     )
@@ -737,7 +737,7 @@ class TestSupervisorPath:
         r = self._run(tmp_path, monkeypatch, path_value)
         item = _item(r, "supervisor")
         assert item["state"] == "missing"
-        assert lacking in item["summary"]
+        assert f"lacks {lacking};" in item["summary"]
         assert item["fix"] == "trailhead outpost enable"
         assert _VERDICT_READY not in r.data["readiness"]["verdict"]
 
