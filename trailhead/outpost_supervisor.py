@@ -258,22 +258,18 @@ def _resolve_binary(name: str, which_runner: Callable[[str], Optional[str]]) -> 
     return resolved
 
 
-def trailhead_bin_dir() -> Path:
-    """The directory of the ``bin/trailhead`` launcher of the running checkout."""
-    return repo_root() / "bin"
-
-
-def harness_cli_dirs(
+def hub_path_dirs(
     env: dict[str, str], which_runner: Callable[[str], Optional[str]]
 ) -> tuple[list[str], list[str]]:
-    """``(dirs, missing)`` for every detected harness that names a CLI.
+    """``(dirs, missing)``: the directories a hub started by the service needs on PATH.
 
-    ``dirs`` holds the directory each CLI resolves to through *which_runner*
-    (the directory of the resolved path, never a symlink's target, so a CLI
-    update is picked up); ``missing`` the CLI names that did not resolve to an
-    absolute path.
+    ``dirs`` holds the running checkout's ``bin`` directory (``bin/trailhead``),
+    then the directory each detected harness's CLI resolves to through
+    *which_runner* (the directory of the resolved path, never a symlink's target,
+    so a CLI update is picked up); ``missing`` the CLI names that did not resolve
+    to an absolute path.
     """
-    dirs: list[str] = []
+    dirs: list[str] = [str(repo_root() / "bin")]
     missing: list[str] = []
     for harness in detect_harnesses(env):
         cli = harness.cli_binary_name()
@@ -369,10 +365,8 @@ def enable(
 
     _which = which_runner or (lambda name: shutil.which(name, path=environ.get("PATH")))
     resolved = {name: _resolve_binary(name, _which) for name in _REQUIRED_BINARIES}
-    cli_dirs, missing_clis = harness_cli_dirs(environ, _which)
-    path_value = _compose_path(
-        list(resolved.values()), [str(trailhead_bin_dir()), *cli_dirs]
-    )
+    hub_dirs, missing_clis = hub_path_dirs(environ, _which)
+    path_value = _compose_path(list(resolved.values()), hub_dirs)
 
     state = ensure_dir(state_dir(outpost_lifecycle.APP, env=environ))
     log_path = state / outpost_lifecycle.LOG_NAME

@@ -6,11 +6,9 @@ import json
 import socket
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-from trailhead.launch_profile import validate_account
+from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
-from trailhead.paths import state_dir
 
 HUB_SOCKET = "outpost-hubs"
 START_TIMEOUT_SECONDS = 60.0
@@ -50,7 +48,7 @@ def outpost_answering(port: int = DAEMON_PORT) -> bool:
 
 
 def read_operator_credential(env: dict[str, str]) -> str:
-    path: Path = state_dir("outpost", env=env) / "operator" / "credential"
+    path = operator_token_store(env=env) / "credential"
     try:
         value = path.read_text().strip()
     except OSError:

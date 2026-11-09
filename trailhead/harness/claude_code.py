@@ -853,8 +853,8 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 # ``session_start`` renders a resolved launch profile into session-only settings
 # passed inline by ``--settings`` (inline, so no file exists for the session to edit).
 # Session settings MERGE with the user-level ``settings.json`` rather than replace it:
-# lists union, and a denial wins over an allowance. That has two consequences this
-# section is built around:
+# lists union, and a denial wins over an allowance. This section is built around what
+# that forces:
 #
 # * A profile can only NARROW. Writes are narrowed by DERIVING ``denyWrite`` from every
 #   user-level writable root that is not one of the profile's roots. A user-level root

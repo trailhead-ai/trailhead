@@ -69,19 +69,18 @@ def mirrors_path(
     return cache_dir("ranger", env=env, platform=platform) / "mirrors" / account
 
 
-def _lore_state(account: str, env: dict[str, str] | None, platform: str | None) -> Path:
-    return state_dir("lore", env=env, platform=platform)
-
-
-def _token_store(account: str, env: dict[str, str] | None, platform: str | None) -> Path:
+def operator_token_store(
+    *, env: dict[str, str] | None = None, platform: str | None = None
+) -> Path:
+    """Outpost's operator directory, which holds the operator ``credential`` file."""
     return state_dir("outpost", env=env, platform=platform) / "operator"
 
 
 _ROLE_RESOLVERS = {
     ROLE_HUB_HOME: lambda a, e, p: hub_home(a, env=e, platform=p),
-    ROLE_LORE_STATE: _lore_state,
+    ROLE_LORE_STATE: lambda a, e, p: state_dir("lore", env=e, platform=p),
     ROLE_CACHE: lambda a, e, p: cache_home(env=e, platform=p),
-    ROLE_TOKEN_STORE: _token_store,
+    ROLE_TOKEN_STORE: lambda a, e, p: operator_token_store(env=e, platform=p),
 }
 
 

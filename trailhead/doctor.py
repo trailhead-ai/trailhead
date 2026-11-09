@@ -611,8 +611,7 @@ def _supervisor_path_lacks(
     if path_value is None:
         return []
     carried = path_value.split(":")
-    cli_dirs, _ = outpost_supervisor.harness_cli_dirs(env, which_runner)
-    required = [str(outpost_supervisor.trailhead_bin_dir()), *cli_dirs]
+    required, _ = outpost_supervisor.hub_path_dirs(env, which_runner)
     return [d for d in required if d not in carried]
 
 
