@@ -4486,3 +4486,31 @@ Each is one surgical edit to the edited `execute.md` (`74fdb783bb670ccaa8da8fb2d
 Spend about 7.74 USD. The real lore config and state were hashed before and after (sha256 over every file outside `.git`) and did not change.
 
 **Reading.** On this case, model tier and sample the two branch-recovery clauses are not pinned. M1: with the section gone, all three runs still switched to the task branch and closed, so the section adds no detectable effect here (the 1 of 3 on the unedited prose in 3a' came from the missing no-ask discharge, not the recovery). M2: with the refusal sentence gone, all three runs still refused a dirty tree and kept the edit; the agent refuses on its own. Explanation 2 or 3 applies (the clause is redundant for this model, or the agent's own caution and the unmutated step 4 carry it); this was not separated further. Graders were not reworded: they already read the observable outcome, and a stricter grader would only manufacture red from behaviour that does not differ. M3a shows the attended case is carried by the operator replies stated in the prompt, so a changed discharge opening alone does not move it; M3b, which also changes the gate that decides what is a no-ask close, turns it red in every run, so the attended arm does pin that Phase 6 must not default to the no-ask path.
+
+## Case: driver-ends-a-slice-without-asking-about-its-check and the three stuck-slice arms
+
+Four runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs per arm, `-j 3`, measuring `skills/drive/SKILL.md`: step 9 runs execute's Phase 6 as a no-ask close, and step 4 runs the stuck check on an open slice parent. The arms are `driver-ends-a-slice-without-asking-about-its-check` (arm 1), `driver-closes-a-stuck-slice-instead-of-re-planning` (arm 2), its `-leaves-an-unfinished-build-alone` paired control (arm 3) and its `-with-a-build-checkpoint` variant (arm 4). Each `expected.md` was committed alone, with every arm and its bar, before the case was built. The prompts bound the session (arm 1 after step 9, arms 2 to 4 after step 4) because step 5 needs a camp manifest the sandbox does not hold.
+
+**Prose fingerprints (`git hash-object` of `drive/SKILL.md`).** Unedited `09003e2305b9a38e58350689c4e7f110c824ee3f`. Arm 1 treatment batches t1, t1b and t1c ran on `1eabb0104768b85da67a3ae60d750c61c35ceca6`; only t1d ran on the shipped `2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`. Arms 2 to 4 treatment batches (t2, t3, t4) ran on `1eabb0104768b85da67a3ae60d750c61c35ceca6`, not on the shipped file. The two differ by one reordered sentence in step 9 (the "procedure still dispatches `assumption-prover`, `executor` and `drift-gate`" sentence moved ahead of the check-discharge paragraph); arms 2 to 4 stop after step 4, so they never reach step 9, but they were not re-run on the shipped file.
+
+### Results
+
+| Arm | Prose | Result |
+|---|---|---|
+| 1 baseline | unedited | 0 of 3 (scores 0.25, 0, 0) |
+| 1 treatment, t1 / t1b | `1eabb010...` | 2 of 3 / 0 of 3, failing only `reports-the-boundary-not-an-escalation` (grader corrected afterwards; see that case's `expected.md`, "Deviations from pre-registration") |
+| 1 treatment, t1c / t1d | `1eabb010...` / `2b780f04...` | 3 of 3 at 1.0 each, on the corrected grader |
+| 2 baseline / treatment | unedited / `1eabb010...` | 0 of 3 (0.2 each) / 3 of 3 at 1.0 |
+| 3 baseline / treatment | unedited / `1eabb010...` | 3 of 3 / 3 of 3 at 1.0 (detector ran with `build-unfinished` in 3 of 3) |
+| 4 baseline / treatment | unedited / `1eabb010...` | 1 of 3 / 3 of 3 at 1.0 |
+
+### Targeted mutation checks: not demonstrated
+
+Each was one edit to the shipped prose, 3 runs of the target arm:
+
+- Delete the step-9 no-ask paragraph, arm 1: green 3 of 3. Also delete step 9's build-failed no-ask clause: green 3 of 3. Also remove the phrase from the step-4 subsection (the compound variant): 2 of 3 green, 1 of 3 red, and that red run failed all four graders (`no-question-asked`, `parent-is-done`, `reports-the-boundary-not-an-escalation`, `writer-verify-gate-close`).
+- Delete the no-block branch's stuck-check clause, arm 2: green 3 of 3; with the block branch's clause and the subsection's "both branches" lead sentence also removed: green 3 of 3.
+- Delete the block-present branch's clause, arm 4: green 3 of 3; with all three trigger sentences removed: green 3 of 3.
+- Arm 3 (paired control): the subsection's exit-1 bullet rewritten to treat exit 1 like `stuck:` and close anyway. Green 3 of 3. The runs ran the detector, read the rewritten instruction and quoted it, and declined to close an unfinished slice and handed it on to step 5, so the arm is carried by the agent's own judgement about the unfinished child task and does not bind the exit-1 clause.
+
+**What this shows.** Each targeted clause deletion left its arm green, and the one compound deletion reddened one run of three. The baseline runs show that `execute.md` alone does not carry the behaviour: on the unedited `drive/SKILL.md` they refused to enter the no-ask close, because the driver never says the phrase. So the behaviour as a whole is carried by the edited step 4 and step 9 prose together, but the per-clause pins are **not demonstrated**: no single clause has been shown to be what makes a graded run pass, and what carries the behaviour clause by clause is unestablished. Known limit: three runs per arm, one model tier, and these graders cannot separate the clauses.

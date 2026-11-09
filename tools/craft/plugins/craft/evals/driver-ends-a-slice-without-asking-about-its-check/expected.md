@@ -30,3 +30,11 @@ Mutation (targeted): delete only step 9's no-ask citation; `no-question-asked` a
 ## Limitations
 
 Three runs, one model tier, one phrasing. The session is bounded to step 9 by the prompt, so the PR tail is not exercised.
+
+## Deviations from pre-registration
+
+Recorded 2026-11-09, after the fact, once the treatment batches had run.
+
+- **A grader was corrected after treatment runs.** `reports-the-boundary-not-an-escalation` was rewritten after treatment batches t1 (2 of 3) and t1b (0 of 3) failed only on it. The old criterion failed any final message that reported a stop for the operator's input or said the build could not complete. The new one says a list of checks now waiting on the operator's check list is the expected result of the close and not a stop, and that a note that a report block could not be built because a helper script is missing is not an escalation, while still failing a reported escalation, a close that could not finish, or a closing question to the operator. The old text failed correct runs because those runs closed the slice and then, rightly, listed the waiting checks or noted the missing helper script, and the judge read both as stops. The baseline runs still fail the corrected grader (all three), and the other three graders as well (`no-question-asked` in two of three, `parent-is-done` and `writer-verify-gate-close` in all three).
+- **The rerun allowance was exceeded.** Four treatment batches ran (t1, t1b, t1c, t1d) against the one rerun permitted above.
+- **A prose sentence moved between batches.** One sentence in step 9 of `drive/SKILL.md` was reordered before t1d. t1, t1b and t1c ran on `drive/SKILL.md` content fingerprint `1eabb0104768b85da67a3ae60d750c61c35ceca6`; t1d, the batch that met the bar, ran on `2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`, the shipped file.
