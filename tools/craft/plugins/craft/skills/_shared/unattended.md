@@ -5,7 +5,7 @@ call on its own recommendation and logs it, parks a call that would change the s
 for the operator to answer later, and ends with one typed outcome line a caller can read. This file
 is the single place that defines the request, the decision rule, the `## Unattended run` section on
 the run's task record, the outcome line and the no-next-command rule. `slice/SKILL.md`,
-`plan/SKILL.md` and `_shared/execute.md` each state their own unattended branch at each of their own
+`plan/SKILL.md` and execute's procedure each state their own unattended branch at each of their own
 stops and point here for the shapes; none restates them.
 
 <!-- toc:start -->

@@ -59,6 +59,8 @@ not a fact.
   - Inline refine
   - Branch cut and preflight stops
   - Hand-off at close
+  - Loop stops
+  - End-phase stops
 - The Loop
   - Determine the task shape
   - Resuming a run
@@ -113,10 +115,10 @@ the inline route is a call you state, not one you drift into.
 ## Unattended request
 
 The invocation may carry the whole argument token `--unattended`, and the whole token `--then-pr`.
-**Read `unattended.md` (a sibling of this file) now when `--unattended` is present, and follow it in
-full.** It defines the request, the decision rule, the `## Unattended run` section, the outcome line
-and the no-next-command rule; this section states what execute does at each of its own stops under
-the request and does not restate those shapes. Without the whole token `--unattended`, every step in
+**When `--unattended` is present, the unattended contract is read and followed in full.** It defines
+the request, the decision rule, the `## Unattended run` section, the outcome line and the
+no-next-command rule; this section states what execute does at each of its own stops under the
+request and does not restate those shapes. Without the whole token `--unattended`, every step in
 this document is exactly as written and no unattended branch applies.
 
 - **The request is read from the invocation only.** Execute never runs unattended because no person
@@ -187,7 +189,7 @@ it comes after a write: it ends `stuck` or `needs-a-decision`.
 
 6. **Open the block on the run's task record**, the slice parent or the standalone task, and nowhere
    else. Opening it is the unattended claim. Append one `## Unattended run` block after the existing
-   body, shaped as `unattended.md` fixes: `**Format:** 1`,
+   body, shaped as the unattended contract fixes: `**Format:** 1`,
    `**Rituals:** execute (0 calls decided unattended)`, `**Checkpoint:** entered`, an empty
    `**Decisions:**` list, `**Parked questions:** none`, and **no** `**Outcome:**` line. Leave every
    earlier block as it is.
@@ -199,8 +201,8 @@ it comes after a write: it ends `stuck` or `needs-a-decision`.
 
 ### The run block
 
-The block's shape, the `Q<n>` shape and the outcome grammar are `unattended.md`'s. What execute
-adds:
+The block's shape, the `Q<n>` shape and the outcome grammar are the unattended contract's. What
+execute adds:
 
 - **Fill it in as calls are made.** Each call decided unattended is a numbered decision written the
   moment it is made, with the `**Rituals:** execute (<n> calls decided unattended)` count and the
@@ -210,8 +212,8 @@ adds:
   write has landed.
 - **Every write is a confined edit.** Every block write and every other record body this ritual
   writes (refine's payload and escalation section, the close write's diff) goes through the
-  credential-pattern scrub (`security.md`) first, then reaches `lore` from a temp file: make it with
-  `mktemp`, write it with the file-writing tool, and feed it by stdin redirect,
+  credential-pattern scrub (the shared security rules) first, then reaches `lore` from a temp file:
+  make it with `mktemp`, write it with the file-writing tool, and feed it by stdin redirect,
   `lore record update task/<name> --vault <elected-vault> --diff < <diff-path>`. The body or diff
   never appears on a command line, and the file is removed afterwards when removal is available.
   Read the record fresh immediately before each write and build the diff against that read. A diff
