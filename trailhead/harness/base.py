@@ -165,11 +165,22 @@ class SessionTranscript:
     file's own mtime — never naive, and never a timestamp parsed out of the
     transcript's own content (which this seam does not read for that
     purpose).
+
+    ``resumable`` is whether the harness's own resume offering would list this
+    transcript — a harness-neutral answer, not a liveness one. It is ``False``
+    for a transcript the harness itself would not offer back (for example one
+    belonging to a member of a multi-agent team, which cannot be meaningfully
+    resumed on its own), and ``True`` otherwise. The row is still yielded either
+    way: a caller that must find every file the harness wrote (to move or delete
+    it) walks these rows, so a non-resumable row is flagged, never dropped. A
+    caller deciding what an operator could recover reads this; whether the
+    session is still running remains the caller's own judgment.
     """
 
     session_id: str
     cwd: Path | None
     modified_at: datetime
+    resumable: bool = True
 
 
 @dataclass(frozen=True)

@@ -59,13 +59,20 @@ def _workspace(state_root: Path, group: str, slug: str) -> Path:
     return ws
 
 
-def _transcript(session_id: str, cwd: Path | None, *, age_seconds: float = 60.0):
+def _transcript(
+    session_id: str,
+    cwd: Path | None,
+    *,
+    age_seconds: float = 60.0,
+    resumable: bool = True,
+):
     from trailhead.harness.base import SessionTranscript
 
     return SessionTranscript(
         session_id=session_id,
         cwd=cwd,
         modified_at=_NOW - timedelta(seconds=age_seconds),
+        resumable=resumable,
     )
 
 
@@ -81,6 +88,58 @@ def _record(session_id: str, cwd: Path, *, name: str | None = None):
         pid=None,
         started_at=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Resumability
+# ---------------------------------------------------------------------------
+
+
+def _candidates(tmp_path: Path, *, transcripts, live_records):
+    from camp.launch.recovery import session_candidates
+
+    return session_candidates(
+        transcripts=transcripts,
+        live_records=live_records,
+        groups=[_group("g")],
+        env=_env(tmp_path),
+        now=_NOW,
+    )
+
+
+def test_a_non_resumable_transcript_makes_a_non_resumable_candidate(tmp_path: Path) -> None:
+    (candidate,) = _candidates(
+        tmp_path,
+        transcripts=[_transcript(_UUID_A, tmp_path, resumable=False)],
+        live_records=[],
+    )
+    assert candidate.resumable is False
+
+
+def test_a_resumable_transcript_makes_a_resumable_candidate(tmp_path: Path) -> None:
+    (candidate,) = _candidates(
+        tmp_path, transcripts=[_transcript(_UUID_A, tmp_path)], live_records=[]
+    )
+    assert candidate.resumable is True
+
+
+def test_a_live_only_record_is_resumable(tmp_path: Path) -> None:
+    (candidate,) = _candidates(
+        tmp_path, transcripts=[], live_records=[_record(_UUID_A, tmp_path)]
+    )
+    assert candidate.resumable is True
+
+
+def test_a_transcript_and_live_record_for_one_id_keep_the_transcripts_answer(
+    tmp_path: Path,
+) -> None:
+    (candidate,) = _candidates(
+        tmp_path,
+        transcripts=[_transcript(_UUID_A, tmp_path, resumable=False)],
+        live_records=[_record(_UUID_A, tmp_path)],
+    )
+    assert candidate.live is True
+    assert candidate.resumable is False
 
 
 # ---------------------------------------------------------------------------

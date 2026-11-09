@@ -219,6 +219,11 @@ class SessionCandidate:
     so recently, or whose harness stores transcripts so lazily, that only the
     live enumeration knows about it). It is never derived from a live record's
     start time, which measures something else.
+
+    ``resumable`` is the harness's own answer to "would you offer this
+    transcript for resuming?", carried through from the transcript. It is
+    independent of ``live``. A candidate with no transcript has no such answer
+    to give and is ``True``.
     """
 
     session_id: str
@@ -228,6 +233,7 @@ class SessionCandidate:
     live: bool
     root_missing: bool
     unreadable: bool
+    resumable: bool = True
 
 
 def _build_candidate(
@@ -266,6 +272,7 @@ def _build_candidate(
         live=record is not None,
         root_missing=root is not None and not root.exists(),
         unreadable=root is None,
+        resumable=transcript.resumable if transcript is not None else True,
     )
 
 

@@ -63,13 +63,20 @@ def _workspace(state_root: Path, group: str, slug: str) -> Path:
     return ws
 
 
-def _transcript(session_id: str, cwd: Path | None, *, age_seconds: float = 60.0):
+def _transcript(
+    session_id: str,
+    cwd: Path | None,
+    *,
+    age_seconds: float = 60.0,
+    resumable: bool = True,
+):
     from trailhead.harness.base import SessionTranscript
 
     return SessionTranscript(
         session_id=session_id,
         cwd=cwd,
         modified_at=_NOW - timedelta(seconds=age_seconds),
+        resumable=resumable,
     )
 
 
@@ -370,6 +377,87 @@ def test_a_probe_that_exited_nonzero_fails_closed(tmp_path: Path, monkeypatch) -
 # ---------------------------------------------------------------------------
 # The refusal
 # ---------------------------------------------------------------------------
+
+
+def test_a_teammate_transcript_beside_a_lead_blocks_on_the_lead_only(tmp_path: Path) -> None:
+    from camp.launch.teardown_guard import render_block
+
+    env = _env(tmp_path)
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[
+            _transcript(_UUID_A, ws),
+            _transcript(_UUID_B, ws, resumable=False),
+        ],
+        live_records=[],
+        groups=[_group("g")],
+        env=env,
+    )
+    assert [c.session_id for c in blocking] == [_UUID_A]
+    rendered = render_block("ws", blocking, group_name="g")
+    assert _UUID_A[:8] in rendered
+    assert _UUID_B[:8] not in rendered
+
+
+def test_a_parked_teammate_transcript_alone_blocks_nothing(tmp_path: Path) -> None:
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[_transcript(_UUID_B, ws, resumable=False)],
+        live_records=[],
+        groups=[_group("g")],
+        env=_env(tmp_path),
+    )
+    assert blocking == ()
+
+
+def test_a_live_teammate_transcript_alone_blocks(tmp_path: Path) -> None:
+    """A live non-resumable session still blocks: a split-pane teammate can run
+    in a workspace its lead was not started in."""
+    ws = _workspace(tmp_path, "g", "ws")
+    blocking = _blocking(
+        ws,
+        transcripts=[_transcript(_UUID_B, ws, resumable=False)],
+        live_records=[_record(_UUID_B, ws)],
+        groups=[_group("g")],
+        env=_env(tmp_path),
+    )
+    assert [c.session_id for c in blocking] == [_UUID_B]
+    assert blocking[0].live is True
+
+
+def _write_transcript(projects: Path, session_id: str, cwd: Path, **extra: Any) -> None:
+    import json
+
+    d = projects / "proj"
+    d.mkdir(parents=True, exist_ok=True)
+    record = {"type": "user", "cwd": str(cwd), **extra}
+    (d / f"{session_id}.jsonl").write_text(json.dumps(record) + "\n")
+
+
+def test_a_real_claude_code_store_blocks_on_the_lead_and_not_the_parked_teammate(
+    tmp_path: Path,
+) -> None:
+    from trailhead.harness.claude_code import ClaudeCodeHarness
+
+    ws = _workspace(tmp_path, "g", "ws")
+    claude_dir = tmp_path / "claude"
+    projects = claude_dir / "projects"
+    _write_transcript(projects, _UUID_A, ws)
+    _write_transcript(projects, _UUID_B, ws, teamName="the-team")
+    harness_env = {"TRAILHEAD_CLAUDE_DIR": str(claude_dir)}
+
+    transcripts = ClaudeCodeHarness().session_transcripts(env=harness_env)
+    blocking = _blocking(
+        ws,
+        transcripts=transcripts,
+        live_records=[],
+        groups=[_group("g")],
+        env=_env(tmp_path),
+    )
+
+    assert [c.session_id for c in blocking] == [_UUID_A]
 
 
 def test_the_refusal_names_every_blocking_session(tmp_path: Path) -> None:
