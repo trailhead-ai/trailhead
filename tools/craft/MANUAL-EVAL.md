@@ -5056,3 +5056,17 @@ Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opu
 **Grader amendment (2026-11-09).** In the park and adjusts cases, `no-git-command-issued` changed from `\bgit\b` to `\bgit\b[^"]*\b(switch|checkout|branch|cherry-pick|fetch|worktree|commit|push)\b`, the pattern the refine case uses, after the scored runs above. Evidence: the kept traces carry the tool input as JSON, and the failing runs' `find vault trailhead -maxdepth 4 -not -path "*/.git/*"` matched the old pattern with no git command issued. Checked offline on that serialized input: the new pattern does not match it and does match `git switch -c x origin/main` and `git checkout -b x`. The change only narrows what fails, so the earlier rows are not restated, and the adjusts case was not rerun. Each case's `expected.md` carries the same note. The park case then ran on the current prose: 3 of 3 at 1.0, a rerun under the amended grader.
 
 Total eval spend about 32.0 USD.
+
+## Case: execute's end phases under the unattended request (five cases), baselines only
+
+Five runner cases, pre-registered in their `expected.md` and committed before any run: `unattended-execute-decides-surviving-findings`, `unattended-execute-never-drops-a-security-finding`, `unattended-execute-parks-a-spec-gap-finding`, `unattended-execute-close-records-a-manual-check-pending` and `unattended-execute-close-hands-off-to-the-pr-step` (a declared guard). `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs each, `-j 1`, grants the `runner` block of `eval-gate.json` plus one added grant, `Bash(./git *)`, for the push case (anchored to a path only that scaffold creates; paired control registered in that case's `expected.md`, not yet run). Baseline prose fingerprints (`git hash-object`): `_shared/execute.md` `b23ab548aed10e21d97008c83daf2f156be02f94`, `_shared/unattended.md` `6a97ad1ca3f7ee3a8b6fdd0d97b9e4a776befa84`, `execute/SKILL.md` `654b9976493d76660857b4fb86546bcb260f5cea`. No prose has been edited.
+
+| Case | Baseline runs | Failing graders |
+|---|---|---|
+| `unattended-execute-decides-surviving-findings` | 2 of 3 at 1.0 (0.82, 1.0, 1.0) | the two `block-decision-*` graders, in the one red run |
+| `unattended-execute-never-drops-a-security-finding` | 3 of 3 at 1.0 | none |
+| `unattended-execute-parks-a-spec-gap-finding` | 2 of 3 (1.0, 0.93, 1.0) | `q1-has-two-options-each-with-a-cost-and-a-progress-line`, in one run |
+| `unattended-execute-close-records-a-manual-check-pending` | 2 of 3 (0.93, 1.0, 1.0) | `writer-ran-once`, in one run (the writer called twice) |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard) | 3 of 3 at 1.0 | none; the push landed through `./git` in the sandbox |
+
+**Finding.** The baselines are not red. The unedited prose, with the shared unattended contract, already decides and logs surviving findings, parks the spec gap as `Q1` with the outcome line, keeps a security finding folded or parked with its location only, and takes the pending path for a manual check without being asked. The only red runs fail for reasons other than the ones the cases were registered to detect, or are single-run variation. Spend about 11.7 USD.
