@@ -2,7 +2,7 @@
 
 ## Under test
 
-The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`), the one-line `create` fix in `agents/updater.md`, and the `stop_at_ready` / outcome-file behaviour of `agents/monitor.md` that the skill dispatches. The claim: when monitor cannot clear the PR (the `./portage wait-for-actionable` stand-in reports `fix_ci` every time and the group names a green-driver agent that does not exist), the outcome file carries `BLOCKED` or `STOPPED`, and the PR step ends `outcome: stuck task/count-words parked=0 — <reason>`, writes `**Outcome:** stuck`, and never merges. The prompt passes `--deadline 900`, a shorter deadline than the default.
+The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`), the one-line `create` fix in `agents/updater.md`, and the `stop_at_ready` / outcome-file behaviour of `agents/monitor.md` that the skill dispatches. The claim: when monitor cannot clear the PR (the `./portage wait-for-actionable` stand-in reports a `blocked` action, a merge conflict that needs a human, that monitor's action table does not clear), the outcome file carries `BLOCKED` or `STOPPED`, and the PR step ends `outcome: stuck task/count-words parked=0 — <reason>`, writes `**Outcome:** stuck`, and never merges. The prompt passes `--deadline 900`, a shorter deadline than the default.
 
 ## Fixture
 
@@ -29,4 +29,5 @@ Predicted baseline (red): no `outcome:` line and no block outcome.
 - Write order ("block before push", "outcome written before the final line") is observed through end state and the tool-call set only.
 - Sandbox accommodations carried in every prompt, which the prose cannot provide itself: a command containing a newline or a redirect is denied, so `gh pr create` takes a one-line body and the updater is handed `pr_body_file` (the saved current body, `pr-description.md`); the prompt also asks that the note be passed on to every dispatched agent.
 - The credential scrub of the block diff, the temp-file route for the diff and the one retry of a non-applying diff are not graded.
+- An earlier fixture made the group name a green-driver agent that does not exist; monitor then decided `BLOCKED` with its prescribed message, which contains backticks, and the runner's sandbox denied the `printf` redirect that writes it, so no outcome file appeared and the case timed out. The fixture was changed to the `blocked` action above (disclosed here; no grader was changed).
 - Whether monitor ends `BLOCKED` or `STOPPED` on this fixture is the monitor's call; both map to `stuck`, and the case does not distinguish them.

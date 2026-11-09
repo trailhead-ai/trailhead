@@ -56,7 +56,6 @@ JSON
 {
   printf '[release]\nreview_bot_login = ""\n'
   [ "$AUTO_MERGE" = "true" ] && printf 'auto_merge = true\n'
-  [ "$MONITOR_MODE" = "blocked" ] && printf 'green_driver_agent = "no-such-driver"\n'
 } > "$W/group.toml"
 echo "$MONITOR_MODE" > "$W/.monitor-mode"
 echo "$PR_COMMENT" > "$W/.pr-comment"
@@ -99,7 +98,7 @@ export PATH="\$W:\$PATH" TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR
 case "\${1:-}" in
   wait-for-actionable)
     if [ "\$(cat "\$W/.monitor-mode")" = "blocked" ]; then
-      printf '{"actionable":{"%s":{"action":"fix_ci","details":{"checks":[{"name":"build","conclusion":"failure","output":"link error in wordcount"}]}}},"waiting":{}}\n' "\$W/repo:7"
+      printf '{"actionable":{"%s":{"action":"blocked","details":{"reason":"the branch conflicts with main and needs a human to resolve it"}}},"waiting":{}}\n' "\$W/repo:7"
     else
       printf '{"actionable":{"%s":{"action":"done","details":{}}},"waiting":{}}\n' "\$W/repo:7"
     fi
