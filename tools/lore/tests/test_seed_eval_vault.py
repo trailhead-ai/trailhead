@@ -872,3 +872,146 @@ def test_unknown_field_is_refused_and_creates_nothing(sandbox):
     assert "relatedd" in result.stderr
     assert snapshot(sandbox / "home" / "cwd") == {}
     assert home_snapshot(sandbox) == {}
+
+
+SESSION_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+SESSION = {
+    "session_id": SESSION_ID,
+    "candidates": [
+        {"kind": "found-work", "phase": "Build", "body": "found-work: deferred | finding: one"},
+        {"kind": "lesson", "phase": "Build", "body": "A lesson worth keeping."},
+    ],
+}
+
+
+def write_session(sandbox: Path, session) -> Path:
+    path = sandbox / "session.json"
+    path.write_text(session if isinstance(session, str) else json.dumps(session), encoding="utf-8")
+    return path
+
+
+def session_show(sandbox: Path, key: str = SESSION_ID) -> dict:
+    result = seeded_lore(sandbox, "session", "show", "--session-id", key, "--json")
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def test_session_json_beside_records_seeds_a_dirty_session_holding_each_candidate(sandbox):
+    write_session(sandbox, SESSION)
+    result = seed(sandbox, [ADR])
+    assert result.returncode == 0, result.stderr
+
+    shown = session_show(sandbox)
+
+    assert shown["sidecar"]["status"] == "dirty"
+    assert "kind=found-work phase=Build" in shown["body"]
+    assert "  found-work: deferred | finding: one" in shown["body"]
+    assert "kind=lesson phase=Build" in shown["body"]
+    assert "  A lesson worth keeping." in shown["body"]
+
+
+def test_session_is_keyed_by_the_declared_session_id(sandbox):
+    write_session(sandbox, {**SESSION, "session_id": "11111111-2222-4333-8444-555555555555"})
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    assert seeded_lore(sandbox, "session", "show", "--session-id", SESSION_ID, "--json").returncode != 0
+    assert session_show(sandbox, "11111111-2222-4333-8444-555555555555")["sidecar"]["status"] == "dirty"
+
+
+def test_no_session_json_seeds_no_session(sandbox):
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    assert seeded_lore(sandbox, "session", "show", "--session-id", SESSION_ID, "--json").returncode != 0
+
+
+@pytest.mark.parametrize(
+    "session,named",
+    [
+        ("not json", "not valid JSON"),
+        ([], "must hold a JSON object"),
+        ({"candidates": []}, "session_id"),
+        ({"session_id": SESSION_ID}, "candidates"),
+        ({"session_id": SESSION_ID, "candidates": [{"kind": "x", "phase": "Build"}]}, "body"),
+        ({"session_id": SESSION_ID, "candidates": [{"kind": "x", "phase": "Build", "body": "b", "extra": 1}]}, "extra"),
+    ],
+)
+def test_malformed_session_json_is_refused_before_anything_is_written(sandbox, session, named):
+    write_session(sandbox, session)
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert named in result.stderr
+    assert not (sandbox / "home" / "cwd" / "vault").exists()
+    assert not (sandbox / "home" / "cwd" / "lore").exists()
+
+
+@pytest.fixture
+def git_denied(sandbox):
+    """A PATH whose ``git`` always fails, as inside the runner's sandbox."""
+    stub = sandbox / "denied-bin"
+    stub.mkdir()
+    (stub / "git").write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+    (stub / "git").chmod(0o755)
+    return clean_env(sandbox, PATH=f"{stub}:/usr/bin:/bin")
+
+
+def create_task(sandbox: Path, env: dict[str, str]):
+    return seeded_lore(
+        sandbox, "record", "create", "--kind", "task", "--title", "Written without git",
+        "--status", "open", stdin="body\n", env=env,
+    )
+
+
+def test_wrapper_writes_with_git_unavailable_and_stamps_the_seeded_identity(sandbox, git_denied):
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    created = create_task(sandbox, git_denied)
+
+    assert created.returncode == 0, created.stderr
+    assert show(sandbox, "task/written-without-git")["sidecar"]["created-by"] == "eval@example.invalid"
+
+
+def test_wrapper_bakes_the_email_of_a_preexisting_gitconfig(sandbox, git_denied):
+    (sandbox / "home" / ".gitconfig").write_text(
+        "[user]\n\tname = Runner\n\temail = runner@example.invalid\n", encoding="utf-8"
+    )
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    created = create_task(sandbox, git_denied)
+
+    assert created.returncode == 0, created.stderr
+    assert show(sandbox, "task/written-without-git")["sidecar"]["created-by"] == "runner@example.invalid"
+
+
+def test_a_lore_email_in_the_callers_environment_wins_over_the_baked_one(sandbox, git_denied):
+    assert seed(sandbox, [ADR]).returncode == 0
+
+    created = create_task(sandbox, {**git_denied, "LORE_EMAIL": "caller@example.invalid"})
+
+    assert created.returncode == 0, created.stderr
+    assert show(sandbox, "task/written-without-git")["sidecar"]["created-by"] == "caller@example.invalid"
+
+
+UNSAFE_EMAILS = [
+    'a"b@example.invalid',
+    "a b@example.invalid",
+    "a$(id)@example.invalid",
+    "a`id`@example.invalid",
+    "a;b@example.invalid",
+    "a'b@example.invalid",
+]
+
+
+@pytest.mark.parametrize("email", UNSAFE_EMAILS)
+def test_an_email_that_is_unsafe_in_a_shell_script_is_refused_and_creates_nothing(sandbox, email):
+    quoted = email.replace("\\", "\\\\").replace('"', '\\"')
+    (sandbox / "home" / ".gitconfig").write_text(
+        f'[user]\n\tname = Runner\n\temail = "{quoted}"\n', encoding="utf-8"
+    )
+
+    result = seed(sandbox, [ADR])
+
+    assert result.returncode != 0
+    assert result.stderr.startswith("seed-eval-vault: ")
+    assert "user.email" in result.stderr
+    assert snapshot(sandbox / "home" / "cwd") == {}

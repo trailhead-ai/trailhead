@@ -20,8 +20,16 @@ file. In the current working directory the script:
 4. writes an executable ``./lore`` wrapper and a copy of the repo's ``trailhead/``
    package beside it. A sandboxed agent that cannot read the repo (or has no
    usable ``lore`` on PATH) runs ``./lore ...`` against the seeded vault: the
-   wrapper puts the copy on ``PYTHONPATH`` and execs this checkout's lore CLI
-   under the symlink-resolved interpreter that ran this script.
+   wrapper puts the copy on ``PYTHONPATH``, defaults ``LORE_EMAIL`` to the identity
+   resolved at seed time (a sandbox that cannot execute ``git`` cannot look it up
+   itself), and execs this checkout's lore CLI under the symlink-resolved
+   interpreter that ran this script.
+
+A ``session.json`` beside ``records.json`` seeds a dirty session as well. It is a
+JSON object ``{"session_id": "<guid>", "candidates": [{kind, phase, body}, ...]}``;
+after the records, each candidate is captured through ``lore session candidate
+--session-id <guid>``, so the session record is the CLI's own and a run reads it
+back with the same ``--session-id``. Without that file no session is seeded.
 
 Nothing is written unless every refusal check passes, and every record's status is
 checked against its kind's vocabulary up front. It refuses (stderr
@@ -29,7 +37,9 @@ checked against its kind's vocabulary up front. It refuses (stderr
 or malformed, when lore's config or state directory — resolved through
 ``trailhead/paths.py``, exactly as lore resolves them, overrides included — is
 not inside ``$HOME``, when a lore config already exists, when an existing
-``$HOME/.gitconfig`` leaves ``git config --global user.email`` empty, or when
+``$HOME/.gitconfig`` leaves ``git config --global user.email`` empty or holds an
+email with characters outside ``[A-Za-z0-9._%+-@]`` (it is baked into a shell
+script), or when
 ``./vault``, ``./lore`` or ``./trailhead`` already exists. The intent is
 that a run can only ever populate a disposable ``$HOME``, never a live install.
 """
@@ -38,6 +48,7 @@ from __future__ import annotations
 import json
 import os
 import pwd
+import re
 import shlex
 import shutil
 import subprocess
@@ -49,6 +60,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 IDENTITY_NAME = "Eval Fixture"
 IDENTITY_EMAIL = "eval@example.invalid"
+SAFE_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")
 FIELDS = ("kind", "title", "status", "body")
 OPTIONAL_FIELDS = ("related",)
 DIRECTORY_OVERRIDES = ("LORE_CONFIG_DIR", "LORE_STATE_DIR", "XDG_CONFIG_HOME", "XDG_STATE_HOME")
@@ -108,6 +120,41 @@ def load_records(path: Path) -> list[dict[str, str]]:
     return records
 
 
+SESSION_FIELDS = ("kind", "phase", "body")
+
+
+def load_session(path: Path) -> dict | None:
+    if not path.exists():
+        return None
+    try:
+        session = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise Refusal(f"cannot read session file {path}: {exc.strerror or exc}") from exc
+    except ValueError as exc:
+        raise Refusal(f"session file {path} is not valid JSON: {exc}") from exc
+    if not isinstance(session, dict):
+        raise Refusal(f"session file {path} must hold a JSON object")
+    unknown = sorted(set(session) - {"session_id", "candidates"})
+    if unknown:
+        raise Refusal(f"session file has unknown field(s): {', '.join(map(repr, unknown))}")
+    if not isinstance(session.get("session_id"), str) or not session["session_id"].strip():
+        raise Refusal("session file needs a non-empty string 'session_id'")
+    candidates = session.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        raise Refusal("session file needs a non-empty list 'candidates'")
+    for index, candidate in enumerate(candidates):
+        where = f"session candidate {index}"
+        if not isinstance(candidate, dict):
+            raise Refusal(f"{where} must be an object with {', '.join(SESSION_FIELDS)}")
+        extra = sorted(set(candidate) - set(SESSION_FIELDS))
+        if extra:
+            raise Refusal(f"{where} has unknown field(s): {', '.join(map(repr, extra))}")
+        for field in SESSION_FIELDS:
+            if not isinstance(candidate.get(field), str) or not candidate[field].strip():
+                raise Refusal(f"{where} needs a non-empty string {field!r}")
+    return session
+
+
 def check_related(where: str, related: object, seeded: set[tuple[str, str]]) -> None:
     if not isinstance(related, list):
         raise Refusal(f"{where} field 'related' must be a list of KIND=NAME strings")
@@ -137,6 +184,12 @@ def tracked_trailhead_files() -> list[Path]:
     if result.returncode != 0:
         raise Refusal(f"git ls-files failed in {REPO_ROOT}: {result.stderr.strip()}")
     return [Path(name) for name in result.stdout.split("\0") if name]
+
+
+def global_email() -> str:
+    return subprocess.run(
+        ["git", "config", "--global", "user.email"], capture_output=True, text=True
+    ).stdout.strip()
 
 
 def check_environment(cwd: Path) -> None:
@@ -173,11 +226,14 @@ def check_environment(cwd: Path) -> None:
     if (home / ".gitconfig").is_symlink():
         raise Refusal(f"{home / '.gitconfig'} is a symlink; refusing to write through it")
     if (home / ".gitconfig").exists():
-        email = subprocess.run(
-            ["git", "config", "--global", "user.email"], capture_output=True, text=True
-        ).stdout.strip()
+        email = global_email()
         if not email:
             raise Refusal(f"{home / '.gitconfig'} exists but sets no user.email, so lore cannot stamp provenance")
+        if not SAFE_EMAIL.fullmatch(email):
+            raise Refusal(
+                f"{home / '.gitconfig'} sets a user.email with characters outside [A-Za-z0-9._%+-@]; "
+                "refusing to bake it into a shell script"
+            )
     for name in ("vault", "lore", "trailhead"):
         if (cwd / name).exists() or (cwd / name).is_symlink():
             raise Refusal(f"{cwd / name} already exists")
@@ -197,6 +253,7 @@ def run_lore(python: str, *args: str, stdin: str | None = None) -> None:
 
 WRAPPER = """#!/bin/sh
 here=$(cd "$(dirname "$0")" && pwd)
+LORE_EMAIL="${{LORE_EMAIL:-{email}}}"; export LORE_EMAIL
 PYTHONPATH="$here" exec {python} {cli} "$@"
 """
 
@@ -212,9 +269,14 @@ def copy_tracked_trailhead(cwd: Path, tracked: list[Path]) -> None:
         target.chmod(source.stat().st_mode & 0o777)
 
 
-def write_wrapper(cwd: Path, python: str, tracked: list[Path]) -> None:
+def write_wrapper(cwd: Path, python: str, email: str, tracked: list[Path]) -> None:
+    if not SAFE_EMAIL.fullmatch(email):
+        raise Refusal(f"the global git user.email {email!r} is unset or unsafe to bake into the lore wrapper")
     wrapper = cwd / "lore"
-    wrapper.write_text(WRAPPER.format(python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI))), encoding="utf-8")
+    wrapper.write_text(
+        WRAPPER.format(python=shlex.quote(python), cli=shlex.quote(str(LORE_CLI)), email=email),
+        encoding="utf-8",
+    )
     wrapper.chmod(0o755)
     copy_tracked_trailhead(cwd, tracked)
 
@@ -222,6 +284,7 @@ def write_wrapper(cwd: Path, python: str, tracked: list[Path]) -> None:
 def seed(records_path: Path) -> None:
     cwd = Path.cwd()
     records = load_records(records_path)
+    session = load_session(records_path.with_name("session.json"))
     check_environment(cwd)
     tracked = tracked_trailhead_files()
     python = os.path.realpath(sys.executable)
@@ -241,7 +304,17 @@ def seed(records_path: Path) -> None:
             *related,
             stdin=record["body"],
         )
-    write_wrapper(cwd, python, tracked)
+    write_wrapper(cwd, python, global_email(), tracked)
+    if session:
+        for candidate in session["candidates"]:
+            run_lore(
+                python,
+                "session", "candidate",
+                "--session-id", session["session_id"],
+                "--kind", candidate["kind"],
+                "--phase", candidate["phase"],
+                stdin=candidate["body"],
+            )
 
 
 def main(argv: list[str]) -> int:

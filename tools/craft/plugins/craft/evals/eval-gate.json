@@ -163,6 +163,21 @@
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "build-triages-found-work": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "build-records-a-security-finding-by-location": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "unlinked-build-keeps-capturing-candidates": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
     }
   }
 }

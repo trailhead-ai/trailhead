@@ -1,0 +1,30 @@
+{
+  "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "candidates": [
+    {
+      "kind": "found-work",
+      "phase": "Build",
+      "body": "found-work: deferred | parent: task/add-pantry-export | record: spec/pantry-export#F1 | finding: Export drops items with no expiry date (ExpiryNullDrop) | where: pantry/export.py | why: Inside the spec's scope, but fixing it would widen this change into the date model."
+    },
+    {
+      "kind": "found-work-result",
+      "phase": "Build",
+      "body": "found-work-result: written | parent: task/add-pantry-export | finding: Export drops items with no expiry date (ExpiryNullDrop) | record: spec/pantry-export#F1 | reason-code: ok"
+    },
+    {
+      "kind": "found-work",
+      "phase": "Build",
+      "body": "found-work: folded | parent: task/add-pantry-export | record: task/add-pantry-export | finding: Header row misnames the unit column (unit_header_label) | where: pantry/export.py | why: This change introduced the misnamed header, so it is fixed here."
+    },
+    {
+      "kind": "found-work-result",
+      "phase": "Build",
+      "body": "found-work-result: written | parent: task/add-pantry-export | finding: Header row misnames the unit column (unit_header_label) | record: task/add-pantry-export | reason-code: ok"
+    },
+    {
+      "kind": "lesson",
+      "phase": "Build",
+      "body": "Lesson: a fixture that hard-codes a calendar date for 'soon to expire' pantry items starts failing the day that date passes. Build the date relative to a pinned clock in the fixture instead, so the export tests stay stable."
+    }
+  ]
+}

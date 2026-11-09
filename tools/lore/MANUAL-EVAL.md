@@ -2306,3 +2306,36 @@ for the fixture slugs and the plan name finds 0 files. I created nothing there a
 
 Runner **15.057 USD**, judge **0.457 USD**, **15.514 USD** for this dispatch (limit 16.5). The slice was at 55.86 USD before, so **71.37 USD**
 against the 74 ceiling. No rerun was used.
+
+## Case: flush-leaves-found-work-decisions
+
+`plugins/lore/evals/flush-leaves-found-work-decisions/` — a dirty session seeded through `fixtures/session.json` (the real `lore session candidate`): a `found-work` deferred line, its `found-work-result` line, a `found-work` folded line, its result line, and one `lesson` candidate. `expected.md` carries the pass condition, written before any run.
+
+**Under test:** `skills/flush/SKILL.md`, Step 3 — a `kind=found-work` or `kind=found-work-result` candidate is left in the session log, never promoted, and the flush still stamps the session clean.
+
+| Date | Arm | Prose under test | Runs | Result | Notes |
+|------|-----|------------------|------|--------|-------|
+| 2026-11-07 | baseline, first attempt (unedited flush prose) | none | 3 | **void** (0.714 x3) | every `./lore` write failed in the sandbox; see below |
+| 2026-11-08 | smoke: `apply-ruled-fix-to-draft-record`, existing case, treatment prose | n/a | 1 | **1.0** | all 5 graders passed; writes work after the wrapper fix |
+| 2026-11-08 | baseline (flush prose before the rule, swapped in for the run) | none | 3 | **0.75 / 0.75 / 0.75, red 3 of 3** | `no-task-from-found-work` failed in 3 of 3 runs, `no-record-carries-found-work-text` failed in 3 of 3 (2 record-writing calls each); the other six graders passed |
+| 2026-11-08 | treatment (flush prose with the rule) | Step 3 found-work rule | 3 | **1.0 / 1.0 / 1.0, 3 of 3** | all eight graders passed in every run |
+
+Model `claude-opus-5-5`, `claude` 2.1.319, macOS, `--runs 3`, `-j 1`, command as in `docs/eval-protocol.md` with `--case flush-leaves-found-work-decisions`.
+The baseline arm is the prose of `skills/flush/SKILL.md` before the rule was added, copied over the file for the run and restored afterwards (diff against the treatment copy empty).
+
+### Why the first runs said nothing about the rule
+
+Every write through `./lore` in the runner's sandbox failed (`error: set git config user.email; *-by provenance is required`). The runner's generated sandbox settings deny the Xcode/CLT `git` binaries, so lore's `git config --global user.email` lookup returned nothing; a `LORE_EMAIL` exported to the runner never reaches the child. The seeder's `./lore` wrapper now carries the identity resolved at seed time (`LORE_EMAIL="${LORE_EMAIL:-<email>}"`), after which the smoke run above passed. `lore flush` with `git` unavailable (simulated with a git that exits 1, and with no git on `PATH`) skips its commit with a notice, requests the publish, stamps the session clean and exits 0, so the flush itself needed no change.
+
+### Grader authoring errors, recorded
+
+1. The "no record from found-work" check as first written covered only task, decision, spec and area, so a lesson written from a found-work line would have passed. A `regex` grader with `target: files` was tried for "no record carries the text" and passed vacuously on a deliberately bad run (it sees only files the agent created through its file tools). It was replaced by `no-record-carries-found-work-text`, a `tool_used` grader over every Bash call (`min: 0`, `max: 0`). Checked through the runner against three scripted runs: clean lesson plus flush passes; a lesson whose body carries `ExpiryNullDrop` fails; a clean lesson plus a task carrying `unit_header_label` fails (and `no-task-from-found-work` fails with it).
+2. The first token list also held the path `pantry/export.py`. The treatment arm's legitimate lesson passed `--related-file pantry/export.py` (the file the build was working in, not a finding), so that treatment batch scored 0.875 x3 on a false positive; a second, kept-temp treatment batch (3 runs, transcripts read) showed the same. The run was right and the grader was wrong: the path was removed from the pattern, and both arms were re-run in full under the corrected grader. The results above are those re-runs. The earlier 0.875 batches are not counted. The three kept transcripts, re-scored offline with the same regex, matched 0 of 3 under the corrected pattern and 2, 2 and 1 calls under the old one.
+
+### Limitations
+
+One fixture, one phrasing, one model tier, 3 runs per arm. `no-record-carries-found-work-text` catches a record-writing call that carries a planted identifier or one of the two finding phrases; a record that restates a finding in words that avoid all four is not caught. The treatment arm's pass is for this candidate shape only. The first-attempt baseline also carried a real-state check: the live lore config and state were snapshotted before and after the batches; the only changes are other sessions' live activity (index, locks, publish logs, a different vault's git files), and a search of the vaults for the fixture tokens finds nothing.
+
+### Cost
+
+Smoke 0.22 USD, scripted grader checks about 1.5, baseline 0.86 (corrected grader; the voided and superseded batches 0.80 and 0.62 and 0.63 and 0.2 on top), treatment 0.66, plus about 0.2 for a treatment batch stopped early. About 5.7 USD this dispatch.

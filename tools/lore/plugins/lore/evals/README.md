@@ -52,6 +52,15 @@ link naming no earlier record of that kind, a `related` that is not a list, an
 entry that is not `KIND=NAME`, and any field other than `kind`, `title`, `status`,
 `body` and `related` are refused before anything is written.
 
+A case that needs a dirty lore session also drops a `session.json` beside `records.json`:
+`{"session_id": "<guid>", "candidates": [{"kind", "phase", "body"}, ...]}`. After the
+records, the seeder captures each candidate through the real `./lore session candidate
+--session-id <guid>`, so the session record is the CLI's own: the prompt must tell the
+agent to pass the same `--session-id` to every lore command, and graders read
+`vault/session/<guid>.json` (status) and `vault/session/<guid>.md` (the candidate log).
+Without the file no session is seeded. A malformed file is refused before anything is
+written. `flush-leaves-found-work-decisions` is the exemplar.
+
 The seeder runs in the run's temp `HOME` and working directory, and writes there:
 the vault at `./vault`, an executable `./lore` beside a copy of the repo's
 `trailhead/` package, and, only when `~/.gitconfig` does not exist, a synthetic

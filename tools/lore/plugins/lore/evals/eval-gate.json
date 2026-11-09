@@ -86,6 +86,11 @@
         "skills/correct/SKILL.md"
       ]
     },
+    "flush-leaves-found-work-decisions": {
+      "measures": [
+        "skills/flush/SKILL.md"
+      ]
+    },
     "no-to-dependent-fixes-leaves-every-record-as-it-was": {
       "measures": [
         "skills/correct/SKILL.md"
