@@ -180,6 +180,11 @@
       "measures": [
         "skills/_shared/execute.md"
       ]
+    },
+    "slice-folds-entries-that-touch-its-code": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
     }
   }
 }

@@ -38,12 +38,16 @@ Every clause holds.
 | The session log carries an `entry-folded` decision for F1 | `fold-decision-is-logged` | `regex`, `source: file`, the session log |
 | Each decision line precedes its result line in the session log | `each-decision-precedes-its-result` | `regex`, `source: file`, the session log |
 | The final message states the fold of F1 and the return of F3 to open | `outcome-reports-the-decisions` | `regex` over the final message |
-| The run named F1 and the overlapping path in its statement, before it wrote the parent | `statement-names-the-fold-before-the-parent` | `llm`, `focus: trace` |
+| The final message's fold sentence for F1 names the overlapping path `tally/counter.py` | `report-names-the-fold-with-its-path` | `regex` over the final message |
 
 ## Limitations
 
 - One spec, one phrasing, one model tier, three treatment runs. The fixture has one overlapping entry and one entry whose `what` tries to be chosen; it does not cover an entry whose `where` names a directory, an entry with several paths, or a spec whose section has no open entry.
-- `statement-names-the-fold-before-the-parent` is judged by a model over the first and last 12 events of the trace, so on a long run the statement can fall in the unseen middle; the deterministic graders do not see ordering between a statement and the write. The session-log order of decision line and result line is the deterministic proxy for "decided before it writes".
+- No grader observes that the step 8 statement came before the parent was written: the statement falls in the middle of a long trace, where a trace judge sees nothing (see the revision below). The session-log order of decision line and result line is the deterministic proxy for "decided before it writes", and `report-names-the-fold-with-its-path` shows the path reached the report.
 - `parent-body-names-the-fold` shows a body with a `**Folds:**` line was written with the file-writing tool, not that it landed on the record; the spec grader and the fold decision line show the fold itself landed.
 - Seeding the session with a fixed id and passing it to the scripts is the eval's own device: a real run does not pass `--session-id`.
 - The failure paths (a failed `reopen-abandoned`, a failed fold and its retry command) are not exercised by this case; the script's tests cover the commands, and nothing runs the prose that reports them.
+
+## Revision after the first treatment runs
+
+Authored after seeing runs, so recorded as a revision and not as the original plan. The first draft graded the statement with an `llm` trace grader, `statement-names-the-fold-before-the-parent`. On the edited prose it voted FAIL on 5 of 6 verdicts across 3 runs while every deterministic grader passed, because the statement sits in the middle of the trace, outside the first and last 12 events the judge sees. It was replaced by the `regex` grader `report-names-the-fold-with-its-path` in the table above. The prompt was also changed: the first treatment batch scored 0.44 to 0.67 because the session-log graders read `vault/session/<id>.md` while the run's `found_work.py` calls had not been given the session id, so the decision lines went to another session. The prompt now tells the agent to add `--session-id` to the `found_work.py` commands that take it. Both are authoring errors in the case, not prose results.
