@@ -18,6 +18,7 @@ test_camp_list.py.)
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -77,6 +78,14 @@ def _read(ws, slug):
     from camp.group.manifest import read_central_manifest
 
     return read_central_manifest(_mpath(ws, slug))
+
+
+def _write_raw_created_by(ws, slug, value):
+    """Rewrite the manifest on disk with `created_by` set to *value*, bypassing camp."""
+    mp = _mpath(ws, slug)
+    data = json.loads(mp.read_text(encoding="utf-8"))
+    data["created_by"] = value
+    mp.write_text(json.dumps(data), encoding="utf-8")
 
 
 class TestStampedAtCreation:
@@ -157,21 +166,14 @@ class TestCarriedForwardAtEveryRebuild:
         assert "created_by" not in _read(ws, "feat")
 
     def test_a_non_string_on_disk_value_reads_as_not_recorded_at_the_rebuilds(self, ws):
-        import json
-
         from camp.provision.provision import seed_pending_workspace
         from camp.provision.reconcile import reconcile_worktree
 
         _new(ws, "feat")
-        mp = _mpath(ws, "feat")
-        data = json.loads(mp.read_text(encoding="utf-8"))
-        data["created_by"] = 7
-        mp.write_text(json.dumps(data), encoding="utf-8")
-
+        _write_raw_created_by(ws, "feat", 7)
         seed_pending_workspace(ws["group"], "feat", env=ws["env"])
         assert "created_by" not in _read(ws, "feat")
-        data["created_by"] = 7
-        mp.write_text(json.dumps(data), encoding="utf-8")
+        _write_raw_created_by(ws, "feat", 7)
         reconcile_worktree(ws["group"], "feat", env=ws["env"])
         assert "created_by" not in _read(ws, "feat")
 
