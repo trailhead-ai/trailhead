@@ -1099,6 +1099,9 @@ class ClaudeCodeHarness(Harness):
     def detect(cls, env: dict[str, str]) -> bool:
         return _claude_dir(env).is_dir()
 
+    def cli_binary_name(self) -> str | None:
+        return "claude"
+
     # -- manifest -------------------------------------------------------------
 
     def generate_manifest(self, tools: list[str], composed_root: Path) -> None:

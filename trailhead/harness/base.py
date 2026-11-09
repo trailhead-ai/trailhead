@@ -232,6 +232,17 @@ class Harness(ABC):
     def detect(cls, env: dict[str, str]) -> bool:
         """Return True if this harness's configuration is present on the machine."""
 
+    # -- CLI ------------------------------------------------------------------
+
+    def cli_binary_name(self) -> str | None:
+        """The name of this harness's command-line binary, or ``None`` when it has none.
+
+        A supervised service resolves the binary's directory at enable time so a
+        pane it starts can run it; a harness with no CLI to resolve keeps the
+        default.
+        """
+        return None
+
     # -- layout ---------------------------------------------------------------
 
     def composed_root(self, state_dir: Path) -> Path:

@@ -85,6 +85,14 @@ class TestDetection:
         assert detect_harnesses({"HOME": str(tmp_path)}) == []
 
 
+class TestCliBinaryName:
+    def test_base_default_is_none(self):
+        assert _BareHarness().cli_binary_name() is None
+
+    def test_claude_names_its_cli(self):
+        assert ClaudeCodeHarness().cli_binary_name() == "claude"
+
+
 class TestComposedRoot:
     def test_per_harness_root(self, tmp_path):
         h = ClaudeCodeHarness()

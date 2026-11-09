@@ -200,7 +200,11 @@ def run_doctor(
         "provenance": provenance,
         "provenance_rejected_reason": provenance_rejected_reason,
         "readiness": build_readiness(
-            env=_env, supervisor_dir=supervisor_dir, lore_runner=lore_runner, platform=platform
+            env=_env,
+            supervisor_dir=supervisor_dir,
+            lore_runner=lore_runner,
+            platform=platform,
+            which_runner=_which,
         ),
     }
 
@@ -553,14 +557,31 @@ def _outpost_item(env: dict[str, str]) -> dict:
     return item(_OK, "Outpost is configured and built")
 
 
-def _supervisor_item(env: dict[str, str], supervisor_dir: Path | None, platform: str | None) -> dict:
+def _supervisor_item(
+    env: dict[str, str],
+    supervisor_dir: Path | None,
+    platform: str | None,
+    which_runner: Callable[[str], Optional[str]],
+) -> dict:
     try:
         enabled = outpost_supervisor.is_enabled(env, platform=platform, supervisor_dir=supervisor_dir)
+        lacking = (
+            _supervisor_path_lacks(env, supervisor_dir, platform, which_runner) if enabled else []
+        )
     except Exception as exc:
         return {
             "id": "supervisor",
             "state": _COULD_NOT_CHECK,
             "summary": f"the supervisor entry could not be checked: {exc}",
+        }
+    if lacking:
+        return {
+            "id": "supervisor",
+            "state": _MISSING,
+            "summary": (
+                "the supervisor entry's PATH lacks " + ", ".join(lacking)
+                + "; hubs cannot start from the service"
+            ),
         }
     if enabled:
         return {"id": "supervisor", "state": _OK, "summary": (
@@ -574,12 +595,34 @@ def _supervisor_item(env: dict[str, str], supervisor_dir: Path | None, platform:
     }
 
 
+def _supervisor_path_lacks(
+    env: dict[str, str],
+    supervisor_dir: Path | None,
+    platform: str | None,
+    which_runner: Callable[[str], Optional[str]],
+) -> list[str]:
+    """The directories the registered entry's PATH should carry and does not.
+
+    An entry that carries no PATH at all is not judged here.
+    """
+    path_value = outpost_supervisor.entry_path_value(
+        env, platform=platform, supervisor_dir=supervisor_dir
+    )
+    if path_value is None:
+        return []
+    carried = path_value.split(":")
+    cli_dirs, _ = outpost_supervisor.harness_cli_dirs(env, which_runner)
+    required = [str(outpost_supervisor.trailhead_bin_dir()), *cli_dirs]
+    return [d for d in required if d not in carried]
+
+
 def build_readiness(
     *,
     env: dict[str, str],
     supervisor_dir: Path | None = None,
     lore_runner: Callable | None = None,
     platform: str | None = None,
+    which_runner: Callable[[str], Optional[str]] | None = None,
 ) -> dict:
     """The host-readiness items in INSTALL.md step order, plus one verdict line.
 
@@ -587,7 +630,7 @@ def build_readiness(
     and ``step`` from this module's table.  Lore's own text is used only as the
     summary, never as a fix.
     """
-    raw = [_outpost_item(env), _supervisor_item(env, supervisor_dir, platform)]
+    raw = [_outpost_item(env), _supervisor_item(env, supervisor_dir, platform, which_runner or shutil.which)]
     raw.extend(_lore_items(lore_runner or _default_lore_runner))
 
     items = []
