@@ -22,16 +22,19 @@ is the slice parent touched.
        line of defence.
     2. The parent is read: it must be `in-progress`, carry the `craft/slice-parent`
        label and be related to the spec (`not-a-slice-parent`), and every entry's
-       criterion must be on `**Covers:**` with a `manual-check` observation and no
-       operator attestation, or already on `**Partially covers:**` with a
-       `pending-check` observation (a re-run) (`not-an-unconfirmed-manual-check`).
+       criterion must be an unconfirmed manual check on `**Covers:**`
+       (`unconfirmed_manual_checks`: a `manual-check` observation and no operator
+       attestation, or no observation and a spec trailer that is manual check), or
+       already on `**Partially covers:**` with a `pending-check` observation (a re-run)
+       (`not-an-unconfirmed-manual-check`).
     3. The spec is read fresh. An entry whose key (criterion, `task/<parent>`) is
        present with latest status `waiting` counts as already written; present with
        any other status it is refused (`entry-already-answered`). Missing entries are
        appended (creating `## Waiting` at the end of the body), and the proposed body
        is certified in-process by `waiting_gate.certify` against the body it was
        composed from; a refusal exits with the gate's own code and writes nothing.
-    4. The spec is written with `lore record update --base <revision read>`. After a failed or
+    4. The spec is written with `lore record update --base <revision read>`; a lore that
+       rejects `--base` as an unrecognised argument is `lore-too-old` (exit 2), not a failed write. After a failed or
        timed-out write the spec is read again: when every entry this run proposed is
        present under its key with status `waiting`, the write is treated as landed and
        the parent is finished. Otherwise the revision decides: changed -> `stale-spec`,
@@ -41,9 +44,11 @@ is the slice parent touched.
        `**Covers:**` line is dropped when it empties), the two lists are certified by
        `covers_gate.main` run in-process against the spec body now on the vault, each
        `manual-check` line becomes `pending-check` with evidence
-       `waiting entry on spec/<n>; <original evidence>`, and the parent is written with
+       `waiting entry on spec/<n>; <original evidence>` (a criterion with no observation
+       gets a new line, evidence `waiting entry on spec/<n>; no observation recorded
+       before close`), and the parent is written with
        `--base <revision of this read>`. Every refusal here exits 2 and says the spec
-       entry already landed: `stale-parent` / `parent-write-failed` for a write that did
+       entry already landed: `stale-parent` / `parent-write-failed` / `lore-too-old` for a write that did
        not take, `parent-not-finished` for any other refusal (the parent no longer
        qualifies, cannot be read, or its covers lists are refused). A re-run completes
        the close.
@@ -126,7 +131,9 @@ _ENTRY_KEYS = {"criterion", "check", "how", "changed_behaviour"}
 _LINE_BREAKS = "\n\r\x0b\x0c\x85\u2028\u2029"
 _PENDING = "pending-check"
 _MANUAL = "manual-check"
-_PARENT_WRITE_CODES = ("stale-parent", "parent-write-failed")
+_PARENT_WRITE_CODES = ("stale-parent", "parent-write-failed", "lore-too-old")
+_NO_OBSERVATION = "no observation recorded before close"
+_BASE_REJECTED_RE = re.compile(r"unrecogni[sz]ed arguments?:.*--base")
 STUCK_REASON_CODES = (
     "not-a-slice-parent",
     "build-unfinished",
@@ -252,6 +259,28 @@ def _spec_entries(body: str) -> dict[tuple[str, str | None], waiting.WaitingEntr
         )
 
 
+def _pending_line(criterion: str, spec: str, evidence: str) -> str:
+    return f"- **{criterion}** — {_PENDING} — waiting entry on spec/{spec}; {evidence}"
+
+
+def _with_observation_lines(body: str, new_lines: list[str]) -> str:
+    """`body` with `new_lines` at the end of its observations section (created at the
+    end of the body when it has none)."""
+    lines, masked = markdown_section.split_body(body)
+    located = markdown_section.section_range(
+        lines, masked, obs._OBSERVATIONS_HEADING, obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE
+    )
+    if located is None:
+        return body.rstrip("\n") + "\n\n" + obs._OBSERVATIONS_HEADING + "\n\n" + "\n".join(new_lines) + "\n"
+    start, end = located
+    last = start
+    for i in range(start + 1, end):
+        if lines[i].strip():
+            last = i
+    lines[last + 1 : last + 1] = new_lines
+    return "\n".join(lines)
+
+
 class _Parent:
     """A parent body read through observation_gate's own parsers."""
 
@@ -285,14 +314,14 @@ class _Parent:
                 return i
         return None
 
-    def classify(self, criteria: list[str]) -> list[str]:
+    def classify(self, criteria: list[str], spec_body: str) -> list[str]:
         """The criteria still to move; the rest are already pending. Refuses any
-        criterion that is neither."""
+        criterion that is neither. Eligibility is `unconfirmed_manual_checks`'s."""
+        unconfirmed = set(unconfirmed_manual_checks(self.body, spec_body)[0])
         todo = []
         for criterion in criteria:
             method = self.observations.get(criterion, ("", ""))[0]
-            attested = obs._is_meaningfully_nonempty(self.attestations.get(criterion, ""))
-            if criterion in self.covers and method == _MANUAL and not attested:
+            if criterion in self.covers and criterion in unconfirmed:
                 todo.append(criterion)
             elif criterion in self.partial and method == _PENDING:
                 continue
@@ -308,10 +337,13 @@ class _Parent:
     def moved(self, moving: list[str], spec: str) -> tuple[str, list[str], list[str]]:
         """(new body, covers left, partially covers now)."""
         lines = list(self.lines)
+        unrecorded: list[str] = []
         for criterion in moving:
-            idx = self.obs_lines[criterion]
-            evidence = self.observations[criterion][1]
-            lines[idx] = f"- **{criterion}** — {_PENDING} — waiting entry on spec/{spec}; {evidence}"
+            if criterion in self.obs_lines:
+                evidence = self.observations[criterion][1]
+                lines[self.obs_lines[criterion]] = _pending_line(criterion, spec, evidence)
+            else:
+                unrecorded.append(_pending_line(criterion, spec, _NO_OBSERVATION))
         covers = [c for c in self.covers if c not in moving]
         partial = self.partial + moving
         covers_idx = self._field_index(obs._COVERS_FIELD_RE)
@@ -328,7 +360,10 @@ class _Parent:
             lines.insert(covers_idx + 1, partial_line)
         else:
             lines[covers_idx] = partial_line
-        return "\n".join(lines), covers, partial
+        body = "\n".join(lines)
+        if unrecorded:
+            body = _with_observation_lines(body, unrecorded)
+        return body, covers, partial
 
 
 def _check_parent(sidecar: dict, spec: str) -> None:
@@ -391,6 +426,11 @@ def _update_argv(record_id: str, vault: str, revision: str) -> list[str]:
     return ["record", "update", record_id, "--vault", vault, "--base", revision]
 
 
+def _refuse_if_base_rejected(done) -> None:
+    if done is not None and done.returncode != 0 and _BASE_REJECTED_RE.search(done.stderr or ""):
+        raise Refusal("this lore's 'record update' has no --base, so nothing was written", "lore-too-old", 2)
+
+
 def _revision_changed(runner, vault: str, record_id: str, revision: str, missing: str) -> bool:
     try:
         return _read(runner, vault, record_id, missing)[2] != revision
@@ -447,7 +487,7 @@ def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
     sidecar, body, revision, _ = _read(runner, vault, f"task/{parent}", "parent-not-found")
     _check_parent(sidecar, spec)
     state = _Parent(body)
-    todo = state.classify(criteria)
+    todo = state.classify(criteria, spec_body)
     if not todo:
         return "already-updated"
     new_body, covers, partial = state.moved(todo, spec)
@@ -455,6 +495,7 @@ def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
     done = _write(runner, _update_argv(f"task/{parent}", vault, revision), new_body)
     if done is not None and done.returncode == 0:
         return "updated"
+    _refuse_if_base_rejected(done)
     if _revision_changed(runner, vault, f"task/{parent}", revision, "parent-not-found"):
         raise Refusal(f"task/{parent} changed after it was read", "stale-parent", 2)
     raise Refusal(f"lore could not write task/{parent}", "parent-write-failed", 2)
@@ -470,10 +511,9 @@ def write_mode(args, runner) -> int:
     spec_id = f"spec/{args.spec}"
     parent_sidecar, parent_body, _, _ = _read(runner, vault, f"task/{args.parent}", "parent-not-found")
     _check_parent(parent_sidecar, args.spec)
-    state = _Parent(parent_body)
-    moving = state.classify(criteria)
-
     _, spec_body, spec_rev, _ = _read(runner, vault, spec_id, "spec-not-found")
+    state = _Parent(parent_body)
+    moving = state.classify(criteria, spec_body)
     present = _spec_entries(spec_body)
     missing = []
     for item in entries:
@@ -494,6 +534,7 @@ def write_mode(args, runner) -> int:
         _precertify_covers(state, moving, args.spec, proposed)
         done = _write(runner, _update_argv(spec_id, vault, spec_rev), proposed)
         if done is None or done.returncode != 0:
+            _refuse_if_base_rejected(done)
             landed = _landed_body(runner, vault, spec_id, missing, args.parent)
             if landed is None:
                 if _revision_changed(runner, vault, spec_id, spec_rev, "spec-not-found"):

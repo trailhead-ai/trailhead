@@ -76,6 +76,11 @@ AUTOMATED_PARENT_BODY = """**Value claim:** the first thing works.
 - **AC1** — automated-assertion — tests/test_first.py::test_first
 """
 
+UNOBSERVED_PARENT_BODY = """**Value claim:** the banner shows the count.
+
+**Covers:** AC2
+"""
+
 END_PHASES = """
 ## End Phases
 
@@ -312,3 +317,25 @@ def test_a_slice_with_an_unfinished_child_is_not_found_stuck(world):
     refused = world.stuck(spec, parent)
     assert refused.returncode == 1
     assert "reason-code: build-unfinished" in refused.stderr
+
+
+def test_a_covered_manual_check_with_no_observation_closes_through_the_real_lore_and_gates(world):
+    spec = world.create_spec(SPEC_BODY.replace("The banner shows the count.",
+                                               "The banner shows the count. *Verified by: manual check.*"))
+    parent = world.create_parent(spec, UNOBSERVED_PARENT_BODY + END_PHASES)
+    world.create_child(parent, "done")
+    assert world.observation_gate(parent).returncode == 1
+
+    written = world.pending_check(spec, parent, [ENTRY])
+    assert written.returncode == 0, written.stderr
+    assert written.stdout.splitlines() == ["pending: AC2", "spec: written", "parent: updated"]
+    parent_body = world.show(f"task/{parent}")["body"]
+    assert "**Partially covers:** AC2\n" in parent_body
+    assert (f"- **AC2** — pending-check — waiting entry on spec/{spec}; "
+            "no observation recorded before close\n") in parent_body
+    assert world.observation_gate(parent).returncode == 0
+    verified = world.script("pending_check.py", "verify", "--spec", spec, "--parent", parent, "--vault", "default")
+    assert (verified.returncode, verified.stdout) == (0, "verified: AC2\n"), verified.stderr
+
+    again = world.pending_check(spec, parent, [ENTRY])
+    assert again.stdout.splitlines() == ["pending: AC2", "spec: already-present", "parent: already-updated"]

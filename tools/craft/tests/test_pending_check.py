@@ -103,6 +103,7 @@ class FakeLore:
         self.counter = 0
         self.fail_update: set[str] = set()
         self.change_on_fail = False
+        self.reject_base = False
         self.after_update = {}
         self.records = {
             f"spec/{SPEC}": self._record(spec_body, {"kind": "spec", "status": "ready", "labels": {}}, layer),
@@ -153,6 +154,8 @@ class FakeLore:
                 self.counter += 1
                 rec["revision"] = self._rev(rec["body"])
             return subprocess.CompletedProcess(argv, 1, "", "boom")
+        if self.reject_base and "--base" in argv:
+            return subprocess.CompletedProcess(argv, 2, "", "lore: error: unrecognized arguments: --base abc")
         base = argv[argv.index("--base") + 1] if "--base" in argv else None
         if base is not None and base != rec["revision"]:
             return subprocess.CompletedProcess(argv, 1, "", "changed after you read it")
@@ -231,6 +234,100 @@ def test_happy_path_writes_spec_first_then_parent_both_with_their_read_revisions
     assert (f"- **AC2** — pending-check — waiting entry on spec/{SPEC}; "
             "looked at the banner in the app\n") in parent_body
     assert "- **AC5** — manual-check — opened the report by hand\n" in parent_body
+
+
+NO_OBS_SPEC_MANUAL = SPEC_BODY.replace(
+    "- **AC2.** The banner shows the count.", "- **AC2.** The banner shows the count. *Verified by: manual check.*"
+)
+NO_OBS_SPEC_AUTOMATED = SPEC_BODY.replace(
+    "- **AC2.** The banner shows the count.", "- **AC2.** The banner shows the count. *Verified by: automated assertion.*"
+)
+NO_OBS_PARENT = """**Value claim:** you can close with a check waiting.
+
+**Covers:** AC2
+"""
+NO_OBS_PARENT_WITH_SECTION = """**Value claim:** you can close with a check waiting.
+
+**Covers:** AC1, AC2
+
+## Criterion observations
+
+- **AC1** — automated-assertion — tests/test_first.py::test_first
+
+## Other
+
+Prose.
+"""
+NO_OBSERVATION_EVIDENCE = f"waiting entry on spec/{SPEC}; no observation recorded before close"
+
+
+@pytest.mark.parametrize("parent_body", [NO_OBS_PARENT, NO_OBS_PARENT_WITH_SECTION], ids=["no-section", "section"])
+def test_a_covered_manual_check_with_no_observation_moves_to_partially_covers_with_the_no_observation_evidence(
+    parent_body, entries_file, capsys
+):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=parent_body)
+
+    rc, out, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 0, err
+    assert out.splitlines() == ["pending: AC2", "spec: written", "parent: updated"]
+    assert fake.update_ids() == [f"spec/{SPEC}", f"task/{PARENT}"]
+    body = fake.body(f"task/{PARENT}")
+    assert "**Partially covers:** AC2\n" in body
+    assert f"- **AC2** — pending-check — {NO_OBSERVATION_EVIDENCE}\n" in body
+    assert body.count("pending-check") == 1
+    if "AC1" in parent_body:
+        assert "**Covers:** AC1\n" in body
+        assert body.index("- **AC2** — pending-check") < body.index("## Other")
+    g = gate("observation_gate.py", stdin=body)
+    assert g.returncode == 0, g.stderr
+    assert "AC2: pending-check" in g.stdout
+    assert pc.main(["verify", f"--spec={SPEC}", f"--parent={PARENT}", f"--vault={VAULT}"], runner=fake.runner) == 0
+    assert capsys.readouterr().out == "verified: AC2\n"
+
+
+def test_a_covered_criterion_with_no_observation_and_a_non_manual_trailer_is_refused_with_no_writes(
+    entries_file, capsys
+):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_AUTOMATED, parent_body=NO_OBS_PARENT)
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 1 and code_of(err) == "not-an-unconfirmed-manual-check"
+    assert fake.updates() == []
+
+
+def test_a_rerun_after_closing_a_criterion_with_no_observation_writes_nothing(entries_file, capsys):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=NO_OBS_PARENT)
+    path = entries_file([entry("AC2")])
+    assert run(fake, path, capsys)[0] == 0
+    before = len(fake.updates())
+
+    rc, out, err = run(fake, path, capsys)
+
+    assert rc == 0, err
+    assert out.splitlines() == ["pending: AC2", "spec: already-present", "parent: already-updated"]
+    assert len(fake.updates()) == before
+
+
+def test_a_lore_that_rejects_base_on_record_update_is_lore_too_old_not_spec_write_failed(entries_file, capsys):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=NO_OBS_PARENT)
+    fake.reject_base = True
+    parent_before = fake.body(f"task/{PARENT}")
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "lore-too-old"
+    assert fake.body(f"task/{PARENT}") == parent_before
+
+
+def test_a_failed_spec_write_that_is_not_a_base_rejection_stays_spec_write_failed(entries_file, capsys):
+    fake = FakeLore()
+    fake.fail_update.add(f"spec/{SPEC}")
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "spec-write-failed"
 
 
 def test_produced_bodies_pass_the_real_gates(entries_file, capsys, tmp_path):
