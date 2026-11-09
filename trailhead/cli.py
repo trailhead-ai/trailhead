@@ -225,7 +225,13 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
     config = read_hub_config(args.account, env=env)
     profile = resolve_profile(HUB_PROFILE, args.account, env=env)
     directory = hub_home(args.account, env=env)
-    prompt = Path(args.prompt_file).read_text() if args.prompt_file else None
+    prompt = None
+    if args.prompt_file:
+        try:
+            prompt = Path(args.prompt_file).read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"trailhead: cannot read --prompt-file {args.prompt_file}: {exc}", file=sys.stderr)
+            return 1
     harnesses = [get_harness(args.harness)] if args.harness else detect_harnesses(env)
     if not harnesses:
         print("trailhead: no harness detected; pass --harness", file=sys.stderr)

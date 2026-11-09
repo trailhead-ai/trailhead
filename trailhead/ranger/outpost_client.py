@@ -11,7 +11,11 @@ from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
 HUB_SOCKET = "outpost-hubs"
-START_TIMEOUT_SECONDS = 60.0
+# Outpost's worst case for one start request, from its server bounds (server/operator/hubs.ts):
+# has-session 10s + trailhead session-start 30s + new-session 10s + settle 1.5s +
+# list/capture/kill up to 30s = 81.5s, and the per-account lock can make the request wait
+# behind one more such request. 180s covers both with margin.
+START_TIMEOUT_SECONDS = 180.0
 
 
 class OutpostRefusal(Exception):

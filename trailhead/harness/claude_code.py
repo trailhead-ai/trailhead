@@ -989,8 +989,14 @@ def _derive_write_confinement(
 ) -> list[str]:
     """Check the profile's write roots against *user*; return the derived ``denyWrite``.
 
+    The launch directory counts as user-allowed: Claude Code's sandbox always permits
+    writes to the session's working directory, whatever ``allowWrite`` lists. System
+    temp (``/tmp``, ``/private/tmp``, the platform temp dir) is shared scratch, not a
+    confinement target, so a user entry resolving to it is never derived into the
+    denial: a deny beats an allow, and it would break the session's own sandbox temp.
+
     Raises :class:`HarnessError` naming the offending entry when a profile root is
-    not covered by the user's writable list, when a user-level writable root contains
+    not covered by the user's writable list or the launch directory, when a user-level writable root contains
     a profile root (it cannot be narrowed without denying the profile root), or when
     a user-level write denial covers a profile root.
     """
@@ -1012,14 +1018,23 @@ def _derive_write_confinement(
                 "refusing the launch"
             )
     for root in roots:
-        if not any(_covers(resolved, root) for _, resolved in allowed):
+        if not _covers(user.launch_dir, root) and not any(
+            _covers(resolved, root) for _, resolved in allowed
+        ):
             raise HarnessError(
                 f"the profile writes {root}, which {user.path} does not allow "
                 "(a profile may narrow the user-level settings, never widen them)"
             )
+    scratch = {
+        Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())
+    }
     deny: list[str] = []
     for _, resolved in allowed:
-        if any(_covers(root, resolved) for root in roots) or str(resolved) in deny:
+        if (
+            resolved in scratch
+            or any(_covers(root, resolved) for root in roots)
+            or str(resolved) in deny
+        ):
             continue
         deny.append(str(resolved))
     return deny
@@ -1046,8 +1061,11 @@ def _check_reads_and_network(
 def _seed_folder_trust(config_file: Path, directory: Path) -> None:
     """Mark *directory* trusted in *config_file* so the first-run trust prompt never fires.
 
-    Read, update ``projects[<directory>].hasTrustDialogAccepted``, atomic rename; every
-    other key survives. An absent file is created; a malformed one refuses.
+    Read, update ``projects[<directory>].hasTrustDialogAccepted``, write a uniquely named
+    temp file beside it, atomic rename (so concurrent launches never share a temp file and
+    the file is never half-written); every other key survives. Two launches seeding at the
+    same instant may still drop one entry (read-modify-write has no lock).
+    An absent file is created; a malformed one refuses.
     """
     if not config_file.parent.is_dir():
         raise HarnessError(
@@ -1075,18 +1093,22 @@ def _seed_folder_trust(config_file: Path, directory: Path) -> None:
         raise HarnessError(f"{config_file}: project entry for {directory} is not an object")
     projects[str(directory)] = {**entry, "hasTrustDialogAccepted": True}
     data["projects"] = projects
-    tmp = config_file.with_name(f".{config_file.name}.trailhead-tmp")
     try:
         mode = stat.S_IMODE(config_file.stat().st_mode)
     except FileNotFoundError:
         mode = 0o600
+    tmp: str | None = None
     try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
+        fd, tmp = tempfile.mkstemp(
+            prefix=f".{config_file.name}.", suffix=".trailhead-tmp", dir=config_file.parent
+        )
         with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), mode)
             json.dump(data, f, indent=2)
         os.replace(tmp, config_file)
     except OSError as exc:
-        tmp.unlink(missing_ok=True)
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
         raise HarnessError(f"{config_file}: cannot write ({exc}); refusing the launch") from exc
 
 
@@ -1933,6 +1955,11 @@ class ClaudeCodeHarness(Harness):
         enabled with ``failIfUnavailable`` so a sandbox that cannot start fails loudly
         instead of leaving ``dontAsk`` to refuse everything quietly.
 
+        Network narrowing is not enforced: session lists merge with the user-level list,
+        so ``allowedDomains`` can never narrow it. The profile's hosts are only checked
+        against the user's list (a host it does not cover refuses the launch) and, when
+        the profile names any, passed along; a profile naming none writes no key.
+
         Account binding is :meth:`session_launch_env_set` / :meth:`session_launch_env_unset`
         verbatim. The only side effect is the folder-trust record in the account's
         ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
@@ -1977,7 +2004,6 @@ class ClaudeCodeHarness(Harness):
                     "denyWrite": deny_write,
                     "denyRead": [str(p) for p in denied_reads],
                 },
-                "network": {"allowedDomains": list(hosts)},
             },
             "permissions": {
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
@@ -1985,6 +2011,8 @@ class ClaudeCodeHarness(Harness):
             },
             "enabledMcpjsonServers": list(profile.profile.mcp_servers),
         }
+        if hosts:
+            settings["sandbox"]["network"] = {"allowedDomains": list(hosts)}
         if profile.profile.model is not None:
             settings["model"] = profile.profile.model
 

@@ -8,7 +8,9 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 import threading
 from dataclasses import FrozenInstanceError
 from pathlib import Path
@@ -100,7 +102,73 @@ def _user_allowing_hub(env) -> dict:
     return _user_sandbox(allowWrite=[".", cache, lore])
 
 
+@pytest.fixture
+def off_temp(tmp_path):
+    """A scratch directory that is not under the system temp dir, so a user allowWrite of
+    /tmp is not an ancestor of the fenced hub roots (as on a real account)."""
+    temp = Path(os.path.realpath(tempfile.gettempdir()))
+    if temp not in tmp_path.resolve().parents and Path("/tmp").resolve() not in tmp_path.resolve().parents:
+        yield tmp_path
+        return
+    base = Path(tempfile.mkdtemp(prefix="trailhead-offtemp-", dir=REPO))
+    try:
+        yield base
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def _real_shaped_user(env, tmp_path) -> dict:
+    """User settings shaped like a real account's: no '.', system temp, the lore and cache
+    roots, and some repository .git directories."""
+    home, lore, cache = _hub_roots(env)
+    gits = [str(tmp_path.resolve() / "code" / name / ".git") for name in ("one", "two")]
+    return _user_sandbox(
+        allowWrite=["/tmp", "/private/tmp", lore, cache, *gits]
+    )
+
+
 # -- never-widen -------------------------------------------------------------
+
+
+def test_launch_directory_counts_as_user_allowed_when_the_user_list_has_no_dot(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _write_user_settings(env, _real_shaped_user(env, tmp_path))
+    fs = _settings_of(_start(env))["sandbox"]["filesystem"]
+    assert fs["allowWrite"] == list(_hub_roots(env))
+
+
+def test_a_root_outside_the_launch_directory_still_needs_the_users_list(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(env, _user_sandbox(allowWrite=["/tmp", cache]))
+    with pytest.raises(HarnessError, match=lore):
+        _start(env)
+
+
+def test_system_temp_is_shared_scratch_and_never_derived_into_denywrite(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    user = _real_shaped_user(env, tmp_path)
+    _write_user_settings(env, user)
+    deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
+    gits = [p for p in user["sandbox"]["filesystem"]["allowWrite"] if p.endswith("/.git")]
+    assert not {"/tmp", "/private/tmp", os.path.realpath("/tmp")} & set(deny)
+    assert set(gits) <= set(deny)
+
+
+def test_a_user_entry_aliasing_system_temp_is_not_denied_but_other_entries_are(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    alias = tmp_path.resolve() / "tmp-alias"
+    alias.symlink_to(tempfile.gettempdir())
+    other = str(tmp_path.resolve() / "other")
+    _write_user_settings(env, _user_sandbox(allowWrite=[str(alias), lore, cache, other]))
+    deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
+    assert os.path.realpath(tempfile.gettempdir()) not in deny
+    assert other in deny
 
 
 def test_hub_profile_within_the_users_write_list_launches_and_denies_nothing(tmp_path):
@@ -370,7 +438,6 @@ def test_settings_place_resolved_paths_under_the_keys_claude_reads(tmp_path):
     assert sandbox["filesystem"]["allowWrite"] == [str(p) for p in resolved.writable]
     assert sandbox["filesystem"]["denyRead"] == [token]
     assert settings["permissions"]["deny"] == [f"Read(/{token}/**)"]
-    assert sandbox["network"]["allowedDomains"] == []
     assert "model" not in settings
     assert settings["enabledMcpjsonServers"] == []
 
@@ -589,6 +656,30 @@ def test_cli_refuses_a_never_widen_violation_with_a_clean_message(tmp_path, monk
     assert rc != 0 and err.startswith("trailhead: ") and lore in err
 
 
+@pytest.mark.parametrize("kind", ["missing", "directory", "not-utf8"])
+def test_cli_refuses_an_unreadable_prompt_file_with_a_clean_message(
+    tmp_path, monkeypatch, capsys, kind
+):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    _write_user_settings(env, _user_allowing_hub(env))
+    path = tmp_path / "prompt"
+    if kind == "directory":
+        path.mkdir()
+    elif kind == "not-utf8":
+        path.write_bytes(b"\xff\xfe\x00")
+    rc = _run_cli(
+        monkeypatch,
+        env,
+        ["session-start", "--role", "hub", "--account", "a", "--json", "--headless",
+         "--prompt-file", str(path)],
+    )
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and str(path) in captured.err
+    assert "unexpected" not in captured.err and "Traceback" not in captured.err
+
+
 def test_cli_prints_argv_env_and_directory_and_headless_reads_the_prompt_file(
     tmp_path, monkeypatch, capsys
 ):
@@ -765,7 +856,8 @@ def _live_hub_run(tmp_path, commands_for, excluded=()):
         {"sandbox": {"enabled": True, "failIfUnavailable": True,
                      "allowUnsandboxedCommands": False, "autoAllowBashIfSandboxed": True,
                      "excludedCommands": list(excluded),
-                     "filesystem": {"allowWrite": [".", str(cache), str(lore), str(outside)]}}},
+                     "filesystem": {"allowWrite": ["/tmp", "/private/tmp", str(cache), str(lore),
+                                                  str(outside)]}}},
     )
     start = _start(env, interactive=False, prompt="go")
     paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store)

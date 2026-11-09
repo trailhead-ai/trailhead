@@ -2,7 +2,7 @@
   "argv": [
     "claude",
     "--settings",
-    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"deny\":[\"Read(/<ROOT>/fence/outpost-state/operator/**)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state/operator\"],\"denyWrite\":[\"<ROOT>/fence/ranger-state/hubs/a/.claude\",\"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\"<ROOT>/fence/scratch\"]},\"network\":{\"allowedDomains\":[]}}}",
+    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"deny\":[\"Read(/<ROOT>/fence/outpost-state/operator/**)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state/operator\"],\"denyWrite\":[\"<ROOT>/fence/ranger-state/hubs/a/.claude\",\"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\"<ROOT>/fence/scratch\"]}}}",
     "--permission-mode",
     "dontAsk",
     "--effort",
