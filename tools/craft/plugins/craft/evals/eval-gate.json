@@ -410,6 +410,18 @@
         "skills/_shared/unattended.md",
         "skills/_shared/refine.md"
       ]
+    },
+    "unattended-execute-adjusts-for-an-invalidated-assumption": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-parks-a-design-change": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }
