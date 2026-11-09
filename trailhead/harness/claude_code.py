@@ -247,7 +247,10 @@ def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
     The first decoded dict carrying a non-empty string ``cwd`` ends the scan;
     the result is that cwd and whether the same record carries a non-empty
     string ``teamName`` (a team member's transcript, which Claude Code's own
-    resume listing drops). A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
+    resume listing drops). Only that first cwd-bearing record is consulted,
+    deliberately narrower than Claude Code's own ``/resume`` filter, which
+    matches a non-empty ``teamName`` anywhere in the first 64 KiB, so this
+    check errs toward blocking. A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
     skipped without being decoded, so a huge early line can never win over a
     plain one further down within the window.
 
