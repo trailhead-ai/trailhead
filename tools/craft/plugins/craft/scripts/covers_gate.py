@@ -369,13 +369,14 @@ def parse_folds(value: str) -> list[str]:
 
 
 def _certify_folds(spec_body: str, folds: list[str]) -> int:
-    # Imported here: followups imports this module at its top level.
+    # Imported here: followups imports this module at its top level. Run as a
+    # script, that import loads a second copy of this module, so the heading
+    # error followups raises is a different class from this file's own.
     import followups
 
     try:
         entries = followups.parse_followups(spec_body)
-    except (DuplicateHeadingError, followups.FollowupsError) as e:
-        _err(f"reason: {e}")
+    except (DuplicateHeadingError, followups.DuplicateHeadingError, followups.FollowupsError) as e:
         _err(f"reason-code: {e.reason_code}")
         return 2
     status = {e.id: e.status_kind for e in entries}

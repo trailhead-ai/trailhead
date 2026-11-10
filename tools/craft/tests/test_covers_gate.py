@@ -613,6 +613,26 @@ def test_folds_over_a_malformed_followups_section_exits_2():
     assert "reason-code: " in r.stderr
 
 
+@pytest.mark.parametrize("covers", [None, "AC1"])
+def test_folds_over_a_duplicated_followups_heading_exits_2_with_the_reason_code(covers):
+    spec = WITH_FOLLOWUPS_SPEC + "\n## Follow-ups\n\n- **F9.** Another\n"
+    r = _run_folds("F1", spec, covers=covers)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-followups-heading" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_folds_refusal_reports_the_reason_code_without_echoing_vault_text():
+    spec = (
+        NINE_CRITERIA_SPEC
+        + "\n## Follow-ups\n\n- **F1** zebra-quokka-marker no period after the id\n"
+    )
+    r = _run_folds("F1", spec)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: " in r.stderr
+    assert "zebra-quokka-marker" not in r.stderr
+
+
 def test_no_flag_at_all_still_exits_2_no_coverage_list_given():
     r = _run_folds(None, WITH_FOLLOWUPS_SPEC)
     assert r.returncode == 2, r.stderr + r.stdout
