@@ -771,7 +771,8 @@ def main(argv: list[str], runner=None) -> int:
     runner = runner or lore_runner
     try:
         mode, args = _parse(argv)
-        return {"write": write_mode, "verify": verify_mode, "describe": describe_mode, "stuck": stuck_mode}[mode](args, runner)
+        modes = {"write": write_mode, "verify": verify_mode, "describe": describe_mode, "stuck": stuck_mode}
+        return modes[mode](args, runner)
     except Refusal as r:
         return emit_refusal(PROG, r)
 

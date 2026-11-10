@@ -82,7 +82,7 @@ def _unnamed_stuck_codes(skill_text: str, codes) -> list[str]:
     return sorted(code for code in codes if code not in skill_text)
 
 
-def test_skill_names_every_reason_code_the_stuck_detector_emits():  # inert-gate: allow code-vs-document consistency seam
+def test_skill_names_every_reason_code_the_stuck_detector_emits():  # inert-gate: allow code-vs-doc consistency seam
     missing = _unnamed_stuck_codes(SLICE_SKILL.read_text(encoding="utf-8"), pending_check.STUCK_REASON_CODES)
     assert not missing, f"slice/SKILL.md never names stuck-detector reason-code(s): {missing}"
 

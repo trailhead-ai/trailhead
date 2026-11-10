@@ -250,7 +250,8 @@ NO_OBS_SPEC_MANUAL = SPEC_BODY.replace(
     "- **AC2.** The banner shows the count.", "- **AC2.** The banner shows the count. *Verified by: manual check.*"
 )
 NO_OBS_SPEC_AUTOMATED = SPEC_BODY.replace(
-    "- **AC2.** The banner shows the count.", "- **AC2.** The banner shows the count. *Verified by: automated assertion.*"
+    "- **AC2.** The banner shows the count.",
+    "- **AC2.** The banner shows the count. *Verified by: automated assertion.*",
 )
 NO_OBS_PARENT = """**Value claim:** you can close with a check waiting.
 
