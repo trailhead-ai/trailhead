@@ -42,7 +42,8 @@ and say so rather than guessing.
 no vault at all.** A session record is the operator's own capture log and is written only to the
 default vault, so there is nothing to elect — pass `--vault` and the command exits nonzero.
 `lore record create`'s routing scopes (`--team <scope>` and its `--repo` / `--product` / `--suite`
-siblings) stamp the record's scope alongside `--vault`, not instead of it. `lore task graph`'s
+siblings) stamp the record's scope alongside `--vault`, not instead of it. The unattended entry
+check names `--vault <elected-vault>` on its `lore task graph` call; `lore task graph`'s later
 literal calls below leave the flag unpinned, so check the render against `<elected-vault>` before
 acting on it: a render that does not match the vault the task came from is the ambiguous case below,
 not a fact.
@@ -173,17 +174,17 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      `the slice has no child tasks; plan it first`;
    - a standalone `ready` record whose node lacks the `(runnable)` marker:
      `a task it depends on is unfinished; finish that task first`.
-5. **Claim and status.** Refuse each of these, in this order. The two specific stops come before the
-   generic claimed one, because a push failure and a block both leave `craft/branch` in place and
-   would otherwise always read as "already claimed":
+5. **Claim and status.** Refuse each of these, in this order. The specific stops come before the
+   generic claimed one, because a push failure, a block and a close all leave `craft/branch` in
+   place and would otherwise always read as "already claimed":
    - a `craft/push=failed` label: `an earlier push failed; settle it by hand and clear the label`;
    - status `blocked`: `the record is blocked; clear the block first`;
+   - status `done`, `dropped` or `superseded`: `the record is already closed`;
    - a `craft/branch` label is present, so the run is already claimed:
      `the run is already claimed; unattended resume is not available, resume it attended`;
    - the record's latest `## Unattended run` block (the last such heading in the body) has no
      `**Outcome:**` line:
-     `another run holds this record, live or interrupted; wait for it, or close its block by hand`;
-   - status `done`, `dropped` or `superseded`: `the record is already closed`.
+     `another run holds this record, live or interrupted; wait for it, or close its block by hand`.
 
 **What is written, and when.** Steps 1 to 5 write nothing, and neither does the lesson search, which
 is a read. The first write of the session is step 6, the block; the status and `craft/branch` claim,
@@ -371,12 +372,15 @@ edit.
   numbered decision per `found_work.py entry` call goes in the block before the call is made:
   `Question:` names the entries and the transition, `Choice:` says marked done or returned to open,
   and `Reasoning:` is the one-line reason the call carries. A call that exits `2` or `3`, or a
-  listing that exits `2`, ends the run `stuck` instead of carrying on to the close: the block's
-  `**Outcome:** stuck` and checkpoint are written first, the close is not made, and the line is
-  `outcome: stuck task/<name> parked=<n> — the follow-up entries folded into this task could not be
-  settled; read the run block, then settle them by hand and run again`. Neither the block, the
-  report nor the outcome line carries the `retry:` line the script printed, or any other command the
-  script printed.
+  listing that exits `2`, ends the run `stuck` instead of carrying on to the close. First one
+  numbered decision in the block records the failure: `Question:` names the call, `Choice:` says it
+  failed with its exit code, and `Reasoning:` carries the finding or reason line the script printed
+  (the scrubbed finding on exit `2`, the `reason-code:` line on `1` or `3`), scrubbed and flattened
+  like every block entry and without the `retry:` line. Then the block's `**Outcome:** stuck` and
+  checkpoint are written, the close is not made, and the line is `outcome: stuck task/<name>
+  parked=<n> — the follow-up entries folded into this task could not be settled; read the run block,
+  then settle them by hand and run again`. Neither the block, the report nor the outcome line
+  carries the `retry:` line the script printed, or any other command the script printed.
 - **Manual-check discharge (Phase 6)** asks nothing and never writes an attestation. Each covered
   criterion whose recorded method is `manual-check` and that has no attestation takes the "Not yet"
   path of [Phase 6](#phase-6-close-and-completion-report): draft `check` and `how` from the
