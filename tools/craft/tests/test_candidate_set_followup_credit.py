@@ -2,7 +2,9 @@
 entry is marked `done by task/<that line's own task id>`.
 
 `fixtures/candidate_set_at_base/` holds the gate as it stood before the credit
-existed, with the sibling modules it imports (source fingerprints, from
+existed, with the sibling modules it imports. All four files were copied from
+origin/main at the branch cut (986bc373); covers_gate, waiting and markdown_section
+are unchanged by this branch, candidate_set is the pre-credit version (source fingerprints, from
 `git hash-object`: candidate_set c1cfb375e5d4f12fb8085c8655f4ea447365ce17,
 covers_gate 56cedf163b3b442d258cd4419918c767c5c59c7d, waiting
 6e899536071c2b7ed86bd8dd9bd1fe388009cb4d, markdown_section
@@ -143,3 +145,26 @@ def test_no_followups_section_output_matches_base_gate(ledger):
     body = _body(ledger)
     new, old = _run(GATE, body), _run(BASE_GATE, body)
     assert (new.returncode, new.stdout, new.stderr) == (old.returncode, old.stdout, old.stderr)
+
+
+# Compatibility: the pre-credit gate, run on the spec body this slice loop produces
+# (a token-less four-field line with a done-by entry beside criteria-covering lines),
+# still exits 0, stays not-eligible, and parses the covering lines' coverage.
+@pytest.mark.parametrize(
+    "criteria_lines, covered, partial",
+    [
+        ([COVERING], "AC1", "none"),
+        ([COVERING, PARTIAL], "AC1", "AC2"),
+    ],
+)
+def test_base_gate_still_parses_coverage_on_new_shape_ledger(criteria_lines, covered, partial):
+    body = _body(
+        [*criteria_lines, "- **Ent** — claim. (`task/ent`, closed 2026-01-03)"],
+        _entry(1, "done by task/ent"),
+    )
+    r = _run(BASE_GATE, body)
+    out = dict(l.split(": ", 1) for l in r.stdout.splitlines())
+    assert r.returncode == 0, r.stderr
+    assert out["complete-eligible"] == "no"
+    assert out["covered"] == covered
+    assert out["partial"] == partial
