@@ -72,7 +72,11 @@ An entry with neither coverage token (predates both fields) contributes no
 identifier to either set and makes the coverage union unverifiable as
 complete — it is a legacy entry, never a fabricated full-coverage claim. An
 entry carrying either field, or both, is a modern entry for eligibility
-purposes: only an entry carrying neither keeps `complete-eligible: no`. Full
+purposes: only an entry carrying neither keeps `complete-eligible: no` —
+unless the spec's `## Follow-ups` section has an entry whose status is
+`done by task/<that entry's own task id>`, which credits that entry as
+carrying a token (a `folded into` or `dropped` entry credits nothing, and an
+unparseable section credits nothing). Full
 coverage wins over partial for the same identifier regardless of which
 ledger line carries which field — the union across lines is order-free, so a
 later full-coverage entry resolves an earlier partial claim on the same
@@ -222,6 +226,7 @@ from covers_gate import (  # noqa: E402
     parse_covers,
     parse_criteria,
 )
+from followups import FollowupsError, parse_followups  # noqa: E402
 from waiting import WaitingParseError, parse_waiting  # noqa: E402
 
 # Stdout line keys: the first six always, the last three only with
@@ -399,6 +404,7 @@ def parse_ledger_voiding(
     removed: frozenset[str],
     reopened: dict[str, list[str]] | None = None,
     closed: frozenset[str] = frozenset(),
+    credited: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str], bool, list[tuple[str, str]], list[str]]:
     """`parse_ledger` with every `covers`/`partially covers` token voided that
     names an identifier in `removed`, or a `reopened` identifier whose entry's
@@ -408,7 +414,12 @@ def parse_ledger_voiding(
     voided token still counts as the entry's coverage token, so it never
     changes `eligible`. A `closed` identifier that any live token names, in
     either field, is added to the covered set and returned, in numeric order,
-    as the fifth element."""
+    as the fifth element.
+
+    A ledger line in the canonical four-field shape (`task/<id>`, `closed
+    <date>`, no coverage token) does not make `eligible` false when its own
+    task id is in `credited` — the task ids that follow-up entries record as
+    `done by`. A line of any other shape earns no credit."""
     reopened = reopened or {}
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
@@ -465,8 +476,12 @@ def parse_ledger_voiding(
             partial_value = None
             head = paren_text
         fields = _LEDGER_FIELDS_RE.match(head)
-        if fields is None or (fields.group("covers") is None and partial_value is None):
+        if fields is None:
             eligible = False
+            continue
+        if fields.group("covers") is None and partial_value is None:
+            if task_id not in credited:
+                eligible = False
             continue
         if fields.group("covers") is not None:
             covered.update(dict.fromkeys(_parse_field(fields.group("covers"), task_id)))
@@ -671,6 +686,28 @@ def find_unclaimed_ledger_lines(spec_body: str) -> list[int]:
     return unclaimed
 
 
+def read_followup_entries(spec_body: str) -> list:
+    """The spec's `## Follow-ups` entries through the one shared parser; empty
+    when the section is absent. Raises FollowupsError on a grammar violation
+    and DuplicateHeadingError on a second unmasked heading."""
+    return parse_followups(spec_body)
+
+
+def credited_task_ids(spec_body: str) -> frozenset[str]:
+    """Task ids that follow-up entries record as `done by task/<id>`. A section
+    that does not parse grants no credit: the ledger then reads exactly as it
+    would without the section."""
+    try:
+        entries = read_followup_entries(spec_body)
+    except (FollowupsError, DuplicateHeadingError):
+        return frozenset()
+    return frozenset(
+        e.status_detail.removeprefix("task/")
+        for e in entries
+        if e.status_kind == "done" and e.status_detail
+    )
+
+
 class CriteriaStateError(ValueError):
     """The `--criteria-state` file is unreadable or not the documented shape."""
 
@@ -860,7 +897,7 @@ def main(argv: list[str]) -> int:
 
     try:
         covered, partial, eligible, voided, closed_counted = parse_ledger_voiding(
-            spec_body, criteria, removed, reopened, frozenset(closed)
+            spec_body, criteria, removed, reopened, frozenset(closed), credited_task_ids(spec_body)
         )
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
