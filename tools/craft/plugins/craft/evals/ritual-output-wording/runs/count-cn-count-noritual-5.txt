@@ -1,6 +1,0 @@
-Of the 12 acceptance criteria, 3 are done, 2 are started or held up, and the other 7 haven't been touched.
-
-- **Partly done:** the wall-length table adds up the metres built, by site and by year (AC6). The yearly totals work and were checked against the 2024 days, but the split by site isn't there yet.
-- **Blocked:** an injury reported on the day is recorded, with the insurer's form filled in from the booking (AC11). This can't go ahead until the insurer sends their form.
-
-The note says the booking and boots-and-gloves work was tested. It reports no check for a member who has attended downloading a certificate showing the training days they completed (AC12), so I'm counting that as done on the note's word alone.

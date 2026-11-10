@@ -7,15 +7,10 @@ case seeds for itself. The generic case shape, how to write and run one, and the
 are in `docs/eval-protocol.md` — read it before adding a case. Results go in
 `tools/lore/MANUAL-EVAL.md`.
 
-## Runner cases and legacy cases
+## Runner cases
 
-**Runner cases** carry a `case.yaml`; the layout below is what lore's seeded cases add to
+Every case carries a `case.yaml`; the layout below is what lore's seeded cases add to
 the protocol's case shape.
-
-**Legacy cases** (`bash-write-gate`, `carve-out-does-not-generalise`) have no
-`case.yaml`. The runner does not run them and the push gate does not gate them. They are
-listed in `_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, which is also
-where a case is removed once it is ported to a runner shape.
 
 ```
 <case-name>/

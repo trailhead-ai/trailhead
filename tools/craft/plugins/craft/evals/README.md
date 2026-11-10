@@ -7,11 +7,6 @@ Each runner case is a directory here, run by `claude plugin eval`. The case shap
 run one, and the sandbox are in `docs/eval-protocol.md` — read it before adding a case. Results,
 with per-case evidence and limitations, go in `tools/craft/MANUAL-EVAL.md`.
 
-The cases here with no `case.yaml` are legacy hand-shaped cases. The runner does not run them and
-the push gate does not gate them. They are listed in `_LEGACY_HAND_SHAPED` in
-`trailhead/tests/test_eval_corpus.py`, which is also where a case is removed once it is ported to a
-runner shape.
-
 ## Runner cases
 
 Every directory here with a `case.yaml` is run by `claude plugin eval`, and `eval-gate.json` lists

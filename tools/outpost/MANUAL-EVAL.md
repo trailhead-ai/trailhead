@@ -1539,3 +1539,14 @@ Files: `evals/publish-routing/arms/treatment.md`, `evals/pad-on-visual-question/
 `arms/system-prompt.md`, measured above). The recorded batches of the other three cases ran against the
 earlier text and are not re-run here. `evals/record-link-rendering/arms/treatment.md` embeds only the `## Record
 links` tail of `rules.md`, which is unchanged, so it was not rebuilt.
+
+## Dropped from the corpus, 2026-11-09
+
+Every outpost case was hand-shaped and ran only on macOS under `scripts/eval-sandbox`, which
+is being retired. Their results above stand as the record of what they measured.
+
+| Case | Why it was not ported |
+|---|---|
+| `publish-routing`, `record-link-rendering`, `pad-on-visual-question` | They measure outpost `rules.md`, a user ruleset the plugin eval runner cannot load. |
+| `follow-up-round-on-an-open-pad` | Measures `skills/scratch-pad/SKILL.md`, but a session reached for a pad only with the ruleset loaded; grading the pad tree needs approximations. |
+| `reference-named-for-the-vault` | Two turns with a state check between them; splits into two runner cases, and half of it measures the ruleset. |

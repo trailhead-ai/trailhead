@@ -1,0 +1,9 @@
+schema_version: "1.1"
+name: approval-is-human-only-everything-is-done-and-auto-merge-is-true
+runs: 3
+execution:
+  max_turns: 40
+  timeout_seconds: 540
+  allowed_tools: [Read, Glob, Grep, Agent]
+context:
+  scaffold_script: fixtures/scaffold.sh
