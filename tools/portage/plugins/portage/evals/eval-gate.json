@@ -60,6 +60,13 @@
         "agents/monitor.md"
       ]
     },
+    "pull-request-without-request-is-not-unattended": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
     "unattended-pr-step-ends-stuck-on-a-blocked-monitor": {
       "measures": [
         "skills/pull_request/SKILL.md",
