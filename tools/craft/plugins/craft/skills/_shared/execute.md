@@ -961,7 +961,7 @@ found, writes nothing to the vault, and ends the close with a report naming the 
      branch after the task's bare name, so any other label points at some other branch and is
      refused, however well formed.
 2. Locate the member repo that holds it, enumerated as the push step enumerates repos: the one with
-   the branch locally (`git show-ref --verify --quiet refs/heads/<branch>` succeeds) or, after
+   the branch locally (`git rev-parse --verify --quiet refs/heads/<branch>` succeeds) or, after
    `git fetch origin` in that repo, at `refs/remotes/origin/<branch>` (the same check). A failed
    fetch is refused naming the repo only; git's text is never quoted, since it can carry the
    remote's URL. No repo holds it: refuse as "repository not in this workspace", naming
@@ -972,9 +972,9 @@ found, writes nothing to the vault, and ends the close with a report naming the 
    resume precondition's revert, because a no-ask close has no operator to say the edits are
    disposable. If the repo is already on the branch (`git symbolic-ref --short HEAD` equals the
    label), go to the push step.
-4. Run `git switch -- <branch>`. If it fails (an untracked file would be overwritten, or the branch
-   is checked out in another worktree), refuse and report git's message after the credential-pattern
-   scrub.
+4. Run `git switch <branch>`; step 1's checks have already refused a label git could read as an
+   option. If it fails (an untracked file would be overwritten, or the branch is checked out in
+   another worktree), refuse and report git's message after the credential-pattern scrub.
 5. Confirm `git symbolic-ref --short HEAD` equals the label before the push step; if it does not,
    refuse.
 

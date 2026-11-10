@@ -4628,3 +4628,14 @@ Prose: `skills/_shared/execute.md` fingerprint `970826bdd68b11175964b59ed463a797
 | `no-ask-close-refuses-an-option-shaped-branch-label` | shipped | 3 of 3 at 1.0 | 1.92 |
 
 No baseline was run, as pre-registered: the arm is a guard on the shipped prose, not a measured detector. It cannot show that the pre-edit prose would have detached HEAD on this runner (an agent may refuse a `--detach` label on its own), so it is not evidence the rule is what produced the refusal. The detach itself was confirmed by hand in a throwaway repo. The not-the-parent's-name and `..` branches of the rule are not exercised by any arm. "Nothing pushed" is inferred from the writer never running and the parent staying `in-progress`; the bare origin's refs are not graded.
+
+### Gate fix: branch recovery uses commands the eval runner grants
+
+On the security-fixed prose, the eval gate on the push failed `driver-closes-a-stuck-slice-instead-of-re-planning` in 0 of 3 runs: `git switch -- <branch>` was denied, because the runner grants `git switch *`. The existence check used `git show-ref`, which the runner does not grant at all. Recovery now checks the branch with `git rev-parse --verify --quiet refs/heads/<branch>` and switches with `git switch <branch>`. Step 1 already refuses a label git could read as an option: it must not start with `-` and must equal the parent's name. Prose `skills/_shared/execute.md` fingerprint `6d3d8f39d14bfb2487f30b952b4ffe37de6df3f5`, model `claude-opus-5-5`, `-j 3`:
+
+| Case | Result | Cost |
+|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning` | 3 of 3 at 1.0 | 4.04 USD |
+| `no-ask-close-switches-to-the-task-branch` | 3 of 3 at 1.0 | 2.77 USD |
+
+During the second batch, files under the real lore state directory changed. They were background fetch and publish logs, publish requests and the search index, from other sessions' syncs. No record was written.
