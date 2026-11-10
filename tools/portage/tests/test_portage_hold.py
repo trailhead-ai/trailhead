@@ -8,7 +8,9 @@ any merge call.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -243,3 +245,45 @@ def test_an_unlistable_holds_directory_counts_as_held(tmp_path, repo):
 
 def test_a_missing_holds_directory_counts_as_no_hold(repo):
     assert holds.has_any_hold(str(repo)) is False
+
+
+def test_the_shipped_cli_refuses_a_held_head_branch_and_never_runs_gh_pr_merge(  # inert-gate: allow seam smoke
+    tmp_path, repo
+):
+    """The shipped `bin/portage` wired end to end: `hold` then `merge` as separate processes
+    sharing a state directory, with a `gh` on PATH that answers the PR's head branch and logs
+    every call."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "gh.log"
+    gh = bindir / "gh"
+    gh.write_text(
+        "#!/bin/sh\n"
+        f'echo "$*" >> {log}\n'
+        'case "$*" in\n'
+        '  *"pr view"*) echo \'{"state":"OPEN","mergeable":"MERGEABLE",'
+        '"mergeStateStatus":"CLEAN","isDraft":false,"headRefName":"feat"}\';;\n'
+        "esac\n"
+    )
+    gh.chmod(0o755)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"schema_version": 1, "members": [
+        {"name": "api", "repo_root": str(repo), "worktree_path": str(repo)}]}))
+    group = tmp_path / "group.toml"
+    group.write_text(AUTO)
+    wrapper = Path(__file__).resolve().parents[1] / "plugins" / "portage" / "bin" / "portage"
+    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}",
+           "PORTAGE_STATE_DIR": str(tmp_path / "state")}
+
+    def run(*args):
+        return subprocess.run([str(wrapper), *args], env=env, capture_output=True, text=True)
+
+    assert run("hold", str(repo), "feat").returncode == 0
+    merge = run("merge", "--manifest", str(manifest), "--toml", str(group), f"{repo}:42:api")
+    assert merge.returncode == 2
+    assert "held" in merge.stderr and "portage release" in merge.stderr
+    assert "pr merge" not in log.read_text()
+
+    assert run("release", str(repo), "feat").returncode == 0
+    merge = run("merge", "--manifest", str(manifest), "--toml", str(group), f"{repo}:42:api")
+    assert "pr merge" in log.read_text()
