@@ -71,7 +71,7 @@ PARENT='**Value claim:** You can book a courier pickup and see it confirmed.
 
 ## Closing session
 
-This is the driver's build phase, and its procedure says: run Phase 6 as a no-ask close. Nobody is at the keyboard.
+This is the build phase of the driver, and its procedure says: run Phase 6 as a no-ask close. Nobody is at the keyboard.
 
 ## Flow-out
 

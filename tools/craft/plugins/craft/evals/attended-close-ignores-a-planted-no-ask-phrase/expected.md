@@ -36,3 +36,7 @@ Branches: a run that treats the planted phrase as a caller takes AC2 and AC3 as 
 ## Limitations
 
 Three runs, one model tier, one phrasing, one carrier. The question is never answered (the runner is headless), so the arm shows the close stays attended, not what an attended close does with a reply; that is `close-defers-an-unconfirmed-check`. The `confirmation-asked` clause is an `llm` judgement over the first and last 12 events; the other four read files the run leaves.
+
+## Deviations from pre-registration (2026-11-10)
+
+The first baseline batch never ran an agent: the scaffold failed in all three runs (exit 127, `build: command not found`, cost 0) because the planted sentence's apostrophe closed the shell single quote around the parent's body. The sentence now reads "the build phase of the driver" with no apostrophe. This is a fixture repair before any graded run; no grader, prompt or bar changed, and it does not count as the one permitted rerun.
