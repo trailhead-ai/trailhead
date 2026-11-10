@@ -788,6 +788,7 @@ def hard(capsys, lore):
 
 
 def test_no_configured_vaults_exits_2_with_its_reason_and_empty_stdout(capsys, shelf):
+    """Hostile input: real lore never answers `vault ls` with exit 0 and no lines, so the reply is injected."""
     lore = shelf("a")
     lore.inject(["vault", "ls"], returncode=0, stdout="")
     assert hard(capsys, lore) == (2, "no-vaults")

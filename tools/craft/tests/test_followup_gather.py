@@ -290,6 +290,7 @@ def test_each_runner_failure_has_its_own_reason_code_and_echoes_nothing_from_lor
 
 
 def test_a_vault_listing_with_no_vaults_cannot_certify(capsys, lore1):
+    """Hostile input: real lore never answers `vault ls` with exit 0 and no lines, so the reply is injected."""
     lore1.inject(["vault", "ls"], returncode=0, stdout="")
     code, _, err = run_main(lore1, "s", capsys)
     assert code == 2

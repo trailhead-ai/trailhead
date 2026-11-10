@@ -183,6 +183,7 @@ def spec_lore(tmp_path, spec=None, tasks=None, task_bodies=None, bodies=None, st
         if status in _STATUSES:
             make_task(lore, name, status)
         else:
+            # Hostile input: lore refuses a status outside its vocabulary, so the show reply is injected.
             lore.inject(
                 lambda a, s, n=name: _is(a, "record", "show", f"task/{n}"),
                 returncode=0, stdout=json.dumps({"body": "# T\n", "revision": "a" * 64, "layer": "personal",
@@ -198,6 +199,8 @@ def spec_lore(tmp_path, spec=None, tasks=None, task_bodies=None, bodies=None, st
         elif name not in bodies or name in bad_body:
             lore.inject(lambda a, s, n=name: _is(a, "record", "show", f"task/{n}"), stderr="boom")
     if layer == "shared":
+        # Injected: real lore reports a team-scope vault's record as `personal`, so the real reply is
+        # re-served with `layer: shared` to reach the shared-layer branch.
         shown = json.loads(_setup(lore, ["record", "show", "spec/s", "--json", f"--vault={VAULT}"]).stdout)
         shown["layer"] = "shared"
         lore.inject(lambda a, s: _is(a, "record", "show", "spec/s"), returncode=0, stdout=json.dumps(shown))
