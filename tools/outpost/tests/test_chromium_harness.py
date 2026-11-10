@@ -411,3 +411,72 @@ def test_wait_for_without_a_timeout_started_late_still_fails_named_rather_than_u
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe(FIXTURES / "widths-narrow", probe, virtual_time_budget=3000)
     assert "a state that never arrives late" in str(err.value)
+
+
+def test_serve_folder_teardown_does_not_wait_out_a_poll_interval(tmp_path):
+    (tmp_path / "index.html").write_text("<html></html>")
+    slowest = 0.0
+    for _ in range(8):
+        with ch.serve_folder(tmp_path) as base:
+            _fetch(f"{base}/index.html").read()
+            started = time.monotonic()
+        slowest = max(slowest, time.monotonic() - started)
+    assert slowest < 0.3
+
+
+def _flaky_launch_stub(path: Path, state: Path, hangs: int) -> Path:
+    """A browser that logs each launch's args to ``state``/<n>.args and hangs on the first ``hangs`` launches."""
+    state.mkdir(parents=True, exist_ok=True)
+    return _stub(
+        path,
+        f"""n=0
+for f in '{state}'/*.args; do [ -e "$f" ] && n=$((n + 1)); done
+printf '%s\\n' "$@" > '{state}'/$n.args
+if [ "$n" -lt {hangs} ]; then {shutil.which('sleep')} 60; fi
+echo '{STUB_DOM}'""",
+    )
+
+
+def _profile_dirs(state: Path) -> list[str]:
+    return [
+        next(a for a in f.read_text().splitlines() if a.startswith("--user-data-dir="))
+        for f in sorted(state.glob("*.args"))
+    ]
+
+
+def test_launch_that_hangs_once_is_retried_with_a_fresh_profile_and_succeeds(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    _flaky_launch_stub(path_dir / "chrome-headless-shell", state, hangs=1)
+    result = ch.run_probe(
+        FIXTURES / "widths-narrow", "return {};", timeout=1, env=env, lookup=_lookup(env, home)
+    )
+    assert result == {"stub": True}
+    profiles = _profile_dirs(state)
+    assert len(profiles) == 2
+    assert profiles[0] != profiles[1]
+
+
+def test_launch_that_hangs_twice_raises_naming_the_timeout_and_the_retry(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    _flaky_launch_stub(path_dir / "chrome-headless-shell", state, hangs=5)
+    with pytest.raises(ch.BrowserLaunchError) as err:
+        ch.run_probe(
+            FIXTURES / "widths-narrow", "return {};", timeout=1, env=env, lookup=_lookup(env, home)
+        )
+    message = str(err.value)
+    assert "1s" in message
+    assert "retried" in message
+    assert "machine load" not in message
+    assert len(_profile_dirs(state)) == 2
+
+
+def test_launch_that_exits_nonzero_is_not_retried(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    state.mkdir()
+    _stub(path_dir / "chrome-headless-shell", f"echo x >> '{state}/runs'\nexit 3")
+    with pytest.raises(ch.BrowserLaunchError):
+        ch.run_probe(FIXTURES / "widths-narrow", "return {};", env=env, lookup=_lookup(env, home))
+    assert (state / "runs").read_text().count("x") == 1
