@@ -225,7 +225,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -320,6 +320,7 @@ _SPEC_RECORD_RE = re.compile(r"spec/[A-Za-z0-9._-]+")
 _ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
 _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
+_DOT_ID_RE = re.compile(r"task/\.{1,2}")
 _NAMED_TASK_RE = re.compile(r"(?<![A-Za-z0-9._/-])(task/[A-Za-z0-9._-]+?)(?=[.,;:!?)`\]]*(?:\s|$))")
 _CODE_RE = re.compile(r"[a-z0-9-]+")
 _LOCATION_RE = re.compile(r".+:[0-9]+(?:-[0-9]+)?")
@@ -606,13 +607,18 @@ def _strip_invisible(text: str) -> str:
     )
 
 
-def _clean(text: str) -> str:
+def _scrub(text: str) -> str:
+    """`text` with credential-shaped runs replaced, including one split by invisible characters."""
     collapsed = _strip_invisible(text)
     if collapsed != text:
         scrubbed = scrub_credential_shaped(collapsed)
         if scrubbed != collapsed:
-            return _neutralize(scrubbed)
-    return _neutralize(scrub_credential_shaped(text))
+            return scrubbed
+    return scrub_credential_shaped(text)
+
+
+def _clean(text: str) -> str:
+    return _neutralize(_scrub(text))
 
 
 def _check_path(path: str) -> None:
@@ -1105,6 +1111,26 @@ class Move:
     confirmed: bool = False  # drop only: the document carried "operator_confirmed": true
 
 
+def _is_marked(entry: followups.Entry) -> bool:
+    return entry.found.startswith(SECURITY_REPLACEMENT_PREFIX) or entry.title.startswith(SECURITY_TITLE_PREFIX)
+
+
+def _restored_found(entry: followups.Entry) -> str:
+    """The `found:` of the entry a restore appends: the restored-from note, behind the security marker when `entry`
+    is marked so the restored entry is still recognised as a security finding."""
+    note = _restored_from(entry.id)
+    return f"{SECURITY_REPLACEMENT}; {note}" if _is_marked(entry) else note
+
+
+def _generic_drop_reason(reason: str) -> str:
+    """`reason` for a security finding's drop: the `nowhere:` marker or the `task/<id>` targets it names, and nothing
+    else of it."""
+    if reason.startswith(NOWHERE_PREFIX):
+        return f"{NOWHERE_PREFIX} {SECURITY_REPLACEMENT}"
+    named = list(dict.fromkeys(_NAMED_TASK_RE.findall(reason)))
+    return " ".join([SECURITY_REPLACEMENT_PREFIX, *named])
+
+
 @dataclass(frozen=True)
 class Planned:
     move: Move
@@ -1117,6 +1143,10 @@ class Planned:
         return self.new_id or self.entry.id
 
     @property
+    def consumed_confirmation(self) -> bool:
+        return self.move.kind == "drop" and self.move.confirmed and _is_marked(self.entry)
+
+    @property
     def decision(self) -> Decision:
         return Decision(
             kind=TRANSITIONS[self.move.kind],
@@ -1127,7 +1157,7 @@ class Planned:
             where=tuple(_redact_where(w) for w in self.entry.where),
             found="",
             security=False,
-            reason=self.move.reason + (CONFIRMED_NOTE if self.move.confirmed else ""),
+            reason=self.move.reason + (CONFIRMED_NOTE if self.consumed_confirmation else ""),
         )
 
 
@@ -1200,7 +1230,7 @@ def _compose(body: str, planned: list[Planned]) -> str:
         if p.changes and p.move.kind == "restore":
             e = p.entry
             try:
-                text = followups.compose_entry(p.new_id, e.title, e.what, e.where, _restored_from(e.id))
+                text = followups.compose_entry(p.new_id, e.title, _clean(e.what), e.where, _restored_found(e))
             except followups.FollowupsError as exc:
                 raise Refusal(f"{e.id} cannot be composed as a new entry", exc.reason_code)
             composed = followups.append_entry(composed, text)
@@ -1210,15 +1240,18 @@ def _compose(body: str, planned: list[Planned]) -> str:
 def _check_drop(move: Move, entry: followups.Entry, runner, vault: str | None) -> None:
     """Refuse a drop of a security finding the operator has not confirmed, and one whose reason does not say where
     the work went: it begins `nowhere:` or names a `task/<id>` that lore can read."""
-    marked = entry.found.startswith(SECURITY_REPLACEMENT_PREFIX) or entry.title.startswith(SECURITY_TITLE_PREFIX)
-    if marked and not move.confirmed:
+    if _is_marked(entry) and not move.confirmed:
         raise Refusal(
             f"{entry.id} is a security finding; dropping it needs the operator's confirmation", "drop-needs-operator"
         )
     if move.reason.startswith(NOWHERE_PREFIX):
         return
     named = list(dict.fromkeys(_NAMED_TASK_RE.findall(move.reason)))
-    if not named or any(_read_record(runner, task, vault) is None for task in named):
+    if (
+        not named
+        or any(_DOT_ID_RE.fullmatch(task) or not _TASK_RECORD_RE.fullmatch(task) for task in named)
+        or any(_read_record(runner, task, vault) is None for task in named)
+    ):
         raise Refusal("a drop's reason must begin 'nowhere:' or name an existing task/<id>", "drop-target-missing")
 
 
@@ -1233,10 +1266,12 @@ def _plan(spec: str, moves: list[Move], runner, vault: str | None) -> tuple[list
         if m.entry_id not in entries:
             raise Refusal(f"{m.entry_id} is not an entry of {spec}", "unknown-entry")
         e = entries[m.entry_id]
+        if m.kind == "drop" and _is_marked(e):
+            m = replace(m, reason=_generic_drop_reason(m.reason))
         changes = _classify(m, e)
         new_id = None
         if m.kind == "restore":
-            prior = [r.id for r in parsed if r.status_kind == "open" and r.found == _restored_from(e.id)]
+            prior = [r.id for r in parsed if r.status_kind == "open" and r.found == _restored_found(e)]
             if prior:
                 new_id, changes = prior[0], False
             else:
@@ -1271,7 +1306,7 @@ def _landed_ok(landed: dict[str, followups.Entry], p: Planned) -> bool:
     if p.move.kind == "restore":
         new = landed.get(p.new_id)
         return bool(
-            new and (new.status_kind, new.title, new.found) == ("open", p.entry.title, _restored_from(p.entry.id))
+            new and (new.status_kind, new.title, new.found) == ("open", p.entry.title, _restored_found(p.entry))
         )
     got = landed.get(p.move.entry_id)
     return got is not None and (got.status_kind, got.status_detail) == _target_status(p.move)
@@ -1474,8 +1509,7 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     moves = [Move(kind, parent, i, _clean(reason), confirmed) for i in ids]
     for m in moves:
         _check_move(m)
-    scrubbed = scrub_credential_shaped(reason)
-    retry_doc = {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": scrubbed}
+    retry_doc = {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": _scrub(reason)}
     if confirmed:
         retry_doc["operator_confirmed"] = True
     return spec, moves, retry_doc
