@@ -12,9 +12,13 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .dispatch import _slug_from_name_or_cwd
 from .parser import group_verb_parser
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 
 #: The branch `camp rebase` rebases onto when the operator names none.
@@ -290,6 +294,60 @@ def _ownership_notice(mpath: Path, env: dict[str, str] | None) -> str | None:
             f"not this host ({self_name!r})"
         )
     return None
+
+
+def _cmd_remove_host_cli(
+    args: list[str],
+    host: "Host",
+    *,
+    dry_run: bool,
+    connect_timeout: float,
+) -> None:
+    """camp remove <slug> --host <name> [--group <g>] [--force] [--dry-run]
+    (alias: rm; `--name <slug>` in place of the positional slug) — hand this
+    process to the far side's own `camp remove`.
+
+    Everything answerable on THIS machine is decided here, before any
+    machine is contacted: exactly one slug, named positionally or by
+    `--name` and never both — there is no cwd to infer one from on the far
+    side (`require_one_raw_slug`); the group (`resolve_cross_host_group`:
+    `--group`, else the cwd's group, confinement checked); and the argument
+    shape, since the parser declares only what local `camp remove` does. The
+    far side then applies every check local removal applies — the session
+    guard, the dirty-tree block, the ownership notice — and answers in its
+    own words.
+
+    `--force` is forwarded when given; *dry_run* is the router's single
+    dry-run answer, forwarded as `--dry-run`. The handoff requests no
+    terminal: the shellenv `camp()` wrapper captures `camp rm`'s stdout to
+    decide where to `cd`, and a pty would merge the far side's stderr into
+    it. Nothing is printed to local stdout, and the far side's own stdout
+    stays empty because a fresh ssh login never sits inside the workspace
+    it removes — so the wrapper never moves the shell.
+    """
+    from ..host.handoff import handoff, remote_camp_argv
+    from .session import require_one_raw_slug, resolve_cross_host_group
+
+    parser = group_verb_parser("remove", dry_run=True)
+    parser.add_argument("--force", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
+    slug = require_one_raw_slug(
+        "remove", [s for s in (parsed.slug, parsed.name) if s is not None]
+    )
+    group_name = resolve_cross_host_group("remove", parsed.group, dict(os.environ))
+
+    camp_args = ["remove", slug, "--group", group_name]
+    if parsed.force:
+        camp_args.append("--force")
+    if dry_run:
+        camp_args.append("--dry-run")
+    handoff(
+        remote_camp_argv(
+            host, camp_args, connect_timeout=connect_timeout, terminal=False
+        )
+    )
 
 
 def _cmd_remove_group_cli(

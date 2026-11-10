@@ -98,26 +98,26 @@ _OPAQUE_PAYLOAD_VERBS = frozenset({"foreach"})
 #: drift against each other — the same shape as `ALL_GROUPS_FLAGS` /
 #: `_ALL_GROUPS_VERBS` above.
 #:
-#: "attach" and "new" carry their slug (plus the group each resolved locally)
-#: across untouched rather than going through the JSON relay transport
-#: `_dispatch_host_command` builds for "list" — see that function's own
-#: docstring.
+#: "attach", "new", "remove", "stop" and "status" carry their arguments (plus
+#: the group each resolved locally) across untouched rather than going through
+#: the JSON relay transport `_dispatch_host_command` builds for "list" — see
+#: that function's own docstring.
 #:
 #: A retired verb (`_LEGACY_REDIRECTS`) is classified and handled ahead of
 #: ALL host routing (both the --all-hosts branch and the --host branch
 #: below), so it never reaches this set's applicability check at all.
 #: "list" is groupless under `--host`: `--host` together with `--group` is
 #: refused as a collision for it, because no group is forwarded to the far
-#: side — the far side resolves its own. "attach" and "new" are the
-#: exceptions — see the `canonical not in _HOST_GROUP_VERBS` guard ahead of
+#: side — the far side resolves its own. Every other member is an
+#: exception — see the `canonical not in _HOST_GROUP_VERBS` guard ahead of
 #: that refusal below.
 HOST_FLAG = "--host"
-_HOST_VERBS = frozenset({"list", "attach", "new"})
+_HOST_VERBS = frozenset({"list", "attach", "new", "remove", "stop", "status"})
 
 #: The `_HOST_VERBS` members that resolve a group LOCALLY and forward its
 #: name, so `--group` alongside `--host` is their normal shape rather than a
 #: collision. Every other member forwards no group at all.
-_HOST_GROUP_VERBS = frozenset({"attach", "new"})
+_HOST_GROUP_VERBS = frozenset({"attach", "new", "remove", "stop", "status"})
 
 
 def read_router_options(verb: str, args: list[str]) -> "tuple[Any, list[str]]":
@@ -265,15 +265,16 @@ def _dispatch_host_command(
     ``connect_timeout`` is the operator's resolved value
     (`camp.host.config.connect_timeout_seconds()`, read once by `main()`'s
     `--host` handling above), threaded to every verb below: "list" uses it on
-    the transport, and "attach" and "new" put it in the interactive ssh
+    the transport, and every other verb puts it in the handed-off ssh
     invocation's `-o ConnectTimeout`. ``dry_run`` is the router's single
     dry-run answer (the ``CAMP_DRY_RUN`` env switch or an explicit
-    ``--dry-run``), consumed only by "new", which forwards it to the far side.
+    ``--dry-run``), consumed by the verbs that declare ``--dry-run`` locally
+    ("new", "remove", "status"), which forward it to the far side.
 
     Reached ONLY after `--host` has resolved to a declared host and every
     refusal above has passed — `main()`'s `--host` block is this function's
     sole caller, and it refuses any verb outside `_HOST_VERBS` before
-    reaching here, so *verb* is always one of the three below.
+    reaching here, so *verb* is always one of those below.
 
     "list" is wired to the SSH transport (`camp.host.transport.run_camp`, via
     `camp.host.relay.relay_all_groups`). "attach" is not: it carries the
@@ -281,7 +282,11 @@ def _dispatch_host_command(
     `ssh -t` (`camp.host.handoff`) rather than relaying a JSON answer — see
     `cli/session.py`'s `_cmd_attach_host_cli`. "new" hands off the same way,
     to the far side's own `camp new` — see `cli/group.py`'s
-    `_cmd_new_host_cli`.
+    `_cmd_new_host_cli`. "remove", "stop" and "status" hand off to the far
+    side's own verb too, but over plain `ssh` with no terminal requested, so
+    its stdout and stderr stay separate streams — see `_cmd_remove_host_cli`
+    (`cli/lifecycle.py`), `_cmd_stop_host_cli` (`cli/stop.py`) and
+    `_cmd_status_host_cli` (`cli/status.py`).
     """
     if verb == "list":
         from .workspace import _cmd_ls_host_cli
@@ -291,6 +296,22 @@ def _dispatch_host_command(
         from .session import _cmd_attach_host_cli
 
         _cmd_attach_host_cli(rest, host, host_name, connect_timeout=connect_timeout)
+    elif verb == "remove":
+        from .lifecycle import _cmd_remove_host_cli
+
+        _cmd_remove_host_cli(
+            rest, host, dry_run=dry_run, connect_timeout=connect_timeout
+        )
+    elif verb == "stop":
+        from .stop import _cmd_stop_host_cli
+
+        _cmd_stop_host_cli(rest, host, connect_timeout=connect_timeout)
+    elif verb == "status":
+        from .status import _cmd_status_host_cli
+
+        _cmd_status_host_cli(
+            rest, host, dry_run=dry_run, connect_timeout=connect_timeout
+        )
     else:
         assert verb == "new"
         from .group import _cmd_new_host_cli

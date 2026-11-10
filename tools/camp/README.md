@@ -263,13 +263,10 @@ way.
 that machine's door: `camp attach <slug> --host <name>`, described under
 [Attach](#attach) above, and `camp new <slug> --host <name>`, described
 under [Creating a workspace on another machine](#creating-a-workspace-on-another-machine)
-below. There is no cross-machine `camp stop`: stopping a workspace on
-another machine is `camp attach <slug> --host <name>` followed by
-`camp stop <slug>` run there, or `ssh <destination> <camp_bin> stop <slug> --group <group>`
-directly (placeholders as defined under
-[Creating a workspace on another machine](#creating-a-workspace-on-another-machine)
-below) — `camp stop` also needs a group from that machine's own `$HOME`,
-which `ssh` never resolves on its own.
+below. `camp status`, `camp stop` and `camp remove` take `--host <name>` the
+same way — see
+[Checking, stopping and removing a workspace on another machine](#checking-stopping-and-removing-a-workspace-on-another-machine)
+below.
 
 A failure to connect, authenticate, or run camp on the far side is its own
 rendered outcome rather than a crash: unreachable, connected but stalled
@@ -348,33 +345,51 @@ answers with its own dry-run line and creates nothing — as it does for
 `--dry-run` given on the command line, including together with `--no-attach`.
 
 If the connection fails or drops, what you see is ssh's own error; check
-where things stand with `camp list --host <name>` (or, on the far side,
-`ssh <destination> <camp_bin> status --group <group> --name <slug>` — a fresh
-login sits in `$HOME`, where no group resolves on its own), and run the same
-line again — it re-enters.
+where things stand with `camp list --host <name>` or
+`camp status --name <slug> --host <name>`, and run the same line again — it
+re-enters.
 A host-key mismatch is fixed by verifying the new key and updating
 `known_hosts`, never by relaxing the host-key checks. The far side's camp
 may be older than this one and refuse a flag in its own words after the
 handoff. `--json` under the requested terminal merges the far side's streams,
 and `--no-attach` still opens a connection.
 
-There is no cross-host remove. Tearing a remote workspace down is two
-commands on the far side, because `camp remove` does not end the workspace's
-tmux session — stop it first, preview the removal, then remove:
+### Checking, stopping and removing a workspace on another machine
 
 ```
-ssh <destination> <camp_bin> stop <slug> --group <group>
-ssh <destination> <camp_bin> remove --group <group> --name <slug> --dry-run
-ssh <destination> <camp_bin> remove --group <group> --name <slug>
+camp status --name <slug> --host <name>
+camp stop <slug> --host <name>
+camp remove <slug> --host <name> --dry-run
+camp remove <slug> --host <name>
 ```
 
-`<destination>` is the host's `ssh` destination from `hosts.toml` (the table
-key when no `ssh` is declared), `<camp_bin>` the `camp_bin` declared for it in
-`hosts.toml` (or `camp` when none is), `<group>` the group the workspace was
-created under, and `<slug>` the workspace's slug. `camp remove` leaves the
-workspace's branch in each far-side member repo — `worktree-<slug>` unless the
-group's `[branch] pattern` says otherwise; deleting those is your call. The far side's login shell may not be POSIX, so keep any `ssh <destination> …`
-follow-up you compose yourself shell-neutral (no `$?`).
+Each hands this process to the named machine's own `camp status`,
+`camp stop` or `camp remove`, over plain `ssh`. As with `camp new --host`,
+the group is the one your cwd resolves to, or the one `--group <group>`
+names; it resolves **on this machine** and is forwarded by name. The slug is
+always named — `camp remove` takes it positionally or as `--name <slug>`,
+never both — because a fresh login on the far side sits in `$HOME`, where no
+workspace is implied. `camp status --host <name>` without `--name` answers
+with that group's fleet view on the far side.
+
+Each verb accepts exactly the flags its local form does and forwards the
+ones you give: `--json` for `status` and `stop`, `--stale` and `--days` for
+`status`, `--force` and `--dry-run` for `remove`. A malformed slug, an
+undeclared host, a group that does not resolve, or a flag the local form
+would refuse is refused here, before any connection.
+
+No terminal is requested, so the far side's stdout and stderr stay separate
+— `--json` reads cleanly, and the shellenv wrapper never `cd`s after a remote
+`camp remove` — and the exit status is the far side's own, including
+`camp status`'s `0`/`2`/`3`. Every check the far side runs locally still
+runs: `camp remove` refuses a workspace that still holds a resumable
+session or uncommitted work (`--force` overrides, as it does locally) and
+does not end the workspace's tmux session, so stop it first. If the
+connection fails, what you see is ssh's own error.
+
+`camp remove` leaves the workspace's branch in each far-side member repo —
+`worktree-<slug>` unless the group's `[branch] pattern` says otherwise;
+deleting those is your call.
 
 ## Listing environments
 

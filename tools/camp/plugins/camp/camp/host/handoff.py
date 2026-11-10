@@ -6,16 +6,19 @@ attach-session -t =<derived name>``) — `=`-qualified through
 bypasses the `Tmux` class itself (an interactive `exec`, which cannot go
 through `subprocess.run`) but still routes its target through the seam's
 own normalization. Remote: one general builder,
-:func:`remote_camp_argv`, composes ``ssh -t <destination> <camp_bin>
-<camp args...>`` for any camp argument list and serves both cross-host door
-verbs — attach (:func:`remote_argv`, ``attach <ref> --group <group>``) and
-creation (``new <slug> --group <group> [--dry-run]``). It carries the per-host camp
+:func:`remote_camp_argv`, composes ``ssh [-t] <destination> <camp_bin>
+<camp args...>`` for any camp argument list and serves every cross-host verb
+that hands this process over — the two door verbs with a terminal, attach
+(:func:`remote_argv`, ``attach <ref> --group <group>``) and creation
+(``new <slug> --group <group> [--dry-run]``), and ``status``, ``stop`` and
+``remove`` without one, so their stdout stays apart from their stderr. It
+carries the per-host camp
 location the host declaration already holds and the group the operator's
 own machine resolved the slug against — the far side has no group axis of
 its own to resolve it from — and the same fixed connection options the
 listing transport pins (``host/transport.py``) — non-interactive
 authentication, strict host-identity checking, the connection timeout —
-differing only by requesting a terminal. The remote command reuses that
+differing only by the terminal the door verbs request. The remote command reuses that
 module's own quote-and-join (:func:`camp.host.transport.quote_and_join`),
 never a second implementation of it: ssh joins trailing argv elements with
 a space and hands the result to the far side's login shell, so an unquoted
@@ -82,15 +85,20 @@ def remote_camp_argv(
     camp_args: Sequence[str],
     *,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
+    terminal: bool = True,
 ) -> list[str]:
-    """argv for an interactive remote camp invocation: ``ssh -t <dest>
-    <camp_bin> <camp_args...>``, for any camp argument list.
+    """argv for a remote camp invocation that takes over this process: ``ssh
+    [-t] <dest> <camp_bin> <camp_args...>``, for any camp argument list.
 
     Mirrors :func:`camp.host.transport.run_camp`'s own ssh argv assembly —
     the same three fixed options (``BatchMode``, ``StrictHostKeyChecking``,
-    ``ConnectTimeout``) — differing only by requesting a terminal (``-t``),
-    since the operator needs an interactive pty where the listing transport
-    deliberately does not take one. The remote command is composed by
+    ``ConnectTimeout``). *terminal* requests a pty (``-t``) for a verb whose
+    far side the operator interacts with — a door into a tmux session. A pty
+    merges the far side's stdout and stderr into one stream, so a verb whose
+    stdout is read by something (the shellenv wrapper's ``cd`` after ``camp
+    remove``, a script reading ``--json``) passes ``terminal=False`` and
+    keeps the two streams apart. Either way ssh exits with the far side's
+    own status. The remote command is composed by
     :func:`camp.host.transport.quote_and_join`, so every element of
     *camp_args* and the host's camp location reach the far side as one
     literal word each.
@@ -98,7 +106,7 @@ def remote_camp_argv(
     remote_command = quote_and_join(host.camp_bin, camp_args)
     return [
         "ssh",
-        "-t",
+        *(["-t"] if terminal else []),
         "-o", "BatchMode=yes",
         "-o", "StrictHostKeyChecking=yes",
         "-o", f"ConnectTimeout={connect_timeout:g}",
