@@ -229,6 +229,11 @@
         "skills/_shared/execute.md"
       ]
     },
+    "no-ask-close-refuses-a-dirty-tree-on-the-task-branch": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
     "driver-ends-a-slice-without-asking-about-its-check": {
       "measures": [
         "skills/drive/SKILL.md",
@@ -277,7 +282,7 @@
         "skills/_shared/execute.md"
       ]
     },
-    "slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused": {
+    "slice-refuses-a-blocked-parent": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md"

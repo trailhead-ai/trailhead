@@ -64,7 +64,6 @@ SPEC='# Schedule courier pickups
 '
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Schedule courier pickups' --status ready >/dev/null
 STATUS=in-progress
-[ "$MODE" = dirty ] && STATUS=blocked
 PARENT='**Value claim:** You can book a courier pickup and see it confirmed.
 
 **Covers:** AC1, AC2, AC3

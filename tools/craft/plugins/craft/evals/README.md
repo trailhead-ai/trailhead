@@ -137,7 +137,7 @@ headroom over the largest batch.
 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`,
 `slice-refuses-when-the-drafted-check-is-refused`,
 `slice-refuses-when-the-slice-repository-is-not-here` and
-`slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused` share one scaffold, the first
+`slice-refuses-a-blocked-parent` share one scaffold, the first
 case's `fixtures/scaffold.sh`, driven by an `ARM` variable. It installs logging wrappers in `./scripts/`
 for the gates a slice pass runs (`ledger_gate`, `candidate_set`, `covers_gate`, `pending_check`,
 `observation_gate`), so every case maps `${CLAUDE_PLUGIN_ROOT}/scripts/` to `./scripts/`. No grant was
