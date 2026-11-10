@@ -480,7 +480,7 @@ def test_an_unreadable_process_table_refuses_with_its_reason_before_any_host_is_
 
 def run_interrupted(rig: AttachRig) -> subprocess.Popen:
     proc = rig.popen_camp("env", "attach", "perseus/levr/main")
-    rig.wait_tagged()
+    rig.wait_backgrounded()
     proc.send_signal(signal.SIGINT)
     proc.wait(timeout=30)
     return proc

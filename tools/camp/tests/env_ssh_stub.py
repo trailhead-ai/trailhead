@@ -479,6 +479,30 @@ class AttachRig:
             time.sleep(0.05)
         raise AssertionError("no forward carrying this rig's namespace appeared")
 
+    def wait_backgrounded(self, timeout: float = 10.0) -> None:
+        """Wait until camp itself recognises two of this rig's forwards at once: the foreground
+        process (kept alive by ``parent_delay``) and the background one it forked. Recognition is
+        camp's own rule, so a stub still re-executing, or not yet forked, does not count."""
+        plugin = str(Path(__file__).resolve().parents[1] / "plugins" / "camp")
+        if plugin not in sys.path:
+            sys.path.insert(0, plugin)
+        from camp.env.attachment import NAMESPACE_ENV, attachments
+
+        deadline = time.monotonic() + timeout
+        previous = os.environ.get(NAMESPACE_ENV)
+        os.environ[NAMESPACE_ENV] = self.ns
+        try:
+            while time.monotonic() < deadline:
+                if len(attachments()) >= 2:
+                    return
+                time.sleep(0.05)
+        finally:
+            if previous is None:
+                os.environ.pop(NAMESPACE_ENV, None)
+            else:
+                os.environ[NAMESPACE_ENV] = previous
+        raise AssertionError("the forward was not seen backgrounded (two recognised processes)")
+
     # -- running -------------------------------------------------------------------------------
 
     def environ(self) -> dict[str, str]:
