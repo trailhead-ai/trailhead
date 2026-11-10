@@ -1,10 +1,10 @@
 """A token-less `## Slices` ledger line earns coverage credit when a `## Follow-ups`
 entry is marked `done by task/<that line's own task id>`.
 
-`fixtures/candidate_set_at_base/` holds the gate as it stood before the credit
-existed, with the sibling modules it imports. All four files were copied from
-origin/main at the branch cut (986bc373); covers_gate, waiting and markdown_section
-are unchanged by this branch, candidate_set is the pre-credit version (source fingerprints, from
+`fixtures/candidate_set_at_base/` holds a craft release that gives no such credit:
+the gate and the sibling modules it imports, all four from one origin/main tree, so
+the compatibility test can show how an older craft reads a ledger the credit-aware
+loop writes (source fingerprints, from
 `git hash-object`: candidate_set c1cfb375e5d4f12fb8085c8655f4ea447365ce17,
 covers_gate 56cedf163b3b442d258cd4419918c767c5c59c7d, waiting
 6e899536071c2b7ed86bd8dd9bd1fe388009cb4d, markdown_section
