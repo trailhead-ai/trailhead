@@ -4585,6 +4585,36 @@ Limitations: one spec shape, one injection phrasing, two captured lens responses
 four live ones for the synthesis cases, one lens for the lens case, one model tier, three runs
 per case, one Linux host.
 
+## Ported to the plugin eval runner, 2026-11-09 — compound-criterion detection
+
+The hand-run `compound-criterion-detection` case ran only on macOS under `scripts/eval-sandbox`;
+its results above stand. Its two sound fixtures are now runner cases that dispatch the real
+`craft:consistency-auditor` and grade the audit it returns:
+
+- `consistency-auditor-flags-a-compound-criterion-phrased-with-with` (fixture 2): the compound
+  criterion uses "with", the shape the auditor's own example teaches as not compound. Its
+  second criterion is not graded, since the hand-run case found it was not a sound negative.
+- `consistency-auditor-spares-an-inseparable-and-but-flags-a-separable-one` (fixture 3): both
+  criteria contain "and"; one is a single state change, the other two deliverables.
+
+Fixture 1 was not ported: it reproduces the auditor prose's own worked examples, so a pass can
+score it by recall. The hand-run case's third condition, that the gauntlet adjudicator rates the
+finding Critical, needs a full gauntlet run and is not measured by any runner case;
+`skills/gauntlet/calibration.md` and `agents/consistency-auditor.md` now say so.
+
+Model `claude-opus-5-5`, `claude` 2.1.321, Linux, `--runs 3`, `-j 1`.
+
+| Case | Runs | Cost |
+|---|---|---|
+| `consistency-auditor-flags-a-compound-criterion-phrased-with-with` | 1.0, 1.0, 1.0 | $0.95 |
+| `consistency-auditor-spares-an-inseparable-and-but-flags-a-separable-one` | 1.0, 1.0, 1.0 | $0.95 |
+
+Both meet their pre-registered bar. A hand-checked run of the second case lists criterion 2 under
+"Compound criteria" and calls criterion 1 "borderline", judged not compound because removal from
+the queue is the visible effect of the same state change, which agrees with its graders.
+
+Limitations: one fixture per case, one model tier, three runs, one Linux host.
+
 ## Dropped from the corpus, 2026-11-09
 
 The hand-shaped cases below ran only on macOS under `scripts/eval-sandbox`, which is being
