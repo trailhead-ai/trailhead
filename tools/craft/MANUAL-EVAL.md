@@ -4532,3 +4532,25 @@ Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-o
 **Not measured.** The question is never put to a person, so the case does not show that the draft `check` and `how` appear in the "Not yet" choice, that criterion words come from `describe`, or that the `mktemp` entries file is removed (no `rm` grant). One spec, one phrasing, one model tier, three runs per case; only `stale-spec` is exercised among the failure codes.
 
 **Why the runner block grants Write.** The prose has the session write the entries file (a JSON list) at a `mktemp` path, and the runner's single-command Bash rule gives it no redirection or `tee` to do so. Without Write the "Not yet" arm cannot reach the writer. The grant applies to every craft case in the run, which is the price of the arm; the other craft cases' prompts name their own `allowed_tools` and none of the earlier ones was changed.
+
+## Dropped from the corpus, 2026-11-09
+
+The hand-shaped cases below ran only on macOS under `scripts/eval-sandbox`, which is being
+retired; neither the plugin eval runner nor the push gate ran them. They were dropped rather
+than ported, and their results above stand as the record of what they measured. Re-creating
+one means writing a runner case for the prose as it stands, per `docs/eval-protocol.md`.
+
+| Case | Measured | Why it was not ported |
+|---|---|---|
+| `ritual-output-wording` | craft `rules.md` `## Output wording` (a user ruleset); one site in `slice` step 8 | The runner cannot load a ruleset; the plugin-prose site needs a mid-ritual staging and the `wording_grader.py` grammar, which no runner grader expresses. |
+| `ritual-deliverable-names-its-record` | outpost `rules.md` `## Record links` (ruleset); the rituals' next-command closings | Record-link half has no route; next-command half is staged mid-ritual for seven rituals and graded by a script grammar. |
+| `finding-presentation-wording` | `skills/_shared/council.md` and the ritual sites that present findings | Graded by the `wording_grader.py` grammar (logical lines, quoted-text removal, by-eye readings), held craft `rules.md` constant. |
+| `scrub-citation-vs-inline` | the gauntlet's credential scrub, inline vs cited `_shared/security.md` | A real run cannot be made to emit the planted credential; a seeded paused state would freeze old prose instead of guarding current prose. |
+| `unconditional-citation-vs-inline` | the gauntlet's override round-trip, inline vs cited `dispositions.md` | Needs a seeded two-step conversation with the skill loaded live in the graded turn; feasible, not straightforward. |
+| `execute-cuts-a-task-branch-off-base` | `skills/_shared/execute.md`, cutting the task branch | Graded on git state (one commit, touching only one path) that runner graders cannot express; needs corpus-wide `Bash(git *)`. |
+| `execute-preflight-refuses-stale-base` | `skills/_shared/execute.md`, workspace preflight | Same git needs, and its fixture predates the branch-cut step, so the preflight paths it tested are no longer reachable as written. |
+| `gate-reads-the-evidence-artifact` | `agents/drift-gate.md`, reading the commit's mutation transcript | Portable, but needs `Bash(git *)` and a test-runner grant added to every craft case; that widening is an operator call. |
+| `observation-point-enumeration` | `agents/executor.md`, enumerating sites and stopping on a `Files:` mismatch | The fully-declared half needs the executor's whole build/test/signed-commit cycle in the sandbox; the other half needs the same grant widening. |
+
+`scripts/wording_grader.py` and `scripts/ritual_deliverable_grader.py` graded only these
+cases and were removed with them.

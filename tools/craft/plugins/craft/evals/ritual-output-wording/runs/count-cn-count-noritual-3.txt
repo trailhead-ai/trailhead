@@ -1,6 +1,0 @@
-The spec is about a quarter done at the end of week 5: three of the twelve criteria are finished, and nine are still open. Seven of those nine haven't been started.
-
-The other two open criteria need attention:
-
-- **Partly done:** the wall-length table adds up the metres built by year, checked against the 2024 days, but doesn't split them by site yet, so "The wall-length table adds up the metres built, by site and by year" isn't met (AC6).
-- **Blocked:** "An injury reported on the day is recorded, with the insurer's form filled in from the booking" can't go ahead until the insurer sends their form (AC11).

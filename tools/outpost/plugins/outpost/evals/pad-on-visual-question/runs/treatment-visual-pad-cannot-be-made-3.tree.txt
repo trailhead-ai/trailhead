@@ -1,3 +1,0 @@
-pads: none
-sites: symlink -> <run>/elsewhere; elsewhere/ entries: 0
-tool calls: Skill, Bash, Bash, Write, Bash

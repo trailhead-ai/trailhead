@@ -1,6 +1,0 @@
-Three of the twelve acceptance criteria are done and nine are left, going by the week 5 status note. Of those nine, seven haven't been started and two need attention:
-
-- **Partly done:** the wall-length table adds up the metres built by year, checked against the 2024 days, but doesn't split them by site yet, so "by site and by year" isn't met (AC6).
-- **Blocked:** recording an injury on the day, with the insurer's form filled in from the booking, can't go ahead until the insurer sends their form (AC11).
-
-The note doesn't say how the certificate download was checked, unlike the other two finished items, so that "done" rests on its word alone. A member can download a certificate showing the training days they completed (AC12).

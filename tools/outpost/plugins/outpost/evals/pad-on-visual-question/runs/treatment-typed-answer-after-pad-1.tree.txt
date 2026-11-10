@@ -1,2 +1,0 @@
-pads: none
-tool calls: Bash, Read

@@ -38,25 +38,9 @@ _PROTOCOL = _REPO_ROOT / "docs" / "eval-protocol.md"
 _LEGACY_HAND_SHAPED = frozenset(
     {
         "craft:compound-criterion-detection",
-        "craft:execute-cuts-a-task-branch-off-base",
-        "craft:execute-preflight-refuses-stale-base",
-        "craft:finding-presentation-wording",
-        "craft:gate-reads-the-evidence-artifact",
-        "craft:observation-point-enumeration",
         "craft:prototype-plan-carries-no-migration",
-        "craft:ritual-deliverable-names-its-record",
-        "craft:ritual-output-wording",
-        "craft:scrub-citation-vs-inline",
-        "craft:unconditional-citation-vs-inline",
         "craft:waived-concern-stands-down",
         "craft:waived-excerpt-does-not-bend-a-lens",
-        "lore:bash-write-gate",
-        "lore:carve-out-does-not-generalise",
-        "outpost:follow-up-round-on-an-open-pad",
-        "outpost:pad-on-visual-question",
-        "outpost:publish-routing",
-        "outpost:record-link-rendering",
-        "outpost:reference-named-for-the-vault",
     }
 )
 
