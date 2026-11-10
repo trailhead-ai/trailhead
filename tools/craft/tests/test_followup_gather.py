@@ -9,7 +9,9 @@ is built from scratch (never inherited) so it cannot reach the live install.
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -18,6 +20,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from _lore_runner import LoreRunner
 
 _LORE_TESTS = Path(__file__).resolve().parents[2] / "lore" / "tests"
 _SCRIPT = (
@@ -35,7 +39,6 @@ from lore_tests_conftest_for_followup_gather import (  # noqa: E402,F401
     _allow_real_publish_spawn,
     _isolate_ambient_env,
     _publish_spawn_guard,
-    make_vault,
 )
 
 _script_spec = importlib.util.spec_from_file_location("followup_gather", _SCRIPT)
@@ -342,55 +345,49 @@ def test_the_default_runner_reports_a_missing_binary_as_lore_missing(monkeypatch
     assert reason_of(err) == "lore-missing"
 
 
-# --- seam: the script as a subprocess against the real lore CLI ---------------
+# --- the real lore CLI, in-process ------------------------------------------------
+# `lore_env` is a `LoreRunner` (tools/craft/tests/_lore_runner.py): real lore run
+# inside this interpreter against a throwaway vault. Tests pass it as the scripts'
+# `runner=`. The seam tests (named `..._seam`) run the script as a real subprocess
+# through `seam_env` instead.
 
 
-def _build_env(tmp_path, vaults):
-    """A from-scratch child environment whose `lore` sees only `vaults`
-    (a list of (name, scope, path)); nothing is inherited from os.environ
-    except PATH, behind a shim that runs this checkout's lore."""
-    state = tmp_path / "state"
-    state.mkdir(exist_ok=True)
-    cfg = tmp_path / "xdg_config"
-    _lore_conftest.write_vault_config(cfg, vaults)
-    home = tmp_path / "home"
-    home.mkdir(exist_ok=True)
-    shim_dir = tmp_path / "bin"
-    shim_dir.mkdir(exist_ok=True)
-    shim = shim_dir / "lore"
-    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{_lore_conftest.CLI_PATH}" "$@"\n')
-    shim.chmod(0o755)
-    return {
-        "PATH": f"{shim_dir}{os.pathsep}{os.environ['PATH']}",
-        "HOME": str(home),
-        "XDG_STATE_HOME": str(state),
-        "XDG_CONFIG_HOME": str(cfg),
-        "LORE_GROUPS_DIR": str(tmp_path / "groups"),
-        "LORE_PUBLISH_DISABLE": "1",
-        "LORE_EMAIL": "tester@example.com",
-    }
-
-
-def _lore(env, *args, stdin=None):
-    r = subprocess.run(["lore", *args], capture_output=True, text=True, env=env, input=stdin)
+def _lore(runner, *args, stdin=None):
+    r = runner(list(args), stdin)
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
 
 
 @pytest.fixture
 def lore_env(tmp_path):
-    """(env, vault_name): a child environment seeing exactly one throwaway vault."""
-    vault, _ = make_vault(tmp_path)
-    return _build_env(tmp_path, [("default", "default", vault)]), "default"
+    """(runner, vault_name): in-process lore seeing exactly one throwaway vault."""
+    return LoreRunner(tmp_path), "default"
 
 
 @pytest.fixture
 def two_vault_lore_env(tmp_path):
-    first, _ = make_vault(tmp_path)
-    second = tmp_path / "second"
-    second.mkdir()
-    env = _build_env(tmp_path, [("default", "default", first), ("other", "team", second)])
-    return env, ("default", "other")
+    return LoreRunner(tmp_path, vaults=("default", "other")), ("default", "other")
+
+
+def seam_env(runner, tmp_path):
+    """The runner's fenced environment, with a `lore` shim running this checkout's
+    lore first on PATH: what a real subprocess (the script, or `lore`) is given."""
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir(exist_ok=True)
+    shim = shim_dir / "lore"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{_lore_conftest.CLI_PATH}" "$@"\n')
+    shim.chmod(0o755)
+    env = runner.env()
+    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
+    return env
+
+
+def run_in_process(main, argv, runner, **kwargs):
+    """Call a script's `main(argv, runner=runner)` and return what a subprocess would."""
+    out, err = io.StringIO(), io.StringIO()
+    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        code = main([str(a) for a in argv], runner=runner, **kwargs)
+    return subprocess.CompletedProcess(list(argv), code, out.getvalue(), err.getvalue())
 
 
 def _create(env, vault, kind, title, status, related=(), labels=(), parent=None):
@@ -409,18 +406,23 @@ def make_spec(env, vault, title, status="ready", labels=(), related=()):
     return _create(env, vault, "spec", title, status, related, labels)
 
 
-def run_script(env, *args):
+def run_script(runner, *args):
+    return run_in_process(gather.main, args, runner)
+
+
+def run_script_subprocess(env, *args):
     return subprocess.run(
         [sys.executable, str(_SCRIPT), *args], capture_output=True, text=True, env=env
     )
 
 
 def test_the_script_run_as_a_subprocess_certifies_a_stopped_spec(  # inert-gate: allow seam smoke
-    lore_env,
+    lore_env, tmp_path
 ):
+    """Seam: the script's CLI as a subprocess against real lore, exit 0 and JSON on stdout."""
     env, vault = lore_env
     name = make_spec(env, vault, "Seam stopped", labels=["craft/slice-loop=stopped"])
-    r = run_script(env, name)
+    r = run_script_subprocess(seam_env(env, tmp_path), name)
     assert r.returncode == 0, r.stderr
     result = json.loads(r.stdout)
     assert result["spec"] == name
@@ -428,12 +430,21 @@ def test_the_script_run_as_a_subprocess_certifies_a_stopped_spec(  # inert-gate:
     assert result["entry"] == "stopped-marker"
 
 
-def test_a_ready_spec_with_no_marker_is_refused_through_real_lore(lore_env):
+def test_a_ready_spec_with_no_marker_is_refused_through_real_lore(lore_env, tmp_path):
+    """Seam: a refusal through the script's CLI as a subprocess exits 1 with a reason-code."""
     env, vault = lore_env
     name = make_spec(env, vault, "Seam ready")
-    r = run_script(env, name)
+    r = run_script_subprocess(seam_env(env, tmp_path), name)
     assert r.returncode == 1
     assert "reason-code: slice-loop-not-ended" in r.stderr
+
+
+def test_an_unknown_spec_is_not_found_through_real_lore(lore_env, tmp_path):
+    """Seam: an error through the script's CLI as a subprocess exits 2 with a reason-code."""
+    env, _ = lore_env
+    r = run_script_subprocess(seam_env(env, tmp_path), "no-such-spec")
+    assert r.returncode == 2
+    assert "reason-code: spec-not-found" in r.stderr
 
 
 def test_a_completed_spec_is_certified_by_status_through_real_lore(lore_env):
@@ -442,13 +453,6 @@ def test_a_completed_spec_is_certified_by_status_through_real_lore(lore_env):
     r = run_script(env, name)
     assert r.returncode == 0, r.stderr
     assert json.loads(r.stdout)["entry"] == "complete-status"
-
-
-def test_an_unknown_spec_is_not_found_through_real_lore(lore_env):
-    env, _ = lore_env
-    r = run_script(env, "no-such-spec")
-    assert r.returncode == 2
-    assert "reason-code: spec-not-found" in r.stderr
 
 
 def test_a_spec_named_in_two_configured_vaults_is_ambiguous_through_real_lore(
