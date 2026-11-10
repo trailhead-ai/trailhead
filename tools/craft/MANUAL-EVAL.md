@@ -5116,3 +5116,29 @@ Final prose fingerprints (`git hash-object`): `_shared/execute.md` `323a7f4da8c7
 **Reading.** The three refusal cases and the guard are green on the first batch, so the load instruction landed where execute decides the mode. The refine and park cases show the same `asked-nothing` judge noise the earlier logs record and clear on the permitted rerun. The brainstorm detector misses the id in one run in three in both batches; on the earlier prose it read 2 of 3 and then 3 of 3 on its rerun, so this is the same one-in-three variation and no case went from green to red because of the move. It is reported as not at the 3 of 3 bar, not retried further. No prose was changed for it.
 
 Spend (runner list price plus judge votes): refusal cases and guard 5.8 USD, the refine case 6.8, the park case 4.8, the brainstorm case 5.0; about 22.4 USD in total.
+
+
+## Review fix-pass re-measure (2026-11-10)
+
+Runner `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, macOS, runner 2.1.322. Final prose fingerprints (`git hash-object`): `_shared/execute.md` `2e2f1dd3f5965d2d38ebeefaddbb3a9648030a0b`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`. The `execute-rule-only.md` live arm was rebuilt.
+
+What changed in the prose: the build-close settle step has an unattended branch (each settle decision logged; a failure ends `stuck` with a fixed reason and no `retry:` line); a security finding is never captured as a session candidate on a parent with no spec link; `craft/push=failed` and `blocked` are checked before the generic claimed refusal; `lore task graph` names the elected vault at the entry check.
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-parks-a-design-change` | batch 1: 1, 0.92, 1; permitted rerun 0.92 x3 (`asked-nothing` judge FAIL in each) | **not at bar** |
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (detector) | batch 1: 0.62, 0.62, 0.75 (`names-the-brainstorm-task-by-id`, `parent-is-done`, in two runs `no-outcome-line`); a 1-run diagnostic with `--keep-temp` scored 1.0; permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-decides-surviving-findings` (guard A) | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard E) | 3 of 3 at 1.0 | at bar |
+| `build-close-marks-folded-entries` (main's settle case) | 3 of 3 at 1.0 | at bar |
+
+Readings:
+- **parks-a-design-change**: only the `asked-nothing` judge fails and every record, outcome and command grader passes. A control with the previous `execute.md` swapped in (fingerprint `a1d1eb5456def291baecbd748af9b0ea012dac2e`) scored 0.92, 1, 1, so the judge also fails on the prose before this pass. The earlier log already recorded this case as judge noise. Four of six treatment runs failing it against one of three on the control is more than I would call noise at these sizes and was not resolved; it is reported as not at bar.
+- **brainstorm detector**: the first batch's failures (parent not closed, an outcome line printed) did not reproduce in the diagnostic run or the rerun, and the diagnostic's trace shows the run reading the new settle text and carrying on to close. The cause of the first batch is not isolated.
+- The new settle branch's failure path (an entry call exiting 2 or 3) and the entry-refusal reorder are not exercised by any case.
+
+Spend, runner list price plus judge votes: about 23.8 USD for the craft batches, controls and diagnostics (park control 2.32, brainstorm diagnostic 0.86). Total for both tools about 45.9 USD.

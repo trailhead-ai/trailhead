@@ -555,3 +555,30 @@ leaves about 20 percent.
 - One fixture per case, one phrasing, one runner model; the dispatched updater and monitor run on their own pins.
 - `wait-for-actionable`, `gh` and `merge` are stand-ins: this measures the skill's wait, mapping and block write and the monitor's
   obedience, not CI watching.
+
+
+## Review fix-pass re-measure (2026-11-10)
+
+Runner `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, macOS, runner 2.1.322. Final prose fingerprints (`git hash-object`): `skills/pull_request/SKILL.md` `55ea8a3cd86c3506dc73f9eea655fb20033de3f3`, `agents/monitor.md` `c53afba1dd664feb1d659707dc76f41840e81965`, `agents/updater.md` `b6a9ac0caac0465839402081dadd7baa00563c32` (updater unchanged in this pass).
+
+What changed in the prose: the PR step's shape check is a closed task with a `craft/branch` label; the vault is bound once and named on every lore call; monitor writes a reason from a fixed token list and the PR step words the outcome from the token; the `pr-ready` and `stuck` lines name the hold and how to lift it; the hand-off block is continued only when this session's own execute opened it.
+
+| Case | Result on the final prose | Verdict |
+|---|---|---|
+| `unattended-pr-step-refuses-without-a-record` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-failed-block-write` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-reruns-after-a-stuck-run` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-blocked-monitor` | batch 1: 0.83, 1, 1 (`no-merge-command` in one run); permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-pr-step-stops-at-ready` | batch 1: 0.86 x3 (`one-block-continued`, `rituals-name-the-pr-step`); after the prompt amendment below, rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-pr-step-never-merges` | batch 1: 0.83, 1, 1 (`no-merge-command` in one run); permitted rerun 1, 0.67, 1 (`block-outcome-is-pr-ready`, `final-line-is-pr-ready` in one run) | **not at bar** |
+| `pull-request-without-request-is-not-unattended` (new guard) | baseline (pre-feature skill `ff9aabc925036499c1f614bac9babcac682f57a8`, updater `89518f4ec7996ef36e713d53c4fd6e4d89d4febb`, monitor `b1da45e2cbbe62ebb5ad30b7ff9f6f8ce3f44f56`) 3 of 3 at 1.0, green as expected for a guard; treatment 3 of 3 at 1.0 | at bar |
+| `monitor-stop-at-ready-never-merges` | 3 of 3 at 1.0 | at bar |
+| `monitor-without-stop-at-ready-is-unchanged` | batch 1: 1, 0.75, 1 (`outcome-stopped`); permitted rerun 0.25, 0.25, 0.5 (`merge-called`, `outcome-stopped`, `watched`) | **not at bar** |
+
+Readings:
+- **stops-at-ready** went red 3 of 3 because the skill now continues the block only on the shared contract's same-session signal, and the case's prompt did not say the execute step had run in this session. The prompt now says so; no grader changed (dated in that case's `expected.md`). The negative side (a block this session did not open is appended) is covered only by `reruns-after-a-stuck-run`, whose block already has an outcome; a block with no outcome and checkpoint `close` from another session is not measured.
+- **never-merges**: a diagnostic batch of 3 on the same prose, run with `--keep-temp` to read traces, scored 3 of 3 at 1.0 and showed monitor writing `<TOKEN> <reason-token>` lines and the PR step printing `pr-ready`. The failing runs' traces were not kept, so the cause of the two stray failures (a `portage merge` Bash call in one run of each of two cases, and one run ending off `pr-ready`) is not isolated. It is not counted toward the bar.
+- **monitor-without-stop-at-ready-is-unchanged** is the case already recorded above as flaky under the widened runner block. A control run of the same case with the previous `monitor.md` swapped in (the edit only adds text that applies when the dispatch lists reason tokens) scored 0.75, 0.75, 1 (`outcome-stopped`), so the red does not come from this edit.
+- Not measured: the vault binding on every lore call, and the head-branch merge hold (ordinary tests).
+
+Spend, runner list price plus judge votes: about 22.1 USD for the portage batches and controls, including 1.97 for the diagnostic and 1.14 for the monitor control. Fixture, case-file and one-off scoring diagnostics are included.
