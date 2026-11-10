@@ -73,8 +73,9 @@ def _install_stamp(tmp_path: Path, env: dict[str, str], *, sha: str = _OLD_SHA) 
 
 
 class _FakeCfg:
-    def __init__(self, harnesses=()):
+    def __init__(self, harnesses=(), cli_flags=None):
         self.harnesses = list(harnesses)
+        self.cli_flags = dict(cli_flags or {})
 
 
 def _make_runner(
@@ -1497,3 +1498,90 @@ class TestApplyRefusesRealRepos:
         assert preflight == {"verdict": "refused", "refusal": "no_upstream"}
         assert rc == 1
         assert "could not resolve the tracked upstream branch" in capsys.readouterr().err
+
+
+class TestUpdateRebuildsTheCliShims:
+    """`trailhead update` rebuilds the shim set exactly as `trailhead install`
+    does, so a CLI added by the upgrade reaches PATH."""
+
+    _ALL_ON = {"camp": True, "lore": True, "portage": True}
+
+    def _setup(self, tmp_path, monkeypatch, *, flags, head_sha, remote_sha):
+        from trailhead import install
+
+        env = _env(tmp_path)
+        _install_stamp(tmp_path, env)
+        repo = tmp_path / "repo"
+        (repo / "bin").mkdir(parents=True)
+        ranger = repo / "bin" / "ranger"
+        ranger.write_text("#!/bin/sh\n")
+        monkeypatch.setattr(install, "_REPO_ROOT", repo)
+        monkeypatch.setattr(install, "_RANGER_BIN", ranger)
+        monkeypatch.setattr(update, "resolve_config_for_env", lambda e: _FakeCfg(cli_flags=flags))
+        monkeypatch.setattr(update, "wire_all_harnesses", lambda *a, **k: {})
+        runner, calls = _make_runner(
+            remote_branch_sha=remote_sha, probe_sha=remote_sha, head_sha=head_sha
+        )
+        shim_dir = Path(env["TRAILHEAD_STATE_DIR"]) / "bin"
+        return env, runner, calls, ranger, shim_dir
+
+    def test_upgrade_over_an_install_lacking_ranger_adds_the_ranger_shim(self, tmp_path, monkeypatch):
+        env, runner, _, ranger, shim_dir = self._setup(
+            tmp_path, monkeypatch, flags=self._ALL_ON, head_sha=_OLD_SHA, remote_sha=_NEW_SHA
+        )
+        shim_dir.mkdir(parents=True)
+        (shim_dir / "camp").write_text("old")
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert str(ranger) in (shim_dir / "ranger").read_text()
+        assert (shim_dir / "lore").exists() and (shim_dir / "portage").exists()
+
+    def test_already_current_checkout_still_gets_the_ranger_shim(self, tmp_path, monkeypatch):
+        env, runner, calls, ranger, shim_dir = self._setup(
+            tmp_path, monkeypatch, flags=self._ALL_ON, head_sha=_OLD_SHA, remote_sha=_OLD_SHA
+        )
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert not any(_git_sub(c) == "merge" for c in calls)
+        assert str(ranger) in (shim_dir / "ranger").read_text()
+
+    def test_every_cli_disabled_builds_no_shims(self, tmp_path, monkeypatch):
+        env, runner, _, _, shim_dir = self._setup(
+            tmp_path,
+            monkeypatch,
+            flags={"camp": False, "lore": False, "portage": False},
+            head_sha=_OLD_SHA,
+            remote_sha=_NEW_SHA,
+        )
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert not shim_dir.exists()
+
+    def test_shim_failure_names_install_exits_nonzero_and_keeps_the_upgrade(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from trailhead import install
+
+        env, runner, calls, _, _ = self._setup(
+            tmp_path, monkeypatch, flags=self._ALL_ON, head_sha=_OLD_SHA, remote_sha=_NEW_SHA
+        )
+
+        def boom(*a, **k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(install, "create_shims", boom)
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        err = capsys.readouterr().err
+        assert rc == 1
+        assert err.startswith("trailhead: ")
+        assert "disk full" in err and "trailhead install" in err
+        assert not any(_git_sub(c) == "reset" for c in calls)
+        assert read_stamp(env=env)["sha"] == _NEW_SHA

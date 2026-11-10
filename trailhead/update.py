@@ -118,7 +118,12 @@ off the stamp — a manually-advanced checkout must not be rewound below where
 it really was) and re-wired again against that reverted state, so a failed
 upgrade is a true no-op rather than a half-upgraded install; the provenance
 stamp is written only once that re-wire actually completes, so it never
-claims a sha that was never fully wired. A failed re-wire is detected by its
+claims a sha that was never fully wired. After the stamp (and also on the
+already-up-to-date path) the CLI shims are rebuilt through
+`trailhead.install.build_cli_shims`, the same helper install uses; a shim
+failure prints a named error pointing at `trailhead install`, fails the run, and
+never rolls back the upgrade. Shims are additive, as in install: a CLI that is
+no longer shipped keeps its old shim until the shim dir is removed. A failed re-wire is detected by its
 own harness call's returncode, not merely a raised exception, so a `claude
 plugin install` that genuinely fails (nonzero exit, no exception) still
 triggers the rollback. Every refusal and failure prints a `trailhead:
@@ -149,6 +154,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from trailhead import doctor, outpost_lifecycle
+from trailhead import install
 from trailhead.install import resolve_config_for_env, wire_all_harnesses
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 from trailhead.paths import state_dir
@@ -773,7 +779,8 @@ def run_update_apply(
     so without the operator running ``trailhead doctor``.  A readiness check
     that raises is reported and never changes the outcome.
 
-    Returns 0 on success or a genuine no-op (already up to date); 1 on any
+    Returns 0 on success or a genuine no-op (already up to date, shims
+    refreshed); 1 on any
     refusal or failure, including an outpost failure after a kept install
     upgrade.
     """
@@ -1056,7 +1063,7 @@ def _upgrade_install(
     # which case the re-wire below still runs.
     if status == "current" and pre_merge_head == pre_sha:
         print(f"trailhead: already up to date (installed {pre_sha[:8]})")
-        return True
+        return _rebuild_shims(cfg, env=env)
 
     print("trailhead: re-wiring plugins…")
     try:
@@ -1100,6 +1107,23 @@ def _upgrade_install(
 
     write_stamp(checkout, env=env, runner=runner)
     print(f"trailhead: upgraded to {remote_sha[:8]}")
+    return _rebuild_shims(cfg, env=env)
+
+
+def _rebuild_shims(cfg, *, env: dict[str, str]) -> bool:
+    """Rebuild the CLI shim dir exactly as `trailhead install` does, so a CLI
+    the upgrade added (or one pulled by hand) reaches PATH. Runs after the
+    stamp: a failure here is reported and fails the run, but never rolls back
+    a completed upgrade."""
+    try:
+        install.build_cli_shims(install.resolve_cli_tools(cfg.cli_flags), env=env)
+    except Exception as exc:
+        print(
+            f"trailhead: could not rebuild the CLI shims ({exc}); the upgrade "
+            f"itself is kept. Rebuild them: trailhead install",
+            file=sys.stderr,
+        )
+        return False
     return True
 
 
