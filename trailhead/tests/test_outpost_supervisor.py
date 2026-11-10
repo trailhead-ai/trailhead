@@ -245,7 +245,7 @@ def test_enable_missing_lore_on_path_raises_named_error_naming_lore_writes_nothi
     runner = _RecordingRunner()
 
     def which_missing_lore(name: str) -> str | None:
-        return {"node": "/usr/bin/node", "git": "/usr/bin/git"}.get(name)
+        return {"node": "/usr/bin/node", "git": "/usr/bin/git", "tmux": "/usr/bin/tmux"}.get(name)
 
     with pytest.raises(OutpostLifecycleError, match="lore"):
         osup.enable(
@@ -265,7 +265,7 @@ def test_enable_binary_resolved_through_relative_path_entry_raises_named_error_w
     runner = _RecordingRunner()
 
     def which_relative_git(name: str) -> str | None:
-        return {"node": "/usr/bin/node", "git": "./git", "lore": "/usr/bin/lore"}.get(name)
+        return {"node": "/usr/bin/node", "git": "./git", "lore": "/usr/bin/lore", "tmux": "/usr/bin/tmux"}.get(name)
 
     with pytest.raises(OutpostLifecycleError, match="'git'.*relative"):
         osup.enable(
@@ -648,7 +648,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
     runner = _RecordingRunner()
 
     def which_a(name: str) -> str | None:
-        return {"node": "/opt/a/node", "git": "/opt/a/git", "lore": "/opt/a/lore"}.get(name)
+        return {"node": "/opt/a/node", "git": "/opt/a/git", "lore": "/opt/a/lore", "tmux": "/opt/a/tmux"}.get(name)
 
     osup.enable(
         env=outpost.env,
@@ -663,7 +663,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
     path_a = plist_a["EnvironmentVariables"]["PATH"]
 
     def which_b(name: str) -> str | None:
-        return {"node": "/opt/b/node", "git": "/opt/b/git", "lore": "/opt/b/lore"}.get(name)
+        return {"node": "/opt/b/node", "git": "/opt/b/git", "lore": "/opt/b/lore", "tmux": "/opt/b/tmux"}.get(name)
 
     osup.enable(
         env=outpost.env,
@@ -795,7 +795,7 @@ def test_harness_with_no_cli_contributes_no_dir_and_no_line(outpost, monkeypatch
 
     path = _enabled_path(outpost, "darwin", which_runner=which)
 
-    assert seen == ["node", "git", "lore"]
+    assert set(seen) == {"node", "git", "lore", "tmux"}
     assert "hubs cannot start" not in capsys.readouterr().out
     assert path.split(":") == [
         str(Path(outpost.which_runner("node")).parent), _TRAILHEAD_BIN,
@@ -820,6 +820,41 @@ def test_real_harness_detected_contributes_its_cli_dir(outpost):
     )
 
     assert "/opt/claude-bin" in path.split(":")
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_composed_path_carries_the_dir_tmux_resolves_to(outpost, platform):
+    path_a = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, tmux="/opt/tmux-a/tmux")
+    )
+    path_b = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, tmux="/opt/tmux-b/tmux")
+    )
+
+    node_dir = str(Path(outpost.which_runner("node")).parent)
+    assert node_dir != "/opt/tmux-a"
+    assert "/opt/tmux-a" in path_a.split(":") and "/opt/tmux-b" not in path_a.split(":")
+    assert "/opt/tmux-b" in path_b.split(":") and "/opt/tmux-a" not in path_b.split(":")
+
+
+def test_enable_without_tmux_on_path_raises_named_error_writes_nothing(outpost):
+    runner = _RecordingRunner()
+
+    def which_missing_tmux(name: str) -> str | None:
+        return None if name == "tmux" else outpost.which_runner(name)
+
+    with pytest.raises(OutpostLifecycleError, match="tmux"):
+        osup.enable(
+            env=outpost.env,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=which_missing_tmux,
+            uid=501,
+        )
+
+    assert not outpost.supervisor_dir.exists() or list(outpost.supervisor_dir.iterdir()) == []
+    assert runner.calls == []
 
 
 # ---------------------------------------------------------------------------

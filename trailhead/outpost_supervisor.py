@@ -90,10 +90,10 @@ SYSTEMD_UNIT_NAME = "outpost.service"
 # directories when composing the supervised entry's PATH.
 _SYSTEM_PATH_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
-# The three binaries the supervised daemon's environment must be able to
-# re-resolve: node to run it, git and lore because trailhead/outpost shell out
-# to both.
-_REQUIRED_BINARIES = ("node", "git", "lore")
+# The binaries the supervised daemon's environment must be able to re-resolve:
+# node to run it, git and lore because trailhead/outpost shell out to them, and
+# tmux because Outpost runs every hub in a tmux session.
+_REQUIRED_BINARIES = ("node", "git", "lore", "tmux")
 
 
 @dataclass(frozen=True)
@@ -264,17 +264,20 @@ def hub_path_dirs(
     """``(dirs, missing)``: the directories a hub started by the service needs on PATH.
 
     ``dirs`` holds the running checkout's ``bin`` directory (``bin/trailhead``),
-    then the directory each detected harness's CLI resolves to through
-    *which_runner* (the directory of the resolved path, never a symlink's target,
-    so a CLI update is picked up); ``missing`` the CLI names that did not resolve
-    to an absolute path.
+    then the directory ``tmux`` resolves to (Outpost runs hubs in tmux) and the
+    directory each detected harness's CLI resolves to through *which_runner* (the
+    directory of the resolved path, never a symlink's target, so an update is
+    picked up); ``missing`` the names (``tmux`` included) that did not resolve to
+    an absolute path.
     """
     dirs: list[str] = [str(repo_root() / "bin")]
     missing: list[str] = []
+    clis = ["tmux"]
     for harness in detect_harnesses(env):
         cli = harness.cli_binary_name()
-        if cli is None:
-            continue
+        if cli is not None:
+            clis.append(cli)
+    for cli in clis:
         resolved = which_runner(cli)
         if not resolved or not Path(resolved).is_absolute():
             missing.append(cli)

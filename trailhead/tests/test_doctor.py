@@ -691,7 +691,7 @@ class TestSupervisorPath:
     """The registered entry's PATH is read from disk and checked for the dirs
     the hub path needs: trailhead's bin dir and each detected harness's CLI dir."""
 
-    def _run(self, tmp_path, monkeypatch, path_value, *, cli_dir="/opt/cli"):
+    def _run(self, tmp_path, monkeypatch, path_value, *, cli_dir="/opt/cli", tmux_dir=None):
         monkeypatch.setattr(harness_registry, "_HARNESSES", {_CliHarness.name: _CliHarness})
         env = _prepare_host(tmp_path, supervisor=False)
         entry = osup.SupervisorEntry(
@@ -707,7 +707,10 @@ class TestSupervisorPath:
         (sup / f"{osup.LAUNCHD_LABEL}.plist").write_bytes(osup.render_plist(entry))
         return run_doctor(
             env=env,
-            which_runner=lambda n: f"{cli_dir}/stubcli" if n == "stubcli" else None,
+            which_runner=lambda n: {
+                "stubcli": f"{cli_dir}/stubcli",
+                "tmux": f"{tmux_dir}/tmux" if tmux_dir else None,
+            }.get(n),
             python_version_runner=_fake_py,
             supervisor_dir=sup,
             platform=self.platform,
@@ -740,6 +743,20 @@ class TestSupervisorPath:
         assert f"lacks {lacking};" in item["summary"]
         assert item["fix"] == "trailhead outpost enable"
         assert _VERDICT_READY not in r.data["readiness"]["verdict"]
+
+    def test_a_path_lacking_the_dir_tmux_resolves_to_is_missing_and_names_it(
+        self, tmp_path, monkeypatch
+    ):
+        path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli"
+        r = self._run(tmp_path, monkeypatch, path_value, tmux_dir="/opt/tmux")
+        item = _item(r, "supervisor")
+        assert item["state"] == "missing"
+        assert "lacks /opt/tmux;" in item["summary"]
+
+    def test_a_path_carrying_the_tmux_dir_is_ok(self, tmp_path, monkeypatch):
+        path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli:/opt/tmux"
+        r = self._run(tmp_path, monkeypatch, path_value, tmux_dir="/opt/tmux")
+        assert _item(r, "supervisor")["state"] == "ok"
 
     def test_the_cli_dir_required_follows_where_the_cli_resolves(self, tmp_path, monkeypatch):
         path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli"
