@@ -1,10 +1,12 @@
 """followup_gather.py: spec resolution across configured vaults, the verdict on
 whether the spec's slice loop has ended, and the gathering of its follow-ups.
 
-Failure modes drive the script's functions with an injected `lore` runner; the
-seam tests run the script as a subprocess, exactly as a skill invokes it,
-against the real `lore` CLI reading a throwaway vault. The child's environment
-is built from scratch (never inherited) so it cannot reach the live install.
+Every test drives the script's functions through the in-process `LoreRunner`
+(real lore over a throwaway vault), injecting a failure or a reply real lore would
+not give where the case needs one; the seam tests run the script as a subprocess,
+exactly as a skill invokes it, against the real `lore` CLI reading a throwaway
+vault. The child's environment is built from scratch (never inherited) so it
+cannot reach the live install.
 """
 
 from __future__ import annotations
@@ -47,43 +49,58 @@ sys.modules["followup_gather"] = gather
 _script_spec.loader.exec_module(gather)
 
 
-class FakeLore:
-    """A runner that answers `vault ls` and `record show --json --vault V spec/N`."""
-
-    def __init__(self, vaults, records=None, vault_ls_rc=0):
-        self.vaults = vaults
-        self.records = records or {}
-        self.vault_ls_rc = vault_ls_rc
-        self.calls = []
-
-    def __call__(self, argv):
-        self.calls.append(list(argv))
-        if argv[:2] == ["vault", "ls"]:
-            out = "".join(f"{v}\tteam\t/x/{v}\t[(all kinds)]\n" for v in self.vaults)
-            return subprocess.CompletedProcess(argv, self.vault_ls_rc, out, "")
-        if argv[:3] == ["record", "show", "--json"]:
-            vault = argv[argv.index("--vault") + 1]
-            rid = argv[-1]
-            doc = self.records.get((vault, rid))
-            if doc is None:
-                return subprocess.CompletedProcess(argv, 1, "", f"lore: record not found: {rid}\n")
-            body = doc if isinstance(doc, str) else json.dumps(doc)
-            return subprocess.CompletedProcess(argv, 0, body, "")
-        if argv[:2] == ["task", "list"]:
-            return subprocess.CompletedProcess(argv, 0, "[]", "")
-        if argv[0] == "search":
-            empty = {"hits": [], "truncated": False}
-            return subprocess.CompletedProcess(argv, 0, json.dumps(empty), "")
-        raise AssertionError(f"unexpected lore call {argv}")
+def _lore(runner, *args, stdin=None):
+    r = runner(list(args), stdin)
+    assert r.returncode == 0, r.stderr
+    return r.stdout.strip()
 
 
-def spec_doc(status="ready", labels=None, kind="spec", related=None):
-    sidecar = {"kind": kind, "status": status}
-    if labels is not None:
-        sidecar["labels"] = labels
-    if related is not None:
-        sidecar["related"] = related
-    return {"record_id": "spec/s", "kind": kind, "sidecar": sidecar, "body": "# s"}
+def _create(env, vault, kind, title, status, related=(), labels=(), parent=None):
+    args = ["record", "create", "--kind", kind, "--title", title, "--status", status,
+            "--vault", vault]
+    for edge in related:
+        args += ["--related", edge]
+    for label in labels:
+        args += ["--label", label]
+    if parent:
+        args += ["--parent", parent]
+    return _lore(env, *args, stdin="# body\n").split("/", 1)[1]
+
+
+def make_spec(env, vault, title, status="ready", labels=(), related=()):
+    return _create(env, vault, "spec", title, status, related, labels)
+
+
+@pytest.fixture
+def lore1(tmp_path):
+    """A `LoreRunner` over one empty vault named `default`."""
+    return LoreRunner(tmp_path)
+
+
+def _is_show(record_id, vault=None):
+    def match(argv, _stdin):
+        return (
+            argv[:3] == ["record", "show", "--json"]
+            and argv[-1] == record_id
+            and (vault is None or argv[argv.index("--vault") + 1] == vault)
+        )
+
+    return match
+
+
+def show_reply(runner, record_id, doc, vault=None):
+    """Make `record show --json` of `record_id` answer `doc` (a dict, or raw text)."""
+    body = doc if isinstance(doc, str) else json.dumps(doc)
+    runner.inject(_is_show(record_id, vault), returncode=0, stdout=body)
+
+
+def search_reply(runner, kind, doc, returncode=0, stderr=""):
+    """Make the `related-<kind>` searches answer `doc` (a dict, or raw text)."""
+    body = doc if isinstance(doc, str) else json.dumps(doc)
+    runner.inject(
+        lambda argv, _stdin: argv[0] == "search" and argv[1].startswith(f"related-{kind}"),
+        returncode=returncode, stdout=body, stderr=stderr,
+    )
 
 
 def run_main(runner, name="s", capsys=None):
@@ -99,250 +116,244 @@ def reason_of(err):
 
 
 @pytest.mark.parametrize("name", ["has space", "a$(touch x)", "semi;colon", "", "a\nb"])
-def test_a_malformed_spec_name_is_refused_before_any_lore_call(name, capsys):
-    runner = FakeLore(["v"])
-    code, out, err = run_main(runner, name, capsys)
+def test_a_malformed_spec_name_is_refused_before_any_lore_call(name, capsys, lore1):
+    code, out, err = run_main(lore1, name, capsys)
     assert code == 2
     assert reason_of(err) == "invalid-spec-name"
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize("name", ["-x", "--flag", "-", "--", "-rf"])
-def test_a_spec_name_starting_with_a_dash_is_refused_before_any_lore_call(name, capsys):
-    runner = FakeLore(["v"])
-    code = gather.main(["--", name], runner=runner)
+def test_a_spec_name_starting_with_a_dash_is_refused_before_any_lore_call(name, capsys, lore1):
+    code = gather.main(["--", name], runner=lore1)
     err = capsys.readouterr().err
     assert code == 2
     assert reason_of(err) == "invalid-spec-name"
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize("name", ["-x", "--flag"])
-def test_a_dash_name_given_without_a_separator_is_refused_with_a_reason_code(name, capsys):
-    runner = FakeLore(["v"])
-    code = gather.main([name], runner=runner)
+def test_a_dash_name_given_without_a_separator_is_refused_with_a_reason_code(name, capsys, lore1):
+    code = gather.main([name], runner=lore1)
     err = capsys.readouterr().err
     assert code == 2
     assert reason_of(err) in {"invalid-spec-name", "invalid-arguments"}
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize("name", ["..", "../x", "a/../b", "a/..", "../../etc"])
-def test_a_spec_name_with_a_dotdot_segment_is_refused_before_any_lore_call(name, capsys):
-    runner = FakeLore(["v"])
-    code, out, err = run_main(runner, name, capsys)
+def test_a_spec_name_with_a_dotdot_segment_is_refused_before_any_lore_call(name, capsys, lore1):
+    code, out, err = run_main(lore1, name, capsys)
     assert code == 2
     assert reason_of(err) == "invalid-spec-name"
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize("name", ["a..b", "..a", "a/.b", "v1.2.3"])
-def test_a_dotted_name_with_no_dotdot_segment_still_reaches_lore(name, capsys):
-    runner = FakeLore(["v"])
-    code, out, err = run_main(runner, name, capsys)
+def test_a_dotted_name_with_no_dotdot_segment_still_reaches_lore(name, capsys, lore1):
+    code, out, err = run_main(lore1, name, capsys)
     assert reason_of(err) == "spec-not-found"
-    assert runner.calls != []
+    assert lore1.calls != []
 
 
 @pytest.mark.parametrize(
     "argv",
     [[], ["--bogus", "s"], ["s", "extra"], ["s", "--bogus"], ["a", "b", "c"]],
 )
-def test_bad_arguments_exit_two_with_invalid_arguments_and_never_call_lore(argv, capsys):
-    runner = FakeLore(["v"])
-    code = gather.main(argv, runner=runner)
+def test_bad_arguments_exit_two_with_invalid_arguments_and_never_call_lore(argv, capsys, lore1):
+    code = gather.main(argv, runner=lore1)
     err = capsys.readouterr().err
     assert code == 2
     assert reason_of(err) == "invalid-arguments"
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize("flag", ["--help", "-h"])
-def test_help_still_exits_zero_with_usage_and_never_calls_lore(flag, capsys):
-    runner = FakeLore(["v"])
+def test_help_still_exits_zero_with_usage_and_never_calls_lore(flag, capsys, lore1):
     with pytest.raises(SystemExit) as exc:
-        gather.main([flag], runner=runner)
+        gather.main([flag], runner=lore1)
     out = capsys.readouterr()
     assert exc.value.code == 0
     assert "usage:" in out.out
     assert "spec_name" in out.out
     assert "reason-code" not in out.err
-    assert runner.calls == []
+    assert lore1.calls == []
 
 
 @pytest.mark.parametrize(
     "status,labels,entry",
     [
-        ("ready", {"craft/slice-loop": "complete"}, "complete-marker"),
-        ("ready", {"craft/slice-loop": "stopped"}, "stopped-marker"),
-        ("complete", {}, "complete-status"),
-        ("complete", {"craft/slice-loop": "other"}, "complete-status"),
+        ("ready", ["craft/slice-loop=complete"], "complete-marker"),
+        ("ready", ["craft/slice-loop=stopped"], "stopped-marker"),
+        ("complete", [], "complete-status"),
+        ("complete", ["craft/slice-loop=other"], "complete-status"),
     ],
 )
-def test_an_ended_slice_loop_exits_zero_naming_how_it_ended(status, labels, entry, capsys):
-    runner = FakeLore(["v"], {("v", "spec/s"): spec_doc(status, labels)})
-    code, out, err = run_main(runner, "s", capsys)
+def test_an_ended_slice_loop_exits_zero_naming_how_it_ended(status, labels, entry, capsys, lore1):
+    name = make_spec(lore1, "default", "s", status, labels)
+    code, out, err = run_main(lore1, name, capsys)
     assert code == 0, err
     result = json.loads(out)
-    assert result["spec"] == "s"
-    assert result["vault"] == "v"
+    assert result["spec"] == name
+    assert result["vault"] == "default"
     assert result["entry"] == entry
 
 
 @pytest.mark.parametrize(
     "labels",
-    [{}, {"craft/slice-loop": "in-progress"}, {"craft/slice-loop": ""}, {"unrelated": "complete"}],
+    [[], ["craft/slice-loop=in-progress"], ["craft/slice-loop="], ["unrelated=complete"]],
 )
-def test_a_ready_spec_without_an_ended_marker_is_refused(labels, capsys):
-    runner = FakeLore(["v"], {("v", "spec/s"): spec_doc("ready", labels)})
-    code, out, err = run_main(runner, "s", capsys)
+def test_a_ready_spec_without_an_ended_marker_is_refused(labels, capsys, lore1):
+    name = make_spec(lore1, "default", "s", "ready", labels)
+    code, out, err = run_main(lore1, name, capsys)
     assert code == 1
     assert out == ""
     assert reason_of(err) == "slice-loop-not-ended"
 
 
-def test_a_spec_in_no_vault_is_not_found(capsys):
-    runner = FakeLore(["a", "b"])
+def test_a_spec_in_no_vault_is_not_found(capsys, two_vault_lore_env):
+    runner, _ = two_vault_lore_env
     code, _, err = run_main(runner, "s", capsys)
     assert code == 2
     assert reason_of(err) == "spec-not-found"
 
 
-def test_a_spec_in_two_vaults_is_ambiguous(capsys):
-    doc = spec_doc("complete")
-    runner = FakeLore(["a", "b"], {("a", "spec/s"): doc, ("b", "spec/s"): doc})
+def test_a_spec_in_two_vaults_is_ambiguous(capsys, two_vault_lore_env):
+    runner, (first, second) = two_vault_lore_env
+    make_spec(runner, first, "s", "complete")
+    make_spec(runner, second, "s", "complete")
     code, _, err = run_main(runner, "s", capsys)
     assert code == 2
     assert reason_of(err) == "spec-ambiguous"
 
 
-def test_a_record_that_is_not_a_spec_is_refused(capsys):
-    runner = FakeLore(["v"], {("v", "spec/s"): spec_doc("complete", kind="task")})
-    code, _, err = run_main(runner, "s", capsys)
+def test_a_record_that_is_not_a_spec_is_refused(capsys, lore1):
+    make_spec(lore1, "default", "s", "complete")
+    show_reply(lore1, "spec/s", {"record_id": "spec/s", "kind": "task",
+                                 "sidecar": {"kind": "task", "status": "complete"}, "body": "# s"})
+    code, _, err = run_main(lore1, "s", capsys)
     assert code == 2
     assert reason_of(err) == "not-a-spec"
 
 
-def test_resolve_spec_returns_the_vault_and_sidecar():
-    doc = spec_doc("ready", {"craft/slice-loop": "stopped"})
-    runner = FakeLore(["a", "b"], {("b", "spec/s"): doc})
-    vault, sidecar = gather.resolve_spec(runner, "s")
-    assert vault == "b"
-    assert sidecar == doc["sidecar"]
+def test_resolve_spec_returns_the_vault_and_sidecar(two_vault_lore_env):
+    runner, (_, second) = two_vault_lore_env
+    name = make_spec(runner, second, "s", "ready", ["craft/slice-loop=stopped"])
+    shown = json.loads(_lore(runner, "record", "show", "--json", "--vault", second, f"spec/{name}"))
+    vault, sidecar = gather.resolve_spec(runner, name)
+    assert vault == second
+    assert sidecar == shown["sidecar"]
 
 
-def test_every_lore_call_is_an_argv_list_of_strings():
-    runner = FakeLore(["a", "b"], {("b", "spec/s"): spec_doc("complete")})
+def test_every_lore_call_is_an_argv_list_of_strings(two_vault_lore_env):
+    runner, (_, second) = two_vault_lore_env
+    make_spec(runner, second, "s", "complete")
+    runner.calls.clear()
     gather.main(["s"], runner=runner)
     assert runner.calls
-    for argv in runner.calls:
+    for argv, _stdin in runner.calls:
         assert isinstance(argv, list) and all(isinstance(a, str) for a in argv)
 
 
-VAULT_LS = "v\tteam\t/x/v\t[(all kinds)]\n"
+def _vault_ls(argv, _stdin):
+    return argv[:2] == ["vault", "ls"]
 
 
-def _failing(exc=None, rc=None, stdout="", stderr="", on="record"):
-    def runner(argv):
-        if argv[:2] == ["vault", "ls"] and on == "record":
-            return subprocess.CompletedProcess(argv, 0, VAULT_LS, "")
-        if exc is not None:
-            raise exc
-        return subprocess.CompletedProcess(argv, rc, stdout, stderr)
-
-    return runner
+def _anything_but_vault_ls(argv, _stdin):
+    return argv[:2] != ["vault", "ls"]
 
 
 @pytest.mark.parametrize(
-    "runner,reason",
+    "inject_kwargs,reason,on_listing",
     [
-        (_failing(exc=FileNotFoundError("lore")), "lore-missing"),
-        (_failing(exc=subprocess.TimeoutExpired(["lore"], 1)), "lore-timeout"),
-        (_failing(rc=3, stderr="SECRET-vault-text"), "lore-failed"),
-        (_failing(rc=0, stdout="not json SECRET-vault-text"), "lore-output-not-json"),
-        (_failing(rc=0, stdout="{}"), "empty-sidecar"),
-        (_failing(rc=0, stdout=json.dumps({"kind": "spec", "sidecar": {}})), "empty-sidecar"),
-        (_failing(rc=0, stdout="[1, 2]"), "lore-output-not-json"),
-        (_failing(exc=FileNotFoundError("lore"), on="ls"), "lore-missing"),
-        (_failing(exc=subprocess.TimeoutExpired(["lore"], 1), on="ls"), "lore-timeout"),
-        (_failing(rc=3, stderr="SECRET-vault-text", on="ls"), "lore-failed"),
+        ({"raises": FileNotFoundError("lore")}, "lore-missing", False),
+        ({"raises": subprocess.TimeoutExpired(["lore"], 1)}, "lore-timeout", False),
+        ({"returncode": 3, "stderr": "SECRET-vault-text"}, "lore-failed", False),
+        ({"returncode": 0, "stdout": "not json SECRET-vault-text"}, "lore-output-not-json", False),
+        ({"returncode": 0, "stdout": "{}"}, "empty-sidecar", False),
+        ({"returncode": 0, "stdout": json.dumps({"kind": "spec", "sidecar": {}})}, "empty-sidecar", False),
+        ({"returncode": 0, "stdout": "[1, 2]"}, "lore-output-not-json", False),
+        ({"raises": FileNotFoundError("lore")}, "lore-missing", True),
+        ({"raises": subprocess.TimeoutExpired(["lore"], 1)}, "lore-timeout", True),
+        ({"returncode": 3, "stderr": "SECRET-vault-text"}, "lore-failed", True),
     ],
 )
 def test_each_runner_failure_has_its_own_reason_code_and_echoes_nothing_from_lore(
-    runner, reason, capsys
+    inject_kwargs, reason, on_listing, capsys, lore1
 ):
-    code, out, err = run_main(runner, "s", capsys)
+    lore1.inject(_vault_ls if on_listing else _anything_but_vault_ls, **inject_kwargs)
+    code, out, err = run_main(lore1, "s", capsys)
     assert code == 2
     assert reason_of(err) == reason
     assert "SECRET" not in out + err
     assert "Traceback" not in err
 
 
-def test_a_vault_listing_with_no_vaults_cannot_certify(capsys):
-    code, _, err = run_main(FakeLore([]), "s", capsys)
+def test_a_vault_listing_with_no_vaults_cannot_certify(capsys, lore1):
+    lore1.inject(["vault", "ls"], returncode=0, stdout="")
+    code, _, err = run_main(lore1, "s", capsys)
     assert code == 2
     assert reason_of(err) == "no-vaults"
 
 
-class RawVaultLs(FakeLore):
-    def __init__(self, raw_vault_ls, vaults=(), records=None):
-        super().__init__(list(vaults), records)
-        self.raw_vault_ls = raw_vault_ls
-
-    def __call__(self, argv):
-        if argv[:2] == ["vault", "ls"]:
-            self.calls.append(list(argv))
-            return subprocess.CompletedProcess(argv, 0, self.raw_vault_ls, "")
-        return super().__call__(argv)
-
-
-def test_a_vault_listing_that_prints_only_a_message_has_no_vaults(capsys):
-    msg = "No vault config found; run 'lore init' to seed one.\n"
-    runner = RawVaultLs(msg)
+def test_a_config_declaring_no_vault_fails_the_listing(capsys, tmp_path):
+    runner = LoreRunner(tmp_path, vaults=())
     code, out, err = run_main(runner, "s", capsys)
+    assert (code, reason_of(err), out) == (2, "lore-failed", "")
+
+
+def test_a_vault_listing_that_prints_only_a_message_has_no_vaults(capsys, lore1):
+    (lore1.config_home / "lore" / "config.json").unlink()
+    code, out, err = run_main(lore1, "s", capsys)
     assert (code, reason_of(err), out) == (2, "no-vaults", "")
-    assert all(argv[:2] == ["vault", "ls"] for argv in runner.calls)
+    assert all(argv[:2] == ["vault", "ls"] for argv, _stdin in lore1.calls)
 
 
-@pytest.mark.parametrize("bad", ["has space", "a$(touch x)", "-x", "a/../b"])
-def test_a_vault_with_a_hostile_name_is_never_queried_or_emitted(bad, capsys):
-    raw = f"{bad}\tteam\t/x/bad\t[(all kinds)]\nv\tteam\t/x/v\t[(all kinds)]\n"
-    records = {("v", "spec/s"): spec_doc(status="complete")}
-    runner = RawVaultLs(raw, records=records)
-    code, out, err = run_main(runner, "s", capsys)
+@pytest.mark.parametrize("bad", ["has space", "a$(touch x)", "-x"])
+def test_a_vault_with_a_hostile_name_is_never_queried_or_emitted(bad, capsys, lore1):
+    elsewhere = lore1.root / "vaults" / "bad"
+    elsewhere.mkdir()
+    lore1.write_config([("v", "default", lore1.vault_path("default")), (bad, "team", elsewhere)])
+    make_spec(lore1, "v", "s", "complete")
+    lore1.calls.clear()
+    code, out, err = run_main(lore1, "s", capsys)
     assert code == 0, err
     assert json.loads(out)["vault"] == "v"
     assert bad not in out
-    for argv in runner.calls:
+    for argv, _stdin in lore1.calls:
         assert not any(bad in part for part in argv), argv
 
 
+def test_a_vault_listing_naming_a_path_traversal_vault_never_queries_it(capsys, lore1):
+    """Real lore refuses a config holding such a name, so the listing is injected."""
+    make_spec(lore1, "default", "s", "complete")
+    listing = (f"a/../b\tteam\t{lore1.root}/bad\t[(all kinds)]\n"
+               f"default\tdefault\t{lore1.vault_path('default')}\t[(all kinds)]\n")
+    lore1.inject(["vault", "ls"], returncode=0, stdout=listing)
+    lore1.calls.clear()
+    code, out, err = run_main(lore1, "s", capsys)
+    assert code == 0, err
+    assert "a/../b" not in out
+    for argv, _stdin in lore1.calls:
+        assert not any("a/../b" in part for part in argv), argv
+
+
 @pytest.mark.parametrize("sidecar", [{"kind": "spec"}, {"status": "ready"}])
-def test_a_sidecar_missing_kind_or_status_is_a_failed_lookup(sidecar, capsys):
-    doc = {"record_id": "spec/s", "kind": "spec", "sidecar": sidecar}
-    runner = FakeLore(["v"], {("v", "spec/s"): doc})
-    code, _, err = run_main(runner, "s", capsys)
+def test_a_sidecar_missing_kind_or_status_is_a_failed_lookup(sidecar, capsys, lore1):
+    make_spec(lore1, "default", "s", "complete")
+    show_reply(lore1, "spec/s", {"record_id": "spec/s", "kind": "spec", "sidecar": sidecar})
+    code, _, err = run_main(lore1, "s", capsys)
     assert code == 2
     assert reason_of(err) == "malformed-sidecar"
 
 
-def test_an_unexpected_exception_exits_two_not_the_refusal_code(capsys):
-    def runner(argv):
-        raise RuntimeError("boom SECRET-vault-text")
-
-    code, out, err = run_main(runner, "s", capsys)
+def test_an_unexpected_exception_exits_two_not_the_refusal_code(capsys, lore1):
+    lore1.inject([], raises=RuntimeError("boom SECRET-vault-text"))
+    code, out, err = run_main(lore1, "s", capsys)
     assert code == 2
     assert reason_of(err) == "internal-error"
     assert "SECRET" not in out + err
     assert "Traceback" not in err
-
-
-def test_the_default_runner_reports_a_missing_binary_as_lore_missing(monkeypatch, capsys):
-    monkeypatch.setenv("PATH", "")
-    code = gather.main(["s"])
-    err = capsys.readouterr().err
-    assert code == 2
-    assert reason_of(err) == "lore-missing"
 
 
 # --- the real lore CLI, in-process ------------------------------------------------
@@ -350,12 +361,6 @@ def test_the_default_runner_reports_a_missing_binary_as_lore_missing(monkeypatch
 # inside this interpreter against a throwaway vault. Tests pass it as the scripts'
 # `runner=`. The seam tests (named `..._seam`) run the script as a real subprocess
 # through `seam_env` instead.
-
-
-def _lore(runner, *args, stdin=None):
-    r = runner(list(args), stdin)
-    assert r.returncode == 0, r.stderr
-    return r.stdout.strip()
 
 
 @pytest.fixture
@@ -388,22 +393,6 @@ def run_in_process(main, argv, runner, **kwargs):
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
         code = main([str(a) for a in argv], runner=runner, **kwargs)
     return subprocess.CompletedProcess(list(argv), code, out.getvalue(), err.getvalue())
-
-
-def _create(env, vault, kind, title, status, related=(), labels=(), parent=None):
-    args = ["record", "create", "--kind", kind, "--title", title, "--status", status,
-            "--vault", vault]
-    for edge in related:
-        args += ["--related", edge]
-    for label in labels:
-        args += ["--label", label]
-    if parent:
-        args += ["--parent", parent]
-    return _lore(env, *args, stdin="# body\n").split("/", 1)[1]
-
-
-def make_spec(env, vault, title, status="ready", labels=(), related=()):
-    return _create(env, vault, "spec", title, status, related, labels)
 
 
 def run_script(runner, *args):
@@ -699,13 +688,17 @@ def test_a_spec_with_no_follow_ups_exits_zero_with_an_empty_list(board):
     assert result["kept"] == 0
 
 
-def test_hostile_edge_values_on_the_spec_are_skipped_and_counted_through_real_lore(board):
+def test_hostile_edge_values_on_the_spec_are_skipped_counted_and_never_reach_lore(board):
     good = board.task("Good", related=[f"task={board.slice}"])
-    for value in ['x") OR kind:task ("', "-flag"]:
+    hostile = ['x") OR kind:task ("', "-flag", "a/../b", "task/-x"]
+    for value in hostile:
         relate(board.env, f"spec/{board.spec}", f"task={value}")
+    board.env.calls.clear()
     result = board.gather()
     assert [f["name"] for f in result["followups"]] == [good]
-    assert result["skipped-edges"] == 2
+    assert result["skipped-edges"] == len(hostile)
+    for argv, _stdin in board.env.calls:
+        assert not any(bad in part for part in argv for bad in hostile), argv
 
 
 def test_follow_ups_past_the_single_query_ceiling_are_all_gathered(board):
@@ -714,29 +707,26 @@ def test_follow_ups_past_the_single_query_ceiling_are_all_gathered(board):
     ]
     first = board.task("Linked to first", related=[f"task={children[0]}"])
     last = board.task("Linked to last", related=[f"task={children[-1]}"])
+    board.env.calls.clear()
     result = board.gather()
     assert result["child-count"] == 41
     assert [f["name"] for f in result["followups"]] == sorted([first, last])
+    task_queries = [argv[1] for argv, _stdin in board.env.calls
+                    if argv[0] == "search" and argv[1].startswith("related-task")]
+    assert len(task_queries) > 1
+    assert all(q.count('"') // 2 <= gather.QUERY_BATCH_SIZE for q in task_queries)
+    seen = {v for q in task_queries for v in re.findall(r'"([^"]+)"', q)}
+    assert {f"task/{k}" for k in children} <= seen and set(children) <= seen
 
 
-# --- gathering: injected lore ---------------------------------------------------
+# --- gathering: lore answers the real CLI would not give -------------------------
 
 
-def task_doc(name, status="open", title=None, parent=None, labels=None, related=None, kind="task"):
-    sidecar = {"kind": kind, "status": status, "title": title or name.title()}
-    if parent is not None:
-        sidecar["parent"] = parent
-    if labels is not None:
-        sidecar["labels"] = labels
-    if related is not None:
-        sidecar["related"] = related
-    return {"record_id": f"task/{name}", "kind": kind, "sidecar": sidecar, "body": "b"}
-
-
-def hit(name, vault="v", kind="task"):
+def hit(runner, name, kind="task", vault_dir=None):
+    vault_dir = vault_dir or str(runner.vault_path("default"))
     return {
-        "id": f"/x/{vault}/{kind}/{name}", "title": name, "kind": kind,
-        "status": "open", "shared": 0, "vault": f"/x/{vault}", "snippet": "",
+        "id": f"{vault_dir}/{kind}/{name}", "title": name, "kind": kind,
+        "status": "open", "shared": 0, "vault": vault_dir, "snippet": "",
     }
 
 
@@ -748,240 +738,144 @@ def search_body(*hits, truncated=False):
     })
 
 
-class GatherLore(FakeLore):
-    """FakeLore plus `task list` and `search`. `search` is a callable taking the
-    query and returning (returncode, stdout)."""
-
-    def __init__(self, vaults, records=None, listing=(), search=None):
-        super().__init__(vaults, records)
-        self.listing = list(listing)
-        self.search = search or (lambda q: (0, search_body()))
-        self.queries = []
-
-    def __call__(self, argv):
-        if argv[:2] == ["task", "list"]:
-            self.calls.append(list(argv))
-            return subprocess.CompletedProcess(argv, 0, json.dumps(self.listing), "")
-        if argv[0] == "search":
-            self.calls.append(list(argv))
-            self.queries.append(argv[1])
-            rc, out = self.search(argv[1])
-            return subprocess.CompletedProcess(argv, rc, out, "boom vault text" if rc else "")
-        return super().__call__(argv)
-
-
 def entry(name, status="open", parent=None, children=()):
     return {"name": name, "status": status, "parent": parent, "children": list(children)}
 
 
-def fake_board(follow_sidecar=None, spec_related=None, search=None, extra=None):
-    """Spec s (complete) -> labelled slice p -> child k; one follow-up f found by search."""
-    records = {
-        ("v", "spec/s"): spec_doc(status="complete", related=spec_related),
-        ("v", "task/p"): task_doc("p", "in-progress", labels={"craft/slice-parent": ""},
-                                  related={"spec": ["s"]}),
-        ("v", "task/k"): task_doc("k", "done", parent="p"),
-        ("v", "task/f"): follow_sidecar
-        or task_doc("f", "open", title="Follow", related={"task": ["p"]}),
-    }
-    records.update(extra or {})
-    listing = [entry("p", "in-progress", children=["k"]), entry("k", "done", parent="p"),
-               entry("f", "open")]
-
-    def default_search(q):
-        return 0, search_body(hit("p")) if q.startswith("related-spec") else search_body(hit("f"))
-
-    return GatherLore(["v"], records, listing, search or default_search)
+def retitled(board, name, title):
+    """Make `record show` of task `name` answer its real record with `title` in the sidecar."""
+    shown = json.loads(_lore(board.env, "record", "show", "--json", "--vault", board.vault,
+                             f"task/{name}"))
+    shown["sidecar"]["title"] = title
+    show_reply(board.env, f"task/{name}", shown)
 
 
-def run_json(runner, capsys):
-    code, out, err = run_main(runner, "s", capsys)
+def followup(board, title="Follow"):
+    return board.task(title, related=[f"task={board.slice}"])
+
+
+def run_board(board, capsys):
+    code, out, err = run_main(board.env, board.spec, capsys)
     return code, (json.loads(out) if out.strip() else None), out, err
 
 
-def test_the_injected_board_gathers_its_follow_up(capsys):
-    code, result, _, err = run_json(fake_board(), capsys)
-    assert code == 0, err
-    assert result["followups"] == [{"name": "f", "title": "Follow", "status": "open"}]
-
-
-def test_a_search_hit_whose_own_edges_and_every_outbound_edge_omit_it_is_not_gathered(capsys):
-    unlinked = task_doc("f", "open", title="Follow", related={"task": ["elsewhere"]})
-    code, result, _, err = run_json(fake_board(follow_sidecar=unlinked), capsys)
-    assert code == 0, err
+def test_a_search_hit_whose_own_edges_and_every_outbound_edge_omit_it_is_not_gathered(board):
+    stray = board.task("Follow", related=["task=elsewhere"])
+    search_reply(board.env, "task", search_body(hit(board.env, stray)))
+    result = board.gather()
     assert result["followups"] == []
     assert (result["candidates-read"], result["kept"]) == (1, 0)
 
 
-@pytest.mark.parametrize(
-    "related",
-    [{"spec": ["s"]}, {"spec": ["spec/s"]}, {"task": ["p"]}, {"task": ["task/p"]}, {"task": ["k"]}],
-)
-def test_a_search_hit_whose_own_edges_name_the_spec_a_slice_or_a_child_is_gathered(related, capsys):
-    linked = task_doc("f", "open", title="Follow", related=related)
-    code, result, _, err = run_json(fake_board(follow_sidecar=linked), capsys)
-    assert code == 0, err
-    assert [f["name"] for f in result["followups"]] == ["f"]
-
-
-@pytest.mark.parametrize("edge_owner", ["spec", "slice", "child"])
-def test_a_search_hit_named_only_by_an_outbound_edge_is_gathered(edge_owner, capsys):
-    runner = fake_board(
-        follow_sidecar=task_doc("f", "open", title="Follow"),
-        spec_related={"task": ["f"]} if edge_owner == "spec" else None,
-    )
-    if edge_owner == "slice":
-        runner.records[("v", "task/p")]["sidecar"]["related"]["task"] = ["f"]
-    if edge_owner == "child":
-        runner.records[("v", "task/k")]["sidecar"]["related"] = {"task": ["f"]}
-    code, result, _, err = run_json(runner, capsys)
-    assert code == 0, err
-    assert [f["name"] for f in result["followups"]] == ["f"]
-
-
-def test_a_truncated_search_exits_two_search_truncated_with_no_output(capsys):
-    runner = fake_board(search=lambda q: (0, search_body(hit("p"), truncated=True)))
-    code, _, out, err = run_json(runner, capsys)
+def test_a_truncated_search_exits_two_search_truncated_with_no_output(board, capsys):
+    search_reply(board.env, "spec", search_body(hit(board.env, board.slice), truncated=True))
+    code, _, out, err = run_board(board, capsys)
     assert code == 2
     assert reason_of(err) == "search-truncated"
     assert out == ""
 
 
-def test_a_failing_search_exits_two_lore_failed_with_no_output_or_vault_text(capsys):
-    runner = fake_board(search=lambda q: (1, ""))
-    code, _, out, err = run_json(runner, capsys)
+def test_a_failing_search_exits_two_lore_failed_with_no_output_or_vault_text(board, capsys):
+    search_reply(board.env, "spec", "", returncode=1, stderr="boom vault text")
+    code, _, out, err = run_board(board, capsys)
     assert code == 2
     assert reason_of(err) == "lore-failed"
     assert out == ""
     assert "boom" not in err
 
 
-def test_a_search_that_is_not_json_exits_two(capsys):
-    runner = fake_board(search=lambda q: (0, "not json"))
-    code, _, out, err = run_json(runner, capsys)
+def test_a_search_that_is_not_json_exits_two(board, capsys):
+    search_reply(board.env, "spec", "not json")
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "lore-output-not-json", "")
 
 
-def test_a_candidate_whose_read_fails_exits_two_with_no_partial_set(capsys):
-    runner = fake_board(extra={("v", "task/g"): task_doc("g", "open")})
-    del runner.records[("v", "task/f")]
-    code, _, out, err = run_json(runner, capsys)
+def test_a_candidate_whose_read_fails_exits_two_with_no_partial_set(board, capsys):
+    kept = followup(board, "Kept")
+    search_reply(board.env, "task", search_body(hit(board.env, kept), hit(board.env, "vanished")))
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "lore-failed", "")
 
 
-def test_a_candidate_with_an_empty_sidecar_exits_two_with_no_partial_set(capsys):
-    runner = fake_board(follow_sidecar={"record_id": "task/f", "sidecar": {}, "body": ""})
-    code, _, out, err = run_json(runner, capsys)
+def test_a_candidate_with_an_empty_sidecar_exits_two_with_no_partial_set(board, capsys):
+    name = followup(board)
+    show_reply(board.env, f"task/{name}", {"record_id": f"task/{name}", "sidecar": {}, "body": ""})
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "empty-sidecar", "")
 
 
-def test_a_candidate_sidecar_missing_status_exits_two_with_no_partial_set(capsys):
-    runner = fake_board(follow_sidecar={"sidecar": {"kind": "task", "title": "t"}})
-    code, _, out, err = run_json(runner, capsys)
+def test_a_candidate_sidecar_missing_status_exits_two_with_no_partial_set(board, capsys):
+    name = followup(board)
+    show_reply(board.env, f"task/{name}", {"sidecar": {"kind": "task", "title": "t"}})
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "malformed-sidecar", "")
 
 
-def test_a_failing_task_listing_exits_two(capsys):
-    runner = fake_board()
-    original = runner.__call__
-
-    class Broken(GatherLore):
-        def __call__(self, argv):
-            if argv[:2] == ["task", "list"]:
-                return subprocess.CompletedProcess(argv, 1, "", "x")
-            return original(argv)
-
-    broken = Broken(["v"], runner.records, runner.listing, runner.search)
-    code, _, out, err = run_json(broken, capsys)
+def test_a_failing_task_listing_exits_two(board, capsys):
+    board.env.inject(["task", "list"], returncode=1, stderr="x")
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "lore-failed", "")
 
 
-def test_hostile_edge_values_never_reach_a_query_or_a_read(capsys):
-    hostile = ['x") OR kind:task ("', "-flag", "a/../b", "task/-x"]
-    runner = fake_board(spec_related={"task": [*hostile, "f"]})
-    code, result, _, err = run_json(runner, capsys)
-    assert code == 0, err
-    assert result["skipped-edges"] == len(hostile)
-    assert [f["name"] for f in result["followups"]] == ["f"]
-    for argv in runner.calls:
-        assert not any(bad in part for part in argv for bad in hostile), argv
-
-
-def test_a_hit_with_a_hostile_record_name_is_skipped_and_counted(capsys):
-    def search(q):
-        return 0, search_body(hit("p") if q.startswith("related-spec") else hit("f"),
-                              hit("a b"), hit("-x"))
-
-    code, result, _, err = run_json(fake_board(search=search), capsys)
-    assert code == 0, err
+def test_a_hit_with_a_hostile_record_name_is_skipped_and_counted(board):
+    name = followup(board)
+    search_reply(board.env, "task",
+                 search_body(hit(board.env, name), hit(board.env, "a b"), hit(board.env, "-x")))
+    result = board.gather()
     assert result["skipped-edges"] == 2
-    assert [f["name"] for f in result["followups"]] == ["f"]
+    assert [f["name"] for f in result["followups"]] == [name]
 
 
-def test_hits_from_another_vault_or_kind_are_ignored(capsys):
-    def search(q):
-        if q.startswith("related-spec"):
-            return 0, search_body(hit("p"))
-        return 0, search_body(hit("f"), hit("other", vault="elsewhere"), hit("s", kind="spec"))
-
-    code, result, _, err = run_json(fake_board(search=search), capsys)
-    assert code == 0, err
-    assert [f["name"] for f in result["followups"]] == ["f"]
+def test_hits_from_another_vault_or_kind_are_ignored(board):
+    name = followup(board)
+    search_reply(board.env, "task", search_body(
+        hit(board.env, name),
+        hit(board.env, "other", vault_dir="/x/elsewhere"),
+        hit(board.env, board.spec, kind="spec"),
+    ))
+    result = board.gather()
+    assert [f["name"] for f in result["followups"]] == [name]
     assert result["candidates-read"] == 1
 
 
-def test_a_listed_task_with_a_hostile_name_is_skipped_and_never_queried_or_read(capsys):
-    runner = fake_board()
-    runner.listing += [entry("bad name", parent="p"), entry("-x", parent="p")]
-    code, result, _, err = run_json(runner, capsys)
-    assert code == 0, err
+def test_a_listed_task_with_a_hostile_name_is_skipped_and_never_queried_or_read(board):
+    listing = json.loads(_lore(board.env, "task", "list", "--vault", board.vault, "--json"))
+    listing += [entry("bad name", parent=board.slice), entry("-x", parent=board.slice)]
+    board.env.inject(["task", "list"], returncode=0, stdout=json.dumps(listing))
+    board.env.calls.clear()
+    result = board.gather()
     assert result["skipped-edges"] == 2
     assert result["child-count"] == 1
-    for argv in runner.calls:
+    for argv, _stdin in board.env.calls:
         assert not any(bad in part for part in argv for bad in ("bad name", "-x")), argv
 
 
-def test_a_dangling_edge_is_skipped_and_counted(capsys):
-    runner = fake_board(spec_related={"task": ["ghost", "f"]})
-    code, result, _, err = run_json(runner, capsys)
-    assert code == 0, err
+def test_a_dangling_edge_is_skipped_and_counted(board):
+    name = board.task("Follow")
+    relate(board.env, f"spec/{board.spec}", "task=ghost")
+    relate(board.env, f"spec/{board.spec}", f"task={name}")
+    result = board.gather()
     assert result["skipped-edges"] == 1
-    assert [f["name"] for f in result["followups"]] == ["f"]
+    assert [f["name"] for f in result["followups"]] == [name]
 
 
-def test_every_query_carries_at_most_the_batch_size_in_values(capsys):
-    kids = [f"kid{i:03d}" for i in range(100)]
-    records = {("v", f"task/{k}"): task_doc(k, "done", parent="p") for k in kids}
-    runner = fake_board(extra=records)
-    runner.listing[0]["children"] = kids
-    runner.listing += [entry(k, "done", parent="p") for k in kids]
-    code, result, _, err = run_json(runner, capsys)
-    assert code == 0, err
-    task_queries = [q for q in runner.queries if q.startswith("related-task")]
-    assert len(task_queries) > 1
-    assert all(q.count('"') // 2 <= gather.QUERY_BATCH_SIZE for q in task_queries)
-    seen = {v for q in task_queries for v in re.findall(r'"([^"]+)"', q)}
-    assert {f"task/{k}" for k in kids} <= seen and set(kids) <= seen
+def test_a_title_is_emitted_without_control_characters(board):
+    name = followup(board)
+    retitled(board, name, "Red\x1b[31m alert\x07\x85 done\n")
+    assert board.gather()["followups"][0]["title"] == "Red[31m alert done"
 
 
-def test_a_title_is_emitted_without_control_characters(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Red\x1b[31m alert\x07\x85 done\n", related={"task": ["p"]}))
-    _, result, _, _ = run_json(runner, capsys)
-    assert result["followups"][0]["title"] == "Red[31m alert done"
-
-
-def test_a_title_carrying_a_credential_is_emitted_redacted(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Rotate AKIAIOSFODNN7EXAMPLE now", related={"task": ["p"]}))
-    _, result, _, _ = run_json(runner, capsys)
-    title = result["followups"][0]["title"]
+def test_a_title_carrying_a_credential_is_emitted_redacted(board):
+    name = followup(board)
+    retitled(board, name, "Rotate AKIAIOSFODNN7EXAMPLE now")
+    title = board.gather()["followups"][0]["title"]
     assert "AKIAIOSFODNN7EXAMPLE" not in title
     assert title.startswith("Rotate ") and title.endswith(" now")
 
 
-def test_a_title_with_nothing_to_strip_is_emitted_unchanged(capsys):
-    runner = fake_board(follow_sidecar=task_doc("f", title="Plain follow-up title", related={"task": ["p"]}))
-    _, result, _, _ = run_json(runner, capsys)
-    assert result["followups"][0]["title"] == "Plain follow-up title"
+def test_a_title_with_nothing_to_strip_is_emitted_unchanged(board):
+    followup(board, "Plain follow-up title")
+    assert board.gather()["followups"][0]["title"] == "Plain follow-up title"
 
 
 def test_a_hostile_oversized_title_is_bounded_and_sanitized_quickly():
@@ -1051,9 +945,12 @@ def test_ordinary_non_ascii_letters_survive_a_title():
     assert gather.sanitize_title(title) == title
 
 
-def test_a_title_scanner_that_cannot_be_imported_exits_two_internal_error(capsys, monkeypatch):
+def test_a_title_scanner_that_cannot_be_imported_exits_two_internal_error(
+    board, capsys, monkeypatch
+):
+    followup(board)
     monkeypatch.setitem(sys.modules, "capture_scan", None)
-    code, _, out, err = run_json(fake_board(), capsys)
+    code, _, out, err = run_board(board, capsys)
     assert (code, reason_of(err), out) == (2, "internal-error", "")
 
 
@@ -1150,43 +1047,9 @@ def test_a_live_follow_up_parent_and_its_children_are_still_not_gathered(board):
     assert result["followups"] == []
 
 
-def _parent_board(distilled=None, parent_status="open"):
-    spec = spec_doc(status="complete", related=None)
-    if distilled:
-        spec["sidecar"]["annotations"] = {"distilled": distilled}
-    extra = {
-        ("v", "task/fp"): task_doc(
-            "fp", parent_status, labels={"craft/followup-parent": ""}, related={"spec": ["s"]}
-        )
-    }
-
-    def search(q):
-        return 0, search_body(hit("p"), hit("fp")) if q.startswith("related-spec") else search_body(hit("f"))
-
-    runner = fake_board(search=search, extra=extra)
-    runner.records[("v", "spec/s")] = spec
-    runner.listing.append(entry("fp", parent_status))
-    return runner
-
-
-def test_the_injected_board_reports_distilled_and_live_parents(capsys):
-    code, result, _, err = run_json(_parent_board(distilled="zero-adr"), capsys)
-    assert code == 0, err
-    assert result["distilled"] is True
-    assert result["followup-parents"] == ["fp"]
-
-
-def test_the_injected_board_without_annotation_or_live_parent_reports_neither(capsys):
-    code, result, _, err = run_json(_parent_board(parent_status="done"), capsys)
-    assert code == 0, err
-    assert result["distilled"] is False
-    assert result["followup-parents"] == []
-
-
-def test_a_failed_lookup_of_a_follow_up_parent_exits_two_with_no_stdout(capsys):
-    runner = _parent_board()
-    del runner.records[("v", "task/fp")]
-    code, result, out, err = run_json(runner, capsys)
+def test_a_failed_lookup_of_a_follow_up_parent_exits_two_with_no_stdout(board, capsys):
+    search_reply(board.env, "spec", search_body(hit(board.env, board.slice), hit(board.env, "vanished-parent")))
+    code, _, out, err = run_board(board, capsys)
     assert code == 2
     assert out == ""
     assert reason_of(err) == "lore-failed"
