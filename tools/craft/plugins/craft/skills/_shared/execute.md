@@ -1400,7 +1400,9 @@ Answering a check from that list arrives with a later command; until then it sta
 ```
 
 A check the operator would have confirmed at close is not confirmed here; it waits on the list like
-the rest. The "left on the task branch" line appears in every no-ask report that got as far as the
+the rest. No line of a no-ask report says a check was confirmed, passed or answered, and that
+includes the phase lines: `verify` is reported as the entries being recorded, never as a check
+confirmed. The "left on the task branch" line appears in every no-ask report that got as far as the
 branch, whether the close finished or refused after it.
 
 **Measurement tally.** For each correctness Critical/Important finding, record it **cited against
