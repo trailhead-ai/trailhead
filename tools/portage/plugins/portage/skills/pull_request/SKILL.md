@@ -154,12 +154,13 @@ shown, and the rest is plain words, never a command to paste.
    failing value is never echoed; the line names `task/<unresolved>` and says
    `the record argument is missing or failed validation; pass the name of the closed slice record`.
 2. **Resolve.** Bind `<vault>` once: ask `lore vault resolve --kind task --json` and read its
-   `vault` field. Every `lore record show` and `lore record update` in this section names
+   `vault` field. A `null` vault (no vault routes task records here) ends the session with
+   `task/<unresolved>` and `no vault routes task records here; check the lore configuration`,
+   writing nothing. Every `lore record show` and `lore record update` in this section names
    `--vault <vault>`, because an unqualified one answers from, or writes to, whichever configured
-   vault comes first. Then `lore record show task/<name> --vault <vault> --json`. If the record is
-   found in a different vault than the bound one, use the record's own vault from here on. A record
-   that does not resolve: `task/<unresolved>` and `the record does not resolve; check the name`.
-   From here the line names `task/<name>`.
+   vault comes first. Then `lore record show task/<name> --vault <vault> --json`, which reads that
+   vault only. A record that does not resolve there: `task/<unresolved>` and
+   `the record does not resolve; check the name`. From here the line names `task/<name>`.
 3. **Shape.** The record must be `done` and carry a `craft/branch=<branch>` label whose value
    passes the same shape check as the record name. Otherwise
    `the record is not a closed task with a branch; run the execute step on it first`.
@@ -312,13 +313,13 @@ and add one numbered decision (question, choice, reasoning, each on its own labe
 judgment call made. Only after that edit has landed, print the session's last line, with nothing after it:
 
 ```
-outcome: pr-ready task/<name> parked=0 — every PR is ready and none was merged: <links>; each branch is held against `portage merge`, so lift the hold with the portage release verb for that repo and branch, then merge them yourself when you choose
-outcome: stuck task/<name> parked=0 — <fixed reason>; <next step in words>; any branch held in Step B is still held, lift it with the portage release verb for that repo and branch before anyone merges. PRs: <links>
+outcome: pr-ready task/<name> parked=0 — every PR is ready and none was merged: <links>; each branch is held against merging from here, so an operator lifts the hold with the portage release verb for that repo and branch before merging them
+outcome: stuck task/<name> parked=0 — <fixed reason>; <next step in words>; any branch held in Step B is still held, an operator lifts it with the portage release verb for that repo and branch. PRs: <links>
 ```
 
 `parked=0` always: this step parks nothing. The next step in a `stuck` line is in words (run the PR
-step again unattended, or watch the PRs attended with the monitor verb), never a pasteable command
-block or a line that begins with a slash. A `stuck` that ends before Step B held anything omits the
+step again unattended, or watch the PRs attended with the monitor verb), never a command or a
+line that begins with a slash. A `stuck` that ends before Step B held anything omits the
 hold clause. A stop that comes after the Step A write is `stuck`, never `refused`. The
 final message states what happened, poses no question, asks for no answer or confirmation, and does
 not say anyone will be notified.
@@ -475,8 +476,8 @@ Every camp group member is a peer — there is no privileged member.
 
    When `auto_merge = true`, the flag is unnecessary and has no effect.
 
-   `portage merge` also refuses (exit 2), before any `gh` call, a PR whose head branch
-   is held (`portage hold <repo> <branch>`) — whatever `auto_merge` says and with or
+   `portage merge` also refuses (exit 2), before any merge call, a PR whose head branch
+   (read from the PR itself through `gh`, never from the checked-out branch) is held (`portage hold <repo> <branch>`) — whatever `auto_merge` says and with or
    without `--operator-directed`. The refusal names the hold and the release command.
    Report it and stop; never run `portage release` yourself — only the operator or the
    orchestrator that placed the hold lifts it.
