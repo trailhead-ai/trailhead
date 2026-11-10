@@ -5142,3 +5142,24 @@ Readings:
 - The new settle branch's failure path (an entry call exiting 2 or 3) and the entry-refusal reorder are not exercised by any case.
 
 Spend, runner list price plus judge votes: about 23.8 USD for the craft batches, controls and diagnostics (park control 2.32, brainstorm diagnostic 0.86). Total for both tools about 45.9 USD.
+
+
+## Re-review fold pass (2026-11-10)
+
+Same runner settings as the section above (`--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants exactly the `runner` block, runner 2.1.322, macOS). Final prose fingerprints (`git hash-object`): `_shared/execute.md` `c09546e44fa4cbc748f371e3debbe85a11c47190`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`. The `execute-rule-only.md` live arm was rebuilt.
+
+What changed: the "already closed" entry refusal now comes before the generic "already claimed" one; a settle failure under the unattended request records the failing call, its exit code and the scrubbed finding in the run block before ending `stuck`; the sentence about leaving `lore task graph` unpinned applies to the later calls only.
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | batch 1: 0.88, 1, 1 (`no-git-command-issued` in one run); permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+| `build-close-marks-folded-entries` | 3 of 3 at 1.0 | at bar |
+
+Readings:
+- No entry case sits on a `done` record that also carries `craft/branch`, so the reordered refusal itself is not observed by any case; the cases show only that the edit did not disturb the refusals that were already measured. The settle failure logging is likewise unobserved (no case makes a settle call fail).
+- `unattended-execute-parks-a-design-change` and `unattended-execute-close-names-a-brainstorm-task-by-id` were not rerun: this pass touches neither the park nor the close text they measure, and the previous section's reading of them stands.
+
+Spend about 8.8 USD for these craft batches (4.51 for the three refusal cases, 1.53 for the rerun, 1.24 for the guard, 1.55 for the settle case); with the portage side the whole pass is about 21.8 USD.
