@@ -7,8 +7,9 @@ private `-L` socket through camp's two server-starting seams and read the
 server process's cwd with `lsof`. Nothing here touches the default tmux socket.
 
 `_REAL_TMUX` is resolved by absolute path at import time, before conftest's
-autouse `_sandbox_tmux` fixture rewrites `PATH`; the PATH shim below redirects
-production code's bare `tmux` calls onto the private socket.
+autouse `_sandbox_tmux` fixture rewrites `PATH`; the PATH shim from
+`test_stop_workspace_real_tmux.redirected_tmux_socket` redirects production
+code's bare `tmux` calls onto the private socket.
 """
 
 from __future__ import annotations
@@ -16,22 +17,26 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import stat
 import subprocess
 import sys
-import time
-import uuid
 from pathlib import Path
 
 import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
+_TESTS_DIR = Path(__file__).resolve().parent
 if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
+if str(_TESTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TESTS_DIR))
 
-_REAL_TMUX = shutil.which("tmux")
-_LSOF = shutil.which("lsof")
+from test_pane_cwd_real_tmux import _LSOF, _cwd_of, _wait_until  # noqa: E402
+from test_stop_workspace_real_tmux import (  # noqa: E402
+    _REAL_TMUX,
+    _sock_run,
+    redirected_tmux_socket,
+)
 
 pytestmark = [
     pytest.mark.real_home,
@@ -39,7 +44,6 @@ pytestmark = [
     pytest.mark.skipif(_LSOF is None, reason="no lsof on PATH"),
 ]
 
-_WAIT_SECONDS = 4.0
 _PATHS = ["new_session", "new_session_with_window"]
 
 
@@ -51,30 +55,12 @@ def _tmux_version() -> tuple[int, int]:
     return (int(found.group(1)), int(found.group(2))) if found else (0, 0)
 
 
-def _sock_run(sock: str, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [_REAL_TMUX, "-L", sock, *args], capture_output=True, text=True, timeout=5
-    )
-
-
 @pytest.fixture()
 def private_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    """A `tmux` shim that pins every bare `tmux` call to a private socket.
-    Yields the socket name; kills only that socket's server on teardown."""
-    sock = f"camp_server_cwd_{os.getpid()}_{uuid.uuid4().hex[:8]}"
-    bin_dir = tmp_path / "shim"
-    bin_dir.mkdir()
-    wrapper = bin_dir / "tmux"
-    wrapper.write_text(
-        f"#!/bin/sh\nexec {_REAL_TMUX} -L {sock} \"$@\"\n", encoding="utf-8"
-    )
-    wrapper.chmod(wrapper.stat().st_mode | stat.S_IEXEC)
-    monkeypatch.setenv("PATH", os.pathsep.join([str(bin_dir), os.environ.get("PATH", "")]))
+    """Every bare `tmux` call pinned to a private socket — see
+    `redirected_tmux_socket`. Yields the socket name."""
     monkeypatch.delenv("TMUX", raising=False)
-    try:
-        yield sock
-    finally:
-        subprocess.run([_REAL_TMUX, "-L", sock, "kill-server"], capture_output=True, timeout=5)
+    yield from redirected_tmux_socket(tmp_path, monkeypatch, "camp_server_cwd")
 
 
 def _env(**extra: str) -> dict[str, str]:
@@ -83,33 +69,10 @@ def _env(**extra: str) -> dict[str, str]:
     return env
 
 
-def _cwd_of(pid: str) -> str:
-    out = subprocess.run(
-        [_LSOF, "-a", "-p", pid, "-d", "cwd", "-Fn"], capture_output=True, text=True, timeout=5
-    ).stdout
-    names = [line[1:] for line in out.splitlines() if line.startswith("n")]
-    return names[0] if names else ""
-
-
 def _server_cwd(sock: str) -> str:
     shown = _sock_run(sock, "display-message", "-p", "#{pid}")
     assert shown.returncode == 0, shown.stderr
     return _cwd_of(shown.stdout.strip())
-
-
-def _pane_pid(sock: str, target: str) -> str:
-    listed = _sock_run(sock, "list-panes", "-t", target, "-F", "#{pane_pid}")
-    assert listed.returncode == 0, listed.stderr
-    return listed.stdout.split()[0]
-
-
-def _wait_until(probe, done, timeout: float = _WAIT_SECONDS):
-    deadline = time.monotonic() + timeout
-    seen = probe()
-    while not done(seen) and time.monotonic() < deadline:
-        time.sleep(0.05)
-        seen = probe()
-    return seen
 
 
 def _start(path: str, session: str, cwd: Path, env: dict[str, str]) -> None:
