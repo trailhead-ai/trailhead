@@ -2,8 +2,10 @@
 
 ``--path <file> --timeout <seconds>`` polls for a non-empty, newline-terminated first line in the
 file (a line still being written is never parsed), for at most ``--timeout`` seconds
-(capped at 570, below the Bash tool's 600 s ceiling), then prints it parsed by ``parse_monitor_outcome``:
-``<TOKEN> <reason>`` (just ``MERGED`` when there is no reason), or ``PENDING``
+(capped at 570, below the Bash tool's 600 s ceiling), then prints it validated by
+``validate_monitor_outcome``:
+``<TOKEN> <reason>`` (just ``MERGED`` when there is no reason) when the token and the reason are both
+from ``MONITOR_OUTCOME_REASONS``, nothing of any other line, or ``PENDING``
 when the deadline passes with nothing there. It never writes and never globs.
 
 Before reading it refuses a path that is a symlink or a non-regular file, and a
@@ -23,7 +25,7 @@ import sys
 import time
 from pathlib import Path
 
-from ..monitor_outcome import parse_monitor_outcome
+from ..monitor_outcome import validate_monitor_outcome
 
 MAX_TIMEOUT_SECONDS = 570
 DEFAULT_INTERVAL_SECONDS = 2.0
@@ -44,7 +46,7 @@ def add_await_outcome_subparser(sub) -> None:
             "exit codes:\n"
             "  0  parsed outcome printed\n"
             "  10 PENDING (deadline passed, no line)\n"
-            "  11 malformed outcome line\n"
+            "  11 malformed outcome line (an unknown token or a reason outside its list; none of it is printed)\n"
             "  12 unreadable (refused path or parent)\n"
             "  2  usage error (e.g. timeout above the cap)"
         ),
@@ -105,15 +107,15 @@ def cmd_await_outcome(args: argparse.Namespace) -> int:
         while True:
             text = _read_once(path)
             if text is not None and "\n" in text and text.strip():
-                token, argument = parse_monitor_outcome(text)
-                if token is None:
+                outcome = validate_monitor_outcome(text)
+                if outcome is None:
                     print(
-                        "portage: malformed monitor outcome: the first line is not a known "
-                        "outcome word followed by a reason",
+                        "portage: malformed monitor outcome: the first line is not an outcome "
+                        "word followed by a reason from its list",
                         file=sys.stderr,
                     )
                     return EXIT_MALFORMED
-                print(f"{token} {argument}".rstrip())
+                print(f"{outcome[0]} {outcome[1]}".rstrip())
                 return EXIT_PARSED
             remaining = deadline - time.monotonic()
             if remaining <= 0:

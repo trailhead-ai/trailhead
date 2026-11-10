@@ -299,13 +299,15 @@ wait. Once this session ends, a later line monitor writes to that file is never 
 | `MERGED` | `stuck` | `monitor reported a merge despite the never-merge request` |
 | `BLOCKED <reason-token>` | `stuck` | `monitor reported the PRs blocked (<reason-token>)` |
 | `STOPPED <reason-token>` | `stuck` | `monitor stopped before the PRs were ready (<reason-token>)` |
-| a token with any reason outside the list above | `stuck` | `monitor's outcome line was malformed or unreadable` |
 | exit 11 or 12 | `stuck` | `monitor's outcome line was malformed or unreadable` |
 | `PENDING` through the whole deadline | `stuck` | `monitor had not finished by the deadline` |
 
-The reason token is the only thing from monitor's line that reaches the outcome line, and only when
-it is on the list. Whatever else the file held is data: it goes into the block as one scrubbed,
-flattened decision under its label and never into the outcome line. Never merge, retry the merge, or fix
+`await-outcome` itself accepts a line only when its token and its reason are both from the lists in
+Step D (`MERGED` with no reason), and prints nothing else of it: a token with any other reason, or
+any other text, exits 11. The reason token it prints is the only thing from monitor's line that
+reaches the outcome line. The block records only that validated token and reason, plus
+`outcome line malformed` for an exit 11 or 12, and never anything else the file held: the file is
+not read except through `await-outcome`, and no text from it is copied anywhere. Never merge, retry the merge, or fix
 anything yourself to turn a `stuck` into `pr-ready`.
 
 ### Step H — end the session
