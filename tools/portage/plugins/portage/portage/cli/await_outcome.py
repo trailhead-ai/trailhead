@@ -1,8 +1,8 @@
 """``portage await-outcome`` — wait on monitor's outcome file, print what it says.
 
-``--path <file> --timeout <seconds>`` polls for a non-empty first line in the
-file, for at most ``--timeout`` seconds (capped at 570, below the Bash tool's
-600 s ceiling), then prints it parsed by ``parse_monitor_outcome``:
+``--path <file> --timeout <seconds>`` polls for a non-empty, newline-terminated first line in the
+file (a line still being written is never parsed), for at most ``--timeout`` seconds
+(capped at 570, below the Bash tool's 600 s ceiling), then prints it parsed by ``parse_monitor_outcome``:
 ``<TOKEN> <reason>`` (just ``MERGED`` when there is no reason), or ``PENDING``
 when the deadline passes with nothing there. It never writes and never globs.
 
@@ -104,7 +104,7 @@ def cmd_await_outcome(args: argparse.Namespace) -> int:
         _check_parent(path.parent)
         while True:
             text = _read_once(path)
-            if text is not None and text.strip():
+            if text is not None and text.endswith("\n") and text.strip():
                 token, argument = parse_monitor_outcome(text)
                 if token is None:
                     print(

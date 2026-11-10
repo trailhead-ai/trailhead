@@ -154,31 +154,33 @@ def _add_merge(sub) -> None:
     p.set_defaults(func=cmd_merge)
 
 
-def _checked_out_branch(repo_path: str) -> str | None:
+def _head_branch(pair: PRPair) -> str | None:
+    """The PR's head branch as GitHub reports it, or None when it cannot be read."""
     try:
         r = subprocess.run(
-            ["git", "-C", repo_path, "symbolic-ref", "--short", "-q", "HEAD"],
-            capture_output=True, text=True, check=False,
+            ["gh", "pr", "view", pair.pr_number, "--json", "headRefName", "--jq", ".headRefName"],
+            cwd=pair.repo_path, capture_output=True, text=True, check=False,
         )
     except OSError:
         return None
-    return r.stdout.strip() or None if r.returncode == 0 else None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
 def _held_branch_refusal(pr_pairs: list[PRPair]) -> str | None:
     """Refusal message for the first pair whose head branch is held, else None.
 
-    Runs before any `gh` call. The head branch is the one checked out in the
-    pair's repo path (a camp worktree sits on the group branch); when it cannot
-    be read and the repo has any hold, the pair is refused rather than guessed at.
+    Runs before the merge. A repo with no hold at all is never asked about its
+    PR. Otherwise the PR's own head branch decides (a camp worktree may have any
+    branch checked out); when the head branch cannot be determined, the pair is
+    refused rather than guessed at.
     """
     for pair in pr_pairs:
-        branch = _checked_out_branch(pair.repo_path)
+        if not holds.has_any_hold(pair.repo_path):
+            continue
+        branch = _head_branch(pair)
         if branch is not None and holds.BRANCH_PATTERN.fullmatch(branch):
             if not holds.is_held(pair.repo_path, branch):
                 continue
-        elif not holds.has_any_hold(pair.repo_path):
-            continue
         shown = branch or "<unreadable>"
         return (
             f"portage: merge refused — branch '{shown}' of {pair.repo_path} is held "

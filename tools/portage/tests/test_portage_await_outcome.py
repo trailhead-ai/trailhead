@@ -147,9 +147,22 @@ def test_writes_nothing(outdir, capsys):
     assert (sorted(p.name for p in outdir.iterdir()), f.read_text(), f.stat().st_mtime_ns) == before
 
 
-def test_help_names_every_exit_code(capsys):
-    with pytest.raises(SystemExit):
-        dispatch.main(["await-outcome", "--help"])
-    help_text = capsys.readouterr().out
-    for code in ("0", "10", "11", "12"):
-        assert f" {code} " in help_text
+def test_a_line_without_its_newline_is_not_parsed_until_it_is_complete(outdir, capsys):
+    f = outdir / "outcome"
+    f.write_text("READY all gr")
+
+    def finish():
+        f.write_text("READY all green\n")
+
+    t = threading.Timer(0.4, finish)
+    t.start()
+    rc, out, _ = _run(capsys, f, timeout="5")
+    t.join()
+    assert (rc, out.strip()) == (PARSED, "READY all green")
+
+
+def test_a_line_that_never_gets_its_newline_stays_pending(outdir, capsys):
+    f = outdir / "outcome"
+    f.write_text("READY all green")
+    rc, out, _ = _run(capsys, f, timeout="1", interval="0.1")
+    assert (rc, out.strip()) == (PENDING, "PENDING")

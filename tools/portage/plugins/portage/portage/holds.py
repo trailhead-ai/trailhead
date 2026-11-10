@@ -1,7 +1,7 @@
 """Merge holds — the structural never-merge guard.
 
-A hold names one `(repo, branch)`. `portage merge` refuses any pair whose repo
-has that branch checked out while the hold exists (`cli/pr.py`), before any `gh`
+A hold names one `(repo, branch)`. `portage merge` refuses any pair whose PR
+head branch is that branch while the hold exists (`cli/pr.py`), before any merge
 call and whatever `[release].auto_merge` or `--operator-directed` say. Only an
 operator or the orchestrator runs `portage release`; the unattended PR step never
 does.
@@ -68,13 +68,16 @@ def is_held(repo: str, branch: str) -> bool:
 
 
 def has_any_hold(repo: str) -> bool:
-    """Whether any branch of `repo` is held (a fail-closed fallback when the
-    checked-out branch cannot be read)."""
+    """Whether any branch of `repo` is held. Fails closed: a holds directory that
+    exists but cannot be listed counts as held."""
     key = _repo_key(repo)
     try:
-        entries = list(_holds_dir().glob("*.json"))
-    except OSError:
+        with os.scandir(_holds_dir()) as it:
+            entries = [Path(e.path) for e in it if e.name.endswith(".json")]
+    except FileNotFoundError:
         return False
+    except OSError:
+        return True
     for f in entries:
         try:
             if json.loads(f.read_text(encoding="utf-8")).get("repo") == key:

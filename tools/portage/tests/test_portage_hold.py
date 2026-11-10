@@ -13,6 +13,7 @@ import pytest
 
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 
+from portage import holds
 from portage.cli import dispatch
 from portage.cli import pr as pr_cli
 
@@ -41,6 +42,14 @@ class _SpyRunner:
 @pytest.fixture(autouse=True)
 def state(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTAGE_STATE_DIR", str(tmp_path / "state"))
+
+
+@pytest.fixture(autouse=True)
+def head_branch(monkeypatch):
+    """The PR's head branch as `gh` reports it; a test sets `head["branch"]` (None = unreadable)."""
+    head = {"branch": "feat"}
+    monkeypatch.setattr(pr_cli, "_head_branch", lambda pair: head["branch"])
+    return head
 
 
 @pytest.fixture
@@ -136,15 +145,33 @@ def test_hold_is_keyed_by_repo_too(tmp_path, monkeypatch, repo):
     assert spy.merge_attempted()
 
 
-def _detach(repo):
-    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True)
-
-
-def test_unreadable_branch_with_a_hold_on_the_repo_refuses_before_any_gh_call(
+def test_held_head_branch_refuses_when_a_different_branch_is_checked_out(
     tmp_path, monkeypatch, repo, capsys
 ):
+    subprocess.run(["git", "-C", str(repo), "checkout", "-q", "-b", "other"], check=True)
     dispatch.main(["hold", str(repo), "feat"])
-    _detach(repo)
+    capsys.readouterr()
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert spy.calls == []
+    assert "held" in err and "feat" in err
+
+
+def test_unheld_head_branch_proceeds_even_when_the_checked_out_branch_is_held(
+    tmp_path, monkeypatch, repo, head_branch
+):
+    dispatch.main(["hold", str(repo), "feat"])
+    head_branch["branch"] = "other"
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    assert spy.merge_attempted()
+
+
+def test_unreadable_head_branch_with_a_hold_on_the_repo_refuses_before_any_gh_call(
+    tmp_path, monkeypatch, repo, capsys, head_branch
+):
+    dispatch.main(["hold", str(repo), "feat"])
+    head_branch["branch"] = None
     capsys.readouterr()
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
     err = capsys.readouterr().err
@@ -153,7 +180,32 @@ def test_unreadable_branch_with_a_hold_on_the_repo_refuses_before_any_gh_call(
     assert "held" in err and "portage release" in err
 
 
-def test_unreadable_branch_without_any_hold_on_the_repo_proceeds(tmp_path, monkeypatch, repo):
-    _detach(repo)
+def test_unreadable_head_branch_without_any_hold_on_the_repo_proceeds(
+    tmp_path, monkeypatch, repo, head_branch
+):
+    head_branch["branch"] = None
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
     assert spy.merge_attempted()
+
+
+def test_a_repo_with_no_hold_never_asks_for_the_head_branch(tmp_path, monkeypatch, repo):
+    asked = []
+    monkeypatch.setattr(pr_cli, "_head_branch", lambda pair: asked.append(pair) or "feat")
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    assert asked == []
+    assert spy.merge_attempted()
+
+
+def test_an_unlistable_holds_directory_counts_as_held(tmp_path, repo):
+    dispatch.main(["hold", str(repo), "feat"])
+    holds_dir = holds._holds_dir()
+    assert holds_dir.is_dir()
+    holds_dir.chmod(0)
+    try:
+        assert holds.has_any_hold(str(repo)) is True
+    finally:
+        holds_dir.chmod(0o700)
+
+
+def test_a_missing_holds_directory_counts_as_no_hold(repo):
+    assert holds.has_any_hold(str(repo)) is False
