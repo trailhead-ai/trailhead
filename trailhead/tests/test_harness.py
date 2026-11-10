@@ -1770,6 +1770,8 @@ class TestClaudeCodeSessionTranscripts:
             yield readable
             raise PermissionError(13, "Permission denied")
 
+        # Patched by path: the walk must yield one readable transcript and then fail
+        # mid-iteration; a directory that is unreadable up front fails before any yield.
         monkeypatch.setattr(Path, "glob", _failing_walk)
 
         rows = ClaudeCodeHarness().session_transcripts(env=self._env(claude_dir))

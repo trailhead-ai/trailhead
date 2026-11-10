@@ -197,23 +197,15 @@ def test_deeply_nested_inline_tables_raise_host_config_error_not_recursion_error
         sys.setrecursionlimit(original_limit)
 
 
-def test_hosts_toml_unreadable_raises_host_config_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_hosts_toml_unreadable_raises_host_config_error(tmp_path: Path) -> None:
     """A hosts.toml that cannot be opened (e.g. mode-000, root-owned) must not
     escape as a raw PermissionError."""
     from camp.host.config import HostConfigError, self_host_name
 
     _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
-
-    real_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):
-        if self.name == "hosts.toml":
-            raise PermissionError(13, "Permission denied")
-        return real_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    hosts = next(tmp_path.rglob("hosts.toml"))
+    hosts.chmod(0o000)
 
     with pytest.raises(HostConfigError):
         self_host_name(env=_env(tmp_path))

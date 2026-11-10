@@ -1300,17 +1300,11 @@ class TestOutpostStatesExecuted:
         assert "not a regular file" in item["summary"]
         assert "fix" not in item
 
-    def test_i_a_config_that_cannot_be_read_could_not_be_checked(self, tmp_path, monkeypatch):
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+    def test_i_a_config_that_cannot_be_read_could_not_be_checked(self, tmp_path):
         sb = _OutpostSandbox(tmp_path)
         sb.write_config('checkout = "/x"\n')
-        real_open = Path.open
-
-        def fail(self, *a, **k):
-            if self == sb.cfg:
-                raise PermissionError(13, "Permission denied")
-            return real_open(self, *a, **k)
-
-        monkeypatch.setattr(Path, "open", fail)
+        sb.cfg.chmod(0o000)
         item = sb.outpost()
         assert item["state"] == "could-not-check"
         assert str(sb.cfg) in item["summary"] and "could not be read" in item["summary"]

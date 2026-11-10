@@ -177,6 +177,8 @@ def test_failure_at_each_step_never_leaves_a_mixed_record(tmp_path, monkeypatch,
                     raise OSError(5, "injected failure")
             return real(src, dst, *a, **k)
 
+        # Patched by path: the second rename of the pair fails while the first has
+        # succeeded; a real trigger would fail both or neither.
         monkeypatch.setattr(os, "replace", replace)
 
     r = _run(

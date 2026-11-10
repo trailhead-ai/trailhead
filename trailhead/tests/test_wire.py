@@ -592,6 +592,8 @@ class TestAtomicPromote:
                 raise OSError("simulated failure promoting the staged tree into place")
             return real_rename(src, dst, *args, **kwargs)
 
+        # Patched by path: only the first rename into the live dir may fail, so the
+        # recovery rename can succeed; a permission change would fail both.
         with patch("os.rename", side_effect=_boom_when_promoting_into_live_dest):
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(

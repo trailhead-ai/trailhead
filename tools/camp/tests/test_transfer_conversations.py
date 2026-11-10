@@ -614,6 +614,8 @@ def test_relocation_across_a_filesystem_boundary_still_succeeds(
         calls["raised"] += 1
         raise OSError(18, "Invalid cross-device link")  # errno.EXDEV on Linux
 
+    # Patched by path: EXDEV needs two filesystems, and a test cannot assume the
+    # temp dir and the harness store sit on different ones.
     monkeypatch.setattr(os, "rename", _cross_device_rename)
     try:
         results = release_conversations(
