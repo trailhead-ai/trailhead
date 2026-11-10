@@ -59,17 +59,39 @@ def _tmux_version() -> tuple[int, int]:
 @pytest.fixture()
 def private_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Every bare `tmux` call pinned to a private socket — see
-    `redirected_tmux_socket`. Yields the socket name."""
+    `redirected_tmux_socket` — and to the config `tmp_path/tmux.conf` through
+    `-f`, so no server reads the operator's own tmux.conf whatever `HOME` is.
+    Yields the socket name."""
     monkeypatch.delenv("TMUX", raising=False)
-    yield from redirected_tmux_socket(
+    conf = tmp_path / "tmux.conf"
+    conf.write_text("", encoding="utf-8")
+    sockets = redirected_tmux_socket(
         tmp_path, monkeypatch, f"camp_server_cwd_{uuid.uuid4().hex[:12]}"
     )
+    sock = next(sockets)
+    (tmp_path / "bin" / "tmux").write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, sys\n"
+        f"os.execv({_REAL_TMUX!r}, [{_REAL_TMUX!r}, '-L', {sock!r}, '-f', {str(conf)!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    try:
+        yield sock
+    finally:
+        sockets.close()
 
 
 def _env(**extra: str) -> dict[str, str]:
-    env = {k: v for k, v in os.environ.items() if k not in ("TMUX", "HOME")}
+    env = {
+        k: v for k, v in os.environ.items() if k not in ("TMUX", "HOME", "XDG_CONFIG_HOME")
+    }
     env.update(extra)
     return env
+
+
+def _tmux_option(sock: str, name: str) -> str:
+    shown = _sock_run(sock, "show-options", "-gv", name)
+    return shown.stdout.strip()
 
 
 def _server_cwd(sock: str) -> str:
@@ -188,7 +210,7 @@ def test_door_hand_over_starts_a_server_from_home_not_the_process_cwd(
     ws.mkdir()
     home = tmp_path / "home"
     home.mkdir()
-    (home / ".tmux.conf").write_text("new-session -d -s keep\n", encoding="utf-8")
+    (tmp_path / "tmux.conf").write_text("new-session -d -s keep\n", encoding="utf-8")
     env = _env(HOME=str(home), PYTHONPATH=str(_PLUGIN_DIR))
 
     subprocess.run(
@@ -230,3 +252,20 @@ def test_hand_opened_window_lands_in_the_session_dir_after_a_workspace_is_delete
     pid = opened.stdout.strip()
 
     assert _wait_until(lambda: _cwd_of(pid), lambda seen: seen == str(ws_b)) == str(ws_b)
+
+
+@pytest.mark.parametrize("home_state", ["unset", "empty", "set"])
+def test_the_server_reads_the_test_config_whatever_home_is(
+    private_server, tmp_path: Path, home_state: str
+) -> None:
+    """tmux with HOME unset or empty falls back to the passwd home's
+    tmux.conf; the fixture's `-f` config must win so no test reads the
+    operator's own."""
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (tmp_path / "tmux.conf").write_text("set -g @camp_test_conf yes\n", encoding="utf-8")
+    env = {"unset": _env(), "empty": _env(HOME=""), "set": _env(HOME=str(tmp_path))}[home_state]
+
+    _start("new_session", "camp-t", ws, env)
+
+    assert _tmux_option(private_server, "@camp_test_conf") == "yes"

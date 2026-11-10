@@ -1193,3 +1193,31 @@ def test_the_door_refuses_before_creating_when_it_cannot_bind_the_declared_accou
     assert "acct" in (probe.reason or "")
     assert tmux.new_session_calls == []
     assert tmux.new_session_with_window_calls == []
+
+
+def test_the_door_reports_a_create_failure_naming_a_missing_workspace_dir(tmp_path, monkeypatch):
+    """With the real seam, a workspace directory that does not exist is a
+    `CREATE_FAILED` naming it — not a session that tmux silently never made."""
+    from camp.launch import tmux as tmux_module
+    from camp.launch.workspace_session import (
+        DoorState,
+        create_or_connect_workspace_session,
+    )
+
+    ran: list[list[str]] = []
+
+    def _record(argv, **kwargs):
+        ran.append(list(argv))
+        return subprocess.CompletedProcess(args=argv, returncode=1, stdout="", stderr="no session")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _record)
+    missing = tmp_path / "gone-workspace"
+
+    probe = create_or_connect_workspace_session(
+        "trailhead", "camp-cli", missing, env={"HOME": str(tmp_path)},
+        tmux=tmux_module.Tmux(), group=None,
+    )
+
+    assert probe.state is DoorState.CREATE_FAILED
+    assert str(missing) in probe.reason
+    assert [a for a in ran if "new-session" in a] == []

@@ -343,6 +343,14 @@ def server_start_dir(env: Mapping[str, str]) -> str:
     return "/"
 
 
+def _require_pane_dir(cwd: object) -> None:
+    """Refuse a *cwd* that does not exist: `tmux new-session -c <missing>`
+    exits 0 and the session vanishes, so the failure must be raised here,
+    naming the directory, before tmux runs."""
+    if not os.path.isdir(str(cwd)):
+        raise FileNotFoundError(f"[Errno 2] No such file or directory: '{cwd}'")
+
+
 def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
     """The pane's argv: change into *cwd* itself, then exec *command*.
 
@@ -741,6 +749,7 @@ class Tmux:
         to reclaim the name after a timeout, or distinguish an unlaunchable
         tmux from a refused spawn, reads them itself.
         """
+        _require_pane_dir(cwd)
         argv = [
             "tmux",
             "new-session",
@@ -800,6 +809,7 @@ class Tmux:
         the server-starting call, and the caller (the workspace door) already
         folds them the way it folds `spawn_session`'s.
         """
+        _require_pane_dir(cwd)
         argv = [
             "tmux",
             "new-session",

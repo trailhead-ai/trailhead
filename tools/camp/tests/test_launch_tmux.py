@@ -37,6 +37,9 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
+_PANE_DIR = str(Path(__file__).resolve().parent)  # an existing directory: the seam refuses a missing one
+
+
 def _completed(*, returncode: int, stdout: str = "", stderr: str = ""):
     return subprocess.CompletedProcess(
         args=["tmux"], returncode=returncode, stdout=stdout, stderr=stderr
@@ -494,7 +497,7 @@ def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
     monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
 
     tmux_module.Tmux().new_session(
-        "my-ws", cwd="/tmp/ws", env={"FOO": "bar"}, timeout=5
+        "my-ws", cwd=_PANE_DIR, env={"FOO": "bar"}, timeout=5
     )
 
     assert calls == [
@@ -505,12 +508,12 @@ def test_new_session_composes_no_command_and_no_argv_of_its_own(monkeypatch):
             "-s",
             "my-ws",
             "-c",
-            "/tmp/ws",
+            _PANE_DIR,
             "sh",
             "-c",
             calls[0][9],
             "camp-cwd",
-            "/tmp/ws",
+            _PANE_DIR,
         ]
     ]
 
@@ -536,7 +539,7 @@ def test_new_session_names_with_s_unprefixed_while_a_target_in_the_same_flow_is_
 
     name = "my-workspace"
     tmux = tmux_module.Tmux()
-    tmux.new_session(name, cwd="/tmp/ws", env={}, timeout=5)
+    tmux.new_session(name, cwd=_PANE_DIR, env={}, timeout=5)
     tmux.has_session(name)
 
     new_session_call, has_session_call = calls
@@ -621,7 +624,7 @@ def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
     monkeypatch.setattr(tmux_module.subprocess, "run", fake_run)
 
     tmux_module.Tmux().new_window(
-        "feat", cwd="/tmp/ws", window_name="my-window", command=["sleep", "30"]
+        "feat", cwd=_PANE_DIR, window_name="my-window", command=["sleep", "30"]
     )
 
     assert calls == [
@@ -636,12 +639,12 @@ def test_new_window_argv_carries_target_cwd_and_command_with_qualified_target(
             "-n",
             "my-window",
             "-c",
-            "/tmp/ws",
+            _PANE_DIR,
             "sh",
             "-c",
             calls[0][13],
             "camp-cwd",
-            "/tmp/ws",
+            _PANE_DIR,
             "sleep",
             "30",
         ]
@@ -663,7 +666,7 @@ def test_new_window_targeting_a_strict_prefix_of_another_live_session_does_not_r
     monkeypatch.setattr(tmux_module.subprocess, "run", fake)
 
     result = tmux_module.Tmux().new_window(
-        "feat", cwd="/tmp/ws", window_name="w", command=()
+        "feat", cwd=_PANE_DIR, window_name="w", command=()
     )
 
     assert result is None, (
@@ -897,7 +900,7 @@ def test_new_session_with_window_argv_carries_every_operand_in_order(monkeypatch
 
     tmux_module.Tmux().new_session_with_window(
         "ws-1",
-        cwd="/tmp/ws",
+        cwd=_PANE_DIR,
         window_name="first",
         command=["sleep", "30"],
     )
@@ -912,7 +915,7 @@ def test_new_session_with_window_argv_carries_every_operand_in_order(monkeypatch
             "-n",
             "first",
             "-c",
-            "/tmp/ws",
+            _PANE_DIR,
             "-P",
             "-F",
             "#{window_id} #{window_name}",
@@ -920,7 +923,7 @@ def test_new_session_with_window_argv_carries_every_operand_in_order(monkeypatch
             "-c",
             calls[0][14],
             "camp-cwd",
-            "/tmp/ws",
+            _PANE_DIR,
             "sleep",
             "30",
         ]
@@ -939,7 +942,7 @@ def test_new_session_with_window_a_name_holding_spaces_round_trips_whole(monkeyp
         lambda *a, **k: _completed(returncode=0, stdout="@0 my window\n"),
     )
     first = tmux_module.Tmux().new_session_with_window(
-        "ws-1", cwd="/tmp/ws", window_name="my window", command=()
+        "ws-1", cwd=_PANE_DIR, window_name="my window", command=()
     )
     assert first.window_id == "@0"
     assert first.window_name == "my window"
@@ -950,7 +953,7 @@ def test_new_session_with_window_a_name_holding_spaces_round_trips_whole(monkeyp
         lambda *a, **k: _completed(returncode=0, stdout="@1 other window\n"),
     )
     second = tmux_module.Tmux().new_session_with_window(
-        "ws-1", cwd="/tmp/ws", window_name="other window", command=()
+        "ws-1", cwd=_PANE_DIR, window_name="other window", command=()
     )
     assert second.window_id == "@1"
     assert second.window_name == "other window"
@@ -968,7 +971,7 @@ def test_new_session_with_window_exit_zero_answers_new_window_result(monkeypatch
     )
 
     result = tmux_module.Tmux().new_session_with_window(
-        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+        "ws-1", cwd=_PANE_DIR, window_name="first", command=()
     )
 
     assert result == tmux_module.NewWindowResult(window_id="@0", window_name="first")
@@ -986,7 +989,7 @@ def test_new_session_with_window_duplicate_marker_answers_duplicate_sentinel(mon
     )
 
     result = tmux_module.Tmux().new_session_with_window(
-        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+        "ws-1", cwd=_PANE_DIR, window_name="first", command=()
     )
 
     assert result is tmux_module.DUPLICATE
@@ -1004,7 +1007,7 @@ def test_new_session_with_window_other_stderr_answers_failure_carrying_it_verbat
     )
 
     result = tmux_module.Tmux().new_session_with_window(
-        "ws-1", cwd="/tmp/ws", window_name="first", command=()
+        "ws-1", cwd=_PANE_DIR, window_name="first", command=()
     )
 
     assert result is not tmux_module.DUPLICATE
@@ -1024,7 +1027,7 @@ def test_new_session_with_window_timeout_expired_propagates_uncaught(monkeypatch
 
     with pytest.raises(subprocess.TimeoutExpired):
         tmux_module.Tmux().new_session_with_window(
-            "ws-1", cwd="/tmp/ws", window_name="first", command=()
+            "ws-1", cwd=_PANE_DIR, window_name="first", command=()
         )
 
 
@@ -1076,3 +1079,38 @@ def test_pane_window_answers_none_when_tmux_gives_no_usable_answer(monkeypatch, 
     monkeypatch.setattr(tmux_module.subprocess, "run", _run)
 
     assert tmux_module.Tmux().pane_window("%12") is None
+
+
+@pytest.mark.parametrize("method", ["spawn_session", "new_session_with_window"])
+def test_a_missing_pane_directory_is_refused_before_tmux_runs(tmp_path, monkeypatch, method):
+    """`tmux new-session -c <missing>` exits 0 and the session vanishes, so
+    the seam refuses a missing *cwd* itself, naming it, and never runs tmux."""
+    from camp.launch import tmux as tmux_module
+
+    ran: list[list[str]] = []
+
+    def _record(argv, **kwargs):
+        ran.append(list(argv))
+        return _completed(returncode=0, stdout="@1 w\n")
+
+    monkeypatch.setattr(tmux_module.subprocess, "run", _record)
+    missing = tmp_path / "gone-workspace"
+    seam = tmux_module.Tmux()
+    if method == "spawn_session":
+        call = lambda d: seam.spawn_session(
+            "camp-t", cwd=d, command=("sleep", "1"), env={"HOME": str(tmp_path)}, timeout=5
+        )
+    else:
+        call = lambda d: seam.new_session_with_window(
+            "camp-t", cwd=d, window_name="w", command=("sleep", "1"),
+            env={"HOME": str(tmp_path)}, timeout=5,
+        )
+
+    with pytest.raises(FileNotFoundError, match=str(missing)):
+        call(missing)
+    assert ran == []
+
+    present = tmp_path / "workspace"
+    present.mkdir()
+    call(present)
+    assert len(ran) == 1

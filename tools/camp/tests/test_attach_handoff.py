@@ -317,3 +317,33 @@ def test_remote_argv_never_calls_the_listing_transports_run_camp(monkeypatch):
     argv = handoff.remote_argv(_HOST, "some-ref", group="g")
 
     assert argv[0] == "ssh"
+
+
+@pytest.mark.parametrize("seam", ["returns", "raises"])
+def test_hand_over_restores_this_process_cwd_whatever_the_exec_seam_does(
+    tmp_path, monkeypatch, seam
+):
+    """The hand-over runs the attach client from the server-start directory;
+    when the (test-injected) exec seam returns or raises, camp's own cwd is
+    back where it was."""
+    import os
+
+    start = tmp_path / "start"
+    start.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.chdir(start)
+    seen: list[str] = []
+
+    def _fake_handoff(argv, **kwargs):
+        seen.append(os.getcwd())
+        if seam == "raises":
+            raise RuntimeError("exec failed")
+
+    monkeypatch.setattr(handoff, "handoff", _fake_handoff)
+
+    with pytest.raises((SystemExit, RuntimeError)):
+        handoff.hand_over_to_session(object(), "camp-x", env={"HOME": str(home)})
+
+    assert seen == [str(home)]
+    assert os.getcwd() == str(start)
