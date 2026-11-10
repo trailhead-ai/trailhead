@@ -374,11 +374,7 @@ def _certify_folds(spec_body: str, folds: list[str]) -> int:
 
     try:
         entries = followups.parse_followups(spec_body)
-    except DuplicateHeadingError as e:
-        _err(f"reason: {e}")
-        _err(f"reason-code: {e.reason_code}")
-        return 2
-    except followups.FollowupsError as e:
+    except (DuplicateHeadingError, followups.FollowupsError) as e:
         _err(f"reason: {e}")
         _err(f"reason-code: {e.reason_code}")
         return 2

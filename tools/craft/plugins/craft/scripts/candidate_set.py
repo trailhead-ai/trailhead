@@ -708,19 +708,12 @@ def find_unclaimed_ledger_lines(spec_body: str) -> list[int]:
     return unclaimed
 
 
-def read_followup_entries(spec_body: str) -> list:
-    """The spec's `## Follow-ups` entries through the one shared parser; empty
-    when the section is absent. Raises FollowupsError on a grammar violation
-    and DuplicateHeadingError on a second unmasked heading."""
-    return parse_followups(spec_body)
-
-
 def credited_task_ids(spec_body: str) -> frozenset[str]:
     """Task ids that follow-up entries record as `done by task/<id>`. A section
     that does not parse grants no credit: the ledger then reads exactly as it
     would without the section."""
     try:
-        entries = read_followup_entries(spec_body)
+        entries = parse_followups(spec_body)
     except (FollowupsError, DuplicateHeadingError):
         return frozenset()
     return frozenset(
@@ -952,7 +945,7 @@ def main(argv: list[str]) -> int:
         eligible = False
 
     try:
-        followups = read_followup_entries(spec_body)
+        followups = parse_followups(spec_body)
     except (FollowupsError, DuplicateHeadingError) as e:
         _err(f"reason: the spec's `## Follow-ups` section is not readable ({e.reason_code})")
         _err(f"reason-code: {_MALFORMED_FOLLOWUPS_REASON_CODE}")
