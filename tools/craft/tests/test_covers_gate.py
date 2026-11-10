@@ -19,6 +19,7 @@ Exit-code contract (matches `leak_gate.py`):
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -69,6 +70,7 @@ def _run(
     covers: str | None,
     spec_body: str,
     partial_covers: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(GATE)]
     if covers is not None:
@@ -521,6 +523,7 @@ def _run_folds(
     spec_body: str,
     covers: str | None = None,
     partial_covers: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(GATE)]
     if folds is not None:
@@ -529,7 +532,7 @@ def _run_folds(
         cmd += ["--covers", covers]
     if partial_covers is not None:
         cmd += ["--partial-covers", partial_covers]
-    return subprocess.run(cmd, input=spec_body, capture_output=True, text=True)
+    return subprocess.run(cmd, input=spec_body, capture_output=True, text=True, env=env)
 
 
 def test_folds_alone_over_open_entries_exits_0_on_a_spec_with_criteria():
@@ -611,6 +614,20 @@ def test_folds_over_a_malformed_followups_section_exits_2():
     r = _run_folds("F1", spec)
     assert r.returncode == 2, r.stderr + r.stdout
     assert "reason-code: " in r.stderr
+
+
+def test_folds_certifies_when_the_interpreter_does_not_put_the_script_directory_on_sys_path():
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    r = _run_folds("F1, F3", WITH_FOLLOWUPS_SPEC, env=env)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "ModuleNotFoundError" not in r.stderr
+
+
+def test_folds_refuses_a_duplicated_followups_heading_with_exit_2_when_the_script_directory_is_not_on_sys_path():
+    spec = WITH_FOLLOWUPS_SPEC + "\n## Follow-ups\n\n- **F9.** Another\n"
+    r = _run_folds("F1", spec, env={**os.environ, "PYTHONSAFEPATH": "1"})
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-followups-heading" in r.stderr
 
 
 @pytest.mark.parametrize("covers", [None, "AC1"])

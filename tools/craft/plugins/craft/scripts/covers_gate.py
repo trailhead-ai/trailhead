@@ -93,6 +93,9 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
 
 _AC_HEADING = "## Acceptance Criteria"
 _AC_HEADING_RE = re.compile(r"^## Acceptance Criteria$", re.IGNORECASE)
@@ -372,6 +375,8 @@ def _certify_folds(spec_body: str, folds: list[str]) -> int:
     # Imported here: followups imports this module at its top level. Run as a
     # script, that import loads a second copy of this module, so the heading
     # error followups raises is a different class from this file's own.
+    if str(_SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPT_DIR))
     import followups
 
     try:
