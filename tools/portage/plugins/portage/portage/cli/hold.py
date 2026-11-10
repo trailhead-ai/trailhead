@@ -15,28 +15,19 @@ from .. import holds
 
 
 def add_hold_subparsers(sub) -> None:
-    for name, func, text in (
-        ("hold", cmd_hold, "Hold a branch: `portage merge` refuses it until released."),
-        ("release", cmd_release, "Release a held branch (operator or orchestrator only)."),
+    for name, op, text in (
+        ("hold", holds.hold, "Hold a branch: `portage merge` refuses it until released."),
+        ("release", holds.release, "Release a held branch (operator or orchestrator only)."),
     ):
         p = sub.add_parser(name, help=text, description=text)
         p.add_argument("repo", help="Repo path, as in a `portage merge` pair.")
         p.add_argument("branch", help="Head branch name (^[A-Za-z0-9._/-]+$).")
-        p.set_defaults(func=func)
+        p.set_defaults(func=cmd_hold_op, hold_op=op)
 
 
-def cmd_hold(args: argparse.Namespace) -> int:
+def cmd_hold_op(args: argparse.Namespace) -> int:
     try:
-        holds.hold(args.repo, args.branch)
-    except holds.HoldError as e:
-        print(f"portage: {e}", file=sys.stderr)
-        return 2
-    return 0
-
-
-def cmd_release(args: argparse.Namespace) -> int:
-    try:
-        holds.release(args.repo, args.branch)
+        args.hold_op(args.repo, args.branch)
     except holds.HoldError as e:
         print(f"portage: {e}", file=sys.stderr)
         return 2

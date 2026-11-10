@@ -30,10 +30,9 @@ class HoldError(ValueError):
     """A hold/release request that is refused (invalid branch name)."""
 
 
-def validate_branch(branch: str) -> str:
+def validate_branch(branch: str) -> None:
     if not BRANCH_PATTERN.fullmatch(branch):
         raise HoldError(f"invalid branch name {branch!r}: must match ^[A-Za-z0-9._/-]+$")
-    return branch
 
 
 def _repo_key(repo: str) -> str:
@@ -49,24 +48,19 @@ def _hold_file(repo: str, branch: str) -> Path:
     return _holds_dir() / f"{digest}.json"
 
 
-def hold(repo: str, branch: str) -> Path:
+def hold(repo: str, branch: str) -> None:
     validate_branch(branch)
     f = _hold_file(repo, branch)
     paths.ensure_dir(f.parent)
     tmp = f.with_name(f.name + f".{os.getpid()}.tmp")
     tmp.write_text(json.dumps({"repo": _repo_key(repo), "branch": branch}), encoding="utf-8")
     os.replace(tmp, f)
-    return f
 
 
-def release(repo: str, branch: str) -> bool:
-    """Clear the hold; return whether one existed."""
+def release(repo: str, branch: str) -> None:
+    """Clear the hold; releasing a branch that is not held is not an error."""
     validate_branch(branch)
-    try:
-        _hold_file(repo, branch).unlink()
-    except FileNotFoundError:
-        return False
-    return True
+    _hold_file(repo, branch).unlink(missing_ok=True)
 
 
 def is_held(repo: str, branch: str) -> bool:
