@@ -245,39 +245,6 @@ def test_plan_remedy_table_names_every_reason_code_the_renderer_can_actually_emi
         )
 
 
-# ---- contract item 10: the waived-concern eval fixtures embed the renderer's real output ----
-#
-# `plugins/craft/evals/waived-concern-stands-down/` is a manual (hand-dispatched) eval case,
-# not something pytest can run — but the calibration block each fixture embeds under its own
-# `## Maturity calibration` heading is claimed to be `scripts/maturity_bars.py`'s real output
-# for that fixture's own spec, not hand-authored stand-down wording. That claim is ordinary
-# code-vs-document wiring and stays a deterministic test: re-run the renderer against the
-# fixture's own spec section and byte-compare.
-
-EVALS_DIR = REPO_ROOT / "plugins" / "craft" / "evals"
-WAIVED_CONCERN_EVAL = EVALS_DIR / "waived-concern-stands-down"
-WAIVED_CONCERN_FIXTURES = sorted(
-    (WAIVED_CONCERN_EVAL / "fixtures").glob("*.md")
-)
-
-_SPEC_HEADING = "## Spec under review\n\n"
-_CALIBRATION_HEADING = "\n## Maturity calibration\n\n"
-_LENS_HEADING = "\n## Captured lens responses\n"
-
-
-def _split_fixture(text: str) -> tuple[str, str]:
-    """Return `(spec_text, calibration_block)` from a waived-concern-stands-down
-    fixture: the spec section between the `## Spec under review` and
-    `## Maturity calibration` headings, and the calibration block between
-    `## Maturity calibration` and `## Captured lens responses`."""
-    spec_start = text.index(_SPEC_HEADING) + len(_SPEC_HEADING)
-    calibration_start = text.index(_CALIBRATION_HEADING, spec_start)
-    spec_text = text[spec_start:calibration_start]
-    block_start = calibration_start + len(_CALIBRATION_HEADING)
-    block_end = text.index(_LENS_HEADING, block_start)
-    return spec_text, text[block_start:block_end]
-
-
 # ---- contract item 11: the documented concern names are derived from _CONCERNS ----
 #
 # `_shared/council.md`'s new waiver-rule prose names the closed concern vocabulary a

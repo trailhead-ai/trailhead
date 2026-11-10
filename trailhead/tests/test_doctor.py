@@ -16,6 +16,10 @@ from pathlib import Path
 import pytest
 
 from trailhead import doctor
+from trailhead import harness as harness_registry
+from trailhead import outpost_supervisor as osup
+from trailhead.harness import ClaudeCodeHarness
+from trailhead.pathint import repo_root
 from trailhead.doctor import run_doctor
 from trailhead.wire import default_manifest_paths
 
@@ -670,6 +674,94 @@ class TestSupervisorSummary:
         assert "entry file exists" in summary
         assert "not checked" in summary
         assert "registered" not in summary
+
+
+class _CliHarness(ClaudeCodeHarness):
+    name = "cli_stub"
+
+    @classmethod
+    def detect(cls, env):
+        return True
+
+    def cli_binary_name(self):
+        return "stubcli"
+
+
+class TestSupervisorPath:
+    """The registered entry's PATH is read from disk and checked for the dirs
+    the hub path needs: trailhead's bin dir and each detected harness's CLI dir."""
+
+    def _run(self, tmp_path, monkeypatch, path_value, *, cli_dir="/opt/cli", tmux_dir=None):
+        monkeypatch.setattr(harness_registry, "_HARNESSES", {_CliHarness.name: _CliHarness})
+        env = _prepare_host(tmp_path, supervisor=False)
+        entry = osup.SupervisorEntry(
+            entrypoint=Path("/c/dist/server/index.js"),
+            checkout=Path("/c"),
+            node_bin="/usr/bin/node",
+            port=7313,
+            log_path=Path("/l"),
+            path_value=path_value,
+        )
+        sup = tmp_path / "supervisor"
+        (sup / "outpost.service").write_text(osup.render_systemd_unit(entry))
+        (sup / f"{osup.LAUNCHD_LABEL}.plist").write_bytes(osup.render_plist(entry))
+        return run_doctor(
+            env=env,
+            which_runner=lambda n: {
+                "stubcli": f"{cli_dir}/stubcli",
+                "tmux": f"{tmux_dir}/tmux" if tmux_dir else None,
+            }.get(n),
+            python_version_runner=_fake_py,
+            supervisor_dir=sup,
+            platform=self.platform,
+            lore_runner=_lore_runner(_lore_stdout(_LORE_OK_ITEMS)),
+        )
+
+    platform = "linux"
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    def test_both_dirs_present_is_ok(self, tmp_path, monkeypatch, platform):
+        self.platform = platform
+        good = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli"
+        assert _item(self._run(tmp_path, monkeypatch, good), "supervisor")["state"] == "ok"
+
+    @pytest.mark.parametrize("platform", ["linux", "darwin"])
+    @pytest.mark.parametrize(
+        "path_value, lacking",
+        [
+            ("/usr/bin:/opt/cli", str(repo_root() / "bin")),
+            (f"/usr/bin:{repo_root() / 'bin'}", "/opt/cli"),
+        ],
+    )
+    def test_lacking_either_dir_is_missing_and_names_the_fix(
+        self, tmp_path, monkeypatch, platform, path_value, lacking
+    ):
+        self.platform = platform
+        r = self._run(tmp_path, monkeypatch, path_value)
+        item = _item(r, "supervisor")
+        assert item["state"] == "missing"
+        assert f"lacks {lacking};" in item["summary"]
+        assert item["fix"] == "trailhead outpost enable"
+        assert _VERDICT_READY not in r.data["readiness"]["verdict"]
+
+    def test_a_path_lacking_the_dir_tmux_resolves_to_is_missing_and_names_it(
+        self, tmp_path, monkeypatch
+    ):
+        path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli"
+        r = self._run(tmp_path, monkeypatch, path_value, tmux_dir="/opt/tmux")
+        item = _item(r, "supervisor")
+        assert item["state"] == "missing"
+        assert "lacks /opt/tmux;" in item["summary"]
+
+    def test_a_path_carrying_the_tmux_dir_is_ok(self, tmp_path, monkeypatch):
+        path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli:/opt/tmux"
+        r = self._run(tmp_path, monkeypatch, path_value, tmux_dir="/opt/tmux")
+        assert _item(r, "supervisor")["state"] == "ok"
+
+    def test_the_cli_dir_required_follows_where_the_cli_resolves(self, tmp_path, monkeypatch):
+        path_value = f"/usr/bin:{repo_root() / 'bin'}:/opt/cli"
+        r = self._run(tmp_path, monkeypatch, path_value, cli_dir="/elsewhere")
+        assert _item(r, "supervisor")["state"] == "missing"
 
 
 class TestOutpostSummary:

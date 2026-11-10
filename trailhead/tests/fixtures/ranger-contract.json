@@ -1,0 +1,6 @@
+{
+  "credential_path": "operator/credential",
+  "tmux_socket": "outpost-hubs",
+  "hub_session_pattern": "hub-<account>",
+  "start_route": "POST /operator/hubs/:account/start"
+}

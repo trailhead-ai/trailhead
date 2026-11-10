@@ -215,6 +215,68 @@
         "skills/_shared/execute.md"
       ]
     },
+    "slice-folds-entries-that-touch-its-code": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
+      "measures": [
+        "skills/plan/SKILL.md"
+      ]
+    },
+    "build-close-marks-folded-entries": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "council-synthesis-stands-down-a-waived-concern": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "council-synthesis-keeps-a-concern-a-waiver-tries-to-silence": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "council-synthesis-rates-every-concern-when-nothing-is-waived": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "reliability-lens-ignores-a-waiver-aimed-at-another-concern": {
+      "measures": [
+        "skills/_shared/council.md",
+        "agents/breaker.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "consistency-auditor-flags-a-compound-criterion-phrased-with-with": {
+      "measures": [
+        "agents/consistency-auditor.md"
+      ]
+    },
+    "consistency-auditor-spares-an-inseparable-and-but-flags-a-separable-one": {
+      "measures": [
+        "agents/consistency-auditor.md"
+      ]
+    },
+    "plan-step-7-suppresses-migration-on-a-prototype": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "scripts/migration_bar.py"
+      ]
+    },
+    "plan-step-7-keeps-migration-a-criterion-requires": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "scripts/migration_bar.py"
+      ]
+    },
     "close-asks-nothing-when-no-one-is-there": {
       "measures": [
         "skills/_shared/execute.md"

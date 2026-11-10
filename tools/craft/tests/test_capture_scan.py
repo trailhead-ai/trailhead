@@ -42,6 +42,11 @@ EVALS_ROOT = REPO_ROOT / "plugins" / "craft" / "evals"
 TOOLS_ROOT = REPO_ROOT.parent
 
 
+def _committed_runs_dirs(tools_root: Path) -> list[Path]:
+    """Every `runs/` directory under any tool's `plugins/*/evals/` tree, sorted."""
+    return sorted(p for p in tools_root.glob("*/plugins/*/evals/**/runs") if p.is_dir())
+
+
 def _run(*paths: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
         [sys.executable, str(SCANNER), *[str(p) for p in paths]],
@@ -473,19 +478,32 @@ def test_scan_text_applies_the_escape_rule_only_to_a_json_stream():
 # ---- CI enforcement: the committed capture batch is scanned ----------------
 
 
+def test_committed_runs_dirs_finds_every_tools_eval_runs_dir(tmp_path):
+    for rel in (
+        "lore/plugins/lore/evals/case-a/runs",
+        "craft/plugins/craft/evals/case-b/nested/runs",
+        "craft/plugins/craft/scripts/runs",
+    ):
+        (tmp_path / rel).mkdir(parents=True)
+    found = _committed_runs_dirs(tmp_path)
+    assert found == [
+        tmp_path / "craft/plugins/craft/evals/case-b/nested/runs",
+        tmp_path / "lore/plugins/lore/evals/case-a/runs",
+    ]
+
+
+def test_committed_runs_dirs_is_empty_for_a_tree_with_no_captures(tmp_path):
+    (tmp_path / "craft/plugins/craft/evals/case-a/fixtures").mkdir(parents=True)
+    assert _committed_runs_dirs(tmp_path) == []
+
+
 def test_the_committed_eval_captures_pass_the_scan():
-    # Widened repo-wide (was EVALS_ROOT/*/runs, craft-only) so a capture batch
-    # committed under another tool's evals/, or in a nested runs/, cannot land
-    # unscanned — the CI gate this test stands in for scans the whole repo, not
-    # one tool's tree.
-    runs_dirs = sorted(
-        p for p in TOOLS_ROOT.glob("*/plugins/*/evals/**/runs") if p.is_dir()
-    )
-    assert runs_dirs, "expected at least one committed evals/**/runs directory"
-    assert any(EVALS_ROOT in p.parents for p in runs_dirs), (
-        f"expected craft's own committed runs/ dir among the widened glob's results, "
-        f"got: {runs_dirs}"
-    )
+    # Repo-wide, so a capture batch committed under any tool's evals/, or in a
+    # nested runs/, cannot land unscanned. Runner cases commit no captures, so an
+    # empty result is the normal state; the scan runs on whatever is committed.
+    runs_dirs = _committed_runs_dirs(TOOLS_ROOT)
+    if not runs_dirs:
+        return
     result = _run(*runs_dirs)
     assert result.returncode == 0, (
         f"a committed capture tripped the credential scan — this is a real "

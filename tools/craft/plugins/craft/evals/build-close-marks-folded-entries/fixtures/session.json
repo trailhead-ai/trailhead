@@ -1,0 +1,6 @@
+{
+ "session_id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+ "candidates": [
+  {"kind": "decision", "phase": "Plan", "body": "Kept the tally output to plain text."}
+ ]
+}

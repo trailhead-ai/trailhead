@@ -12,7 +12,10 @@ Output hygiene:
 """
 
 import argparse
+import json
+import os
 import sys
+from pathlib import Path
 
 from trailhead import __version__
 from trailhead.capabilities import ConfineError, ManifestError
@@ -24,9 +27,10 @@ from trailhead.compose import (
     UnknownSubagentError,
 )
 from trailhead.doctor import run_doctor
-from trailhead.harness import HarnessError
+from trailhead.harness import HarnessError, detect_harnesses, get_harness
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
+from trailhead.launch_profile import HUB_PROFILE, LaunchProfileError, hub_home, resolve_profile
 from trailhead.outpost_lifecycle import (
     OutpostLifecycleError,
     open_ui,
@@ -39,6 +43,7 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
+from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfigError, read_hub_config
 from trailhead.uninstall import run_uninstall
 from trailhead.update import (
     FRESHNESS_WINDOW_SECONDS,
@@ -65,6 +70,8 @@ _TRAILHEAD_ERRORS = (
     PathIntegrationError,
     PathResolutionError,
     OutpostLifecycleError,
+    HubConfigError,
+    LaunchProfileError,
 )
 
 _CURATED_HELP = """\
@@ -208,6 +215,48 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
         args.outpost_parser.print_help(file=sys.stderr)
         return 2
     return handler()
+
+
+def _cmd_session_start(args: argparse.Namespace) -> int:
+    if not args.json:
+        print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
+        return 1
+    env = dict(os.environ)
+    config = read_hub_config(args.account, env=env)
+    profile = resolve_profile(HUB_PROFILE, args.account, env=env)
+    directory = hub_home(args.account, env=env)
+    prompt = None
+    if args.prompt_file:
+        try:
+            prompt = Path(args.prompt_file).read_text()
+        except (OSError, UnicodeDecodeError) as exc:
+            print(f"trailhead: cannot read --prompt-file {args.prompt_file}: {exc}", file=sys.stderr)
+            return 1
+    harnesses = [get_harness(args.harness)] if args.harness else detect_harnesses(env)
+    if not harnesses:
+        print("trailhead: no harness detected; pass --harness", file=sys.stderr)
+        return 1
+    launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
+    start = harnesses[0].session_start(
+        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env
+    )
+    if start is None:
+        print(
+            f"trailhead: harness {harnesses[0].name!r} cannot start a confined session; refusing",
+            file=sys.stderr,
+        )
+        return 1
+    print(
+        json.dumps(
+            {
+                "argv": start.argv,
+                "env_set": start.env_set,
+                "env_unset": start.env_unset,
+                "directory": str(directory),
+            }
+        )
+    )
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -398,6 +447,19 @@ def _build_parser() -> argparse.ArgumentParser:
     # Carry the parser so the handler can print help when no verb is given.
     outpost_p.set_defaults(outpost_parser=outpost_p)
 
+    session_p = subparsers.add_parser(
+        "session-start",
+        help="Print the argv and env to start a confined session for a role (never execs).",
+    )
+    session_p.add_argument("--role", required=True, choices=["hub"], help="Role to start.")
+    session_p.add_argument("--account", required=True, help="Account short name.")
+    session_p.add_argument("--prompt-file", metavar="P", default=None, help="File holding the first prompt.")
+    session_p.add_argument(
+        "--headless", action="store_true", default=False, help="Start a non-interactive session."
+    )
+    session_p.add_argument("--harness", metavar="NAME", default=None, help="Default: first detected.")
+    session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
     return parser
 
 
@@ -417,6 +479,7 @@ def main() -> int:
         "update": _cmd_update,
         "shellenv": _cmd_shellenv,
         "outpost": _cmd_outpost,
+        "session-start": _cmd_session_start,
     }
     handler = dispatch.get(args.command)
     if handler is None:

@@ -332,27 +332,13 @@ because ignoring it produced a wrong read at least once.
   baseline arm may already carry a user-level ruleset; probe before trusting a
   baseline.
 
-## Legacy hand-shaped cases
-
-A case directory with no `case.yaml` is hand-shaped: a fixture, an `expected.md`
-and, sometimes, `arms/` edited prose copies, written for an in-session run. Neither
-the runner nor the gate runs one. They are listed in
-`_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`, and their fixtures
-and verdicts are kept so they can be ported. Porting one means giving it a runner
-shape (a `case.yaml`, a prompt, graders and a gate mapping) and removing it from
-the list. The list can only shrink. `scripts/eval-sandbox` stays on disk only for
-those cases' existing harness and is not a way to run anything new.
-
-The list is a hygiene check, not a security control.
-
 ## Corpus hygiene
 
 `trailhead/tests/test_eval_corpus.py` runs over every tool. Each case directory
 must carry an `expected.md` and a non-empty `fixtures/`, and each `expected.md`
 must state what is under test and its pass condition. A case must also be
-runner-shaped, with a `case.yaml`, unless it is on the legacy list; a new
-hand-shaped case fails, and so does a listed case that has since been ported or
-removed. The rule fails the test suite and the pull request's CI. It does not fail
+runner-shaped, with a `case.yaml`; a hand-run case with no `case.yaml` fails. The
+rule fails the test suite and the pull request's CI. It does not fail
 a commit, because pre-commit does not run pytest. That is structure only: it
 cannot tell you a case is worth running, and it deliberately does not try.
 

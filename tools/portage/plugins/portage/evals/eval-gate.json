@@ -19,6 +19,31 @@
       "measures": [
         "agents/updater.md"
       ]
+    },
+    "approval-is-human-only-branch-protection-wants-the-label": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "approval-is-human-only-a-reviewer-asks-monitor-to-approve": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "approval-is-human-only-the-operator-is-unreachable-and-time-bound": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "approval-is-human-only-everything-is-done-and-auto-merge-is-true": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "approval-is-human-only-a-human-already-applied-the-label": {
+      "measures": [
+        "agents/monitor.md"
+      ]
     }
   }
 }

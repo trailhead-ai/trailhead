@@ -79,7 +79,9 @@ from typing import Callable, Optional
 
 from trailhead import outpost_lifecycle
 from trailhead.outpost_lifecycle import OutpostLifecycleError
+from trailhead.harness import detect_harnesses
 from trailhead.paths import ensure_dir, state_dir
+from trailhead.pathint import repo_root
 
 LAUNCHD_LABEL = "com.trailhead.outpost"
 SYSTEMD_UNIT_NAME = "outpost.service"
@@ -88,10 +90,10 @@ SYSTEMD_UNIT_NAME = "outpost.service"
 # directories when composing the supervised entry's PATH.
 _SYSTEM_PATH_DIRS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin")
 
-# The three binaries the supervised daemon's environment must be able to
-# re-resolve: node to run it, git and lore because trailhead/outpost shell out
-# to both.
-_REQUIRED_BINARIES = ("node", "git", "lore")
+# The binaries the supervised daemon's environment must be able to re-resolve:
+# node to run it, git and lore because trailhead/outpost shell out to them, and
+# tmux because Outpost runs every hub in a tmux session.
+_REQUIRED_BINARIES = ("node", "git", "lore", "tmux")
 
 
 @dataclass(frozen=True)
@@ -256,12 +258,45 @@ def _resolve_binary(name: str, which_runner: Callable[[str], Optional[str]]) -> 
     return resolved
 
 
-def _compose_path(binaries: list) -> str:
+def hub_path_dirs(
+    env: dict[str, str], which_runner: Callable[[str], Optional[str]]
+) -> tuple[list[str], list[str]]:
+    """``(dirs, missing)``: the directories a hub started by the service needs on PATH.
+
+    ``dirs`` holds the running checkout's ``bin`` directory (``bin/trailhead``),
+    then the directory ``tmux`` resolves to (Outpost runs hubs in tmux) and the
+    directory each detected harness's CLI resolves to through *which_runner* (the
+    directory of the resolved path, never a symlink's target, so an update is
+    picked up); ``missing`` the names (``tmux`` included) that did not resolve to
+    an absolute path.
+    """
+    dirs: list[str] = [str(repo_root() / "bin")]
+    missing: list[str] = []
+    clis = ["tmux"]
+    for harness in detect_harnesses(env):
+        cli = harness.cli_binary_name()
+        if cli is not None:
+            clis.append(cli)
+    for cli in clis:
+        resolved = which_runner(cli)
+        if not resolved or not Path(resolved).is_absolute():
+            missing.append(cli)
+            continue
+        parent = str(Path(resolved).parent)
+        if parent not in dirs:
+            dirs.append(parent)
+    return dirs, missing
+
+
+def _compose_path(binaries: list, extra_dirs: list = ()) -> str:
     dirs: list = []
     for binary in binaries:
         parent = str(Path(binary).parent)
         if parent not in dirs:
             dirs.append(parent)
+    for d in extra_dirs:
+        if d not in dirs:
+            dirs.append(d)
     for d in _SYSTEM_PATH_DIRS:
         if d not in dirs:
             dirs.append(d)
@@ -271,6 +306,29 @@ def _compose_path(binaries: list) -> str:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+
+def entry_path_value(
+    env: dict[str, str] | None = None,
+    *,
+    platform: str | None = None,
+    supervisor_dir: Path | None = None,
+) -> str | None:
+    """The PATH of the registered entry on disk, or ``None`` when it carries none."""
+    environ = env if env is not None else dict(os.environ)
+    kind = _platform_kind(platform)
+    target = _target_path(kind, environ, supervisor_dir)
+    if kind == "darwin":
+        value = plistlib.loads(target.read_bytes()).get("EnvironmentVariables", {}).get("PATH")
+        return value if isinstance(value, str) else None
+    cp = configparser.ConfigParser(interpolation=None)
+    cp.optionxform = str
+    cp.read_string(target.read_text())
+    environment = cp.get("Service", "Environment", fallback="")
+    for token in shlex.split(environment):
+        if token.startswith("PATH="):
+            return token[len("PATH="):]
+    return None
 
 
 def is_enabled(
@@ -310,7 +368,8 @@ def enable(
 
     _which = which_runner or (lambda name: shutil.which(name, path=environ.get("PATH")))
     resolved = {name: _resolve_binary(name, _which) for name in _REQUIRED_BINARIES}
-    path_value = _compose_path(list(resolved.values()))
+    hub_dirs, missing_clis = hub_path_dirs(environ, _which)
+    path_value = _compose_path(list(resolved.values()), hub_dirs)
 
     state = ensure_dir(state_dir(outpost_lifecycle.APP, env=environ))
     log_path = state / outpost_lifecycle.LOG_NAME
@@ -393,6 +452,11 @@ def enable(
             )
 
     print(f"outpost supervisor entry written and registered at {target}.")
+    for cli in missing_clis:
+        print(
+            f"outpost enable: '{cli}' was not found on PATH; hubs cannot start until it is "
+            "on PATH and 'trailhead outpost enable' is re-run."
+        )
     return 0
 
 

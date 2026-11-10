@@ -2339,3 +2339,11 @@ One fixture, one phrasing, one model tier, 3 runs per arm. `no-record-carries-fo
 ### Cost
 
 Smoke 0.22 USD, scripted grader checks about 1.5, baseline 0.86 (corrected grader; the voided and superseded batches 0.80 and 0.62 and 0.63 and 0.2 on top), treatment 0.66, plus about 0.2 for a treatment batch stopped early. About 5.7 USD this dispatch.
+
+## Dropped from the corpus, 2026-11-09
+
+`bash-write-gate` and `carve-out-does-not-generalise` were hand-shaped cases that ran only on
+macOS under `scripts/eval-sandbox`, which is being retired. Both measure lore's agent ruleset
+(`_WRITE_PROHIBITION` in `lore/config/agent_ruleset.py`, installed as a user ruleset), which
+the plugin eval runner cannot load, so they have no runner route (`docs/eval-protocol.md`,
+"Limits"). Their results above stand as the record of what they measured.

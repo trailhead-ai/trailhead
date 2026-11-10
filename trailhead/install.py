@@ -57,6 +57,7 @@ from trailhead.wire import LockError, WireError, default_manifest_paths, wire, w
 
 _REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
+_RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 
 
 def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
@@ -77,6 +78,13 @@ def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
         if bin_path.exists():
             tools[name] = bin_path
     return tools
+
+
+def _with_ranger(cli_tools: dict[str, Path]) -> dict[str, Path]:
+    """The shim set: the plugin CLIs plus the repo's own ``bin/ranger`` when present."""
+    if not _RANGER_BIN.exists():
+        return cli_tools
+    return {**cli_tools, "ranger": _RANGER_BIN}
 
 
 def install_user_rulesets(
@@ -342,7 +350,9 @@ def run_install(
     shim_build_failed = False
     if cli_tools:
         try:
-            shim_dir = create_shims(cli_tools, str(_REPO_ROOT), env=_env).shim_dir
+            shim_dir = create_shims(
+                _with_ranger(cli_tools), str(_REPO_ROOT), env=_env
+            ).shim_dir
         except Exception as exc:
             # M1: a shim-dir failure is a warning — wiring succeeded.
             shim_build_failed = True
@@ -446,6 +456,8 @@ def _print_human_summary(
     # actually built — a failed build, or no resolvable CLI binaries, means
     # they must not be named in the "on your PATH" promise.
     path_clis = clis if shim_dir is not None else []
+    if shim_dir is not None and _RANGER_BIN.exists():
+        path_clis = [*path_clis, "ranger"]
     commands = list(path_clis)
     if trailhead_available:
         commands.append("trailhead")

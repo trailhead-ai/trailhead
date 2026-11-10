@@ -912,3 +912,125 @@ def test_a_lost_result_retry_after_a_separate_decision_does_not_reuse_it_for_a_b
     code, out, err = go(seam, task_decision("brainstorm"))
     assert code == 0, err
     assert len(all_tasks(seam)) == 2
+
+
+# --- entry: fold then done through lore's --base check ---------------------------
+
+
+def make_task(seam, title, body, status, parent=None):
+    argv = ["record", "create", "--kind", "task", "--title", title, "--status", status]
+    if parent:
+        argv += ["--parent", parent.split("/", 1)[1]]
+    done = seam.lore(*argv, stdin=body)
+    assert done.returncode == 0, done.stderr
+    return done.stdout.strip()
+
+
+def transition_doc(kind, entries, parent, **over):
+    return {"transition": kind, "parent": parent, "spec": "spec/fixture-spec", "entries": entries,
+            "reason": "it touches the same code", **over}
+
+
+def run_entry_cli(seam, doc, vault="default"):
+    return seam.script("entry", "--session-id", SID, "--vault", vault, stdin=json.dumps(doc))
+
+
+def test_a_fold_then_a_done_land_on_a_ready_spec_through_lores_base_check_and_read_back(seam):
+    spec_id = make_spec(seam, SPEC_BODY + SECTION.replace("status: dropped: not worth it", "status: open"))
+    assert show(seam, spec_id)["sidecar"]["status"] == "ready"
+    parent = make_task(seam, "Slice parent", "the slice\n", "in-progress")
+    delivers = "# T\n\n**Delivers:** Resolves spec/fixture-spec#F1: First thing\n"
+    make_task(seam, "Build the first thing", delivers, "done", parent)
+    before = show(seam, spec_id)["body"]
+
+    fold = run_entry_cli(seam, transition_doc("fold", ["F1", "F2"], parent))
+    assert fold.returncode == 0, fold.stderr
+    assert [ln.split(" | ")[0] for ln in fold.stdout.splitlines()] == ["found-work-result: written"] * 2
+    folded = show(seam, spec_id)["body"]
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(folded)} == {
+        "F1": ("folded", parent), "F2": ("folded", parent)}
+    assert followups.excise_section(folded) == followups.excise_section(before)
+
+    done = run_entry_cli(seam, transition_doc("done", ["F1"], parent, reason=""))
+    assert done.returncode == 0, done.stderr
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(show(seam, spec_id)["body"])} == {
+        "F1": ("done", parent), "F2": ("folded", parent)}
+
+    unbuilt = run_entry_cli(seam, transition_doc("done", ["F2"], parent))
+    assert unbuilt.returncode == 1
+    assert "reason-code: entry-not-built" in unbuilt.stderr
+
+    log = found_work_lines(seam.session_text())
+    assert [ln.split(" | ")[0] for ln in log] == (
+        ["found-work: entry-folded"] * 2 + ["found-work-result: written"] * 2
+        + ["found-work: entry-done", "found-work-result: written"]
+    )
+    report = seam.report(parent)
+    assert report.stdout.splitlines() == [
+        "Folded spec/fixture-spec#F1 into this slice: First thing, because it touches the same code.",
+        "Folded spec/fixture-spec#F2 into this slice: Second thing, because it touches the same code.",
+        "Marked spec/fixture-spec#F1 done by this slice: First thing.",
+    ]
+
+
+# --- reopen-abandoned against the real lore ---------------------------------------
+
+
+def _folded_section(*pairs):
+    entries = "".join(
+        f"- **F{n}.** Thing {n}\n  - status: folded into {task}\n  - what: w\n  - where: `src/a.py`\n  - found: f\n"
+        for n, task in pairs
+    )
+    return "\n## Follow-ups\n\n" + entries
+
+
+def test_reopen_abandoned_reopens_the_entry_of_a_dropped_slice_and_leaves_the_running_one(seam):
+    dropped = make_task(seam, "Dropped slice", "the slice\n", "dropped")
+    running = make_task(seam, "Running slice", "the slice\n", "in-progress")
+    spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, dropped), (2, running)))
+    before = show(seam, spec_id)["body"]
+
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines() == [
+        f"found-work-result: written | parent: {dropped} | finding: Thing 1 | record: {spec_id}#F1"
+        " | reason-code: none",
+        f"reopened: {spec_id}#F1 ({dropped})",
+    ]
+    after = show(seam, spec_id)["body"]
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(after)} == {
+        "F1": ("open", None), "F2": ("folded", running)}
+    assert followups.excise_section(after) == followups.excise_section(before)
+    assert found_work_lines(seam.session_text())[0] == (
+        f"found-work: entry-reopened | parent: {dropped} | record: {spec_id}#F1 | finding: Thing 1"
+        f" | where: src/a.py | why: its slice {dropped} ended dropped without building it"
+    )
+
+    again = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    assert (again.returncode, again.stdout, again.stderr) == (0, "", "")
+
+
+def test_reopen_abandoned_marks_the_entry_a_done_child_built_done_and_reopens_the_one_nothing_built(seam):
+    parent = make_task(seam, "Finished slice", "the slice\n", "done")
+    delivers = "# T\n\n**Delivers:** Resolves spec/fixture-spec#F1: Thing 1\n"
+    make_task(seam, "Build thing one", delivers, "done", parent)
+    spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, parent), (2, parent)))
+
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.splitlines()[-2:] == [
+        f"marked done: {spec_id}#F1 ({parent})", f"reopened: {spec_id}#F2 ({parent})"]
+    after = show(seam, spec_id)["body"]
+    assert {e.id: (e.status_kind, e.status_detail) for e in followups.parse_followups(after)} == {
+        "F1": ("done", parent), "F2": ("open", None)}
+    assert [ln.split(" | ")[0] for ln in found_work_lines(seam.session_text())] == (
+        ["found-work: entry-done", "found-work: entry-reopened"] + ["found-work-result: written"] * 2
+    )
+
+
+def test_reopen_abandoned_with_an_unknown_task_exits_2_lookup_failed(seam):
+    spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, "task/no-such-task")))
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    assert done.returncode == 2
+    assert "reason-code: lookup-failed" in done.stderr
+    assert {e.id: e.status_kind for e in followups.parse_followups(show(seam, spec_id)["body"])} == {"F1": "folded"}

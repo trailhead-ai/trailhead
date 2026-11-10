@@ -141,12 +141,12 @@ def _spawn_unrelated_process() -> subprocess.Popen:
 # ---------------------------------------------------------------------------
 
 
-# The three binaries outpost_supervisor.enable() resolves via its injectable
+# The binaries outpost_supervisor.enable() resolves via its injectable
 # which_runner seam. Tests that exercise enable() stub these under tmp_path
 # rather than passing shutil.which straight through to the real machine PATH —
 # CI (and any dev machine) may not have `lore` installed/on PATH, and the
 # fixture must not depend on that (Axiom 6 plus this run's CI-red finding).
-_STUBBED_BINARIES = ("node", "git", "lore")
+_STUBBED_BINARIES = ("node", "git", "lore", "tmux")
 
 
 def _make_stub_which(bin_dir: Path):

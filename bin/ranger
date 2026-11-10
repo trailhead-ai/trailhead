@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# bin/ranger — git-only CLI entry point for the ranger hub tool.
+#
+# Works on a fresh git clone with no pip install: picks a python3 that meets the
+# repo's declared requires-python floor and execs bin/_ranger.py on it.
+#
+# Interpreter selection — a bare `python3` on a stripped PATH can resolve to an
+# interpreter far below the floor (e.g. macOS system Python 3.9 when Homebrew's
+# is not on that PATH). The floor is read from <repo_root>/pyproject.toml, one
+# level above bin/, where this launcher's own declaration lives, and every
+# absolute `python3` on PATH is searched in PATH order for one that satisfies it;
+# relative entries (`.`, `bin`) are skipped, and entries are never glob-expanded.
+# There is no upward search: a pyproject.toml above the repo is a stranger's, and
+# letting it set the floor would silently move which interpreter trailhead accepts.
+# Mirrors tools/camp/plugins/camp/bin/camp; camp's copy ships inside the camp
+# plugin tree and cannot be shared from here.
+
+set -euo pipefail
+
+# An exported CDPATH makes `cd` echo the directory it resolved to, which would
+# put a second line into every `$(cd ... && pwd)` capture below.
+unset CDPATH
+# Nothing here globs; with globbing off, a PATH entry like `/opt/*/bin` is
+# searched literally instead of expanding into directories the user never named.
+set -f
+
+# Symlink-safe self-resolution (macOS does not ship GNU readlink -f).
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+    SOURCE="$(readlink "$SOURCE")"
+    # Handle relative symlinks.
+    [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+BIN_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd -P "$BIN_DIR/.." && pwd)"
+SHIM="$BIN_DIR/_ranger.py"
+
+_read_requires_python_floor() {
+    local pyproject="$1"
+    [ -f "$pyproject" ] || return 1
+    local line
+    line="$(grep -m1 '^requires-python' "$pyproject" || true)"
+    [ -n "$line" ] || return 1
+    FLOOR="$(printf '%s' "$line" | grep -oE '[0-9]+\.[0-9]+' | head -1)"
+    [ -n "$FLOOR" ]
+}
+
+_interpreter_version() {
+    local interp="$1" out
+    out="$("$interp" --version 2>&1)" || return 1
+    printf '%s' "$out" | grep -oE '[0-9]+\.[0-9]+' | head -1
+}
+
+_version_ge() {
+    local c_major="${1%%.*}" c_minor="${1#*.}" f_major="${2%%.*}" f_minor="${2#*.}"
+    if [ "$c_major" -gt "$f_major" ]; then return 0; fi
+    if [ "$c_major" -lt "$f_major" ]; then return 1; fi
+    [ "$c_minor" -ge "$f_minor" ]
+}
+
+# Search every `python3` on PATH (PATH order) for one meeting FLOOR. Sets
+# CHOSEN_PYTHON on success; sets LAST_FOUND_VERSION regardless, for the error
+# message when nothing satisfies. Walks PATH directories directly rather than
+# `command -v -a`, which not every `command` builtin supports.
+_select_python() {
+    local floor="$1"
+    CHOSEN_PYTHON=""
+    LAST_FOUND_VERSION=""
+    local dir interp v
+    local saved_ifs="$IFS"
+    IFS=':'
+    for dir in $PATH; do
+        IFS="$saved_ifs"
+        case "$dir" in /*) ;; *) IFS=':'; continue ;; esac
+        interp="$dir/python3"
+        if [ -x "$interp" ] && v="$(_interpreter_version "$interp")"; then
+            LAST_FOUND_VERSION="$v"
+            if _version_ge "$v" "$floor"; then
+                CHOSEN_PYTHON="$interp"
+                return 0
+            fi
+        fi
+        IFS=':'
+    done
+    IFS="$saved_ifs"
+    return 1
+}
+
+if _read_requires_python_floor "$REPO_ROOT/pyproject.toml"; then
+    if _select_python "$FLOOR"; then
+        exec "$CHOSEN_PYTHON" "$SHIM" "$@"
+    else
+        echo "ranger: requires Python >=${FLOOR}, found Python ${LAST_FOUND_VERSION:-none}" >&2
+        exit 1
+    fi
+else
+    echo "ranger: could not determine the required Python version (no requires-python in $REPO_ROOT/pyproject.toml); proceeding with whatever python3 resolves to" >&2
+fi
+
+exec python3 "$SHIM" "$@"
