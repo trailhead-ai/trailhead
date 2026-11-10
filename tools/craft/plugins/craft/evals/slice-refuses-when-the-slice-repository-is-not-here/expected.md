@@ -29,3 +29,9 @@ The unedited prose refuses on the open slice without running the detector, so `d
 ## Limitations
 
 The design doc says the reason line names the repository; the vault records no repository for a slice, so the reply is graded on naming the slice and the remedy execute's paragraph fixes. One fixture, three runs, one model tier.
+
+## Revision (2026-11-10, the label is the task's own name)
+
+The eval gate ran this case on the merged prose and it scored 0 of 3, every run failing `reply-reports-the-missing-repository`. Each reply said the close was refused because the `craft/branch` label (`pickups-no-repository-holds-this`) is not the task's own name, and none said the repository is not in this workspace. That is the prose working as written: branch recovery step 1 now refuses any label other than the parent's name before it looks for a repository, so a fixture label that differs from the name never reaches the repository check this case exists to pin. No grader changes.
+
+Change to the fixture only: arm `norepo` now labels the parent with its own name, `pickups-can-be-booked-and-confirmed`, and does not create that branch locally or on `origin`, so the label passes the structural checks and no repository in the run directory holds the branch. Bar unchanged: 3 of 3 at 1.0, on the prose fingerprint recorded in `tools/craft/MANUAL-EVAL.md`; at most one rerun, stated here before any run.
