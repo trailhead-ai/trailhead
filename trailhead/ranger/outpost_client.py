@@ -73,6 +73,19 @@ def _body(exc: urllib.error.HTTPError) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _canned_detail(error: object, account: str) -> str | None:
+    """The fix to print for an Outpost error code whose reply carried no message."""
+    return {
+        "trailhead_bad_output": (
+            "the hub launch was refused; run "
+            f"`trailhead session-start --role hub --account {account} --json` to see why"
+        ),
+        "tmux_failed": "tmux failed; run `trailhead doctor`",
+        "invalid_account": f"the account name {account!r} is invalid",
+        "internal": "Outpost failed; check its log with `trailhead outpost status`",
+    }.get(error) if isinstance(error, str) else None
+
+
 def start_hub(
     account: str,
     credential: str,
@@ -102,7 +115,12 @@ def start_hub(
             raise OutpostRefusal(f"hub exited at launch:\n{body.get('output', '')}")
         if exc.code == 504:
             raise OutpostRefusal("Outpost timed out starting the hub")
-        detail = body.get("message") or body.get("error") or f"HTTP {exc.code}"
+        detail = (
+            body.get("message")
+            or _canned_detail(body.get("error"), account)
+            or body.get("error")
+            or f"HTTP {exc.code}"
+        )
         step = body.get("step")
         raise OutpostRefusal(f"Outpost could not start the hub: {detail}" + (f" (step: {step})" if step else ""))
     except (socket.timeout, TimeoutError):

@@ -310,6 +310,45 @@ def test_other_refusal_prints_its_message(tmp_path, stub, capsys):
     assert "no such launch account" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "error, status, fix",
+    [
+        (
+            "trailhead_bad_output",
+            502,
+            "the hub launch was refused; run `trailhead session-start --role hub "
+            "--account acme --json` to see why",
+        ),
+        ("tmux_failed", 502, "tmux failed; run `trailhead doctor`"),
+        ("invalid_account", 400, "the account name 'acme' is invalid"),
+        ("internal", 500, "Outpost failed; check its log with `trailhead outpost status`"),
+    ],
+)
+def test_reply_without_a_message_names_its_fix_and_the_step(
+    tmp_path, stub, capsys, error, status, fix
+):
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub(status=status, body={"error": error, "step": "session-start"})
+    rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
+    assert rc != 0 and ex.calls == []
+    assert fix in err
+    assert "(step: session-start)" in err
+    assert error not in err
+
+
+def test_a_message_in_the_reply_still_wins_over_the_canned_fix(tmp_path, stub, capsys):
+    env = _env(tmp_path)
+    _configure(env, "acme")
+    _write_credential(env)
+    s = stub(status=502, body={"error": "tmux_failed", "message": "no server running"})
+    rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
+    assert "no server running" in err and "trailhead doctor" not in err
+
+
 def test_unresponsive_start_times_out_without_exec(tmp_path, stub, capsys):
     env = _env(tmp_path)
     _configure(env, "acme")
