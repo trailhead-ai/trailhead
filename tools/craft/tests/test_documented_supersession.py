@@ -20,7 +20,6 @@ import contextlib
 import difflib
 import io
 import json
-import os
 import re
 import shlex
 import subprocess
@@ -29,10 +28,11 @@ from pathlib import Path
 
 import pytest
 
+from _lore_runner import LoreRunner
+
 REPO_ROOT = Path(__file__).parent.parent
 CRAFT_PLUGIN = REPO_ROOT / "plugins" / "craft"
 _LORE_PLUGIN = REPO_ROOT.parent / "lore" / "plugins" / "lore"
-_LORE_CLI = _LORE_PLUGIN / "cli" / "lore"
 if str(_LORE_PLUGIN) not in sys.path:
     sys.path.insert(0, str(_LORE_PLUGIN))
 
@@ -246,29 +246,14 @@ BODY = "# T\n\nbody\n"
 
 
 class Vault:
+    """One in-process lore (`LoreRunner`) over a throwaway vault."""
+
     def __init__(self, tmp_path: Path):
-        self.path = tmp_path / "vault"
-        self.path.mkdir()
-        state = tmp_path / "state"
-        state.mkdir()
-        config = state / "_xdg_config" / "lore"
-        config.mkdir(parents=True)
-        (config / "config.json").write_text(
-            json.dumps({"vaults": [{"name": "default", "scope": "default", "path": str(self.path)}]}),
-            encoding="utf-8",
-        )
-        self.env = {
-            **os.environ,
-            "XDG_STATE_HOME": str(state),
-            "XDG_CONFIG_HOME": str(state / "_xdg_config"),
-            "LORE_EMAIL": "tester@example.com",
-        }
+        self.runner = LoreRunner(tmp_path)
+        self.path = self.runner.vault_path("default")
 
     def run(self, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            [sys.executable, str(_LORE_CLI), *args],
-            capture_output=True, text=True, env=self.env, input=stdin,
-        )
+        return self.runner(list(args), stdin)
 
     def create(self, kind: str, status: str, title: str, *extra: str) -> str:
         r = self.run("record", "create", "--kind", kind, "--title", title, "--keyword", "k",
