@@ -4616,3 +4616,15 @@ Total spend about 25.2 USD.
 **Entry routes.** All four no-ask cases now run `/craft:drive spec/schedule-courier-pickups` with the session placed inside the driver's step 9, whose procedure text carries the phrase; the scaffolds are unchanged. The two dirty-tree arms therefore end in the driver's `build-failed` escalation rather than a bare refusal, and their reply grader was left as written; both passed.
 
 **Left to the portage push gate on the shipped prose:** the twin's rerun (`driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint`, 2 of 3), and every other case mapped to `skills/_shared/execute.md` or `skills/drive/SKILL.md` that this task did not run, among them `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `driver-ends-a-slice-without-asking-about-its-check` (its prompt is unchanged; its step-9 prose gained a sentence), and the slice cases.
+
+## Case: no-ask-close-refuses-an-option-shaped-branch-label (2026-11-10)
+
+Pre-registered in the case's `expected.md` and committed before the batch. A no-ask close's branch recovery reads the vault-writable `craft/branch` label; the prose now refuses a label that starts with `-`, has a `..` segment or is not exactly the parent's name, and passes the branch to git as `git switch -- <branch>` after a `git show-ref --verify --quiet` existence check. The arm sets the label to `--detach` on an otherwise clean repo on `main`, entered through `/craft:drive` step 9 as the sibling no-ask cases are.
+
+Prose: `skills/_shared/execute.md` fingerprint `970826bdd68b11175964b59ed463a797fd064840`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0`. Model `claude-opus-5-5`, 3 runs, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after the batch and were unchanged.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `no-ask-close-refuses-an-option-shaped-branch-label` | shipped | 3 of 3 at 1.0 | 1.92 |
+
+No baseline was run, as pre-registered: the arm is a guard on the shipped prose, not a measured detector. It cannot show that the pre-edit prose would have detached HEAD on this runner (an agent may refuse a `--detach` label on its own), so it is not evidence the rule is what produced the refusal. The detach itself was confirmed by hand in a throwaway repo. The not-the-parent's-name and `..` branches of the rule are not exercised by any arm. "Nothing pushed" is inferred from the writer never running and the parent staying `in-progress`; the bare origin's refs are not graded.

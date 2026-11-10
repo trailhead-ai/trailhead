@@ -21,6 +21,8 @@ capturing it:
   `(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b`
   — issuer-shaped credentials identifiable on their own, with no `key=` preamble to trip the pattern
   above
+- **URL userinfo** — `[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@` — a password carried in a remote or
+  service URL, which none of the patterns above matches
 - **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`,
   `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
 - **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets),

@@ -229,6 +229,11 @@
         "skills/_shared/execute.md"
       ]
     },
+    "no-ask-close-refuses-an-option-shaped-branch-label": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
     "no-ask-close-refuses-a-dirty-tree-on-the-task-branch": {
       "measures": [
         "skills/_shared/execute.md"

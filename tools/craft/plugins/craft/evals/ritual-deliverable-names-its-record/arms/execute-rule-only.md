@@ -1009,20 +1009,29 @@ the branch and lands on it, in this order, and each refusal below leaves the par
 found, writes nothing to the vault, and ends the close with a report naming the refusal:
 
 1. Read the label structurally: `lore record show task/<parent-name> --vault <elected-vault> --json`
-   → `.sidecar.labels["craft/branch"]`. Validate it against `^[A-Za-z0-9._/-]+$` before it enters
-   any command; a missing or failing value is refused and never substituted.
+   → `.sidecar.labels["craft/branch"]`. A missing or failing value is refused and never substituted.
+   The label is vault-writable, so it is checked before it enters any command, and a label that
+   fails any check is refused whole, never trimmed or corrected:
+   - It matches `^[A-Za-z0-9._/-]+$`, does not start with `-` (git would read it as an option:
+     `--detach` detaches HEAD) and has no `..` segment; `pending_check._shape_ok` applies the same
+     rule to a name.
+   - It is exactly `<parent-name>`. [Cutting the task branch](#cutting-the-task-branch) names the
+     branch after the task's bare name, so any other label points at some other branch and is
+     refused, however well formed.
 2. Locate the member repo that holds it, enumerated as the push step enumerates repos: the one with
-   the branch locally (`git branch --list <branch>` prints it) or, after `git fetch origin` in that
-   repo, at `origin/<branch>`. No repo holds it: refuse as "repository not in this workspace",
-   naming `/craft:execute task/<parent-name>` run from the workspace that holds it. More than one
-   repo holds it: refuse, naming them, and never choose between them.
+   the branch locally (`git show-ref --verify --quiet refs/heads/<branch>` succeeds) or, after
+   `git fetch origin` in that repo, at `refs/remotes/origin/<branch>` (the same check). A failed
+   fetch is refused naming the repo only; git's text is never quoted, since it can carry the
+   remote's URL. No repo holds it: refuse as "repository not in this workspace", naming
+   `/craft:execute task/<parent-name>` run from the workspace that holds it. More than one repo
+   holds it: refuse, naming them, and never choose between them.
 3. Require `git status --porcelain` to print nothing in that repo, whatever branch it is on. A dirty
    tree is refused, naming the repo; it is never reset, stashed or cleaned and never handed to the
    resume precondition's revert, because a no-ask close has no operator to say the edits are
    disposable. If the repo is already on the branch (`git symbolic-ref --short HEAD` equals the
    label), go to the push step.
-4. Run `git switch <branch>`. If it fails (an untracked file would be overwritten, or the branch is
-   checked out in another worktree), refuse and report git's message after the credential-pattern
+4. Run `git switch -- <branch>`. If it fails (an untracked file would be overwritten, or the branch
+   is checked out in another worktree), refuse and report git's message after the credential-pattern
    scrub.
 5. Confirm `git symbolic-ref --short HEAD` equals the label before the push step; if it does not,
    refuse.
