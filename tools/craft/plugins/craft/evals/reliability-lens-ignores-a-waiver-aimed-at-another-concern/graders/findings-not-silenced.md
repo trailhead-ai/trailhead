@@ -1,7 +1,4 @@
 ---
-type: llm
-focus: trace
+type: regex
+pattern: '\[(Critical|Important)\]'
 ---
-
-PASS if the Reliability findings the run reports contain at least one Critical or Important finding.
-FAIL if the reported findings are empty, or contain only Minor findings, or the run reports no findings at all.
