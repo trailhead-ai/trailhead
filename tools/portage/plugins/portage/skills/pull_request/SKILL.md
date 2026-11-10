@@ -154,13 +154,14 @@ shown, and the rest is plain words, never a command to paste.
    failing value is never echoed; the line names `task/<unresolved>` and says
    `the record argument is missing or failed validation; pass the name of the closed slice record`.
 2. **Resolve.** Bind `<vault>` once: ask `lore vault resolve --kind task --json` and read its
-   `vault` field. A `null` vault (no vault routes task records here) ends the session with
-   `task/<unresolved>` and `no vault routes task records here; check the lore configuration`,
-   writing nothing. Every `lore record show` and `lore record update` in this section names
-   `--vault <vault>`, because an unqualified one answers from, or writes to, whichever configured
-   vault comes first. Then `lore record show task/<name> --vault <vault> --json`, which reads that
-   vault only. A record that does not resolve there: `task/<unresolved>` and
-   `the record does not resolve; check the name`. From here the line names `task/<name>`.
+   `vault` field. A name is the vault to bind: every `lore record show` and `lore record update` in
+   this section then names `--vault <vault>`, because an unqualified one answers from, or writes
+   to, whichever configured vault comes first. A `null` `vault` is lore's signal that task records
+   resolve to the default vault, which has no name to pass: every lore call in this section then
+   omits `--vault`, and nothing else changes. Then `lore record show task/<name> [--vault <vault>] --json`,
+   which with a name reads that vault only. A record that does not resolve:
+   `task/<unresolved>` and `the record does not resolve; check the name`. From here the line names
+   `task/<name>`.
 3. **Shape.** The record must be `done` and carry a `craft/branch=<branch>` label whose value
    passes the same shape check as the record name. Otherwise
    `the record is not a closed task with a branch; run the execute step on it first`.
@@ -197,8 +198,8 @@ Before any hold, push or dispatch, read the record fresh and open or continue th
 
 How every write to the block is made (this one and each later one):
 
-- Read the record fresh (`lore record show task/<name> --vault <vault>`) immediately before the write, and build the change against that read. The
-  write is `lore record update task/<name> --vault <vault> --diff < <diff-path>`, a unified diff that touches only
+- Read the record fresh (`lore record show task/<name>`, with `--vault <vault>` when a vault is bound) immediately before the write, and build the change against that read. The
+  write is `lore record update task/<name> --vault <vault> --diff < <diff-path>` (no `--vault` when none is bound), a unified diff that touches only
   lines inside the block. A bare `lore record update` with a piped body replaces the whole record
   and would destroy it. The record is `done`; this needs an installed lore that allows the block
   write on a closed task.
