@@ -165,7 +165,13 @@ shown, and the rest is plain words, never a command to paste.
 3. **Shape.** The record must be `done` and carry a `craft/branch=<branch>` label whose value
    passes the same shape check as the record name. Otherwise
    `the record is not a closed task with a branch; run the execute step on it first`.
-4. **Pushed.** `portage detect-repos --manifest <manifest_path>`, then for each repo it lists whose
+4. **Branch.** `portage check-slice-branch --manifest <manifest_path> --record <name> --branch <branch>`,
+   where `<branch>` is the label's value. Exit 3 (the label names a default branch of a member
+   repo): `the record's branch label is a default branch; an operator corrects the label to the task branch before the PR step runs`.
+   Exit 4 (the label is not the record's own branch, which is its bare name):
+   `the record's branch label is not its own branch; an operator corrects the label to the task branch before the PR step runs`.
+   Any other nonzero exit: `the record's branch could not be checked; check the camp manifest`.
+5. **Pushed.** `portage detect-repos --manifest <manifest_path>`, then for each repo it lists whose
    `branch` is `<branch>`, `git -C <repo_path> ls-remote --exit-code --heads origin <branch>`. No such
    repo, or one without the branch on origin: `the slice branch is not pushed; run the execute step first`.
 

@@ -12,6 +12,9 @@
 #   RECORD_STATE   closed | stuck-earlier the slice record's block: execute's, left open at `close`,
 #                                         or one an earlier PR step already ended `stuck`
 #   LORE_WRITE     ok | refuse            whether ./lore accepts a --diff write
+#   ON_DEFAULT     unset | true           true: the repo's default branch is `develop` (origin/HEAD),
+#                                         the slice's commits sit on it and are pushed to it, and the
+#                                         record's craft/branch label is `develop`
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "$here/../../../../.." && pwd)"
@@ -41,6 +44,11 @@ git add -A
 base=$(signed "chore: base" ""); git update-ref refs/heads/main "$base"; git symbolic-ref HEAD refs/heads/main
 git push -q origin main
 git remote set-head origin main >/dev/null
+if [ "${ON_DEFAULT:-}" = "true" ]; then
+  BRANCH=develop
+  git push -q origin main:refs/heads/develop
+  git remote set-head origin develop >/dev/null
+fi
 git checkout -q -b "$BRANCH"
 printf 'def count(path):\n    return len(open(path).read().split())\n' > wordcount.py; git add wordcount.py
 one=$(signed "feat: count the words in a file" "$base"); git update-ref HEAD "$one"; git reset -q --hard "$one"
@@ -107,14 +115,14 @@ case "\${1:-}" in
     echo "portage \$*" >> "\$W/merge.log"
     printf '{"merged":["%s:7"],"failed":{},"skipped":{}}\n' "\$W/repo"
     exit 0;;
-  detect-repos|check-status|evaluate-status|sidecar|summarize|approvals|eval-gate|hold|release|await-outcome)
+  detect-repos|check-status|evaluate-status|sidecar|summarize|approvals|eval-gate|hold|release|await-outcome|check-slice-branch)
     exec python3 "$plugin_root/cli/portage" "\$@";;
 esac
 # Help and usage errors have the names of the subcommands the prose under test introduces scrubbed.
 set -o pipefail
 python3 "$plugin_root/cli/portage" "\$@" 2>&1 | python3 -c '
 import re, sys
-names = "eval-gate|await-outcome|hold|release"
+names = "eval-gate|await-outcome|hold|release|check-slice-branch"
 for line in sys.stdin:
     if re.match(r"\s+(%s)\b" % names, line):
         continue

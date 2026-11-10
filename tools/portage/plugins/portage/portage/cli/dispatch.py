@@ -23,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     # Imported here (not at module top) so the trailhead.vcs imports these command
     # modules carry only fire after main() has run ensure_trailhead_importable() —
     # importing them earlier would touch trailhead before the bootstrap walk.
-    from . import await_outcome, ci, eval_gate, hold, pr, repos
+    from . import await_outcome, ci, eval_gate, hold, pr, repos, slice_branch
 
     parser = argparse.ArgumentParser(prog="portage", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -34,6 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_gate.add_eval_gate_subparser(sub)
     await_outcome.add_await_outcome_subparser(sub)
     hold.add_hold_subparsers(sub)
+    slice_branch.add_slice_branch_subparser(sub)
 
     return parser
 
