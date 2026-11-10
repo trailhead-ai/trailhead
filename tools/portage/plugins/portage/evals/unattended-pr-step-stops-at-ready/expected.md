@@ -29,3 +29,7 @@ Predicted baseline (red): the committed skill has no `--unattended` branch; it d
 - Write order ("block before push", "outcome written before the final line") is observed through end state and the tool-call set only.
 - Sandbox accommodations carried in every prompt, which the prose cannot provide itself: a command containing a newline or a redirect is denied, so `gh pr create` takes a one-line body and the updater is handed `pr_body_file` (the saved current body, `pr-description.md`); the prompt also asks that the note be passed on to every dispatched agent.
 - The credential scrub of the block diff, the temp-file route for the diff and the one retry of a non-applying diff are not graded.
+
+## Amendment, 2026-11-10 (review fix pass)
+
+The skill now continues the hand-off block only when this session's own execute opened it (the unattended contract's positive same-session signal), so the prompt states that this session ran the execute step. No grader changed: the scenario the case always described, a same-session hand-off, is now said in the prompt instead of being implied by the record's state.
