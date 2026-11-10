@@ -92,13 +92,14 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import tempfile
 from collections.abc import Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import BinaryIO
+from typing import TYPE_CHECKING, BinaryIO
 
 from trailhead.harness.base import (
     AccountAuthentication,
@@ -107,8 +108,12 @@ from trailhead.harness.base import (
     Harness,
     HarnessError,
     SessionRecord,
+    SessionStart,
     SessionTranscript,
 )
+
+if TYPE_CHECKING:
+    from trailhead.launch_profile import ResolvedProfile
 
 _REGISTERED_MARKER = ".trailhead-registered"
 #: Ledger dir inside the composed tree holding one file per Claude config dir
@@ -843,6 +848,379 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
     return base / _CONFIG_FILENAME
 
 
+# -- confined session start ---------------------------------------------------
+#
+# ``session_start`` renders a resolved launch profile into session-only settings
+# passed inline by ``--settings`` (inline, so no file exists for the session to edit).
+# Session settings MERGE with the user-level ``settings.json`` rather than replace it:
+# lists union, and a denial wins over an allowance. This section is built around what
+# that forces:
+#
+# * A profile can only NARROW. Writes are narrowed by DERIVING ``denyWrite`` from every
+#   user-level writable root that is not one of the profile's roots. A user-level root
+#   that CONTAINS a profile root cannot be denied without denying the profile root too
+#   (the denial wins), so that launch is refused. Reads and network destinations
+#   cannot be narrowed this way, so a profile that asks for one the user-level
+#   configuration forbids is refused too.
+# * A user-level ``sandbox.excludedCommands`` entry runs OUTSIDE the sandbox and cannot be
+#   removed by a session (lists union), so each one is also denied as a ``Bash()``
+#   permission rule: a denial beats any allowance at every scope, so the command is
+#   refused rather than run unconfined.
+# * The directory the session starts in is writable and trusted, so a session could
+#   rewrite the project settings, hooks, agents and MCP config a later launch honours.
+#   ``<directory>/.claude`` and ``<directory>/.mcp.json`` are therefore always denied.
+# * Anything unreadable about the user-level configuration is a refusal, never a guess.
+#
+# Path conventions differ by key: ``sandbox.filesystem.*`` takes absolute or ``~/``
+# paths, ``permissions.deny`` ``Read()`` rules take ``//abs/path``. The user-level file
+# is ``$CLAUDE_CONFIG_DIR/settings.json`` for a bound account, else ``~/.claude/settings.json``.
+
+_SETTINGS_FILENAME = "settings.json"
+_READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
+
+
+def _resolve_settings_path(entry: str, home: Path, launch_dir: Path) -> Path:
+    """A path as a settings entry spells it, made absolute and symlink-free.
+
+    ``~`` expands against *home*; ``.`` and any other relative entry are the launch
+    directory. Comparison is always on these resolved paths, by segment.
+    """
+    if entry == "~" or entry.startswith("~/"):
+        path = home / entry[2:]
+    else:
+        path = Path(entry)
+        if not path.is_absolute():
+            path = launch_dir / path
+    return Path(os.path.realpath(path))
+
+
+def _covers(parent: Path, child: Path) -> bool:
+    """True when *child* is *parent* or lies beneath it (whole path segments)."""
+    return child == parent or parent in child.parents
+
+
+def _host_allowed(host: str, allowed: list[str]) -> bool:
+    for entry in allowed:
+        if entry == host:
+            return True
+        if entry.startswith("*.") and host.endswith(entry[1:]):
+            return True
+    return False
+
+
+class _UserSettings:
+    """The parts of an account's user-level settings a launch must not widen."""
+
+    def __init__(self, path: Path, home: Path, launch_dir: Path) -> None:
+        self.path = path
+        data = self._load(path)
+        sandbox = data.get("sandbox", {})
+        if not isinstance(sandbox, dict):
+            raise HarnessError(f"{path}: 'sandbox' must be an object; refusing the launch")
+        if "enabled" in sandbox and not isinstance(sandbox["enabled"], bool):
+            raise HarnessError(
+                f"{path}: 'sandbox.enabled' must be true or false; the sandbox cannot be "
+                "confirmed, refusing the launch"
+            )
+        fs = self._section(path, sandbox, "filesystem")
+        net = self._section(path, sandbox, "network")
+        permissions = self._section(path, data, "permissions")
+        self.allow_write = self._strings(path, fs, "allowWrite", "sandbox.filesystem.allowWrite")
+        self.deny_write = self._strings(path, fs, "denyWrite", "sandbox.filesystem.denyWrite") or []
+        self.allowed_domains = self._strings(
+            path, net, "allowedDomains", "sandbox.network.allowedDomains"
+        )
+        self.excluded_commands = (
+            self._strings(path, sandbox, "excludedCommands", "sandbox.excludedCommands") or []
+        )
+        deny_read = self._strings(path, fs, "denyRead", "sandbox.filesystem.denyRead") or []
+        rules = self._strings(path, permissions, "deny", "permissions.deny") or []
+        self.deny_read: list[tuple[str, Path]] = [
+            (entry, _resolve_settings_path(entry, home, launch_dir)) for entry in deny_read
+        ]
+        for rule in rules:
+            match = _READ_RULE_RE.match(rule)
+            if not match:
+                continue
+            spec = match.group("spec")
+            for tail in ("/**", "/*"):
+                if spec.endswith(tail):
+                    spec = spec[: -len(tail)]
+            spec = spec[1:] if spec.startswith("//") else spec
+            if spec.startswith("/") or spec.startswith("~/") or spec == "~":
+                self.deny_read.append((rule, _resolve_settings_path(spec, home, launch_dir)))
+        self.home, self.launch_dir = home, launch_dir
+
+    @staticmethod
+    def _load(path: Path) -> dict:
+        try:
+            text = path.read_text()
+        except FileNotFoundError:
+            return {}
+        except OSError as exc:
+            raise HarnessError(f"{path}: cannot read user-level settings ({exc}); refusing the launch") from exc
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"{path}: malformed user-level settings ({exc}); refusing the launch") from exc
+        if not isinstance(data, dict):
+            raise HarnessError(f"{path}: user-level settings must be a JSON object; refusing the launch")
+        return data
+
+    @staticmethod
+    def _section(path: Path, parent: dict, key: str) -> dict:
+        value = parent.get(key, {})
+        if not isinstance(value, dict):
+            raise HarnessError(f"{path}: {key!r} must be an object; refusing the launch")
+        return value
+
+    @staticmethod
+    def _strings(path: Path, parent: dict, key: str, label: str) -> list[str] | None:
+        if key not in parent:
+            return None
+        value = parent[key]
+        if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+            raise HarnessError(f"{path}: {label!r} must be a list of strings; refusing the launch")
+        return value
+
+
+def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
+    """The directory tmux keeps its default sockets in: ``<TMUX_TMPDIR or /tmp>/tmux-<uid>``,
+    symlink-free (``/tmp`` is ``/private/tmp`` on macOS)."""
+    return Path(os.path.realpath(Path(env.get("TMUX_TMPDIR") or "/tmp") / f"tmux-{uid}"))
+
+
+def _derive_write_confinement(
+    user: _UserSettings, roots: list[Path], tmux_socket_dir: Path
+) -> list[str]:
+    """Check the profile's write roots against *user*; return the derived ``denyWrite``.
+
+    The launch directory counts as user-allowed: Claude Code's sandbox always permits
+    writes to the session's working directory, whatever ``allowWrite`` lists. System
+    temp (``/tmp``, ``/private/tmp``, the platform temp dir) is shared scratch, not a
+    confinement target, so a user entry resolving to it is never derived into the
+    denial: a deny beats an allow, and it would break the session's own sandbox temp.
+
+    *tmux_socket_dir* sits inside that scratch, so a session could unlink the sockets of
+    the tmux server it runs in (or the operator's default one). It is denied whenever it
+    lies under a user-allowed root or the launch directory; outside those it is already
+    unwritable, so nothing is added there and the list never names a path the user did
+    not allow. A directory that contains a profile root is never denied, since the denial
+    would win over the root.
+
+    Raises :class:`HarnessError` naming the offending entry when a profile root is
+    not covered by the user's writable list or the launch directory, when a user-level writable root contains
+    a profile root (it cannot be narrowed without denying the profile root), or when
+    a user-level write denial covers a profile root.
+    """
+    for entry in user.deny_write:
+        denied = _resolve_settings_path(entry, user.home, user.launch_dir)
+        if any(_covers(denied, root) for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level write denial {entry!r} covers a path this "
+                "profile writes; refusing the launch"
+            )
+    if user.allow_write is None:
+        return []
+    allowed = [(e, _resolve_settings_path(e, user.home, user.launch_dir)) for e in user.allow_write]
+    for entry, resolved in allowed:
+        if any(resolved in root.parents for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level writable root {entry!r} contains a path this "
+                "profile writes, so it cannot be narrowed without denying that path; "
+                "refusing the launch"
+            )
+    for root in roots:
+        if not _covers(user.launch_dir, root) and not any(
+            _covers(resolved, root) for _, resolved in allowed
+        ):
+            raise HarnessError(
+                f"the profile writes {root}, which {user.path} does not allow "
+                "(a profile may narrow the user-level settings, never widen them)"
+            )
+    scratch = {
+        Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())
+    }
+    deny: list[str] = []
+    for _, resolved in allowed:
+        if (
+            resolved in scratch
+            or any(_covers(root, resolved) for root in roots)
+            or str(resolved) in deny
+        ):
+            continue
+        deny.append(str(resolved))
+    if (
+        (_covers(user.launch_dir, tmux_socket_dir) or any(_covers(r, tmux_socket_dir) for _, r in allowed))
+        and not any(_covers(tmux_socket_dir, root) for root in roots)
+        and str(tmux_socket_dir) not in deny
+    ):
+        deny.append(str(tmux_socket_dir))
+    return deny
+
+
+_GIT_ADMIN_NAMES = ("config", "hooks", "info")
+_GIT_SCAN_DEPTH = 3
+_GITDIR_POINTER_LIMIT = 4096
+
+
+def _gitdir_of(dot_git: Path) -> Path | None:
+    """The git directory a vault's ``.git`` entry stands for, or ``None``.
+
+    A directory is itself the git directory; a symlink resolves to its target; a file is
+    a ``gitdir: <path>`` pointer (relative paths resolve against the file's directory).
+    Anything else, including a pointer that does not parse, is not a repository.
+    """
+    if dot_git.is_symlink():
+        resolved = Path(os.path.realpath(dot_git))
+        return resolved if resolved.is_dir() else None
+    if dot_git.is_dir():
+        return dot_git
+    if not dot_git.is_file():
+        return None
+    try:
+        with dot_git.open("rb") as f:
+            line = f.read(_GITDIR_POINTER_LIMIT).decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    if not line or not line[0].startswith("gitdir:"):
+        return None
+    target = line[0][len("gitdir:"):].strip()
+    if not target:
+        return None
+    resolved = Path(os.path.realpath(dot_git.parent / target))
+    return resolved if resolved.is_dir() else None
+
+
+def _common_dir_of(git_dir: Path) -> Path | None:
+    pointer = git_dir / "commondir"
+    try:
+        target = pointer.read_text().strip()
+    except OSError:
+        return None
+    if not target:
+        return None
+    resolved = Path(os.path.realpath(git_dir / target))
+    return resolved if resolved.is_dir() else None
+
+
+def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
+    """``denyWrite`` entries protecting the git administrative files under *guarded* roots.
+
+    Every repository found within ``_GIT_SCAN_DEPTH`` directory levels of a guarded root
+    (the root itself included) gets ``config``, ``hooks`` and ``info`` of its git directory
+    denied. When ``.git`` is a pointer file or a symlink, the ``.git`` entry itself is
+    denied too (so it cannot be repointed) along with the resolved git directory, and a
+    linked worktree's common directory, which is where its ``config`` and ``hooks`` live.
+    A git directory outside every *writable* root is not named: it is already unwritable.
+
+    Each guarded root also gets the glob ``<root>/*/*/.git/<name>`` for each name, the
+    shape of lore's ``vaults/<name>``, so a vault created after launch is covered without
+    being enumerated. Repositories deeper than the scan bound and created after launch are
+    not covered.
+    """
+    found: list[str] = []
+
+    def add(path: Path | str) -> None:
+        if str(path) not in found:
+            found.append(str(path))
+
+    def add_admin(git_dir: Path) -> None:
+        if any(_covers(w, git_dir) for w in writable):
+            for name in _GIT_ADMIN_NAMES:
+                add(git_dir / name)
+
+    for root in guarded:
+        for current, dirnames, _ in os.walk(root):
+            here = Path(current)
+            depth = len(here.relative_to(root).parts)
+            dot_git = here / ".git"
+            git_dir = _gitdir_of(dot_git) if os.path.lexists(dot_git) else None
+            if git_dir is not None:
+                if git_dir != dot_git:
+                    add(dot_git)
+                add_admin(git_dir)
+                common = _common_dir_of(git_dir)
+                if common is not None:
+                    add_admin(common)
+            dirnames[:] = [] if depth >= _GIT_SCAN_DEPTH else [d for d in dirnames if d != ".git"]
+        for name in _GIT_ADMIN_NAMES:
+            add(f"{root}/*/*/.git/{name}")
+    return found
+
+
+def _check_reads_and_network(
+    user: _UserSettings, roots: list[Path], hosts: tuple[str, ...]
+) -> None:
+    for entry, denied in user.deny_read:
+        if any(_covers(denied, root) for root in roots):
+            raise HarnessError(
+                f"{user.path}: the user-level read denial {entry!r} covers a path this "
+                "profile allows; refusing the launch"
+            )
+    if user.allowed_domains is not None:
+        for host in hosts:
+            if not _host_allowed(host, user.allowed_domains):
+                raise HarnessError(
+                    f"the profile reaches {host!r}, which the network allow-list in "
+                    f"{user.path} does not include (a profile may narrow it, never widen it)"
+                )
+
+
+def _seed_folder_trust(config_file: Path, directory: Path) -> None:
+    """Mark *directory* trusted in *config_file* so the first-run trust prompt never fires.
+
+    Read, update ``projects[<directory>].hasTrustDialogAccepted``, write a uniquely named
+    temp file beside it, atomic rename (so concurrent launches never share a temp file and
+    the file is never half-written); every other key survives. Two launches seeding at the
+    same instant may still drop one entry (read-modify-write has no lock).
+    An absent file is created; a malformed one refuses.
+    """
+    if not config_file.parent.is_dir():
+        raise HarnessError(
+            f"{config_file.parent} does not exist, so {config_file.name} cannot be written; "
+            "refusing the launch"
+        )
+    try:
+        text = config_file.read_text()
+    except FileNotFoundError:
+        data: object = {}
+    except OSError as exc:
+        raise HarnessError(f"{config_file}: cannot read ({exc}); refusing the launch") from exc
+    else:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise HarnessError(f"{config_file}: malformed ({exc}); refusing the launch") from exc
+    projects = data.get("projects", {}) if isinstance(data, dict) else None
+    if not isinstance(data, dict) or not isinstance(projects, dict):
+        raise HarnessError(
+            f"{config_file}: expected a JSON object with an object 'projects'; refusing the launch"
+        )
+    entry = projects.get(str(directory), {})
+    if not isinstance(entry, dict):
+        raise HarnessError(f"{config_file}: project entry for {directory} is not an object")
+    projects[str(directory)] = {**entry, "hasTrustDialogAccepted": True}
+    data["projects"] = projects
+    try:
+        mode = stat.S_IMODE(config_file.stat().st_mode)
+    except FileNotFoundError:
+        mode = 0o600
+    tmp: str | None = None
+    try:
+        fd, tmp = tempfile.mkstemp(
+            prefix=f".{config_file.name}.", suffix=".trailhead-tmp", dir=config_file.parent
+        )
+        with os.fdopen(fd, "w") as f:
+            os.fchmod(f.fileno(), mode)
+            json.dump(data, f, indent=2)
+        os.replace(tmp, config_file)
+    except OSError as exc:
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
+        raise HarnessError(f"{config_file}: cannot write ({exc}); refusing the launch") from exc
+
+
 class ClaudeCodeHarness(Harness):
     """Install agent-plugins into Claude Code via the ``claude plugin`` CLI."""
 
@@ -851,6 +1229,9 @@ class ClaudeCodeHarness(Harness):
     @classmethod
     def detect(cls, env: dict[str, str]) -> bool:
         return _claude_dir(env).is_dir()
+
+    def cli_binary_name(self) -> str | None:
+        return "claude"
 
     # -- manifest -------------------------------------------------------------
 
@@ -1661,6 +2042,144 @@ class ClaudeCodeHarness(Harness):
         config_dir = str(_account_dir(account, source))
         _refuse_conflicting_config_dirs({**source, "CLAUDE_CONFIG_DIR": config_dir})
         return {"CLAUDE_CONFIG_DIR": config_dir}
+
+    def session_start(
+        self,
+        profile: ResolvedProfile,
+        directory: Path,
+        prompt: str | None,
+        *,
+        interactive: bool,
+        account: str | None,
+        env: dict[str, str] | None = None,
+        uid: int | None = None,
+    ) -> SessionStart:
+        """Render *profile* into a confined, never-prompting ``claude`` launch.
+
+        See the section comment above ``_resolve_settings_path`` for how session
+        settings merge with the account's user-level settings and what that forces.
+
+        Posture: ``--permission-mode dontAsk`` (a refused action is reported to the
+        model and the session carries on); headless adds ``-p`` and
+        ``--permission-prompts none`` so nothing waits on an answer. The sandbox is
+        enabled with ``failIfUnavailable`` so a sandbox that cannot start fails loudly
+        instead of leaving ``dontAsk`` to refuse everything quietly.
+
+        Network narrowing is not enforced: session lists merge with the user-level list,
+        so ``allowedDomains`` can never narrow it. The profile's hosts are only checked
+        against the user's list (a host it does not cover refuses the launch) and, when
+        the profile names any, passed along; a profile naming none writes no key.
+
+        Account binding is :meth:`session_launch_env_set` / :meth:`session_launch_env_unset`
+        verbatim. The only side effect is the folder-trust record in the account's
+        ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
+        written after every refusal check has passed. Never execs.
+
+        Git administrative files: for every role in the profile's ``git_guarded_roles`` (the
+        hub's is the lore state root, which holds each vault as a git working tree),
+        ``config``, ``hooks`` and ``info`` of every repository under it join ``denyWrite``
+        (see :func:`_git_admin_denials`). Claude Code's own protection of ``.git/config``
+        and ``.git/hooks`` covers only the session's working directory, so without this a
+        prompt-injected hub could plant a git filter, ``core.fsmonitor``, ``core.pager``,
+        ``alias.*`` or a hook that Outpost, ``lore sync`` or the operator's own git would
+        later run unsandboxed. Objects, refs, the index, ``COMMIT_EDITMSG`` and logs stay
+        writable, so committing records through the ``lore`` CLI works. Repositories are
+        enumerated at launch, and the glob ``<root>/*/*/.git/<name>`` covers a vault
+        created later at ``vaults/<name>``; a repository created later anywhere else, or
+        deeper than the scan bound, is not covered. Anything that must write a vault's
+        ``.git/config`` (``git config``, ``push --set-upstream``, ``remote add``, a fresh
+        ``git init`` or clone) is refused inside the hub; the operator runs it outside.
+
+        The tmux socket directory (``$TMUX_TMPDIR`` from *env*, else ``/tmp``, then
+        ``tmux-<uid>``; *uid* defaults to the process's) joins ``denyWrite`` under the
+        conditions :func:`_derive_write_confinement` states.
+
+        *directory* must be an existing directory: a launcher that cannot enter it (tmux
+        falls back to ``$HOME``) would run the session in a directory the sandbox always
+        lets it write. A missing or non-directory *directory* is refused before anything
+        is written.
+
+        Raises :class:`HarnessError` for a *directory* that is not an existing directory,
+        a profile that would widen the user-level settings, an unreadable or malformed
+        user-level settings or ``.claude.json``, a profile that may prompt, and a prompt that would parse as a flag.
+        """
+        if not profile.profile.never_prompt:
+            raise HarnessError("session_start only starts never-prompt profiles")
+        if prompt and prompt.startswith("-"):
+            raise HarnessError("the prompt starts with '-', so it would be read as a flag")
+        if not Path(directory).is_dir():
+            raise HarnessError(
+                f"the hub home {directory} is not an existing directory; "
+                "run `ranger setup --account <A>` for this hub's account to create it"
+            )
+        source = env if env is not None else dict(os.environ)
+        env_set = self.session_launch_env_set(account, env=source)
+        env_unset = self.session_launch_env_unset()
+        config_dir = env_set.get("CLAUDE_CONFIG_DIR")
+        home = _account_home(source)
+        launch_dir = Path(os.path.realpath(directory))
+        user = _UserSettings(
+            (Path(config_dir) if config_dir else home / ".claude") / _SETTINGS_FILENAME,
+            home,
+            launch_dir,
+        )
+        roots = [Path(os.path.realpath(p)) for p in profile.writable]
+        deny_write = [
+            str(launch_dir / ".claude"),
+            str(launch_dir / ".mcp.json"),
+            *_derive_write_confinement(
+                user, roots, _tmux_socket_dir(source, os.getuid() if uid is None else uid)
+            ),
+            *_git_admin_denials(
+                [Path(os.path.realpath(profile.paths[r])) for r in profile.profile.git_guarded_roles],
+                roots,
+            ),
+        ]
+        hosts = profile.profile.network_allowed_hosts
+        _check_reads_and_network(user, roots, hosts)
+
+        denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
+        settings: dict = {
+            "sandbox": {
+                "enabled": True,
+                "failIfUnavailable": True,
+                "allowUnsandboxedCommands": False,
+                "filesystem": {
+                    "allowWrite": [str(r) for r in roots],
+                    "denyWrite": deny_write,
+                    "denyRead": [str(p) for p in denied_reads],
+                },
+            },
+            "permissions": {
+                "deny": [f"Read(/{p}/**)" for p in denied_reads]
+                + [f"Bash({command})" for command in user.excluded_commands]
+            },
+            "enabledMcpjsonServers": list(profile.profile.mcp_servers),
+        }
+        if hosts:
+            settings["sandbox"]["network"] = {"allowedDomains": list(hosts)}
+        if profile.profile.model is not None:
+            settings["model"] = profile.profile.model
+
+        config_file = (
+            Path(config_dir) / _CONFIG_FILENAME
+            if config_dir
+            else claude_config_file({k: v for k, v in source.items() if k != "CLAUDE_CONFIG_DIR"})
+        )
+        _seed_folder_trust(config_file, launch_dir)
+
+        argv = ["claude"]
+        if not interactive:
+            argv.append("-p")
+        argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
+        argv += ["--permission-mode", "dontAsk"]
+        if not interactive:
+            argv += ["--permission-prompts", "none"]
+        if profile.profile.effort is not None:
+            argv += ["--effort", profile.profile.effort]
+        if prompt:
+            argv.append(prompt)
+        return SessionStart(argv=argv, env_set=env_set, env_unset=env_unset)
 
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None

@@ -20,6 +20,9 @@ from pathlib import Path
 import pytest
 
 from trailhead import cli, outpost_supervisor as osup
+from trailhead.harness import ClaudeCodeHarness
+from trailhead import harness as harness_registry
+from trailhead.pathint import repo_root
 from trailhead.outpost_lifecycle import OutpostLifecycleError
 
 from . import test_outpost_lifecycle as _lifecycle_tests
@@ -242,7 +245,7 @@ def test_enable_missing_lore_on_path_raises_named_error_naming_lore_writes_nothi
     runner = _RecordingRunner()
 
     def which_missing_lore(name: str) -> str | None:
-        return {"node": "/usr/bin/node", "git": "/usr/bin/git"}.get(name)
+        return {"node": "/usr/bin/node", "git": "/usr/bin/git", "tmux": "/usr/bin/tmux"}.get(name)
 
     with pytest.raises(OutpostLifecycleError, match="lore"):
         osup.enable(
@@ -262,7 +265,7 @@ def test_enable_binary_resolved_through_relative_path_entry_raises_named_error_w
     runner = _RecordingRunner()
 
     def which_relative_git(name: str) -> str | None:
-        return {"node": "/usr/bin/node", "git": "./git", "lore": "/usr/bin/lore"}.get(name)
+        return {"node": "/usr/bin/node", "git": "./git", "lore": "/usr/bin/lore", "tmux": "/usr/bin/tmux"}.get(name)
 
     with pytest.raises(OutpostLifecycleError, match="'git'.*relative"):
         osup.enable(
@@ -645,7 +648,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
     runner = _RecordingRunner()
 
     def which_a(name: str) -> str | None:
-        return {"node": "/opt/a/node", "git": "/opt/a/git", "lore": "/opt/a/lore"}.get(name)
+        return {"node": "/opt/a/node", "git": "/opt/a/git", "lore": "/opt/a/lore", "tmux": "/opt/a/tmux"}.get(name)
 
     osup.enable(
         env=outpost.env,
@@ -660,7 +663,7 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
     path_a = plist_a["EnvironmentVariables"]["PATH"]
 
     def which_b(name: str) -> str | None:
-        return {"node": "/opt/b/node", "git": "/opt/b/git", "lore": "/opt/b/lore"}.get(name)
+        return {"node": "/opt/b/node", "git": "/opt/b/git", "lore": "/opt/b/lore", "tmux": "/opt/b/tmux"}.get(name)
 
     osup.enable(
         env=outpost.env,
@@ -680,6 +683,178 @@ def test_composed_path_uses_resolved_binaries_dirs_plus_system_dirs_not_shell_pa
     # a shell PATH entry that holds none of the three binaries never appears
     assert "/some/unrelated/shell/dir" not in path_a
     assert "/usr/bin" in path_a  # system dirs are still present
+
+
+# ---------------------------------------------------------------------------
+# PATH composition — trailhead's own bin dir and the harness CLI's dir
+# ---------------------------------------------------------------------------
+
+
+class _CliHarness(ClaudeCodeHarness):
+    """A harness that is always detected and names a CLI binary."""
+
+    name = "cli_stub"
+    cli = "stubcli"
+
+    @classmethod
+    def detect(cls, env):
+        return True
+
+    def cli_binary_name(self):
+        return self.cli
+
+
+class _NoCliHarness(_CliHarness):
+    name = "no_cli_stub"
+    cli = None
+
+
+def _only_harnesses(monkeypatch, *classes):
+    monkeypatch.setattr(harness_registry, "_HARNESSES", {c.name: c for c in classes})
+
+
+def _which_with(outpost, **extra):
+    def which(name: str) -> str | None:
+        return extra.get(name, outpost.which_runner(name))
+
+    return which
+
+
+def _enabled_path(outpost, platform: str, **enable_kwargs) -> str:
+    osup.enable(
+        env=outpost.env,
+        platform=platform,
+        supervisor_dir=outpost.supervisor_dir,
+        port=outpost.port,
+        runner=_RecordingRunner(),
+        uid=501,
+        user="alice",
+        **enable_kwargs,
+    )
+    if platform == "darwin":
+        plist = plistlib.loads((outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist").read_bytes())
+        return plist["EnvironmentVariables"]["PATH"]
+    unit = _parse_unit((outpost.supervisor_dir / osup.SYSTEMD_UNIT_NAME).read_text())
+    return unit["Service"]["Environment"].split("PATH=", 1)[1]
+
+
+_TRAILHEAD_BIN = str(repo_root() / "bin")
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_composed_path_carries_trailhead_bin_and_harness_cli_dir(outpost, monkeypatch, platform):
+    _only_harnesses(monkeypatch, _CliHarness)
+    stub_bin = str(Path(outpost.which_runner("node")).parent)
+
+    path_a = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, stubcli="/opt/cli-a/stubcli")
+    )
+    path_b = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, stubcli="/opt/cli-b/stubcli")
+    )
+
+    assert path_a.split(":") == [
+        stub_bin, _TRAILHEAD_BIN, "/opt/cli-a", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    ]
+    assert "/opt/cli-b" in path_b.split(":") and "/opt/cli-a" not in path_b.split(":")
+    assert _TRAILHEAD_BIN in path_b.split(":")
+
+
+def test_unresolved_harness_cli_still_enables_prints_one_line_and_adds_no_dir(
+    outpost, monkeypatch, capsys
+):
+    _only_harnesses(monkeypatch, _CliHarness)
+
+    path = _enabled_path(outpost, "darwin", which_runner=outpost.which_runner)
+
+    assert (outpost.supervisor_dir / f"{osup.LAUNCHD_LABEL}.plist").exists()
+    assert _TRAILHEAD_BIN in path.split(":")
+    assert "/opt/cli-a" not in path
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if "stubcli" in ln]
+    assert len(lines) == 1
+    assert "hubs cannot start" in lines[0]
+    assert "trailhead outpost enable" in lines[0]
+
+
+def test_no_harness_detected_adds_no_cli_dir_and_prints_no_missing_line(outpost, monkeypatch, capsys):
+    _only_harnesses(monkeypatch)
+
+    path = _enabled_path(outpost, "darwin", which_runner=outpost.which_runner)
+
+    assert _TRAILHEAD_BIN in path.split(":")
+    assert "hubs cannot start" not in capsys.readouterr().out
+
+
+def test_harness_with_no_cli_contributes_no_dir_and_no_line(outpost, monkeypatch, capsys):
+    _only_harnesses(monkeypatch, _NoCliHarness)
+    seen = []
+
+    def which(name):
+        seen.append(name)
+        return outpost.which_runner(name)
+
+    path = _enabled_path(outpost, "darwin", which_runner=which)
+
+    assert set(seen) == {"node", "git", "lore", "tmux"}
+    assert "hubs cannot start" not in capsys.readouterr().out
+    assert path.split(":") == [
+        str(Path(outpost.which_runner("node")).parent), _TRAILHEAD_BIN,
+        "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    ]
+
+
+def test_relative_harness_cli_resolution_is_treated_as_unresolved(outpost, monkeypatch, capsys):
+    _only_harnesses(monkeypatch, _CliHarness)
+
+    path = _enabled_path(outpost, "darwin", which_runner=_which_with(outpost, stubcli="./stubcli"))
+
+    assert "." not in path.split(":")
+    assert "hubs cannot start" in capsys.readouterr().out
+
+
+def test_real_harness_detected_contributes_its_cli_dir(outpost):
+    (Path(outpost.env["HOME"]) / ".claude").mkdir(parents=True)
+
+    path = _enabled_path(
+        outpost, "darwin", which_runner=_which_with(outpost, claude="/opt/claude-bin/claude")
+    )
+
+    assert "/opt/claude-bin" in path.split(":")
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_composed_path_carries_the_dir_tmux_resolves_to(outpost, platform):
+    path_a = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, tmux="/opt/tmux-a/tmux")
+    )
+    path_b = _enabled_path(
+        outpost, platform, which_runner=_which_with(outpost, tmux="/opt/tmux-b/tmux")
+    )
+
+    node_dir = str(Path(outpost.which_runner("node")).parent)
+    assert node_dir != "/opt/tmux-a"
+    assert "/opt/tmux-a" in path_a.split(":") and "/opt/tmux-b" not in path_a.split(":")
+    assert "/opt/tmux-b" in path_b.split(":") and "/opt/tmux-a" not in path_b.split(":")
+
+
+def test_enable_without_tmux_on_path_raises_named_error_writes_nothing(outpost):
+    runner = _RecordingRunner()
+
+    def which_missing_tmux(name: str) -> str | None:
+        return None if name == "tmux" else outpost.which_runner(name)
+
+    with pytest.raises(OutpostLifecycleError, match="tmux"):
+        osup.enable(
+            env=outpost.env,
+            platform="darwin",
+            supervisor_dir=outpost.supervisor_dir,
+            runner=runner,
+            which_runner=which_missing_tmux,
+            uid=501,
+        )
+
+    assert not outpost.supervisor_dir.exists() or list(outpost.supervisor_dir.iterdir()) == []
+    assert runner.calls == []
 
 
 # ---------------------------------------------------------------------------

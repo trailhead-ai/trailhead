@@ -247,6 +247,38 @@ def cache_dir(
     raise PathResolutionError(f"Unsupported platform {plat!r}. Cannot resolve cache directory.")
 
 
+def cache_home(
+    *,
+    platform: str | None = None,
+    env: dict[str, str] | None = None,
+) -> Path:
+    """Return the XDG cache home itself (no app subdirectory).
+
+    $XDG_CACHE_HOME else ~/.cache on Linux and macOS (never ~/Library/Caches);
+    %LOCALAPPDATA% on Windows. Pure: creates nothing.
+
+    Raises:
+        PathResolutionError: On unsupported OS, missing HOME/LOCALAPPDATA, or a
+                             relative XDG_CACHE_HOME.
+    """
+    plat = platform if platform is not None else sys.platform
+    environ = env if env is not None else dict(os.environ)
+
+    if plat.startswith("linux") or plat == "darwin":
+        xdg = _xdg_override("XDG_CACHE_HOME", environ)
+        if xdg is not None:
+            return xdg
+        return _home(environ, "cache home") / ".cache"
+    if plat == "win32" or os.name == "nt":
+        localappdata = environ.get("LOCALAPPDATA")
+        if not localappdata:
+            raise PathResolutionError(
+                "Cannot resolve cache home on Windows: LOCALAPPDATA environment variable is not set."
+            )
+        return Path(localappdata)
+    raise PathResolutionError(f"Unsupported platform {plat!r}. Cannot resolve cache home.")
+
+
 # ---------------------------------------------------------------------------
 # Creator helper (the ONLY function that touches the filesystem)
 # ---------------------------------------------------------------------------
