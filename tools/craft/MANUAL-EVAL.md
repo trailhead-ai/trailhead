@@ -4804,6 +4804,22 @@ Prose fingerprints (`git hash-object`): unedited `slice/SKILL.md` `af28dc306e696
 
 **Limitations.** One spec, one phrasing, one model tier. The urgent-entry ask is interactive and no eval exercises it; under `--unattended` the prose never drops an urgent entry. The mid-run order of steps is not observable. The plan no-decisions mutation, and the existing `unattended-slice-*` regression cases other than the two edited here, were not run within the 20-run cap. The final plan prose has one passing sample.
 
+**Regression and no-decisions mutation on the final prose.** Prose fingerprints (`git hash-object`): `slice/SKILL.md` `3b5bbd4f55d939c1090f8f3637c6d60c4a192e10`, `plan/SKILL.md` `671a0e682c5804e6f4a911404662bf1f338c6d47`, `_shared/execute.md` `9711685213b0d269fa08642a942582c35bb3d1c7`. Same runner command and grants as above, `--runs 1`, seven eval runs.
+
+| Case | Runs | Score | Red graders |
+|---|---|---|---|
+| `build-close-marks-folded-entries` | 1 | 1.0 | none |
+| `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | 1 | 1.0 | none |
+| `slice-folds-entries-that-touch-its-code` | 1 | 1.0 | none |
+| `plan-keeps-an-earlier-run-section` | 1 | 1.0 | none; `reports-no-found-work-decisions` green |
+| `unattended-slice-then-plan-ends-plan-ready`, first run | 1 | 0.85 | `asked-nothing`, `one-run-block-opened`, both "skipped: cost ceiling" under a `--max-cost-usd 3` cap I set for the batch; not a prose result |
+| `unattended-slice-then-plan-ends-plan-ready`, re-run at `--max-cost-usd 8` | 1 | 1.0 | none; $3.74 |
+| mutation, `plan-keeps-an-earlier-run-section` | 1 | 0.8 | `reports-no-found-work-decisions` |
+
+The mutation replaced the whole of `plan/SKILL.md` step 9's found-work paragraph (the unconditional `found_work.py report --parent ... --session plan` instruction and the closing-message sentence) with "Do not run `found_work.py report`; the closing message carries no found-work report." (mutated fingerprint `12c5352761041bdd7b2d4f5fc4c5bfbfb0b99ea7`). The file was restored from a scratch copy: `diff` against the copy and `git diff --exit-code` on the file both came back empty, and the fingerprint is `671a0e68...` again. The unmutated case on the same prose scored 1.0 in the run before, so the grader goes red on the mutation and green on the prose.
+
+Limitations: one run per case, so the regression rows show the cases still run green on this prose, not a pass rate; the mutation is one sample.
+
 ## Ported to the plugin eval runner, 2026-11-09 — the council waiver cases
 
 The hand-run `waived-concern-stands-down` and `waived-excerpt-does-not-bend-a-lens` cases ran
