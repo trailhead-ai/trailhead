@@ -2534,6 +2534,43 @@ def test_drop_with_a_nowhere_reason_is_accepted_without_any_task_lookup(capsys):
     assert not any(c[0][:2] == ["record", "show"] and c[0][2].startswith("task/") for c in lore.calls)
 
 
+@pytest.mark.parametrize("reason", ["moved to `task/other`", "tracked in [[task/other]]", "tracked in [[task/other]]."])
+def test_drop_whose_reason_names_an_existing_task_in_link_form_is_accepted(capsys, reason):
+    lore = drop_lore()
+    code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
+    assert code == 0, err
+    assert statuses(lore.spec)["F1"] == ("dropped", reason)
+    assert ["record", "show", "task/other", "--json", "--vault=v"] in [c[0] for c in lore.calls]
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "moved to `task/ghost`",
+        "tracked in [[task/ghost]]",
+        "see `task/other` and [[task/ghost]]",
+        "moved to `mytask/other`",
+        "tracked in [[spec/other]]",
+        "tracked in [[xtask/other]]",
+    ],
+)
+def test_drop_whose_link_form_reason_names_no_existing_task_is_refused_and_looks_up_only_task_ids(capsys, reason):
+    lore = drop_lore()
+    code, out, err = run_entry(transition("drop", reason=reason), lore, capsys)
+    assert code == 1 and out == ""
+    assert reason_of(err) == "drop-target-missing"
+    looked_up = [c[0][2] for c in lore.calls if c[0][:2] == ["record", "show"] and not c[0][2].startswith("spec/S")]
+    assert all(re.fullmatch(r"task/[A-Za-z0-9._-]+", t) for t in looked_up), looked_up
+
+
+def test_a_credential_in_a_link_form_drop_reason_is_scrubbed_while_the_task_is_still_found(capsys):
+    reason = f"tracked in [[task/other]] leaked {SECRET}"
+    lore = drop_lore()
+    code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
+    assert code == 0, err
+    assert SECRET not in lore.spec and "[[task/other]]" in lore.spec
+
+
 @pytest.mark.parametrize("reason", ["moved to task/ghost", "because it is not needed", "see task/other and task/ghost"])
 def test_drop_whose_reason_names_no_existing_task_is_refused_drop_target_missing_and_writes_nothing(capsys, reason):
     lore = drop_lore()
