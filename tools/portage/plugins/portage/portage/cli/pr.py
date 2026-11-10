@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 from pathlib import Path
 
@@ -132,7 +131,13 @@ def _add_merge(sub) -> None:
     p = sub.add_parser(
         "merge",
         help="Merge camp-group PRs in dependency order.",
-        description="Merge camp-group PRs in dependency order with safety checks.",
+        description=(
+            "Merge camp-group PRs in dependency order with safety checks. A PR whose head "
+            "branch is held (`portage hold`) is refused before any merge, whatever "
+            "--operator-directed says; a hold is local to this machine's portage state "
+            "directory and the repo's real path, so it does not bind a merge made by hand "
+            "or through the host."
+        ),
     )
     p.add_argument("--manifest", required=True, help="Path to the camp central manifest.json")
     p.add_argument("--toml", default=None, help="Path to the group TOML (for merge_order)")
@@ -154,30 +159,18 @@ def _add_merge(sub) -> None:
     p.set_defaults(func=cmd_merge)
 
 
-def _head_branch(pair: PRPair) -> str | None:
-    """The PR's head branch as GitHub reports it, or None when it cannot be read."""
-    try:
-        r = subprocess.run(
-            ["gh", "pr", "view", pair.pr_number, "--json", "headRefName", "--jq", ".headRefName"],
-            cwd=pair.repo_path, capture_output=True, text=True, check=False,
-        )
-    except OSError:
-        return None
-    return (r.stdout.strip() or None) if r.returncode == 0 else None
-
-
-def _held_branch_refusal(pr_pairs: list[PRPair]) -> str | None:
+def _held_branch_refusal(pr_pairs: list[PRPair], provider) -> str | None:
     """Refusal message for the first pair whose head branch is held, else None.
 
     Runs before the merge. A repo with no hold at all is never asked about its
     PR. Otherwise the PR's own head branch decides (a camp worktree may have any
-    branch checked out); when the head branch cannot be determined, the pair is
-    refused rather than guessed at.
+    branch checked out), read through the provider's runner; when it cannot be
+    determined, the pair is refused rather than guessed at.
     """
     for pair in pr_pairs:
         if not holds.has_any_hold(pair.repo_path):
             continue
-        branch = _head_branch(pair)
+        branch = provider.pr.head_branch(pair.repo_path, pair.pr_number)
         if branch is not None and holds.BRANCH_PATTERN.fullmatch(branch):
             if not holds.is_held(pair.repo_path, branch):
                 continue
@@ -209,13 +202,14 @@ def cmd_merge(args: argparse.Namespace) -> int:
         repo_path, pr_number, member_name = parts[0], parts[1], parts[2]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
-    refusal = _held_branch_refusal(pr_pairs)
+    provider = get_provider()
+    refusal = _held_branch_refusal(pr_pairs, provider)
     if refusal:
         print(refusal, file=sys.stderr)
         return 2
 
     try:
-        result = get_provider().pr.merge(
+        result = provider.pr.merge(
             pr_pairs,
             args.manifest,
             toml_path=args.toml,

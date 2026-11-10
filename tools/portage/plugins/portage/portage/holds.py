@@ -6,6 +6,12 @@ call and whatever `[release].auto_merge` or `--operator-directed` say. Only an
 operator or the orchestrator runs `portage release`; the unattended PR step never
 does.
 
+Scope: a hold is local. It is keyed by the repo's real path and the branch name on this
+machine's portage state directory, so it binds only a `portage merge` run that reads that
+same state directory against that same checkout path. It does not stop a merge made by hand,
+through the host's own interface, by a run with a different state directory, or against the
+same repository cloned at another path.
+
 State lives under `<portage state dir>/holds/`, resolved through
 `trailhead.paths.state_dir` and never built by hand. One file per hold, named by
 a digest of the repo's real path and the branch, so no caller-supplied string
@@ -83,5 +89,5 @@ def has_any_hold(repo: str) -> bool:
             if json.loads(f.read_text(encoding="utf-8")).get("repo") == key:
                 return True
         except (OSError, ValueError):
-            continue
+            return True
     return False

@@ -1948,6 +1948,12 @@ class _GitHubPR(PRSurface):
     def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
         return _check_approval(repo_path, pr_number, runner=self._runner)
 
+    def head_branch(self, repo_path: str, pr_number: str) -> str | None:
+        validate_pr_number(pr_number)
+        state = _get_pr_state(repo_path, pr_number, self._runner)
+        branch = state.get("headRefName") if state else None
+        return branch or None
+
 
 class _GitHubCI(CISurface):
     def __init__(self, runner: rp.Runner, pr: _GitHubPR) -> None:

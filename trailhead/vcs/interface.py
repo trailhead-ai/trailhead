@@ -89,6 +89,11 @@ class PRSurface(ABC):
         """
 
     @abstractmethod
+    def head_branch(self, repo_path: str, pr_number: str) -> str | None:
+        """The PR's head branch name, or ``None`` when it cannot be read (the host
+        refused the lookup, or answered with no branch). Read-only."""
+
+    @abstractmethod
     def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
         """Answer whether this PR carries a human-authored approval signal.
 

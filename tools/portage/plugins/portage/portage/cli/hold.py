@@ -2,8 +2,10 @@
 
 ``hold <repo> <branch>`` records a hold (idempotent); ``release <repo> <branch>``
 clears it. ``<repo>`` is the repo path as it appears in a ``portage merge`` pair.
-``portage merge`` refuses a held branch (see ``portage.holds``). Exit 0 on
-success, 2 on a refused branch name.
+``portage merge`` refuses a held branch (see ``portage.holds``). A hold is local: it is
+keyed by the repo's real path and the branch in this machine's portage state directory, so it
+binds only `portage merge` runs that share both, never a merge made by hand or through the
+host. Exit 0 on success, 2 on a refused branch name.
 """
 
 from __future__ import annotations

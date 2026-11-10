@@ -104,7 +104,7 @@ def cmd_await_outcome(args: argparse.Namespace) -> int:
         _check_parent(path.parent)
         while True:
             text = _read_once(path)
-            if text is not None and text.endswith("\n") and text.strip():
+            if text is not None and "\n" in text and text.strip():
                 token, argument = parse_monitor_outcome(text)
                 if token is None:
                     print(

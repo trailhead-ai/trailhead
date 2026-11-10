@@ -166,3 +166,12 @@ def test_a_line_that_never_gets_its_newline_stays_pending(outdir, capsys):
     f.write_text("READY all green")
     rc, out, _ = _run(capsys, f, timeout="1", interval="0.1")
     assert (rc, out.strip()) == (PENDING, "PENDING")
+
+
+def test_a_terminated_first_line_is_parsed_while_a_second_line_is_still_being_written(
+    outdir, capsys
+):
+    f = outdir / "outcome"
+    f.write_text("READY all green\nextra pa")
+    rc, out, _ = _run(capsys, f)
+    assert (rc, out.strip()) == (PARSED, "READY all green")

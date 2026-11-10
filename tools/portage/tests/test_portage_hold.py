@@ -1,7 +1,8 @@
 """`portage hold` / `portage release` and `portage merge`'s refusal of a held branch.
 
-`merge` runs against the real ``GitHubProvider`` with a spy runner standing in for ``gh``;
-the held-branch refusal must happen before the spy sees any call.
+`merge` runs against the real ``GitHubProvider`` with a spy runner standing in for ``gh``. The
+held-branch refusal reads the PR's head branch through that same runner, and must happen before
+any merge call.
 """
 
 from __future__ import annotations
@@ -21,35 +22,40 @@ from trailhead.vcs.github import GitHubProvider
 
 
 class _SpyRunner:
-    def __init__(self) -> None:
+    """Stands in for ``gh``. ``view`` sets how ``gh pr view`` answers: a dict is the JSON payload,
+    ``"fail"`` is a nonzero exit, ``"empty"`` is a clean exit with no output."""
+
+    def __init__(self, view=None) -> None:
         self.calls: list[list[str]] = []
+        self.cwds: list[str | None] = []
+        self.view = view if view is not None else {"headRefName": "feat"}
 
     def __call__(self, cmd, **kwargs):
         self.calls.append(list(cmd))
+        self.cwds.append(kwargs.get("cwd"))
         s = " ".join(cmd)
         if "user.email" in s:
             return subprocess.CompletedProcess(cmd, 0, "t@e.x\n", "")
         if "view" in s and "--json" in s:
+            if self.view == "fail":
+                return subprocess.CompletedProcess(cmd, 1, "", "no pull request found")
+            if self.view == "empty":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
             payload = {"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
-                       "isDraft": False, "headRefName": "feat"}
+                       "isDraft": False, "baseRefName": "main", **self.view}
             return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
         return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
 
     def merge_attempted(self) -> bool:
         return any("pr" in c and "merge" in c for c in self.calls)
 
+    def only_views(self) -> bool:
+        return all(c[:3] == ["gh", "pr", "view"] for c in self.calls)
+
 
 @pytest.fixture(autouse=True)
 def state(tmp_path, monkeypatch):
     monkeypatch.setenv("PORTAGE_STATE_DIR", str(tmp_path / "state"))
-
-
-@pytest.fixture(autouse=True)
-def head_branch(monkeypatch):
-    """The PR's head branch as `gh` reports it; a test sets `head["branch"]` (None = unreadable)."""
-    head = {"branch": "feat"}
-    monkeypatch.setattr(pr_cli, "_head_branch", lambda pair: head["branch"])
-    return head
 
 
 @pytest.fixture
@@ -62,13 +68,13 @@ def repo(tmp_path):
     return r
 
 
-def _merge(tmp_path, monkeypatch, repo, toml, *, operator_directed=False):
+def _merge(tmp_path, monkeypatch, repo, toml, *, operator_directed=False, view=None):
     manifest = tmp_path / "manifest.json"
     manifest.write_text(json.dumps({"schema_version": 1, "members": [
         {"name": "api", "repo_root": str(repo), "worktree_path": str(repo)}]}))
     group = tmp_path / "group.toml"
     group.write_text(toml)
-    spy = _SpyRunner()
+    spy = _SpyRunner(view)
     monkeypatch.setattr(pr_cli, "get_provider", lambda *a, **k: GitHubProvider(runner=spy))
     argv = ["merge", "--manifest", str(manifest), "--toml", str(group)]
     if operator_directed:
@@ -86,13 +92,13 @@ def test_merge_on_an_unheld_branch_proceeds(tmp_path, monkeypatch, repo):
     assert rc == 0
 
 
-def test_hold_blocks_merge_before_any_gh_call_with_auto_merge(tmp_path, monkeypatch, repo, capsys):
+def test_hold_blocks_merge_before_any_merge_call_with_auto_merge(tmp_path, monkeypatch, repo, capsys):
     assert dispatch.main(["hold", str(repo), "feat"]) == 0
     capsys.readouterr()
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
     err = capsys.readouterr().err
     assert rc == 2
-    assert spy.calls == []
+    assert not spy.merge_attempted()
     assert "held" in err and "portage release" in err and "feat" in err
 
 
@@ -100,7 +106,7 @@ def test_hold_blocks_merge_even_when_operator_directed(tmp_path, monkeypatch, re
     dispatch.main(["hold", str(repo), "feat"])
     rc, spy = _merge(tmp_path, monkeypatch, repo, "[release]\n", operator_directed=True)
     assert rc == 2
-    assert spy.calls == []
+    assert not spy.merge_attempted()
 
 
 def test_hold_on_another_branch_does_not_block(tmp_path, monkeypatch, repo):
@@ -154,46 +160,74 @@ def test_held_head_branch_refuses_when_a_different_branch_is_checked_out(
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
     err = capsys.readouterr().err
     assert rc == 2
-    assert spy.calls == []
+    assert spy.only_views()
     assert "held" in err and "feat" in err
 
 
 def test_unheld_head_branch_proceeds_even_when_the_checked_out_branch_is_held(
-    tmp_path, monkeypatch, repo, head_branch
+    tmp_path, monkeypatch, repo
 ):
     dispatch.main(["hold", str(repo), "feat"])
-    head_branch["branch"] = "other"
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view={"headRefName": "other"})
     assert spy.merge_attempted()
 
 
-def test_unreadable_head_branch_with_a_hold_on_the_repo_refuses_before_any_gh_call(
-    tmp_path, monkeypatch, repo, capsys, head_branch
+def test_the_base_branch_being_held_does_not_refuse_a_pr_whose_head_is_not_held(
+    tmp_path, monkeypatch, repo
+):
+    dispatch.main(["hold", str(repo), "main"])
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view={"headRefName": "feat"})
+    assert spy.merge_attempted()
+
+
+def test_the_head_branch_is_read_in_the_pairs_repo(tmp_path, monkeypatch, repo):
+    dispatch.main(["hold", str(repo), "feat"])
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    views = [cwd for c, cwd in zip(spy.calls, spy.cwds) if c[:3] == ["gh", "pr", "view"]]
+    assert views and all(cwd == str(repo) for cwd in views)
+
+
+@pytest.mark.parametrize("view", ["fail", "empty"])
+def test_an_unreadable_head_branch_with_a_hold_on_the_repo_refuses(
+    tmp_path, monkeypatch, repo, capsys, view
 ):
     dispatch.main(["hold", str(repo), "feat"])
-    head_branch["branch"] = None
     capsys.readouterr()
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view=view)
     err = capsys.readouterr().err
     assert rc == 2
-    assert spy.calls == []
+    assert not spy.merge_attempted()
     assert "held" in err and "portage release" in err
 
 
-def test_unreadable_head_branch_without_any_hold_on_the_repo_proceeds(
-    tmp_path, monkeypatch, repo, head_branch
+@pytest.mark.parametrize("view", ["fail", "empty"])
+def test_an_unreadable_head_branch_without_any_hold_on_the_repo_is_not_a_hold_refusal(
+    tmp_path, monkeypatch, repo, capsys, view
 ):
-    head_branch["branch"] = None
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
-    assert spy.merge_attempted()
+    capsys.readouterr()
+    _merge(tmp_path, monkeypatch, repo, AUTO, view=view)
+    assert "held" not in capsys.readouterr().err
 
 
 def test_a_repo_with_no_hold_never_asks_for_the_head_branch(tmp_path, monkeypatch, repo):
-    asked = []
-    monkeypatch.setattr(pr_cli, "_head_branch", lambda pair: asked.append(pair) or "feat")
     rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
-    assert asked == []
+    asked = [c for c in spy.calls if c[:3] == ["gh", "pr", "view"]]
+    # the merge itself reads the PR once; the hold check adds no further read
+    assert len(asked) == 1
     assert spy.merge_attempted()
+
+
+def test_a_corrupt_hold_entry_counts_as_held(repo):
+    holds._holds_dir().mkdir(parents=True, exist_ok=True)
+    (holds._holds_dir() / "garbage.json").write_text("{not json")
+    assert holds.has_any_hold(str(repo)) is True
+
+
+def test_a_hold_entry_for_another_repo_does_not_count(tmp_path, repo):
+    other = tmp_path / "other"
+    other.mkdir()
+    holds.hold(str(other), "feat")
+    assert holds.has_any_hold(str(repo)) is False
 
 
 def test_an_unlistable_holds_directory_counts_as_held(tmp_path, repo):
