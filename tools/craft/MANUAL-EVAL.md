@@ -4879,3 +4879,25 @@ one means writing a runner case for the prose as it stands, per `docs/eval-proto
 
 `scripts/wording_grader.py` and `scripts/ritual_deliverable_grader.py` graded only these
 cases and were removed with them.
+
+## Eval-gate failures after the merge with main (2026-11-10)
+
+The portage eval gate ran 34 cases on the merge of this branch with main and 4 failed. Model `claude-opus-5-5`, 3 runs per batch, `--ablation none`, the runner block's grants, `TMPDIR` outside `/tmp`. Real lore config and state were hashed before and after each batch; the hash differed on every batch, and the files changed in that window were other sessions' records and sessions in other vaults (none in the eval's own vault).
+
+Prose fingerprints (`git hash-object`): before the fix `skills/_shared/execute.md` `ad8465037532507ab60e3a0119c2f9615cfa0601`; after `2244ad181e0d05d15fc268eb58da8db17fac98b7`. Unchanged: `skills/slice/SKILL.md` `a77e8c5c2b69096f43f42078d4c7ec0bb580aef6`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0`, `skills/plan/SKILL.md` `f5edf0a130cc6fc3ff967b7df0bb6ff9cf6d7ecf`, `skills/_shared/security.md` `db4422a25dc4b5b118c23496684f3a6bcd285dc0`.
+
+| Case | Gate | Cause | Change |
+|---|---|---|---|
+| `slice-refuses-when-the-slice-repository-is-not-here` | 0 of 3 | fixture: its label was not the task's own name, which this branch's branch recovery refuses before looking for a repository | `norepo` arm labels the parent with its own name and cuts no branch |
+| `slice-refuses-when-the-drafted-check-is-refused` | 1 of 3 | fixture: the stand-in edited the session's own file, and the session reported tampering instead of the refusal | stand-in appends the token to a copy handed to the real writer |
+| `close-asks-nothing-when-no-one-is-there` | 1 of 3 | prose: the two failing replies said "`verify` confirmed AC2 and AC3"; a judge re-run on the saved final message failed that clause and passed the run that did not say it | one sentence in `execute.md`: a no-ask report never says a check was confirmed |
+| `unattended-slice-then-plan-ends-plan-ready` | 1 of 3 | pre-existing: fails on main's own prose too (below) | none |
+
+| Batch | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `unattended-slice-then-plan-ends-plan-ready`, 3 runs, main's `slice/SKILL.md` `af28dc306e696ff7f8e16bb677dc5da9dcc0edcd`, `drive/SKILL.md` `09003e2305b9a38e58350689c4e7f110c824ee3f`, `_shared/execute.md` `9711685213b0d269fa08642a942582c35bb3d1c7`, `_shared/security.md` `9c01a75f7bbf16873901c4f20e0f77c41793e95d` (`plan/SKILL.md` identical on both) swapped in, then restored and re-hashed to the values above | origin/main | 2 of 3 at 1.0; run 3 0.85, failed `asked-nothing` and `one-run-block-opened` | 10.15 |
+| `slice-refuses-when-the-slice-repository-is-not-here` | `2244ad18...` | 3 of 3 at 1.0 | 2.87 |
+| `slice-refuses-when-the-drafted-check-is-refused` | `2244ad18...` | 3 of 3 at 1.0 | 3.62 |
+| `close-asks-nothing-when-no-one-is-there` | `2244ad18...` | 3 of 3 at 1.0 | 2.79 |
+
+Not run again after the fix: the other 30 cases. The scaffold change touches the stuck-slice scaffold they share, but only in arms `credential` and `norepo`. The grader judge for case 2 could not be reproduced: a re-run of the judge on the saved final messages passed two of the three runs the gate failed, so the cause given for that case is the stand-in's visible edit (the replies narrate tampering), not an established judge fault. Case 4 stays flaky: on main's prose one run of three failed the same grader, and on this branch two of three failed it, one judge reading the reply's note that a token-shaped string in the spec was left for the operator to decide as an open choice.
