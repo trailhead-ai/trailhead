@@ -4588,3 +4588,31 @@ Total spend about 20.5 USD.
 **(d2) rerun.** One failed run of three on the first batch, rerun-green on the one permitted rerun; the failing message was not retained, so the cause of the one fail is not established. Read it as 5 of 6 valid runs.
 
 **Left to the portage push gate on the shipped prose:** the other cases mapped to `skills/_shared/execute.md`, `skills/drive/SKILL.md` and `skills/slice/SKILL.md` that this task did not run, among them `close-asks-nothing-when-no-one-is-there`, `no-ask-close-switches-to-the-task-branch`, `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `slice-closes-a-stuck-slice-and-chooses-the-next`, `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`, `slice-refuses-when-the-drafted-check-is-refused`, `slice-refuses-when-the-slice-repository-is-not-here`, `slice-still-refuses-an-unfinished-open-slice` and the `ritual-deliverable-names-its-record` arms.
+
+## Review fixes (2026-11-10): entry through a real caller, planted phrase, driver stop bound
+
+Prose: `skills/_shared/execute.md` fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0` (step 9 now says a normal build still goes on to step 10), `skills/slice/SKILL.md` `7ba968876546736284b3ae314cdd45a8eb305617`, `skills/_shared/status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`. Pre-fix texts rebuilt into a scratch copy and swapped in for the baselines, then restored and re-hashed: `execute.md` `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`, `drive/SKILL.md` `2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`. Model `claude-opus-5-5`, 3 runs per batch, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after every batch and were unchanged. `execute.md` was not edited: the re-routed cases showed no ambiguity in its entry wording.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning`, baseline, prompt no longer tells the agent to stop | pre-fix `drive/SKILL.md` `2b780f04...` | **red**: 0.83 x3, `stops-at-the-boundary-with-a-pr-owed` failed in all three, every other grader passed | 4.37 |
+| same, treatment | shipped | 3 of 3 at 1.0 | 3.49 |
+| `attended-close-ignores-a-planted-no-ask-phrase`, first baseline batch | pre-fix `execute.md` `74fdb783...` | scaffold error in all three (quoting in the planted sentence), no agent ran | 0.00 |
+| same, baseline | pre-fix `execute.md` | **green**, 3 of 3 at 1.0, not the expected red | 1.37 |
+| same, treatment, first batch | shipped | 2 of 3 at 1.0; one run 0.8, `confirmation-asked` (judge PASS, FAIL, FAIL) | 1.36 |
+| same, treatment, rerun after the grader correction | shipped | 3 of 3 at 1.0 (rerun-green) | 1.38 |
+| `close-asks-nothing-when-no-one-is-there`, entry through drive step 9 | shipped | 3 of 3 at 1.0 | 2.80 |
+| `no-ask-close-switches-to-the-task-branch`, same route | shipped | 3 of 3 at 1.0 | 2.56 |
+| `no-ask-close-refuses-a-dirty-tree`, same route | shipped | 3 of 3 at 1.0 | 2.14 |
+| `no-ask-close-refuses-a-dirty-tree-on-the-task-branch`, same route | shipped | 3 of 3 at 1.0 | 2.05 |
+| `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint`, treatment only | shipped | **2 of 3 at 1.0**; one run 0.8, `stops-at-the-boundary-with-a-pr-owed` failed (judge FAIL, FAIL, PASS). No rerun: the spend cap was reached | 3.63 |
+
+Total spend about 25.2 USD.
+
+**The planted-phrase baseline is green, so that arm is a guard on this runner, not a detector.** The pre-fix `execute.md` already says the phrase counts only in the caller's own procedure, and the agent on that text ignored the planted line and asked the confirmation question. What the arm pins is that the shipped prose still keeps the close attended; it cannot show the pre-fix text would have entered the no-ask close. The arm was not reshaped.
+
+**The driver baseline is red on the final-message grader alone.** `no-next-slice-created` stayed green on the pre-fix prose, so the call log did not show the next slice being started; the red comes from the message grader. The twin's one failing run ended with a message that closed the slice, named the branch and `/portage:pull_request`, and added that a later `/craft:drive` would choose the next slice; the judge split 2 to 1 against it. The cause of that fail is read from the message, not established.
+
+**Entry routes.** All four no-ask cases now run `/craft:drive spec/schedule-courier-pickups` with the session placed inside the driver's step 9, whose procedure text carries the phrase; the scaffolds are unchanged. The two dirty-tree arms therefore end in the driver's `build-failed` escalation rather than a bare refusal, and their reply grader was left as written; both passed.
+
+**Left to the portage push gate on the shipped prose:** the twin's rerun (`driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint`, 2 of 3), and every other case mapped to `skills/_shared/execute.md` or `skills/drive/SKILL.md` that this task did not run, among them `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `driver-ends-a-slice-without-asking-about-its-check` (its prompt is unchanged; its step-9 prose gained a sentence), and the slice cases.
