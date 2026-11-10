@@ -1107,6 +1107,8 @@ _NO_FLAG_BASELINE = {
         "candidates: AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
         "waiting: none\n"
+        "entries-open: none\n"
+        "entries-folded: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_full_coverage.md": (
@@ -1115,6 +1117,8 @@ _NO_FLAG_BASELINE = {
         "candidates: none\n"
         "partial: none\n"
         "waiting: none\n"
+        "entries-open: none\n"
+        "entries-folded: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_union_disjoint.md": (
@@ -1123,6 +1127,8 @@ _NO_FLAG_BASELINE = {
         "candidates: AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
         "waiting: none\n"
+        "entries-open: none\n"
+        "entries-folded: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_partial_then_full.md": (
@@ -1131,6 +1137,8 @@ _NO_FLAG_BASELINE = {
         "candidates: AC1, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
         "waiting: none\n"
+        "entries-open: none\n"
+        "entries-folded: none\n"
         "complete-eligible: yes\n"
     ),
 }
@@ -1193,15 +1201,16 @@ def test_removed_criterion_coverage_is_void_and_the_rest_is_derived(tmp_path):
     assert tokens["void"] == "AC2 (removed by amend)"
 
 
-def test_the_six_lines_keep_their_positions_and_void_and_the_two_close_lines_follow(tmp_path):
+def test_the_base_lines_keep_their_positions_and_void_and_the_two_close_lines_follow(tmp_path):
     r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
     lines = r.stdout.splitlines()
     assert [ln.split(":")[0] for ln in lines] == [
-        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible", "void",
+        "criteria", "covered", "candidates", "partial", "waiting", "entries-open", "entries-folded",
+        "complete-eligible", "void",
         "closed", "closed-uncounted",
     ]
     assert lines[-2:] == ["closed: none", "closed-uncounted: none"]
-    assert lines[:6] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
+    assert lines[:8] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
 
 
 def test_the_same_input_without_the_flag_is_undeclared_with_a_hint_naming_the_flag():
@@ -1278,8 +1287,8 @@ def test_void_ids_are_deduplicated_and_in_numeric_order(tmp_path):
 def test_empty_removed_with_a_matching_declared_prints_void_none(tmp_path):
     r = _run_flag(FULL_COVERAGE, _state(tmp_path, [f"AC{i}" for i in range(1, 10)], []))
     assert r.returncode == 0, r.stderr
-    assert r.stdout.splitlines()[6] == "void: none"
-    assert r.stdout.splitlines()[:6] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
+    assert r.stdout.splitlines()[8] == "void: none"
+    assert r.stdout.splitlines()[:8] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
 
 
 def test_a_declared_id_is_never_voided_even_when_the_state_lists_it_as_removed(tmp_path):
@@ -1553,6 +1562,8 @@ def test_a_state_carrying_both_marks_exits_zero_and_acts_on_them(tmp_path):
         "candidates": "AC2, AC3",
         "partial": "none",
         "waiting": "none",
+        "entries-open": "none",
+        "entries-folded": "none",
         "complete-eligible": "yes",
         "void": "AC2 (reopened by amend)",
         "closed": "AC1",
@@ -1795,7 +1806,7 @@ def test_a_waiting_criterion_leaves_candidates_and_blocks_completion():
 def test_the_waiting_line_sits_after_partial_and_before_complete_eligible():
     r = _run(_with_waiting(_spec(_THREE, _AC1_COVERED), _waiting_entry("AC2")))
     assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
-        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible",
+        "criteria", "covered", "candidates", "partial", "waiting", "entries-open", "entries-folded", "complete-eligible",
     ]
 
 
@@ -1880,7 +1891,9 @@ def test_a_spec_with_no_waiting_section_prints_todays_lines_plus_waiting_none():
     spec = (FIXTURES / "spec_candidate_multi_covers_with_partial.md").read_text(encoding="utf-8")
     r = _run(spec)
     assert r.returncode == 0, r.stderr
-    assert r.stdout == expected.replace("complete-eligible", "waiting: none\ncomplete-eligible")
+    assert r.stdout == expected.replace(
+        "complete-eligible", "waiting: none\nentries-open: none\nentries-folded: none\ncomplete-eligible"
+    )
 
 
 def test_the_criteria_state_lines_still_follow_complete_eligible_in_order(tmp_path):
@@ -1888,7 +1901,145 @@ def test_the_criteria_state_lines_still_follow_complete_eligible_in_order(tmp_pa
     r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], []))
     assert r.returncode == 0, r.stderr
     assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
-        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible",
+        "criteria", "covered", "candidates", "partial", "waiting", "entries-open", "entries-folded", "complete-eligible",
         "void", "closed", "closed-uncounted",
     ]
     assert _tokens(r.stdout)["waiting"] == "AC3"
+
+
+# ---------------------------------------------------------------------------
+# `## Follow-ups`: an open or folded entry holds the loop open; done and
+# dropped entries do not.
+# ---------------------------------------------------------------------------
+
+_ALL_COVERED = [_entry(1, "covers AC1, AC2, AC3")]
+
+
+def _followup(n: int, status: str) -> str:
+    return (
+        f"- **F{n}.** Title {n}\n"
+        f"  - status: {status}\n"
+        "  - what: something is wrong\n"
+        "  - where: `a/b.py`\n"
+        "  - found: during review\n"
+    )
+
+
+def _with_followups(body: str, *entries: str) -> str:
+    return body + "\n## Follow-ups\n\n" + "".join(entries)
+
+
+def _followups_run(ledger, *entries):
+    r = _run(_with_followups(_spec(_THREE, ledger), *entries))
+    assert r.returncode == 0, r.stderr
+    return _tokens(r.stdout)
+
+
+def test_an_open_entry_is_listed_and_blocks_completion_when_every_criterion_is_covered():
+    t = _followups_run(_ALL_COVERED, _followup(1, "open"))
+    assert t["candidates"] == "none"
+    assert t["entries-open"] == "F1"
+    assert t["entries-folded"] == "none"
+    assert t["complete-eligible"] == "no"
+
+
+def test_a_folded_entry_is_listed_and_blocks_completion():
+    t = _followups_run(_ALL_COVERED, _followup(1, "folded into task/x"))
+    assert t["entries-open"] == "none"
+    assert t["entries-folded"] == "F1"
+    assert t["complete-eligible"] == "no"
+
+
+def test_done_and_dropped_entries_appear_in_neither_token_and_complete_eligible_stays_yes():
+    t = _followups_run(_ALL_COVERED, _followup(1, "done by task/x"), _followup(2, "dropped: nowhere: not needed"))
+    assert t["entries-open"] == "none"
+    assert t["entries-folded"] == "none"
+    assert t["complete-eligible"] == "yes"
+
+
+def test_entry_ids_are_listed_in_section_order_per_status():
+    t = _followups_run(
+        _ALL_COVERED,
+        _followup(3, "open"), _followup(1, "folded into task/x"), _followup(2, "open"),
+        _followup(4, "folded into task/y"),
+    )
+    assert t["entries-open"] == "F3, F2"
+    assert t["entries-folded"] == "F1, F4"
+
+
+def test_a_spec_with_no_followups_section_prints_none_for_both_and_its_other_lines_are_unchanged():
+    r = _run(_spec(_THREE, _ALL_COVERED))
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == (
+        "criteria: AC1, AC2, AC3\n"
+        "covered: AC1, AC2, AC3\n"
+        "candidates: none\n"
+        "partial: none\n"
+        "waiting: none\n"
+        "entries-open: none\n"
+        "entries-folded: none\n"
+        "complete-eligible: yes\n"
+    )
+
+
+def test_open_entries_do_not_change_the_candidates_of_uncovered_criteria():
+    with_entries = _followups_run([_entry(1, "covers AC1")], _followup(1, "open"), _followup(2, "folded into task/x"))
+    without = _tokens(_run(_spec(_THREE, [_entry(1, "covers AC1")])).stdout)
+    assert with_entries["candidates"] == without["candidates"] == "AC2, AC3"
+    assert with_entries["entries-open"] == "F1"
+    assert with_entries["entries-folded"] == "F2"
+
+
+def test_the_entry_tokens_sit_between_waiting_and_complete_eligible(tmp_path):
+    body = _with_followups(_spec(_THREE, _ALL_COVERED), _followup(1, "open"))
+    r = _run_flag(body, _state(tmp_path, _THREE, []))
+    assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
+        "criteria", "covered", "candidates", "partial", "waiting",
+        "entries-open", "entries-folded", "complete-eligible", "void", "closed", "closed-uncounted",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("section", "code"),
+    [
+        ("- **F1.** Title\n  - status: pending\n  - what: w\n  - where: `a/b.py`\n  - found: f\n", "malformed-entry"),
+        ("an unmarked sentinel-prose line\n", "malformed-entry"),
+        (_followup(1, "open") + "\n## Follow-ups\n\n" + _followup(2, "open"), "duplicate-followups-heading"),
+    ],
+)
+def test_a_malformed_followups_section_refuses_naming_the_parsers_code(section, code):
+    r = _run(_spec(_THREE, _ALL_COVERED) + "\n## Follow-ups\n\n" + section)
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert _reason_code(r.stderr) == "malformed-followups-section"
+    assert code in r.stderr
+    assert "sentinel-prose" not in r.stderr
+
+
+@pytest.mark.parametrize(
+    ("fixture", "open_ids", "folded_ids"),
+    [
+        ("followups_section_six_entries.md", "F3, F4, F6", "F1, F2, F5"),
+        (
+            "followups_section_eleven_entries.md",
+            "F1, F2, F3, F4, F5, F6, F7, F8, F9, F10, F11",
+            "none",
+        ),
+    ],
+)
+def test_a_followups_section_copied_from_a_real_spec_parses(fixture, open_ids, folded_ids):
+    section = (FIXTURES / fixture).read_text(encoding="utf-8")
+    r = _run(_spec(_THREE, _ALL_COVERED) + "\n" + section)
+    assert r.returncode == 0, r.stderr
+    t = _tokens(r.stdout)
+    listed = [i for key in ("entries-open", "entries-folded") for i in t[key].split(", ") if i != "none"]
+    assert len(listed) == section.count("\n- **F")
+    assert (t["entries-open"], t["entries-folded"]) == (open_ids, folded_ids)
+
+
+def test_a_followups_out_of_scope_heading_is_not_the_section():
+    r = _run(_spec(_THREE, _ALL_COVERED) + "\n## Follow-ups (out of scope)\n\nan unmarked sentinel-prose line\n")
+    assert r.returncode == 0, r.stderr
+    t = _tokens(r.stdout)
+    assert t["entries-open"] == t["entries-folded"] == "none"
+    assert t["complete-eligible"] == "yes"

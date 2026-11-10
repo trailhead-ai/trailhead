@@ -1,0 +1,57 @@
+## Follow-ups
+
+- **F1.** Synthetic ordinary entry one
+  - status: open
+  - what: A generic description of synthetic follow-up 1, written for the parser fixture.
+  - where: `example/pkg/mod_1.py`
+  - found: synthetic review
+- **F2.** Synthetic ordinary entry two
+  - status: open
+  - what: A generic description of synthetic follow-up 2, written for the parser fixture.
+  - where: `example/pkg/mod_2.py`
+  - found: synthetic review
+- **F3.** Synthetic ordinary entry three
+  - status: open
+  - what: A generic description of synthetic follow-up 3, written for the parser fixture.
+  - where: `example/bin/tool`
+  - found: synthetic review
+- **F4.** Security finding at example/pkg/mod_1.py:11 (ref aaaa0001)
+  - status: open
+  - what: security finding — see example/pkg/mod_1.py:11
+  - where: `example/pkg/mod_1.py`
+  - found: security finding — see location
+- **F5.** Security finding at example/pkg/mod_1.py:23 (ref aaaa0002)
+  - status: open
+  - what: security finding — see example/pkg/mod_1.py:23
+  - where: `example/pkg/mod_1.py`
+  - found: security finding — see location
+- **F6.** Security finding at example/pkg/mod_1.py:35 (ref aaaa0003)
+  - status: open
+  - what: security finding — see example/pkg/mod_1.py:35
+  - where: `example/pkg/mod_1.py`
+  - found: security finding — see location
+- **F7.** Security finding at example/pkg/mod_1.py:47 (ref aaaa0004)
+  - status: open
+  - what: security finding — see example/pkg/mod_1.py:47
+  - where: `example/pkg/mod_1.py`
+  - found: security finding — see location
+- **F8.** Security finding at example/pkg/mod_1.py:59 (ref aaaa0005)
+  - status: open
+  - what: security finding — see example/pkg/mod_1.py:59
+  - where: `example/pkg/mod_1.py`
+  - found: security finding — see location
+- **F9.** Security finding at example/pkg/mod_2.py:12 (ref aaaa0006)
+  - status: open
+  - what: security finding — see example/pkg/mod_2.py:12
+  - where: `example/pkg/mod_2.py`
+  - found: security finding — see location
+- **F10.** Security finding at example/svc/mod_3.ts:24 (ref aaaa0007)
+  - status: open
+  - what: security finding — see example/svc/mod_3.ts:24
+  - where: `example/svc/mod_3.ts`
+  - found: security finding — see location
+- **F11.** Security finding at example/svc/mod_4.ts:36 (ref aaaa0008)
+  - status: open
+  - what: security finding — see example/svc/mod_4.ts:36
+  - where: `example/svc/mod_4.ts`
+  - found: security finding — see location

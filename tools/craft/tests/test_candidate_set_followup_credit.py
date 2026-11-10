@@ -113,7 +113,7 @@ def test_credit_is_per_line_own_task_only():
 def test_one_done_by_entry_credits_its_line_among_several_entries():
     body = _body(
         [COVERING, LEGACY, "- **Ent** — claim. (`task/ent`, closed 2026-01-03)"],
-        _entry(1, "open"),
+        _entry(1, "dropped: nowhere: not needed"),
         _entry(2, "done by task/ent"),
         _entry(3, "done by task/legacy"),
     )
@@ -127,12 +127,13 @@ def test_token_carrying_lines_output_is_unchanged_by_done_by_entries():
     assert _run(GATE, with_entries).stdout == _run(GATE, base).stdout
 
 
-def test_malformed_followups_section_grants_no_credit_and_does_not_crash():
+def test_malformed_followups_section_refuses_rather_than_reading_a_ledger_without_credit():
     body = _body([COVERING, "- **Ent** — claim. (`task/ent`, closed 2026-01-03)"],
                  _entry(1, "done by task/ent"), "- not an entry\n")
     r = _run(GATE, body)
-    assert r.returncode == 0
-    assert "complete-eligible: no" in r.stdout
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert "reason-code: malformed-followups-section" in r.stderr
 
 
 # Compatibility: with no `## Follow-ups` section the output matches the base gate
@@ -144,7 +145,10 @@ def test_malformed_followups_section_grants_no_credit_and_does_not_crash():
 def test_no_followups_section_output_matches_base_gate(ledger):
     body = _body(ledger)
     new, old = _run(GATE, body), _run(BASE_GATE, body)
-    assert (new.returncode, new.stdout, new.stderr) == (old.returncode, old.stdout, old.stderr)
+    entry_lines = ("entries-open: none\n", "entries-folded: none\n")
+    assert all(line in new.stdout for line in entry_lines)
+    without_entry_lines = new.stdout.replace(entry_lines[0], "").replace(entry_lines[1], "")
+    assert (new.returncode, without_entry_lines, new.stderr) == (old.returncode, old.stdout, old.stderr)
 
 
 # Compatibility: the pre-credit gate, run on the spec body this slice loop produces
