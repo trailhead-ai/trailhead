@@ -609,3 +609,30 @@ Readings:
 - `monitor-without-stop-at-ready-is-unchanged` was not rerun (no monitor prose changed); its recorded red is the earlier section's.
 
 Spend (runner list price plus judge votes) for this pass: 0.57 + 1.88 for the two `never-merges` diagnostics, 9.19 for the six-case batch, 1.29 for the guard; the portage side totals about 12.9 USD; the craft cases of the same pass are in `tools/craft/MANUAL-EVAL.md`, and the whole pass is about 21.8 USD.
+
+## Security fix pass (2026-11-10)
+
+Same runner settings as the re-review fold pass (`--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants exactly the `runner` block, runner 2.1.322, macOS); each case ran as its own invocation. Final prose fingerprints (`git hash-object`): `skills/pull_request/SKILL.md` `cc1cbe771596311c5f0ca1304a97c55648470458`, `agents/monitor.md` `c53afba1dd664feb1d659707dc76f41840e81965`, `agents/updater.md` `b6a9ac0caac0465839402081dadd7baa00563c32` (monitor and updater unchanged, so monitor's own cases were not rerun).
+
+What changed: `hold` and `release` refuse a repo that is not an absolute existing directory, and the PR step names the `path` field of `detect-repos`; hold checks fail closed (a hold file named for the repo counts whatever its JSON says, a non-object entry counts as held, a stat error counts as held); `await-outcome` accepts a line only when its token and reason are from the closed vocabulary now defined in code, and the PR step records only that validated pair; a new `portage check-slice-branch` entry check refuses a `craft/branch` label that is a default branch or not the record's own branch. The four code changes are covered by ordinary tests (mutation-checked, in the commit bodies).
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-pr-step-refuses-a-default-branch-label` (new) | baseline on the prior skill (`583978f86f1c49dc7d51467789252cd9420d3076`) 0.88 x3; treatment 1, 1, 1 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-blocked-monitor` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-failed-block-write` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-never-merges` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-refuses-without-a-record` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-reruns-after-a-stuck-run` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-stops-at-ready` | 3 of 3 at 1.0 | at bar |
+| `pull-request-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+
+No rerun was used.
+
+Readings:
+- **The new case's baseline is red only on the fixed refusal line.** Without the entry check the model read `origin/HEAD` itself (a kept trace of one run showed it), saw `develop` was the default branch and refused in its own words, so only `final-line-is-refused` failed. The case therefore pins the wording and the no-write behaviour, not the detection; the detection is the code helper, which is unit-tested. The fixture uses a default branch named `develop` because `detect-repos` skips a repo on a branch literally named `main`, so a `main` label is already caught by the pushed check.
+- The scaffold's `./portage` stand-in passes `check-slice-branch` through to the real CLI and scrubs its name from help output, like the other verbs the prose introduces.
+- `skills/pull_request/SKILL.md` already failed `wrap_gate.py --column 100` before this pass, so it was not reflowed; the new prose is hand-wrapped.
+- The `no-merge-command` stray match of the earlier pass did not recur.
+
+Spend (runner list price plus judge votes): about 12.5 USD (the new case 0.84 baseline, 0.3 trace diagnostic and 0.67 treatment; the six PR-step cases 9.5; the guard 1.2).
