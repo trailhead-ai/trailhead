@@ -153,17 +153,16 @@ that fails. Then run
   carried out keeps the slice open, so there is nothing to resume or re-plan. Read
   `../_shared/execute.md` and the documents step 9 reads alongside it, then run its Phase 6 inline
   against this parent as the caller that says **run Phase 6 as a no-ask close** — asking no one
-  about the check. A `blocked` parent is moved to in progress first, and the branch is recovered
-  before the push, by execute's own paragraphs ([the
-  move](../_shared/execute.md#no-ask-close-moving-a-blocked-parent-to-in-progress), [the
-  recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill never restates either.
-  A close that finishes ends the open parent: continue as though none were open, under "No open
-  parent exists" above. A close that refuses or fails, including a refused or failed write of the
-  waiting entry, escalates under the `build-failed` trigger, following the escalation contract
-  below, with no retry.
-- **Exit 1, or exit 2.** Exit 1 prints a `reason-code:` and means the slice is not stuck; exit 2 is
-  a read failure and is treated the same. Proceed exactly as the branch above says, as though this
-  check had not run.
+  about the check. The branch is recovered before the push by execute's own paragraph ([the
+  recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill never restates it. A
+  close that finishes ends this run at the slice boundary: report the closed slice, say its branch
+  is pushed and that a pull request is owed, naming the branch and `/portage:pull_request`, and
+  stop. Select and build no other slice in this run. A close that refuses or fails, including a
+  refused or failed write of the waiting entry, escalates under the `build-failed` trigger,
+  following the escalation contract below, with no retry.
+- **Exit 1, or exit 2.** Exit 1 prints a `reason-code:` and means the slice is not stuck (a
+  `blocked` parent exits 1 with `parent-blocked`); exit 2 is a read failure and is treated the same.
+  Proceed exactly as the branch above says, as though this check had not run.
 
 #### Defer to the slice ritual — read it, don't invoke it
 

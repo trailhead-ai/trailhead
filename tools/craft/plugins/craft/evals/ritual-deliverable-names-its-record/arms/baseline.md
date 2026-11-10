@@ -441,16 +441,14 @@ where `<elected-vault>` is the vault the spec was read from.
   rules draw on without naming, and run its Phase 6 inline against this parent as the caller that
   says **run Phase 6 as a no-ask close** ([execute's no-ask
   close](../_shared/execute.md#no-ask-close)), asking no one about the check. This skill reads
-  execute and never invokes `/craft:execute`. A `blocked` parent is moved to in progress first, and
-  the branch is recovered before the push, by execute's own paragraphs ([the
-  move](../_shared/execute.md#no-ask-close-moving-a-blocked-parent-to-in-progress), [the
-  recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill restates neither, and a
-  slice whose repository is not in this workspace is refused by the recovery's own wording. A close
-  that finishes ends the open parent: restart from step 4, so the reconcile appends the closed
-  slice's partial-coverage line and both gates run before any candidate is derived. A parent is
-  closed at most once per pass: if the restart finds a parent this pass already closed, the detector
-  certifying it again, do not close it again; refuse, naming that parent and saying its close did
-  not take.
+  execute and never invokes `/craft:execute`. The branch is recovered before the push by execute's
+  own paragraph ([the recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill
+  does not restate it, and a slice whose repository is not in this workspace is refused by the
+  recovery's own wording. A close that finishes ends the open parent: restart from step 4, so the
+  reconcile appends the closed slice's partial-coverage line and both gates run before any candidate
+  is derived. A parent is closed at most once per pass: if the restart finds a parent this pass
+  already closed, the detector certifying it again, do not close it again; refuse, naming that
+  parent and saying its close did not take.
 - **Exit 1, printing a `reason-code:`.** The slice is not stuck, so nothing is closed and nothing is
   written. Refuse as below, and add one line after naming the open slice, mapped from the
   reason-code and never echoing any record text: `build-unfinished` says it was not closed for the
@@ -459,7 +457,10 @@ where `<elected-vault>` is the vault the spec was read from.
   is not a manual check; `push-failed` says its last push failed and needs settling by hand;
   `lore-too-old` says this install is too old to close it, because lore cannot make the guarded
   write the close needs, with the remedy to update trailhead (`trailhead update`) and run the pass
-  again. `not-a-slice-parent` and `no-unconfirmed-manual-check` add no line.
+  again; `parent-blocked` says the slice is blocked and a pass never closes a blocked slice, with
+  the remedy to set the parent back to in progress by hand or run
+  `/craft:execute task/<slice-parent-name>`. `not-a-slice-parent` and `no-unconfirmed-manual-check`
+  add no line.
 - **Exit 2, or a name that failed the shape check.** The pass cannot tell, so it treats the slice as
   not stuck and refuses as below, naming the read failure and never closing on a guess.
 - **A close that refuses or fails**, including a refused or failed write of the waiting entry, a
@@ -467,11 +468,9 @@ where `<elected-vault>` is the vault the spec was read from.
   workspace, leaves that parent open: refuse as below. The report says what was tried, names the
   criterion and the reason in the gate's own vocabulary (a `reason-code:`; none of the text it
   refused reaches the report, not a prefix, a fragment or a description of its shape), says nothing
-  on the slice was changed apart from a move out of `blocked`, and gives the remedy execute names:
+  on the slice was changed, and gives the remedy execute names:
   `/craft:execute task/<slice-parent-name>`, run from the workspace holding the slice's repository,
-  or a rerun of this pass after a changed spec or a failed write. A parent that was `blocked` stays
-  in progress after a refused close, and the report says "It had been set aside as blocked; it is
-  now in progress."
+  or a rerun of this pass after a changed spec or a failed write.
 
 **Several open parents.** Each one is checked and each stuck one is closed, whatever the others do.
 Any one that is not stuck, or whose close was refused, still refuses selection. The report shows the

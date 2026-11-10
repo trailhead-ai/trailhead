@@ -76,10 +76,6 @@ named exit owner is how a value becomes a permanent high-water mark instead of c
 - **`* → blocked`** — writer: the orchestrating session, as a judgment call when an escalation ends
   the run unresolved. Never written mechanically by a dispatched agent. Exit owner: the operator's
   recorded answer, acted on by hand.
-- **`blocked → in-progress`** — writer: a slice pass or the driver closing a stuck slice, only for a
-  no-ask close and only immediately after `pending_check.py stuck` exited `0` for that parent, as
-  execute's Phase 6 states. Exit owner: the close's own `done` write, or, on a refused close, the
-  next pass, which finishes it.
 - **`blocked → open` / `blocked → ready`** — writer: whoever acts on the operator's answer (interim:
   the operator by hand). `ready` when the answer makes the task workable as-is; `open` when the
   answer changes its shape enough to need re-refinement first.
