@@ -1557,6 +1557,9 @@ def test_guard_acquire_rechecks_inode_and_fails_safe_on_race(
 def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tuple[Path, Path]:
     """Create a real upstream repo + a linked worktree at ws_dir/member_name.
 
+    Runs git under whatever environment the caller has: tests using it request
+    the `hermetic_git_env` fixture so the commit has an identity and no signing.
+
     reconcile_break's removal path runs `git -C repo_root worktree remove
     wt_path` — repo_root and wt_path must therefore be the upstream repo and
     an actual LINKED worktree of it, not the same directory, or the remove
@@ -1569,8 +1572,6 @@ def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tupl
     subprocess.run(
         ["git", "-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "init"],
         check=True,
-        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"},
     )
     wt_path = ws_dir / member_name
     ws_dir.mkdir(parents=True, exist_ok=True)
@@ -1580,7 +1581,9 @@ def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tupl
     return upstream, wt_path
 
 
-def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(tmp_path: Path) -> None:
+def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(
+    tmp_path: Path, hermetic_git_env: dict[str, str]
+) -> None:
     """reconcile_break reaps a member's leaked activate-phase guard lockfile
     once the slug is fully torn down — without this, every removed workspace
     that ever ran activate-phase work leaks one lockfile per member forever."""
@@ -1628,7 +1631,9 @@ def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(tmp_path:
     assert not lock_path.exists(), "member guard lockfile must be reaped on full teardown"
 
 
-def test_reconcile_break_does_not_block_on_in_progress_activation(tmp_path: Path) -> None:
+def test_reconcile_break_does_not_block_on_in_progress_activation(
+    tmp_path: Path, hermetic_git_env: dict[str, str]
+) -> None:
     """camp remove does not block for an in-flight activate run's full
     duration: the guard held by a long activate-phase run must not stall
     reconcile_break's teardown critical section."""

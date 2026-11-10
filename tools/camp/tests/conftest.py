@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from ._git_support import make_hermetic_git_env
+
 
 @pytest.fixture(autouse=True)
 def _forbid_real_home(request, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,3 +160,20 @@ def _sandbox_tmux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     stub.write_text(_NO_SERVER_TMUX_STUB, encoding="utf-8")
     stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+
+@pytest.fixture
+def hermetic_git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Apply :func:`make_hermetic_git_env` to this process and its children.
+
+    Opt-in: a test whose subject is how git reacts to a hostile config builds
+    its own environment instead. Returns the env dict for tests that pass
+    ``env=`` explicitly.
+    """
+    env = make_hermetic_git_env(os.environ, tmp_path)
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    for key, value in env.items():
+        if key.startswith("GIT_"):
+            monkeypatch.setenv(key, value)
+    return env
