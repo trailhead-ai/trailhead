@@ -1990,13 +1990,24 @@ def test_open_entries_do_not_change_the_candidates_of_uncovered_criteria():
     assert with_entries["entries-folded"] == "F2"
 
 
-def test_the_entry_tokens_sit_between_waiting_and_complete_eligible(tmp_path):
-    body = _with_followups(_spec(_THREE, _ALL_COVERED), _followup(1, "open"))
+@pytest.mark.parametrize(
+    ("followups", "open_ids", "folded_ids"),
+    [
+        ([], "none", "none"),
+        ([_followup(1, "open")], "F1", "none"),
+        ([_followup(1, "open"), _followup(2, "open"), _followup(3, "folded into task/P")], "F1, F2", "F3"),
+    ],
+)
+def test_the_entry_lines_sit_between_waiting_and_complete_eligible_and_list_the_ids(
+    tmp_path, followups, open_ids, folded_ids
+):
+    body = _with_followups(_spec(_THREE, _ALL_COVERED), *followups)
     r = _run_flag(body, _state(tmp_path, _THREE, []))
-    assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
-        "criteria", "covered", "candidates", "partial", "waiting",
-        "entries-open", "entries-folded", "complete-eligible", "void", "closed", "closed-uncounted",
-    ]
+    pairs = [ln.split(": ", 1) for ln in r.stdout.splitlines()]
+    keys = [k for k, _ in pairs]
+    assert keys[keys.index("waiting") + 1 : keys.index("complete-eligible")] == ["entries-open", "entries-folded"]
+    values = dict(pairs)
+    assert (values["entries-open"], values["entries-folded"]) == (open_ids, folded_ids)
 
 
 @pytest.mark.parametrize(

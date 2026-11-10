@@ -241,7 +241,7 @@ from covers_gate import (  # noqa: E402
 from followups import FollowupsError, parse_followups  # noqa: E402
 from waiting import WaitingParseError, parse_waiting  # noqa: E402
 
-# Stdout line keys: the first six always, the last three only with
+# Stdout line keys: `STDOUT_LINE_KEYS` always, `CRITERIA_STATE_LINE_KEYS` only with
 # `--criteria-state`. A consumer derives the output grammar from these.
 STDOUT_LINE_KEYS = (
     "criteria",
