@@ -4396,6 +4396,94 @@ Total spend about 28.3 USD. On the final prose and graders the slice-then-plan c
 
 **Graders tightened after the final code review (verified offline, not by a paid rerun).** `approach-choice-logged-as-a-decision` (slice-then-plan) now needs the word "approach" in a decision entry's own bold summary or `Question:` line, followed by that entry's `Choice:` and `Reasoning:`; before, any Write holding the labels and the word anywhere matched. `no-run-block-written` in `plan-without-request-is-not-unattended` is a `source: file`, `not_contains` check of the seeded slice parent for `## Unattended run`, because its former Bash match could not fail once block diffs moved to the file-writing tool. `slice-without-request-is-not-unattended` keeps its Bash grader and gains `no-run-block-written-by-the-file-tool` (the created record's name is the model's choice, so no file path can be named). `body-written-with-the-file-tool` (gate-refusal case) now needs a Write whose content opens with the spec's own text. Each was checked against kept traces with a throwaway script applying the grader's regex to the serialized tool inputs (JavaScript regex, confirmed with node): the approach grader matched 2 Write calls in each of the 6 slice-then-plan traces that reached an approach decision and 0 in the 2 that stopped earlier, and matched 0 on a constructed block write with "approach" only in the `Choice:` and `Reasoning:` lines; the Write grader matched 3 Write calls carrying `## Unattended run` in an unattended trace and 0 in the plan-without-request trace; the plan record regex found no block in the seeded parent body and found one with a block appended; the gate-refusal Write grader matched a composed-spec-body Write and rejected a parent-coverage Write and another record's text. Three of the trace directories named for the check were absent from /private/tmp, so they were not used. The graders have not been rerun by `claude plugin eval`; the case counts in the tables above are from the earlier runs.
 
+## Case: slice-folds-entries-that-touch-its-code
+
+One runner case for the follow-up fold and reopen steps of `skills/slice/SKILL.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` (AC1 closed by a done slice, AC2 left) whose `## Follow-ups` holds F1 (open, `where` `tally/counter.py`), F2 (open, unrelated path, `what` asks to be folded) and F3 (folded into a dropped slice, unrelated path), run as `/craft:slice spec/tally-report --unattended`. Edited prose fingerprint (`git hash-object`): `8f9d6b58e831dc4005795053ffb9c9f506bc1f13`; unedited baseline prose `6b90445d031d197fadff8f9c4b9274cdb74e46b7`.
+
+**Status: measured.** Treatment 3 of 3 on the final prose and graders; baseline red; every existing slice case still passes.
+
+Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`, grants as in `eval-gate.json` (`Bash(*/scripts/found_work.py *)` already present; no grant added), each invocation wrapped in `timeout`. Real lore vaults checked before and after: no change attributable to the batches and no fixture title in any vault.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-08 | baseline (unedited `slice/SKILL.md`) | 1 | 0.11; 0 of 1 pass | red on the fold, reopen, decision-line, ordering, parent-`**Folds:**` and outcome graders; `f2-stays-open` green (nothing changes F2) and the first-draft `llm` statement grader voted FAIL 3 of 3. 103 s, $0.98 |
+| 2026-11-08 | treatment, first prompt | 3 | 0.67, 0.56, 0.56; 0 of 3 | fold and reopen landed on the spec; the session-log graders failed because the run's `found_work.py` calls had not been given the session id (authoring error in the prompt). 381 s, $3.44 |
+| 2026-11-08 | treatment, prompt adds `--session-id` to the script commands, first-draft `llm` statement grader | 3 | 0.89 x3; 0 of 3 | every deterministic grader green; the statement judge voted FAIL on 5 of 6 verdicts because the statement is in the unseen middle of the trace (authoring error; grader replaced). 367 s, $3.36 |
+| 2026-11-08 | treatment, statement grader replaced by a regex on the final message | 3 | 1.0, 0.78, 0.78; 1 of 3 | two runs left the report sentences in an earlier message, so `outcome-reports-the-decisions` and `report-names-the-fold-with-its-path` failed. Prose change: the sentences go in the closing message. 357 s, $3.26 |
+| 2026-11-08 | treatment, final prose | 3 | 1.0 x3; 3 of 3 pass | every grader passes in every run. 343 s, $3.26 |
+| 2026-11-08 | regression, `unattended-slice-*` (6 cases), final prose | 1 each | 1.0 x6; 6 of 6 pass | `ends-slice-chosen`, `refuses-a-draft-spec`, `refuses-an-open-slice`, `refuses-on-a-gate-refusal`, `reports-spec-complete`, `then-plan-ends-plan-ready`. 614 s, $6.68 |
+| 2026-11-08 | regression, `slice-spec-complete-hands-off-to-tidy-followups`, final prose | 1 | 1.0; 1 of 1 pass | 51 s, $0.68 |
+| 2026-11-08 | baseline re-run on the final case (final prompt with `--session-id`, final graders), unedited prose rebuilt from the pre-edit blob (`git hash-object` `6b90445d031d197fadff8f9c4b9274cdb74e46b7`) in an untracked temp copy of the plugin | 1 | 0.11; 0 of 1 pass | eight of nine graders red: `each-decision-precedes-its-result`, `f1-is-folded-into-the-new-parent`, `f3-is-reopened`, `fold-decision-is-logged`, `outcome-reports-the-decisions`, `parent-body-names-the-fold` (Write called 0x), `reopen-decision-names-the-dropped-task`, `report-names-the-fold-with-its-path`; `f2-stays-open` green as pre-registered. 41 turns, 89 s, $0.91 |
+| 2026-11-09 | regression after the `reopen-abandoned` reason-code wording (`slice/SKILL.md` fingerprint `5297ca05da5df5029e4612e8f7ce267ddee1a588`) | 1 | 1.0; 1 of 1 pass | every grader green. 48 turns, 129 s, $1.05 |
+| 2026-11-09 | regression after `reopen-abandoned` marks a built entry done (`slice/SKILL.md` fingerprint `29f12e4396dcb9b5349b38d277ffbcbc3ca0f865`) | 1 | 1.0; 1 of 1 pass | all nine graders green. 54 turns, 130 s, $1.15 |
+| 2026-11-09 | regression after the line-anchored `Resolves` matcher, argument checks and the marked-done outcome wording (`slice/SKILL.md` fingerprint `15a4abb093f28139509393f95e9dce4739aca194`) | 1 | 1.0; 1 of 1 pass | all nine graders green. 52 turns, 139 s, $1.13 |
+
+Total spend about $22.8 (a further 1-run `--keep-temp` diagnostic, $1.13, is included).
+
+**Graders shown red on a state where the behaviour is absent.** The baseline run shows `f1-is-folded-into-the-new-parent`, `f3-is-reopened`, `fold-decision-is-logged`, `reopen-decision-names-the-dropped-task`, `each-decision-precedes-its-result`, `parent-body-names-the-fold` and `outcome-reports-the-decisions` red. The rest were checked offline against fixture states built with the real scaffold and `found_work.py` (graders' regexes run in Python, not the runner): F2 folded instead of F1 turns `f2-stays-open` red (and `f1-is-folded-into-the-new-parent`); F1 folded into the dropped task turns `f1-is-folded-into-the-new-parent` red; fold without a reopen turns `f3-is-reopened`, `reopen-decision-names-the-dropped-task` and `each-decision-precedes-its-result` red. `report-names-the-fold-with-its-path` is red on the baseline by absence of any fold sentence; on a fold sentence without the path it was shown red offline (2026-11-08, the grader's pattern run in Python over constructed final messages): `Folded spec/tally-report#F1 into this slice because it touches the same code.` is red, the same sentence naming `tally/export.py` is red, the sentence with `tally/counter.py` only on a later line is red, and `... (overlaps tally/counter.py).` is green.
+
+**Limitations.** One spec, one phrasing, one model tier. No grader observes that the step 8 statement preceded the parent write (see `expected.md`'s revision note). The failure paths (failed `reopen-abandoned`, failed fold and its retry command) are not exercised by a run. The drop-path sentence in step 5 is not exercised by any case.
+
+## Case: planning-builds-each-folded-entry-into-a-task-or-reopens-it
+
+One runner case for the slice-rooted fold handling of `skills/plan/SKILL.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` (AC1 closed by a done slice) and a slice parent `task/count-lines` whose `**Folds:**` line names F1, F2 and F3: F1 (small, `tally/counter.py`) and F2 (a return-contract change across six files) are `folded into` the parent and F3 (small, `tally/cli.py`) is still `open`, run as `/craft:plan task/count-lines --unattended`. Edited prose fingerprint (`git hash-object`): `db9c207a3c873351cb540858122db03353719125`; unedited baseline prose `5fff0b645746f2f15e60e264d5422f77990bac60`.
+
+**Status: measured.** Treatment 3 of 3 on the final prose and graders; the F1, F2 and F3 graders are red on the pre-feature plugin; the unedited-`plan/SKILL.md` baseline is partly green (see below); the two runnable regression cases pass.
+
+Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`, grants as in `eval-gate.json` plus `Write` (no grant added to the file), each invocation under `timeout 580`, `TMPDIR` a fresh directory under `~/.cache`.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-09 | smoke, `--allow-tools` mis-split | 1 | not scored | the grants were word-split wrongly, so `Write` was withheld; 20 s, $0.36 |
+| 2026-11-09 | baseline (unedited `plan/SKILL.md`), first prompt that named `found_work.py` subcommands | 1 | 0.64; 0 of 1 | the run re-folded F3 and reopened F2 itself; red on the three `Write` graders and the reopen reason. 362 s, $2.93 |
+| 2026-11-09 | baseline, prompt without the command names | 1 | 0.55; 0 of 1 | same: the agent grepped the plugin for `Folds:`, read `slice/SKILL.md` and `found_work.py`, then did the folds. 324 s, $3.03 |
+| 2026-11-09 | treatment, prompt that did not name `entry` and `report` | 3 | 0.55, 0.64, 0.55; 0 of 3 | the prose ran (re-fold, reopen, report) but the decision lines landed in another session (authoring error), and `f2-is-named-by-no-child` could not pass without `min: 0`. 284 s, $6.95 |
+| 2026-11-09 | treatment, final prompt and graders, final prose | 3 (`-j 3`) | 1.0 x3; 3 of 3 pass | 329 s, $7.23 |
+| 2026-11-09 | baseline on the final case, unedited `plan/SKILL.md` in a plugin copy (`trailhead/`, `tools/lore/{plugins,scripts}`, `git init`) | 1 | 0.82; 0 of 1 | red: `f1-is-named-by-a-child` (the run wrote `Resolves spec/tally-report#F1.` with no title) and `closing-message-reports-the-decisions`; green on F2 open and F3 folded because the agent found `slice/SKILL.md` and `found_work.py`. 418 s, $3.08 |
+| 2026-11-09 | baseline on the final case, plugin as it stood before this feature (merge-base `tools/craft/plugins/craft`, copy as above) | 1 | 0.27; 0 of 1 | red: `f1-is-named-by-a-child`, `f2-stays-open`, `f3-is-folded-into-the-parent`, `f3-is-named-by-a-child`, `f2-reopen-decision-carries-a-balloon-reason`, `f3-fold-decision-is-logged`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. 524 s, $4.19 |
+| 2026-11-09 | regression, `plan-keeps-an-earlier-run-section`, final prose | 1 | 1.0; 1 of 1 pass | 268 s, $2.32 |
+| 2026-11-09 | regression, `unattended-slice-then-plan-ends-plan-ready`, final prose | 1 | 1.0; 1 of 1 pass | 346 s, $2.82 |
+| 2026-11-09 | regression after own-line `Resolves` lines with `Resolves ` stripped from copied titles (`plan/SKILL.md` fingerprint `f5edf0a130cc6fc3ff967b7df0bb6ff9cf6d7ecf`) | 1 | 0.91; 0 of 1 pass | red only `closing-message-reports-the-decisions` (the report sentences were not in the last message); every entry-placement grader green. 91 turns, 402 s, $2.65 |
+| 2026-11-09 | same prose, second run | 1 | 1.0; 1 of 1 pass | all eleven graders green. 82 turns, 342 s, $2.35. The closing-message grader passed 1 of 2 on this prose: an intermittent miss in where the agent puts the report sentences, not an entry-handling regression |
+
+`prototype-plan-carries-no-migration` is a legacy hand-shaped case (no `case.yaml`; the runner does not run it); `tools/craft/tests/test_plan_migration_bar_contract.py` passes unchanged on the edited skill.
+
+Total spend about $32.9, including the two failed first-treatment and the mis-split smoke batches.
+
+**Graders shown red on a state where the behaviour is absent.** On the pre-feature plugin run: `f1-is-named-by-a-child`, `f3-is-named-by-a-child`, `f2-stays-open`, `f3-is-folded-into-the-parent`, `f2-reopen-decision-carries-a-balloon-reason`, `f3-fold-decision-is-logged`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. `f1-stays-folded` and `f2-is-named-by-no-child` are guards that hold when nothing happens and are not shown red. `final-line-is-plan-ready` is green on every arm.
+
+**Finding on the registered baseline bar.** The bar "the unedited `plan/SKILL.md` fails the F1, F2 and F3 graders" is not met as a run on the full plugin: an agent that is planning a slice parent whose body says `**Folds:**` finds the slice and script documentation in the same plugin and performs the re-fold and reopen unaided, so the F2 and F3 graders pass there. What only the plan prose produced in those runs is the `Resolves spec/<spec>#F<n>: <title>` Delivers form and the closing-message report; the F1, F2 and F3 graders fail on a plugin without the fold machinery.
+
+**Limitations.** One spec, one phrasing, one model tier. Child `Resolves` lines are read from the bodies written, not from created records. The failure paths (failed re-fold or reopen) are not exercised by a run. The boundary between a fold that balloons and one that does not is not probed.
+
+## Case: build-close-marks-folded-entries
+
+One runner case for the final sweep over folded entries in `skills/_shared/execute.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` and a slice parent `task/count-lines` whose `**Folds:**` line names F1 and F2, both `folded into` the parent; one child, `task/count-lines-build`, is `done` and its Delivers carries `Resolves spec/tally-report#F1: ...`; F2 is named by no child. A seeded `review.md` (PASS, no findings) stands for the whole-change review. The run carries execute from the Phase 5 final sweep through the completion report. Edited prose fingerprint (`git hash-object`): `ab73fa55477a11df26958155f15b3a8c6a299fad`; unedited baseline prose `6967612a5e610d22a0bbc9122172eb5df2fdea11`.
+
+**Status: measured.** Treatment 3 of 3; the six graders are red on the pre-feature plugin; the unedited-`execute.md` baseline is fully green (the behaviour is reachable without the build prose); the three regression cases pass.
+
+Runner: `claude plugin eval`, `--ablation none`, `--scaffold`, `claude-opus-5-5`, grants as in `eval-gate.json` (no grant added), each invocation under `timeout 580`, `TMPDIR` a fresh directory under `~/.cache`, plugin copies for the baselines carrying `trailhead/`, `tools/lore/{plugins,scripts}` and a `git init`.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-09 | baseline A, only `execute.md` unedited (`6967612a...`) | 1 | 1.0; 1 of 1 pass | green on every grader, F1 and F2 included: the agent found `slice/SKILL.md`, `plan/SKILL.md` and the `found_work.py` docstring in the same plugin and did the `done` and `reopen` unaided. 65 s, $0.66 |
+| 2026-11-09 | baseline B, plugin as it stood before this feature (`slice/SKILL.md`, `plan/SKILL.md`, `execute.md`, `found_work.py` from the merge base) | 1 | 0.0; 0 of 1 | red on all six graders. 60 s, $0.65 |
+| 2026-11-09 | treatment, final prose | 3 (`-j 1`) | 1.0 x3; 3 of 3 pass | 147 s, $1.51 |
+| 2026-11-09 | regression, `build-triages-found-work` | 1 | 1.0; 1 of 1 pass | 116 s, $1.04 |
+| 2026-11-09 | regression, `build-records-a-security-finding-by-location` | 1 | 1.0; 1 of 1 pass | 117 s, $1.19 |
+| 2026-11-09 | regression, `unlinked-build-keeps-capturing-candidates` | 1 | 1.0; 1 of 1 pass | 94 s, $1.04 |
+| 2026-11-09 | regression after the sweep-failure-does-not-hold-the-close wording (`_shared/execute.md` fingerprint `c5d9411a42471b65541d769c3c739201b01f79c8`) | 1 | 1.0; 1 of 1 pass | every grader green. 54 s, $0.53 |
+| 2026-11-09 | regression after the failed-`done` wording (built, but not marked done; `_shared/execute.md` fingerprint `2f947422162dc935f2766b2354362556fd25a695`) | 1 | 1.0; 1 of 1 pass | all six graders green. 16 turns, 47 s, $0.50 |
+| 2026-11-09 | regression after the line-anchored `Resolves` matcher and the seed child's own-line `Resolves` (fixture `scaffold.sh` edit; `_shared/execute.md` fingerprint `2f947422162dc935f2766b2354362556fd25a695`) | 1 | 1.0; 1 of 1 pass | all six graders green. 18 turns, 53 s, $0.51 |
+
+Total spend about $6.1.
+
+**Graders shown red on a state where the behaviour is absent.** All six, on baseline B: `f1-is-done-by-the-parent`, `f2-is-open-again`, `f1-done-and-f2-reopen-decisions-are-logged`, `f2-reopen-decision-carries-a-not-built-reason`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`. No grader holds when nothing happens, so none is a guard.
+
+**Finding on the registered baseline bar.** The bar "the unedited `execute.md` fails the F1 and F2 graders" is not met on the full plugin (baseline A, one run): the slice and plan prose and the script docstring in the same plugin teach the `done` and `reopen` transitions, so an agent given a folded-entry fixture performs them unaided. As with the planning case, the case is a guard against the build prose regressing and a detector only against a plugin without the fold machinery. The case cannot show that the new `execute.md` text is what caused the behaviour. Not probed: a child named by an entry but not yet `done`, a review that did not pass, and the sweep failure path (exit 2 or 3, retry command).
+
+**Limitations.** One spec, one phrasing, one model tier, one baseline run per arm, three treatment runs. The review and the child's `done` status are seeded, not built. The real lore state was snapshotted around the batches: only `index.sqlite` and the trailhead vault's publish log changed, and neither names a fixture title.
+
 ---
 
 ## Case: waiting-checks-hold-the-loop-open and failed-check-returns-its-criterion-to-the-candidates
