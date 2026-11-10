@@ -106,7 +106,12 @@ jobs:
         # the source). testpaths in pyproject.toml span the CLI + all tool suites.
         # addopts in pyproject.toml deselects `benchmark`-marked tests here — a
         # wall-clock latency assertion is meaningless under xdist worker contention.
-        run: python -m pytest
+        # junit.xml feeds the run-time guard below: xunit1 carries each test's source file
+        # (how the guard assigns a test to an area) and duration_report=total counts fixture
+        # setup and teardown in a test's time, so the per-test cap sees them.
+        run: >-
+          python -m pytest --junitxml=junit.xml -o junit_family=xunit1
+          -o junit_duration_report=total
 
       - name: Run benchmark tests serially
         # Timing/latency assertions need uncontended CPU to mean anything, so
@@ -114,3 +119,29 @@ jobs:
         # -o addopts= clears pyproject's `-n auto -m "not benchmark"` so this
         # step isn't parallel and isn't deselecting the tests it exists to run.
         run: python -m pytest -o addopts="" -n 0 -m benchmark
+
+      - name: Suite run-time guard
+        # Owner: the budgets and the passed-count baseline below live here, beside the step
+        # that enforces them. Raising a budget is a reviewed edit and its pull request states
+        # the newly measured spread; the failure text says so too. Runs after pytest even when
+        # pytest failed (the job is already red then); skipped only when the run is cancelled.
+        # The per-test cap is checked after the run, so a hung test still costs the job timeout.
+        if: ${{ !cancelled() }}
+        run: |
+          # Budget per leg = median + 2 sample standard deviations of the "Run the test suite"
+          # step over the 20 most recent successful runs of this workflow (2026-11-10), rounded
+          # up to 10 s:  py3.11 1484 + 2*270 = 2024 -> 2030;  py3.12 1780 + 2*303 = 2386 -> 2390;
+          # py3.13 1702 + 2*278 = 2258 -> 2260.
+          case "${{ matrix.python-version }}" in
+            3.11) budget=2030 ;;
+            3.12) budget=2390 ;;
+            3.13) budget=2260 ;;
+          esac
+          # Passed-count floor for the default tier: the lowest passed count (14381) among the
+          # distinct counts logged by those runs (14381, 14385, 14405). Tighten it to the count
+          # this guard prints once it has run on main.
+          # Per-test cap: twice the 60 s wall-clock the Chromium harness allows one launch, so a
+          # test that sits through a harness timeout and then some is named.
+          python scripts/suite-time-report junit.xml --tier default \
+            --budget "$budget" --per-test-cap 120 --baseline-passed 14381 \
+            --summary "$GITHUB_STEP_SUMMARY"
