@@ -460,8 +460,15 @@ class AttachRig:
         return [json.loads(line)["dest"] for line in log.read_text().splitlines()] if log.exists() else []
 
     def tagged_pids(self) -> list[int]:
-        """Live processes of this user whose command line carries this rig's tag namespace."""
-        return [pid for pid, command in _process_table() if f"Tag={self.ns}:" in command]
+        """Live processes of this user whose command line carries this rig's tag namespace and
+        whose argv[0] is the one camp recognises (``ssh``, or ``camp-env-relay``). The stub carries
+        the tag a moment earlier, before it re-executes itself as ``ssh``; in that window the
+        process is not one camp can recognise as a forward."""
+        return [
+            pid
+            for pid, command in _process_table()
+            if f"Tag={self.ns}:" in command and command.split()[:1] in (["ssh"], ["camp-env-relay"])
+        ]
 
     def wait_tagged(self, timeout: float = 10.0) -> list[int]:
         deadline = time.monotonic() + timeout
