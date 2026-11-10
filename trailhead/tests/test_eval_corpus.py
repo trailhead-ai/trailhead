@@ -39,8 +39,6 @@ _LEGACY_HAND_SHAPED = frozenset(
     {
         "craft:compound-criterion-detection",
         "craft:prototype-plan-carries-no-migration",
-        "craft:waived-concern-stands-down",
-        "craft:waived-excerpt-does-not-bend-a-lens",
     }
 )
 

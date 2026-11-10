@@ -179,8 +179,8 @@
     "unlinked-build-keeps-capturing-candidates": {
       "measures": [
         "skills/_shared/execute.md"
-        ]
-      },
+      ]
+    },
     "waiting-checks-hold-the-loop-open": {
       "measures": [
         "skills/slice/SKILL.md"
@@ -219,6 +219,31 @@
     "build-close-marks-folded-entries": {
       "measures": [
         "skills/_shared/execute.md"
+      ]
+    },
+    "council-synthesis-stands-down-a-waived-concern": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "council-synthesis-keeps-a-concern-a-waiver-tries-to-silence": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "council-synthesis-rates-every-concern-when-nothing-is-waived": {
+      "measures": [
+        "skills/_shared/council.md",
+        "scripts/maturity_bars.py"
+      ]
+    },
+    "reliability-lens-ignores-a-waiver-aimed-at-another-concern": {
+      "measures": [
+        "skills/_shared/council.md",
+        "agents/breaker.md",
+        "scripts/maturity_bars.py"
       ]
     }
   }
