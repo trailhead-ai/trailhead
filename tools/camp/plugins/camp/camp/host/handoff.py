@@ -51,7 +51,7 @@ from typing import Callable, Mapping, NoReturn, Sequence
 
 from ..attach.prefix_warning import inside_multiplexer
 from ..launch.recovery import printable_path
-from ..launch.tmux import Tmux, target
+from ..launch.tmux import Tmux, server_start_dir, target
 from .config import Host
 from .transport import DEFAULT_CONNECT_TIMEOUT_SECONDS, quote_and_join
 
@@ -178,6 +178,13 @@ def hand_over_to_session(
     still attached to the SOURCE session at this point, so this is the only
     place camp can say why the switch failed.
 
+    The exec arm runs from :func:`camp.launch.tmux.server_start_dir`, not
+    this process's cwd: ``tmux attach-session`` starts a server when none is
+    running (so a tmux.conf ``new-session`` line can create sessions) and that
+    server takes the client's cwd, which must outlive every workspace — on
+    tmux 3.7c a deleted server cwd overrides ``-c`` for every later pane. The
+    chdir is undone if the exec seam returns.
+
     Never returns: the exec arm's fall-through only runs when a test's
     injected exec seam returns instead of replacing the process, and even
     then the invocation must end here rather than falling back into the
@@ -192,5 +199,15 @@ def hand_over_to_session(
             print(printable_path(stderr), file=sys.stderr)
         sys.exit(switched.returncode)
 
-    handoff(door_argv(derived_name))
+    start_dir = server_start_dir(env)
+    try:
+        previous = os.getcwd()
+    except OSError:
+        previous = None
+    os.chdir(start_dir)
+    try:
+        handoff(door_argv(derived_name))
+    finally:
+        if previous is not None:
+            os.chdir(previous)
     sys.exit(0)

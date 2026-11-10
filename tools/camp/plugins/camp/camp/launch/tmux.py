@@ -41,14 +41,17 @@ reason.
 
 The server's working directory
 ------------------------------
-Whichever `new-session` finds no server running starts one, and that server's
-cwd is the cwd of the process that ran it. The server's cwd must outlive every
+Whichever tmux call finds no server running starts one, and that server's
+cwd is the cwd of the process that ran it. `new-session` does, and so does
+`attach-session` (tmux starts a server for it so a tmux.conf `new-session`
+line or auto-restore can create sessions). The server's cwd must outlive every
 workspace: on tmux 3.7c a deleted server cwd overrides `-c` for every later
 pane (hand-opened windows included), so a server started from a workspace
 directory breaks every window the moment that workspace is torn down.
-`spawn_session` and `new_session_with_window` — the only camp calls that run
-`new-session` — therefore run from :func:`_server_start_dir` (the home
-directory, else `/`), while `-c` and the :func:`_pane_argv` wrapper still put
+`spawn_session` and `new_session_with_window` (the camp calls that run
+`new-session`) and the door's `attach-session` hand-over
+(`camp.host.handoff.hand_over_to_session`) therefore run from
+:func:`server_start_dir` (the home directory, else `/`), while `-c` and the :func:`_pane_argv` wrapper still put
 each pane in its workspace. A server the operator started by hand from a
 since-deleted directory is not guarded; `tmux kill-server` is the cure.
 
@@ -328,12 +331,16 @@ _CD_PRELUDE = (
 )
 
 
-def _server_start_dir(env: Mapping[str, str]) -> str:
-    """The directory a server-starting `new-session` subprocess runs from:
-    *env*'s `HOME` when it names an existing directory, else `/`. Never a
-    workspace directory — the server's cwd must outlive every workspace."""
+def server_start_dir(env: Mapping[str, str]) -> str:
+    """The directory a tmux call that can start the server runs from: *env*'s
+    `HOME` when it is absolute, an existing directory, and enterable, else `/`.
+    Never a workspace directory — the server's cwd must outlive every
+    workspace. A relative `HOME` would resolve against the caller's cwd (often
+    a workspace) and a non-enterable one would make the chdir raise."""
     home = env.get("HOME", "")
-    return home if home and os.path.isdir(home) else "/"
+    if home and os.path.isabs(home) and os.path.isdir(home) and os.access(home, os.X_OK):
+        return home
+    return "/"
 
 
 def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
@@ -721,7 +728,7 @@ class Tmux:
         first pane, wrapped by :func:`_pane_argv` so the pane changes into
         *cwd* itself (on tmux 3.7c `-c` is ignored once the server's cwd is deleted).
 
-        The subprocess runs from :func:`_server_start_dir`, not *cwd*: if this
+        The subprocess runs from :func:`server_start_dir`, not *cwd*: if this
         call starts the server, that directory becomes the server's cwd for its
         whole life and must outlive every workspace (see the module
         docstring's "server's working directory"; a server the operator
@@ -746,7 +753,7 @@ class Tmux:
         ]
         return subprocess.run(
             argv,
-            cwd=_server_start_dir(env),
+            cwd=server_start_dir(env),
             env=dict(env),
             start_new_session=True,
             stdin=subprocess.DEVNULL,
@@ -784,7 +791,7 @@ class Tmux:
         otherwise.
 
         Like :meth:`spawn_session`, the subprocess runs from
-        :func:`_server_start_dir` of the env it is given (`os.environ` when
+        :func:`server_start_dir` of the env it is given (`os.environ` when
         *env* is None), so a server this call starts never takes a workspace
         directory as its own cwd.
 
@@ -811,7 +818,7 @@ class Tmux:
         spawn_env = dict(os.environ) if env is None else dict(env)
         done = subprocess.run(
             argv,
-            cwd=_server_start_dir(spawn_env),
+            cwd=server_start_dir(spawn_env),
             env=spawn_env,
             start_new_session=True,
             stdin=subprocess.DEVNULL,

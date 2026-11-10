@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -60,7 +61,9 @@ def private_server(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Every bare `tmux` call pinned to a private socket — see
     `redirected_tmux_socket`. Yields the socket name."""
     monkeypatch.delenv("TMUX", raising=False)
-    yield from redirected_tmux_socket(tmp_path, monkeypatch, "camp_server_cwd")
+    yield from redirected_tmux_socket(
+        tmp_path, monkeypatch, f"camp_server_cwd_{uuid.uuid4().hex[:12]}"
+    )
 
 
 def _env(**extra: str) -> dict[str, str]:
@@ -142,21 +145,59 @@ def test_new_session_with_window_reads_os_environ_home_when_env_is_none(
 
 
 @pytest.mark.parametrize("path", _PATHS)
-@pytest.mark.parametrize("home_state", ["unset", "empty", "missing"])
+@pytest.mark.parametrize("home_state", ["unset", "empty", "missing", "relative", "not_enterable"])
 def test_unusable_home_falls_back_to_root(
-    private_server, tmp_path: Path, path: str, home_state: str
+    private_server, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str, home_state: str
 ) -> None:
     ws = tmp_path / "ws"
     ws.mkdir()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "relhome").mkdir()
+    locked = tmp_path / "locked-home"
+    locked.mkdir()
+    if home_state == "not_enterable":
+        if os.geteuid() == 0:
+            pytest.skip("root can enter any directory")
+        locked.chmod(0o600)
     env = {
         "unset": _env(),
         "empty": _env(HOME=""),
         "missing": _env(HOME=str(tmp_path / "no-such-home")),
+        "relative": _env(HOME="relhome"),
+        "not_enterable": _env(HOME=str(locked)),
     }[home_state]
+    try:
+        _start(path, "camp-t", ws, env)
+        assert _server_cwd(private_server) == "/"
+    finally:
+        locked.chmod(0o700)
 
-    _start(path, "camp-t", ws, env)
 
-    assert _server_cwd(private_server) == "/"
+_DOOR_SCRIPT = (
+    "import os, sys\n"
+    "from camp.host.handoff import hand_over_to_session\n"
+    "from camp.launch.tmux import Tmux\n"
+    "hand_over_to_session(Tmux(), 'camp-x', env=os.environ)\n"
+)
+
+
+def test_door_hand_over_starts_a_server_from_home_not_the_process_cwd(
+    private_server, tmp_path: Path
+) -> None:
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / ".tmux.conf").write_text("new-session -d -s keep\n", encoding="utf-8")
+    env = _env(HOME=str(home), PYTHONPATH=str(_PLUGIN_DIR))
+
+    subprocess.run(
+        [sys.executable, "-c", _DOOR_SCRIPT],
+        cwd=ws, env=env, capture_output=True, text=True, timeout=20,
+    )
+
+    assert _sock_run(private_server, "has-session", "-t", "=keep").returncode == 0
+    assert _server_cwd(private_server) == str(home)
 
 
 @pytest.mark.skipif(
@@ -178,7 +219,13 @@ def test_hand_opened_window_lands_in_the_session_dir_after_a_workspace_is_delete
     _start(path, "camp-b", ws_b, env)
     shutil.rmtree(ws_a)
 
-    opened = _sock_run(private_server, "new-window", "-d", "-t", "=camp-b:", "-P", "-F", "#{pane_pid}")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    opened = subprocess.run(
+        [_REAL_TMUX, "-L", private_server, "new-window", "-d", "-t", "=camp-b:",
+         "-c", "#{session_path}", "-P", "-F", "#{pane_pid}"],
+        cwd=elsewhere, capture_output=True, text=True, timeout=5,
+    )
     assert opened.returncode == 0, opened.stderr
     pid = opened.stdout.strip()
 
