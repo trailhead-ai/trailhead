@@ -1059,6 +1059,96 @@ def _derive_write_confinement(
     return deny
 
 
+_GIT_ADMIN_NAMES = ("config", "hooks", "info")
+_GIT_SCAN_DEPTH = 3
+_GITDIR_POINTER_LIMIT = 4096
+
+
+def _gitdir_of(dot_git: Path) -> Path | None:
+    """The git directory a vault's ``.git`` entry stands for, or ``None``.
+
+    A directory is itself the git directory; a symlink resolves to its target; a file is
+    a ``gitdir: <path>`` pointer (relative paths resolve against the file's directory).
+    Anything else, including a pointer that does not parse, is not a repository.
+    """
+    if dot_git.is_symlink():
+        resolved = Path(os.path.realpath(dot_git))
+        return resolved if resolved.is_dir() else None
+    if dot_git.is_dir():
+        return dot_git
+    if not dot_git.is_file():
+        return None
+    try:
+        with dot_git.open("rb") as f:
+            line = f.read(_GITDIR_POINTER_LIMIT).decode("utf-8", "replace").splitlines()
+    except OSError:
+        return None
+    if not line or not line[0].startswith("gitdir:"):
+        return None
+    target = line[0][len("gitdir:"):].strip()
+    if not target:
+        return None
+    resolved = Path(os.path.realpath(dot_git.parent / target))
+    return resolved if resolved.is_dir() else None
+
+
+def _common_dir_of(git_dir: Path) -> Path | None:
+    pointer = git_dir / "commondir"
+    try:
+        target = pointer.read_text().strip()
+    except OSError:
+        return None
+    if not target:
+        return None
+    resolved = Path(os.path.realpath(git_dir / target))
+    return resolved if resolved.is_dir() else None
+
+
+def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
+    """``denyWrite`` entries protecting the git administrative files under *guarded* roots.
+
+    Every repository found within ``_GIT_SCAN_DEPTH`` directory levels of a guarded root
+    (the root itself included) gets ``config``, ``hooks`` and ``info`` of its git directory
+    denied. When ``.git`` is a pointer file or a symlink, the ``.git`` entry itself is
+    denied too (so it cannot be repointed) along with the resolved git directory, and a
+    linked worktree's common directory, which is where its ``config`` and ``hooks`` live.
+    A git directory outside every *writable* root is not named: it is already unwritable.
+
+    Each guarded root also gets the glob ``<root>/*/*/.git/<name>`` for each name, the
+    shape of lore's ``vaults/<name>``, so a vault created after launch is covered without
+    being enumerated. Repositories deeper than the scan bound and created after launch are
+    not covered.
+    """
+    found: list[str] = []
+
+    def add(path: Path | str) -> None:
+        if str(path) not in found:
+            found.append(str(path))
+
+    def add_admin(git_dir: Path) -> None:
+        if any(_covers(w, git_dir) for w in writable):
+            for name in _GIT_ADMIN_NAMES:
+                add(git_dir / name)
+
+    for root in guarded:
+        for current, dirnames, _ in os.walk(root):
+            here = Path(current)
+            depth = len(here.relative_to(root).parts)
+            dot_git = here / ".git"
+            git_dir = _gitdir_of(dot_git) if os.path.lexists(dot_git) else None
+            if git_dir is not None:
+                if git_dir != dot_git:
+                    add(dot_git)
+                add_admin(git_dir)
+                common = _common_dir_of(git_dir)
+                if common is not None:
+                    add_admin(common)
+            dirnames[:] = [] if depth >= _GIT_SCAN_DEPTH else [d for d in dirnames if d != ".git"]
+        for name in _GIT_ADMIN_NAMES:
+            add(f"{root}/*/*/.git/{name}")
+    return found
+
+
 def _check_reads_and_network(
     user: _UserSettings, roots: list[Path], hosts: tuple[str, ...]
 ) -> None:
@@ -1985,6 +2075,21 @@ class ClaudeCodeHarness(Harness):
         ``.claude.json`` (``projects[<realpath of directory>].hasTrustDialogAccepted``),
         written after every refusal check has passed. Never execs.
 
+        Git administrative files: for every role in the profile's ``git_guarded_roles`` (the
+        hub's is the lore state root, which holds each vault as a git working tree),
+        ``config``, ``hooks`` and ``info`` of every repository under it join ``denyWrite``
+        (see :func:`_git_admin_denials`). Claude Code's own protection of ``.git/config``
+        and ``.git/hooks`` covers only the session's working directory, so without this a
+        prompt-injected hub could plant a git filter, ``core.fsmonitor``, ``core.pager``,
+        ``alias.*`` or a hook that Outpost, ``lore sync`` or the operator's own git would
+        later run unsandboxed. Objects, refs, the index, ``COMMIT_EDITMSG`` and logs stay
+        writable, so committing records through the ``lore`` CLI works. Repositories are
+        enumerated at launch, and the glob ``<root>/*/*/.git/<name>`` covers a vault
+        created later at ``vaults/<name>``; a repository created later anywhere else, or
+        deeper than the scan bound, is not covered. Anything that must write a vault's
+        ``.git/config`` (``git config``, ``push --set-upstream``, ``remote add``, a fresh
+        ``git init`` or clone) is refused inside the hub; the operator runs it outside.
+
         The tmux socket directory (``$TMUX_TMPDIR`` from *env*, else ``/tmp``, then
         ``tmux-<uid>``; *uid* defaults to the process's) joins ``denyWrite`` under the
         conditions :func:`_derive_write_confinement` states.
@@ -2024,6 +2129,10 @@ class ClaudeCodeHarness(Harness):
             str(launch_dir / ".mcp.json"),
             *_derive_write_confinement(
                 user, roots, _tmux_socket_dir(source, os.getuid() if uid is None else uid)
+            ),
+            *_git_admin_denials(
+                [Path(os.path.realpath(profile.paths[r])) for r in profile.profile.git_guarded_roles],
+                roots,
             ),
         ]
         hosts = profile.profile.network_allowed_hosts

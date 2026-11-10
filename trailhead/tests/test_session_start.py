@@ -217,7 +217,7 @@ def test_hub_profile_within_the_users_write_list_launches_and_denies_nothing(tmp
     start = _start(env)
     fs = _settings_of(start)["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == _protected(env)
+    assert fs["denyWrite"] == [*_protected(env), *_later_vault_globs(env)]
 
 
 def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_path):
@@ -225,7 +225,7 @@ def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_pa
     for env in (first, second):
         deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
         home = _hub_roots(env)[0]
-        assert deny == [f"{home}/.claude", f"{home}/.mcp.json"]
+        assert deny == [f"{home}/.claude", f"{home}/.mcp.json", *_later_vault_globs(env)]
     assert _protected(first) != _protected(second)
 
 
@@ -235,7 +235,7 @@ def test_user_writable_root_outside_the_hub_roots_is_derived_into_denywrite(tmp_
     extra = str(tmp_path.resolve() / "elsewhere")
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, extra]))
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
-    assert fs["denyWrite"] == [*_protected(env), extra]
+    assert fs["denyWrite"] == [*_protected(env), extra, *_later_vault_globs(env)]
     assert not set(fs["denyWrite"]) & set(fs["allowWrite"])
 
 
@@ -248,7 +248,9 @@ def test_user_write_entry_is_resolved_before_it_is_compared_to_a_hub_root(tmp_pa
     _write_user_settings(
         env, _user_sandbox(allowWrite=[".", str(alias / Path(cache).name), lore])
     )
-    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == _protected(env)
+    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [
+        *_protected(env), *_later_vault_globs(env)
+    ]
 
 
 def test_hub_write_root_the_users_list_does_not_cover_is_refused_naming_it(tmp_path):
@@ -275,7 +277,9 @@ def test_user_write_entry_sharing_only_a_string_prefix_with_a_hub_root_is_not_an
     home, lore, cache = _hub_roots(env)
     sibling = home + "-sibling"
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore, sibling]))
-    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [*_protected(env), sibling]
+    assert _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"] == [
+        *_protected(env), sibling, *_later_vault_globs(env)
+    ]
 
 
 def test_user_deny_write_covering_a_hub_root_is_refused_naming_the_entry(tmp_path):
@@ -365,7 +369,7 @@ def test_with_no_user_sandbox_block_the_profiles_own_narrowing_still_applies(tmp
         _write_user_settings(env, content)
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
-    assert fs["denyWrite"] == _protected(env)
+    assert fs["denyWrite"] == [*_protected(env), *_later_vault_globs(env)]
 
 
 @pytest.mark.parametrize(
@@ -804,6 +808,138 @@ def test_cli_maps_launch_account_default_and_declared_to_the_env_binding(
     assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct)}
 
 
+# -- git administrative files under the lore state root ----------------------
+
+_GIT_ADMIN = ("config", "hooks", "info")
+
+
+def _admin(git_dir) -> list[str]:
+    return [f"{git_dir}/{name}" for name in _GIT_ADMIN]
+
+
+def _make_vault(lore: str, name: str) -> Path:
+    vault = Path(lore) / "vaults" / name
+    (vault / ".git").mkdir(parents=True)
+    (vault / "record.md").write_text("x")
+    return vault
+
+
+def _vault_denials(env) -> list[str]:
+    lore = Path(_hub_roots(env)[1])
+    return [d for d in _deny_of(env) if d.startswith(str(lore) + "/") and "/.git" in d]
+
+
+def _later_vault_globs(env) -> list[str]:
+    return _admin(f"{_hub_roots(env)[1]}/*/*/.git")
+
+
+def test_no_vaults_denies_only_the_glob_for_vaults_created_later(tmp_path):
+    env = _fence(tmp_path)
+    assert _vault_denials(env) == _later_vault_globs(env)
+
+
+def test_each_vault_gets_its_config_hooks_and_info_denied(tmp_path):
+    env = _fence(tmp_path)
+    one = _make_vault(_hub_roots(env)[1], "one")
+    two = _make_vault(_hub_roots(env)[1], "two")
+    denied = _vault_denials(env)
+    assert set(_admin(one / ".git") + _admin(two / ".git")) <= set(denied)
+    assert not any(d.startswith(f"{one}/record") for d in denied)
+
+
+def test_a_single_vault_adds_exactly_its_three_entries(tmp_path):
+    env = _fence(tmp_path)
+    one = _make_vault(_hub_roots(env)[1], "one")
+    assert set(_vault_denials(env)) == set(_admin(one / ".git")) | set(_later_vault_globs(env))
+
+
+def test_a_directory_without_a_git_dir_gets_no_entries(tmp_path):
+    env = _fence(tmp_path)
+    plain = Path(_hub_roots(env)[1]) / "vaults" / "plain"
+    plain.mkdir(parents=True)
+    assert _vault_denials(env) == _later_vault_globs(env)
+
+
+def test_a_vault_whose_git_is_a_gitdir_file_has_the_resolved_gitdir_denied(tmp_path):
+    env = _fence(tmp_path)
+    lore = Path(_hub_roots(env)[1])
+    real = lore / "gitdirs" / "wt"
+    real.mkdir(parents=True)
+    vault = lore / "vaults" / "linked"
+    vault.mkdir(parents=True)
+    (vault / ".git").write_text(f"gitdir: {real}\n")
+    denied = _deny_of(env)
+    assert set(_admin(real)) <= set(denied)
+    assert f"{vault}/.git" in denied
+
+
+def test_a_relative_gitdir_file_is_resolved_against_the_vault(tmp_path):
+    env = _fence(tmp_path)
+    lore = Path(_hub_roots(env)[1])
+    real = lore / "vaults" / "shared.git"
+    real.mkdir(parents=True)
+    vault = lore / "vaults" / "linked"
+    vault.mkdir()
+    (vault / ".git").write_text("gitdir: ../shared.git\n")
+    assert set(_admin(real)) <= set(_deny_of(env))
+
+
+def test_a_linked_worktree_also_denies_the_common_dir_it_shares_config_with(tmp_path):
+    env = _fence(tmp_path)
+    lore = Path(_hub_roots(env)[1])
+    common = lore / "stores" / "a" / "b" / "c" / "main.git"
+    (common / "worktrees" / "wt").mkdir(parents=True)
+    (common / "worktrees" / "wt" / "commondir").write_text("../..\n")
+    linked = lore / "vaults" / "linked"
+    linked.mkdir(parents=True)
+    (linked / ".git").write_text(f"gitdir: {common}/worktrees/wt\n")
+    deny = _deny_of(env)
+    assert set(_admin(common)) <= set(deny)
+    assert set(_admin(common / "worktrees" / "wt")) <= set(deny)
+
+
+def test_a_gitdir_pointing_outside_every_writable_root_adds_nothing(tmp_path):
+    env = _fence(tmp_path)
+    lore = Path(_hub_roots(env)[1])
+    vault = lore / "vaults" / "linked"
+    vault.mkdir(parents=True)
+    elsewhere = tmp_path / "elsewhere" / "repo.git"
+    elsewhere.mkdir(parents=True)
+    (vault / ".git").write_text(f"gitdir: {elsewhere}\n")
+    assert not any(str(elsewhere) in d for d in _deny_of(env))
+
+
+def test_a_malformed_git_file_is_ignored(tmp_path):
+    env = _fence(tmp_path)
+    vault = Path(_hub_roots(env)[1]) / "vaults" / "bad"
+    vault.mkdir(parents=True)
+    (vault / ".git").write_text("not a gitdir pointer")
+    assert _vault_denials(env) == _later_vault_globs(env)
+
+
+def test_vault_denials_sit_alongside_the_lore_root_allow_write(tmp_path):
+    env = _fence(tmp_path)
+    one = _make_vault(_hub_roots(env)[1], "one")
+    fs = _settings_of(_start(env))["sandbox"]["filesystem"]
+    assert _hub_roots(env)[1] in fs["allowWrite"]
+    assert set(_admin(one / ".git")) <= set(fs["denyWrite"])
+
+
+def test_a_profile_without_a_guarded_root_denies_no_git_files(tmp_path):
+    env = _fence(tmp_path)
+    _make_vault(_hub_roots(env)[1], "one")
+    bare = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles)
+    deny = _settings_of(_start(env, profile=bare))["sandbox"]["filesystem"]["denyWrite"]
+    assert not any("/.git" in d for d in deny)
+
+
+def test_a_vault_nested_deeper_than_the_scan_bound_is_left_to_the_glob_only(tmp_path):
+    env = _fence(tmp_path)
+    deep = Path(_hub_roots(env)[1]) / "a" / "b" / "c" / "d" / ".git"
+    deep.mkdir(parents=True)
+    assert not any(str(deep.parent) in d for d in _deny_of(env))
+
+
 # -- seam smoke and golden --------------------------------------------------
 
 
@@ -811,6 +947,7 @@ def _golden_scenario(tmp_path: Path):
     env = _fence(tmp_path)
     home, lore, cache = _hub_roots(env)
     (Path(env["HOME"]) / ".claude").mkdir(parents=True, exist_ok=True)
+    _make_vault(lore, "default")
     _configure_hub(env)
     _write_user_settings(
         env,
@@ -946,6 +1083,7 @@ def _live_hub_run(tmp_path, tmux_root, commands_for, excluded=()):
     for d in (lore, cache, token_store):
         d.mkdir(parents=True, exist_ok=True)
     (token_store / "token").write_text("TOPSECRET")
+    vault = _make_vault(str(lore), "throwaway")
     outside = tmp_path.resolve() / "outside"
     outside.mkdir()
     (Path(env["HOME"]) / ".claude").mkdir(parents=True, exist_ok=True)
@@ -959,7 +1097,7 @@ def _live_hub_run(tmp_path, tmux_root, commands_for, excluded=()):
                                                   str(outside)]}}},
     )
     start = _start(env, interactive=False, prompt="go")
-    paths = dict(home=home, lore=lore, cache=cache, outside=outside, token_store=token_store,
+    paths = dict(home=home, lore=lore, vault=vault, cache=cache, outside=outside, token_store=token_store,
                  tmux_root=tmux_root, tmux_socket_dir=tmux_socket_dir)
     commands = commands_for(paths)
     url, seen, shutdown = _mock_anthropic(commands)
@@ -1018,3 +1156,31 @@ def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_pat
     )
     assert _refused(results[0])
     assert not (paths["home"] / "excluded-ran").exists()
+
+
+@_LIVE_SKIP
+def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_records(
+    tmp_path, tmux_root
+):
+    def commands(p):
+        v = p["vault"]
+        return [
+            f"echo x > {v}/record-ok.md",
+            f"echo x > {v}/.git/COMMIT_EDITMSG",
+            f"printf '[core]\\n\\tfsmonitor = true\\n' > {v}/.git/config",
+            f"mkdir -p {v}/.git/hooks && echo x > {v}/.git/hooks/post-commit",
+            f"mkdir -p {v}/.git/info && echo x > {v}/.git/info/attributes",
+            f"mv {v}/.git {v}/.git-moved",
+            f"mkdir -p {p['lore']}/vaults/late/.git && echo x > {p['lore']}/vaults/late/.git/config",
+        ]
+
+    results, _, paths = _live_hub_run(tmp_path, tmux_root, commands)
+    record_w, msg_w, config_w, hook_w, info_w, move_w, late_w = results
+    v = paths["vault"]
+    assert not _refused(record_w) and (v / "record-ok.md").exists()
+    assert not _refused(msg_w) and (v / ".git" / "COMMIT_EDITMSG").exists()
+    assert _refused(config_w) and not (v / ".git" / "config").exists()
+    assert _refused(hook_w) and not (v / ".git" / "hooks" / "post-commit").exists()
+    assert _refused(info_w) and not (v / ".git" / "info" / "attributes").exists()
+    assert _refused(move_w) and (v / ".git").is_dir()
+    assert _refused(late_w) and not (paths["lore"] / "vaults" / "late" / ".git" / "config").exists()

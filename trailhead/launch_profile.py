@@ -9,6 +9,15 @@ Write rules are an allow-list of writable roles only. A harness whose
 user-level write list merges with the session's narrows by deriving denials
 itself; the profile carries no deny-write list.
 
+``git_guarded_roles`` names writable roles that hold git repositories whose
+administrative files (``config``, ``hooks``, ``info``) the session must never
+write: a harness's own protection of them covers only the session's working
+directory, and a planted filter, hook or ``core.*`` setting would later run
+unsandboxed in whatever tool next touches the repository. The hub guards the
+lore state root, where every vault lives as a git working tree. A guarded role
+that is not writable adds nothing, since a harness only denies what it would
+otherwise allow.
+
 All resolution goes through ``trailhead.paths`` and creates nothing.
 """
 
@@ -87,6 +96,7 @@ _ROLE_RESOLVERS = {
 @dataclass(frozen=True)
 class LaunchProfile:
     writable_roles: tuple[str, ...] = ()
+    git_guarded_roles: tuple[str, ...] = ()
     read_denied_roles: tuple[str, ...] = ()
     network_allowed_hosts: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] = ()
@@ -95,7 +105,7 @@ class LaunchProfile:
     effort: str | None = None
 
     def __post_init__(self) -> None:
-        for role in (*self.writable_roles, *self.read_denied_roles):
+        for role in (*self.writable_roles, *self.git_guarded_roles, *self.read_denied_roles):
             if role not in _ROLE_RESOLVERS:
                 raise UnknownRoleError(f"unknown directory role {role!r} in launch profile")
 
@@ -117,6 +127,7 @@ class ResolvedProfile:
 
 HUB_PROFILE = LaunchProfile(
     writable_roles=(ROLE_HUB_HOME, ROLE_LORE_STATE, ROLE_CACHE),
+    git_guarded_roles=(ROLE_LORE_STATE,),
     read_denied_roles=(ROLE_TOKEN_STORE,),
     network_allowed_hosts=(),
     mcp_servers=(),
@@ -134,6 +145,8 @@ def resolve_profile(
     platform: str | None = None,
 ) -> ResolvedProfile:
     validate_account(account)
-    roles = dict.fromkeys((*profile.writable_roles, *profile.read_denied_roles))
+    roles = dict.fromkeys(
+        (*profile.writable_roles, *profile.git_guarded_roles, *profile.read_denied_roles)
+    )
     paths = {role: _ROLE_RESOLVERS[role](account, env, platform) for role in roles}
     return ResolvedProfile(profile=profile, account=account, paths=paths)
