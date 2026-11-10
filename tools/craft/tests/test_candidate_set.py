@@ -1106,6 +1106,7 @@ _NO_FLAG_BASELINE = {
         "covered: AC1, AC2\n"
         "candidates: AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
+        "waiting: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_full_coverage.md": (
@@ -1113,6 +1114,7 @@ _NO_FLAG_BASELINE = {
         "covered: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
         "candidates: none\n"
         "partial: none\n"
+        "waiting: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_union_disjoint.md": (
@@ -1120,6 +1122,7 @@ _NO_FLAG_BASELINE = {
         "covered: AC1, AC3, AC2, AC4\n"
         "candidates: AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
+        "waiting: none\n"
         "complete-eligible: yes\n"
     ),
     "spec_candidate_partial_then_full.md": (
@@ -1127,6 +1130,7 @@ _NO_FLAG_BASELINE = {
         "covered: AC2\n"
         "candidates: AC1, AC3, AC4, AC5, AC6, AC7, AC8, AC9\n"
         "partial: none\n"
+        "waiting: none\n"
         "complete-eligible: yes\n"
     ),
 }
@@ -1189,15 +1193,15 @@ def test_removed_criterion_coverage_is_void_and_the_rest_is_derived(tmp_path):
     assert tokens["void"] == "AC2 (removed by amend)"
 
 
-def test_the_five_lines_keep_their_positions_and_void_and_the_two_close_lines_follow(tmp_path):
+def test_the_six_lines_keep_their_positions_and_void_and_the_two_close_lines_follow(tmp_path):
     r = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
     lines = r.stdout.splitlines()
     assert [ln.split(":")[0] for ln in lines] == [
-        "criteria", "covered", "candidates", "partial", "complete-eligible", "void",
+        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible", "void",
         "closed", "closed-uncounted",
     ]
     assert lines[-2:] == ["closed: none", "closed-uncounted: none"]
-    assert lines[:5] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
+    assert lines[:6] == _run(_spec(["AC1", "AC3"], [_entry(1, "covers AC1, AC3")])).stdout.splitlines()
 
 
 def test_the_same_input_without_the_flag_is_undeclared_with_a_hint_naming_the_flag():
@@ -1274,8 +1278,8 @@ def test_void_ids_are_deduplicated_and_in_numeric_order(tmp_path):
 def test_empty_removed_with_a_matching_declared_prints_void_none(tmp_path):
     r = _run_flag(FULL_COVERAGE, _state(tmp_path, [f"AC{i}" for i in range(1, 10)], []))
     assert r.returncode == 0, r.stderr
-    assert r.stdout.splitlines()[5] == "void: none"
-    assert r.stdout.splitlines()[:5] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
+    assert r.stdout.splitlines()[6] == "void: none"
+    assert r.stdout.splitlines()[:6] == _NO_FLAG_BASELINE["spec_candidate_full_coverage.md"].splitlines()
 
 
 def test_a_declared_id_is_never_voided_even_when_the_state_lists_it_as_removed(tmp_path):
@@ -1548,6 +1552,7 @@ def test_a_state_carrying_both_marks_exits_zero_and_acts_on_them(tmp_path):
         "covered": "AC1",
         "candidates": "AC2, AC3",
         "partial": "none",
+        "waiting": "none",
         "complete-eligible": "yes",
         "void": "AC2 (reopened by amend)",
         "closed": "AC1",
@@ -1749,3 +1754,141 @@ def test_the_state_flag_lines_are_emitted_under_the_named_module_constants(tmp_p
     assert f"({candidate_set.VOID_REOPENED_ANNOTATION})" in reopened.stdout
     removed = _run_flag(VOID_BODY, _state(tmp_path, ["AC1", "AC3"], ["AC2"]))
     assert f"({candidate_set.VOID_REMOVED_ANNOTATION})" in removed.stdout
+
+
+# ---------------------------------------------------------------------------
+# `## Waiting`: a criterion whose check is waiting is not a candidate, and
+# nothing completes while one waits.
+# ---------------------------------------------------------------------------
+
+_THREE = ["AC1", "AC2", "AC3"]
+_AC1_COVERED = [_entry(1, "covers AC1")]
+
+
+def _waiting_entry(ac: str, status: str = "waiting", slice_id: str = "building") -> str:
+    return (
+        f"- **{ac}.** pending check — task/{slice_id}\n"
+        "  - check: look at it\n"
+        "  - how: open it\n"
+        "  - changed behaviour: no\n"
+        f"  - 2026-11-02 {status}: words"
+    )
+
+
+def _with_waiting(body: str, *entries: str) -> str:
+    return body + "\n## Waiting\n\n" + "\n\n".join(entries) + "\n"
+
+
+def _waiting_run(declared, ledger, *entries):
+    r = _run(_with_waiting(_spec(declared, ledger), *entries))
+    assert r.returncode == 0, r.stderr
+    return _tokens(r.stdout)
+
+
+def test_a_waiting_criterion_leaves_candidates_and_blocks_completion():
+    t = _waiting_run(_THREE, _AC1_COVERED, _waiting_entry("AC2"))
+    assert t["candidates"] == "AC3"
+    assert t["waiting"] == "AC2"
+    assert t["complete-eligible"] == "no"
+
+
+def test_the_waiting_line_sits_after_partial_and_before_complete_eligible():
+    r = _run(_with_waiting(_spec(_THREE, _AC1_COVERED), _waiting_entry("AC2")))
+    assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
+        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible",
+    ]
+
+
+def test_a_failed_entry_excludes_nothing_and_lists_nothing_as_waiting():
+    t = _waiting_run(_THREE, _AC1_COVERED, _waiting_entry("AC2", "failed"))
+    assert t["candidates"] == "AC2, AC3"
+    assert t["waiting"] == "none"
+    assert t["complete-eligible"] == "yes"
+
+
+@pytest.mark.parametrize("status", ["released", "passed"])
+def test_a_released_or_passed_entry_excludes_nothing(status):
+    t = _waiting_run(_THREE, _AC1_COVERED, _waiting_entry("AC2", status))
+    assert t["candidates"] == "AC2, AC3"
+    assert t["covered"] == "AC1"
+    assert t["waiting"] == "none"
+
+
+def test_only_the_latest_history_line_decides_whether_an_entry_waits():
+    reawakened = _waiting_entry("AC2", "failed") + "\n  - 2026-11-03 waiting: again"
+    assert _waiting_run(_THREE, _AC1_COVERED, reawakened)["waiting"] == "AC2"
+    answered = _waiting_entry("AC2", "waiting") + "\n  - 2026-11-03 failed: no"
+    t = _waiting_run(_THREE, _AC1_COVERED, answered)
+    assert t["waiting"] == "none"
+    assert t["candidates"] == "AC2, AC3"
+
+
+def test_a_partially_covered_waiting_criterion_is_excluded_but_stays_partial():
+    t = _waiting_run(_THREE, [_entry(1, "covers AC1, partially covers AC2")], _waiting_entry("AC2"))
+    assert t["candidates"] == "AC3"
+    assert t["partial"] == "AC2"
+    assert t["waiting"] == "AC2"
+
+
+def test_everything_covered_but_one_waiting_criterion_is_not_complete():
+    ledger = [_entry(1, "covers AC1, AC3, partially covers AC2")]
+    t = _waiting_run(_THREE, ledger, _waiting_entry("AC2"))
+    assert t["candidates"] == "none"
+    assert t["complete-eligible"] == "no"
+
+
+def test_the_same_spec_with_that_entry_failed_offers_it_and_keeps_todays_eligibility():
+    ledger = [_entry(1, "covers AC1, AC3, partially covers AC2")]
+    t = _waiting_run(_THREE, ledger, _waiting_entry("AC2", "failed"))
+    assert t["candidates"] == "AC2"
+    assert t["complete-eligible"] == "yes"
+
+
+def test_any_waiting_entry_for_a_criterion_excludes_it():
+    entries = (_waiting_entry("AC2", "failed", "one"), _waiting_entry("AC2", "waiting", "two"))
+    t = _waiting_run(_THREE, _AC1_COVERED, *entries)
+    assert t["candidates"] == "AC3"
+    assert t["waiting"] == "AC2"
+
+
+def test_waiting_lists_identifiers_in_declared_order_without_repeats():
+    entries = (_waiting_entry("AC3"), _waiting_entry("AC2", slice_id="a"), _waiting_entry("AC2", slice_id="b"))
+    assert _waiting_run(_THREE, [], *entries)["waiting"] == "AC2, AC3"
+
+
+def test_an_unparseable_waiting_section_fails_closed_naming_the_parsers_code():
+    body = _with_waiting(_spec(_THREE, _AC1_COVERED), "an unmarked sentinel-prose line")
+    r = _run(body)
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert _reason_code(r.stderr) == "malformed-waiting-section"
+    assert "unmarked-prose" in r.stderr
+    assert "sentinel-prose" not in r.stderr
+
+
+def test_an_undeclared_waiting_identifier_excludes_nothing_but_blocks_completion():
+    t = _waiting_run(_THREE, _AC1_COVERED, _waiting_entry("AC9"))
+    assert t["candidates"] == "AC2, AC3"
+    assert t["waiting"] == "none"
+    assert t["complete-eligible"] == "no"
+
+
+def test_a_spec_with_no_waiting_section_prints_todays_lines_plus_waiting_none():
+    expected = (FIXTURES / "candidate_set_pre_waiting_output_multi_covers_with_partial.txt").read_text(
+        encoding="utf-8"
+    )
+    spec = (FIXTURES / "spec_candidate_multi_covers_with_partial.md").read_text(encoding="utf-8")
+    r = _run(spec)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == expected.replace("complete-eligible", "waiting: none\ncomplete-eligible")
+
+
+def test_the_criteria_state_lines_still_follow_complete_eligible_in_order(tmp_path):
+    body = _with_waiting(_spec(["AC1", "AC3"], [_entry(1, "covers AC1")]), _waiting_entry("AC3"))
+    r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], []))
+    assert r.returncode == 0, r.stderr
+    assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
+        "criteria", "covered", "candidates", "partial", "waiting", "complete-eligible",
+        "void", "closed", "closed-uncounted",
+    ]
+    assert _tokens(r.stdout)["waiting"] == "AC3"

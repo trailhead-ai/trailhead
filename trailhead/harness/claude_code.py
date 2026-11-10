@@ -211,7 +211,7 @@ def _directories_munging_to(key: str) -> list[Path]:
 
 
 #: Bounded head-scan limits for extracting a session's start cwd out of a
-#: transcript (see :func:`_extract_transcript_cwd`). Real transcripts run to
+#: transcript (see :func:`_scan_transcript_head`). Real transcripts run to
 #: hundreds of megabytes, so this seam must never read one in full:
 #: ``_CWD_SCAN_MAX_LINES`` bounds how many leading records are inspected, and
 #: ``_CWD_SCAN_MAX_LINE_BYTES`` skips any single record too large to be a
@@ -224,6 +224,10 @@ def _directories_munging_to(key: str) -> list[Path]:
 #: above that; the scan still stops at the first cwd it finds.
 _CWD_SCAN_MAX_LINES = 200
 _CWD_SCAN_MAX_LINE_BYTES = 1_000_000
+
+#: A team verdict is only trusted when the record carrying it ends within this
+#: many bytes of the file's start (see :func:`_scan_transcript_head`).
+_TEAM_SCAN_MAX_BYTES = 64 * 1024
 
 
 def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
@@ -240,26 +244,41 @@ def _skip_rest_of_overlong_line(f: BinaryIO) -> None:
             return
 
 
-def _extract_transcript_cwd(path: Path) -> Path | None:
-    """Bounded head-scan for the cwd recorded near the start of a transcript.
+def _scan_transcript_head(path: Path) -> tuple[Path | None, bool]:
+    """Bounded head-scan for the cwd and team membership of a transcript.
 
-    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn,
-    and returns the first decoded dict's string ``cwd``. A line longer than
-    ``_CWD_SCAN_MAX_LINE_BYTES`` is skipped without being decoded, so a huge
-    early line can never win over a plain one further down within the window.
+    Reads at most ``_CWD_SCAN_MAX_LINES`` lines, JSON-decoding each in turn.
+    The first decoded dict carrying a non-empty string ``cwd`` ends the scan;
+    the result is that cwd and whether the same record carries a non-empty
+    string ``teamName`` (a team member's transcript, which Claude Code's own
+    resume listing drops). A line longer than ``_CWD_SCAN_MAX_LINE_BYTES`` is
+    skipped without being decoded, so a huge early line can never win over a
+    plain one further down within the window.
+
+    The team verdict is deliberately stricter than the cwd answer: the record
+    is reported as a team member only when its ``teamName`` sits on the first
+    cwd-bearing record, no line was skipped ahead of it (over the byte cap, or
+    not decodable as JSON), and that record ends within the first
+    ``_TEAM_SCAN_MAX_BYTES`` (64 KiB) of the file. Any other head reads as not
+    a team member. An undecided or ambiguous head must read as resumable,
+    because a non-resumable answer lets a parked session stop blocking an
+    irreversible workspace removal. Claude Code's own ``/resume`` matches
+    ``teamName`` anywhere in the first 64 KiB, so this rule is strictly
+    narrower.
 
     The cap bounds the READ, not just the decode: no single call takes more
     than ``_CWD_SCAN_MAX_LINE_BYTES + 1`` bytes, so a corrupt transcript
     carrying no newline at all costs bounded memory instead of its full size.
 
-    Returns ``None`` — never raises — when the file cannot be opened, no line
-    within the window decodes to a JSON object, or no decoded object carries a
-    non-empty string ``cwd``. This is the seam's only source of an
+    Returns ``(None, False)`` — never raises — when the file cannot be opened,
+    no line within the window decodes to a JSON object, or no decoded object
+    carries a non-empty string ``cwd``. This is the seam's only source of an
     "unreadable/undecodable transcript" outcome; the caller turns that into a
     row with ``cwd=None`` rather than dropping the row.
     """
     try:
         with path.open("rb") as f:
+            skipped_a_line = False
             for _ in range(_CWD_SCAN_MAX_LINES):
                 # Read WITH the cap, not merely check it afterwards: an
                 # unbounded readline() materializes the whole record first, so
@@ -271,18 +290,27 @@ def _extract_transcript_cwd(path: Path) -> Path | None:
                 if len(line) > _CWD_SCAN_MAX_LINE_BYTES:
                     if not line.endswith(b"\n"):
                         _skip_rest_of_overlong_line(f)
+                    skipped_a_line = True
                     continue
                 try:
                     record = json.loads(line)
                 except ValueError:
+                    skipped_a_line = True
                     continue
                 if isinstance(record, dict):
                     cwd = record.get("cwd")
                     if isinstance(cwd, str) and cwd:
-                        return Path(cwd)
+                        team_name = record.get("teamName")
+                        is_team_member = (
+                            isinstance(team_name, str)
+                            and bool(team_name)
+                            and not skipped_a_line
+                            and f.tell() <= _TEAM_SCAN_MAX_BYTES
+                        )
+                        return Path(cwd), is_team_member
     except OSError:
-        return None
-    return None
+        return None, False
+    return None, False
 
 
 def _stream_rest_of_overlong_line(f_in: BinaryIO, f_out: BinaryIO) -> None:
@@ -1347,7 +1375,7 @@ class ClaudeCodeHarness(Harness):
             except OSError:
                 existing_paths = []
             for existing in existing_paths:
-                other_cwd = _extract_transcript_cwd(existing)
+                other_cwd, _ = _scan_transcript_head(existing)
                 if other_cwd is not None and other_cwd.resolve() != resolved:
                     raise HarnessError(
                         f"session_transcript_destination: projects key {munged!r} "
@@ -1505,7 +1533,7 @@ class ClaudeCodeHarness(Harness):
     # A project directory's NAME is not consulted for anything but locating the
     # file: it is a lossy munge of a launch cwd ('/' and '.' both collapse to
     # '-'), so it cannot be reversed into a real path. The cwd this method
-    # returns always comes from :func:`_extract_transcript_cwd` reading the
+    # returns always comes from :func:`_scan_transcript_head` reading the
     # transcript's own content, never from the directory name.
 
     def session_transcripts(
@@ -1536,7 +1564,7 @@ class ClaudeCodeHarness(Harness):
             except OSError:
                 continue
 
-            raw_cwd = _extract_transcript_cwd(candidate)
+            raw_cwd, is_team_member = _scan_transcript_head(candidate)
             # A relative recorded cwd is dropped rather than resolved. Resolving
             # one anchors it at whatever directory camp happened to be invoked
             # from, which would make both the reported location and the launch
@@ -1559,6 +1587,7 @@ class ClaudeCodeHarness(Harness):
                     session_id=session_id,
                     cwd=cwd,
                     modified_at=datetime.fromtimestamp(mtime, tz=timezone.utc),
+                    resumable=not is_team_member,
                 )
             )
 

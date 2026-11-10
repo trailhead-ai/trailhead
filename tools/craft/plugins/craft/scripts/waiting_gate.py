@@ -316,6 +316,13 @@ def _certify(prior_body: str, proposed: str) -> None:
         )
 
 
+def certify(prior_body: str, proposed: str) -> None:
+    """Certify `proposed` against `prior_body`: returns None when every rule above
+    holds, raises `gate_plumbing.Refusal` (carrying the reason code and exit code the
+    CLI would print) otherwise. The entry point for writers that certify in-process."""
+    _certify(prior_body, proposed)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         description="Certify a proposed '## Waiting' write against the body it was composed "
@@ -330,7 +337,7 @@ def main(argv: list[str]) -> int:
     try:
         proposed = read_stdin()
         prior_body, revision = load_prior(args.prior)
-        _certify(prior_body, proposed)
+        certify(prior_body, proposed)
     except Refusal as r:
         return emit_refusal("waiting-gate", r)
     print(f"base: {revision}")

@@ -23,6 +23,16 @@ malformed group config — would answer "not camp-managed" for a session sitting
 inside the very workspace being torn down, which is this module's one way to be
 permissive when it cannot tell. Containment needs no group list to be right.
 
+A PARKED session the harness itself would not offer for resuming — ``resumable``
+False on its candidate — blocks nothing: such a transcript cannot be
+meaningfully resumed on its own, so removing the workspace loses no
+conversation the operator could get back. A LIVE one blocks like any other live
+candidate rooted in the workspace, because a split-pane teammate is started
+with ``cd <dir>`` into its lead's current or an explicit directory, so it can
+run in a workspace its lead was not started in; this relies on the live
+enumeration listing such teammates. Camp reads only the harness-neutral flag,
+never what makes a harness set it.
+
 FAIL CLOSED. If camp cannot enumerate one of the two halves, it does not know
 whether anything is rooted there, and :class:`EnumerationUnavailable` is raised
 rather than an empty answer returned. Folding "could not tell" into "nothing
@@ -183,7 +193,11 @@ def blocking_sessions(
     know where it ran, and refusing on it would wedge every removal for as long
     as one unreadable transcript survives. A candidate whose root is already
     GONE blocks nothing either — there is nothing left to resume there, and the
-    entry an interrupted teardown left behind must not wedge the re-attempt.
+    entry an interrupted teardown left behind must not wedge the re-attempt. A
+    candidate the harness reports as not resumable blocks nothing either while
+    parked; once live it blocks like any other live candidate, since a teammate
+    can run in a workspace its lead was not started in (this relies on the live
+    enumeration listing such teammates).
     """
     if transcripts is None or live_records is None:
         raise EnumerationUnavailable(
@@ -201,7 +215,7 @@ def blocking_sessions(
             env=env,
             now=now,
         )
-        if _rooted_in(candidate, root)
+        if (candidate.resumable or candidate.live) and _rooted_in(candidate, root)
     )
 
 
