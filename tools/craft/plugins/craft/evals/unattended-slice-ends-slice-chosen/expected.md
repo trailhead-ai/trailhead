@@ -38,3 +38,7 @@ Every clause holds.
 - One spec, one phrasing, one model tier, three runs.
 - "Asked nothing" is behavioural and judged by a model over the first and last 12 events of the trace.
 - The session cannot answer, so a ritual that asked and stopped would end without the outcome line and fail the second clause.
+
+## Addendum: no-decisions grader
+
+Authored with the follow-ups entries-path case, before any run of it. `reports-no-found-work-decisions` is a `regex` over the final message for `The slice made no decisions about found work.`: this fixture has no `## Follow-ups` section, so the pass makes no found-work decision and slice's outcome prints the line `found_work.py report --session slice` prints. Expected red on the unedited prose (nothing prints it) and green on the edited prose.

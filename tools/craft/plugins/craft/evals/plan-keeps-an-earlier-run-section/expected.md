@@ -33,3 +33,7 @@ Every clause holds.
 - Question numbering across blocks is not graded: the earlier block parks nothing, so there is no `Q1` for a later block to reuse, and a reuse check would pass vacuously. No case exercises a `Q<n>` that follows an earlier block's question.
 - Amended before any edit to the prose, after the first baseline run: the final-line clause was loosened to any outcome kind and a run that stopped before step 8 passed every grader (1 run, score 1.0, 19 turns). The final line is now `plan-ready` and the council section must be on the parent, so the case can only pass by reaching and surviving the full-body write.
 - One fixture, one phrasing, one model tier.
+
+## Addendum: no-decisions grader
+
+Authored with the follow-ups entries-path case, before any run of it. `reports-no-found-work-decisions` is a `regex` over the final message for `The plan made no decisions about found work.`: this fixture folds nothing, so plan's closing report prints the line `found_work.py report --session plan` prints, above the outcome line. Expected red on the unedited prose and green on the edited prose.
