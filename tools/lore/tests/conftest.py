@@ -450,9 +450,38 @@ _BARE_REMOTE_TEMPLATE: list[Path] = []
 DEFAULT_VAULT_IDENTITY = ("t@e.st", "Test")
 
 
+#: The environment this process started with, before any test fixture changed it.
+_STARTUP_ENV = dict(os.environ)
+_TEMPLATE_HOME: list[Path] = []
+
+
+def _template_build_env() -> dict:
+    """The environment a template is built under: the same whichever test asks first.
+
+    A template is built once per process, on first use, and every later test gets
+    a copy. Built under whatever the first test's environment happened to be,
+    it would differ run to run: a commit's author comes from the environment
+    before it comes from config, and an `init` under the hermetic env (no global
+    config) picks a different default branch than one under the ambient config —
+    which breaks a clone of a bare template for a vault built by hand. So the
+    build sees the startup environment minus any identity, with an empty home.
+    """
+    if not _TEMPLATE_HOME:
+        import shutil
+        import tempfile
+
+        home = Path(tempfile.mkdtemp(prefix="lore-tests-template-home-"))
+        atexit.register(shutil.rmtree, home, True)
+        _TEMPLATE_HOME.append(home)
+    env = {k: v for k, v in _STARTUP_ENV.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    env["HOME"] = str(_TEMPLATE_HOME[0])
+    env["XDG_CONFIG_HOME"] = str(_TEMPLATE_HOME[0] / "xdg")
+    return env
+
+
 def _run_git(path, *args):
     return subprocess.run(
-        ["git", "-C", str(path), *args], capture_output=True, text=True
+        ["git", "-C", str(path), *args], capture_output=True, text=True, env=_template_build_env()
     )
 
 
@@ -508,7 +537,9 @@ def _reset_copied_repo(template: Path, path: Path) -> None:
     import shutil
 
     git_dir = _git_dir(path)
-    (git_dir / "config").write_text(_PRISTINE_CONFIG[template])
+    pristine = _PRISTINE_CONFIG.get(template)
+    if pristine is not None:
+        (git_dir / "config").write_text(pristine)
     hooks = git_dir / "hooks"
     if hooks.is_dir():
         shutil.rmtree(hooks)
@@ -517,14 +548,19 @@ def _reset_copied_repo(template: Path, path: Path) -> None:
 
 def _git_init(path: Path, *flags: str) -> None:
     """``git init`` with no template: no sample hooks, no description, so a
-    template is 11 files instead of 27 and every copy of it is cheaper."""
+    template is a dozen files instead of 27 and every copy of it is cheaper."""
     import tempfile
 
     with tempfile.TemporaryDirectory(prefix="lore-tests-empty-git-template-") as empty:
         subprocess.run(
             ["git", "init", "-q", f"--template={empty}", *flags, str(path)],
-            check=True, capture_output=True,
+            check=True, capture_output=True, env=_template_build_env(),
         )
+    # Not part of the template dir git copies from, but tests append to it.
+    exclude = _git_dir(path) / "info" / "exclude"
+    exclude.parent.mkdir(exist_ok=True)
+    exclude.write_text("")
+    (_git_dir(path) / "hooks").mkdir(exist_ok=True)
 
 
 def _build_vault_template(path: Path, identity, commit: bool) -> Path:
@@ -597,6 +633,14 @@ def make_bare_remote(path: Path) -> Path:
     return _copy_git_tree(_BARE_REMOTE_TEMPLATE[0], path)
 
 
+def _parent_ref(parent: str, marks: dict[str, int]) -> str:
+    if parent in marks:
+        return f":{marks[parent]}"
+    # `from refs/heads/x` on a commit to refs/heads/x is "a branch from itself";
+    # `^0` names the same commit as a plain revision.
+    return f"{parent}^0" if parent.startswith("refs/") else parent
+
+
 def build_history(repo: Path, commits, *, env=None) -> dict[str, str]:
     """Write a multi-commit, multi-branch history into *repo* with ONE git spawn.
 
@@ -607,8 +651,12 @@ def build_history(repo: Path, commits, *, env=None) -> dict[str, str]:
     - ``id``: a name the returned mapping uses, and ``parents`` entries refer to
     - ``branch``: the branch the commit is made on
     - ``message``, ``files`` (path -> text, applied on top of the first parent)
-    - ``parents``: ids of the parents; omitted, it is the branch's previous
-      commit (a root commit when the branch has none); two or more is a merge
+    - ``parents``: the parents, each an ``id`` from this spec or, for history the
+      repo already has, a full ref (``refs/heads/main``) or sha; omitted, it is
+      the branch's previous commit in this spec (a root commit when it has
+      none); two or more is a merge
+    - ``author``: ``(name, email)`` for author and committer; default is the
+      hermetic identity
 
     Returns ``{id: sha}``. Timestamps are fixed and increasing, so two builds of
     one spec give the same shas.
@@ -617,6 +665,7 @@ def build_history(repo: Path, commits, *, env=None) -> dict[str, str]:
 
     name, email = HERMETIC_GIT_IDENTITY
     tip: dict[str, str] = {}
+    marks = {c["id"]: i for i, c in enumerate(commits, start=1)}
     stream: list[bytes] = []
     for number, commit in enumerate(commits, start=1):
         cid, branch = commit["id"], commit["branch"]
@@ -624,17 +673,17 @@ def build_history(repo: Path, commits, *, env=None) -> dict[str, str]:
         if parents is None:
             parents = [tip[branch]] if branch in tip else []
         message = commit.get("message", cid).encode()
-        who = f"{name} <{email}> {1_700_000_000 + 60 * number} +0000".encode()
+        who_name, who_email = commit.get("author", (name, email))
+        who = f"{who_name} <{who_email}> {1_700_000_000 + 60 * number} +0000".encode()
         stream += [
             f"commit refs/heads/{branch}\nmark :{number}\n".encode(),
             b"author " + who + b"\ncommitter " + who + b"\n",
             f"data {len(message)}\n".encode() + message + b"\n",
         ]
-        marks = {c["id"]: i for i, c in enumerate(commits, start=1)}
         if parents:
-            stream.append(f"from :{marks[parents[0]]}\n".encode())
+            stream.append(f"from {_parent_ref(parents[0], marks)}\n".encode())
             for extra in parents[1:]:
-                stream.append(f"merge :{marks[extra]}\n".encode())
+                stream.append(f"merge {_parent_ref(extra, marks)}\n".encode())
         for rel, text in commit.get("files", {}).items():
             body = text.encode()
             stream.append(f"M 100644 inline {rel}\ndata {len(body)}\n".encode() + body + b"\n")
@@ -642,9 +691,11 @@ def build_history(repo: Path, commits, *, env=None) -> dict[str, str]:
         tip[branch] = cid
     with tempfile.TemporaryDirectory(prefix="lore-tests-fast-import-") as scratch:
         marks_file = Path(scratch) / "marks"
-        subprocess.run(
+        done = subprocess.run(
             ["git", "-C", str(repo), "fast-import", "--quiet", f"--export-marks={marks_file}"],
-            input=b"".join(stream), check=True, capture_output=True, env=env,
+            input=b"".join(stream), capture_output=True, env=env,
         )
+        if done.returncode != 0:
+            raise RuntimeError(f"git fast-import failed: {done.stderr.decode(errors='replace')}")
         by_mark = dict(line.split()[:2] for line in marks_file.read_text().splitlines())
     return {c["id"]: by_mark[f":{i}"] for i, c in enumerate(commits, start=1)}

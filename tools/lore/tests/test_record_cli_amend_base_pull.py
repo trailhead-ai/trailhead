@@ -37,7 +37,7 @@ def _stale_scenario(tmp_path):
     Returns ``(env, vault, rid, stale_revision, device_b_state)`` with the fetch
     stamp cleared so the next write path pulls.
     """
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
     env = (config_home, state_dir)
     created = _cli(env, "record", "create", "--kind", "adr", "--title", "A Decision",
                    "--keyword", "k", "--status", "draft", stdin_text=BODY)
@@ -47,10 +47,9 @@ def _stale_scenario(tmp_path):
     _git(vault, "add", "-A")
     _git(vault, "commit", "-m", "the created record")
     _git(vault, "push", "origin")
-    _git(other, "pull")
     stale = _revision(env, rid)
 
-    _push_from_device_b(other, f"{kind}/{name}.md", THEIRS)
+    _push_from_device_b(remote, f"{kind}/{name}.md", THEIRS)
     _fetch_stamp(state_dir, vault).unlink(missing_ok=True)
     return env, vault, rid, stale, (vault / kind / f"{name}.md",
                                     vault / kind / f"{name}.json")

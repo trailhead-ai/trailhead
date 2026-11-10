@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import load_script, make_bare_remote, make_git_vault, write_vault_config
+from conftest import build_history, load_script, make_bare_remote, make_git_vault, write_vault_config
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -62,20 +62,22 @@ def _wire_remote(vault: Path, remote: Path) -> None:
     _git(vault, "push", "-u", "origin", branch)
 
 
-def _clone_as_second_device(remote: Path, path: Path) -> Path:
-    subprocess.run(["git", "clone", str(remote), str(path)], check=True, capture_output=True)
-    for key, val in (("user.email", "b@e.st"), ("user.name", "DeviceB"),
-                     ("commit.gpgsign", "false")):
-        _git(path, "config", key, val)
-    return path
+def _land_on_remote(remote: Path, files: dict[str, str], message: str) -> None:
+    """Land one commit from the other device on the remote's branch, in place.
+
+    The remote is bare, so the commit is written straight into it: no clone of
+    device B, no push.
+    """
+    branch = _git(remote, "for-each-ref", "--format=%(refname:short)", "refs/heads").stdout.split()[0]
+    build_history(remote, [{
+        "id": "b", "branch": branch, "parents": [f"refs/heads/{branch}"],
+        "message": message, "files": files, "author": ("DeviceB", "b@e.st"),
+    }])
 
 
-def _push_from_device_b(other: Path, name: str, text: str) -> None:
+def _push_from_device_b(remote: Path, name: str, text: str) -> None:
     """Land one commit on the remote from the other device."""
-    (other / name).write_text(text)
-    _git(other, "add", "-A")
-    _git(other, "commit", "-m", f"device B: {name}")
-    _git(other, "push", "origin")
+    _land_on_remote(remote, {name: text}, f"device B: {name}")
 
 
 def _run_cli(args, *, config_home: Path, state_dir: Path, stdin_text=None):
@@ -105,16 +107,15 @@ def _worktree_snapshot(vault: Path) -> dict[str, bytes]:
 
 
 def _one_vault(tmp_path: Path, *, dirty: bool = False):
-    """Return ``(config_home, state_dir, vault, remote, device_b)``."""
+    """Return ``(config_home, state_dir, vault, remote)``."""
     config_home = tmp_path / "config"
     state_dir = tmp_path / "state"
     state_dir.mkdir(parents=True, exist_ok=True)
     vault = _make_vault(tmp_path / "v-default", dirty=dirty)
     remote = _make_bare_remote(tmp_path / "remote.git")
     _wire_remote(vault, remote)
-    other = _clone_as_second_device(remote, tmp_path / "device-b")
     write_vault_config(config_home, [("default", "default", vault)])
-    return config_home, state_dir, vault, remote, other
+    return config_home, state_dir, vault, remote
 
 
 def _fetch_stamp(state_dir: Path, vault: Path) -> Path:
@@ -142,8 +143,8 @@ def test_fetch_stamp_distinguishes_vaults_sharing_a_basename(tmp_path, monkeypat
 
 
 def test_pull_only_integrates_on_a_clean_tree(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
@@ -154,8 +155,8 @@ def test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind(tmp_pat
     """A dirty tree is never rebased — but it is also never `converged`: it is
     `holding`, exit non-zero, because something is uncommitted and only the
     full `lore sync` can clear it (see `PULL_DIRTY` in `cli/sync.py`)."""
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path, dirty=True)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path, dirty=True)
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     before_head = _head(vault)
     before_tree = _worktree_snapshot(vault)
@@ -177,7 +178,7 @@ def test_pull_only_never_commits_or_pushes(tmp_path):
     see `PULL_DIRTY`) — that is a DIFFERENT, already-covered contract
     (`test_pull_only_leaves_a_dirty_tree_byte_identical_and_reports_behind`);
     this test's own subject is that no commit and no push ever happen."""
-    config_home, state_dir, vault, remote, _other = _one_vault(tmp_path)
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
     (vault / "ours.md").write_text("# device A\n")
     _git(vault, "add", "-A")
     _git(vault, "commit", "-m", "local only")
@@ -197,18 +198,16 @@ def test_pull_only_never_commits_or_pushes(tmp_path):
 
 
 def test_pull_only_reindexes_what_it_integrated(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    (other / "decision").mkdir()
-    (other / "decision" / "from-b.md").write_text("# Chose the quokka renderer\n")
-    (other / "decision" / "from-b.json").write_text(json.dumps({
-        "title": "Chose the quokka renderer",
-        "status": "active",
-        "created-at": "2026-07-29",
-        "updated-at": "2026-07-29",
-    }))
-    _git(other, "add", "-A")
-    _git(other, "commit", "-m", "device B decision")
-    _git(other, "push", "origin")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _land_on_remote(remote, {
+        "decision/from-b.md": "# Chose the quokka renderer\n",
+        "decision/from-b.json": json.dumps({
+            "title": "Chose the quokka renderer",
+            "status": "active",
+            "created-at": "2026-07-29",
+            "updated-at": "2026-07-29",
+        }),
+    }, "device B decision")
 
     r = _run_cli(["sync", "--pull-only"], config_home=config_home, state_dir=state_dir)
     assert r.returncode == 0, r.stderr
@@ -238,8 +237,7 @@ def test_pull_only_reports_one_vaults_failed_recovery_and_still_pulls_the_next(t
     for name, vault in (("first", first), ("second", second)):
         remote = _make_bare_remote(tmp_path / f"{name}.git")
         _wire_remote(vault, remote)
-        other = _clone_as_second_device(remote, tmp_path / f"{name}-b")
-        _push_from_device_b(other, f"theirs-{name}.md", "# device B\n")
+        _push_from_device_b(remote, f"theirs-{name}.md", "# device B\n")
         vaults.append((name, vault))
     write_vault_config(config_home, [("first", "default", first), ("second", "product", second)])
     _crash_pair(first, state_dir, "task/x", AMENDED, '{"changed": true}\n')
@@ -270,8 +268,8 @@ def _record_id_lines(stdout: str) -> list[str]:
 
 
 def test_record_create_pulls_implicitly(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(
         ["record", "create", "--kind", "decision", "--title", "Local call"],
@@ -283,8 +281,8 @@ def test_record_create_pulls_implicitly(tmp_path):
 
 def test_record_create_stdout_stays_exactly_one_record_id_line(tmp_path):
     """The pinned stdout contract: implicit-pull chatter is stderr-only."""
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(
         ["record", "create", "--kind", "decision", "--title", "Local call"],
@@ -302,8 +300,8 @@ def test_record_create_stdout_stays_exactly_one_record_id_line(tmp_path):
 
 
 def test_second_write_inside_the_freshness_window_does_not_fetch(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "first.md", "# first\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "first.md", "# first\n")
 
     r1 = _run_cli(
         ["record", "create", "--kind", "decision", "--title", "One"],
@@ -313,7 +311,7 @@ def test_second_write_inside_the_freshness_window_does_not_fetch(tmp_path):
     assert (vault / "first.md").exists()
 
     # A second remote commit lands, then a second write inside the window.
-    _push_from_device_b(other, "second.md", "# second\n")
+    _push_from_device_b(remote, "second.md", "# second\n")
     r2 = _run_cli(
         ["record", "create", "--kind", "decision", "--title", "Two"],
         config_home=config_home, state_dir=state_dir, stdin_text="body\n",
@@ -355,8 +353,8 @@ def test_a_failed_fetch_still_stamps_so_the_next_write_skips_the_retry(tmp_path)
 
 
 def test_a_conflicting_implicit_pull_does_not_integrate_and_does_not_fail_the_write(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "README.md", "edited on device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "README.md", "edited on device B\n")
 
     # A committed local edit to the same file — a true both-sides conflict.
     (vault / "README.md").write_text("edited on device A\n")
@@ -384,7 +382,7 @@ def test_a_conflicting_implicit_pull_does_not_integrate_and_does_not_fail_the_wr
 
 
 def test_record_update_pulls_implicitly(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
     created = _run_cli(
         ["record", "create", "--kind", "decision", "--title", "Local call"],
         config_home=config_home, state_dir=state_dir, stdin_text="body\n",
@@ -398,7 +396,7 @@ def test_record_update_pulls_implicitly(tmp_path):
     _git(vault, "commit", "-m", "the created record")
     # Clear the freshness stamp so the update's own pull is not throttled.
     _fetch_stamp(state_dir, vault).unlink(missing_ok=True)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(
         ["record", "update", record_id, "--status", "active"],
@@ -409,8 +407,8 @@ def test_record_update_pulls_implicitly(tmp_path):
 
 
 def test_session_candidate_pulls_implicitly(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(
         ["session", "candidate", "--session-id", SID, "--kind", "decision",
@@ -422,7 +420,7 @@ def test_session_candidate_pulls_implicitly(tmp_path):
 
 
 def test_flush_pulls_implicitly(tmp_path):
-    config_home, state_dir, vault, _remote, other = _one_vault(tmp_path)
+    config_home, state_dir, vault, remote = _one_vault(tmp_path)
     seeded = _run_cli(
         ["session", "candidate", "--session-id", SID, "--kind", "decision",
          "--phase", "Build"],
@@ -433,7 +431,7 @@ def test_flush_pulls_implicitly(tmp_path):
     _git(vault, "commit", "-m", "the seeded session")
 
     _fetch_stamp(state_dir, vault).unlink(missing_ok=True)
-    _push_from_device_b(other, "theirs.md", "# device B\n")
+    _push_from_device_b(remote, "theirs.md", "# device B\n")
 
     r = _run_cli(
         ["flush", "--session-id", SID], config_home=config_home, state_dir=state_dir

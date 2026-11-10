@@ -303,3 +303,54 @@ def test_a_history_can_be_built_into_a_bare_remote_and_cloned(hermetic_git_env, 
 
     assert _git(clone, "rev-parse", "HEAD").stdout.strip() == shas["b"]
 
+
+
+def test_a_commit_carries_the_author_the_spec_names_and_the_default_otherwise(hermetic_git_env, tmp_path):
+    repo = _empty_repo(tmp_path)
+
+    shas = build_history(repo, [
+        {"id": "a", "branch": "main", "files": {"a.md": "a\n"}},
+        {"id": "b", "branch": "main", "files": {"b.md": "b\n"}, "author": ("DeviceB", "b@e.st")},
+    ])
+
+    assert _git(repo, "log", "-1", "--format=%an <%ae> / %cn <%ce>", shas["a"]).stdout.strip() == (
+        "Test <t@e.st> / Test <t@e.st>"
+    )
+    assert _git(repo, "log", "-1", "--format=%an <%ae> / %cn <%ce>", shas["b"]).stdout.strip() == (
+        "DeviceB <b@e.st> / DeviceB <b@e.st>"
+    )
+
+
+def test_a_history_continues_the_tip_of_a_branch_the_repository_already_has(hermetic_git_env, tmp_path):
+    repo = _empty_repo(tmp_path)
+    first = build_history(repo, [{"id": "a", "branch": "main", "files": {"a.md": "a\n"}}])
+
+    later = build_history(repo, [
+        {"id": "b", "branch": "main", "parents": ["refs/heads/main"], "files": {"b.md": "b\n"}}
+    ])
+
+    assert _git(repo, "rev-parse", f"{later['b']}^").stdout.strip() == first["a"]
+    assert _git(repo, "show", f"{later['b']}:a.md").stdout == "a\n"
+
+
+def test_a_template_built_while_the_hermetic_env_is_active_still_carries_the_requested_identity(
+    hermetic_git_env, tmp_path
+):
+    vault = make_git_vault(tmp_path / "v", identity=("x@e.st", "Xavier"))
+
+    assert _git(vault, "log", "-1", "--format=%an <%ae>").stdout.strip() == "Xavier <x@e.st>"
+
+
+def test_a_repository_built_for_a_template_follows_the_startup_env_not_the_hermetic_one(
+    hermetic_git_env, tmp_path, monkeypatch
+):
+    import conftest as lore_conftest
+
+    monkeypatch.setitem(lore_conftest._STARTUP_ENV, "GIT_CONFIG_COUNT", "1")
+    monkeypatch.setitem(lore_conftest._STARTUP_ENV, "GIT_CONFIG_KEY_0", "init.defaultBranch")
+    monkeypatch.setitem(lore_conftest._STARTUP_ENV, "GIT_CONFIG_VALUE_0", "trunk")
+    bare = tmp_path / "r.git"
+
+    lore_conftest._git_init(bare, "--bare")
+
+    assert (bare / "HEAD").read_text().strip() == "ref: refs/heads/trunk"
