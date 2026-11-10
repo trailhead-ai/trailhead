@@ -1096,14 +1096,13 @@ def test_a_missing_pane_directory_is_refused_before_tmux_runs(tmp_path, monkeypa
     monkeypatch.setattr(tmux_module.subprocess, "run", _record)
     missing = tmp_path / "gone-workspace"
     seam = tmux_module.Tmux()
-    if method == "spawn_session":
-        call = lambda d: seam.spawn_session(
-            "camp-t", cwd=d, command=("sleep", "1"), env={"HOME": str(tmp_path)}, timeout=5
-        )
-    else:
-        call = lambda d: seam.new_session_with_window(
-            "camp-t", cwd=d, window_name="w", command=("sleep", "1"),
-            env={"HOME": str(tmp_path)}, timeout=5,
+    env = {"HOME": str(tmp_path)}
+
+    def call(d):
+        if method == "spawn_session":
+            return seam.spawn_session("camp-t", cwd=d, command=("sleep", "1"), env=env, timeout=5)
+        return seam.new_session_with_window(
+            "camp-t", cwd=d, window_name="w", command=("sleep", "1"), env=env, timeout=5
         )
 
     with pytest.raises(FileNotFoundError, match=str(missing)):
