@@ -427,12 +427,12 @@ class TestShellenvGuidance:
     def test_no_cli_binaries_resolved_skips_shim_build_without_failure_copy(
         self, tmp_path, capsys
     ):
-        # cli_flags enabled but _resolve_cli_tools drops every CLI (bins missing
+        # cli_flags enabled but resolve_cli_tools drops every CLI (bins missing
         # on disk) — no shim build is attempted, so the "could not build the
         # shim dir (see warning above)" copy (which implies an attempt/warning)
         # must not appear.
         with _patched(detected=True) as m, patch(
-            "trailhead.install._resolve_cli_tools", return_value={}
+            "trailhead.install.resolve_cli_tools", return_value={}
         ):
             rc = run_install(env=_env(tmp_path), quiet=True)
         assert rc == 0

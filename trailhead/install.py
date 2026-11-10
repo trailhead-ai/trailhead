@@ -24,7 +24,9 @@ No presets, no interactive prompts, no remote fetch, no install manifest — the
 repo checkout IS the source ("install = clone the repo").
 
 Upgrades are additive: re-running install only adds; it never removes a plugin
-or CLI shim that a previous run installed.
+or CLI shim that a previous run installed. The shim build itself is
+``build_cli_shims``, which ``trailhead update`` calls too so both build the same
+set (the enabled plugin CLIs plus ``bin/ranger``).
 
 No harness found (and none named): warn, still build the CLI shims, exit non-zero.
 
@@ -60,7 +62,7 @@ _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 
 
-def _resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
+def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
     """Resolve each enabled CLI-bearing tool to its shippable binary path.
 
     ``cli_flags`` (from ``ResolvedConfig``) already only contains tools whose
@@ -87,6 +89,20 @@ def _with_ranger(cli_tools: dict[str, Path]) -> dict[str, Path]:
     return {**cli_tools, "ranger": _RANGER_BIN}
 
 
+def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str]) -> Path | None:
+    """Build the CLI shim dir for *cli_tools* plus ``bin/ranger``; the one shim
+    build shared by ``trailhead install`` and ``trailhead update``.
+
+    Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
+    disables every CLI builds no shims, and ranger alone does not change that.
+    Additive: shims already in the dir are left alone. Raises whatever
+    ``create_shims`` raises; the caller decides how loudly to fail.
+    """
+    if not cli_tools:
+        return None
+    return create_shims(_with_ranger(cli_tools), str(_REPO_ROOT), env=env).shim_dir
+
+
 def install_user_rulesets(
     harness,
     plugin_names: list[str],
@@ -104,7 +120,7 @@ def install_user_rulesets(
     for it: the manifest's self-declared ``[tool] name`` is plugin-supplied
     content, and using it here would let a plugin file choose the filename written
     into the user's harness config dir, or silently claim another plugin's.
-    ``_resolve_cli_tools`` above keys off the same trusted name for the same
+    ``resolve_cli_tools`` above keys off the same trusted name for the same
     reason.
 
     Content is the manifest's markdown file read verbatim — identical bytes on
@@ -344,15 +360,13 @@ def run_install(
     # Build the CLI shim dir (harness-independent, additive).
     # The shim dir's contents encode the selection; `shellenv` adds it to PATH.
     # ------------------------------------------------------------------
-    cli_tools = _resolve_cli_tools(cfg.cli_flags)
+    cli_tools = resolve_cli_tools(cfg.cli_flags)
 
     shim_dir = None
     shim_build_failed = False
     if cli_tools:
         try:
-            shim_dir = create_shims(
-                _with_ranger(cli_tools), str(_REPO_ROOT), env=_env
-            ).shim_dir
+            shim_dir = build_cli_shims(cli_tools, env=_env)
         except Exception as exc:
             # M1: a shim-dir failure is a warning — wiring succeeded.
             shim_build_failed = True
