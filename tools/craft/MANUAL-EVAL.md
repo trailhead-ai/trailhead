@@ -4456,6 +4456,20 @@ Total spend about $32.9, including the two failed first-treatment and the mis-sp
 
 **Limitations.** One spec, one phrasing, one model tier. Child `Resolves` lines are read from the bodies written, not from created records. The failure paths (failed re-fold or reopen) are not exercised by a run. The boundary between a fold that balloons and one that does not is not probed.
 
+
+### Addendum 2026-11-10: attributing the fold handling to `plan/SKILL.md`
+
+Carriers of the fold, reopen and `Resolves` moves, same grep as the build-close case: `plan/SKILL.md` (step 1 fold block, step 7 placement block, step 8 verify clause, step 9 report clause), `found_work.py`'s docstring, and `slice/SKILL.md`. The prompt now says: work from the `craft:plan` skill and the documents under `skills/_shared/` it points to, open no other skill, read no script's source or docstring. `eval-gate.json` now maps `skills/plan/SKILL.md` and `scripts/found_work.py` to this case.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-10 | baseline, narrowed prompt (`910a18efec99a959cfff7780a4c266ad0b8ac74c`); the four `plan/SKILL.md` blocks removed (`f5edf0a130cc6fc3ff967b7df0bb6ff9cf6d7ecf`) and the `found_work.py` docstring blocks removed | 1 | 0.27; 0 of 1 | red on `f1-is-named-by-a-child`, `f3-is-named-by-a-child`, `f3-is-folded-into-the-parent`, `f3-fold-decision-is-logged`, `f2-stays-open`, `f2-reopen-decision-carries-a-balloon-reason`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`; green on the guards `f1-stays-folded`, `f2-is-named-by-no-child` and on `final-line-is-plan-ready`. $2.62 |
+| 2026-11-10 | baseline, same prompt, `plan/SKILL.md` blocks removed only, docstring intact (`1ec22f3718fe4340086a972759c26d484bac26f3`) | 1 | 0.45; 0 of 1 | red on `f1-is-named-by-a-child`, `f3-is-named-by-a-child`, `f3-is-folded-into-the-parent`, `f3-fold-decision-is-logged`, `each-decision-precedes-its-result`, `closing-message-reports-the-decisions`; green on `f2-stays-open` and `f2-reopen-decision-carries-a-balloon-reason`: the docstring leaks the `reopen` move, which is why `found_work.py` is mapped. $2.96 |
+| 2026-11-10 | treatment, narrowed prompt, committed prose (`plan/SKILL.md` `f5edf0a130cc6fc3ff967b7df0bb6ff9cf6d7ecf`, `found_work.py` `9160322911d01524f4bedc5a5b078ca2e762fb6f`) | 2 (one per batch) | 1.0, 1.0; 2 of 2 pass | all eleven graders green; the gate's bar (2 of 3) is met; a third sample was not run. $2.64, $2.72 |
+| 2026-11-10 | mutation, the one `Resolves spec/<spec-name>#F<n>: <title>` form in step 7 changed to `Covers ...` | 1 | 1.0; pass | stayed green: step 8's "own-line `Resolves` form" and the stripped-token sentence still teach the form. $2.61 |
+
+**Finding.** The named-by grader is red when the carriers are removed, and the case binds the step 7 block as a whole; the single-clause mutation of the `Resolves` form stays green because step 8 repeats it.
+
 ## Case: build-close-marks-folded-entries
 
 One runner case for the final sweep over folded entries in `skills/_shared/execute.md`. `expected.md` was committed alone before any run. The fixture is a `ready` spec `tally-report` and a slice parent `task/count-lines` whose `**Folds:**` line names F1 and F2, both `folded into` the parent; one child, `task/count-lines-build`, is `done` and its Delivers carries `Resolves spec/tally-report#F1: ...`; F2 is named by no child. A seeded `review.md` (PASS, no findings) stands for the whole-change review. The run carries execute from the Phase 5 final sweep through the completion report. Edited prose fingerprint (`git hash-object`): `ab73fa55477a11df26958155f15b3a8c6a299fad`; unedited baseline prose `6967612a5e610d22a0bbc9122172eb5df2fdea11`.
@@ -4483,6 +4497,22 @@ Total spend about $6.1.
 **Finding on the registered baseline bar.** The bar "the unedited `execute.md` fails the F1 and F2 graders" is not met on the full plugin (baseline A, one run): the slice and plan prose and the script docstring in the same plugin teach the `done` and `reopen` transitions, so an agent given a folded-entry fixture performs them unaided. As with the planning case, the case is a guard against the build prose regressing and a detector only against a plugin without the fold machinery. The case cannot show that the new `execute.md` text is what caused the behaviour. Not probed: a child named by an entry but not yet `done`, a review that did not pass, and the sweep failure path (exit 2 or 3, retry command).
 
 **Limitations.** One spec, one phrasing, one model tier, one baseline run per arm, three treatment runs. The review and the child's `done` status are seeded, not built. The real lore state was snapshotted around the batches: only `index.sqlite` and the trailhead vault's publish log changed, and neither names a fixture title.
+
+
+### Addendum 2026-11-10: attributing the sweep to `execute.md`
+
+The 2026-11-09 baseline A was green because the prompt let the agent read the carriers of the sweep's moves outside `execute.md`: `scripts/found_work.py`'s docstring (`entry`, `reopen-abandoned`, `report`), `skills/slice/SKILL.md` and `skills/plan/SKILL.md`. Carriers enumerated with `grep -rn "folded-into\|entry-reopened\|entry-done\|reopen" skills scripts agents` (plugin root): `_shared/execute.md` (Phase 5 sweep paragraph, sibling Phase 5 bullet, report-sentence clause), `scripts/found_work.py` docstring, `slice/SKILL.md` (`reopen-abandoned`), `plan/SKILL.md` (`reopen` document). The prompt now says: work from the `craft:execute` skill and the documents under `skills/_shared/` it points to, open no other skill, read no script's source or docstring. Runner and grants as above; `-j 1`; `TMPDIR` `~/.cache/ee.<8 chars>`; the baseline plugin copies sit beside a symlinked `tools/lore` and `.venv` so the scaffold's repo-relative paths resolve.
+
+| Date | Arm | Runs | Result | Notes |
+|------|-----|------|--------|-------|
+| 2026-11-10 | baseline, old prompt; `execute.md` sweep paragraph, sibling bullet and report clause removed, `found_work.py` docstring `entry`/`reopen-abandoned`/`report` blocks removed (prose `27cbe9818c19c5e07be4b757b552e3b7fabb73e1`, `a8fa93128cea3aac9a67297dfc9eeb1ea1b30b4b`) | 2 | 0.17 and 1.0; 1 of 2 pass | run 1 red on five of six (`f2-is-open-again` green); run 2 green on all six. This is the defect: with the prompt as it was, removing every `execute.md` and docstring carrier did not make the case fail, because `slice/SKILL.md`, `plan/SKILL.md` and the script itself still taught the moves. $1.00, $1.03 |
+| 2026-11-10 | baseline, narrowed prompt (`9599c45471d725019f4330eaac9c90f584b5e1ee`), same removals | 2 | 0.0, 0.0; 0 of 2 | red on all six graders in both runs. $0.76, $0.91 |
+| 2026-11-10 | treatment, narrowed prompt, committed prose (`execute.md` `9711685213b0d269fa08642a942582c35bb3d1c7`, `found_work.py` `9160322911d01524f4bedc5a5b078ca2e762fb6f`) | 3 | 1.0 x3; 3 of 3 pass | $0.68, $0.59, $0.71 |
+| 2026-11-10 | baseline, narrowed prompt, `execute.md` carriers removed only; `found_work.py` docstring, `slice` and `plan` skills untouched | 1 | 0.0; 0 of 1 | red on all six graders: with the prompt narrowed, the `execute.md` text alone carries the sweep. $1.09 |
+| 2026-11-10 | mutation, `Built` bullet "Mark it done." changed to "Leave it folded." | 1 | 1.0; pass | stayed green: the JSON examples and the sentence on `entry-not-built` in the same paragraph still teach `done`. $0.80 |
+| 2026-11-10 | mutation, `Not built` bullet "Return it to open ..." changed to "Leave it folded." | 1 | 1.0; pass | stayed green for the same reason (the `reopen` example, the `entry-not-built` sentence and the next-pass sentence). $0.60 |
+
+**Finding.** The case binds the sweep paragraph as a whole, not any single clause of it: removing the whole paragraph and bullet goes red on every grader, while flipping either decision bullet alone stays green (redundant carriers inside the paragraph, not a weak grader). Only `skills/_shared/execute.md` is mapped for this case in `eval-gate.json`; its mapping is unchanged. Not mapped: `found_work.py` (the carriers-only-removed arm above shows its docstring does not carry the sweep under the narrowed prompt), `slice/SKILL.md` and `plan/SKILL.md` (the prompt no longer sends the agent to them). The `expected.md` fingerprint for the baseline prose is stale after later edits to `execute.md`; the fingerprints above are the ones these runs used.
 
 ---
 
