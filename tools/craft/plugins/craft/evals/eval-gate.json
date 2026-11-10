@@ -255,6 +255,18 @@
       "measures": [
         "agents/consistency-auditor.md"
       ]
+    },
+    "plan-step-7-suppresses-migration-on-a-prototype": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "scripts/migration_bar.py"
+      ]
+    },
+    "plan-step-7-keeps-migration-a-criterion-requires": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "scripts/migration_bar.py"
+      ]
     }
   }
 }

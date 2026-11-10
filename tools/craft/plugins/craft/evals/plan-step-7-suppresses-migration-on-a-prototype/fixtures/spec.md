@@ -1,11 +1,3 @@
-# Fixture — positive
-
-A planning session paused at step 7 ("Define Tasks"), immediately before the feature is
-broken into tasks. The spec under review and the renderer's real output for this fixture's
-own `## Maturity` stamp follow. Read this file in full, then perform step 7 on it.
-
-## Spec under review
-
 # Spec — replace the widget's category field with a tags list
 
 **Problem.** Every widget currently carries one free-text `category` field. Users want to
@@ -26,8 +18,3 @@ for new writes.
 
 - trailhead: prototype
 
-## Migration bar (rendered)
-
-migration-bar: (level: prototype) (basis: stamp) (target-repo: trailhead) — suppressed: migration and backfill
-Migration and backfill tasks are suppressed for this plan.
-Reopens only if the plan's acceptance criteria require preserving existing state — decompose the migration/backfill work normally in that case despite this suppression.

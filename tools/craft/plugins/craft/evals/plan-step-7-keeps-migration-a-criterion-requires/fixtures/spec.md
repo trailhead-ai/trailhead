@@ -1,11 +1,3 @@
-# Fixture — round2-baseline-negative
-
-A planning session paused at step 7 ("Define Tasks"), immediately before the feature is
-broken into tasks. The spec under review follows. Read this file in full, then perform
-step 7 on it.
-
-## Spec under review
-
 # Spec — replace the widget's category field with a tags list
 
 **Problem.** Every widget currently carries one free-text `category` field. Users want to
@@ -24,3 +16,4 @@ for new writes.
 ## Maturity
 
 - trailhead: prototype
+

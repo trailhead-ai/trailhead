@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: plan-step-7-keeps-migration-a-criterion-requires
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

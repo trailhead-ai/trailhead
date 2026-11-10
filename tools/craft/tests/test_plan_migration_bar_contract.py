@@ -158,11 +158,9 @@ def _reopening_condition_phrase(stdout: str) -> str:
 # mentions naming or keeping anything — that half is pure planner judgment.
 # A prose-presence search for those phrases would be exactly the retyped,
 # undeliverable check `CLAUDE.md`'s "never write a test whose subject is the
-# text of a prose document" rule forbids, so it is not asserted here. Per
-# the plan's own council review (Critical: "the eval is the only artifact
-# that can show a planning session actually honours the block"), that half
-# is measured behaviorally by the `prototype-plan-carries-no-migration` eval
-# under `plugins/craft/evals/`, not by this code-vs-document check.
+# text of a prose document" rule forbids, so it is not asserted here. That
+# half is measured behaviorally by the `plan-step-7-*` eval cases under
+# `plugins/craft/evals/`, not by this code-vs-document check.
 
 
 # ---- durable trace: the fields step 7 requires writing into Given Axioms
