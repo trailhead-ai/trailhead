@@ -4639,3 +4639,17 @@ On the security-fixed prose, the eval gate on the push failed `driver-closes-a-s
 | `no-ask-close-switches-to-the-task-branch` | 3 of 3 at 1.0 | 2.77 USD |
 
 During the second batch, files under the real lore state directory changed. They were background fetch and publish logs, publish requests and the search index, from other sessions' syncs. No record was written.
+
+### Pinned git grants
+
+The push gate runs every case under the base branch's runner block, so a branch cannot widen the grants for its own gate. The git grants therefore land on main in a separate change, pinned to the exact forms branch recovery and the push step run, instead of the eight wildcard grants. Each git-using case ran 3 runs (`-j 3`) under the pinned block, prose `skills/_shared/execute.md` `6d3d8f39…`:
+
+| Case | Result | Cost |
+|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning` | 3 of 3 at 1.0 | 4.00 USD |
+| `driver-ends-a-slice-without-asking-about-its-check` | 3 of 3 at 1.0 | 2.91 USD |
+| `no-ask-close-switches-to-the-task-branch` | 3 of 3 at 1.0 | 2.81 USD |
+| `no-ask-close-refuses-a-dirty-tree` | 3 of 3 at 1.0 | 2.06 USD |
+| `no-ask-close-refuses-a-dirty-tree-on-the-task-branch` | 3 of 3 at 1.0 | 2.25 USD |
+| `no-ask-close-refuses-an-option-shaped-branch-label` | 3 of 3 at 1.0 | 2.02 USD |
+| `slice-closes-a-stuck-slice-and-chooses-the-next` | 3 of 3 at 1.0 | 5.13 USD |

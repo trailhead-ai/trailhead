@@ -88,13 +88,17 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   rule for the file-write tool (`Edit(//private/tmp/e-*/**)` on macOS) where a path-scoped
   `Write(...)` rule is denied, so the bare grant can be narrowed to the run directory once every
   case that relies on it is checked under the narrower rule.
-- The eight `git` grants (`git status *`, `git log *`, `git switch *`, `git fetch *`, `git symbolic-ref *`,
-  `git branch *`, `git push *`, `git rev-parse *`) are for the no-ask close's branch recovery and push
-  step in `skills/_shared/execute.md` Phase 6, run by the cases `close-asks-nothing-when-no-one-is-there`,
-  `no-ask-close-switches-to-the-task-branch` and `no-ask-close-refuses-a-dirty-tree`, whose run
-  directory is a git repository with a bare `origin.git` beside it. The push gate uses the base runner
-  block, so every grant reaches every craft case, not only these; each is anchored to a git
-  subcommand, and `git push *` can push whatever repository the case's run directory holds.
+- The nine `git` grants are pinned to the forms the no-ask close's branch recovery and push step
+  in `skills/_shared/execute.md` Phase 6 runs: `git status --porcelain`, `git rev-parse --verify
+  --quiet refs/heads/*`, `git rev-parse --verify --quiet refs/remotes/origin/*`, `git fetch origin`,
+  `git symbolic-ref --short HEAD`, `git switch *`, `git log origin/*`, `git log HEAD --not
+  --remotes=origin -p` and `git push --set-upstream origin HEAD`. They are for the cases whose run
+  directory is a git repository with a bare `origin.git` beside it. The push gate runs every case
+  under the base branch's runner block, so a branch cannot widen these for its own gate, and every
+  grant reaches every craft case. The exact forms leave no room for `--upload-pack`,
+  `--receive-pack`, `--force` or a ref deletion. Two still end in `*`, because a branch name cannot
+  be pinned: `git switch *` admits its option forms (`--discard-changes`, `--detach`), and
+  `git log origin/*` admits `--output=<path>`, which writes a file the sandbox allows.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
   `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `pending_check.py`) matches any single command that ends in
   or contains that script path, whatever program runs it. So the set of commands a case can run is

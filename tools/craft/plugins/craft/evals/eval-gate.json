@@ -20,14 +20,15 @@
       "Bash(*/scripts/migration_bar.py *)",
       "Bash(*/scripts/pending_check.py *)",
       "Bash(*/scripts/observation_gate.py)",
-      "Bash(git status *)",
-      "Bash(git log *)",
+      "Bash(git status --porcelain)",
+      "Bash(git rev-parse --verify --quiet refs/heads/*)",
+      "Bash(git rev-parse --verify --quiet refs/remotes/origin/*)",
+      "Bash(git fetch origin)",
+      "Bash(git symbolic-ref --short HEAD)",
       "Bash(git switch *)",
-      "Bash(git fetch *)",
-      "Bash(git symbolic-ref *)",
-      "Bash(git branch *)",
-      "Bash(git push *)",
-      "Bash(git rev-parse *)"
+      "Bash(git log origin/*)",
+      "Bash(git log HEAD --not --remotes=origin -p)",
+      "Bash(git push --set-upstream origin HEAD)"
     ],
     "max_cost_usd": 10
   },
