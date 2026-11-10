@@ -1,8 +1,0 @@
-[main] BASH
-$CRAFT[base]/scripts/followup_gather.py fixture-distilled-spec > /tmp/gather_out.json 2>/tmp/gather_err.txt; echo "exit=$?"; cat /tmp/gather_out.json; echo ---; cat /tmp/gather_err.txt
-
-[main] BASH
-$CRAFT[base]/scripts/followup_gather.py fixture-distilled-spec; echo "exit=$?"
-
-[main] BASH
-lore record show --json --vault default task/distilled-reject-path-traversal-in-the-upload-endpoint; echo "exit=$?"

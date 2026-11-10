@@ -1,2 +1,0 @@
-vault CHANGED task/quilts-count-the-quilts-hanging-on-the-rack.json
-vault CHANGED task/quilts-count-the-quilts-hanging-on-the-rack.md
