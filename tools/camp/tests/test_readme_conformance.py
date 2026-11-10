@@ -450,8 +450,9 @@ def test_every_documented_attach_form_dispatches_through_the_real_entry_point(
 
 # ---------------------------------------------------------------------------
 # camp new --host — every documented line reaches the handoff with the far
-# side's own `camp new` argv, and the prescribed far-side teardown parses under
-# the real remove / stop parsers.
+# side's own `camp new` argv. camp status / stop / remove --host — every
+# documented line reaches the handoff, and the argv it hands the far side parses
+# under the real status / stop / remove parsers.
 # ---------------------------------------------------------------------------
 
 #: A README code line carrying `camp new <slug> … --host <name> …`, with any
@@ -461,12 +462,11 @@ _NEW_HOST_INVOCATION = re.compile(
     re.MULTILINE,
 )
 
-#: A README teardown line: `ssh <destination> <camp_bin> <camp argv…>`.
-_TEARDOWN_INVOCATION = re.compile(r"^ssh <destination> <camp_bin> (.+)$", re.MULTILINE)
-
-#: The far-side status check the README prescribes inline:
-#: `ssh <destination> <camp_bin> status …`.
-_FAR_STATUS_INVOCATION = re.compile(r"`ssh <destination> <camp_bin> (status [^`]+)`")
+#: A README code line carrying `camp status|stop|remove … --host <name> …`.
+_TEARDOWN_HOST_INVOCATION = re.compile(
+    r"^(camp (?:status|stop|remove) [^\n#]*--host <name>[^\n#]*?)[ \t]*$",
+    re.MULTILINE,
+)
 
 _DOC_GROUP = "docgroup"
 _ARGV_MISMATCH = "far-side argv mismatch"
@@ -484,12 +484,8 @@ def _new_host_invocation_lines() -> list[str]:
     return _NEW_HOST_INVOCATION.findall(README.read_text())
 
 
-def _teardown_invocation_lines() -> list[str]:
-    return _TEARDOWN_INVOCATION.findall(README.read_text())
-
-
-def _far_status_lines() -> list[str]:
-    return _FAR_STATUS_INVOCATION.findall(README.read_text())
+def _teardown_host_invocation_lines() -> list[str]:
+    return _TEARDOWN_HOST_INVOCATION.findall(README.read_text())
 
 
 def _documented_group_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -645,26 +641,50 @@ def test_the_creation_flag_comparison_goes_red_when_the_readme_list_and_declarat
     assert _readme_forwarded_creation_flags(extra) == declared | {"--bogus"}
 
 
-def test_the_prescribed_far_side_teardown_argv_parses_under_the_real_remove_and_stop_parsers(
+def test_every_documented_teardown_host_form_hands_the_far_side_an_argv_its_parsers_accept(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
-    """The camp argv of each teardown line — the part after `ssh <name>
-    <camp_bin>` — is run through the real dispatcher: `remove` under dry run
-    (its documented preview form, and the real form with `--dry-run` added so
-    nothing is removed), `stop` with the stop engine stubbed so no session is
-    touched. Only the camp argv is pinned, not the ssh wrapping — the
-    teardown is not composed through the handoff."""
-    lines = _teardown_invocation_lines()
-    assert lines, "README no longer documents a far-side teardown line"
-    verbs = sorted(shlex.split(line)[0] for line in lines)
-    assert verbs == ["remove", "remove", "stop"], lines
+    """Every `camp status|stop|remove … --host <name>` line the README documents
+    is dispatched through the real entry point from inside the documented group,
+    and must reach the handoff once, over plain `ssh` (no `-t`) to the declared
+    destination. The camp argv it hands the far side is then run through the
+    real dispatcher as the far side would run it: `remove` under dry run (`--dry-run`
+    added where the line has none, so nothing is removed), `stop` with the stop
+    engine stubbed so no session is touched, `status` with the report stubbed."""
+    lines = _teardown_host_invocation_lines()
+    verbs = sorted(shlex.split(line)[1] for line in lines)
+    assert verbs == ["remove", "remove", "status", "stop"], lines
 
     dispatch = importlib.import_module("camp.cli.dispatch")
+    handoff = importlib.import_module("camp.host.handoff")
+    inside = _documented_group_env(tmp_path, monkeypatch)
+    handoffs: list[list[str]] = []
+    monkeypatch.setattr(handoff, "handoff", lambda argv: handoffs.append(list(argv)))
+
+    far_argvs: list[list[str]] = []
+    for line in lines:
+        argv = shlex.split(line.replace("<slug>", "ws1").replace("<name>", "andromeda"))
+        monkeypatch.chdir(inside)
+        monkeypatch.setattr(sys, "argv", argv)
+        handoffs.clear()
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            raise AssertionError(
+                f"{line!r} exited {exc.code} instead of reaching the handoff: "
+                f"{capsys.readouterr().err!r}"
+            ) from exc
+        assert len(handoffs) == 1, f"{line!r} did not reach the handoff exactly once"
+        assert handoffs[0][:2] == ["ssh", "-o"], (line, handoffs[0])
+        assert handoffs[0][-2] == _DOC_SSH_DESTINATION, (line, handoffs[0])
+        remote = shlex.split(handoffs[0][-1])
+        assert remote[0] == "camp", (line, remote)
+        far_argvs.append(remote[1:])
+
     cli_session = importlib.import_module("camp.cli.session")
     lifecycle = importlib.import_module("camp.provision.lifecycle")
     stop_cli = importlib.import_module("camp.cli.stop")
     stop_workspace = importlib.import_module("camp.launch.stop_workspace")
-    _documented_group_env(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
 
     ws = tmp_path / "state" / _DOC_GROUP / "worktrees" / "ws1"
@@ -696,30 +716,6 @@ def test_the_prescribed_far_side_teardown_argv_parses_under_the_real_remove_and_
     # this test pins argv parsing, so hand the guard an empty, readable pool.
     teardown_guard = importlib.import_module("camp.launch.teardown_guard")
     monkeypatch.setattr(teardown_guard, "gather_pool", lambda harnesses, *, env: ([], []))
-
-    for line in lines:
-        argv = shlex.split(
-            line.replace("<slug>", "ws1").replace("<group>", _DOC_GROUP)
-        )
-        if argv[0] == "remove" and "--dry-run" not in argv:
-            argv.append("--dry-run")
-        monkeypatch.setattr(sys, "argv", ["camp", *argv])
-        try:
-            dispatch.main()
-        except SystemExit as exc:
-            assert exc.code in (0, None), (
-                f"{line!r} refused: exit {exc.code}, stderr={capsys.readouterr().err!r}"
-            )
-        err = capsys.readouterr().err
-        if argv[0] == "remove":
-            assert f"[dry-run] would remove worktree 'ws1' for group '{_DOC_GROUP}'" in err, (
-                line,
-                err,
-            )
-    assert stopped == [(_DOC_GROUP, "ws1")]
-
-    status_lines = _far_status_lines()
-    assert len(status_lines) == 1, status_lines
     checked: list[tuple[str, str]] = []
 
     def _fake_status(group, slug, **kw):
@@ -727,14 +723,26 @@ def test_the_prescribed_far_side_teardown_argv_parses_under_the_real_remove_and_
         return 0, {"code": 0, "work_code": 0, "members": []}
 
     monkeypatch.setattr(lifecycle, "provision_status_code", _fake_status)
-    argv = shlex.split(
-        status_lines[0].replace("<slug>", "ws1").replace("<group>", _DOC_GROUP)
-    )
-    monkeypatch.setattr(sys, "argv", ["camp", *argv])
-    with pytest.raises(SystemExit) as status_exit:
-        dispatch.main()
-    assert status_exit.value.code in (0, None), capsys.readouterr().err
-    assert checked == [(_DOC_GROUP, "ws1")], checked
+
+    for far in far_argvs:
+        if far[0] == "remove" and "--dry-run" not in far:
+            far = [*far, "--dry-run"]
+        monkeypatch.setattr(sys, "argv", ["camp", *far])
+        try:
+            dispatch.main()
+        except SystemExit as exc:
+            assert exc.code in (0, None), (
+                f"far side refused {far!r}: exit {exc.code}, "
+                f"stderr={capsys.readouterr().err!r}"
+            )
+        err = capsys.readouterr().err
+        if far[0] == "remove":
+            assert f"[dry-run] would remove worktree 'ws1' for group '{_DOC_GROUP}'" in err, (
+                far,
+                err,
+            )
+    assert stopped == [(_DOC_GROUP, "ws1")]
+    assert checked == [(_DOC_GROUP, "ws1")]
 
 
 # ---------------------------------------------------------------------------

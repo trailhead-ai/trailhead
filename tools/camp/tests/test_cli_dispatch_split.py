@@ -410,10 +410,10 @@ def test_trailing_host_flag_on_inapplicable_verb_reports_no_meaning_not_missing_
     isolated_env: dict[str, str], tmp_path: Path
 ) -> None:
     """`--host` with no value at all, on a verb --host has no meaning for
-    regardless of a value (status is not in `_HOST_VERBS`), must report
+    regardless of a value (sync is not in `_HOST_VERBS`), must report
     "has no meaning here" — not "requires a value", which would tell the
     operator to go supply a value that would be refused anyway."""
-    result = _run(["status", "--host"], env=isolated_env, cwd=tmp_path)
+    result = _run(["sync", "--host"], env=isolated_env, cwd=tmp_path)
 
     assert result.returncode != 0
     assert "has no meaning here" in result.stderr, result.stderr

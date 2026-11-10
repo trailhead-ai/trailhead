@@ -655,8 +655,8 @@ def test_host_has_no_meaning_for_a_verb_that_does_not_read_it(
 ) -> None:
     """`--host` is rejected outright on a verb it has no meaning for, before
     the hosts file or any group config is ever loaded."""
-    result = _run(["status", "--host", "andromeda"], env=corrupt_sibling_env_with_hosts)
-    _assert_clean_refusal(result, needle="has no meaning here", verb="status")
+    result = _run(["sync", "--host", "andromeda"], env=corrupt_sibling_env_with_hosts)
+    _assert_clean_refusal(result, needle="has no meaning here", verb="sync")
     combined = result.stdout + result.stderr
     assert "config error" not in combined
     # Distinguishes this refusal from a *resolved* --host reaching the

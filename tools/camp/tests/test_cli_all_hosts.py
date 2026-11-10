@@ -952,16 +952,18 @@ def test_single_host_list_threads_declared_connect_timeout_to_the_relay(
 
 def test_relay_route_verb_set_is_every_host_verb_except_handoff_verbs():  # inert-gate: allow verb-set drift reminder
     """Pins the enumeration the parametrized test below drives against.
-    `_HOST_VERBS` carries {list, attach, new} — `attach` and `new`
-    (interactive hand-offs, no transport seam) are the members the
-    parametrized relay test below excludes for their own reason; `list` is
+    `_HOST_VERBS` carries {list, attach, new, remove, stop, status} — every
+    member but `list` hands the process off to the far side's own camp (no
+    transport seam), so the parametrized relay test below excludes them for
+    their own reason (covered in test_new_host_cli.py,
+    test_teardown_host_cli.py and test_attach_cli.py); `list` is
     the only member left, and it is the one that actually reaches the relay.
     `sessions`/`kill`/`launch` are retired and absent from `_HOST_VERBS`
     entirely — a retired verb never reaches this relay route at all,
     redirecting instead (LEGACY_REDIRECTS), before main() ever reaches the
     `--host` block that reads this set."""
     dispatch = _dispatch_module()
-    assert dispatch._HOST_VERBS - {"attach", "new"} == {"list"}
+    assert dispatch._HOST_VERBS - {"attach", "new", "remove", "stop", "status"} == {"list"}
 
 
 @pytest.mark.parametrize(

@@ -45,7 +45,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import NoReturn
+from typing import TYPE_CHECKING, NoReturn
 
 from ..launch.naming import workspace_session_name
 from ..launch.recovery import printable_path
@@ -63,6 +63,9 @@ from ..launch.stop_workspace import (
 )
 from ..workspace.verb_taxonomy import needs_group_message
 from .parser import CampParser
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 #: The closed set of line prefixes `camp.launch.window_reconcile` emits —
 #: see this module's docstring. `render_changes`' `Dropped`/`Renamed`
@@ -99,6 +102,49 @@ def _refuse(outcome, reason: str, *, as_json: bool) -> NoReturn:
     sys.exit(exit_status(outcome))
 
 
+#: The refusal for a stop with no slug, local or cross-host alike: stopping
+#: is not a verb an operator picks blind, so neither form offers a picker.
+_NO_SLUG = "camp stop: no slug given — name the workspace to stop; stop has no picker"
+
+
+def _cmd_stop_host_cli(
+    args: list[str], host: "Host", *, connect_timeout: float
+) -> None:
+    """`camp stop <slug> --host <name> [--group <name>] [--json]` — hand this
+    process to the far side's own `camp stop`.
+
+    Decided here, before any machine is contacted: a slug is present
+    (`_NO_SLUG`, as locally) and safe to forward (`require_one_raw_slug`),
+    the group resolves on this machine (`resolve_cross_host_group`) and is
+    forwarded by name, and the parser declares only what local `camp stop`
+    does — so `--dry-run`, which local stop never accepted, is refused here
+    too. `--json` is forwarded when given. The handoff requests no terminal,
+    so the far side's `--json` stdout is never merged with its stderr; its
+    preview, outcome line and exit status are the far side's own.
+    """
+    from ..host.handoff import handoff, remote_camp_argv
+    from .session import require_one_raw_slug, resolve_cross_host_group
+
+    parser = CampParser(verb="stop")
+    parser.add_argument("--group")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("slug", nargs="?")
+    parsed = parser.parse_args(args)
+    if not parsed.slug:
+        _die(_NO_SLUG)
+    slug = require_one_raw_slug("stop", [parsed.slug])
+    group_name = resolve_cross_host_group("stop", parsed.group, dict(os.environ))
+
+    camp_args = ["stop", slug, "--group", group_name]
+    if parsed.json:
+        camp_args.append("--json")
+    handoff(
+        remote_camp_argv(
+            host, camp_args, connect_timeout=connect_timeout, terminal=False
+        )
+    )
+
+
 def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     """`camp stop <slug> [--group <name>] [--json]`.
 
@@ -116,7 +162,7 @@ def _cmd_stop_cli(args: list[str], env: dict[str, str] | None = None) -> None:
     parsed = parser.parse_args(args)
 
     if not parsed.slug:
-        _die("camp stop: no slug given — name the workspace to stop; stop has no picker")
+        _die(_NO_SLUG)
 
     resolved_env = dict(env) if env is not None else dict(os.environ)
     groups = _parsable_groups()

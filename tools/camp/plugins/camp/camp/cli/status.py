@@ -8,10 +8,16 @@ otherwise.
 """
 from __future__ import annotations
 
+import argparse
+import os
 import sys
+from typing import TYPE_CHECKING
 
 from .dispatch import _SELF, _VERSION, _slug_from_name_or_cwd
 from .parser import group_verb_parser
+
+if TYPE_CHECKING:
+    from ..host.config import Host
 
 
 def _cmd_version() -> None:
@@ -55,6 +61,79 @@ def _print_active_group() -> None:
 
 def _cmd_which() -> None:
     print(str(_SELF))
+
+
+def _parse_status_args(args: list[str]) -> argparse.Namespace:
+    """Parse `camp status`'s arguments — the one declaration the local and the
+    cross-host form share, so a flag one accepts the other accepts too.
+
+    `--name` selects one workspace and `--stale` ranks the group's, so the two
+    ask for different views. Both are things the operator typed, and widening
+    to the fleet would answer by discarding one of them — refused here, for
+    both forms.
+    """
+    parser = group_verb_parser("status", dry_run=True)
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument("--name", metavar="SLUG")
+    parser.add_argument("--stale", action="store_true")
+    parser.add_argument("--days", metavar="N")
+    parsed = parser.parse_args(args)
+    if parsed.stale and parsed.name is not None:
+        parser.die(
+            "--name and --stale are mutually exclusive — --name selects one "
+            "workspace and --stale ranks the group's"
+        )
+    return parsed
+
+
+def _cmd_status_host_cli(
+    args: list[str],
+    host: "Host",
+    *,
+    dry_run: bool,
+    connect_timeout: float,
+) -> None:
+    """camp status --host <name> [--group <g>] [--name <slug>] [--json]
+    [--stale [--days N]] — hand this process to the far side's own
+    `camp status`.
+
+    Decided here, before any machine is contacted: the arguments parse under
+    local status's own declaration (`_parse_status_args`, which also refuses
+    `--name` with `--stale`), a `--name` slug is safe to forward
+    (`require_one_raw_slug`), and the group resolves on this machine
+    (`resolve_cross_host_group`) and is forwarded by name. Without `--name`
+    the far side answers with its fleet view: its cwd is a fresh login's
+    `$HOME`, which names no workspace. Every flag given is forwarded, and
+    *dry_run* (the router's answer) as `--dry-run`.
+
+    The handoff requests no terminal, so `--json` stdout stays apart from
+    stderr, and ssh exits with the far side's structured status code
+    (0 ready, 2 pending, 3 failed) for a script to branch on.
+    """
+    from ..host.handoff import handoff, remote_camp_argv
+    from .session import require_one_raw_slug, resolve_cross_host_group
+
+    parsed = _parse_status_args(args)
+    if parsed.name is not None:
+        require_one_raw_slug("status", [parsed.name])
+    group_name = resolve_cross_host_group("status", parsed.group, dict(os.environ))
+
+    camp_args = ["status", "--group", group_name]
+    if parsed.name is not None:
+        camp_args += ["--name", parsed.name]
+    if parsed.json:
+        camp_args.append("--json")
+    if parsed.stale:
+        camp_args.append("--stale")
+    if parsed.days is not None:
+        camp_args += ["--days", parsed.days]
+    if dry_run:
+        camp_args.append("--dry-run")
+    handoff(
+        remote_camp_argv(
+            host, camp_args, connect_timeout=connect_timeout, terminal=False
+        )
+    )
 
 
 def _cmd_status_group_cli(
@@ -112,22 +191,8 @@ def _cmd_status_group_cli(
     import json as _json
     from ..provision.lifecycle import cmd_status_group, provision_status_code, status_header
 
-    parser = group_verb_parser("status", dry_run=True)
-    parser.add_argument("--json", action="store_true")
-    parser.add_argument("--name", metavar="SLUG")
-    parser.add_argument("--stale", action="store_true")
-    parser.add_argument("--days", metavar="N")
-    parsed = parser.parse_args(args)
+    parsed = _parse_status_args(args)
     as_json = parsed.json
-
-    # `--name` selects one workspace and `--stale` ranks the group's, so the two
-    # ask for different views. Both are things the operator typed, and widening
-    # to the fleet would answer by discarding one of them.
-    if parsed.stale and parsed.name is not None:
-        parser.die(
-            "--name and --stale are mutually exclusive — --name selects one "
-            "workspace and --stale ranks the group's"
-        )
 
     # Resolve a slug from --name or cwd; if found, emit the provision-state view.
     slug = _slug_from_name_or_cwd(
