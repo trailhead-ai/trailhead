@@ -145,6 +145,7 @@ fallback, no GNU `readlink -f`, macOS-safe).
   smoke, marked `# inert-gate: allow <reason>`. `scripts/inert-test-gate` enforces both
   halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
   rule.
+- **Craft tests that need lore use `tools/craft/tests/_lore_runner.py`** (`LoreRunner`, or its `lore_runner` fixture): an in-process lore that is fenced on every call and fails closed outside the test's `tmp_path`. Do not spawn `lore` or hand-roll a `FakeLore`; `LoreRunner.inject` makes lore fail on demand.
 - **A test never reads this repository's git history** — no `git show <sha>:<path>`,
   `git log`, or any lookup by commit. Merging rebases a branch onto main, which gives
   its commits new SHAs, so a test pinned to one passes on its pull request and fails
