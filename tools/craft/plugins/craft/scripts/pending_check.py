@@ -263,21 +263,22 @@ def _pending_line(criterion: str, spec: str, evidence: str) -> str:
     return f"- **{criterion}** — {_PENDING} — waiting entry on spec/{spec}; {evidence}"
 
 
-def _with_observation_lines(body: str, new_lines: list[str]) -> str:
-    """`body` with `new_lines` at the end of its observations section (created at the
-    end of the body when it has none)."""
+def _append_to_section(
+    body: str, heading: str, duplicate_code: str, new_lines: list[str], *, separated: bool = False
+) -> str:
+    """`body` with `new_lines` after the last non-blank line of its `heading` section (after
+    a blank line when `separated`), or under a new `heading` at the end of the body when it
+    has none."""
     lines, masked = markdown_section.split_body(body)
-    located = markdown_section.section_range(
-        lines, masked, obs._OBSERVATIONS_HEADING, obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE
-    )
+    located = markdown_section.section_range(lines, masked, heading, duplicate_code)
     if located is None:
-        return body.rstrip("\n") + "\n\n" + obs._OBSERVATIONS_HEADING + "\n\n" + "\n".join(new_lines) + "\n"
+        return body.rstrip("\n") + "\n\n" + heading + "\n\n" + "\n".join(new_lines) + "\n"
     start, end = located
     last = start
     for i in range(start + 1, end):
         if lines[i].strip():
             last = i
-    lines[last + 1 : last + 1] = new_lines
+    lines[last + 1 : last + 1] = ([""] if separated else []) + new_lines
     return "\n".join(lines)
 
 
@@ -362,20 +363,27 @@ class _Parent:
             lines[covers_idx] = partial_line
         body = "\n".join(lines)
         if unrecorded:
-            body = _with_observation_lines(body, unrecorded)
+            body = _append_to_section(
+                body, obs._OBSERVATIONS_HEADING, obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE, unrecorded
+            )
         return body, covers, partial
 
 
-def _check_parent(sidecar: dict, spec: str) -> None:
+def _is_slice_parent(sidecar: dict, spec: str, statuses: tuple[str, ...]) -> bool:
+    """A task in one of `statuses`, labelled a slice parent, related to `spec`."""
     related = sidecar.get("related")
     specs = related.get("spec") if isinstance(related, dict) else None
     linked = {v.removeprefix("spec/") for v in specs if isinstance(v, str)} if isinstance(specs, list) else set()
-    if (
-        sidecar.get("kind") != "task"
-        or sidecar.get("status") != "in-progress"
-        or gather.SLICE_LABEL not in gather._labels(sidecar)
-        or spec not in linked
-    ):
+    return (
+        sidecar.get("kind") == "task"
+        and sidecar.get("status") in statuses
+        and gather.SLICE_LABEL in gather._labels(sidecar)
+        and spec in linked
+    )
+
+
+def _check_parent(sidecar: dict, spec: str) -> None:
+    if not _is_slice_parent(sidecar, spec, ("in-progress",)):
         raise Refusal(
             "the parent is not an in-progress slice parent related to this spec",
             "not-a-slice-parent",
@@ -400,19 +408,7 @@ def _with_entries(body: str, items: list[dict], parent: str) -> str:
         if block:
             block.append("")
         block += _entry_lines(item, parent, today)
-    lines, masked = markdown_section.split_body(body)
-    located = markdown_section.section_range(
-        lines, masked, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE
-    )
-    if located is None:
-        return body.rstrip("\n") + "\n\n" + waiting.HEADING + "\n\n" + "\n".join(block) + "\n"
-    start, end = located
-    last = start
-    for i in range(start + 1, end):
-        if lines[i].strip():
-            last = i
-    lines[last + 1 : last + 1] = [""] + block
-    return "\n".join(lines)
+    return _append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
 
 
 def _write(runner, argv: list[str], stdin: str):
@@ -717,26 +713,16 @@ def stuck_mode(args, runner) -> int:
         raise _refuse_stuck("this lore's 'record update' has no --base, so no close could write", "lore-too-old")
     vault = _resolve_vault(runner, args.spec, args.vault)
     sidecar, parent_body, _, _ = _read_or_fail(runner, vault, f"task/{args.parent}", "parent-not-found")
-    related = sidecar.get("related")
-    specs = related.get("spec") if isinstance(related, dict) else None
-    linked = {v.removeprefix("spec/") for v in specs if isinstance(v, str)} if isinstance(specs, list) else set()
-    labels = gather._labels(sidecar)
-    if (
-        sidecar.get("kind") != "task"
-        or sidecar.get("status") not in _STUCK_STATUSES
-        or gather.SLICE_LABEL not in labels
-        or args.spec not in linked
-    ):
+    if not _is_slice_parent(sidecar, args.spec, _STUCK_STATUSES):
         raise _refuse_stuck(
             "the parent is not an in-progress or blocked slice parent related to this spec", "not-a-slice-parent"
         )
-    if labels.get("craft/push") == "failed":
+    if gather._labels(sidecar).get("craft/push") == "failed":
         raise _refuse_stuck("the parent's last push failed and needs settling by hand", "push-failed")
-    unfinished = _refuse_stuck("the parent's build is not finished", "build-unfinished")
-    if any(status != "done" for status in _children_statuses(runner, vault, args.parent)):
-        raise unfinished
-    if not _end_phases_finished(_Parent(parent_body)):
-        raise unfinished
+    if any(status != "done" for status in _children_statuses(runner, vault, args.parent)) or not (
+        _end_phases_finished(_Parent(parent_body))
+    ):
+        raise _refuse_stuck("the parent's build is not finished", "build-unfinished")
     _, spec_body, _, layer = _read_or_fail(
         runner, vault, f"spec/{args.spec}", "spec-not-found", personal_only=False
     )
