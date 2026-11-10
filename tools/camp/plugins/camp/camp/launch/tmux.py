@@ -39,6 +39,19 @@ qualification does not apply to. See :meth:`Tmux.set_option`'s docstring.
 :meth:`Tmux.pane_window` addresses a PANE id (`%12`) verbatim for the same
 reason.
 
+The server's working directory
+------------------------------
+Whichever `new-session` finds no server running starts one, and that server's
+cwd is the cwd of the process that ran it. The server's cwd must outlive every
+workspace: on tmux 3.7c a deleted server cwd overrides `-c` for every later
+pane (hand-opened windows included), so a server started from a workspace
+directory breaks every window the moment that workspace is torn down.
+`spawn_session` and `new_session_with_window` — the only camp calls that run
+`new-session` — therefore run from :func:`_server_start_dir` (the home
+directory, else `/`), while `-c` and the :func:`_pane_argv` wrapper still put
+each pane in its workspace. A server the operator started by hand from a
+since-deleted directory is not guarded; `tmux kill-server` is the cure.
+
 The tri-state contract
 -----------------------
 `has_session` answers `True` / `False` / `None` (tmux did not answer at
@@ -313,6 +326,14 @@ def target(name: str) -> str:
 _CD_PRELUDE = (
     'cd -- "$1" || { printf \'camp: cannot enter directory %s\\n\' "$1" >&2; exit 1; }; shift; '
 )
+
+
+def _server_start_dir(env: Mapping[str, str]) -> str:
+    """The directory a server-starting `new-session` subprocess runs from:
+    *env*'s `HOME` when it names an existing directory, else `/`. Never a
+    workspace directory — the server's cwd must outlive every workspace."""
+    home = env.get("HOME", "")
+    return home if home and os.path.isdir(home) else "/"
 
 
 def _pane_argv(cwd: object, command: Sequence[str]) -> list[str]:
@@ -700,6 +721,13 @@ class Tmux:
         first pane, wrapped by :func:`_pane_argv` so the pane changes into
         *cwd* itself (on tmux 3.7c `-c` is ignored once the server's cwd is deleted).
 
+        The subprocess runs from :func:`_server_start_dir`, not *cwd*: if this
+        call starts the server, that directory becomes the server's cwd for its
+        whole life and must outlive every workspace (see the module
+        docstring's "server's working directory"; a server the operator
+        started by hand from a deleted directory is not guarded —
+        `tmux kill-server` is the cure).
+
         ``-s`` names the new session — never `=`-qualified, see the module
         docstring's target-vs-name property. Exceptions are NOT swallowed
         here (unlike :meth:`_run`'s tri-state methods): a caller that needs
@@ -718,7 +746,7 @@ class Tmux:
         ]
         return subprocess.run(
             argv,
-            cwd=str(cwd),
+            cwd=_server_start_dir(env),
             env=dict(env),
             start_new_session=True,
             stdin=subprocess.DEVNULL,
@@ -755,6 +783,11 @@ class Tmux:
         :class:`NewSessionWindowFailure` carrying tmux's verbatim stderr
         otherwise.
 
+        Like :meth:`spawn_session`, the subprocess runs from
+        :func:`_server_start_dir` of the env it is given (`os.environ` when
+        *env* is None), so a server this call starts never takes a workspace
+        directory as its own cwd.
+
         Exceptions from the spawn (`OSError`, `TimeoutExpired`) are NOT
         swallowed — propagate exactly as :meth:`spawn_session`'s do. This is
         the server-starting call, and the caller (the workspace door) already
@@ -775,10 +808,11 @@ class Tmux:
             "#{window_id} #{window_name}",
             *_pane_argv(cwd, command),
         ]
+        spawn_env = dict(os.environ) if env is None else dict(env)
         done = subprocess.run(
             argv,
-            cwd=str(cwd),
-            env=dict(os.environ) if env is None else dict(env),
+            cwd=_server_start_dir(spawn_env),
+            env=spawn_env,
             start_new_session=True,
             stdin=subprocess.DEVNULL,
             capture_output=True,
