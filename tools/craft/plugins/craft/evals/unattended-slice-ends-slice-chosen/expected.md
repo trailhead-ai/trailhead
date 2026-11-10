@@ -42,3 +42,5 @@ Every clause holds.
 ## Addendum: no-decisions grader
 
 Authored with the follow-ups entries-path case, before any run of it. `reports-no-found-work-decisions` is a `regex` over the final message for `The slice made no decisions about found work.`: this fixture has no `## Follow-ups` section, so the pass makes no found-work decision and slice's outcome prints the line `found_work.py report --session slice` prints. Expected red on the unedited prose (nothing prints it) and green on the edited prose.
+
+Correction, after the first edited-prose run: that run printed no no-decisions line because `found_work.py` could not run in this fixture (`session-unreadable`, `spec-unreadable`): the scaffold had no `bin/lore` shim on `PATH` and no seeded session, and the prompt passed no session id. The scaffold now writes the shim, `fixtures/session.json` seeds the session `aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee`, and the prompt passes that id to the scripts that take one and puts `bin` first on `PATH`, as `slice-folds-entries-that-touch-its-code` does. This is an authoring error in the fixture, not a prose result; the baseline is re-run on the corrected fixture.
