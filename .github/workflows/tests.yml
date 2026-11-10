@@ -143,5 +143,5 @@ jobs:
           # Per-test cap: twice the 60 s wall-clock the Chromium harness allows one launch, so a
           # test that sits through a harness timeout and then some is named.
           python scripts/suite-time-report junit.xml --tier default \
-            --budget "$budget" --per-test-cap 120 --baseline-passed 14381 \
+            --budget "$budget" --per-test-cap 120 --baseline-passed 14474 \
             --summary "$GITHUB_STEP_SUMMARY"
