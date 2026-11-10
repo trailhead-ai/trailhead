@@ -309,6 +309,13 @@ def resolve_cross_host_group(
     tell the operator to pass a group they already passed. So an explicit
     value goes through `resolve_group_override` ahead of that fold. Groups are
     read through this module's `_parsable_groups`, looked up at call time.
+
+    A group taken from the cwd rather than named with `--group` is announced
+    on stderr — `camp <verb>: group '<g>' (from this directory)` — once it has
+    passed every check, before the caller hands anything to the far side.
+    The far side's own lines name only the slug, so without it the operator
+    could create, stop or remove in a group they did not expect. stdout is
+    never touched: `camp remove`'s wrapper and `--json` readers consume it.
     """
     from ..group.resolve import (
         GroupConfinementError,
@@ -343,6 +350,8 @@ def resolve_cross_host_group(
             f"camp {verb}: group {group_name!r} begins with '-' and would be "
             "read as a flag on the far side"
         )
+    if not group_override:
+        print(f"camp {verb}: group {group_name!r} (from this directory)", file=sys.stderr)
     return group_name
 
 
