@@ -2600,6 +2600,68 @@ def test_a_security_finding_is_not_dropped_without_operator_confirmation(capsys)
     assert lore.entries == [] and lore.update_calls() == []
 
 
+SECURITY_TITLE = f"{fw.SECURITY_TITLE_PREFIX} src/a.py:3 (ref abcd1234)"
+
+
+def marked_md(n, *, title, found, status="open"):
+    return (
+        f"- **F{n}.** {title}\n"
+        f"  - status: {status}\n"
+        "  - what: it is slow\n"
+        "  - where: `src/a.py`\n"
+        f"  - found: {found}\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "title, found, needs_operator",
+    [
+        ("Tidy the parser", fw.SECURITY_REPLACEMENT, True),
+        ("Tidy the parser", "while building", False),
+        (SECURITY_TITLE, "while building", True),
+        ("Tidy the parser", "while building", False),
+    ],
+    ids=["found-marker-only", "found-marker-absent", "title-marker-only", "title-marker-absent"],
+)
+def test_a_drop_needs_the_operator_when_either_the_found_or_the_title_marks_a_security_finding(
+    capsys, title, found, needs_operator
+):
+    lore = EntryLore(spec_body(marked_md(1, title=title, found=found)), task_bodies=TARGETS)
+    code, _, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
+    if needs_operator:
+        assert code == 1 and reason_of(err) == "drop-needs-operator"
+        assert lore.update_calls() == []
+    else:
+        assert code == 0, err
+        assert statuses(lore.spec)["F1"] == ("dropped", DROP_REASON)
+
+
+@pytest.mark.parametrize(
+    "title, needs_operator",
+    [(SECURITY_TITLE, True), ("Tidy the parser", False)],
+    ids=["security-title", "ordinary-title"],
+)
+def test_a_restored_entry_keeps_only_its_title_so_the_title_alone_decides_whether_dropping_it_needs_the_operator(
+    capsys, title, needs_operator
+):
+    lore = EntryLore(
+        spec_body(marked_md(1, title=title, found=fw.SECURITY_REPLACEMENT, status="dropped: nowhere: obsolete")),
+        task_bodies=TARGETS,
+    )
+    code, _, err = run_entry(transition("restore", ("F1",), reason="needed after all"), lore, capsys)
+    assert code == 0, err
+    import followups as fu
+    restored = {e.id: e for e in fu.parse_followups(lore.spec)}["F2"]
+    assert restored.found == "restored from F1"
+    code, _, err = run_entry(transition("drop", ("F2",), reason=DROP_REASON), lore, capsys)
+    if needs_operator:
+        assert code == 1 and reason_of(err) == "drop-needs-operator"
+        assert statuses(lore.spec)["F2"] == ("open", None)
+        code, _, err = run_entry(transition("drop", ("F2",), reason=DROP_REASON, operator_confirmed=True), lore, capsys)
+    assert code == 0, err
+    assert statuses(lore.spec)["F2"] == ("dropped", DROP_REASON)
+
+
 def test_a_security_finding_is_dropped_with_operator_confirmation_and_the_decision_line_records_it(capsys):
     lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed=True), lore, capsys)
