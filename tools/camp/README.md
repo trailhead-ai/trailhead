@@ -190,7 +190,8 @@ never tears down the one you came from.
 else the group your cwd resolves to, the same as a local attach — and
 carries the slug plus that resolved group across to the named machine's own
 camp, which resolves and refuses in its own words, exactly as if you had run
-`camp attach <slug> --group <group>` there yourself. No group resolving
+`camp attach <slug> --group <group>` there yourself. A group taken from
+your cwd is named on stderr before the handoff. No group resolving
 locally refuses locally, with the same needs-group line above, and no
 machine is contacted.
 
@@ -317,7 +318,9 @@ camp new <slug> --host <name> --no-session --group <group>
 own `camp new`, over `ssh -t`. Without `--group`, the group is the one your
 cwd resolves to; with it, the group you name. Either way the group resolves
 **on this machine** and is forwarded to the far side by name, exactly as
-`camp attach <slug> --host <name>` does. Creation flags you give
+`camp attach <slug> --host <name>` does. A group taken from your cwd is
+named on stderr — `camp new: group '<group>' (from this directory)` — before
+the handoff. Creation flags you give
 (`--no-attach`, `--no-session`, `--no-wait`, `--activate`, `--json`) ride
 along to the far side; any other flag is refused.
 
@@ -366,7 +369,8 @@ camp remove <slug> --host <name>
 Each hands this process to the named machine's own `camp status`,
 `camp stop` or `camp remove`, over plain `ssh`. As with `camp new --host`,
 the group is the one your cwd resolves to, or the one `--group <group>`
-names; it resolves **on this machine** and is forwarded by name. The slug is
+names; it resolves **on this machine** and is forwarded by name, and a group
+taken from your cwd is named on stderr before anything is handed over. The slug is
 always named — `camp remove` takes it positionally or as `--name <slug>`,
 never both — because a fresh login on the far side sits in `$HOME`, where no
 workspace is implied. `camp status --host <name>` without `--name` answers

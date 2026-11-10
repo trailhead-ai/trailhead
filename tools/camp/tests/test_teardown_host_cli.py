@@ -317,3 +317,44 @@ def test_status_refuses_a_dash_leading_name(env: Env, monkeypatch, capsys) -> No
         ["status", "--host", "andromeda", "--group", "g", "--name=-x"], monkeypatch
     )
     _refused(env, capsys, code, "'-x' is not a valid workspace slug", "status")
+
+
+# The inferred group is announced ----------------------------------------
+
+#: Every cross-host verb that resolves a group locally and forwards it, with
+#: the argv that reaches its handoff.
+_GROUP_FORWARDING = [
+    ("attach", ["attach", "ws1"]),
+    ("new", ["new", "ws1"]),
+    ("remove", ["rm", "ws1"]),
+    ("stop", ["stop", "ws1"]),
+    ("status", ["status", "--name", "ws1"]),
+]
+
+
+@pytest.mark.parametrize(
+    "verb, argv", _GROUP_FORWARDING, ids=[v for v, _ in _GROUP_FORWARDING]
+)
+def test_a_group_taken_from_the_cwd_is_named_before_the_handoff(
+    env: Env, monkeypatch, capsys, verb, argv
+) -> None:
+    """With no `--group`, the operator learns which group the far side will
+    act on before anything is handed over — the far side's own lines name
+    only the slug."""
+    env.cwd_in("g2")
+    assert _run([*argv, "--host", "andromeda"], monkeypatch) == 0
+    err = capsys.readouterr().err
+    assert f"camp {verb}: group 'g2' (from this directory)\n" in err, err
+    assert len(env.handoffs) == 1
+
+
+@pytest.mark.parametrize(
+    "verb, argv", _GROUP_FORWARDING, ids=[v for v, _ in _GROUP_FORWARDING]
+)
+def test_a_group_named_with_the_flag_is_not_announced(
+    env: Env, monkeypatch, capsys, verb, argv
+) -> None:
+    env.cwd_in("g2")
+    assert _run([*argv, "--host", "andromeda", "--group", "g"], monkeypatch) == 0
+    assert "from this directory" not in capsys.readouterr().err
+    assert len(env.handoffs) == 1
