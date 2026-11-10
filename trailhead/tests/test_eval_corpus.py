@@ -57,7 +57,6 @@ _LEGACY_HAND_SHAPED = frozenset(
         "outpost:publish-routing",
         "outpost:record-link-rendering",
         "outpost:reference-named-for-the-vault",
-        "portage:approval-is-human-only",
     }
 )
 
