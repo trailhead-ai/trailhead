@@ -76,6 +76,22 @@ AUTOMATED_PARENT_BODY = """**Value claim:** the first thing works.
 - **AC1** — automated-assertion — tests/test_first.py::test_first
 """
 
+UNOBSERVED_PARENT_BODY = """**Value claim:** the banner shows the count.
+
+**Covers:** AC2
+"""
+
+END_PHASES = """
+## End Phases
+
+- [x] Phase 1 — gate
+- [x] Phase 2 — simplify
+- [x] Phase 3 — correctness
+- [x] Phase 4 — security
+- [x] Phase 5 — flow-out
+- [ ] Phase 6 — close
+"""
+
 ENTRY = {"criterion": "AC2", "check": "the banner shows 3", "how": "open the app", "changed_behaviour": True}
 
 
@@ -112,6 +128,14 @@ class World:
         out = self.lore("record", "create", "--kind", "spec", "--title", "Seam spec", "--status", "ready",
                         "--vault", "default", stdin=body).stdout
         return out.strip().split("/", 1)[1]
+
+    def create_child(self, parent, status):
+        out = self.lore("record", "create", "--kind", "task", "--title", f"Child {status}", "--status", status,
+                        "--parent", parent, "--vault", "default", stdin="child\n").stdout
+        return out.strip().split("/", 1)[1]
+
+    def stuck(self, spec, parent):
+        return self.script("pending_check.py", "stuck", "--spec", spec, "--parent", parent, "--vault", "default")
 
     def create_parent(self, spec, body=PARENT_BODY, title="Seam parent"):
         out = self.lore("record", "create", "--kind", "task", "--title", title, "--status", "in-progress",
@@ -270,3 +294,51 @@ def test_a_spec_with_no_waiting_section_and_an_all_automated_parent_closes_and_d
     assert tokens["waiting"] == "none"
     assert tokens["complete-eligible"] == "yes"
     assert "## Waiting" not in world.show(f"spec/{spec}")["body"]
+
+
+def test_a_finished_build_waiting_only_on_its_check_is_found_stuck_closed_and_still_found_if_it_never_finishes(world):
+    spec = world.create_spec()
+    parent = world.create_parent(spec, PARENT_BODY + END_PHASES)
+    world.create_child(parent, "done")
+
+    found = world.stuck(spec, parent)
+    assert (found.returncode, found.stdout) == (0, "stuck: AC2\n"), found.stderr
+
+    written = world.pending_check(spec, parent, [ENTRY])
+    assert written.returncode == 0, written.stderr
+
+    resumed = world.stuck(spec, parent)
+    assert (resumed.returncode, resumed.stdout) == (0, "stuck: AC2\n"), resumed.stderr
+
+
+def test_a_slice_with_an_unfinished_child_is_not_found_stuck(world):
+    spec = world.create_spec()
+    parent = world.create_parent(spec, PARENT_BODY + END_PHASES)
+    world.create_child(parent, "done")
+    world.create_child(parent, "ready")
+
+    refused = world.stuck(spec, parent)
+    assert refused.returncode == 1
+    assert "reason-code: build-unfinished" in refused.stderr
+
+
+def test_a_covered_manual_check_with_no_observation_closes_through_the_real_lore_and_gates(world):
+    spec = world.create_spec(SPEC_BODY.replace("The banner shows the count.",
+                                               "The banner shows the count. *Verified by: manual check.*"))
+    parent = world.create_parent(spec, UNOBSERVED_PARENT_BODY + END_PHASES)
+    world.create_child(parent, "done")
+    assert world.observation_gate(parent).returncode == 1
+
+    written = world.pending_check(spec, parent, [ENTRY])
+    assert written.returncode == 0, written.stderr
+    assert written.stdout.splitlines() == ["pending: AC2", "spec: written", "parent: updated"]
+    parent_body = world.show(f"task/{parent}")["body"]
+    assert "**Partially covers:** AC2\n" in parent_body
+    assert (f"- **AC2** — pending-check — waiting entry on spec/{spec}; "
+            "no observation recorded before close\n") in parent_body
+    assert world.observation_gate(parent).returncode == 0
+    verified = world.script("pending_check.py", "verify", "--spec", spec, "--parent", parent, "--vault", "default")
+    assert (verified.returncode, verified.stdout) == (0, "verified: AC2\n"), verified.stderr
+
+    again = world.pending_check(spec, parent, [ENTRY])
+    assert again.stdout.splitlines() == ["pending: AC2", "spec: already-present", "parent: already-updated"]

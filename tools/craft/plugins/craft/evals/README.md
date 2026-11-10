@@ -129,3 +129,17 @@ The `runner` block holds the grants of that batch command, the model `claude-opu
 at about 0.75 to 0.93 USD a run, 2.4 to 2.5 USD for three runs (`tools/craft/MANUAL-EVAL.md`), and
 the review-correction cases cost 0.7 to 1.1 USD for three runs, so 3.5 leaves about 40 percent
 headroom over the largest batch.
+
+### The slice pass's stuck-close cases
+
+`slice-closes-a-stuck-slice-and-chooses-the-next`, `slice-still-refuses-an-unfinished-open-slice`,
+`slice-unattended-closes-a-stuck-slice-and-chooses-the-next`,
+`slice-refuses-when-the-drafted-check-is-refused`,
+`slice-refuses-when-the-slice-repository-is-not-here` and
+`slice-refuses-a-blocked-parent` share one scaffold, the first
+case's `fixtures/scaffold.sh`, driven by an `ARM` variable. It installs logging wrappers in `./scripts/`
+for the gates a slice pass runs (`ledger_gate`, `candidate_set`, `covers_gate`, `pending_check`,
+`observation_gate`), so every case maps `${CLAUDE_PLUGIN_ROOT}/scripts/` to `./scripts/`. No grant was
+added: the cases use the existing script, git, `mktemp` and `Write` grants. In the `credential` arm the
+`pending_check.py` stand-in appends a credential-shaped token to the drafted `check` before the real
+writer reads it, so the real waiting gate refuses.

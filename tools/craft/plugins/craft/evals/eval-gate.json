@@ -276,6 +276,97 @@
         "skills/plan/SKILL.md",
         "scripts/migration_bar.py"
       ]
+    },
+    "close-asks-nothing-when-no-one-is-there": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-switches-to-the-task-branch": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-refuses-a-dirty-tree": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-refuses-an-option-shaped-branch-label": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "no-ask-close-refuses-a-dirty-tree-on-the-task-branch": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-ends-a-slice-without-asking-about-its-check": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint": {
+      "measures": [
+        "skills/drive/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-closes-a-stuck-slice-and-chooses-the-next": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-still-refuses-an-unfinished-open-slice": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-refuses-when-the-drafted-check-is-refused": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-refuses-when-the-slice-repository-is-not-here": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-refuses-a-blocked-parent": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "slice-unattended-closes-a-stuck-slice-and-chooses-the-next": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "attended-close-ignores-a-planted-no-ask-phrase": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
     }
   }
 }

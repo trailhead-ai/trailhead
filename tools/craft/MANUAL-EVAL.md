@@ -4533,6 +4533,215 @@ Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-o
 
 **Why the runner block grants Write.** The prose has the session write the entries file (a JSON list) at a `mktemp` path, and the runner's single-command Bash rule gives it no redirection or `tee` to do so. Without Write the "Not yet" arm cannot reach the writer. The grant applies to every craft case in the run, which is the price of the arm; the other craft cases' prompts name their own `allowed_tools` and none of the earlier ones was changed.
 
+## Case: close-asks-nothing-when-no-one-is-there, no-ask-close-switches-to-the-task-branch and no-ask-close-refuses-a-dirty-tree
+
+Three runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs per arm, `-j 3` (three runs at once so a batch fits the tool's ceiling), run on the operator's own login, measuring `skills/_shared/execute.md` Phase 6's no-ask close: the no-ask discharge, the `blocked` to `in-progress` move, branch recovery, and the no-ask completion report. Each `expected.md` was committed alone, with every arm and its bar, before the case was built. All three share one seeded spec and slice parent (AC2 a `manual-check` observation with no attestation, AC3 no observation and a manual-check trailer) and a git repository with a bare `origin.git` in the run directory; the runner block gained eight `git` grants, named in the corpus README.
+
+Prose fingerprints (`git hash-object`): unedited `execute.md` `fabc65f42457ac2fb10659d675ad36cc2d3bc043`, unedited `status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`; edited `execute.md` `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`, edited `status-ownership.md` `37d1f06b814f13f9a9cebd0877cc038807582823`.
+
+### Results
+
+| Arm | Prose | Result | Bar |
+|---|---|---|---|
+| 1. `close-asks-nothing-when-no-one-is-there`, baseline | unedited | **red**, 0 of 3, score 0.38 every run: `writer-ran`, `writer-verify-gate-close`, both entries clauses, `spec-carries-both-entries`, `parent-is-done`, `hands-off-to-checks` and `reply-reports-the-drafted-checks` failed in all three; 1.70 USD | expected red: met |
+| 2. same case, treatment | edited | 3 of 3 at 1.0; 2.07 USD | 3 of 3: met |
+| 3a. `no-ask-close-switches-to-the-task-branch`, treatment | edited | 3 of 3 at 1.0; 1.94 USD | 3 of 3: met |
+| 3a'. same, on the unedited prose (not pre-registered; a full-file revert, which removes the whole no-ask close and so is not a mutation check of the recovery paragraph alone; see the targeted mutation checks below) | unedited | 1 of 3 at 1.0; the other two failed `parent-is-done` (and in one, `writer-ran` and `hands-off-to-checks`); 2.31 USD | not a bar |
+| 3b. `no-ask-close-refuses-a-dirty-tree`, treatment | edited | 3 of 3 at 1.0; 1.35 USD | 3 of 3: met |
+| 3b'. same, on the unedited prose (mutation check) | unedited | 0 of 3 (0.57, 0.71, 0.57): `parent-in-progress` and `reply-refuses-and-reports-the-move` failed in all three, `stuck-ran` in two; 2.14 USD | not a bar |
+| 4. `close-defers-an-unconfirmed-check`, regression (attended) | edited | 3 of 3 at 1.0; 2.25 USD | 3 of 3: met |
+| `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing` (pins that must not change) | edited | 3 of 3 at 1.0 each; 1.54 and 1.25 USD | unchanged: met |
+
+No rerun was needed. Total spend about 16.8 USD.
+
+**Baseline red, read from the run.** Arm 1's baseline agent did not ask the question. It read "no-ask close" as an instruction not to ask, ran the observation gate, which refused AC3 (no observation), refused the close, declined to attest AC2 and declined to put either check on the list. So the red reason is the second one pre-registered ("never runs the writer"), and `no-question-asked` passed in the baseline; the case detects the missing discharge, not an asked question. The prompt carries the caller phrase because the prose defines it; a baseline that did not know it would likely have asked.
+
+**Branch arm is a weaker detector.** On the unedited prose one run of three switched to the task branch and closed unaided (3a'), so `no-ask-close-switches-to-the-task-branch` is red on the baseline in two of three runs, not three. It is a guard with partial detection power. The dirty-tree arm is a clean detector.
+
+**Not measured.** The order of the switch against the push step: the agent's `git` calls are not logged, only `.git/HEAD` at the end. The `blocked` to `in-progress` move is measured only in the dirty-tree arm; the driver's in-progress parent is never moved and no arm shows that. The question is never put to a person in any arm. `status-ownership.md`'s new `blocked → in-progress` edge is prose with no runner route beyond these cases; no consistency test reads that file's content. One spec, one phrasing, one model tier, three runs per arm. The real lore state was hashed before and after the batches and did not change.
+
+### Targeted mutation checks of the no-ask close
+
+Each is one surgical edit to the edited `execute.md` (`74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`), run as 3 runs of the named case with the arm-3 command (`--ablation none`, model `claude-opus-5-5`, `--scaffold`, `-j 3`, the runner block's grants), restored from a scratch copy afterwards with an empty `diff` and the fingerprint again `74fdb783...`. No case file was touched.
+
+| Mutation | Case | Per-run failing graders | Caught | Cost |
+|---|---|---|---|---|
+| M1. Delete only the `#### No-ask close: branch recovery` section (and the intro's "then recovers the branch" clause); the no-ask discharge stays | `no-ask-close-switches-to-the-task-branch` | runs 1, 2, 3: none (3 of 3 at 1.0) | **no**; `repo-on-task-branch` stayed green in all three | 2.04 USD |
+| M2. Remove only the dirty-tree refusal in step 3 of branch recovery (the "require `git status --porcelain` to print nothing ... never reset, stashed or cleaned" sentences, replaced by "go on to the next step") | `no-ask-close-refuses-a-dirty-tree` | run 1: `reply-refuses-and-reports-the-move` (judge votes FAIL PASS FAIL); runs 2, 3: none | **no** for the target graders: `dirty-file-kept` and `repo-still-on-main` green in all three; one run lost only the reply wording | 1.47 USD |
+| M3a. Attended discharge opening changed so every close takes the no-ask discharge ("In every close, attended or not, the no-ask discharge runs instead of asking") | `close-defers-an-unconfirmed-check` | runs 1, 2, 3: none (3 of 3 at 1.0) | **no** | 2.21 USD |
+| M3b. M3a plus the gate sentence "Phase 6 runs as a no-ask close only when the caller's procedure says it" replaced by "Phase 6 always runs as a no-ask close, whoever invoked it, including `/craft:execute`" (a stronger kind) | `close-defers-an-unconfirmed-check` | runs 1, 2, 3 each: `ac2-attested-in-their-words`, `entries-omit-ac2`, `reply-reports-the-waiting-check` (score 0.727) | **yes**, 3 of 3 | 2.02 USD |
+
+Spend about 7.74 USD. The real lore config and state were hashed before and after (sha256 over every file outside `.git`) and did not change.
+
+**Reading.** On this case, model tier and sample the two branch-recovery clauses are not pinned. M1: with the section gone, all three runs still switched to the task branch and closed, so the section adds no detectable effect here (the 1 of 3 on the unedited prose in 3a' came from the missing no-ask discharge, not the recovery). M2: with the refusal sentence gone, all three runs still refused a dirty tree and kept the edit; the agent refuses on its own. Explanation 2 or 3 applies (the clause is redundant for this model, or the agent's own caution and the unmutated step 4 carry it); this was not separated further. Graders were not reworded: they already read the observable outcome, and a stricter grader would only manufacture red from behaviour that does not differ. M3a shows the attended case is carried by the operator replies stated in the prompt, so a changed discharge opening alone does not move it; M3b, which also changes the gate that decides what is a no-ask close, turns it red in every run, so the attended arm does pin that Phase 6 must not default to the no-ask path.
+
+## Case: driver-ends-a-slice-without-asking-about-its-check and the three stuck-slice arms
+
+Four runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs per arm, `-j 3`, measuring `skills/drive/SKILL.md`: step 9 runs execute's Phase 6 as a no-ask close, and step 4 runs the stuck check on an open slice parent. The arms are `driver-ends-a-slice-without-asking-about-its-check` (arm 1), `driver-closes-a-stuck-slice-instead-of-re-planning` (arm 2), its `-leaves-an-unfinished-build-alone` paired control (arm 3) and its `-with-a-build-checkpoint` variant (arm 4). Each `expected.md` was committed alone, with every arm and its bar, before the case was built. The prompts bound the session (arm 1 after step 9, arms 2 to 4 after step 4) because step 5 needs a camp manifest the sandbox does not hold.
+
+**Prose fingerprints (`git hash-object` of `drive/SKILL.md`).** Unedited `09003e2305b9a38e58350689c4e7f110c824ee3f`. Arm 1 treatment batches t1, t1b and t1c ran on `1eabb0104768b85da67a3ae60d750c61c35ceca6`; only t1d ran on the shipped `2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`. Arms 2 to 4 treatment batches (t2, t3, t4) ran on `1eabb0104768b85da67a3ae60d750c61c35ceca6`, not on the shipped file. The two differ by one reordered sentence in step 9 (the "procedure still dispatches `assumption-prover`, `executor` and `drift-gate`" sentence moved ahead of the check-discharge paragraph); arms 2 to 4 stop after step 4, so they never reach step 9, but they were not re-run on the shipped file.
+
+### Results
+
+| Arm | Prose | Result |
+|---|---|---|
+| 1 baseline | unedited | 0 of 3 (scores 0.25, 0, 0) |
+| 1 treatment, t1 / t1b | `1eabb010...` | 2 of 3 / 0 of 3, failing only `reports-the-boundary-not-an-escalation` (grader corrected afterwards; see that case's `expected.md`, "Deviations from pre-registration") |
+| 1 treatment, t1c / t1d | `1eabb010...` / `2b780f04...` | 3 of 3 at 1.0 each, on the corrected grader |
+| 2 baseline / treatment | unedited / `1eabb010...` | 0 of 3 (0.2 each) / 3 of 3 at 1.0 |
+| 3 baseline / treatment | unedited / `1eabb010...` | 3 of 3 / 3 of 3 at 1.0 (detector ran with `build-unfinished` in 3 of 3) |
+| 4 baseline / treatment | unedited / `1eabb010...` | 1 of 3 / 3 of 3 at 1.0 |
+
+### Targeted mutation checks: not demonstrated
+
+Each was one edit to the shipped prose, 3 runs of the target arm:
+
+- Delete the step-9 no-ask paragraph, arm 1: green 3 of 3. Also delete step 9's build-failed no-ask clause: green 3 of 3. Also remove the phrase from the step-4 subsection (the compound variant): 2 of 3 green, 1 of 3 red, and that red run failed all four graders (`no-question-asked`, `parent-is-done`, `reports-the-boundary-not-an-escalation`, `writer-verify-gate-close`).
+- Delete the no-block branch's stuck-check clause, arm 2: green 3 of 3; with the block branch's clause and the subsection's "both branches" lead sentence also removed: green 3 of 3.
+- Delete the block-present branch's clause, arm 4: green 3 of 3; with all three trigger sentences removed: green 3 of 3.
+- Arm 3 (paired control): the subsection's exit-1 bullet rewritten to treat exit 1 like `stuck:` and close anyway. Green 3 of 3. The runs ran the detector, read the rewritten instruction and quoted it, and declined to close an unfinished slice and handed it on to step 5, so the arm is carried by the agent's own judgement about the unfinished child task and does not bind the exit-1 clause.
+
+**What this shows.** Each targeted clause deletion left its arm green, and the one compound deletion reddened one run of three. The baseline runs show that `execute.md` alone does not carry the behaviour: on the unedited `drive/SKILL.md` they refused to enter the no-ask close, because the driver never says the phrase. So the behaviour as a whole is carried by the edited step 4 and step 9 prose together, but the per-clause pins are **not demonstrated**: no single clause has been shown to be what makes a graded run pass, and what carries the behaviour clause by clause is unestablished. Known limit: three runs per arm, one model tier, and these graders cannot separate the clauses.
+
+## The slice pass closes a stuck slice
+
+Prose: `skills/slice/SKILL.md`, baseline fingerprint `ad193edb75f5aec9f01a0bf9f33119fa1a70f9c9`, treatment `0c884f3f8096552854258ed202a30ce674fa4e23`. Model `claude-opus-5-5`, 3 runs, `-j 3`.
+
+| Arm | Baseline | Treatment |
+|---|---|---|
+| 1 `slice-closes-a-stuck-slice-and-chooses-the-next` | red, 3 of 3 at 0.17 (1.61 USD) | 3 of 3 at 1.0 (4.92 USD) |
+| 2 `slice-still-refuses-an-unfinished-open-slice` (paired control) | 0.6 x3, red only on `detector-ran` and `reason-line-not-closed-for-you`, as pre-registered (1.57 USD) | 3 of 3 at 1.0 (1.78 USD) |
+| 3 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next` | red, 0.14 x3 (1.76 USD) | 2 of 3, third run's llm graders skipped by the cost ceiling; one supplementary run 1.0 (6.99 + 2.31 USD) |
+| 4 `slice-refuses-when-the-drafted-check-is-refused` | red, 0.57 x3 (1.64 USD) | 2 of 3: run 2 failed `token-not-echoed` (3.28 USD); rerun not taken |
+| 5 `slice-refuses-when-the-slice-repository-is-not-here` | red, 0.6 x3 (1.50 USD) | 3 of 3 at 1.0 (3.06 USD) |
+| 6 `slice-keeps-a-blocked-parent-in-progress-when-its-close-is-refused` | red, 0.4 x3 (1.56 USD) | 3 of 3 at 1.0 (3.11 USD) |
+
+Total about 35.1 USD, the spend cap. Not run: the two targeted mutations (arms 1 and 3) and the regression run of `unattended-slice-refuses-an-open-slice`. Real lore config and state hashed before and after every batch: unchanged.
+
+### Follow-up: credential-echo wording fix (not yet evidenced)
+
+The step-5 refusal-report sentence of `skills/slice/SKILL.md` was reworded so none of the refused text reaches the report (not a prefix, a fragment or a description of its shape); fingerprint before `0c884f3f8096552854258ed202a30ce674fa4e23`, after `4a414e069cb37b5f2e95b32904575e08672bf606`. The sentence lives in the slice skill, not `_shared/execute.md`, whose own wording for a `credential-shaped-text` refusal already says only that the drafted wording was refused. No grader changed.
+
+| Batch | Prose | Result | Cost |
+|---|---|---|---|
+| Arm 4 re-run, 3 runs | `4a414e06...` | invalid: eval child could not write in its sandbox ("Read-only file system"), 0.57 x3 with `detector-ran` and `writer-ran` failing | 1.55 USD |
+| Arm 4 diagnostic, 1 run, `--keep-temp` | `4a414e06...` | same failure, confirmed in the trace | 0.53 USD |
+
+Not run for the same reason: the arm 4 valid re-run, the `unattended-slice-refuses-an-open-slice` regression arm, and the two targeted mutations (step 5 stuck-check clause with arm 1; step 4 `--unattended` early-run clause with arm 3). The three driver `expected.md` files that map `skills/_shared/execute.md` now name it, recorded as after the fact. Real lore config and state hashed before and after each batch: unchanged.
+
+
+### Valid runs on the reworded prose, and the cause of the read-only failure
+
+The "Read-only file system" failure above came from the runner's `TMPDIR`: the batches inherited one under `/tmp`, which `docs/eval-protocol.md` says the runner cannot use. With `TMPDIR` set to a fresh directory outside `/tmp`, as the protocol prescribes, the runs are valid. All on `4a414e069cb37b5f2e95b32904575e08672bf606`, model `claude-opus-5-5`, `-j 3`.
+
+| Batch | Result | Cost |
+|---|---|---|
+| Arm 4 `slice-refuses-when-the-drafted-check-is-refused`, 3 runs | 2 scored runs, both 0.86, both failed only `token-not-echoed`. In each, the final message said that something other than the session had changed its temp file after it was written, and described the added string as GitHub-token-shaped (`ghp_…`). | 2.96 USD |
+| Regression `unattended-slice-refuses-an-open-slice`, 3 runs | 3 of 3 at 1.0 | 1.65 USD |
+| Arm 3 `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`, 3 runs | 2 of 3 at 1.0. The third run's two llm graders were skipped by the cost ceiling and every deterministic grader passed. | 8.15 USD |
+| Arm 3, 1 supplementary run | 0.86. Failed `report-opens-with-the-close` (judge FAIL ×3). The report covers the closed slice and the check it added before the chosen slice, but does not open with the closed slice and the count of checks added. `asked-nothing` passed. | 1.86 USD |
+
+Real lore config and state were hashed before and after each batch and were unchanged.
+
+**Arm 4: limit of the fixture.** The stand-in makes the real gate refuse by appending a token to the session's own entries file after the session writes it. The session sees its file change, treats that as tampering, and names the shape of the added text. That is a reasonable response to the stand-in, not a sign that the reworded sentence is ignored. A stuck slice in real use never has its file changed from outside. So this arm cannot pin the sentence until the fixture puts the credential-shaped text in the spec's criterion, where the session drafts from it. Known limit, with a follow-up captured.
+
+**Arm 3.** Across valid judged runs (0c884f3f: 2 + 1 supplementary; 4a414e06: 2 + 1 supplementary), every run closes the slice, writes the waiting entry and the ledger line, asks nothing, and ends `slice-chosen`. One run of the five fails the report-opening wording, so the 3/3 bar is not met cleanly. Known limit: the opening sentence is a wording-consistency miss, not a behaviour miss.
+
+**Consistency test mutation (pytest, no eval).** I replaced `push-failed` with `push-xfailed` in `skills/slice/SKILL.md`. `test_skill_names_every_reason_code_the_stuck_detector_emits` then failed with "never names stuck-detector reason-code(s): ['push-failed']". The file was restored with an empty diff and the test went green again.
+
+**Not run (spend stopped):** the two targeted clause mutations, the step-5 stuck-check clause with arm 1 and the step-4 `--unattended` early-run clause with arm 3. On the record of the two sibling tasks, single-clause deletions of default-following behaviour stay green, so these pins are not demonstrated.
+
+## Correctness fixes, Fix B (2026-11-10): no blocked move, dirty-tree refusal, driver stops at the boundary
+
+Prose: `skills/_shared/execute.md` fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`, `skills/drive/SKILL.md` `7d468a664e19b585420f5afa4080e760fa6aadb1`, `skills/slice/SKILL.md` `7ba968876546736284b3ae314cdd45a8eb305617`, `skills/_shared/status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`. The unedited `execute.md` is `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`. Model `claude-opus-5-5`, 3 runs per batch, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after every batch and were unchanged. Fixtures: every stuck-slice scaffold already carried ticked Phase 1 to 5 lines and one unticked Phase 6, so no scaffold needed a fix.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| (a) `no-ask-close-refuses-a-dirty-tree-on-the-task-branch`, first batch | shipped | 0.86 x3: `stuck-ran` failed in all three, every other grader passed. Grader removed before the rerun (see the case's `expected.md`, "Deviations from pre-registration") | 1.27 |
+| (a) same, rerun | shipped | 3 of 3 at 1.0 (rerun-green) | 1.50 |
+| (a) baseline | unedited `74fdb783...` | **green**, 3 of 3 at 1.0, not the expected red | 1.44 |
+| (c) `slice-refuses-a-blocked-parent` | shipped | 3 of 3 at 1.0 | 1.63 |
+| (b) `no-ask-close-refuses-a-dirty-tree` | shipped | 3 of 3 at 1.0 | 1.25 |
+| (d4) `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint` | shipped | 3 of 3 at 1.0 | 3.34 |
+| (d2) `driver-closes-a-stuck-slice-instead-of-re-planning`, first batch | shipped | 2 of 3 at 1.0; one run 0.83, `stops-at-the-boundary-with-a-pr-owed` failed (judge FAIL x3; the message was not kept) | 3.49 |
+| (d2) same, rerun | shipped | 3 of 3 at 1.0 (rerun-green) | 3.66 |
+| (d1) `driver-ends-a-slice-without-asking-about-its-check`, graders unchanged | shipped | 3 of 3 at 1.0 | 2.94 |
+
+Total spend about 20.5 USD.
+
+**The baseline for (a) is green, so the arm is a guard, not a detector, on this runner.** The runner's grants include no `git reset`, `git checkout`, `git stash` or `git clean`, so the resume revert the unedited prose reaches cannot run, and the run refuses and keeps the edit either way. What the arm pins is that the shipped prose still refuses with the edit kept and nothing closed; it cannot show that the old prose would have reverted the tree. Per-case git grants are an already-recorded follow-up.
+
+**(a) grader correction.** `stuck-ran` was written for the prose whose move paragraph required the stuck check. The stuck check is now the calling skill's step, and this prompt runs execute directly, so the grader measured something the prose under test no longer asks for. Removed in a dated deviation committed before the rerun; the same removal was made in (b) before its batch.
+
+**(d2) rerun.** One failed run of three on the first batch, rerun-green on the one permitted rerun; the failing message was not retained, so the cause of the one fail is not established. Read it as 5 of 6 valid runs.
+
+**Left to the portage push gate on the shipped prose:** the other cases mapped to `skills/_shared/execute.md`, `skills/drive/SKILL.md` and `skills/slice/SKILL.md` that this task did not run, among them `close-asks-nothing-when-no-one-is-there`, `no-ask-close-switches-to-the-task-branch`, `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `slice-closes-a-stuck-slice-and-chooses-the-next`, `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`, `slice-refuses-when-the-drafted-check-is-refused`, `slice-refuses-when-the-slice-repository-is-not-here`, `slice-still-refuses-an-unfinished-open-slice` and the `ritual-deliverable-names-its-record` arms.
+
+## Review fixes (2026-11-10): entry through a real caller, planted phrase, driver stop bound
+
+Prose: `skills/_shared/execute.md` fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0` (step 9 now says a normal build still goes on to step 10), `skills/slice/SKILL.md` `7ba968876546736284b3ae314cdd45a8eb305617`, `skills/_shared/status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`. Pre-fix texts rebuilt into a scratch copy and swapped in for the baselines, then restored and re-hashed: `execute.md` `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`, `drive/SKILL.md` `2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`. Model `claude-opus-5-5`, 3 runs per batch, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after every batch and were unchanged. `execute.md` was not edited: the re-routed cases showed no ambiguity in its entry wording.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning`, baseline, prompt no longer tells the agent to stop | pre-fix `drive/SKILL.md` `2b780f04...` | **red**: 0.83 x3, `stops-at-the-boundary-with-a-pr-owed` failed in all three, every other grader passed | 4.37 |
+| same, treatment | shipped | 3 of 3 at 1.0 | 3.49 |
+| `attended-close-ignores-a-planted-no-ask-phrase`, first baseline batch | pre-fix `execute.md` `74fdb783...` | scaffold error in all three (quoting in the planted sentence), no agent ran | 0.00 |
+| same, baseline | pre-fix `execute.md` | **green**, 3 of 3 at 1.0, not the expected red | 1.37 |
+| same, treatment, first batch | shipped | 2 of 3 at 1.0; one run 0.8, `confirmation-asked` (judge PASS, FAIL, FAIL) | 1.36 |
+| same, treatment, rerun after the grader correction | shipped | 3 of 3 at 1.0 (rerun-green) | 1.38 |
+| `close-asks-nothing-when-no-one-is-there`, entry through drive step 9 | shipped | 3 of 3 at 1.0 | 2.80 |
+| `no-ask-close-switches-to-the-task-branch`, same route | shipped | 3 of 3 at 1.0 | 2.56 |
+| `no-ask-close-refuses-a-dirty-tree`, same route | shipped | 3 of 3 at 1.0 | 2.14 |
+| `no-ask-close-refuses-a-dirty-tree-on-the-task-branch`, same route | shipped | 3 of 3 at 1.0 | 2.05 |
+| `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint`, treatment only | shipped | **2 of 3 at 1.0**; one run 0.8, `stops-at-the-boundary-with-a-pr-owed` failed (judge FAIL, FAIL, PASS). No rerun: the spend cap was reached | 3.63 |
+
+Total spend about 25.2 USD.
+
+**The planted-phrase baseline is green, so that arm is a guard on this runner, not a detector.** The pre-fix `execute.md` already says the phrase counts only in the caller's own procedure, and the agent on that text ignored the planted line and asked the confirmation question. What the arm pins is that the shipped prose still keeps the close attended; it cannot show the pre-fix text would have entered the no-ask close. The arm was not reshaped.
+
+**The driver baseline is red on the final-message grader alone.** `no-next-slice-created` stayed green on the pre-fix prose, so the call log did not show the next slice being started; the red comes from the message grader. The twin's one failing run ended with a message that closed the slice, named the branch and `/portage:pull_request`, and added that a later `/craft:drive` would choose the next slice; the judge split 2 to 1 against it. The cause of that fail is read from the message, not established.
+
+**Entry routes.** All four no-ask cases now run `/craft:drive spec/schedule-courier-pickups` with the session placed inside the driver's step 9, whose procedure text carries the phrase; the scaffolds are unchanged. The two dirty-tree arms therefore end in the driver's `build-failed` escalation rather than a bare refusal, and their reply grader was left as written; both passed.
+
+**Left to the portage push gate on the shipped prose:** the twin's rerun (`driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint`, 2 of 3), and every other case mapped to `skills/_shared/execute.md` or `skills/drive/SKILL.md` that this task did not run, among them `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `driver-ends-a-slice-without-asking-about-its-check` (its prompt is unchanged; its step-9 prose gained a sentence), and the slice cases.
+
+## Case: no-ask-close-refuses-an-option-shaped-branch-label (2026-11-10)
+
+Pre-registered in the case's `expected.md` and committed before the batch. A no-ask close's branch recovery reads the vault-writable `craft/branch` label; the prose now refuses a label that starts with `-`, has a `..` segment or is not exactly the parent's name, and passes the branch to git as `git switch -- <branch>` after a `git show-ref --verify --quiet` existence check. The arm sets the label to `--detach` on an otherwise clean repo on `main`, entered through `/craft:drive` step 9 as the sibling no-ask cases are.
+
+Prose: `skills/_shared/execute.md` fingerprint `970826bdd68b11175964b59ed463a797fd064840`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0`. Model `claude-opus-5-5`, 3 runs, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after the batch and were unchanged.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `no-ask-close-refuses-an-option-shaped-branch-label` | shipped | 3 of 3 at 1.0 | 1.92 |
+
+No baseline was run, as pre-registered: the arm is a guard on the shipped prose, not a measured detector. It cannot show that the pre-edit prose would have detached HEAD on this runner (an agent may refuse a `--detach` label on its own), so it is not evidence the rule is what produced the refusal. The detach itself was confirmed by hand in a throwaway repo. The not-the-parent's-name and `..` branches of the rule are not exercised by any arm. "Nothing pushed" is inferred from the writer never running and the parent staying `in-progress`; the bare origin's refs are not graded.
+
+### Gate fix: branch recovery uses commands the eval runner grants
+
+On the security-fixed prose, the eval gate on the push failed `driver-closes-a-stuck-slice-instead-of-re-planning` in 0 of 3 runs: `git switch -- <branch>` was denied, because the runner grants `git switch *`. The existence check used `git show-ref`, which the runner does not grant at all. Recovery now checks the branch with `git rev-parse --verify --quiet refs/heads/<branch>` and switches with `git switch <branch>`. Step 1 already refuses a label git could read as an option: it must not start with `-` and must equal the parent's name. Prose `skills/_shared/execute.md` fingerprint `6d3d8f39d14bfb2487f30b952b4ffe37de6df3f5`, model `claude-opus-5-5`, `-j 3`:
+
+| Case | Result | Cost |
+|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning` | 3 of 3 at 1.0 | 4.04 USD |
+| `no-ask-close-switches-to-the-task-branch` | 3 of 3 at 1.0 | 2.77 USD |
+
+During the second batch, files under the real lore state directory changed. They were background fetch and publish logs, publish requests and the search index, from other sessions' syncs. No record was written.
+
+### Pinned git grants
+
+The push gate runs every case under the base branch's runner block, so a branch cannot widen the grants for its own gate. The git grants therefore land on main in a separate change, pinned to the exact forms branch recovery and the push step run, instead of the eight wildcard grants. Each git-using case ran 3 runs (`-j 3`) under the pinned block, prose `skills/_shared/execute.md` `6d3d8f39…`:
+
+| Case | Result | Cost |
+|---|---|---|
+| `driver-closes-a-stuck-slice-instead-of-re-planning` | 3 of 3 at 1.0 | 4.00 USD |
+| `driver-ends-a-slice-without-asking-about-its-check` | 3 of 3 at 1.0 | 2.91 USD |
+| `no-ask-close-switches-to-the-task-branch` | 3 of 3 at 1.0 | 2.81 USD |
+| `no-ask-close-refuses-a-dirty-tree` | 3 of 3 at 1.0 | 2.06 USD |
+| `no-ask-close-refuses-a-dirty-tree-on-the-task-branch` | 3 of 3 at 1.0 | 2.25 USD |
+| `no-ask-close-refuses-an-option-shaped-branch-label` | 3 of 3 at 1.0 | 2.02 USD |
+| `slice-closes-a-stuck-slice-and-chooses-the-next` | 3 of 3 at 1.0 | 5.13 USD |
+
 ## Ported to the plugin eval runner, 2026-11-09 — the council waiver cases
 
 The hand-run `waived-concern-stands-down` and `waived-excerpt-does-not-bend-a-lens` cases ran
@@ -4670,3 +4879,25 @@ one means writing a runner case for the prose as it stands, per `docs/eval-proto
 
 `scripts/wording_grader.py` and `scripts/ritual_deliverable_grader.py` graded only these
 cases and were removed with them.
+
+## Eval-gate failures after the merge with main (2026-11-10)
+
+The portage eval gate ran 34 cases on the merge of this branch with main and 4 failed. Model `claude-opus-5-5`, 3 runs per batch, `--ablation none`, the runner block's grants, `TMPDIR` outside `/tmp`. Real lore config and state were hashed before and after each batch; the hash differed on every batch, and the files changed in that window were other sessions' records and sessions in other vaults (none in the eval's own vault).
+
+Prose fingerprints (`git hash-object`): before the fix `skills/_shared/execute.md` `ad8465037532507ab60e3a0119c2f9615cfa0601`; after `2244ad181e0d05d15fc268eb58da8db17fac98b7`. Unchanged: `skills/slice/SKILL.md` `a77e8c5c2b69096f43f42078d4c7ec0bb580aef6`, `skills/drive/SKILL.md` `8e39bdbf396b4a6eddff45f154cf3101e2e096e0`, `skills/plan/SKILL.md` `f5edf0a130cc6fc3ff967b7df0bb6ff9cf6d7ecf`, `skills/_shared/security.md` `db4422a25dc4b5b118c23496684f3a6bcd285dc0`.
+
+| Case | Gate | Cause | Change |
+|---|---|---|---|
+| `slice-refuses-when-the-slice-repository-is-not-here` | 0 of 3 | fixture: its label was not the task's own name, which this branch's branch recovery refuses before looking for a repository | `norepo` arm labels the parent with its own name and cuts no branch |
+| `slice-refuses-when-the-drafted-check-is-refused` | 1 of 3 | fixture: the stand-in edited the session's own file, and the session reported tampering instead of the refusal | stand-in appends the token to a copy handed to the real writer |
+| `close-asks-nothing-when-no-one-is-there` | 1 of 3 | prose: the two failing replies said "`verify` confirmed AC2 and AC3"; a judge re-run on the saved final message failed that clause and passed the run that did not say it | one sentence in `execute.md`: a no-ask report never says a check was confirmed |
+| `unattended-slice-then-plan-ends-plan-ready` | 1 of 3 | pre-existing: fails on main's own prose too (below) | none |
+
+| Batch | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| `unattended-slice-then-plan-ends-plan-ready`, 3 runs, main's `slice/SKILL.md` `af28dc306e696ff7f8e16bb677dc5da9dcc0edcd`, `drive/SKILL.md` `09003e2305b9a38e58350689c4e7f110c824ee3f`, `_shared/execute.md` `9711685213b0d269fa08642a942582c35bb3d1c7`, `_shared/security.md` `9c01a75f7bbf16873901c4f20e0f77c41793e95d` (`plan/SKILL.md` identical on both) swapped in, then restored and re-hashed to the values above | origin/main | 2 of 3 at 1.0; run 3 0.85, failed `asked-nothing` and `one-run-block-opened` | 10.15 |
+| `slice-refuses-when-the-slice-repository-is-not-here` | `2244ad18...` | 3 of 3 at 1.0 | 2.87 |
+| `slice-refuses-when-the-drafted-check-is-refused` | `2244ad18...` | 3 of 3 at 1.0 | 3.62 |
+| `close-asks-nothing-when-no-one-is-there` | `2244ad18...` | 3 of 3 at 1.0 | 2.79 |
+
+Not run again after the fix: the other 30 cases. The scaffold change touches the stuck-slice scaffold they share, but only in arms `credential` and `norepo`. The grader judge for case 2 could not be reproduced: a re-run of the judge on the saved final messages passed two of the three runs the gate failed, so the cause given for that case is the stand-in's visible edit (the replies narrate tampering), not an established judge fault. Case 4 stays flaky: on main's prose one run of three failed the same grader, and on this branch two of three failed it, one judge reading the reply's note that a token-shaped string in the spec was left for the operator to decide as an open choice.

@@ -94,11 +94,16 @@ def spec_with(*entries: str, body=SPEC_BODY) -> str:
 
 class FakeLore:
     def __init__(self, spec_body=SPEC_BODY, parent_body=PARENT_BODY, *, parent_status="in-progress",
-                 parent_labels=None, parent_related=None, layer="personal"):
+                 parent_labels=None, parent_related=None, layer="personal",
+                 children=(("child-one", "done"),), update_help="--base REVISION"):
+        self.children = list(children)
+        self.update_help = update_help
+        self.list_override = None
         self.calls: list[tuple[list[str], str | None]] = []
         self.counter = 0
         self.fail_update: set[str] = set()
         self.change_on_fail = False
+        self.reject_base = False
         self.after_update = {}
         self.records = {
             f"spec/{SPEC}": self._record(spec_body, {"kind": "spec", "status": "ready", "labels": {}}, layer),
@@ -125,6 +130,16 @@ class FakeLore:
         self.calls.append((list(argv), stdin))
         if argv[:2] == ["vault", "ls"]:
             return subprocess.CompletedProcess(argv, 0, f"{VAULT}\tpersonal\t/tmp/{VAULT}\n", "")
+        if argv == ["record", "update", "--help"]:
+            return subprocess.CompletedProcess(argv, 0, f"usage: lore record update\n  {self.update_help}\n", "")
+        if argv[:2] == ["task", "list"]:
+            if self.list_override is not None:
+                return self.list_override
+            rows = [{"name": PARENT, "status": "in-progress", "parent": None,
+                     "children": [n for n, _ in self.children]},
+                    {"name": "unrelated", "status": "ready", "parent": None, "children": []}]
+            rows += [{"name": n, "status": st, "parent": PARENT, "children": []} for n, st in self.children]
+            return subprocess.CompletedProcess(argv, 0, json.dumps(rows), "")
         rid = argv[-1] if argv[:2] == ["record", "show"] else argv[2]
         rec = self.records.get(rid)
         if argv[:2] == ["record", "show"]:
@@ -139,6 +154,8 @@ class FakeLore:
                 self.counter += 1
                 rec["revision"] = self._rev(rec["body"])
             return subprocess.CompletedProcess(argv, 1, "", "boom")
+        if self.reject_base and "--base" in argv:
+            return subprocess.CompletedProcess(argv, 2, "", "lore: error: unrecognized arguments: --base abc")
         base = argv[argv.index("--base") + 1] if "--base" in argv else None
         if base is not None and base != rec["revision"]:
             return subprocess.CompletedProcess(argv, 1, "", "changed after you read it")
@@ -217,6 +234,111 @@ def test_happy_path_writes_spec_first_then_parent_both_with_their_read_revisions
     assert (f"- **AC2** — pending-check — waiting entry on spec/{SPEC}; "
             "looked at the banner in the app\n") in parent_body
     assert "- **AC5** — manual-check — opened the report by hand\n" in parent_body
+
+
+def test_a_new_waiting_entry_is_set_off_from_the_entry_before_it_by_a_blank_line(entries_file, capsys):
+    fake = FakeLore(spec_body=spec_with(waiting_text("AC5")))
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 0, err
+    spec_body = fake.updates()[0][1]
+    assert ("closed with this check not yet carried out\n\n- **AC2.** pending check") in spec_body
+
+
+NO_OBS_SPEC_MANUAL = SPEC_BODY.replace(
+    "- **AC2.** The banner shows the count.", "- **AC2.** The banner shows the count. *Verified by: manual check.*"
+)
+NO_OBS_SPEC_AUTOMATED = SPEC_BODY.replace(
+    "- **AC2.** The banner shows the count.",
+    "- **AC2.** The banner shows the count. *Verified by: automated assertion.*",
+)
+NO_OBS_PARENT = """**Value claim:** you can close with a check waiting.
+
+**Covers:** AC2
+"""
+NO_OBS_PARENT_WITH_SECTION = """**Value claim:** you can close with a check waiting.
+
+**Covers:** AC1, AC2
+
+## Criterion observations
+
+- **AC1** — automated-assertion — tests/test_first.py::test_first
+
+## Other
+
+Prose.
+"""
+NO_OBSERVATION_EVIDENCE = f"waiting entry on spec/{SPEC}; no observation recorded before close"
+
+
+@pytest.mark.parametrize("parent_body", [NO_OBS_PARENT, NO_OBS_PARENT_WITH_SECTION], ids=["no-section", "section"])
+def test_a_covered_manual_check_with_no_observation_moves_to_partially_covers_with_the_no_observation_evidence(
+    parent_body, entries_file, capsys
+):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=parent_body)
+
+    rc, out, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 0, err
+    assert out.splitlines() == ["pending: AC2", "spec: written", "parent: updated"]
+    assert fake.update_ids() == [f"spec/{SPEC}", f"task/{PARENT}"]
+    body = fake.body(f"task/{PARENT}")
+    assert "**Partially covers:** AC2\n" in body
+    assert f"- **AC2** — pending-check — {NO_OBSERVATION_EVIDENCE}\n" in body
+    assert body.count("pending-check") == 1
+    if "AC1" in parent_body:
+        assert "**Covers:** AC1\n" in body
+        assert body.index("- **AC2** — pending-check") < body.index("## Other")
+    g = gate("observation_gate.py", stdin=body)
+    assert g.returncode == 0, g.stderr
+    assert "AC2: pending-check" in g.stdout
+    assert pc.main(["verify", f"--spec={SPEC}", f"--parent={PARENT}", f"--vault={VAULT}"], runner=fake.runner) == 0
+    assert capsys.readouterr().out == "verified: AC2\n"
+
+
+def test_a_covered_criterion_with_no_observation_and_a_non_manual_trailer_is_refused_with_no_writes(
+    entries_file, capsys
+):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_AUTOMATED, parent_body=NO_OBS_PARENT)
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 1 and code_of(err) == "not-an-unconfirmed-manual-check"
+    assert fake.updates() == []
+
+
+def test_a_rerun_after_closing_a_criterion_with_no_observation_writes_nothing(entries_file, capsys):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=NO_OBS_PARENT)
+    path = entries_file([entry("AC2")])
+    assert run(fake, path, capsys)[0] == 0
+    before = len(fake.updates())
+
+    rc, out, err = run(fake, path, capsys)
+
+    assert rc == 0, err
+    assert out.splitlines() == ["pending: AC2", "spec: already-present", "parent: already-updated"]
+    assert len(fake.updates()) == before
+
+
+def test_a_lore_that_rejects_base_on_record_update_is_lore_too_old_not_spec_write_failed(entries_file, capsys):
+    fake = FakeLore(spec_body=NO_OBS_SPEC_MANUAL, parent_body=NO_OBS_PARENT)
+    fake.reject_base = True
+    parent_before = fake.body(f"task/{PARENT}")
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "lore-too-old"
+    assert fake.body(f"task/{PARENT}") == parent_before
+
+
+def test_a_failed_spec_write_that_is_not_a_base_rejection_stays_spec_write_failed(entries_file, capsys):
+    fake = FakeLore()
+    fake.fail_update.add(f"spec/{SPEC}")
+
+    rc, _, err = run(fake, entries_file([entry("AC2")]), capsys)
+
+    assert rc == 2 and code_of(err) == "spec-write-failed"
 
 
 def test_produced_bodies_pass_the_real_gates(entries_file, capsys, tmp_path):
@@ -513,10 +635,11 @@ def test_a_criterion_that_is_not_an_unconfirmed_manual_check_is_refused_with_no_
     "kwargs",
     [
         {"parent_status": "complete"},
+        {"parent_status": "blocked"},
         {"parent_labels": {}},
         {"parent_related": {"spec": ["some-other-spec"]}},
     ],
-    ids=["not-in-progress", "no-slice-label", "unrelated-spec"],
+    ids=["not-in-progress", "blocked", "no-slice-label", "unrelated-spec"],
 )
 def test_a_parent_that_is_not_this_specs_open_slice_parent_is_refused_with_no_writes(
     kwargs, entries_file, capsys
@@ -803,3 +926,305 @@ def test_the_script_closes_a_manual_check_through_the_real_lore_cli(  # inert-ga
     assert ok.returncode == 0 and ok.stdout == "verified: AC2\n"
     text = run_script("describe", "--spec", spec, "--criteria", "AC2")
     assert text.stdout == "AC2: The banner shows the count.\n"
+
+
+# ---------------------------------------------------------------------------
+# stuck mode
+# ---------------------------------------------------------------------------
+
+STUCK_SPEC = """# The spec
+
+## Acceptance Criteria
+
+- **AC1.** The first thing works. *Verified by: automated assertion.*
+- **AC2.** The banner shows the count. *Verified by: manual check.*
+- **AC3.** The export is correct. *Verified by: automated assertion.*
+
+## Slices
+"""
+
+ALL_PHASES = (1, 2, 3, 4, 5)
+
+
+def stuck_parent(covers="AC2", observations=("AC2 — manual-check — looked at the banner",),
+                 attestations=(), ticked=ALL_PHASES, close_ticked=False, partial=None, end_phases=True,
+                 omit=(), extra_close=0):
+    lines = ["**Value claim:** you can close with a check waiting.", ""]
+    if covers:
+        lines.append(f"**Covers:** {covers}")
+    if partial:
+        lines.append(f"**Partially covers:** {partial}")
+    if observations:
+        lines += ["", "## Criterion observations", ""] + [f"- **{o.split(' — ', 1)[0]}** — {o.split(' — ', 1)[1]}"
+                                                           for o in observations]
+    if attestations:
+        lines += ["", "## Operator attestations", ""] + [f"- **{a}** — the operator confirmed" for a in attestations]
+    if end_phases:
+        lines += ["", "## End Phases", ""]
+        lines += [f"- [{'x' if n in ticked else ' '}] Phase {n} — step" for n in range(1, 6) if n not in omit]
+        lines.append(f"- [{'x' if close_ticked else ' '}] Phase 6 — close")
+        lines += ["- [ ] Phase 6 — close again"] * extra_close
+    return "\n".join(lines) + "\n"
+
+
+def run_stuck(fake, capsys, *, spec=SPEC, parent=PARENT, vault=VAULT):
+    argv = ["stuck", f"--spec={spec}", f"--parent={parent}"]
+    if vault is not None:
+        argv.append(f"--vault={vault}")
+    rc = pc.main(argv, runner=fake.runner)
+    out = capsys.readouterr()
+    return rc, out.out, out.err
+
+
+def test_stuck_an_in_progress_parent_finished_but_for_a_manual_check_is_certified(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out) == (0, "stuck: AC2\n"), err
+    assert fake.update_ids() == ["--help"]
+
+
+def test_stuck_a_blocked_parent_is_never_certified(capsys):
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_status="blocked"), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "parent-blocked")
+
+
+@pytest.mark.parametrize("status", ["open", "ready", "done", "dropped"])
+def test_stuck_a_parent_in_any_other_status_is_not_a_slice_parent(status, capsys):
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_status=status), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-a-slice-parent")
+
+
+def test_stuck_a_parent_without_the_slice_label_is_not_a_slice_parent(capsys):
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_labels={}), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-a-slice-parent")
+
+
+def test_stuck_a_parent_related_to_another_spec_is_not_a_slice_parent(capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_related={"spec": ["other"]}), capsys)
+    assert (rc, code_of(err)) == (1, "not-a-slice-parent")
+
+
+def test_stuck_a_child_that_is_not_done_means_the_build_is_unfinished(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(), children=(("one", "done"), ("two", "ready")))
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out, code_of(err)) == (1, "", "build-unfinished")
+
+
+@pytest.mark.parametrize("status", ["done", "dropped", "superseded"])
+def test_stuck_a_terminal_child_counts_as_finished(status, capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(), children=(("one", "done"), ("two", status)))
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out) == (0, "stuck: AC2\n"), err
+
+
+@pytest.mark.parametrize("status", ["open", "ready", "in-progress", "blocked"])
+def test_stuck_a_child_in_a_live_status_means_the_build_is_unfinished(status, capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(), children=(("one", "done"), ("two", status)))
+    rc, _, err = run_stuck(fake, capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+@pytest.mark.parametrize("omit", [(1,), (3,), (1, 2, 3, 4)])
+def test_stuck_an_end_phase_line_missing_before_the_close_means_the_build_is_unfinished(omit, capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(omit=omit)), capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+def test_stuck_a_second_unticked_close_line_means_the_build_is_unfinished(capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(extra_close=1)), capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+def _two_vaults(fake):
+    real = fake.runner
+
+    def runner(argv, stdin=None):
+        if argv[:2] == ["vault", "ls"]:
+            return subprocess.CompletedProcess(argv, 0, f"{VAULT}\tpersonal\t/tmp/a\nother\tpersonal\t/tmp/b\n", "")
+        return real(argv, stdin)
+
+    fake.runner = runner
+
+
+def test_stuck_a_spec_found_in_no_vault_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    del fake.records[f"spec/{SPEC}"]
+    rc, out, err = run_stuck(fake, capsys, vault=None)
+    assert (rc, out, code_of(err)) == (2, "", "spec-not-found")
+
+
+def test_stuck_a_spec_found_in_two_vaults_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    _two_vaults(fake)
+    rc, out, err = run_stuck(fake, capsys, vault=None)
+    assert (rc, out, code_of(err)) == (2, "", "spec-ambiguous")
+
+
+def test_stuck_a_spec_name_that_is_not_a_spec_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    fake.records[f"spec/{SPEC}"]["sidecar"]["kind"] = "task"
+    rc, out, err = run_stuck(fake, capsys, vault=None)
+    assert (rc, out, code_of(err)) == (2, "", "not-a-spec")
+
+
+def test_stuck_a_parent_with_no_children_is_judged_on_its_phases_alone(capsys):
+    rc, out, _ = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), children=()), capsys)
+    assert (rc, out) == (0, "stuck: AC2\n")
+
+
+@pytest.mark.parametrize("ticked", [(1, 2, 3, 4), (1, 2, 3, 5), ()])
+def test_stuck_an_unticked_phase_before_the_close_means_the_build_is_unfinished(ticked, capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(ticked=ticked)), capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+def test_stuck_a_ticked_close_means_the_build_is_unfinished(capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(close_ticked=True)), capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+def test_stuck_a_parent_with_no_end_phases_checklist_is_unfinished(capsys):
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(end_phases=False)), capsys)
+    assert (rc, code_of(err)) == (1, "build-unfinished")
+
+
+def test_stuck_an_uncertain_end_phases_heading_is_a_read_failure_not_a_guess(capsys):
+    body = stuck_parent() + "\n## End Phases\n\n- [x] Phase 6 — close\n"
+    rc, out, _ = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, out) == (2, "")
+
+
+def test_stuck_an_unobserved_criterion_whose_trailer_is_manual_check_is_stuck(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(observations=()))
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out) == (0, "stuck: AC2\n"), err
+
+
+def test_stuck_an_unobserved_criterion_whose_trailer_is_automated_is_a_close_gap(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(covers="AC3", observations=()))
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out, code_of(err)) == (1, "", "close-gap-not-a-manual-check")
+
+
+def test_stuck_a_covered_criterion_the_spec_does_not_declare_is_a_close_gap(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(covers="AC9", observations=()))
+    rc, _, err = run_stuck(fake, capsys)
+    assert (rc, code_of(err)) == (1, "close-gap-not-a-manual-check")
+
+
+def test_stuck_a_close_gap_beats_a_stuck_manual_check_on_the_same_parent(capsys):
+    body = stuck_parent(covers="AC2, AC3", observations=("AC2 — manual-check — looked",))
+    rc, _, err = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, code_of(err)) == (1, "close-gap-not-a-manual-check")
+
+
+def test_stuck_an_attested_manual_check_leaves_nothing_to_move(capsys):
+    body = stuck_parent(covers="AC1, AC2",
+                        observations=("AC1 — automated-assertion — t.py::t", "AC2 — manual-check — looked"),
+                        attestations=("AC2",))
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "no-unconfirmed-manual-check")
+
+
+def test_stuck_only_the_unconfirmed_manual_check_is_named_among_observed_ones(capsys):
+    body = stuck_parent(covers="AC1, AC2",
+                        observations=("AC1 — automated-assertion — t.py::t", "AC2 — manual-check — looked"))
+    rc, out, _ = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, out) == (0, "stuck: AC2\n")
+
+
+def test_stuck_identifiers_are_listed_in_numeric_order(capsys):
+    spec = STUCK_SPEC.replace("- **AC3.** The export is correct. *Verified by: automated assertion.*",
+                              "- **AC3.** The export is correct. *Verified by: manual check.*")
+    body = stuck_parent(covers="AC3, AC2", observations=("AC3 — manual-check — x", "AC2 — manual-check — y"))
+    rc, out, _ = run_stuck(FakeLore(spec, body), capsys)
+    assert (rc, out) == (0, "stuck: AC2, AC3\n")
+
+
+def test_stuck_a_half_closed_parent_is_still_stuck_and_resumable(capsys):
+    body = stuck_parent(covers=None, partial="AC2",
+                        observations=("AC2 — pending-check — waiting entry on spec/the-spec; looked",))
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, out) == (0, "stuck: AC2\n"), err
+
+
+def test_stuck_a_half_closed_parent_beside_a_still_covered_manual_check_names_both(capsys):
+    body = stuck_parent(covers="AC3", partial="AC2", observations=(
+        "AC3 — manual-check — x", "AC2 — pending-check — waiting entry on spec/the-spec; looked"))
+    rc, out, _ = run_stuck(FakeLore(STUCK_SPEC, body), capsys)
+    assert (rc, out) == (0, "stuck: AC2, AC3\n")
+
+
+def test_stuck_a_parent_whose_push_failed_is_never_certified(capsys):
+    labels = {"craft/slice-parent": "", "craft/push": "failed"}
+    rc, out, err = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_labels=labels), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "push-failed")
+
+
+def test_stuck_a_push_label_with_another_value_does_not_refuse(capsys):
+    labels = {"craft/slice-parent": "", "craft/push": "ok"}
+    rc, out, _ = run_stuck(FakeLore(STUCK_SPEC, stuck_parent(), parent_labels=labels), capsys)
+    assert (rc, out) == (0, "stuck: AC2\n")
+
+
+def test_stuck_a_lore_without_base_on_record_update_is_too_old_and_nothing_else_is_called(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent(), update_help="--diff")
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out, code_of(err)) == (1, "", "lore-too-old")
+    assert fake.calls == [(["record", "update", "--help"], None)]
+
+
+@pytest.mark.parametrize("kwargs", [{"spec": "bad name"}, {"parent": "../x"}, {"vault": "-v"}])
+def test_stuck_a_name_of_unsafe_shape_is_refused_before_any_lore_call(kwargs, capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    rc, _, err = run_stuck(fake, capsys, **kwargs)
+    assert (rc, code_of(err)) == (2, "invalid-name")
+    assert fake.calls == []
+
+
+def test_stuck_a_lore_failure_resolving_the_vault_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    real = fake.runner
+    fake.runner = lambda argv, stdin=None: (
+        subprocess.CompletedProcess(argv, 1, "", "boom") if argv[:2] == ["vault", "ls"] else real(argv, stdin))
+    rc, out, err = run_stuck(fake, capsys, vault=None)
+    assert (rc, out, code_of(err)) == (2, "", "lore-failed")
+
+
+def test_stuck_a_failing_children_list_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    fake.list_override = subprocess.CompletedProcess([], 1, "", "boom")
+    rc, out, err = run_stuck(fake, capsys)
+    assert (rc, out, code_of(err)) == (2, "", "lore-failed")
+
+
+@pytest.mark.parametrize("stdout", ["not json", "{}", "[]", '[{"name": "x"}]'])
+def test_stuck_a_children_list_that_does_not_hold_the_parent_is_a_read_failure(stdout, capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    fake.list_override = subprocess.CompletedProcess([], 0, stdout, "")
+    rc, out, _ = run_stuck(fake, capsys)
+    assert (rc, out) == (2, "")
+
+
+def test_stuck_a_child_missing_from_the_list_is_a_read_failure(capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    rows = [{"name": PARENT, "status": "in-progress", "parent": None, "children": ["ghost"]}]
+    fake.list_override = subprocess.CompletedProcess([], 0, json.dumps(rows), "")
+    rc, out, _ = run_stuck(fake, capsys)
+    assert (rc, out) == (2, "")
+
+
+@pytest.mark.parametrize("which", [f"task/{PARENT}", f"spec/{SPEC}"])
+def test_stuck_a_record_that_cannot_be_read_is_a_read_failure(which, capsys):
+    fake = FakeLore(STUCK_SPEC, stuck_parent())
+    del fake.records[which]
+    rc, out, _ = run_stuck(fake, capsys)
+    assert (rc, out) == (2, "")
+
+
+def test_stuck_a_reason_line_never_carries_criterion_or_record_text(capsys):
+    spec = STUCK_SPEC.replace("The export is correct.", "Zebra marmalade protocol.")
+    rc, _, err = run_stuck(FakeLore(spec, stuck_parent(covers="AC3", observations=())), capsys)
+    assert rc == 1
+    assert "Zebra" not in err and "marmalade" not in err
+

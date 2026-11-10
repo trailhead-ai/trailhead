@@ -20,6 +20,7 @@ SLICE_SKILL = CRAFT / "skills" / "slice" / "SKILL.md"
 sys.path.insert(0, str(CRAFT / "scripts"))
 import candidate_set  # noqa: E402
 import covers_gate  # noqa: E402
+import pending_check  # noqa: E402
 
 
 def _emitted_reason_codes(module) -> set[str]:
@@ -75,3 +76,18 @@ def test_an_output_token_the_skill_omits_is_reported():
         VOID_REOPENED_ANNOTATION="z",
     )
     assert _unnamed_output_tokens("`b:` x\ny", module) == ["`c:`", "z"]
+
+
+def _unnamed_stuck_codes(skill_text: str, codes) -> list[str]:
+    return sorted(code for code in codes if code not in skill_text)
+
+
+def test_skill_names_every_reason_code_the_stuck_detector_emits():  # inert-gate: allow code-vs-doc consistency seam
+    missing = _unnamed_stuck_codes(SLICE_SKILL.read_text(encoding="utf-8"), pending_check.STUCK_REASON_CODES)
+    assert not missing, f"slice/SKILL.md never names stuck-detector reason-code(s): {missing}"
+
+
+def test_a_stuck_reason_code_the_skill_omits_is_reported():
+    grown = (*pending_check.STUCK_REASON_CODES, "zz-new-stuck-code")
+    assert _unnamed_stuck_codes("build-unfinished", ("build-unfinished", "push-failed")) == ["push-failed"]
+    assert "zz-new-stuck-code" in _unnamed_stuck_codes(SLICE_SKILL.read_text(encoding="utf-8"), grown)
