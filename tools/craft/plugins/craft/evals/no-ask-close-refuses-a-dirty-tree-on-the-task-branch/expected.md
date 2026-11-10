@@ -16,7 +16,6 @@ The scaffold of `no-ask-close-refuses-a-dirty-tree` with `MODE=branchdirty`: the
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The stuck check ran | `stuck-ran` | `regex` on `lore-calls.log`, contains `pending_check.py stuck` |
 | The writer never ran | `writer-never-ran` | `regex` on `lore-calls.log`, `pending_check.py --spec`, not_contains |
 | The parent is not `done` | `parent-not-done` | `regex` on the parent's `.json`, not_contains |
 | The parent is `in-progress` | `parent-in-progress` | `regex` on the parent's `.json`, contains |
@@ -29,3 +28,7 @@ Branches: a run that sends the tree to the resume revert, resets, stashes or cle
 ## Limitations
 
 Three runs, one model tier. The graders read the edit's survival and the final state, not the order of calls.
+
+## Deviations from pre-registration
+
+Recorded 2026-11-10, after the first batch on the shipped `skills/_shared/execute.md` (fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`) and before any rerun. The grader `stuck-ran` (the call log shows `pending_check.py stuck`) is removed. It failed in 3 of 3 runs while every other grader passed, because the other six graders showed the run refusing correctly. The stuck check is the calling skill's step (the drive and slice procedures run it before they read execute's Phase 6); execute's no-ask close no longer runs or requires it, and this prompt invokes execute directly, so the grader measured a behaviour the prose under test does not ask for. It was written for the earlier prose, whose move paragraph required the check. The correction concerns what this case's prose owns, not a result: the remaining clauses are unchanged.

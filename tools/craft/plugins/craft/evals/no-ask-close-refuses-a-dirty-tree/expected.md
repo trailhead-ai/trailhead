@@ -16,7 +16,6 @@ The scaffold of `close-asks-nothing-when-no-one-is-there`, except: the parent is
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The stuck check ran | `stuck-ran` | `regex` on `lore-calls.log`, contains `pending_check.py stuck` |
 | The writer never ran | `writer-never-ran` | `regex` on `lore-calls.log`, `pending_check.py --spec`, not_contains |
 | The parent is not `done` | `parent-not-done` | `regex` on the parent's `.json`, not_contains |
 | The parent is `in-progress` (nothing changed) | `parent-in-progress` | `regex` on the parent's `.json`, contains |
@@ -33,3 +32,7 @@ Three runs, one model tier. Whether the move came *right after* the stuck check 
 ## Revision (2026-11-10): no blocked move
 
 The operator removed the `blocked` to `in-progress` move. The scaffold's parent is now `in-progress` (the `dirty` mode no longer sets `blocked`), the prompt no longer says the slice was set aside as blocked, and the grader `reply-refuses-and-reports-the-move` became `reply-refuses-for-the-dirty-tree`, which no longer asks for a move line. The other graders are unchanged. The branch recovery now refuses a dirty tree on any branch; this arm covers a dirty tree on another branch, and the new case `no-ask-close-refuses-a-dirty-tree-on-the-task-branch` covers the task branch. Bar 3 of 3 at 1.0 on the shipped prose; at most one rerun.
+
+## Deviations from pre-registration
+
+Recorded 2026-11-10, after the first batch on the shipped `skills/_shared/execute.md` (fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`) and before any rerun. The grader `stuck-ran` (the call log shows `pending_check.py stuck`) is removed. It failed in 3 of 3 runs while every other grader passed, because the other six graders showed the run refusing correctly. The stuck check is the calling skill's step (the drive and slice procedures run it before they read execute's Phase 6); execute's no-ask close no longer runs or requires it, and this prompt invokes execute directly, so the grader measured a behaviour the prose under test does not ask for. It was written for the earlier prose, whose move paragraph required the check. The correction concerns what this case's prose owns, not a result: the remaining clauses are unchanged.
