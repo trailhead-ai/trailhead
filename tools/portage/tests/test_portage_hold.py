@@ -247,6 +247,87 @@ def test_a_missing_holds_directory_counts_as_no_hold(repo):
     assert holds.has_any_hold(str(repo)) is False
 
 
+@pytest.mark.parametrize("verb", ["hold", "release"])
+def test_an_absolute_existing_directory_is_accepted(repo, verb):
+    assert dispatch.main([verb, str(repo), "feat"]) == 0
+
+
+@pytest.mark.parametrize("verb", ["hold", "release"])
+@pytest.mark.parametrize("kind", ["relative", "bare-name", "missing-absolute", "a-file"])
+def test_a_repo_that_is_not_an_absolute_existing_directory_is_refused_and_holds_nothing(
+    tmp_path, monkeypatch, capsys, verb, kind
+):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "afile").write_text("x")
+    monkeypatch.chdir(tmp_path)
+    arg = {
+        "relative": "./real",
+        "bare-name": "real",
+        "missing-absolute": str(tmp_path / "nope"),
+        "a-file": str(tmp_path / "afile"),
+    }[kind]
+    rc = dispatch.main([verb, arg, "feat"])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert err.startswith("portage: ") and "absolute" in err
+    assert not [p for p in (tmp_path / "state").rglob("*") if p.is_file()]
+
+
+def test_a_hold_through_a_relative_path_never_reports_success_for_a_hold_merge_misses(
+    tmp_path, monkeypatch, repo
+):
+    monkeypatch.chdir(repo.parent)
+    assert dispatch.main(["hold", "repo", "feat"]) == 2
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+    assert spy.merge_attempted()
+
+
+def test_a_hold_entry_named_for_the_repo_counts_even_when_its_repo_field_is_wrong(repo):
+    holds.hold(str(repo), "feat")
+    (entry,) = holds._holds_dir().iterdir()
+    entry.write_text(json.dumps({"repo": "/somewhere/else", "branch": "feat"}))
+    assert holds.has_any_hold(str(repo)) is True
+
+
+def test_a_hold_entry_named_for_the_repo_counts_even_when_its_repo_field_is_missing(repo):
+    holds.hold(str(repo), "feat")
+    (entry,) = holds._holds_dir().iterdir()
+    entry.write_text(json.dumps({"branch": "feat"}))
+    assert holds.has_any_hold(str(repo)) is True
+
+
+def test_a_hold_entry_named_for_another_repo_with_a_wrong_field_does_not_count(tmp_path, repo):
+    other = tmp_path / "other"
+    other.mkdir()
+    holds.hold(str(other), "feat")
+    (entry,) = holds._holds_dir().iterdir()
+    entry.write_text(json.dumps({"repo": "/somewhere/else", "branch": "feat"}))
+    assert holds.has_any_hold(str(repo)) is False
+
+
+@pytest.mark.parametrize("body", ["[]", '"held"', "7", "null"])
+def test_a_hold_entry_holding_json_that_is_not_an_object_counts_as_held(repo, body):
+    holds._holds_dir().mkdir(parents=True, exist_ok=True)
+    (holds._holds_dir() / "odd.json").write_text(body)
+    assert holds.has_any_hold(str(repo)) is True
+
+
+def test_a_stat_error_on_the_hold_entry_counts_as_held(repo):
+    holds.hold(str(repo), "feat")
+    holds._holds_dir().chmod(0)
+    try:
+        assert holds.is_held(str(repo), "feat") is True
+        assert holds.is_held(str(repo), "other") is True
+    finally:
+        holds._holds_dir().chmod(0o700)
+
+
+def test_an_absent_hold_entry_is_not_held(repo):
+    holds.hold(str(repo), "feat")
+    assert holds.is_held(str(repo), "other") is False
+
+
 def test_the_shipped_cli_refuses_a_held_head_branch_and_never_runs_gh_pr_merge(  # inert-gate: allow seam smoke
     tmp_path, repo
 ):

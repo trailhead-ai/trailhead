@@ -14,7 +14,7 @@ same repository cloned at another path.
 
 State lives under `<portage state dir>/holds/`, resolved through
 `trailhead.paths.state_dir` and never built by hand. One file per hold, named by
-a digest of the repo's real path and the branch, so no caller-supplied string
+the digest of the repo's real path then the digest of the branch, so no caller-supplied string
 becomes a path segment. Holding is idempotent: the same pair always names the
 same file.
 """
@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 from pathlib import Path
 
 from trailhead import paths
@@ -41,8 +42,20 @@ def validate_branch(branch: str) -> None:
         raise HoldError(f"invalid branch name {branch!r}: must match ^[A-Za-z0-9._/-]+$")
 
 
+def validate_repo(repo: str) -> None:
+    if not os.path.isabs(repo) or not os.path.isdir(repo):
+        raise HoldError(
+            f"invalid repo {repo!r}: must be an absolute path to an existing directory "
+            "(the `path` of `portage detect-repos`)"
+        )
+
+
 def _repo_key(repo: str) -> str:
     return os.path.realpath(repo)
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
 
 
 def _holds_dir() -> Path:
@@ -50,11 +63,11 @@ def _holds_dir() -> Path:
 
 
 def _hold_file(repo: str, branch: str) -> Path:
-    digest = hashlib.sha256(f"{_repo_key(repo)}\0{branch}".encode()).hexdigest()
-    return _holds_dir() / f"{digest}.json"
+    return _holds_dir() / f"{_digest(_repo_key(repo))}-{_digest(branch)}.json"
 
 
 def hold(repo: str, branch: str) -> None:
+    validate_repo(repo)
     validate_branch(branch)
     f = _hold_file(repo, branch)
     paths.ensure_dir(f.parent)
@@ -65,18 +78,27 @@ def hold(repo: str, branch: str) -> None:
 
 def release(repo: str, branch: str) -> None:
     """Clear the hold; releasing a branch that is not held is not an error."""
+    validate_repo(repo)
     validate_branch(branch)
     _hold_file(repo, branch).unlink(missing_ok=True)
 
 
 def is_held(repo: str, branch: str) -> bool:
-    return _hold_file(repo, branch).is_file()
+    """Whether the pair is held. Fails closed: an entry that cannot be examined counts as held."""
+    try:
+        return stat.S_ISREG(_hold_file(repo, branch).stat().st_mode)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
 
 
 def has_any_hold(repo: str) -> bool:
     """Whether any branch of `repo` is held. Fails closed: a holds directory that
-    exists but cannot be listed counts as held."""
+    exists but cannot be listed, an entry named for the repo whatever it contains, and an
+    entry that cannot be read or is not a JSON object all count as held."""
     key = _repo_key(repo)
+    prefix = f"{_digest(key)}-"
     try:
         with os.scandir(_holds_dir()) as it:
             entries = [Path(e.path) for e in it if e.name.endswith(".json")]
@@ -85,9 +107,12 @@ def has_any_hold(repo: str) -> bool:
     except OSError:
         return True
     for f in entries:
+        if f.name.startswith(prefix):
+            return True
         try:
-            if json.loads(f.read_text(encoding="utf-8")).get("repo") == key:
-                return True
+            entry = json.loads(f.read_text(encoding="utf-8"))
         except (OSError, ValueError):
+            return True
+        if not isinstance(entry, dict) or entry.get("repo") == key:
             return True
     return False

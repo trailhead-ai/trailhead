@@ -220,8 +220,10 @@ How every write to the block is made (this one and each later one):
 
 ### Step B — hold the branch
 
-`portage hold <repo_path> <branch>` for every repo from the pushed check, one call each, before
-anything is dispatched. It makes `portage merge` refuse the branch. A hold that fails ends `stuck`
+`portage hold <path> <branch>` for every repo from the pushed check, one call each, before
+anything is dispatched, where `<path>` is that repo's `path` field from `portage detect-repos` (an
+absolute directory; the command refuses a relative path, a bare name or a missing directory, and the
+`repo` field is a name, not a path). It makes `portage merge` refuse the branch. A hold that fails ends `stuck`
 (`the branch could not be held`) through Step H. Never run `portage release`: the hold stays in
 place whatever the run ends on.
 
