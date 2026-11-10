@@ -32,3 +32,7 @@ Three runs, one model tier. The graders read the edit's survival and the final s
 ## Deviations from pre-registration
 
 Recorded 2026-11-10, after the first batch on the shipped `skills/_shared/execute.md` (fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`) and before any rerun. The grader `stuck-ran` (the call log shows `pending_check.py stuck`) is removed. It failed in 3 of 3 runs while every other grader passed, because the other six graders showed the run refusing correctly. The stuck check is the calling skill's step (the drive and slice procedures run it before they read execute's Phase 6); execute's no-ask close no longer runs or requires it, and this prompt invokes execute directly, so the grader measured a behaviour the prose under test does not ask for. It was written for the earlier prose, whose move paragraph required the check. The correction concerns what this case's prose owns, not a result: the remaining clauses are unchanged.
+
+## Baseline result (2026-11-10)
+
+The baseline on the unedited prose (fingerprint `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`) scored 3 of 3 at 1.0, not the expected red. The runner grants no `git reset`, `git checkout`, `git stash` or `git clean`, so the resume revert cannot execute and the unedited prose refuses with the edit kept too. This arm is therefore a guard on the shipped prose, not a detector of the old behaviour.

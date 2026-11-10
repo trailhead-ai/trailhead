@@ -4562,3 +4562,29 @@ Real lore config and state were hashed before and after each batch and were unch
 **Consistency test mutation (pytest, no eval).** I replaced `push-failed` with `push-xfailed` in `skills/slice/SKILL.md`. `test_skill_names_every_reason_code_the_stuck_detector_emits` then failed with "never names stuck-detector reason-code(s): ['push-failed']". The file was restored with an empty diff and the test went green again.
 
 **Not run (spend stopped):** the two targeted clause mutations, the step-5 stuck-check clause with arm 1 and the step-4 `--unattended` early-run clause with arm 3. On the record of the two sibling tasks, single-clause deletions of default-following behaviour stay green, so these pins are not demonstrated.
+
+## Correctness fixes, Fix B (2026-11-10): no blocked move, dirty-tree refusal, driver stops at the boundary
+
+Prose: `skills/_shared/execute.md` fingerprint `bc2c994706d47999bb9bcab45375ac8c8f0d606e`, `skills/drive/SKILL.md` `7d468a664e19b585420f5afa4080e760fa6aadb1`, `skills/slice/SKILL.md` `7ba968876546736284b3ae314cdd45a8eb305617`, `skills/_shared/status-ownership.md` `030c02714ed68bc322e26ad82e99c831cc2c44a4`. The unedited `execute.md` is `74fdb783bb670ccaa8da8fb2d03b7acf9f707e43`. Model `claude-opus-5-5`, 3 runs per batch, `-j 3`, `--ablation none`. Real lore config and state were hashed before and after every batch and were unchanged. Fixtures: every stuck-slice scaffold already carried ticked Phase 1 to 5 lines and one unticked Phase 6, so no scaffold needed a fix.
+
+| Arm | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| (a) `no-ask-close-refuses-a-dirty-tree-on-the-task-branch`, first batch | shipped | 0.86 x3: `stuck-ran` failed in all three, every other grader passed. Grader removed before the rerun (see the case's `expected.md`, "Deviations from pre-registration") | 1.27 |
+| (a) same, rerun | shipped | 3 of 3 at 1.0 (rerun-green) | 1.50 |
+| (a) baseline | unedited `74fdb783...` | **green**, 3 of 3 at 1.0, not the expected red | 1.44 |
+| (c) `slice-refuses-a-blocked-parent` | shipped | 3 of 3 at 1.0 | 1.63 |
+| (b) `no-ask-close-refuses-a-dirty-tree` | shipped | 3 of 3 at 1.0 | 1.25 |
+| (d4) `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint` | shipped | 3 of 3 at 1.0 | 3.34 |
+| (d2) `driver-closes-a-stuck-slice-instead-of-re-planning`, first batch | shipped | 2 of 3 at 1.0; one run 0.83, `stops-at-the-boundary-with-a-pr-owed` failed (judge FAIL x3; the message was not kept) | 3.49 |
+| (d2) same, rerun | shipped | 3 of 3 at 1.0 (rerun-green) | 3.66 |
+| (d1) `driver-ends-a-slice-without-asking-about-its-check`, graders unchanged | shipped | 3 of 3 at 1.0 | 2.94 |
+
+Total spend about 20.5 USD.
+
+**The baseline for (a) is green, so the arm is a guard, not a detector, on this runner.** The runner's grants include no `git reset`, `git checkout`, `git stash` or `git clean`, so the resume revert the unedited prose reaches cannot run, and the run refuses and keeps the edit either way. What the arm pins is that the shipped prose still refuses with the edit kept and nothing closed; it cannot show that the old prose would have reverted the tree. Per-case git grants are an already-recorded follow-up.
+
+**(a) grader correction.** `stuck-ran` was written for the prose whose move paragraph required the stuck check. The stuck check is now the calling skill's step, and this prompt runs execute directly, so the grader measured something the prose under test no longer asks for. Removed in a dated deviation committed before the rerun; the same removal was made in (b) before its batch.
+
+**(d2) rerun.** One failed run of three on the first batch, rerun-green on the one permitted rerun; the failing message was not retained, so the cause of the one fail is not established. Read it as 5 of 6 valid runs.
+
+**Left to the portage push gate on the shipped prose:** the other cases mapped to `skills/_shared/execute.md`, `skills/drive/SKILL.md` and `skills/slice/SKILL.md` that this task did not run, among them `close-asks-nothing-when-no-one-is-there`, `no-ask-close-switches-to-the-task-branch`, `close-defers-an-unconfirmed-check`, `stale-write-leaves-the-slice-open`, `one-failed-check-saves-nothing`, `driver-closes-a-stuck-slice-instead-of-re-planning-leaves-an-unfinished-build-alone`, `slice-closes-a-stuck-slice-and-chooses-the-next`, `slice-unattended-closes-a-stuck-slice-and-chooses-the-next`, `slice-refuses-when-the-drafted-check-is-refused`, `slice-refuses-when-the-slice-repository-is-not-here`, `slice-still-refuses-an-unfinished-open-slice` and the `ritual-deliverable-names-its-record` arms.

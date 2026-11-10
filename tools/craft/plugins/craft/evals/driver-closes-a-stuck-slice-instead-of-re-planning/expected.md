@@ -37,3 +37,7 @@ Three runs, one model tier. The prompt bound keeps the session short; the "conti
 ## Revision (2026-11-10): the driver stops at the boundary after a stuck close
 
 Pre-registered before the batch. The operator decided that after a stuck close that finishes, the driver reports the closed slice, says its branch is pushed and that a pull request is owed (naming the branch and `/portage:pull_request`), and stops: it selects and builds no other slice in that run. Graders changed: `not-resumed-into-plan` became `stops-at-the-boundary-with-a-pr-owed` (`llm`, trace: the message says the slice was closed, names the branch `pickups-can-be-booked-and-confirmed` as pushed with a pull request owed through `/portage:pull_request`, and says it stops without choosing, planning or building another slice or resuming this one), and a new `regex` grader `no-next-slice-created` fails if `lore-calls.log` shows `record create --kind task` (a new slice parent). The prompt's bound now says a close ends the run at the boundary. The other graders are unchanged. Bar 3 of 3 at 1.0 on the shipped prose; at most one rerun. The fixture's parent carries Phases 1 to 5 ticked and Phase 6 unticked, as the detector now requires; checked, no scaffold change was needed.
+
+## Deviations from pre-registration (2026-11-10)
+
+The first batch on the shipped prose scored 2 of 3 at 1.0 (one run failed `stops-at-the-boundary-with-a-pr-owed`); the one permitted rerun scored 3 of 3 at 1.0 and is reported as rerun-green. No grader was changed after a run.
