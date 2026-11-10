@@ -85,6 +85,9 @@ END_PHASES = """
 ## End Phases
 
 - [x] Phase 1 — gate
+- [x] Phase 2 — simplify
+- [x] Phase 3 — correctness
+- [x] Phase 4 — security
 - [x] Phase 5 — flow-out
 - [ ] Phase 6 — close
 """

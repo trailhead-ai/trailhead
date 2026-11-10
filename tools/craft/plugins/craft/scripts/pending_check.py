@@ -71,13 +71,17 @@ unmet close condition is one or more unconfirmed manual checks. Exit 0 prints
 including an identifier an earlier close already moved to `**Partially covers:**` with a
 `pending-check` line while the parent never reached `done` (the writer's re-run finishes it).
 Exit 1 prints one of `STUCK_REASON_CODES`: not-a-slice-parent (not labelled, not related to
-the spec, or a status other than in-progress / blocked), push-failed (the parent carries
-`craft/push=failed`), build-unfinished (a child not `done`, a `## End Phases` line before the
-close unticked, the close already ticked, or no such checklist), close-gap-not-a-manual-check
+the spec, or a status other than in-progress / blocked), parent-blocked (a labelled, related
+parent whose status is blocked: only an in-progress parent is certified), push-failed (the parent carries
+`craft/push=failed`), build-unfinished (a child not terminal — `done`, `dropped` or `superseded`, as lore's
+completion guard counts them — or an `## End Phases` checklist that is not Phases 1-5 all present
+and ticked beside exactly one unticked Phase 6, or no such checklist), close-gap-not-a-manual-check
 (a covered identifier with no observation whose spec trailer is not manual check),
 no-unconfirmed-manual-check (nothing to move), lore-too-old (`record update --help` does not
 accept `--base`; probed first, after the name shape check, and nothing else is called).
-Exit 2 is a read failure; every caller treats exit 2 as "not stuck". No criterion or record
+Exit 2 is a read failure, which includes a spec that is not found, ambiguous or not a spec when
+no `--vault` is given; every exit 1 carries a code from `STUCK_REASON_CODES`, and every caller
+treats exit 2 as "not stuck". No criterion or record
 text appears in a `reason:` line. `unconfirmed_manual_checks` is the eligibility rule: a
 covered identifier is an unconfirmed manual check when it has a `manual-check` observation and
 no attestation, or has no observation and the spec's `*Verified by:*` trailer for it
@@ -141,12 +145,16 @@ STUCK_REASON_CODES = (
     "no-unconfirmed-manual-check",
     "push-failed",
     "lore-too-old",
+    "parent-blocked",
 )
-_STUCK_STATUSES = ("in-progress", "blocked")
+# The statuses lore's parent-completion guard treats as settled (`TERMINAL_STATUSES` in
+# lore's record/graph.py); mirrored because craft does not import lore.
+_TERMINAL_STATUSES = frozenset({"done", "dropped", "superseded"})
 _END_PHASES_HEADING = "## End Phases"
 _DUPLICATE_END_PHASES_CODE = "duplicate-end-phases-section"
 _PHASE_LINE_RE = re.compile(r"^\s*[-*+]\s+\[([ xX])\]\s+Phase\s+([0-9]+)\b")
 _CLOSE_PHASE = 6
+_BUILD_PHASES = range(1, _CLOSE_PHASE)
 _HISTORY_WORDS = "closed with this check not yet carried out"
 
 
@@ -238,13 +246,17 @@ def _read(runner, vault: str, record_id: str, missing_code: str, *, personal_onl
     return sidecar, body, revision, layer
 
 
-def _resolve_vault(runner, spec: str, vault: str | None) -> str:
+def _resolve_vault(runner, spec: str, vault: str | None, *, refusal_exit: int = 1) -> str:
+    """`vault`, or the one vault holding `spec`; a spec that is missing, in several vaults
+    or not a spec is refused with `refusal_exit`, any other failure with 2."""
     if vault is not None:
         return vault
     try:
         return gather.resolve_spec(runner, spec)[0]
     except gather.GatherError as err:
-        raise _refusal_from(err, 1 if err.reason in ("spec-not-found", "spec-ambiguous", "not-a-spec") else 2)
+        raise _refusal_from(
+            err, refusal_exit if err.reason in ("spec-not-found", "spec-ambiguous", "not-a-spec") else 2
+        )
 
 
 def _spec_entries(body: str) -> dict[tuple[str, str | None], waiting.WaitingEntry]:
@@ -601,7 +613,8 @@ def describe_mode(args, runner) -> int:
 
 
 def _end_phases_finished(state: _Parent) -> bool:
-    """Every phase before the close ticked (Phase 5 among them) and the close not."""
+    """Phases 1-5 all present and every line of them ticked, and exactly one Phase 6 line,
+    unticked."""
     try:
         located = markdown_section.section_range(
             state.lines, state.masked, _END_PHASES_HEADING, _DUPLICATE_END_PHASES_CODE
@@ -618,7 +631,7 @@ def _end_phases_finished(state: _Parent) -> bool:
             phases.setdefault(int(m.group(2)), []).append(m.group(1) != " ")
     before = [ticked for n, marks in phases.items() if n < _CLOSE_PHASE for ticked in marks]
     return (
-        _CLOSE_PHASE - 1 in phases
+        all(n in phases for n in _BUILD_PHASES)
         and all(before)
         and phases.get(_CLOSE_PHASE) == [False]
     )
@@ -711,15 +724,15 @@ def stuck_mode(args, runner) -> int:
         raise Refusal("lore could not describe 'record update'", "lore-failed", 2)
     if "--base" not in probe.stdout:
         raise _refuse_stuck("this lore's 'record update' has no --base, so no close could write", "lore-too-old")
-    vault = _resolve_vault(runner, args.spec, args.vault)
+    vault = _resolve_vault(runner, args.spec, args.vault, refusal_exit=2)
     sidecar, parent_body, _, _ = _read_or_fail(runner, vault, f"task/{args.parent}", "parent-not-found")
-    if not _is_slice_parent(sidecar, args.spec, _STUCK_STATUSES):
-        raise _refuse_stuck(
-            "the parent is not an in-progress or blocked slice parent related to this spec", "not-a-slice-parent"
-        )
+    if _is_slice_parent(sidecar, args.spec, ("blocked",)):
+        raise _refuse_stuck("the parent is blocked; only an in-progress parent is certified", "parent-blocked")
+    if not _is_slice_parent(sidecar, args.spec, ("in-progress",)):
+        raise _refuse_stuck("the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent")
     if gather._labels(sidecar).get("craft/push") == "failed":
         raise _refuse_stuck("the parent's last push failed and needs settling by hand", "push-failed")
-    if any(status != "done" for status in _children_statuses(runner, vault, args.parent)) or not (
+    if any(status not in _TERMINAL_STATUSES for status in _children_statuses(runner, vault, args.parent)) or not (
         _end_phases_finished(_Parent(parent_body))
     ):
         raise _refuse_stuck("the parent's build is not finished", "build-unfinished")
