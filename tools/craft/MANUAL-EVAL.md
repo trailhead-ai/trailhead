@@ -4615,6 +4615,40 @@ the queue is the visible effect of the same state change, which agrees with its 
 
 Limitations: one fixture per case, one model tier, three runs, one Linux host.
 
+## Ported to the plugin eval runner, 2026-11-09 — plan step 7's migration bar
+
+The hand-run `prototype-plan-carries-no-migration` case ran only on macOS under
+`scripts/eval-sandbox`; its two rounds above stand. Its sound fixtures are now two staged
+runner cases. The scaffold copies the branch's own `skills/plan/SKILL.md` into the run and
+renders `migration-bar.txt` with the branch's own `scripts/migration_bar.py --target-repo
+trailhead`; the agent performs step 7 and presents the task list and `Given Axioms`.
+
+- `plan-step-7-suppresses-migration-on-a-prototype` (`positive.md`): no migration task, and a
+  `Given Axioms` entry naming target repository, level and basis, the durable record both
+  hand-run rounds upheld.
+- `plan-step-7-keeps-migration-a-criterion-requires` (`negative.md`): AC3 requires preserving
+  state, so the migration task is kept and AC3 named.
+
+`control.md` was not ported: Round Two found it unsound, since its AC3 waives preservation and
+a planner can defensibly drop the migration there. A sound production control needs a new
+fixture. A real `/craft:plan --unattended` run was considered and rejected as the driver: it
+allows 120 turns and 25 minutes per run, past what a foreground batch can hold.
+
+Model `claude-opus-5-5`, `claude` 2.1.321, Linux, `--runs 3`, `-j 1`.
+
+| Case | Runs | Cost |
+|---|---|---|
+| `plan-step-7-suppresses-migration-on-a-prototype` | 1.0, 1.0, 1.0 | $1.05 |
+| `plan-step-7-keeps-migration-a-criterion-requires` | 1.0, 1.0, 1.0 | $1.02 |
+
+Both meet their pre-registered bar. A hand-checked positive run's `Given Axioms` reads
+"The migration-bar renderer reported `target-repo: trailhead`, `level: prototype`, `basis:
+stamp`, and `suppressed`", which agrees with its graders.
+
+Limitations: staged at step 7, so the earlier steps and the renderer's invocation through
+`lore record show` are not exercised; one fixture per case, one model tier, three runs, one
+Linux host.
+
 ## Dropped from the corpus, 2026-11-09
 
 The hand-shaped cases below ran only on macOS under `scripts/eval-sandbox`, which is being
