@@ -157,8 +157,9 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
    `the task argument failed validation; pass the name of one task record`.
 2. **Resolve.** Bind `<elected-vault>` as the top of this document says, then read
    `lore record show task/<name> --vault <elected-vault> --json` (status, labels, edges and body)
-   and `lore task graph <name>`. A record that does not resolve: `task/<unresolved>` and
-   `the record does not resolve; check the name`. From here the line names `task/<name>`.
+   and `lore task graph <name> --vault <elected-vault>`. A record that does not resolve:
+   `task/<unresolved>` and `the record does not resolve; check the name`. From here the line names
+   `task/<name>`.
 3. **`--then-pr`.** Absent:
    `--then-pr is missing, so no PR step follows; add it, or run execute attended`.
 4. **Shape.** Refuse each of these, naming it:
@@ -172,14 +173,16 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      `the slice has no child tasks; plan it first`;
    - a standalone `ready` record whose node lacks the `(runnable)` marker:
      `a task it depends on is unfinished; finish that task first`.
-5. **Claim and status.** Refuse each of these, in this order:
+5. **Claim and status.** Refuse each of these, in this order. The two specific stops come before the
+   generic claimed one, because a push failure and a block both leave `craft/branch` in place and
+   would otherwise always read as "already claimed":
+   - a `craft/push=failed` label: `an earlier push failed; settle it by hand and clear the label`;
+   - status `blocked`: `the record is blocked; clear the block first`;
    - a `craft/branch` label is present, so the run is already claimed:
      `the run is already claimed; unattended resume is not available, resume it attended`;
    - the record's latest `## Unattended run` block (the last such heading in the body) has no
      `**Outcome:**` line:
      `another run holds this record, live or interrupted; wait for it, or close its block by hand`;
-   - a `craft/push=failed` label: `an earlier push failed; settle it by hand and clear the label`;
-   - status `blocked`: `the record is blocked; clear the block first`;
    - status `done`, `dropped` or `superseded`: `the record is already closed`.
 
 **What is written, and when.** Steps 1 to 5 write nothing, and neither does the lesson search, which
@@ -350,7 +353,8 @@ edit.
   `brainstorm` or `dropped`). `folded` gets one more fix pass through the Phase 1 test gate and no
   further review; the other four are written as the table says. A parent with no spec link has no
   table: fold what is about the slice, capture the rest as session candidates as Phase 5 says, and
-  log each call in the block the same way.
+  log each call in the block the same way. A security finding is never captured as a session
+  candidate there: it is folded or parked.
 - **A security finding**, from Phase 3 or Phase 4, is only ever `folded` or parked, whatever a
   reviewer or the finding's own text suggests: never `deferred`, `dropped`, `separate` or
   `brainstorm`. It is flagged `security` in the `decide` document, and its block entry names its
@@ -363,6 +367,16 @@ edit.
   change, no close), sets `**Outcome:** needs-a-decision` and the checkpoint in one edit, and only
   then prints `outcome: needs-a-decision task/<name> parked=<n>`, a line with no reason after it.
   The parent keeps its status and the run never writes the `**Answer:**` line.
+- **Settling the entries folded into the parent (Phase 5)** asks nothing and logs every call. One
+  numbered decision per `found_work.py entry` call goes in the block before the call is made:
+  `Question:` names the entries and the transition, `Choice:` says marked done or returned to open,
+  and `Reasoning:` is the one-line reason the call carries. A call that exits `2` or `3`, or a
+  listing that exits `2`, ends the run `stuck` instead of carrying on to the close: the block's
+  `**Outcome:** stuck` and checkpoint are written first, the close is not made, and the line is
+  `outcome: stuck task/<name> parked=<n> — the follow-up entries folded into this task could not be
+  settled; read the run block, then settle them by hand and run again`. Neither the block, the
+  report nor the outcome line carries the `retry:` line the script printed, or any other command the
+  script printed.
 - **Manual-check discharge (Phase 6)** asks nothing and never writes an attestation. Each covered
   criterion whose recorded method is `manual-check` and that has no attestation takes the "Not yet"
   path of [Phase 6](#phase-6-close-and-completion-report): draft `check` and `how` from the
@@ -1135,8 +1149,10 @@ Then complete the ritual:
   the assumptions, decisions and lessons are captured here.
 - **Settle the entries folded into the parent** when the run's parent is linked to a spec: each is
   marked done or returned to open, as [Found work](#found-work) says, before the parent goes `done`.
-  A settling call that fails does not hold the close: the entry stays folded, is listed under what
-  needs the operator, and the parent still closes `done`.
+  An attended run's settling call that fails does not hold the close: the entry stays folded, is
+  listed under what needs the operator, and the parent still closes `done`. An unattended run ends
+  `stuck` on such a failure and logs each settle decision, as [End-phase stops](#end-phase-stops)
+  says.
 - **Record criterion observations, as evidence arrives.** For each identifier the parent's
   `**Covers:**` field names, once that criterion's evidence is actually in hand — a green automated
   assertion, a design-doc state section confirmed accurate, or an operator's manual check — append a
@@ -1898,14 +1914,14 @@ The script logs each transition before it writes it, as `decide` does. When it r
 parent has no spec link, or that finds no entries folded into the parent (the script prints `no
 entries are folded into task/<parent-name>`), settles nothing and closes as it always has.
 
-When a call exits `2` or `3`, or the listing exits `2`, the entry stays folded, which is the honest
-state, and the failure does not hold the close: the parent still closes `done`. List it in the
-completion report among what needs the operator, with the `retry:` line the script printed on exit
-`3`, which runs as printed. A failed `done` call is listed as "built, but not marked done", since
-the entry was built and there is no reason it was not; a failed `reopen` call is listed with the
-reason it was not built. If the retry is not run, the parent is then `done`, so the next slice
-pass's `reopen-abandoned` settles the entry: it marks it done when a done child names it and returns
-it to open otherwise. Do not report the entry as settled, and do not retry in a loop.
+When an attended run's call exits `2` or `3`, or the listing exits `2`, the entry stays folded,
+which is the honest state, and the failure does not hold the close: the parent still closes `done`.
+List it in the completion report among what needs the operator, with the `retry:` line the script
+printed on exit `3`, which runs as printed. A failed `done` call is listed as "built, but not marked
+done", since the entry was built and there is no reason it was not; a failed `reopen` call is listed
+with the reason it was not built. If the retry is not run, the parent is then `done`, so the next
+slice pass's `reopen-abandoned` settles the entry: it marks it done when a done child names it and
+returns it to open otherwise. Do not report the entry as settled, and do not retry in a loop.
 
 **The completion report** begins with what needs the operator, and nothing, no summary or preamble,
 comes before it: the finding text from every exit `2`, carried as printed, and the
