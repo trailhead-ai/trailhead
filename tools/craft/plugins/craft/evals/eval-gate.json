@@ -245,6 +245,16 @@
         "agents/breaker.md",
         "scripts/maturity_bars.py"
       ]
+    },
+    "consistency-auditor-flags-a-compound-criterion-phrased-with-with": {
+      "measures": [
+        "agents/consistency-auditor.md"
+      ]
+    },
+    "consistency-auditor-spares-an-inseparable-and-but-flags-a-separable-one": {
+      "measures": [
+        "agents/consistency-auditor.md"
+      ]
     }
   }
 }

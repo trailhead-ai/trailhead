@@ -37,7 +37,6 @@ _PROTOCOL = _REPO_ROOT / "docs" / "eval-protocol.md"
 
 _LEGACY_HAND_SHAPED = frozenset(
     {
-        "craft:compound-criterion-detection",
         "craft:prototype-plan-carries-no-migration",
     }
 )

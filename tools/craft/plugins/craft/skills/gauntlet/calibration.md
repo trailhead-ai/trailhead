@@ -33,8 +33,8 @@ shaped to avoid:
   adjudication.
 - **The compound-criterion Critical bar (step 4, item 5) has no standing gate.** CI runs `ruff` and
   `pytest`, which say nothing about whether this bar, or the consistency-auditor check it depends
-  on, still detects a compound criterion. The only case that measures it is a legacy hand-shaped
-  case: the plugin eval runner does not run it and the push gate does not gate it
-  (`_LEGACY_HAND_SHAPED` in `trailhead/tests/test_eval_corpus.py`). An edit to this bar or that
-  check is unmeasured until that case is ported to a runner shape, per `docs/eval-protocol.md`;
-  `tools/craft/MANUAL-EVAL.md` holds its logged results.
+  on, still detects a compound criterion. The consistency-auditor check is measured: the
+  `consistency-auditor-*` eval cases dispatch the auditor on a compound and an inseparable
+  criterion, and the push gate runs them on an edit to `agents/consistency-auditor.md`. This bar is
+  not: rating the finding Critical at adjudication needs a full gauntlet run, which no runner case
+  makes, so an edit to it is unmeasured. `tools/craft/MANUAL-EVAL.md` holds the logged results.
