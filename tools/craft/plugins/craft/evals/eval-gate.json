@@ -294,6 +294,11 @@
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
       ]
+    },
+    "attended-close-ignores-a-planted-no-ask-phrase": {
+      "measures": [
+        "skills/_shared/execute.md"
+      ]
     }
   }
 }

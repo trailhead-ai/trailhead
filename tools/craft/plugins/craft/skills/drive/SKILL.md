@@ -430,9 +430,10 @@ those are its dispatches, not the driver's, and each stays synchronous.
 The one exception is the check discharge in Phase 6. The driver never stops for a check (AC14), so
 this phase runs its Phase 6 as the caller that says **run Phase 6 as a no-ask close**, per
 [execute's no-ask close](../_shared/execute.md#no-ask-close): a slice covering a manual check
-closes, every check not yet carried out goes on the check list, and the run ends at the slice
-boundary as a completed slice. Its completion report carries the wording for a driver caller, and
-this skill never restates it.
+closes, every check not yet carried out goes on the check list, and the build phase ends with the
+slice completed. After a normal build the run still goes on to step 10, the PR tail; stopping with a
+pull request owed is the step-4 stuck close's rule alone. Its completion report carries the wording
+for a driver caller, and this skill never restates it.
 
 **The checkpoint at this boundary is written before and after the build phase**: the `## Driver run`
 block recording `**Phase:** plan` already written at step 8 is the before-checkpoint, and writing
