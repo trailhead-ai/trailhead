@@ -187,6 +187,39 @@ def test_flush_wait_syncs_the_writable_vaults_and_leaves_the_read_only_one_alone
     assert _remote_head(install.remotes["w1"], _branch(w1)) == _git(w1, "rev-parse", "HEAD").stdout.strip()
 
 
+def _ro_state_files(install) -> dict[str, bytes | None]:
+    """State-dir entries naming the ``ro`` vault (request, lock, log, marker files)."""
+    return {
+        rel: data for rel, data in _snapshot(install.state).items()
+        if any(part == "ro" or part.startswith(("ro-", "ro.")) for part in rel.split("/"))
+    }
+
+
+def test_flush_skips_a_read_only_vault_whose_folder_is_absent_and_writes_nothing_for_it(install):
+    shutil.rmtree(install.ro)
+    ro_state = _ro_state_files(install)
+    r = install.run(["flush"])
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert _ro_state_files(install) == ro_state
+    requested = [ln for ln in r.stderr.splitlines() if ln.startswith("Publish requested for:")]
+    assert requested == ["Publish requested for: default, w1, w2"], r.stderr
+    assert _skip_lines(r) == [SKIP_LINE], r.stdout + r.stderr
+    assert not install.ro.exists()
+
+
+def test_sync_naming_a_read_only_vault_whose_folder_is_absent_is_refused_as_read_only(install):
+    shutil.rmtree(install.ro)
+    r = install.run(["sync", "--vault", "ro"])
+    _refused(r)
+    assert "not found" not in r.stdout + r.stderr
+    assert not install.ro.exists()
+
+    w1 = install.vaults["w1"]
+    ok = install.run(["sync", "--vault", "w1"])
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert _remote_head(install.remotes["w1"], _branch(w1)) == _git(w1, "rev-parse", "HEAD").stdout.strip()
+
+
 # ---------------------------------------------------------------------------
 # AC9 / AC10 — a named read-only vault is refused
 # ---------------------------------------------------------------------------

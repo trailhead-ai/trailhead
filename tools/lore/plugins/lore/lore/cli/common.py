@@ -295,16 +295,19 @@ def _drop_read_only_vaults(vaults, *, announce: bool = True) -> list:
     vault is dropped BEFORE the first git call rather than left to the write lock.
     With *announce* each dropped vault is named on stderr in one line, the write
     guard's own message plus ``skipped``. Identity is the folder
-    (:func:`locking.read_only_vault_name`), so an alias entry reaching a read-only
-    folder is dropped too. Raises :class:`locking.VaultWriteRefusedError` on a
-    config that cannot be read, like every other check of the declaration.
+    (:func:`locking.read_only_name_of`: inode, else resolved path), so an alias
+    entry reaching a read-only folder is dropped too, and so is a read-only vault
+    whose folder does not exist. The declarations are read once per call.
+    Raises :class:`locking.VaultWriteRefusedError` on a config that cannot be
+    read, like every other check of the declaration.
     """
     from .. import locking
 
+    roots = locking.read_only_roots()
     kept = []
     for entry in vaults:
         name, path = entry[0], entry[1]
-        if locking.read_only_vault_name(path) is None:
+        if locking.read_only_name_of(path, roots) is None:
             kept.append(entry)
         elif announce:
             print(f"{locking.read_only_message(name)} — skipped", file=sys.stderr)

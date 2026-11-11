@@ -140,14 +140,21 @@ def _root_id(path: str | Path) -> tuple[int, int] | None:
     return (st.st_dev, st.st_ino)
 
 
-def read_only_roots(env: dict[str, str] | None = None) -> dict[tuple[int, int], str]:
-    """``(st_dev, st_ino) -> vault name`` for every configured read-only vault.
+def _root_key(path: str | Path) -> str:
+    """The resolved spelling of *path*, which exists even when the folder does not."""
+    return os.path.realpath(path)
 
-    Identity is the folder itself, so a symlink or a second config entry reaching
-    the same folder is the same root; a folder two entries resolve to is read-only
-    if either entry is. Entries whose path cannot be stat'd are skipped. No config
-    file means every root is writable; a config that is present but cannot be read
-    or validated fails closed with :class:`VaultWriteRefusedError`.
+
+def read_only_roots(env: dict[str, str] | None = None) -> dict[tuple[int, int] | str, str]:
+    """``identity -> vault name`` for every configured read-only vault.
+
+    Identity is the folder itself — ``(st_dev, st_ino)`` — so a symlink or a second
+    config entry reaching the same folder is the same root; a folder two entries
+    resolve to is read-only if either entry is. Every entry is also keyed by its
+    resolved path (``os.path.realpath``), the only identity a folder that does not
+    exist yet has; match through :func:`read_only_name_of`. No config file means
+    every root is writable; a config that is present but cannot be read or
+    validated fails closed with :class:`VaultWriteRefusedError`.
     """
     from .vault import config as vault_config
 
@@ -160,21 +167,31 @@ def read_only_roots(env: dict[str, str] | None = None) -> dict[tuple[int, int], 
         raise VaultWriteRefusedError(
             f"lore: refusing to write — config.json at {path} cannot be read: {exc}"
         ) from exc
-    roots: dict[tuple[int, int], str] = {}
+    roots: dict[tuple[int, int] | str, str] = {}
     for vault in vaults:
         if vault.read_only:
             ident = _root_id(vault.path)
             if ident is not None:
                 roots.setdefault(ident, vault.name)
+            roots.setdefault(_root_key(vault.path), vault.name)
     return roots
+
+
+def read_only_name_of(root: str | Path, roots: dict[tuple[int, int] | str, str]) -> str | None:
+    """The read-only vault *root* is within *roots* (from :func:`read_only_roots`), or ``None``.
+
+    The folder's ``(st_dev, st_ino)`` decides when it can be stat'd; its resolved
+    path decides otherwise, so a declared folder that is absent is still refused.
+    """
+    ident = _root_id(root)
+    if ident is not None and ident in roots:
+        return roots[ident]
+    return roots.get(_root_key(root))
 
 
 def read_only_vault_name(root: str | Path, *, env: dict[str, str] | None = None) -> str | None:
     """The name of the read-only vault *root* is, or ``None`` when it is writable."""
-    ident = _root_id(root)
-    if ident is None:
-        return None
-    return read_only_roots(env).get(ident)
+    return read_only_name_of(root, read_only_roots(env))
 
 
 def assert_writable(root: str | Path, *, env: dict[str, str] | None = None) -> None:
@@ -396,9 +413,9 @@ def vault_write_locks(
     # other root untouched too. The config is read once for the whole set.
     read_only = read_only_roots(env)
     for root in roots:
-        ident = _root_id(root)
-        if ident is not None and ident in read_only:
-            raise ReadOnlyVaultError(read_only[ident])
+        name = read_only_name_of(root, read_only)
+        if name is not None:
+            raise ReadOnlyVaultError(name)
     with ExitStack() as stack:
         for root in roots:
             stack.enter_context(

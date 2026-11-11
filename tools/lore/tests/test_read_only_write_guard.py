@@ -151,6 +151,27 @@ def test_create_naming_the_read_only_vault_is_refused_and_a_writable_one_succeed
     assert (install.writable / "blob" / "yes.md").exists()
 
 
+def test_create_naming_a_read_only_vault_whose_folder_is_absent_is_refused_and_creates_nothing(
+    install,
+):
+    import shutil
+
+    shutil.rmtree(install.ro)
+    r = install.run(
+        ["record", "create", "--kind", "blob", "--title", "Nope", "--vault", "ro"],
+        stdin_text="x\n",
+    )
+    _refused(r)
+    assert not install.ro.exists()
+
+    ok = install.run(
+        ["record", "create", "--kind", "blob", "--title", "Yes", "--vault", "writable"],
+        stdin_text="x\n",
+    )
+    assert ok.returncode == 0, ok.stderr
+    assert (install.writable / "blob" / "yes.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # AC6 — every change to an existing record
 # ---------------------------------------------------------------------------
@@ -549,6 +570,56 @@ def test_locks_over_several_roots_refuse_before_taking_any(lockenv):
     assert not (roots["ro"] / ".lore.lock").exists()
 
 
+def _absent_read_only(lockenv):
+    tmp, env, roots, configure = lockenv
+    missing = tmp / "ro-missing"
+    configure(
+        [
+            ("default", "default", roots["default"]),
+            ("ro", "read-only", missing),
+            ("writable", "repo", roots["writable"]),
+        ]
+    )
+    return env, roots, missing
+
+
+def _spellings(missing):
+    return [missing, missing.parent / "." / "ro-missing", missing.parent / "x" / ".." / "ro-missing"]
+
+
+def test_lock_on_a_read_only_root_whose_folder_is_absent_raises_and_creates_nothing(lockenv):
+    env, roots, missing = _absent_read_only(lockenv)
+    for spelling in _spellings(missing):
+        with pytest.raises(locking.ReadOnlyVaultError) as exc:
+            with locking.vault_write_lock(spelling, env=env):
+                pytest.fail("the lock must not be acquired")
+        assert str(exc.value) == MESSAGE
+        assert not missing.exists()
+    with locking.vault_write_lock(roots["writable"], env=env):
+        assert (roots["writable"] / ".lore.lock").exists()
+
+
+def test_locks_over_several_roots_refuse_an_absent_read_only_root_before_taking_any(lockenv):
+    env, roots, missing = _absent_read_only(lockenv)
+    with pytest.raises(locking.ReadOnlyVaultError) as exc:
+        with locking.vault_write_locks(roots["default"], missing, env=env):
+            pytest.fail("the locks must not be acquired")
+    assert str(exc.value) == MESSAGE
+    assert not missing.exists()
+    assert not (roots["default"] / ".lore.lock").exists()
+    with locking.vault_write_locks(roots["default"], roots["writable"], env=env):
+        assert (roots["writable"] / ".lore.lock").exists()
+
+
+def test_assert_writable_refuses_an_absent_read_only_root_and_passes_an_absent_writable_one(lockenv):
+    env, roots, missing = _absent_read_only(lockenv)
+    with pytest.raises(locking.ReadOnlyVaultError):
+        locking.assert_writable(missing, env=env)
+    locking.assert_writable(missing.parent / "not-declared", env=env)
+    assert locking.read_only_vault_name(missing, env=env) == "ro"
+    assert not missing.exists()
+
+
 def test_the_refusal_is_not_an_oserror_so_sync_cannot_read_it_as_a_lock_failure(lockenv):
     _, env, roots, _ = lockenv
     with pytest.raises(Exception) as exc:
@@ -582,3 +653,59 @@ def test_is_read_only_root_reports_the_declaring_vault_name(lockenv):
     _, env, roots, _ = lockenv
     assert locking.read_only_vault_name(roots["ro"], env=env) == "ro"
     assert locking.read_only_vault_name(roots["writable"], env=env) is None
+
+
+def _unborn_behind_origin(tmp_path):
+    """A git vault with no commits whose origin has a branch to adopt, fetched."""
+    remote = make_bare_remote(tmp_path / "remote.git")
+    seed = make_git_vault(tmp_path / "seed")
+    _git(seed, "remote", "add", "origin", str(remote))
+    branch = _git(seed, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    assert _git(seed, "push", "origin", branch).returncode == 0
+    vault = make_git_vault(tmp_path / "unborn", commit=False)
+    _git(vault, "remote", "add", "origin", str(remote))
+    assert _git(vault, "fetch", "origin").returncode == 0
+    assert _git(vault, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0
+    return vault
+
+
+def _configure_pull(tmp_path, monkeypatch, vault, scope):
+    cfg = tmp_path / "cfg"
+    write_vault_config(cfg, [("default", "default", make_vault(tmp_path / "d")[0]),
+                             ("pulled", scope, vault)])
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    return cfg
+
+
+def test_an_unborn_branch_pull_with_an_unreadable_config_holds_the_vault_for_a_person(
+    tmp_path, monkeypatch
+):
+    vault = _unborn_behind_origin(tmp_path)
+    cfg = _configure_pull(tmp_path, monkeypatch, vault, "repo")
+    (cfg / "lore" / "config.json").write_text("{not json", encoding="utf-8")
+    sync = load_script("lore.cli.sync")
+    state = load_script("lore.cli.resolve_state")
+    out, lines = _pull(sync, vault)
+    assert out == (sync.PULL_AWAITING_PERSON, 0), lines
+    assert any("cannot be read" in ln for ln in lines), lines
+    assert state.vault_is_held(vault)
+    assert _git(vault, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0
+
+
+def test_an_unborn_branch_pull_into_a_read_only_vault_raises_and_a_writable_one_adopts_origin(
+    tmp_path, monkeypatch
+):
+    vault = _unborn_behind_origin(tmp_path)
+    _configure_pull(tmp_path, monkeypatch, vault, "read-only")
+    sync = load_script("lore.cli.sync")
+    state = load_script("lore.cli.resolve_state")
+    with pytest.raises(locking.ReadOnlyVaultError):
+        _pull(sync, vault)
+    assert not state.vault_is_held(vault)
+    assert _git(vault, "rev-parse", "--verify", "--quiet", "HEAD").returncode != 0
+
+    _configure_pull(tmp_path, monkeypatch, vault, "repo")
+    out, lines = _pull(sync, vault)
+    assert out[0] == sync.PULL_OK, lines
+    assert _git(vault, "rev-parse", "--verify", "--quiet", "HEAD").returncode == 0

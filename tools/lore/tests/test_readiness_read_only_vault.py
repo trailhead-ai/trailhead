@@ -125,3 +125,27 @@ def test_read_only_unlistable_folder_is_missing(tmp_path, no_probe, capsys):
         assert _status_json(capsys)["vault:ro"]["state"] == "missing"
     finally:
         folder.chmod(0o755)
+
+
+def test_read_only_folder_absent_stays_missing_after_a_refused_write(tmp_path, no_probe, capsys):
+    from lore import locking
+
+    absent = tmp_path / "absent"
+    _setup(tmp_path, absent)
+    with pytest.raises(locking.ReadOnlyVaultError):
+        with locking.vault_write_lock(absent):
+            pytest.fail("the lock must not be acquired")
+    assert not absent.exists()
+    assert _status_json(capsys)["vault:ro"]["state"] == "missing"
+
+
+def test_a_writable_absent_folder_is_created_by_a_write_and_then_reads_ok(
+    tmp_path, no_probe, capsys
+):
+    from lore import locking
+
+    absent = tmp_path / "absent"
+    _setup(tmp_path, absent, scope="repo")
+    with locking.vault_write_lock(absent):
+        pass
+    assert absent.is_dir()

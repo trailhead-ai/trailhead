@@ -680,6 +680,19 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     return _pull_one(vault, say, say_err, already_fetched=True)
 
 
+def _hold_unwritable(vault: Path, exc: Exception, say_err) -> tuple[str, int]:
+    """End a pull whose write lock was refused because the config cannot be read.
+
+    Nothing was written. No person is present to read a traceback: hold the vault
+    for one, the same ending an unsettled conflict reaches.
+    """
+    say_err(f"error: {exc}")
+    from . import resolve_state as resolve_state_mod
+
+    resolve_state_mod.mark_held(vault)
+    return PULL_AWAITING_PERSON, 0
+
+
 def _pull_one(
     vault: Path, say, say_err, *, already_fetched: bool = False,
     resolve_conflicts: bool = False, name: str = "", shared: bool = False,
@@ -754,10 +767,15 @@ def _pull_one(
                 return PULL_OK, 0
             rc_n, n_out, _ = _git(vault, "rev-list", "--count", f"origin/{unborn}")
             # Tree mutation — locked (the fetch above was not).
-            with locking.vault_write_lock(vault):
-                rc_reset, _, stderr_reset = _git(
-                    vault, "reset", "--hard", f"origin/{unborn}"
-                )
+            try:
+                with locking.vault_write_lock(vault):
+                    rc_reset, _, stderr_reset = _git(
+                        vault, "reset", "--hard", f"origin/{unborn}"
+                    )
+            except locking.ReadOnlyVaultError:
+                raise
+            except locking.VaultWriteRefusedError as exc:
+                return _hold_unwritable(vault, exc, say_err)
             if rc_reset != 0:
                 say_err(f"error: could not adopt origin/{unborn}: {stderr_reset}")
                 return PULL_FAILED, 0
@@ -790,14 +808,7 @@ def _pull_one(
     except locking.ReadOnlyVaultError:
         raise
     except locking.VaultWriteRefusedError as exc:
-        # The write lock refused because the config cannot be read, so nothing
-        # was replayed. No person is present to read a traceback: hold the
-        # vault for one, the same ending an unsettled conflict reaches.
-        say_err(f"error: {exc}")
-        from . import resolve_state as resolve_state_mod
-
-        resolve_state_mod.mark_held(vault)
-        return PULL_AWAITING_PERSON, 0
+        return _hold_unwritable(vault, exc, say_err)
     if rc_rebase != 0:
         if not resolve_conflicts:
             say_err("error: rebase onto origin failed — pull skipped")
