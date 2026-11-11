@@ -559,8 +559,23 @@ def test_effort_comes_from_the_profile(tmp_path):
 def test_default_account_unsets_the_config_dir_variable(tmp_path):
     env = _fence(tmp_path)
     start = _start(env, account=None)
-    assert start.env_set == {}
+    assert start.env_set == {"PATH": env["PATH"]}
     assert "CLAUDE_CONFIG_DIR" in start.env_unset
+
+
+@pytest.mark.parametrize("entries", [["/usr/bin", "/bin"], ["/opt/tools/bin"]])
+def test_a_broker_launch_runs_with_exactly_the_path_it_guarded(tmp_path, entries):
+    env = _fence(tmp_path)
+    env["PATH"] = os.pathsep.join(entries)
+    start = _start(env, account=None)
+    assert start.env_set == {"PATH": os.pathsep.join(entries)}
+
+
+def test_a_launch_with_no_broker_leaves_path_alone(tmp_path):
+    env = _fence(tmp_path)
+    env["PATH"] = "/usr/bin:/bin"
+    profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
+    assert "PATH" not in _start(env, profile=profile).env_set
 
 
 def test_declared_account_sets_the_config_dir_to_the_expanded_path(tmp_path):
@@ -568,7 +583,7 @@ def test_declared_account_sets_the_config_dir_to_the_expanded_path(tmp_path):
     acct = Path(env["HOME"]) / ".claude-x"
     acct.mkdir(parents=True)
     start = _start(env, account="~/.claude-x")
-    assert start.env_set == {"CLAUDE_CONFIG_DIR": str(acct)}
+    assert start.env_set == {"CLAUDE_CONFIG_DIR": str(acct), "PATH": env["PATH"]}
 
 
 # -- settings shape ---------------------------------------------------------
@@ -890,7 +905,7 @@ def test_cli_maps_launch_account_default_and_declared_to_the_env_binding(
     _write_user_settings(env, _user_allowing_hub(env), account_dir=acct)
     rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     out = json.loads(capsys.readouterr().out)
-    assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct)}
+    assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct), "PATH": env["PATH"]}
 
 
 # -- git administrative files under the lore state root ----------------------
@@ -1051,6 +1066,9 @@ def _normalised(text: str, tmp_path: Path) -> str:
     return text.replace(str(tmp_path.resolve()), ROOT_TOKEN).replace(str(REPO), "<TRAILHEAD>")
 
 
+PATH_TOKEN = "<PATH>"
+
+
 def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # inert-gate: allow wiring seam smoke
     tmp_path,
 ):
@@ -1063,7 +1081,8 @@ def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # iner
         cwd=foreign, env=env, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    actual = json.loads(_normalised(result.stdout, tmp_path))
+    assert json.loads(result.stdout)["env_set"]["PATH"] == env["PATH"]
+    actual = json.loads(_normalised(result.stdout.replace(env["PATH"], PATH_TOKEN), tmp_path))
     assert set(actual) == {"argv", "env_set", "env_unset", "directory", "broker", "files"}
     assert actual == json.loads(GOLDEN.read_text())
 
@@ -1723,7 +1742,7 @@ def test_the_default_account_with_an_ambient_config_dir_reads_and_trusts_where_t
     seeded = json.loads((Path(env["HOME"]) / ".claude.json").read_text())
     assert seeded["projects"][str(hub)]["hasTrustDialogAccepted"] is True
     assert not (ambient / ".claude.json").exists()
-    assert "CLAUDE_CONFIG_DIR" in start.env_unset and start.env_set == {}
+    assert "CLAUDE_CONFIG_DIR" in start.env_unset and start.env_set == {"PATH": env["PATH"]}
 
 
 # -- the headers helper's code must not be writable by the session -----------------

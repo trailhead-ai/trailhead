@@ -11,7 +11,9 @@
     "--effort",
     "medium"
   ],
-  "env_set": {},
+  "env_set": {
+    "PATH": "<PATH>"
+  },
   "env_unset": [
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDECODE",

@@ -1240,10 +1240,10 @@ def _refuse_helper_code_under_write_roots(
     must be out of the session's reach: ``bin/trailhead`` (as named, and where it resolves),
     the checkout's ``bin`` directory, ``trailhead`` package and ``pyproject.toml`` (the
     launcher reads its interpreter floor there), and every directory of the PATH it runs with.
-    The helper is spawned by the harness, whose environment is the one this launch was
-    started from (``env_set`` carries only ``CLAUDE_CONFIG_DIR`` and ``env_unset`` names no
-    ``PATH``), so *env*'s ``PATH`` is the one it resolves bash, grep, head, dirname, readlink
-    and python3 through. An entry that is relative or empty, or whose lexical path or realpath
+    The helper is spawned by the harness, whose environment is the launched session's:
+    ``session_start`` emits *env*'s ``PATH`` in ``env_set`` (and ``env_unset`` names no
+    ``PATH``), so the PATH checked here is the one it resolves bash, grep, head, dirname,
+    readlink and python3 through. An entry that is relative or empty, or whose lexical path or realpath
     overlaps a write root, is refused whether or not it exists yet: the session could create
     it. A path overlaps a write root when either contains the other, by whole segments.
     """
@@ -2355,9 +2355,11 @@ class ClaudeCodeHarness(Harness):
         ``sandbox.filesystem.allowWrite`` allows only the working directory.
 
         Headers helper code: a launch whose helper (``bin/trailhead``, the ``trailhead``
-        package, ``pyproject.toml`` beside it, or a ``python3`` on PATH) overlaps any path the
+        package, ``pyproject.toml`` beside it, or any entry of PATH) overlaps any path the
         session may write (profile roots, the session directory, system temp) is refused,
-        since the helper runs outside the sandbox with the operator's access.
+        and so is a PATH entry that is relative or empty, since the helper runs outside the
+        sandbox with the operator's access. A broker launch emits the PATH it checked in
+        ``env_set`` so the session runs with exactly that PATH.
 
         Raises :class:`HarnessError` for a *directory* that is not an existing directory,
         a profile naming the broker server with no *broker*, a profile that would widen
@@ -2397,6 +2399,8 @@ class ClaudeCodeHarness(Harness):
             _refuse_helper_code_under_write_roots(
                 broker.header_command, source, [*roots, launch_dir, *sorted(_scratch_dirs())]
             )
+            if "PATH" in source:
+                env_set = {**env_set, "PATH": source["PATH"]}
         deny_write = [
             str(launch_dir / ".claude"),
             str(launch_dir / ".mcp.json"),
