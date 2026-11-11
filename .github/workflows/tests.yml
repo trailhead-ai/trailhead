@@ -57,7 +57,7 @@ jobs:
             baseline: 3343
             budget: 300
           - area: lore-camp
-            baseline: 7506
+            baseline: 7491
             budget: 330
           - area: rest
             baseline: 3159
