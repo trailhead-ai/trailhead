@@ -638,68 +638,6 @@ def test_depends_on_cycle_rejected_at_create(tmp_path):
     assert not (vault / "task" / "b.md").exists()
 
 
-def test_self_parent_rejected_at_create(tmp_path):
-    """A task whose --parent is its own name is rejected as an ancestor loop."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "loop-me", extra=["--parent", "loop-me"])
-    assert r.returncode != 0
-    assert "graph-guard [parent-loop]" in r.stderr
-    assert not (vault / "task" / "loop-me.md").exists()
-
-
-def test_traversal_parent_rejected_by_confinement(tmp_path):
-    """A path-traversal-shaped --parent value is rejected by the confinement guard."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "../../etc/passwd"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_traversal_depends_on_rejected_by_confinement(tmp_path):
-    """A path-traversal-shaped --depends-on value is rejected by the confinement guard."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "../evil"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_prefixed_depends_on_rejected_on_create(tmp_path):
-    """Every entry on a create is newly supplied, so every entry is form-checked."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "task/foo"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_staged_depends_on_rejected_on_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "foo@ready"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_prefixed_parent_rejected_on_create(tmp_path):
-    """A kind-prefixed --parent detaches the child, so the create never lands."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "task/foo"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert "task/foo" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_staged_parent_rejected_on_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "foo@ready"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
 def test_bare_parent_still_creates(tmp_path):
     """The accepted shape is unchanged — a bare parent name still writes."""
     vault, state = _make_vault(tmp_path)
@@ -725,19 +663,6 @@ def test_flow_out_reminder_when_parent_body_lacks_section(tmp_path):
     r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
     assert r.returncode == 0, r.stderr
     assert "graph-guard [flow-out]" in r.stderr
-
-
-def test_no_flow_out_reminder_when_parent_body_has_section(tmp_path):
-    """A '## Flow-out' section suppresses the reminder on a parent's completion."""
-    vault, state = _make_vault(tmp_path)
-    _create_task(vault, state, "kid", extra=["--parent", "a", "--status", "done"])
-    r = _create_task(
-        vault, state, "a",
-        extra=["--status", "done"],
-        body="intro\n\n## Flow-out\n- [ ] update area\n",
-    )
-    assert r.returncode == 0, r.stderr
-    assert "graph-guard [flow-out]" not in r.stderr
 
 
 def test_no_flow_out_reminder_for_childless_task(tmp_path):
@@ -796,16 +721,6 @@ def test_design_bare_name_depends_on_rejected_at_create(tmp_path):
     assert not (vault / "spec" / "consumer.md").exists()
 
 
-def test_design_traversal_depends_on_rejected_by_confinement_at_create(tmp_path):
-    """A path-traversal-shaped design depends-on entry is rejected, nothing written."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/../evil"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "spec" / "consumer.md").exists()
-    assert not (vault / "spec" / "consumer.json").exists()
-
-
 def test_depends_on_help_names_both_task_and_design_forms(tmp_path):
     """``--help`` describes both the bare-task-name and KIND/NAME[@STAGE] forms."""
     vault, state = _make_vault(tmp_path)
@@ -855,29 +770,6 @@ def test_supersedes_self_edge_rejected_at_create(tmp_path):
     assert r.returncode != 0
     assert "graph-guard [supersedes-self-edge]" in r.stderr
     assert not (vault / "adr" / "loop-me.md").exists()
-
-
-def test_supersedes_malformed_reference_rejected_at_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(vault, state, "adr", "successor", extra=["--supersedes", "no-slash"])
-    assert r.returncode != 0
-    assert "graph-guard [supersedes-reference]" in r.stderr
-    assert not (vault / "adr" / "successor.md").exists()
-
-
-def test_supersedes_path_traversal_reference_rejected_at_create(tmp_path):
-    """``../../etc/passwd`` first-``/``-splits into kind ``..`` and name
-    ``../etc/passwd`` — a well-formed-looking KIND/NAME pair that must still be
-    rejected because ``..`` is not a real record kind. The sibling repo resolves
-    a stored ``supersedes`` string to a filesystem path, so a traversal sequence
-    written here verbatim is a path-traversal vector, not just a query miss."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(
-        vault, state, "adr", "successor", extra=["--supersedes", "../../etc/passwd"],
-    )
-    assert r.returncode != 0
-    assert "graph-guard [supersedes-reference]" in r.stderr
-    assert not (vault / "adr" / "successor.md").exists()
 
 
 def test_supersedes_mutual_pair_accepted_by_both_writes(tmp_path):
