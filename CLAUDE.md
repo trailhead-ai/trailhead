@@ -146,6 +146,16 @@ fallback, no GNU `readlink -f`, macOS-safe).
   halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
   rule.
 - **Craft tests that need lore use `tools/craft/tests/_lore_runner.py`** (`LoreRunner`, or its `lore_runner` fixture): an in-process lore that is fenced on every call and fails closed outside the test's `tmp_path`. Do not spawn `lore` or hand-roll a `FakeLore`; `LoreRunner.inject` makes lore fail on demand.
+- **A test that touches git belongs to one of three groups.** (1) Git only builds the
+  fixture: make a real repo under `tmp_path` with the `hermetic_git_env` fixture (or
+  `make_hermetic_git_env` from the area's `_git_support.py`) and, for history,
+  `build_history` in lore's conftest. (2) Git's own behaviour is the subject (transfer,
+  sync, rebase, conflicts): keep real git with the same hermetic env. (3) Our code only
+  reads git's output: use real git with the same hermetic env. Lore's and camp's `_git`
+  helpers take no `runner=`; give one a runner seam, fed output recorded from real git
+  plus one contract test per parsed command against real git, only when measured git time
+  in a file's tests is over a second and over a tenth of that file's time
+  (`trailhead/provenance.py` already takes `runner=` and is the shape to copy).
 - **A test never reads this repository's git history** — no `git show <sha>:<path>`,
   `git log`, or any lookup by commit. Merging rebases a branch onto main, which gives
   its commits new SHAs, so a test pinned to one passes on its pull request and fails
