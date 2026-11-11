@@ -1625,7 +1625,7 @@ def test_one_wrong_entry_refuses_the_whole_batch(capsys, tmp_path):
 def test_a_transition_re_run_on_an_entry_in_its_target_state_is_written_with_no_capture_and_no_write(
     capsys, kind, status
 , tmp_path):
-    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="First", status=status)), tasks={}, task_bodies={})
+    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="First", status=status)), tasks={}, statuses={})
     code, out, err = run_entry(transition(kind), lore, capsys)
     assert code == 0, err
     assert out.splitlines() == [
@@ -2489,7 +2489,7 @@ def test_a_credential_shaped_where_segment_of_a_vault_entry_is_redacted_in_the_l
 
 # --- entry: drop / restore --------------------------------------------------------
 
-TARGETS = {"other": task_body("x")}
+TARGETS = {"other": "open"}
 DROP_REASON = "moved to task/other"
 
 
@@ -2503,43 +2503,44 @@ def security_md(n, status="open"):
     )
 
 
-def drop_lore(prior="open", **kw):
-    return EntryLore(
+def drop_lore(tmp_path, prior="open", **kw):
+    return spec_lore(
+        tmp_path,
         spec_body(entry_md(1, title="First", status=prior), entry_md(2, title="Bystander")),
-        task_bodies=kw.pop("task_bodies", TARGETS), **kw,
+        statuses=kw.pop("statuses", TARGETS), **kw,
     )
 
 
-@pytest.mark.parametrize("prior", ["open", "folded into task/P"])
-def test_drop_writes_dropped_status_logs_the_decision_before_the_write_and_prints_written(capsys, prior):
-    lore = drop_lore(prior)
+@pytest.mark.parametrize("prior", ["open", "folded into task/p"])
+def test_drop_writes_dropped_status_logs_the_decision_before_the_write_and_prints_written(capsys, prior, tmp_path):
+    lore = drop_lore(tmp_path, prior)
     code, out, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     assert code == 0, err
-    assert statuses(lore.spec) == {"F1": ("dropped", DROP_REASON), "F2": ("open", None)}
+    assert statuses(spec_now(lore)) == {"F1": ("dropped", DROP_REASON), "F2": ("open", None)}
     assert lore.events == ["capture:found-work", "update", "capture:found-work-result"]
-    assert lore.bodies("found-work") == [
-        "found-work: entry-dropped | parent: task/P | record: spec/S#F1 | finding: First | where: src/a.py"
+    assert bodies(lore, "found-work") == [
+        "found-work: entry-dropped | parent: task/p | record: spec/s#F1 | finding: First | where: src/a.py"
         f" | why: {DROP_REASON}"
     ]
     assert out.splitlines() == [
-        "found-work-result: written | parent: task/P | finding: First | record: spec/S#F1 | reason-code: none"
+        "found-work-result: written | parent: task/p | finding: First | record: spec/s#F1 | reason-code: none"
     ]
 
 
-def test_drop_with_a_nowhere_reason_is_accepted_without_any_task_lookup(capsys):
-    lore = drop_lore(task_bodies={})
+def test_drop_with_a_nowhere_reason_is_accepted_without_any_task_lookup(capsys, tmp_path):
+    lore = drop_lore(tmp_path, statuses={})
     code, _, err = run_entry(transition("drop", reason="nowhere: obsolete after the redesign"), lore, capsys)
     assert code == 0, err
-    assert statuses(lore.spec)["F1"] == ("dropped", "nowhere: obsolete after the redesign")
-    assert not any(c[0][:2] == ["record", "show"] and c[0][2].startswith("task/") for c in lore.calls)
+    assert statuses(spec_now(lore))["F1"] == ("dropped", "nowhere: obsolete after the redesign")
+    assert task_reads(lore) == []
 
 
 @pytest.mark.parametrize("reason", ["moved to `task/other`", "tracked in [[task/other]]", "tracked in [[task/other]]."])
-def test_drop_whose_reason_names_an_existing_task_in_link_form_is_accepted(capsys, reason):
-    lore = drop_lore()
+def test_drop_whose_reason_names_an_existing_task_in_link_form_is_accepted(capsys, reason, tmp_path):
+    lore = drop_lore(tmp_path)
     code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 0, err
-    assert statuses(lore.spec)["F1"] == ("dropped", reason)
+    assert statuses(spec_now(lore))["F1"] == ("dropped", reason)
     assert ["record", "show", "task/other", "--json", "--vault=v"] in [c[0] for c in lore.calls]
 
 
@@ -2554,87 +2555,87 @@ def test_drop_whose_reason_names_an_existing_task_in_link_form_is_accepted(capsy
         "tracked in [[xtask/other]]",
     ],
 )
-def test_drop_whose_link_form_reason_names_no_existing_task_is_refused_and_looks_up_only_task_ids(capsys, reason):
-    lore = drop_lore()
+def test_drop_whose_link_form_reason_names_no_existing_task_is_refused_and_looks_up_only_task_ids(capsys, reason, tmp_path):
+    lore = drop_lore(tmp_path)
     code, out, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1 and out == ""
     assert reason_of(err) == "drop-target-missing"
-    looked_up = [c[0][2] for c in lore.calls if c[0][:2] == ["record", "show"] and not c[0][2].startswith("spec/S")]
+    looked_up = [c[0][2] for c in lore.calls if c[0][:2] == ["record", "show"] and not c[0][2].startswith("spec/s")]
     assert all(re.fullmatch(r"task/[A-Za-z0-9._-]+", t) for t in looked_up), looked_up
 
 
-def test_a_credential_in_a_link_form_drop_reason_is_scrubbed_while_the_task_is_still_found(capsys):
+def test_a_credential_in_a_link_form_drop_reason_is_scrubbed_while_the_task_is_still_found(capsys, tmp_path):
     reason = f"tracked in [[task/other]] leaked {SECRET}"
-    lore = drop_lore()
+    lore = drop_lore(tmp_path)
     code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 0, err
-    assert SECRET not in lore.spec and "[[task/other]]" in lore.spec
+    assert SECRET not in spec_now(lore) and "[[task/other]]" in spec_now(lore)
 
 
 @pytest.mark.parametrize("reason", ["moved to task/ghost", "because it is not needed", "see task/other and task/ghost"])
-def test_drop_whose_reason_names_no_existing_task_is_refused_drop_target_missing_and_writes_nothing(capsys, reason):
-    lore = drop_lore()
+def test_drop_whose_reason_names_no_existing_task_is_refused_drop_target_missing_and_writes_nothing(capsys, reason, tmp_path):
+    lore = drop_lore(tmp_path)
     code, out, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1 and out == ""
     assert reason_of(err) == "drop-target-missing"
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
 @pytest.mark.parametrize("reason", ["", "   "])
-def test_drop_without_a_reason_is_refused_reason_required(capsys, reason):
-    lore = drop_lore()
+def test_drop_without_a_reason_is_refused_reason_required(capsys, reason, tmp_path):
+    lore = drop_lore(tmp_path)
     code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1
     assert reason_of(err) == "reason-required"
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
-@pytest.mark.parametrize("prior", ["folded into task/OTHER", "done by task/P", "dropped: moved to task/else"])
-def test_drop_of_an_entry_in_another_state_is_refused_with_the_wrong_status_code(capsys, prior):
-    lore = drop_lore(prior)
+@pytest.mark.parametrize("prior", ["folded into task/OTHER", "done by task/p", "dropped: moved to task/else"])
+def test_drop_of_an_entry_in_another_state_is_refused_with_the_wrong_status_code(capsys, prior, tmp_path):
+    lore = drop_lore(tmp_path, prior)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     assert code == 1
     assert reason_of(err) == "entry-not-open"
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
-def test_a_failed_decision_capture_of_a_drop_writes_nothing(capsys):
-    lore = drop_lore(fail_nth_capture=1)
+def test_a_failed_decision_capture_of_a_drop_writes_nothing(capsys, tmp_path):
+    lore = drop_lore(tmp_path, fail_nth_capture=1)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     assert code == 2
     assert "capture-failed" in err
-    assert lore.update_calls() == []
-    assert statuses(lore.spec)["F1"] == ("open", None)
+    assert update_calls(lore) == []
+    assert statuses(spec_now(lore))["F1"] == ("open", None)
 
 
-def test_re_running_the_same_drop_is_a_no_op_that_captures_and_writes_nothing(capsys):
-    lore = drop_lore()
+def test_re_running_the_same_drop_is_a_no_op_that_captures_and_writes_nothing(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
     run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
-    lore.entries.clear()
-    lore.updates.clear()
+    before = entries(lore)
+    del lore.calls[:]
     code, out, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     assert code == 0, err
     assert out.splitlines() == [
-        "found-work-result: written | parent: task/P | finding: First | record: spec/S#F1 | reason-code: none"
+        "found-work-result: written | parent: task/p | finding: First | record: spec/s#F1 | reason-code: none"
     ]
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == before and update_calls(lore) == []
 
 
-def test_a_credential_in_the_drop_reason_is_scrubbed_before_the_decision_line_and_the_write(capsys):
-    lore = drop_lore(task_bodies={})
+def test_a_credential_in_the_drop_reason_is_scrubbed_before_the_decision_line_and_the_write(capsys, tmp_path):
+    lore = drop_lore(tmp_path, statuses={})
     code, _, err = run_entry(transition("drop", reason=f"nowhere: leaked {SECRET}"), lore, capsys)
     assert code == 0, err
-    assert SECRET not in lore.spec
-    assert SECRET not in " ".join(lore.bodies("found-work"))
-    assert "[redacted]" in lore.spec
+    assert SECRET not in spec_now(lore)
+    assert SECRET not in " ".join(bodies(lore, "found-work"))
+    assert "[redacted]" in spec_now(lore)
 
 
-def test_a_security_finding_is_not_dropped_without_operator_confirmation(capsys):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
+def test_a_security_finding_is_not_dropped_without_operator_confirmation(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     assert code == 1
     assert reason_of(err) == "drop-needs-operator"
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
 SECURITY_TITLE = f"{fw.SECURITY_TITLE_PREFIX} src/a.py:3 (ref abcd1234)"
@@ -2661,16 +2662,16 @@ def marked_md(n, *, title, found, status="open"):
     ids=["found-marker-only", "found-marker-absent", "title-marker-only", "title-marker-absent"],
 )
 def test_a_drop_needs_the_operator_when_either_the_found_or_the_title_marks_a_security_finding(
-    capsys, title, found, needs_operator
+    capsys, title, found, needs_operator, tmp_path
 ):
-    lore = EntryLore(spec_body(marked_md(1, title=title, found=found)), task_bodies=TARGETS)
+    lore = spec_lore(tmp_path, spec_body(marked_md(1, title=title, found=found)), statuses=TARGETS)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
     if needs_operator:
         assert code == 1 and reason_of(err) == "drop-needs-operator"
-        assert lore.update_calls() == []
+        assert update_calls(lore) == []
     else:
         assert code == 0, err
-        assert statuses(lore.spec)["F1"] == ("dropped", DROP_REASON)
+        assert statuses(spec_now(lore))["F1"] == ("dropped", DROP_REASON)
 
 
 @pytest.mark.parametrize(
@@ -2679,132 +2680,134 @@ def test_a_drop_needs_the_operator_when_either_the_found_or_the_title_marks_a_se
     ids=["security-title", "ordinary-title"],
 )
 def test_a_restored_entry_of_an_unmarked_found_line_is_marked_only_when_its_title_is(
-    capsys, title, needs_operator
+    capsys, title, needs_operator, tmp_path
 ):
-    lore = EntryLore(
+    lore = spec_lore(
+        tmp_path,
         spec_body(marked_md(1, title=title, found="while building", status="dropped: nowhere: obsolete")),
-        task_bodies=TARGETS,
+        statuses=TARGETS,
     )
     code, _, err = run_entry(transition("restore", ("F1",), reason="needed after all"), lore, capsys)
     assert code == 0, err
     code, _, err = run_entry(transition("drop", ("F2",), reason=DROP_REASON), lore, capsys)
     if needs_operator:
         assert code == 1 and reason_of(err) == "drop-needs-operator"
-        assert statuses(lore.spec)["F2"] == ("open", None)
+        assert statuses(spec_now(lore))["F2"] == ("open", None)
         code, _, err = run_entry(transition("drop", ("F2",), reason=DROP_REASON, operator_confirmed=True), lore, capsys)
     assert code == 0, err
     expected = f"{fw.SECURITY_REPLACEMENT_PREFIX} task/other" if needs_operator else DROP_REASON
-    assert statuses(lore.spec)["F2"] == ("dropped", expected)
+    assert statuses(spec_now(lore))["F2"] == ("dropped", expected)
 
 
-def test_a_security_finding_is_dropped_with_operator_confirmation_and_the_decision_line_records_it(capsys):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
+def test_a_security_finding_is_dropped_with_operator_confirmation_and_the_decision_line_records_it(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed=True), lore, capsys)
     assert code == 0, err
     generic = f"{fw.SECURITY_REPLACEMENT_PREFIX} task/other"
-    assert statuses(lore.spec)["F1"] == ("dropped", generic)
-    (line,) = lore.bodies("found-work")
+    assert statuses(spec_now(lore))["F1"] == ("dropped", generic)
+    (line,) = bodies(lore, "found-work")
     assert line.endswith(f"why: {generic} (operator confirmed)")
 
 
-def test_an_ordinary_entry_needs_no_operator_confirmation_to_drop_and_logs_none(capsys):
-    lore = drop_lore()
+def test_an_ordinary_entry_needs_no_operator_confirmation_to_drop_and_logs_none(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
     run_entry(transition("drop", reason=DROP_REASON), lore, capsys)
-    assert "operator confirmed" not in lore.bodies("found-work")[0]
+    assert "operator confirmed" not in bodies(lore, "found-work")[0]
 
 
-def test_operator_confirmed_must_be_a_boolean(capsys):
-    lore = drop_lore()
+def test_operator_confirmed_must_be_a_boolean(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed="yes"), lore, capsys)
     assert code == 1
     assert reason_of(err) == "malformed-input"
     assert lore.calls == []
 
 
-def test_the_retry_command_of_a_failed_confirmed_drop_keeps_the_confirmation(capsys):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS, update_mode="stale")
+def test_the_retry_command_of_a_failed_confirmed_drop_keeps_the_confirmation(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS, update_mode="stale")
     code, out, _ = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed=True), lore, capsys)
     assert code == 3
     assert '"operator_confirmed": true' in out
 
 
-def restore_lore(**kw):
+def restore_lore(tmp_path, **kw):
     entries = [entry_md(n, title=f"T{n}") for n in (1, 3, 4, 5, 6)]
     entries.insert(1, entry_md(2, title="Second", status="dropped: nowhere: obsolete", where=("src/b.py", "src/c.py"),
                                what="it is slow"))
-    return EntryLore(spec_body(*entries), **kw)
+    return spec_lore(tmp_path, spec_body(*entries), **kw)
 
 
-def test_restore_appends_the_next_id_open_with_the_dropped_entrys_fields_and_leaves_it_alone(capsys):
-    lore = restore_lore()
+def test_restore_appends_the_next_id_open_with_the_dropped_entrys_fields_and_leaves_it_alone(capsys, tmp_path):
+    lore = restore_lore(tmp_path)
     code, out, err = run_entry(transition("restore", ("F2",), reason="needed after all"), lore, capsys)
     assert code == 0, err
     import followups as fu
-    entries = {e.id: e for e in fu.parse_followups(lore.spec)}
+    entries = {e.id: e for e in fu.parse_followups(spec_now(lore))}
     assert (entries["F2"].status_kind, entries["F2"].status_detail) == ("dropped", "nowhere: obsolete")
     new = entries["F7"]
     assert (new.status_kind, new.title, new.what, new.where, new.found) == (
         "open", "Second", "it is slow", ("src/b.py", "src/c.py"), "restored from F2")
     assert list(entries) == ["F1", "F2", "F3", "F4", "F5", "F6", "F7"]
     assert lore.events == ["capture:found-work", "update", "capture:found-work-result"]
-    assert lore.bodies("found-work") == [
-        "found-work: entry-restored | parent: task/P | record: spec/S#F7 | finding: Second | where: src/b.py, src/c.py"
+    assert bodies(lore, "found-work") == [
+        "found-work: entry-restored | parent: task/p | record: spec/s#F7 | finding: Second | where: src/b.py, src/c.py"
         " | why: needed after all"
     ]
     assert out.splitlines() == [
-        "found-work-result: written | parent: task/P | finding: Second | record: spec/S#F7 | reason-code: none"
+        "found-work-result: written | parent: task/p | finding: Second | record: spec/s#F7 | reason-code: none"
     ]
 
 
-def test_restore_of_two_entries_in_one_call_takes_two_fresh_ids(capsys):
-    lore = EntryLore(spec_body(entry_md(1, title="A", status="dropped: nowhere: x"),
+def test_restore_of_two_entries_in_one_call_takes_two_fresh_ids(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="A", status="dropped: nowhere: x"),
                                entry_md(2, title="B", status="dropped: nowhere: y")))
     code, _, err = run_entry(transition("restore", ("F1", "F2"), reason="again"), lore, capsys)
     assert code == 0, err
     import followups as fu
-    got = {e.id: (e.status_kind, e.title, e.found) for e in fu.parse_followups(lore.spec)}
+    got = {e.id: (e.status_kind, e.title, e.found) for e in fu.parse_followups(spec_now(lore))}
     assert got["F3"] == ("open", "A", "restored from F1") and got["F4"] == ("open", "B", "restored from F2")
 
 
-def test_restore_naming_the_same_entry_twice_is_refused_and_writes_nothing(capsys):
-    lore = restore_lore()
+def test_restore_naming_the_same_entry_twice_is_refused_and_writes_nothing(capsys, tmp_path):
+    lore = restore_lore(tmp_path)
     code, _, err = run_entry(transition("restore", ("F2", "F2"), reason="needed after all"), lore, capsys)
     assert code == 1
     assert reason_of(err) == "malformed-input"
-    assert lore.entries == [] and lore.update_calls() == []
-    assert "restored from F2" not in lore.spec
+    assert entries(lore) == [] and update_calls(lore) == []
+    assert "restored from F2" not in spec_now(lore)
 
 
-@pytest.mark.parametrize("prior", ["open", "folded into task/P", "done by task/P"])
-def test_restore_of_an_entry_that_is_not_dropped_is_refused(capsys, prior):
-    lore = EntryLore(spec_body(entry_md(1, status=prior)))
+@pytest.mark.parametrize("prior", ["open", "folded into task/p", "done by task/p"])
+def test_restore_of_an_entry_that_is_not_dropped_is_refused(capsys, prior, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(entry_md(1, status=prior)))
     code, _, err = run_entry(transition("restore", reason="again"), lore, capsys)
     assert code == 1
     assert reason_of(err) == "entry-not-dropped"
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
-def test_restore_without_a_reason_is_refused_reason_required(capsys):
-    lore = restore_lore()
+def test_restore_without_a_reason_is_refused_reason_required(capsys, tmp_path):
+    lore = restore_lore(tmp_path)
     code, _, err = run_entry(transition("restore", ("F2",), reason=""), lore, capsys)
     assert code == 1
     assert reason_of(err) == "reason-required"
 
 
-def test_re_running_a_restore_whose_new_entry_is_still_open_appends_nothing_more(capsys):
-    lore = restore_lore()
+def test_re_running_a_restore_whose_new_entry_is_still_open_appends_nothing_more(capsys, tmp_path):
+    lore = restore_lore(tmp_path)
     run_entry(transition("restore", ("F2",), reason="again"), lore, capsys)
-    lore.entries.clear()
-    lore.updates.clear()
+    before = entries(lore)
+    del lore.calls[:]
     code, out, err = run_entry(transition("restore", ("F2",), reason="again"), lore, capsys)
     assert code == 0, err
-    assert "record: spec/S#F7" in out
-    assert lore.entries == [] and lore.update_calls() == []
-    assert lore.spec.count("restored from F2") == 1
+    assert "record: spec/s#F7" in out
+    assert entries(lore) == before and update_calls(lore) == []
+    assert spec_now(lore).count("restored from F2") == 1
 
 
-def test_a_restore_that_does_not_land_is_reported_readback_failed(capsys):
-    lore = restore_lore(update_mode="drop-write")
+def test_a_restore_that_does_not_land_is_reported_readback_failed(capsys, tmp_path):
+    # Injected: real lore never answers a write with success and then leaves the spec unchanged.
+    lore = restore_lore(tmp_path, update_mode="drop-write")
     code, out, _ = run_entry(transition("restore", ("F2",), reason="again"), lore, capsys)
     assert code == 3
     assert "reason-code: readback-failed" in out
@@ -2815,31 +2818,31 @@ def test_a_restore_that_does_not_land_is_reported_readback_failed(capsys):
     ("slice", "The slice made no decisions about found work."),
     ("plan", "The plan made no decisions about found work."),
 ])
-def test_report_with_no_decisions_names_the_session_asked_for(capsys, session, line):
-    _, out, _ = run_report("task/P", EntryLore(two_open()), capsys, "--session-id", SID, "--session", session)
+def test_report_with_no_decisions_names_the_session_asked_for(capsys, session, line, tmp_path):
+    _, out, _ = run_report("task/p", spec_lore(tmp_path, two_open()), capsys, "--session-id", SID, "--session", session)
     assert out.strip() == line
 
 
-def test_report_with_no_session_flag_prints_the_build_line_byte_for_byte(capsys):
-    _, out, _ = run_report("task/P", EntryLore(two_open()), capsys, "--session-id", SID)
+def test_report_with_no_session_flag_prints_the_build_line_byte_for_byte(capsys, tmp_path):
+    _, out, _ = run_report("task/p", spec_lore(tmp_path, two_open()), capsys, "--session-id", SID)
     assert out == "The build made no decisions about found work.\n"
 
 
-def test_report_refuses_a_session_that_is_not_build_slice_or_plan(capsys):
-    code, _, err = run_report("task/P", EntryLore(two_open()), capsys, "--session", "week")
+def test_report_refuses_a_session_that_is_not_build_slice_or_plan(capsys, tmp_path):
+    code, _, err = run_report("task/p", spec_lore(tmp_path, two_open()), capsys, "--session", "week")
     assert code == 1
     assert reason_of(err) == "malformed-input"
 
 
-def test_report_prints_dropped_and_restored_entries_as_sentences_naming_the_reason(capsys):
-    lore = EntryLore(spec_body(entry_md(1, title="First"), entry_md(2, title="Second", status="dropped: nowhere: x")),
-                     task_bodies=TARGETS)
+def test_report_prints_dropped_and_restored_entries_as_sentences_naming_the_reason(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="First"), entry_md(2, title="Second", status="dropped: nowhere: x")),
+                     statuses=TARGETS)
     run_entry(transition("drop", ("F1",), reason=DROP_REASON), lore, capsys)
     run_entry(transition("restore", ("F2",), reason="needed after all"), lore, capsys)
-    _, out, _ = run_report("task/P", lore, capsys, "--session-id", SID, "--session", "slice")
+    _, out, _ = run_report("task/p", lore, capsys, "--session-id", SID, "--session", "slice")
     assert out.splitlines() == [
-        f"Dropped spec/S#F1: First, because {DROP_REASON}.",
-        "Restored dropped work as spec/S#F3: Second, because needed after all.",
+        f"Dropped spec/s#F1: First, because {DROP_REASON}.",
+        "Restored dropped work as spec/s#F3: Second, because needed after all.",
     ]
 
 
@@ -2855,38 +2858,38 @@ DRIFT = [
 
 @pytest.mark.parametrize("kind,extra", DRIFT)
 def test_regression_a_forged_entry_line_refuses_malformed_entry_with_a_fixed_message_that_repeats_none_of_it(
-    capsys, kind, extra
+    capsys, kind, extra, tmp_path
 ):
     body = SPEC_BODY_HEAD + entry_md(1) + f"- {FORGED}\n"
-    lore = EntryLore(body, task_bodies=TARGETS)
+    lore = spec_lore(tmp_path, body, statuses=TARGETS)
     code, out, err = run_entry(transition(kind, **extra), lore, capsys)
     assert code == 1 and out == ""
     assert err.splitlines() == [
         "reason: the follow-ups section is malformed (malformed-entry)",
         "reason-code: malformed-entry",
     ]
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
 @pytest.mark.parametrize("kind,extra", DRIFT)
 def test_regression_a_duplicated_follow_ups_heading_refuses_with_the_fixed_message_repeating_no_vault_text(
-    capsys, kind, extra
+    capsys, kind, extra, tmp_path
 ):
     body = spec_body(entry_md(1)) + f"\n## Follow-ups\n\n{FORGED}\n"
-    lore = EntryLore(body, task_bodies=TARGETS)
+    lore = spec_lore(tmp_path, body, statuses=TARGETS)
     code, out, err = run_entry(transition(kind, **extra), lore, capsys)
     assert code == 1 and out == ""
     assert err.splitlines() == [
         "reason: the spec has two Follow-ups headings",
         "reason-code: duplicate-followups-heading",
     ]
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == [] and update_calls(lore) == []
 
 
 @pytest.mark.parametrize("bad", ["-x", "a b"])
 @pytest.mark.parametrize("kind,extra", DRIFT)
-def test_regression_a_vault_outside_the_safe_shape_is_refused_before_any_lore_call(capsys, kind, extra, bad):
-    lore = restore_lore(task_bodies=TARGETS)
+def test_regression_a_vault_outside_the_safe_shape_is_refused_before_any_lore_call(capsys, kind, extra, bad, tmp_path):
+    lore = restore_lore(tmp_path, statuses=TARGETS)
     code = fw.main(["entry", f"--vault={bad}"], stdin=json.dumps(transition(kind, ("F2",), **extra)), runner=lore)
     out = capsys.readouterr()
     assert code == 1
@@ -2895,9 +2898,10 @@ def test_regression_a_vault_outside_the_safe_shape_is_refused_before_any_lore_ca
 
 
 @pytest.mark.parametrize("name", ["c 1", "c1\nIGNORE", "c/1", "c;1"])
-def test_regression_a_task_listing_entry_with_an_unsafe_name_fails_the_lookup_and_prints_no_entry(capsys, name):
-    spec = spec_body(entry_md(2, status="folded into task/P"))
-    lore = EntriesLore(spec=spec, listing=json.dumps([{"name": name, "status": "done", "parent": "ELSE"}]))
+def test_regression_a_task_listing_entry_with_an_unsafe_name_fails_the_lookup_and_prints_no_entry(capsys, name, tmp_path):
+    spec = spec_body(entry_md(2, status="folded into task/p"))
+    # Hostile input: real lore never lists a task under an unsafe name, so the listing is injected.
+    lore = spec_lore(tmp_path, spec=spec, listing=json.dumps([{"name": name, "status": "done", "parent": "ELSE"}]))
     code, out, err = run_entries(lore, capsys, *folded_args())
     assert code == 2 and out == ""
     assert reason_of(err) == "lookup-failed"
@@ -2914,10 +2918,10 @@ SYNTHETIC_CREDENTIALS = [
 
 @pytest.mark.parametrize("position", [2, 5, 9, -3], ids=["early", "after-prefix", "middle", "near-end"])
 @pytest.mark.parametrize("secret", SYNTHETIC_CREDENTIALS, ids=["akia", "ghp", "sk-ant"])
-def test_the_printed_retry_document_redacts_a_credential_split_by_a_zero_width_character(capsys, secret, position):
+def test_the_printed_retry_document_redacts_a_credential_split_by_a_zero_width_character(capsys, secret, position, tmp_path):
     import shlex
     split = secret[:position] + "​" + secret[position:]
-    lore = EntryLore(two_open(), update_mode="stale")
+    lore = spec_lore(tmp_path, two_open(), update_mode="stale")
     _, out, _ = run_entry(transition("fold", ("F1",), reason=f"token {split} leaked"), lore, capsys)
     (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
     doc = json.loads(shlex.split(retry[len("retry: "):])[2])
@@ -2928,58 +2932,59 @@ def test_the_printed_retry_document_redacts_a_credential_split_by_a_zero_width_c
 def _dropped_with_flag(lore, capsys, **over):
     code, _, err = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed=True, **over), lore, capsys)
     assert code == 0, err
-    return lore.bodies("found-work")[0]
+    return bodies(lore, "found-work")[0]
 
 
-def test_a_confirmed_drop_of_a_marked_entry_notes_the_confirmation(capsys):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
+def test_a_confirmed_drop_of_a_marked_entry_notes_the_confirmation(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     assert _dropped_with_flag(lore, capsys).endswith("(operator confirmed)")
 
 
-def test_a_confirmed_drop_of_an_unmarked_entry_does_not_note_a_confirmation(capsys):
-    lore = drop_lore()
+def test_a_confirmed_drop_of_an_unmarked_entry_does_not_note_a_confirmation(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
     assert "operator confirmed" not in _dropped_with_flag(lore, capsys)
 
 
 @pytest.mark.parametrize("kind", ["fold", "done", "restore"])
-def test_a_flag_carried_by_a_non_drop_transition_is_not_noted_as_a_confirmation(capsys, kind):
-    prior = {"restore": "dropped: nowhere: x", "done": "folded into task/P"}.get(kind, "open")
-    lore = EntryLore(spec_body(entry_md(1, title="First", status=prior)), tasks=BUILT,
+def test_a_flag_carried_by_a_non_drop_transition_is_not_noted_as_a_confirmation(capsys, kind, tmp_path):
+    prior = {"restore": "dropped: nowhere: x", "done": "folded into task/p"}.get(kind, "open")
+    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="First", status=prior)), tasks=BUILT,
                      task_bodies=BUILT_BODIES)
     code, _, err = run_entry(transition(kind, operator_confirmed=True), lore, capsys)
     assert code == 0, err
-    assert "operator confirmed" not in lore.bodies("found-work")[0]
+    assert "operator confirmed" not in bodies(lore, "found-work")[0]
 
 
-def test_an_entry_marked_only_by_its_found_line_stays_a_security_finding_through_a_restore(capsys):
-    lore = EntryLore(spec_body(marked_md(1, title="Tidy the parser", found=fw.SECURITY_REPLACEMENT)),
-                     task_bodies=TARGETS)
+def test_an_entry_marked_only_by_its_found_line_stays_a_security_finding_through_a_restore(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(marked_md(1, title="Tidy the parser", found=fw.SECURITY_REPLACEMENT)),
+                     statuses=TARGETS)
     code, _, err = run_entry(transition("drop", reason=DROP_REASON, operator_confirmed=True), lore, capsys)
     assert code == 0, err
     code, _, err = run_entry(transition("restore", ("F1",), reason="needed after all"), lore, capsys)
     assert code == 0, err
     code, _, err = run_entry(transition("drop", ("F2",), reason=DROP_REASON), lore, capsys)
     assert code == 1 and reason_of(err) == "drop-needs-operator"
-    assert statuses(lore.spec)["F2"] == ("open", None)
+    assert statuses(spec_now(lore))["F2"] == ("open", None)
 
 
-def test_a_restore_that_already_landed_is_recognised_for_a_marked_entry_too(capsys):
-    lore = EntryLore(spec_body(marked_md(1, title="Tidy", found=fw.SECURITY_REPLACEMENT, status="dropped: nowhere: x")))
+def test_a_restore_that_already_landed_is_recognised_for_a_marked_entry_too(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(marked_md(1, title="Tidy", found=fw.SECURITY_REPLACEMENT, status="dropped: nowhere: x")))
     run_entry(transition("restore", ("F1",), reason="again"), lore, capsys)
-    lore.entries.clear()
+    before = entries(lore)
+    del lore.calls[:]
     code, _, err = run_entry(transition("restore", ("F1",), reason="again"), lore, capsys)
     assert code == 0, err
-    assert set(statuses(lore.spec)) == {"F1", "F2"}
+    assert set(statuses(spec_now(lore))) == {"F1", "F2"}
 
 
-def test_a_restore_scrubs_a_credential_out_of_the_what_it_copies(capsys):
+def test_a_restore_scrubs_a_credential_out_of_the_what_it_copies(capsys, tmp_path):
     body = marked_md(1, title="Tidy", found="while building", status="dropped: nowhere: x").replace(
         "it is slow", f"it leaks {SECRET}")
-    lore = EntryLore(spec_body(body))
+    lore = spec_lore(tmp_path, spec_body(body))
     code, _, err = run_entry(transition("restore", ("F1",), reason="again"), lore, capsys)
     assert code == 0, err
     import followups as fu
-    new = {e.id: e for e in fu.parse_followups(lore.spec)}["F2"]
+    new = {e.id: e for e in fu.parse_followups(spec_now(lore))}["F2"]
     assert SECRET not in new.what and "[redacted]" in new.what
 
 
@@ -2987,40 +2992,39 @@ LEAKY_REASON = "xyzzy-distinctive-detail"
 
 
 @pytest.mark.parametrize("target", ["task/other", "nowhere:"])
-def test_a_confirmed_drop_of_a_marked_entry_stores_and_logs_a_generic_reason_keeping_its_target(capsys, target):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
+def test_a_confirmed_drop_of_a_marked_entry_stores_and_logs_a_generic_reason_keeping_its_target(capsys, target, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     reason = f"{target} {LEAKY_REASON}" if target == "nowhere:" else f"{LEAKY_REASON} moved to {target}"
     code, _, err = run_entry(transition("drop", reason=reason, operator_confirmed=True), lore, capsys)
     assert code == 0, err
-    assert LEAKY_REASON not in lore.spec and LEAKY_REASON not in " ".join(lore.bodies("found-work"))
-    kind, detail = statuses(lore.spec)["F1"]
+    assert LEAKY_REASON not in spec_now(lore) and LEAKY_REASON not in " ".join(bodies(lore, "found-work"))
+    kind, detail = statuses(spec_now(lore))["F1"]
     assert kind == "dropped" and target in detail
 
 
-def test_re_running_a_confirmed_marked_drop_is_a_no_op(capsys):
-    lore = EntryLore(spec_body(security_md(1)), task_bodies=TARGETS)
+def test_re_running_a_confirmed_marked_drop_is_a_no_op(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     reason = f"{LEAKY_REASON} moved to task/other"
     run_entry(transition("drop", reason=reason, operator_confirmed=True), lore, capsys)
-    lore.entries.clear()
-    lore.updates.clear()
+    before = entries(lore)
+    del lore.calls[:]
     code, _, err = run_entry(transition("drop", reason=reason, operator_confirmed=True), lore, capsys)
     assert code == 0, err
-    assert lore.entries == [] and lore.update_calls() == []
+    assert entries(lore) == before and update_calls(lore) == []
 
 
-def test_an_unmarked_drop_keeps_its_reason(capsys):
-    lore = drop_lore()
+def test_an_unmarked_drop_keeps_its_reason(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
     reason = f"{LEAKY_REASON} moved to task/other"
     code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 0, err
-    assert statuses(lore.spec)["F1"] == ("dropped", reason)
-    assert reason in lore.bodies("found-work")[0]
+    assert statuses(spec_now(lore))["F1"] == ("dropped", reason)
+    assert reason in bodies(lore, "found-work")[0]
 
 
 @pytest.mark.parametrize("reason", ["see task/.. x", "see task/. x", "see task/..", "task/."])
-def test_a_drop_target_naming_a_dot_id_is_refused_without_a_lore_lookup(capsys, reason):
-    lore = drop_lore()
+def test_a_drop_target_naming_a_dot_id_is_refused_without_a_lore_lookup(capsys, reason, tmp_path):
+    lore = drop_lore(tmp_path)
     code, _, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1 and reason_of(err) == "drop-target-missing"
-    argvs = [c[0] if isinstance(c, tuple) else c for c in lore.calls]
-    assert not [a for a in argvs if a[:2] == ["record", "show"] and a[2].startswith("task/")]
+    assert task_reads(lore) == []
