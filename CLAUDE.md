@@ -84,7 +84,9 @@ use bare `python`; direnv trusts by path, so every worktree needs its own allow.
 ```sh
 scripts/bootstrap-venv            # create/converge .venv (idempotent, cheap to re-run)
 pip install -e .                  # editable install (optional; bin/trailhead works without it)
-.venv/bin/python -m pytest        # whole suite (root pyproject testpaths span CLI + all tool tests)
+.venv/bin/python -m pytest        # default run: everything except the opt-in tiers below
+.venv/bin/python -m pytest -m "not benchmark"   # ALL tiers: the default run plus every tier
+.venv/bin/python -m pytest -m chromium $(.venv/bin/python scripts/test-area-args --tier chromium)   # one tier, over the paths its CI job collects (`--tier seam_real` for the other)
 .venv/bin/python -m pytest trailhead/tests/test_compose.py             # one CLI test file
 .venv/bin/python -m pytest trailhead/tests/test_paths.py::TestMacosBranch  # one class/test
 .venv/bin/python -m pytest tools/lore/tests                            # one tool's suite
@@ -98,14 +100,50 @@ bin/trailhead uninstall           # remove the whole install (keeps your data)
 The root `pyproject.toml`'s `addopts` applies `-n auto` (pytest-xdist) whenever
 pytest resolves that file as its config — the whole-suite run, and any path under
 `trailhead/tests`, `tools/outpost/tests`, or `tools/portage/tests` (they have no
-config of their own). `tools/camp`,
-`tools/craft`, and `tools/lore` each carry their own `pyproject.toml` with no
-`addopts`, so a path under `tools/camp/tests` / `tools/craft/tests` /
-`tools/lore/tests` runs serially by default — `--pdb` works there unmodified.
+config of their own). `tools/camp`, `tools/craft`, and `tools/lore` each carry their
+own `pyproject.toml`, whose `addopts` holds only the tier exclusion and the closing-line
+plugin (no `-n`), so a path under `tools/camp/tests` / `tools/craft/tests` /
+`tools/lore/tests` still runs serially by default — `--pdb` works there unmodified.
 Wherever `-n auto` IS in effect, `--pdb` does not work, and `-p no:xdist` is
 **not** a valid way to go serial — xdist stays registered either way. The only
 serial escape hatch is `-n 0`, e.g.
 `.venv/bin/python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
+
+**Worker count: keep `-n auto`.** Measured on the default selection in a 4-CPU Linux
+container (relative times, not CI's): two workers took 1.7x as long as four; 11 workers
+on 4 CPUs (what `auto` reads there) took 1.18x as long as four; with the CPUs half taken by
+other work, four workers and `auto` took the same time (1.0x), both about 1.7x the idle
+run. So never go below the core count, and on a loaded machine a fixed lower count does not
+help; passing `-n <cores>` only matters inside a container that reports the host's CPUs.
+Splitting a heavy file's tests across workers is also right: the largest file holds about a seventh
+of all test time, spread over 499 cheap tests (median 0.1 s, the slowest 5 s), so
+`--dist loadfile` measured 164 s against 161 s for the default distribution, so neither it nor
+`loadgroup` is used.
+
+**Opt-in test tiers.** Two kinds of test are left out of the default command because they
+launch real processes and dominate its run time: `chromium` (drives a real headless
+Chromium) and `seam_real` (its subject is a real lore or git process end to end). A default
+run ends with `deselected tiers: ... — run them with <command>`; that line means the green
+result does not cover them, so run the all-tiers command before calling work done. The three
+tool configs (`tools/craft`, `tools/lore`, `tools/camp`) carry the same exclusion and register
+the same markers, so a path-scoped run behaves the same way, and `strict_markers` makes a
+misspelled marker a collection error. Mark a new test with `pytestmark = pytest.mark.<tier>`
+(a whole file) or `@pytest.mark.<tier>` (one test) when its subject needs the real process;
+an unmarked test stays in the default run. Keep one wiring smoke per seam unmarked, and the
+in-process lore runner's contract test. Tests are re-homed to a tier, never deleted for being
+slow.
+
+**What gates merge.** `main` has no branch protection or ruleset, so a pull request merges
+when every job of the `tests` workflow is green. Each tier is a job of that workflow
+(`pytest-tiers`), beside the default job, which CI splits by area into parallel jobs
+(`[tool.trailhead.test-areas]` in `pyproject.toml`, `scripts/test-area-args`; a path added to
+`testpaths` lands in the `rest` job). The split is CI-only: the default command above stays
+one run. Every one of them runs the run-time guard
+with its own tier name, budget and passed-count baseline, so a tier job that selects nothing
+(pytest exits nonzero) or skips a test it should run (the passed count falls under its
+baseline) fails. To undo the split, delete `and not chromium and not seam_real` from the
+`addopts` in the root `pyproject.toml` and the three tool configs: the default command then
+runs everything again.
 
 There is no separate lint step configured in-repo. Path resolvers accept injected
 `platform=` / `env=` — use those plus `tmp_path` so tests never touch real
@@ -145,6 +183,32 @@ fallback, no GNU `readlink -f`, macOS-safe).
   smoke, marked `# inert-gate: allow <reason>`. `scripts/inert-test-gate` enforces both
   halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
   rule.
+- **Craft tests that need lore use `tools/craft/tests/_lore_runner.py`** (`LoreRunner`, or its `lore_runner` fixture): an in-process lore that is fenced on every call and fails closed outside the test's `tmp_path`. Do not spawn `lore` or hand-roll a `FakeLore`; `LoreRunner.inject` makes lore fail on demand. `scripts/inert-test-gate` refuses a craft test that spawns `lore` with a literal `["lore", ...]` argv outside a `*_seam.py` file or a `seam_real` mark (it cannot see a spawn through a PATH shim, so the wiring smokes that use one carry `# inert-gate: allow`).
+- **Shared setup is a template copied per test, with per-test state explicit.** Lore's conftest
+  builds a vault once per process and copies it (`make_git_vault`, `make_bare_remote`); a copy
+  carries no remote and resets hooks and config, and what a test needs that differs is an
+  argument (`dirty=`, `commit=`, `identity=`), never left in the template. Measured gain is small
+  (building a vault costs about 7 ms, copying about 2 ms), so add a template only where setup
+  cost is measured, and time one case against many before cutting case count.
+- **Tests use the real disk under `tmp_path`.** Cause a real failure (a read-only directory, a
+  file where a directory is expected) instead of patching `os`, `shutil` or `open`; patch only
+  where no real trigger exists, such as a full disk.
+- **Wait on an observable, never a sleep.** Wait for the sentinel file, log line or process exit.
+  Where a duration is the subject, inject it (`stream_camp` takes `producer_wait_seconds`).
+- **Re-home a slow test, add a case to the existing file.** A slow real-process test moves to a
+  tier (above), never deleted. A new case goes in the file that already tests the subject, and
+  cases of one shape with different values are one `pytest.mark.parametrize` test, which needs a
+  mutation check of its subject so the collapse cannot pass for the wrong reason.
+- **A test that touches git belongs to one of three groups.** (1) Git only builds the
+  fixture: make a real repo under `tmp_path` with the `hermetic_git_env` fixture (or
+  `make_hermetic_git_env` from `trailhead/tests/_git_support.py`) and, for history,
+  `build_history` in lore's conftest. (2) Git's own behaviour is the subject (transfer,
+  sync, rebase, conflicts): keep real git with the same hermetic env. (3) Our code only
+  reads git's output: use real git with the same hermetic env. Lore's and camp's `_git`
+  helpers take no `runner=`; give one a runner seam, fed output recorded from real git
+  plus one contract test per parsed command against real git, only when measured git time
+  in a file's tests is over a second and over a tenth of that file's time
+  (`trailhead/provenance.py` already takes `runner=` and is the shape to copy).
 - **A test never reads this repository's git history** — no `git show <sha>:<path>`,
   `git log`, or any lookup by commit. Merging rebases a branch onto main, which gives
   its commits new SHAs, so a test pinned to one passes on its pull request and fails
@@ -164,9 +228,21 @@ fallback, no GNU `readlink -f`, macOS-safe).
 - Modules carry long contract docstrings stating their invariants and security
   posture — read them before changing behavior; update them when the contract
   changes (Axiom 5).
-- Code is written for testability via dependency injection: real collaborators are
-  imported at module level so tests patch them (e.g. `patch("trailhead.install.wire")`),
-  and resolvers/pipelines take injectable `env=` / `runner=` / `platform=`.
+- Code is written for testability via dependency injection: resolvers and pipelines take
+  injectable `env=` / `runner=` / `platform=` / a clock, and real collaborators are imported
+  at module level. Use the seam when the test varies the collaborator's answer (about 3,300
+  test sites pass `runner=`, `env=`, `platform=`, `clock=` or `now=`). Patch by module path
+  (`patch("trailhead.install.wire")`, `monkeypatch.setattr`, about 130 `patch` and 1,000
+  `monkeypatch.setattr` sites) only to stub an orchestrator's collaborator the test does not
+  care about, patched where the consumer looks it up. Do not patch through a module's import
+  of a stdlib module (`camp.launch.inject.time.time_ns`: measured in a container, rewriting
+  `inject.py` to `from time import time_ns` left all 41 tests in `test_inject.py` green while the
+  patch silently stopped applying, so the collision test no longer collides), or a process-wide
+  function (`subprocess.run`, which catches every caller including incidental ones;
+  `scripts/inert-test-gate` flags a new bare `subprocess.run` patch and lists the existing sites as
+  allowed; it does not match the `mod.subprocess.run` form). Add a
+  `runner=` or clock seam to the code instead. The counts above and the verdict on when
+  path-patching is right are a judgment from reading the sites, not a measured result.
 - Error hygiene, CLI-wide: a named error prints a clean `trailhead: <message>` on
   stderr and exits nonzero — never a raw traceback. Normal output goes to stdout.
   No ANSI/color.

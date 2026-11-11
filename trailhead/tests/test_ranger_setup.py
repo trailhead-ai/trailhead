@@ -247,6 +247,10 @@ def test_a_failed_write_leaves_no_partial_config(tmp_path, monkeypatch, capsys):
     def boom(*a, **k):
         raise OSError("disk full")
 
+    # Patched by path: the failure under test is the rename after the temp file
+    # was written. `write_hub_config` re-asserts 0700 on the config dir first, so
+    # a read-only directory cannot reach the write, and a non-empty directory at
+    # the target is refused earlier as "already configured".
     monkeypatch.setattr(os, "replace", boom)
     assert _setup(env, "a") != 0
     assert capsys.readouterr().err.startswith("ranger: ")

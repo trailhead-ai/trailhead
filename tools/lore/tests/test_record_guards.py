@@ -1122,29 +1122,19 @@ def test_frozen_body_refusal_withholds_the_command_for_a_hostile_id(kind, status
     assert "authored-content line" in msg
 
 
-def test_active_adr_immutable_check_allows_unchanged_body():
+@pytest.mark.parametrize(
+    ("kind", "prior_status", "prior_body", "new_body"),
+    [
+        pytest.param("adr", "active", "same body", "same body", id="allows_unchanged_body"),
+        pytest.param("adr", "draft", "old body", "new body", id="keys_on_status_not_kind_alone_draft_allows"),
+        pytest.param("spec", "active", "old body", "new body", id="ignores_non_adr_kind"),
+    ],
+)
+def test_frozen_body_check_allows(kind, prior_status, prior_body, new_body):
     g = _guards()
     msg = g.check_frozen_body(
-        kind="adr", name="foo", prior_status="active",
-        prior_body="same body", new_body="same body",
-    )
-    assert msg is None
-
-
-def test_active_adr_immutable_check_keys_on_status_not_kind_alone_draft_allows():
-    g = _guards()
-    msg = g.check_frozen_body(
-        kind="adr", name="foo", prior_status="draft",
-        prior_body="old body", new_body="new body",
-    )
-    assert msg is None
-
-
-def test_active_adr_immutable_check_ignores_non_adr_kind():
-    g = _guards()
-    msg = g.check_frozen_body(
-        kind="spec", name="foo", prior_status="active",
-        prior_body="old body", new_body="new body",
+        kind=kind, name="foo", prior_status=prior_status,
+        prior_body=prior_body, new_body=new_body,
     )
     assert msg is None
 

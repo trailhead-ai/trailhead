@@ -18,53 +18,50 @@ from trailhead.vcs.github import (
     get_commit_series,
     resolve_merge_strategy,
 )
+import pytest
 
 
-def test_parses_merged_with_no_argument():
-    assert parse_monitor_outcome("MERGED") == ("MERGED", "")
+@pytest.mark.parametrize(
+    ("line", "token", "argument"),
+    [
+        pytest.param("MERGED", "MERGED", "", id="parses_merged_with_no_argument"),
+        pytest.param(
+            "READY awaiting-human-approval",
+            "READY",
+            "awaiting-human-approval",
+            id="parses_ready_with_its_reason",
+        ),
+        pytest.param(
+            "BLOCKED 3 fix cycles without progress",
+            "BLOCKED",
+            "3 fix cycles without progress",
+            id="parses_blocked_with_its_reason",
+        ),
+        pytest.param(
+            "STOPPED auto_merge disabled",
+            "STOPPED",
+            "auto_merge disabled",
+            id="parses_stopped_with_its_reason",
+        ),
+        pytest.param("MERGED\nextra junk after the first line", "MERGED", "", id="only_the_first_line_is_parsed"),
+    ],
+)
+def test_parses_token_and_argument(line, token, argument):
+    assert parse_monitor_outcome(line) == (token, argument)
 
 
-def test_parses_ready_with_its_reason():
-    assert parse_monitor_outcome("READY awaiting-human-approval") == (
-        "READY",
-        "awaiting-human-approval",
-    )
-
-
-def test_parses_blocked_with_its_reason():
-    assert parse_monitor_outcome("BLOCKED 3 fix cycles without progress") == (
-        "BLOCKED",
-        "3 fix cycles without progress",
-    )
-
-
-def test_parses_stopped_with_its_reason():
-    assert parse_monitor_outcome("STOPPED auto_merge disabled") == (
-        "STOPPED",
-        "auto_merge disabled",
-    )
-
-
-def test_unrecognized_token_is_refused():
-    token, argument = parse_monitor_outcome("FOO bar")
+@pytest.mark.parametrize(
+    ("line", "argument"),
+    [
+        pytest.param("FOO bar", "FOO bar", id="unrecognized_token"),
+        pytest.param("READY", "READY", id="argument_requiring_token_missing_its_argument"),
+        pytest.param("", "", id="empty_line"),
+    ],
+)
+def test_unparseable_line_is_refused(line, argument):
+    token, parsed_argument = parse_monitor_outcome(line)
     assert token is None
-    assert argument == "FOO bar"
-
-
-def test_argument_requiring_token_missing_its_argument_is_refused():
-    token, argument = parse_monitor_outcome("READY")
-    assert token is None
-    assert argument == "READY"
-
-
-def test_only_the_first_line_is_parsed():
-    assert parse_monitor_outcome("MERGED\nextra junk after the first line") == ("MERGED", "")
-
-
-def test_empty_line_is_refused():
-    token, argument = parse_monitor_outcome("")
-    assert token is None
-    assert argument == ""
+    assert parsed_argument == argument
 
 
 def test_read_missing_file_synthesizes_a_failure(tmp_path):

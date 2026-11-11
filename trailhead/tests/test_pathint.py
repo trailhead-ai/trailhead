@@ -96,22 +96,18 @@ class TestCreateShims:
         assert (res.shim_dir / "camp").exists()
         assert not (res.shim_dir / "lore").exists()
 
-    def test_rejects_unsafe_trailhead_root(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("root", "shim", "bin_path"),
+        [
+            pytest.param('/repo"; evil', "camp", "/repo/bin/camp", id="trailhead_root"),
+            pytest.param("/repo", "camp", '/repo/bin/camp"; evil', id="bin_path"),
+            pytest.param("/repo", 'camp"; evil', "/repo/bin/camp", id="shim_name"),
+        ],
+    )
+    def test_rejects_unsafe_shim_input(self, tmp_path, root, shim, bin_path):
         with pytest.raises(PathIntegrationError):
             create_shims(
-                {"camp": Path("/repo/bin/camp")}, '/repo"; evil', env=_env(tmp_path)
-            )
-
-    def test_rejects_unsafe_bin_path(self, tmp_path):
-        with pytest.raises(PathIntegrationError):
-            create_shims(
-                {"camp": Path('/repo/bin/camp"; evil')}, "/repo", env=_env(tmp_path)
-            )
-
-    def test_rejects_unsafe_shim_name(self, tmp_path):
-        with pytest.raises(PathIntegrationError):
-            create_shims(
-                {'camp"; evil': Path("/repo/bin/camp")}, "/repo", env=_env(tmp_path)
+                {shim: Path(bin_path)}, root, env=_env(tmp_path)
             )
 
 
@@ -291,12 +287,16 @@ class TestCampWrapperPosix:
     def out(self, request, tmp_path):
         return shellenv_lines(shell=request.param, env=_env(tmp_path), trailhead_root="/repo")
 
-    def test_defines_a_camp_function(self, out):
-        assert "camp() {" in out
-
-    def test_uses_command_camp_to_avoid_path_recursion(self, out):
-        # Both the capture (new) and the passthrough branch must call `command camp`.
-        assert 'command camp "$@"' in out
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            pytest.param("camp() {", id="defines_a_camp_function"),
+            pytest.param('command camp "$@"', id="uses_command_camp_to_avoid_path_recursion"),
+            pytest.param('cd -- "$p"', id="cd_is_quote_safe"),
+        ],
+    )
+    def test_camp_function_text_contains(self, out, snippet):
+        assert snippet in out
 
     def test_cds_only_on_the_intercepted_verbs(self, out):
         # remove/rm (both spellings — aliasing happens inside the CLI, the
@@ -307,9 +307,6 @@ class TestCampWrapperPosix:
         assert "remove|rm)" in out
         # The one intercepted branch cds; the passthrough does not.
         assert out.count("cd -- ") == 1
-
-    def test_cd_is_quote_safe(self, out):
-        assert 'cd -- "$p"' in out
 
     def test_new_is_plain_passthrough_with_no_marker(self, out):
         # `camp new` must run with no `$( … )` capture and no `cd` — it falls

@@ -270,6 +270,7 @@ class TestInstallTool:
         for call_args in calls_seen:
             assert isinstance(call_args, list)
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_never_invokes_real_cli(self, composed_root):
         with patch("subprocess.run") as mock_run:
             _harness().install_tool("lore", composed_root, runner=lambda args, **kw: None)
@@ -369,6 +370,7 @@ class TestRewireTool:
         for call_args in calls_seen:
             assert call_args[call_args.index("--scope") + 1] == "user"
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_never_invokes_real_subprocess(self, composed_root):
         with patch("subprocess.run") as mock_run:
             _harness().rewire_tool("lore", composed_root, runner=lambda args, **kw: None)

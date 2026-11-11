@@ -250,17 +250,17 @@ class TestCraftSubsetWiring:
             runner=_noop_runner,
         )
 
-    def test_standard_lore_dest_exists(self, tmp_path):
+    @pytest.mark.parametrize(
+        "tool",
+        [
+            pytest.param("lore", id="lore"),
+            pytest.param("camp", id="camp"),
+            pytest.param("craft", id="craft"),
+        ],
+    )
+    def test_standard_dest_exists(self, tmp_path, tool):
         self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "lore").exists()
-
-    def test_standard_camp_dest_exists(self, tmp_path):
-        self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "camp").exists()
-
-    def test_standard_craft_dest_exists(self, tmp_path):
-        self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "craft").exists()
+        assert _live_dest(tmp_path, tool).exists()
 
     def test_unselected_council_agents_absent(self, tmp_path):
         """The council four are absent when craft is wired with a subset that excludes them.
@@ -592,6 +592,8 @@ class TestAtomicPromote:
                 raise OSError("simulated failure promoting the staged tree into place")
             return real_rename(src, dst, *args, **kwargs)
 
+        # Patched by path: only the first rename into the live dir may fail, so the
+        # recovery rename can succeed; a permission change would fail both.
         with patch("os.rename", side_effect=_boom_when_promoting_into_live_dest):
             with pytest.raises(Exception):  # WireError wrapping OSError
                 wire(
@@ -700,6 +702,7 @@ class TestRegistrySequencing:
             f"unexpected per-tool marketplace ref in install: {installs}"
         )
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_runner_never_invokes_real_subprocess(self, tmp_path):
         """wire with a stub runner must not touch subprocess.run."""
         from trailhead.wire import wire

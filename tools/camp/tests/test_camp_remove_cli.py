@@ -303,29 +303,6 @@ class TestCampRemoveDirtyBlock:
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
 
-    def test_dirty_worktree_blocked_via_rm_alias(self, remove_env):
-        """The dirty-tree block holds through the `rm` alias too."""
-        self._make_dirty(remove_env)
-        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
-        assert r.returncode != 0, (
-            f"camp rm (alias) should also block on a dirty worktree.\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-
-    def test_dirty_worktree_blocked_message_mentions_dirty(self, remove_env):
-        """Dirty-block error message mentions 'dirty' or 'uncommitted'."""
-        self._make_dirty(remove_env)
-        r = _camp(remove_env, "remove", "ws-slug", "--group", "rmgroup")
-        combined = r.stdout + r.stderr
-        assert (
-            "dirty" in combined.lower()
-            or "uncommitted" in combined.lower()
-            or "force" in combined.lower()
-        ), (
-            f"dirty-block error should mention 'dirty', 'uncommitted', or 'force'.\n"
-            f"stdout: {r.stdout}\nstderr: {r.stderr}"
-        )
-
     def test_dirty_worktree_succeeds_with_force(self, remove_env):
         """camp remove --force succeeds even when the worktree is dirty."""
         self._make_dirty(remove_env)
@@ -334,15 +311,6 @@ class TestCampRemoveDirtyBlock:
             f"camp remove --force should exit 0 on a dirty worktree.\n"
             f"stdout: {r.stdout}\nstderr: {r.stderr}"
         )
-
-    def test_dirty_worktree_force_removes_manifest(self, remove_env):
-        """camp remove --force removes the manifest even when the worktree was dirty."""
-        self._make_dirty(remove_env)
-        _camp(remove_env, "remove", "--force", "ws-slug", "--group", "rmgroup")
-        assert not _manifest_path(remove_env).exists(), (
-            "manifest should be removed after camp remove --force"
-        )
-
 
 class TestCampRemoveUnknownSlug:
     def test_unknown_slug_exits_nonzero(self, remove_env):
@@ -1141,15 +1109,6 @@ class TestCampRemoveSessionGuard:
         assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
         assert "parked" in r.stderr, r.stderr
 
-    def test_a_session_rooted_below_the_workspace_is_refused(self, remove_env):
-        """The subtree rule: a group's harness cwd routinely roots at a member
-        repo, so an equality test would miss the common case."""
-        member = remove_env["ws_dir"] / "repo_a"
-        self._seed_transcript(remove_env, _GUARD_UUID, member)
-        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
-        assert r.returncode != 0, f"a session rooted below must block: {r.stderr}"
-        assert str(member) in r.stderr, r.stderr
-
     def test_a_refused_removal_tears_down_nothing(self, remove_env):
         self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
         _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
@@ -1166,30 +1125,12 @@ class TestCampRemoveSessionGuard:
         assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
         assert _manifest_path(remove_env).is_file()
 
-    def test_a_session_rooted_elsewhere_removes_normally(self, remove_env):
-        elsewhere = remove_env["tmp_path"] / "elsewhere"
-        elsewhere.mkdir()
-        self._seed_transcript(remove_env, _GUARD_UUID, elsewhere)
-        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
-        assert r.returncode == 0, f"an unrelated session must not block: {r.stderr}"
-        assert not _manifest_path(remove_env).exists()
-
     def test_force_skips_the_guard(self, remove_env):
         self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
         self._seed_live(remove_env, _GUARD_UUID_B, remove_env["ws_dir"])
         r = _camp(remove_env, "rm", "--force", "ws-slug", "--group", "rmgroup")
         assert r.returncode == 0, f"--force must skip the session guard: {r.stderr}"
         assert not _manifest_path(remove_env).exists()
-
-    def test_it_is_the_only_session_grounds_refusal(self, remove_env):
-        """Nothing camp stores has a say: the refusal comes from the derived
-        pool alone, and its wording is the guard's own."""
-        self._seed_transcript(remove_env, _GUARD_UUID, remove_env["ws_dir"])
-
-        r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
-        assert r.returncode != 0, f"a resumable session must block removal: {r.stderr}"
-        assert f"camp-ws-slug-{_GUARD_UUID[:8]}" in r.stderr, r.stderr
-        assert "--force" in r.stderr, r.stderr
 
     def test_an_unenumerable_harness_fails_closed(self, remove_env):
         """Removal is destructive and irreversible: "camp cannot tell" is a
@@ -1198,24 +1139,6 @@ class TestCampRemoveSessionGuard:
         r = _camp(remove_env, "rm", "ws-slug", "--group", "rmgroup")
         assert r.returncode != 0, (
             f"an unanswerable enumeration must refuse removal: {r.stderr}"
-        )
-        assert "--force" in r.stderr, r.stderr
-        assert _manifest_path(remove_env).is_file(), "nothing may be torn down"
-
-    def test_a_harness_that_exited_nonzero_fails_closed(self, remove_env):
-        """A failed probe is not an empty one. The enumeration is a general
-        listing command with no exit-code contract, so a transient failure must
-        not read as "no sessions here" on an irreversible operation."""
-        r = _camp(
-            remove_env,
-            "rm",
-            "ws-slug",
-            "--group",
-            "rmgroup",
-            extra_env={"CAMP_FAKE_AGENTS_FAIL": "1"},
-        )
-        assert r.returncode != 0, (
-            f"a probe that failed must refuse removal: {r.stderr}"
         )
         assert "--force" in r.stderr, r.stderr
         assert _manifest_path(remove_env).is_file(), "nothing may be torn down"

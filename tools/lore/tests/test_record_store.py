@@ -455,6 +455,8 @@ def test_write_temp_then_rename_no_partial_on_crash(rs, tmp_path, monkeypatch):
     def _crash_replace(*a, **k):
         raise RuntimeError("crash before rename completes")
 
+    # Patched by path: a crash between the temp write and the rename is a moment in
+    # time, not a filesystem state, so no directory permission or layout reproduces it.
     monkeypatch.setattr(os, "replace", _crash_replace)
 
     with pytest.raises(RuntimeError):
@@ -558,6 +560,8 @@ def test_move_record_interrupted_keeps_old_intact(rs, conn, tmp_path, monkeypatc
             raise RuntimeError("crash during delete-old")
         return real_unlink(self, *a, **k)
 
+    # Patched by path: the crash is between the copy-new and delete-old phases; the
+    # old artifact is deletable on disk, so only an injected failure stops that one call.
     monkeypatch.setattr(Path, "unlink", _crash_unlink)
 
     with pytest.raises(RuntimeError):

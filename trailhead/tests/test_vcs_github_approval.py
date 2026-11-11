@@ -139,13 +139,39 @@ class TestApprovalReviewRecency:
     merge gate opens on an approval its author has already taken back.
     """
 
-    def test_later_changes_requested_supersedes_an_earlier_approval(self) -> None:
+    @pytest.mark.parametrize(
+        ("first_state", "first_at", "second_state", "second_at"),
+        [
+            pytest.param(
+                "APPROVED",
+                "2026-08-01T00:00:00Z",
+                "CHANGES_REQUESTED",
+                "2026-08-02T00:00:00Z",
+                id="later_changes_requested_supersedes_an_earlier_approval",
+            ),
+            pytest.param(
+                "APPROVED",
+                "2026-08-01T00:00:00Z",
+                "DISMISSED",
+                "2026-08-02T00:00:00Z",
+                id="a_dismissed_approval_no_longer_counts",
+            ),
+            pytest.param(
+                "CHANGES_REQUESTED",
+                "2026-08-02T00:00:00Z",
+                "APPROVED",
+                "2026-08-01T00:00:00Z",
+                id="out_of_order_reviews_are_sorted_by_submitted_at",
+            ),
+        ],
+    )
+    def test_review_sequence_decides_approval(self, first_state, first_at, second_state, second_at) -> None:
         provider = get_provider(
             "github",
             runner=_make_stub(
                 reviews=[
-                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
-                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-02T00:00:00Z"),
+                    _review("tom", "User", first_state, first_at),
+                    _review("tom", "User", second_state, second_at),
                 ],
                 timeline=[],
             ),
@@ -166,20 +192,6 @@ class TestApprovalReviewRecency:
         result = provider.pr.approval("some/path", "42")
         assert result["approved"] is True
         assert result["actor"] == "tom"
-
-    def test_a_dismissed_approval_no_longer_counts(self) -> None:
-        provider = get_provider(
-            "github",
-            runner=_make_stub(
-                reviews=[
-                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
-                    _review("tom", "User", "DISMISSED", "2026-08-02T00:00:00Z"),
-                ],
-                timeline=[],
-            ),
-        )
-        result = provider.pr.approval("some/path", "42")
-        assert result["approved"] is False
 
     def test_another_reviewers_standing_approval_still_counts(self) -> None:
         provider = get_provider(
@@ -210,20 +222,6 @@ class TestApprovalReviewRecency:
         )
         result = provider.pr.approval("some/path", "42")
         assert result["approved"] is True
-
-    def test_out_of_order_reviews_are_sorted_by_submitted_at(self) -> None:
-        provider = get_provider(
-            "github",
-            runner=_make_stub(
-                reviews=[
-                    _review("tom", "User", "CHANGES_REQUESTED", "2026-08-02T00:00:00Z"),
-                    _review("tom", "User", "APPROVED", "2026-08-01T00:00:00Z"),
-                ],
-                timeline=[],
-            ),
-        )
-        result = provider.pr.approval("some/path", "42")
-        assert result["approved"] is False
 
 
 class TestApprovalLabelPath:

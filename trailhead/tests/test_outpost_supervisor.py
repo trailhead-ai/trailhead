@@ -620,6 +620,7 @@ def test_enable_linux_over_already_registered_running_daemon_stops_before_enable
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_default_runner_invokes_subprocess_run_with_list_argv_captured_text(monkeypatch):
     recorded = {}
 

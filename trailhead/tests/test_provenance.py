@@ -192,21 +192,28 @@ class TestRedactCredentials:
         assert "s3cr3t" not in out
         assert "alice" not in out
 
-    def test_redacts_https_bare_token_form(self):
-        """https://<token>@host/... — no colon, the common PAT-as-userinfo form."""
-        out = redact_credentials("https://ghp_supersecrettoken@example.com/repo.git")
-        assert "ghp_supersecrettoken" not in out
-        assert "example.com/repo.git" in out
-
-    def test_redacts_ssh_scheme_url_form(self):
-        out = redact_credentials("ssh://git@example.com/org/repo.git")
-        assert "git@" not in out
-        assert "example.com/org/repo.git" in out
-
-    def test_redacts_ssh_user_host_form(self):
-        out = redact_credentials("git@github.com:org/repo.git")
-        assert "git@" not in out
-        assert "github.com:org/repo.git" in out
+    @pytest.mark.parametrize(
+        ("url", "secret", "kept"),
+        [
+            pytest.param(
+                "https://ghp_supersecrettoken@example.com/repo.git",
+                "ghp_supersecrettoken",
+                "example.com/repo.git",
+                id="https_bare_token",
+            ),
+            pytest.param(
+                "ssh://git@example.com/org/repo.git",
+                "git@",
+                "example.com/org/repo.git",
+                id="ssh_scheme_url",
+            ),
+            pytest.param("git@github.com:org/repo.git", "git@", "github.com:org/repo.git", id="ssh_user_host"),
+        ],
+    )
+    def test_redacts_credential_form(self, url, secret, kept):
+        out = redact_credentials(url)
+        assert secret not in out
+        assert kept in out
 
     def test_leaves_credential_free_text_unchanged(self):
         text = "fetch failed: connection timed out after 10s"

@@ -7,6 +7,8 @@ import pytest
 
 from trailhead import doctor
 
+from ._git_support import hermetic_git_env  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _redirect_claude_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

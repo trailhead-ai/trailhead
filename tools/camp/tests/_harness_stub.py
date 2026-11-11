@@ -18,16 +18,11 @@ import os
 from pathlib import Path
 
 #: A `claude` stand-in. The only subcommand camp reaches for on this surface is
-#: the live-session enumeration, whose answer each test writes into a file; the
-#: failure branch exists so a test can pin what camp does when the probe fails
-#: rather than returns an empty list.
+#: the live-session enumeration, whose answer each test writes into a file.
 CLAUDE_STUB = """#!/usr/bin/env python3
 import os, sys
 
 if sys.argv[1:3] == ["agents", "--json"]:
-    if os.environ.get("CAMP_FAKE_AGENTS_FAIL"):
-        sys.stderr.write("claude: not logged in")
-        sys.exit(1)
     path = os.environ.get("CAMP_FAKE_AGENTS_FILE")
     sys.stdout.write(open(path).read() if path else "[]")
     sys.exit(0)

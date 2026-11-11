@@ -115,30 +115,18 @@ def test_self_name_outside_strict_charset_raises(tmp_path: Path, bad_name: str) 
         self_host_name(env=_env(tmp_path))
 
 
-def test_self_name_with_trailing_newline_raises(tmp_path: Path) -> None:
-    """Separate from the embedded-newline case: this is the specific bypass
-    \\Z anchoring (rather than $) exists to defeat."""
+@pytest.mark.parametrize(
+    "toml",
+    [
+        pytest.param('self_name = "andromeda\\n"\n', id="with_trailing_newline"),
+        pytest.param("self_name = 42\n", id="non_string_integer"),
+        pytest.param("[self_name]\nx = 1\n", id="non_string_table"),
+    ],
+)
+def test_malformed_self_name_raises(tmp_path: Path, toml) -> None:
     from camp.host.config import HostConfigError, self_host_name
 
-    _write_hosts_toml(tmp_path, 'self_name = "andromeda\\n"\n')
-
-    with pytest.raises(HostConfigError):
-        self_host_name(env=_env(tmp_path))
-
-
-def test_self_name_non_string_integer_raises(tmp_path: Path) -> None:
-    from camp.host.config import HostConfigError, self_host_name
-
-    _write_hosts_toml(tmp_path, "self_name = 42\n")
-
-    with pytest.raises(HostConfigError):
-        self_host_name(env=_env(tmp_path))
-
-
-def test_self_name_non_string_table_raises(tmp_path: Path) -> None:
-    from camp.host.config import HostConfigError, self_host_name
-
-    _write_hosts_toml(tmp_path, "[self_name]\nx = 1\n")
+    _write_hosts_toml(tmp_path, toml)
 
     with pytest.raises(HostConfigError):
         self_host_name(env=_env(tmp_path))
@@ -197,23 +185,15 @@ def test_deeply_nested_inline_tables_raise_host_config_error_not_recursion_error
         sys.setrecursionlimit(original_limit)
 
 
-def test_hosts_toml_unreadable_raises_host_config_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+def test_hosts_toml_unreadable_raises_host_config_error(tmp_path: Path) -> None:
     """A hosts.toml that cannot be opened (e.g. mode-000, root-owned) must not
     escape as a raw PermissionError."""
     from camp.host.config import HostConfigError, self_host_name
 
     _write_hosts_toml(tmp_path, 'self_name = "andromeda"\n')
-
-    real_read_text = Path.read_text
-
-    def fake_read_text(self: Path, *args, **kwargs):
-        if self.name == "hosts.toml":
-            raise PermissionError(13, "Permission denied")
-        return real_read_text(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "read_text", fake_read_text)
+    hosts = next(tmp_path.rglob("hosts.toml"))
+    hosts.chmod(0o000)
 
     with pytest.raises(HostConfigError):
         self_host_name(env=_env(tmp_path))

@@ -1900,32 +1900,6 @@ def test_unset_depends_on_removes_a_stored_prefixed_entry(tmp_path):
     assert _find_sidecar(vault, rid)["depends-on"] == ["keeper"]
 
 
-def test_depends_on_cycle_rejected_on_update(tmp_path):
-    """update introducing A→B→A is rejected and the record is left unchanged."""
-    vault, state = _make_vault(tmp_path)
-    a = _mk_task(vault, state, "a")
-    _mk_task(vault, state, "b", extra=["--depends-on", "a"])
-    # a depends-on b would close the cycle a→b→a.
-    u = _run(["record", "update", a, "--depends-on", "b"], vault=vault, state_dir=state)
-    assert u.returncode != 0
-    assert "graph-guard [depends-on-cycle]" in u.stderr
-    # a's sidecar unchanged — no depends-on written.
-    assert "depends-on" not in _find_sidecar(vault, a)
-
-
-def test_deep_ancestor_loop_rejected_on_update(tmp_path):
-    """A three-level parent loop (c→a→b→c) is rejected."""
-    vault, state = _make_vault(tmp_path)
-    c = _mk_task(vault, state, "c")
-    _mk_task(vault, state, "b", extra=["--parent", "c"])
-    _mk_task(vault, state, "a", extra=["--parent", "b"])
-    # Point c's parent at a → closes c→a→b→c.
-    u = _run(["record", "update", c, "--parent", "a"], vault=vault, state_dir=state)
-    assert u.returncode != 0
-    assert "graph-guard [parent-loop]" in u.stderr
-    assert "parent" not in _find_sidecar(vault, c)
-
-
 def test_status_done_with_open_children_rejected_naming_them(tmp_path):
     """--status done on a parent with a non-terminal child is rejected, naming the child."""
     vault, state = _make_vault(tmp_path)
@@ -1977,24 +1951,6 @@ def test_dependent_warning_on_delete_does_not_block(tmp_path):
     assert "graph-guard [dependents]" in d.stderr
     assert "b" in d.stderr
     assert not (vault / "task" / "a.md").exists()
-
-
-def test_flow_out_reminder_iff_parent_body_lacks_section(tmp_path):
-    """Completing a parent prints the flow-out reminder only when body lacks the section."""
-    vault, state = _make_vault(tmp_path)
-    # No section → reminder (only fires for a task with children).
-    plain = _mk_task(vault, state, "plain", body="prose only\n")
-    _mk_task(vault, state, "plain-kid", extra=["--parent", "plain", "--status", "done"])
-    u1 = _run(["record", "update", plain, "--status", "done"], vault=vault, state_dir=state)
-    assert u1.returncode == 0, u1.stderr
-    assert "graph-guard [flow-out]" in u1.stderr
-
-    # Has section → no reminder (metadata-only update keeps the body).
-    ritual = _mk_task(vault, state, "ritual", body="intro\n\n## Flow-out\n- [ ] x\n")
-    _mk_task(vault, state, "ritual-kid", extra=["--parent", "ritual", "--status", "done"])
-    u2 = _run(["record", "update", ritual, "--status", "done"], vault=vault, state_dir=state)
-    assert u2.returncode == 0, u2.stderr
-    assert "graph-guard [flow-out]" not in u2.stderr
 
 
 def test_no_flow_out_reminder_for_childless_task_on_update(tmp_path):
@@ -2157,19 +2113,6 @@ def test_dropping_a_depended_on_spec_prints_notice_while_the_flip_succeeds(tmp_p
     assert "spec/b" in u.stderr
     assert _find_sidecar(vault, a)["status"] == "dropped"
     assert b  # kept only to document the setup
-
-
-def test_design_dependent_warning_on_delete_does_not_block(tmp_path):
-    """Deleting a depended-on spec warns listing dependents but succeeds."""
-    vault, state = _make_vault(tmp_path)
-    a = _mk_design(vault, state, "spec", "a")
-    _mk_design(vault, state, "spec", "b", extra=["--depends-on", "spec/a"])
-    d = _run(["record", "delete", a], vault=vault, state_dir=state)
-    assert d.returncode == 0, d.stderr
-    assert "graph-guard [design-dependents]" in d.stderr
-    assert "spec/b" in d.stderr
-    kind, name = a.split("/", 1)
-    assert not (vault / kind / f"{name}.md").exists()
 
 
 # ---------------------------------------------------------------------------

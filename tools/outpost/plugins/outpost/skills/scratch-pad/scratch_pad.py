@@ -505,6 +505,8 @@ def _stream_publisher(
     """Run the publisher with stdout passed through as written and each non-blank stderr line shown as it arrives.
 
     Lines are shown in the ``scratch-pad: publish:`` relay form, escaped; nothing is held back for the exit.
+    When the drain runs out the relay is closed before its lock is taken, so a descendant still flooding the pipe
+    can delay the return by at most the one line being relayed.
     No timer unless given. Once the publisher has exited, the rest of its stderr is waited for only briefly: a
     descendant that inherited the pipe and outlives it does not hold the call open, and the daemon reader is left
     to end with the pipe.
@@ -535,8 +537,9 @@ def _stream_publisher(
         reader.join(drain)
         cut_short = reader.is_alive()
         if cut_short:
+            closed.set()
             with relaying:
-                closed.set()
+                pass
         else:
             proc.stderr.close()
     result = _Streamed(list(cmd), returncode, None, "")

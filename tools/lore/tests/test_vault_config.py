@@ -207,13 +207,22 @@ def test_zero_default_vaults_raises(tmp_path, monkeypatch):
         cfg.load_config(config_path)
 
 
-def test_two_default_vaults_raises(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    ("name", "scope"),
+    [
+        pytest.param("default2", "default", id="two_default_vaults"),
+        pytest.param("my-vault", "workspace", id="bad_scope_value"),
+        pytest.param("", "team", id="empty_name_after_normalization"),
+        pytest.param("..", "team", id="dotdot_name"),
+    ],
+)
+def test_invalid_vault_entry_raises(tmp_path, monkeypatch, name, scope):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
     data = {
         "vaults": [
             {"name": "default", "scope": "default"},
-            {"name": "default2", "scope": "default"},
+            {"name": name, "scope": scope},
         ]
     }
     config_path = _write_config(tmp_path, data)
@@ -271,20 +280,6 @@ def test_duplicate_name_after_normalization_raises(tmp_path, monkeypatch):
         cfg.load_config(config_path)
 
 
-def test_bad_scope_value_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    cfg = vc()
-    data = {
-        "vaults": [
-            {"name": "default", "scope": "default"},
-            {"name": "my-vault", "scope": "workspace"},  # invalid scope
-        ]
-    }
-    config_path = _write_config(tmp_path, data)
-    with pytest.raises(cfg.VaultConfigError):
-        cfg.load_config(config_path)
-
-
 def test_records_entry_not_in_kinds_raises(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     cfg = vc()
@@ -292,34 +287,6 @@ def test_records_entry_not_in_kinds_raises(tmp_path, monkeypatch):
         "vaults": [
             {"name": "default", "scope": "default"},
             {"name": "my-vault", "scope": "team", "records": ["nosuchkind"]},
-        ]
-    }
-    config_path = _write_config(tmp_path, data)
-    with pytest.raises(cfg.VaultConfigError):
-        cfg.load_config(config_path)
-
-
-def test_empty_name_after_normalization_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    cfg = vc()
-    data = {
-        "vaults": [
-            {"name": "default", "scope": "default"},
-            {"name": "", "scope": "team"},
-        ]
-    }
-    config_path = _write_config(tmp_path, data)
-    with pytest.raises(cfg.VaultConfigError):
-        cfg.load_config(config_path)
-
-
-def test_dotdot_name_raises(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    cfg = vc()
-    data = {
-        "vaults": [
-            {"name": "default", "scope": "default"},
-            {"name": "..", "scope": "team"},
         ]
     }
     config_path = _write_config(tmp_path, data)

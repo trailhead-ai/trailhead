@@ -34,13 +34,14 @@ _CAPABILITIES_TOML = _TOOL_DIR / "capabilities.toml"
 # ---------------------------------------------------------------------------
 
 
-def test_camp_help_exits_0() -> None:
+@pytest.mark.parametrize("flag", ["--help", "--version", "--which"])
+def test_camp_meta_flag_exits_0(flag) -> None:
     result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "--help"],
+        [sys.executable, str(_CLI_CAMP), flag],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, f"--help exited {result.returncode}\nstderr: {result.stderr}"
+    assert result.returncode == 0, f"{flag} exited {result.returncode}\nstderr: {result.stderr}"
 
 
 def test_camp_help_prints_grouped_menu() -> None:
@@ -61,15 +62,6 @@ def test_camp_help_prints_grouped_menu() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_camp_version_exits_0() -> None:
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "--version"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"--version exited {result.returncode}\n{result.stderr}"
-
-
 def test_camp_version_includes_binary_path() -> None:
     result = subprocess.run(
         [sys.executable, str(_CLI_CAMP), "--version"],
@@ -84,15 +76,6 @@ def test_camp_version_includes_binary_path() -> None:
 # ---------------------------------------------------------------------------
 # camp --which
 # ---------------------------------------------------------------------------
-
-
-def test_camp_which_exits_0() -> None:
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "--which"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"--which exited {result.returncode}\n{result.stderr}"
 
 
 def test_camp_which_prints_path() -> None:
@@ -803,22 +786,6 @@ def test_atomicity_roundtrip_gate_failure_unlinks_tmp(author_env):
 
 def test_group_help_documents_flags() -> None:
     """`camp group --help` documents --member / --scaffold / --force modes."""
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "group", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    out = result.stdout + result.stderr
-    for token in ("--member", "--scaffold", "--force"):
-        assert token in out, f"expected {token!r} in group --help:\n{out}"
-
-
-def test_init_help_documents_new_flags() -> None:
-    """`camp group --help` documents --member / --scaffold / --force modes.
-
-    Legacy name kept for backward-compat; routes to group --help.
-    """
     result = subprocess.run(
         [sys.executable, str(_CLI_CAMP), "group", "--help"],
         capture_output=True,

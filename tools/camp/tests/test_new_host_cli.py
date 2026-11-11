@@ -170,12 +170,18 @@ def test_dry_run_unset_forwards_no_dry_run(env: Env, monkeypatch) -> None:
     assert _remote_tail(env) == "camp new ws1 --group g"
 
 
-def test_env_dry_run_appends_the_flag_after_slug_and_group(
-    env: Env, monkeypatch
-) -> None:
-    monkeypatch.setenv("CAMP_DRY_RUN", "1")
+@pytest.mark.parametrize(
+    ("dry_run", "expected_tail"),
+    [
+        pytest.param("1", "camp new ws1 --group g --dry-run", id="env_dry_run_appends_the_flag_after_slug_and_group"),
+        pytest.param("", "camp new ws1 --group g", id="empty_env_dry_run_is_absent"),
+        pytest.param("0", "camp new ws1 --group g --dry-run", id="env_dry_run_zero_is_present_like_local_camp"),
+    ],
+)
+def test_env_dry_run_decides_the_remote_flag(env: Env, monkeypatch, dry_run, expected_tail) -> None:
+    monkeypatch.setenv("CAMP_DRY_RUN", dry_run)
     _run(["new", "ws1", "--host", "andromeda", "--group", "g"], monkeypatch)
-    assert _remote_tail(env) == "camp new ws1 --group g --dry-run"
+    assert _remote_tail(env) == expected_tail
 
 
 def test_explicit_dry_run_flag_forwards_it_once(env: Env, monkeypatch) -> None:
@@ -187,18 +193,6 @@ def test_env_and_flag_together_still_forward_it_once(env: Env, monkeypatch) -> N
     monkeypatch.setenv("CAMP_DRY_RUN", "1")
     _run(["new", "ws1", "--host", "andromeda", "--group", "g", "--dry-run"], monkeypatch)
     assert _remote_tail(env).count("--dry-run") == 1
-
-
-def test_empty_env_dry_run_is_absent(env: Env, monkeypatch) -> None:
-    monkeypatch.setenv("CAMP_DRY_RUN", "")
-    _run(["new", "ws1", "--host", "andromeda", "--group", "g"], monkeypatch)
-    assert _remote_tail(env) == "camp new ws1 --group g"
-
-
-def test_env_dry_run_zero_is_present_like_local_camp(env: Env, monkeypatch) -> None:
-    monkeypatch.setenv("CAMP_DRY_RUN", "0")
-    _run(["new", "ws1", "--host", "andromeda", "--group", "g"], monkeypatch)
-    assert _remote_tail(env) == "camp new ws1 --group g --dry-run"
 
 
 # AC6 -------------------------------------------------------------------
@@ -224,14 +218,29 @@ def test_no_notice_outside_a_multiplexer(env: Env, monkeypatch, capsys) -> None:
 # Refusals --------------------------------------------------------------
 
 
-def test_undeclared_host_lists_the_declared_hosts(env: Env, monkeypatch, capsys) -> None:
-    code = _run(["new", "ws1", "--host", "nope", "--group", "g"], monkeypatch)
-    _refused(env, capsys, code, "declared hosts are: andromeda")
-
-
-def test_unknown_explicit_group_refuses(env: Env, monkeypatch, capsys) -> None:
-    code = _run(["new", "ws1", "--host", "andromeda", "--group", "zzz"], monkeypatch)
-    _refused(env, capsys, code, "group 'zzz' is not configured on this machine")
+@pytest.mark.parametrize(
+    ("message", "slug", "host", "group"),
+    [
+        pytest.param(
+            "declared hosts are: andromeda",
+            "ws1",
+            "nope",
+            "g",
+            id="undeclared_host_lists_the_declared_hosts",
+        ),
+        pytest.param(
+            "group 'zzz' is not configured on this machine",
+            "ws1",
+            "andromeda",
+            "zzz",
+            id="unknown_explicit_group_refuses",
+        ),
+        pytest.param("-x", "-x", "andromeda", "g", id="dash_leading_slug_refuses"),
+    ],
+)
+def test_refused_new_host_invocation_says_why(env: Env, monkeypatch, capsys, message, slug, host, group) -> None:
+    code = _run(["new", slug, "--host", host, "--group", group], monkeypatch)
+    _refused(env, capsys, code, message)
 
 
 def test_unclaimed_cwd_without_group_prints_the_needs_group_message(
@@ -288,11 +297,6 @@ def test_missing_empty_or_blank_slug_refuses(
         ["new", *slug_argv, "--host", "andromeda", "--group", "g"], monkeypatch
     )
     _refused(env, capsys, code, needle)
-
-
-def test_dash_leading_slug_refuses(env: Env, monkeypatch, capsys) -> None:
-    code = _run(["new", "-x", "--host", "andromeda", "--group", "g"], monkeypatch)
-    _refused(env, capsys, code, "-x")
 
 
 def test_dash_leading_slug_after_double_dash_refuses(

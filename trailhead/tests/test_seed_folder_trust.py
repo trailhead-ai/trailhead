@@ -67,6 +67,9 @@ def test_failed_rename_leaves_the_original_and_no_temp_file(tmp_path, monkeypatc
     def boom(src, dst):
         raise OSError("nope")
 
+    # Patched by path: the failure under test is the rename after the temp file was
+    # written while the original stays readable; no permission on the directory
+    # fails the rename but not the temp write.
     monkeypatch.setattr(os, "replace", boom)
     with pytest.raises(HarnessError, match="cannot write"):
         _seed_folder_trust(config, tmp_path / "hub")

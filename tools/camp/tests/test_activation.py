@@ -159,6 +159,7 @@ def test_activate_pending_prints_provisioning_message(tmp_path: Path) -> None:
     assert "camp status" in msg or "camp setup" in msg
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_activate_pending_does_not_run_tasks(tmp_path: Path) -> None:
     """A pending member triggers MemberNotReadyError before any task step runs."""
     from camp.provision.activation import activate_member, MemberNotReadyError
@@ -244,6 +245,7 @@ def test_activate_failed_names_failure_and_retry(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_activate_ready_does_not_run_tasks_inline(tmp_path: Path) -> None:
     """camp activate never runs activate-phase task steps inline — outstanding
     work is handed to the detached provisioner, not executed synchronously."""
@@ -392,6 +394,7 @@ def test_activate_ready_prints_fallback_when_no_claude_md(tmp_path: Path, capsys
     assert member_name in captured.out or member_name in captured.err
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_activate_ready_marks_activated_in_manifest(tmp_path: Path) -> None:
     """After activate_member succeeds, the manifest member has activated=true."""
     from camp.provision.activation import activate_member
@@ -501,6 +504,7 @@ def test_activate_missing_valid_and_corrupt_records_answer_identically(
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_records_task_state_and_work_ready(tmp_path: Path) -> None:
     """run_activate_tasks_in_background: a successful task records state 'ok'
     in the manifest tasks map, and work_state becomes 'ready'."""
@@ -545,6 +549,7 @@ def test_background_run_records_task_state_and_work_ready(tmp_path: Path) -> Non
     assert member_entry["work_state"] == "ready"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_refuses_out_of_confinement_worktree_path(tmp_path: Path) -> None:
     """FINDING 3 regression: `entry["worktree_path"]` is read straight off the
     on-disk manifest. If it resolves outside the CANONICAL workspace dir for
@@ -588,6 +593,7 @@ def test_background_run_refuses_out_of_confinement_worktree_path(tmp_path: Path)
     mock_run.assert_not_called()
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_skips_task_recorded_ok(tmp_path: Path) -> None:
     """A task whose persisted state is 'ok' is skipped on re-activation —
     the detached run reads persisted task state, not an empty completed map."""
@@ -625,6 +631,7 @@ def test_background_run_skips_task_recorded_ok(tmp_path: Path) -> None:
     mock_run.assert_not_called()
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_retries_failed_task_with_cleanup_first(tmp_path: Path) -> None:
     """One recorded 'failed' task is retried, with its cleanup command running
     first — this is the path that lets a partial `node_modules` recover."""
@@ -666,6 +673,7 @@ def test_background_run_retries_failed_task_with_cleanup_first(tmp_path: Path) -
     assert mock_run.call_args_list[1][0][0] == ["npm", "ci"]
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_honors_timeout_seconds(tmp_path: Path) -> None:
     """Activate-phase task execution honours each task's timeout_seconds."""
     from camp.provision.activation import run_activate_tasks_in_background
@@ -702,6 +710,7 @@ def test_background_run_honors_timeout_seconds(tmp_path: Path) -> None:
     assert mock_run.call_args_list[0][1]["timeout"] == 7
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_required_failure_marks_work_failed_and_skips_remaining(
     tmp_path: Path,
 ) -> None:
@@ -773,6 +782,7 @@ def _drain_notices(group_name: str, slug: str, *, env: dict[str, str]) -> str:
     return json.loads(stdout)["hookSpecificOutput"]["additionalContext"]
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_success_enqueues_exactly_one_settle_notice(tmp_path: Path) -> None:
     """A member settling (all activate-phase tasks reach a terminal 'ok' run)
     enqueues exactly one notice — individual task successes enqueue none."""
@@ -815,6 +825,7 @@ def test_background_run_success_enqueues_exactly_one_settle_notice(tmp_path: Pat
     assert len(files) == 1, f"expected exactly one queued notice, got: {files}"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_success_notice_excludes_task_stderr(tmp_path: Path) -> None:
     """The security property, tested directly: a settle notice never contains
     any task's captured stderr, even though a task ran with a recognisable
@@ -856,6 +867,7 @@ def test_background_run_success_notice_excludes_task_stderr(tmp_path: Path) -> N
     assert member_name in ctx
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_failure_enqueues_notice_immediately_without_task_output(
     tmp_path: Path,
 ) -> None:
@@ -904,6 +916,7 @@ def test_background_run_failure_enqueues_notice_immediately_without_task_output(
     assert member_name in ctx
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_background_run_notice_body_matches_the_template_shape(tmp_path: Path) -> None:
     """The enqueued notice has exactly build_notice_body's shape (a
     '# camp: <phase>-phase work for <member>' header, a 'Task:' line naming
@@ -1036,6 +1049,7 @@ def test_activate_ready_reactivate_reprints_doc(tmp_path: Path, capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_legacy_dep_install_executes_on_background_run(tmp_path: Path) -> None:
     """A legacy [[members.hooks]] dep-install block, normalized by load_group into
     an implicit required activate-phase task, still runs on the detached run."""
@@ -1101,6 +1115,7 @@ cmd = ["echo", "installing"]
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_optional_task_failure_marks_work_state_failed_and_warns(
     tmp_path: Path, capsys
 ) -> None:
@@ -1153,6 +1168,7 @@ def test_optional_task_failure_marks_work_state_failed_and_warns(
     assert "camp status" in captured.err
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_optional_task_failure_alongside_other_ok_tasks_marks_work_failed(
     tmp_path: Path,
 ) -> None:
@@ -1395,6 +1411,7 @@ def test_feedback_no_activate_task_declared(tmp_path: Path, capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_guard_released_when_holder_process_is_killed(tmp_path: Path) -> None:
     """A holder that dies without releasing leaves the guard free — the next
     activation runs the tasks rather than treating the member as already in
@@ -1557,6 +1574,9 @@ def test_guard_acquire_rechecks_inode_and_fails_safe_on_race(
 def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tuple[Path, Path]:
     """Create a real upstream repo + a linked worktree at ws_dir/member_name.
 
+    Runs git under whatever environment the caller has: tests using it request
+    the `hermetic_git_env` fixture so the commit has an identity and no signing.
+
     reconcile_break's removal path runs `git -C repo_root worktree remove
     wt_path` — repo_root and wt_path must therefore be the upstream repo and
     an actual LINKED worktree of it, not the same directory, or the remove
@@ -1569,8 +1589,6 @@ def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tupl
     subprocess.run(
         ["git", "-C", str(upstream), "commit", "-q", "--allow-empty", "-m", "init"],
         check=True,
-        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"},
     )
     wt_path = ws_dir / member_name
     ws_dir.mkdir(parents=True, exist_ok=True)
@@ -1580,7 +1598,9 @@ def _git_linked_worktree(tmp_path: Path, ws_dir: Path, member_name: str) -> tupl
     return upstream, wt_path
 
 
-def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(tmp_path: Path) -> None:
+def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(
+    tmp_path: Path, hermetic_git_env: dict[str, str]
+) -> None:
     """reconcile_break reaps a member's leaked activate-phase guard lockfile
     once the slug is fully torn down — without this, every removed workspace
     that ever ran activate-phase work leaks one lockfile per member forever."""
@@ -1628,7 +1648,9 @@ def test_reconcile_break_reaps_member_guard_lockfiles_on_full_teardown(tmp_path:
     assert not lock_path.exists(), "member guard lockfile must be reaped on full teardown"
 
 
-def test_reconcile_break_does_not_block_on_in_progress_activation(tmp_path: Path) -> None:
+def test_reconcile_break_does_not_block_on_in_progress_activation(
+    tmp_path: Path, hermetic_git_env: dict[str, str]
+) -> None:
     """camp remove does not block for an in-flight activate run's full
     duration: the guard held by a long activate-phase run must not stall
     reconcile_break's teardown critical section."""

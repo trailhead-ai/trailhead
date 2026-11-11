@@ -18,6 +18,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "reference_depth_gate.py"
@@ -112,34 +113,43 @@ class TestFinding:
 class TestRealWorldForms:
     """Each of the six real forms live prose uses for the same reference."""
 
-    def test_parent_relative_form(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = "# Title\n\nSee `../_shared/status-ownership.md` for the contract.\n"
-        assert run(doc(tmp_path, body)).returncode == 1
-
-    def test_directory_relative_form(self, tmp_path):
-        sibling(tmp_path, "slice.md")
-        body = "# Title\n\nThe shapes `_shared/slice.md` fixes.\n"
-        assert run(doc(tmp_path, body)).returncode == 1
-
-    def test_parent_relative_form_second_sibling(self, tmp_path):
-        sibling(tmp_path, "refine.md")
-        body = "# Title\n\nRun `../_shared/refine.md`'s citation-resolution gate.\n"
-        assert run(doc(tmp_path, body)).returncode == 1
-
-    def test_directory_relative_form_second_sibling(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = "# Title\n\nSee `_shared/status-ownership.md` for the full contract.\n"
-        assert run(doc(tmp_path, body)).returncode == 1
-
-    def test_directory_relative_form_third_sibling(self, tmp_path):
-        sibling(tmp_path, "council.md")
-        body = "# Title\n\nThe `_shared/council.md` precedent.\n"
-        assert run(doc(tmp_path, body)).returncode == 1
-
-    def test_bare_filename_form_no_directory_at_all(self, tmp_path):
-        sibling(tmp_path, "refine.md")
-        body = "# Title\n\nA thin wrapper over it (refine.md's shape).\n"
+    @pytest.mark.parametrize(
+        ("body", "sibling_name"),
+        [
+            pytest.param(
+                "# Title\n\nSee `../_shared/status-ownership.md` for the contract.\n",
+                "status-ownership.md",
+                id="parent_relative_form",
+            ),
+            pytest.param(
+                "# Title\n\nThe shapes `_shared/slice.md` fixes.\n",
+                "slice.md",
+                id="directory_relative_form",
+            ),
+            pytest.param(
+                "# Title\n\nRun `../_shared/refine.md`'s citation-resolution gate.\n",
+                "refine.md",
+                id="parent_relative_form_second_sibling",
+            ),
+            pytest.param(
+                "# Title\n\nSee `_shared/status-ownership.md` for the full contract.\n",
+                "status-ownership.md",
+                id="directory_relative_form_second_sibling",
+            ),
+            pytest.param(
+                "# Title\n\nThe `_shared/council.md` precedent.\n",
+                "council.md",
+                id="directory_relative_form_third_sibling",
+            ),
+            pytest.param(
+                "# Title\n\nA thin wrapper over it (refine.md's shape).\n",
+                "refine.md",
+                id="bare_filename_form_no_directory_at_all",
+            ),
+        ],
+    )
+    def test_real_world_form_is_a_finding(self, tmp_path, body, sibling_name):
+        sibling(tmp_path, sibling_name)
         assert run(doc(tmp_path, body)).returncode == 1
 
 
@@ -147,32 +157,28 @@ class TestForgedStructure:
     """A gate that derives ground truth from a document format must not be
     steerable by text that only looks like a live reference."""
 
-    def test_reference_inside_a_triple_backtick_fence_is_not_a_finding(self, tmp_path):
+    @pytest.mark.parametrize(
+        "hidden",
+        [
+            pytest.param(
+                "\n```markdown\nSee `_shared/status-ownership.md`.\n```\n",
+                id="a_triple_backtick_fence_is_not_a_finding",
+            ),
+            pytest.param(
+                "\n~~~markdown\nSee `_shared/status-ownership.md`.\n~~~\n",
+                id="a_tilde_fence_is_not_a_finding",
+            ),
+            pytest.param(
+                "\n````markdown\n```\nSee `_shared/status-ownership.md`.\n```\n````\n",
+                id="a_longer_fence_wrapping_a_shorter_one",
+            ),
+            pytest.param("\n```sh\nSee _shared/status-ownership.md\n", id="an_unterminated_fence_running_to_eof"),
+            pytest.param("\n<!-- see _shared/status-ownership.md -->\n", id="an_html_comment_is_not_a_finding"),
+        ],
+    )
+    def test_reference_hidden_from_prose_is_not_a_finding(self, tmp_path, hidden):
         sibling(tmp_path, "status-ownership.md")
-        body = BASE + "\n```markdown\nSee `_shared/status-ownership.md`.\n```\n"
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_reference_inside_a_tilde_fence_is_not_a_finding(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = BASE + "\n~~~markdown\nSee `_shared/status-ownership.md`.\n~~~\n"
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_reference_inside_a_longer_fence_wrapping_a_shorter_one(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = (
-            BASE
-            + "\n````markdown\n```\nSee `_shared/status-ownership.md`.\n```\n````\n"
-        )
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_reference_inside_an_unterminated_fence_running_to_eof(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = BASE + "\n```sh\nSee _shared/status-ownership.md\n"
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_reference_inside_an_html_comment_is_not_a_finding(self, tmp_path):
-        sibling(tmp_path, "status-ownership.md")
-        body = BASE + "\n<!-- see _shared/status-ownership.md -->\n"
+        body = BASE + hidden
         assert run(doc(tmp_path, body)).returncode == 0
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -134,27 +135,36 @@ def test_merged_path_strips_cursor_colour_and_c1_sequences(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_newline_and_tab_survive_multiline_refusal(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("stderr", "expected_notice"),
+    [
+        pytest.param(
+            "camp list: refused\n\tgroup:\tlevr\nsecond line\n",
+            "camp list: refused\n\tgroup:\tlevr\nsecond line",
+            id="newline_and_tab_survive_multiline_refusal",
+        ),
+        pytest.param(
+            "camp list: \x1b[31mgroup 'levr' does not exist on this host\x1b[0m\n",
+            "camp list: [31mgroup 'levr' does not exist on this host[0m",
+            id="remote_refusal_exact_wording_unchanged_apart_from_escapes",
+        ),
+        pytest.param(
+            "camp list: café-ソフト group not found: \x1b[31m✗\x1b[0m\n",
+            "camp list: café-ソフト group not found: [31m✗[0m",
+            id="non_ascii_content_not_mangled",
+        ),
+    ],
+)
+def test_refusal_stderr_is_relayed_as_one_notice(monkeypatch, stderr, expected_notice) -> None:
     transport = _transport_module()
-    stderr = "camp list: refused\n\tgroup:\tlevr\nsecond line\n"
     outcome = transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1)
     answer = _answer_via_host_path(monkeypatch, outcome)
-    assert answer.notices == ["camp list: refused\n\tgroup:\tlevr\nsecond line"]
+    assert answer.notices == [expected_notice]
 
 
 # ---------------------------------------------------------------------------
 # exact wording preserved — the strip must not become a reword
 # ---------------------------------------------------------------------------
-
-
-def test_remote_refusal_exact_wording_unchanged_apart_from_escapes(monkeypatch) -> None:
-    transport = _transport_module()
-    stderr = "camp list: \x1b[31mgroup 'levr' does not exist on this host\x1b[0m\n"
-    outcome = transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1)
-    answer = _answer_via_host_path(monkeypatch, outcome)
-    assert answer.notices == [
-        "camp list: [31mgroup 'levr' does not exist on this host[0m"
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -183,11 +193,3 @@ def test_bare_newline_stderr_produces_no_notice(monkeypatch) -> None:
     outcome = transport.RemoteRefusal(stdout="", stderr="\n", exit_code=1)
     answer = _answer_via_host_path(monkeypatch, outcome)
     assert answer.notices == []
-
-
-def test_non_ascii_content_not_mangled(monkeypatch) -> None:
-    transport = _transport_module()
-    stderr = "camp list: café-ソフト group not found: \x1b[31m✗\x1b[0m\n"
-    outcome = transport.RemoteRefusal(stdout="", stderr=stderr, exit_code=1)
-    answer = _answer_via_host_path(monkeypatch, outcome)
-    assert answer.notices == ["camp list: café-ソフト group not found: [31m✗[0m"]

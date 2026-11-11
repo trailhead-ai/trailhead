@@ -205,106 +205,90 @@ def _ids(rows, conn):
 class TestLockedCompileTable:
     """Each LOCKED compile-table row → expected SQL fragment + params."""
 
-    def test_kind_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("kind:spec"))
-        assert "records.kind = ?" in cq.where
-        assert "spec" in cq.params
+    @pytest.mark.parametrize(
+        ("where_fragment", "param", "query"),
+        [
+            pytest.param("records.kind = ?", "spec", "kind:spec", id="kind_scalar_field_eq"),
+            pytest.param("records.status = ?", "active", "status:active", id="status_scalar_field_eq"),
+            pytest.param(
+                "records.repo = ?",
+                "trailhead-ai/trailhead",
+                'repo:"trailhead-ai/trailhead"',
+                id="repo_scalar_field_eq",
+            ),
+            pytest.param("records.team = ?", "platform infra", 'team:"platform infra"', id="team_scalar_field_eq"),
+            pytest.param("records.product = ?", "lore", "product:lore", id="product_scalar_field_eq"),
+            pytest.param("records.suite = ?", "search", "suite:search", id="suite_scalar_field_eq"),
+            pytest.param("EXISTS", "related-area", "related-area:penny", id="related_area_real_key_passthrough"),
+            pytest.param(
+                "EXISTS",
+                "related-phases",
+                "related-phases:build",
+                id="related_phases_real_key_passthrough",
+            ),
+            pytest.param("EXISTS", "keywords", "keywords:foo", id="keywords_real_key_passthrough"),
+            pytest.param(
+                "records.created_at >= ?",
+                "2026-01-01",
+                'created-at >= "2026-01-01"',
+                id="compare_gte_created_at",
+            ),
+            pytest.param(
+                "records.updated_at <= ?",
+                "2026-06-01",
+                'updated-at <= "2026-06-01"',
+                id="compare_lte_updated_at",
+            ),
+        ],
+    )
+    def test_scalar_field_eq(self, kql, compiler, where_fragment, param, query):
+        cq = compiler.compile(kql.parse(query))
+        assert where_fragment in cq.where
+        assert param in cq.params
 
-    def test_status_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("status:active"))
-        assert "records.status = ?" in cq.where
-        assert "active" in cq.params
-
-    def test_repo_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse('repo:"trailhead-ai/trailhead"'))
-        assert "records.repo = ?" in cq.where
-        assert "trailhead-ai/trailhead" in cq.params
-
-    def test_team_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse('team:"platform infra"'))
-        assert "records.team = ?" in cq.where
-        assert "platform infra" in cq.params
-
-    def test_product_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("product:lore"))
-        assert "records.product = ?" in cq.where
-        assert "lore" in cq.params
-
-    def test_suite_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("suite:search"))
-        assert "records.suite = ?" in cq.where
-        assert "search" in cq.params
-
-    def test_area_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("area:penny"))
+    @pytest.mark.parametrize(
+        ("param_key", "param_value", "query"),
+        [
+            pytest.param("related-area", "penny", "area:penny", id="area_alias_resolves_to_facet_exists"),
+            pytest.param(
+                "related-task",
+                "my-task",
+                "related-task:my-task",
+                id="related_task_kind_field_compiles_no_sql_changes",
+            ),
+            pytest.param(
+                "supersedes",
+                "adr/foo",
+                'supersedes:"adr/foo"',
+                id="supersedes_field_compiles_no_sql_changes",
+            ),
+            pytest.param(
+                "superseded-by",
+                "adr/bar",
+                'superseded-by:"adr/bar"',
+                id="superseded_by_field_compiles_no_sql_changes",
+            ),
+        ],
+    )
+    def test_facet_query_binds_its_facet_and_value(self, kql, compiler, param_key, param_value, query):
+        cq = compiler.compile(kql.parse(query))
         assert "EXISTS" in cq.where
         assert "record_facet" in cq.where
-        assert "related-area" in cq.params
-        assert "penny" in cq.params
+        assert param_key in cq.params
+        assert param_value in cq.params
 
-    def test_phase_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("phase:build"))
+    @pytest.mark.parametrize(
+        ("query", "facet_key", "value"),
+        [
+            pytest.param("phase:build", "related-phases", "build", id="phase_alias"),
+            pytest.param("keyword:foo", "keywords", "foo", id="keyword_alias"),
+        ],
+    )
+    def test_alias_resolves_to_facet_exists(self, kql, compiler, query, facet_key, value):
+        cq = compiler.compile(kql.parse(query))
         assert "EXISTS" in cq.where
-        assert "related-phases" in cq.params
-        assert "build" in cq.params
-
-    def test_keyword_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("keyword:foo"))
-        assert "EXISTS" in cq.where
-        assert "keywords" in cq.params
-        assert "foo" in cq.params
-
-    def test_related_area_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("related-area:penny"))
-        assert "EXISTS" in cq.where
-        assert "related-area" in cq.params
-
-    def test_related_phases_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("related-phases:build"))
-        assert "EXISTS" in cq.where
-        assert "related-phases" in cq.params
-
-    def test_keywords_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("keywords:foo"))
-        assert "EXISTS" in cq.where
-        assert "keywords" in cq.params
-
-    def test_related_task_kind_field_compiles_no_sql_changes(self, kql, compiler):
-        """A kind-derived ``related-<kind>`` field compiles exactly like the
-        pre-existing ``related-area``/``related-phases`` real-key fields — the
-        facet name is bound as a plain SQL param, so the compiler needed no
-        change to support the new per-kind fields."""
-        cq = compiler.compile(kql.parse("related-task:my-task"))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "related-task" in cq.params
-        assert "my-task" in cq.params
-
-    def test_supersedes_field_compiles_no_sql_changes(self, kql, compiler):
-        """``supersedes`` compiles exactly like ``related-<kind>`` real-key
-        fields — a plain facet-name param, no compiler code required."""
-        cq = compiler.compile(kql.parse('supersedes:"adr/foo"'))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "supersedes" in cq.params
-        assert "adr/foo" in cq.params
-
-    def test_superseded_by_field_compiles_no_sql_changes(self, kql, compiler):
-        cq = compiler.compile(kql.parse('superseded-by:"adr/bar"'))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "superseded-by" in cq.params
-        assert "adr/bar" in cq.params
-
-    def test_compare_gte_created_at(self, kql, compiler):
-        cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
-        assert "records.created_at >= ?" in cq.where
-        assert "2026-01-01" in cq.params
-
-    def test_compare_lte_updated_at(self, kql, compiler):
-        cq = compiler.compile(kql.parse('updated-at <= "2026-06-01"'))
-        assert "records.updated_at <= ?" in cq.where
-        assert "2026-06-01" in cq.params
+        assert facet_key in cq.params
+        assert value in cq.params
 
     def test_compare_gt(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at > "2025-01-01"'))
@@ -464,8 +448,16 @@ class TestRankingSelection:
     the pre-computed ``rank.score``. So these assert the locked weights appear in
     the assembled query, not literally inside ``order_by``."""
 
-    def test_fulltext_query_uses_bm25_order(self, kql, compiler):
-        cq = compiler.compile(kql.parse("foo"))
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("foo", id="fulltext_query_uses_bm25_order"),
+            pytest.param('"penny worker"', id="phrase_query_uses_bm25_order"),
+            pytest.param("foo and kind:spec", id="mixed_fulltext_and_facet_uses_bm25"),
+        ],
+    )
+    def test_fulltext_query_uses_bm25_order(self, kql, compiler, query):
+        cq = compiler.compile(kql.parse(query))
         assert "rank.score" in cq.order_by
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
@@ -475,16 +467,6 @@ class TestRankingSelection:
         assert "last_referenced_at" in cq.order_by
         assert "bm25" not in cq.order_by
         assert "bm25" not in cq.full_query()
-
-    def test_phrase_query_uses_bm25_order(self, kql, compiler):
-        cq = compiler.compile(kql.parse('"penny worker"'))
-        assert "rank.score" in cq.order_by
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
-
-    def test_mixed_fulltext_and_facet_uses_bm25(self, kql, compiler):
-        cq = compiler.compile(kql.parse("foo and kind:spec"))
-        assert "rank.score" in cq.order_by
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
     def test_bm25_orders_title_hit_before_body_hit(self, kql, compiler, ranking_index):
         """A title-hit row sorts before a body-only-hit row under the bm25 ORDER BY."""
@@ -1024,22 +1006,17 @@ class TestLabelCompile:
         assert ids == [i for i in ids if i.endswith("/spec/two-labels")]
         assert any(i.endswith("/spec/two-labels") for i in ids), ids
 
-    def test_nonexistent_label_returns_none(self, kql, compiler, label_index):
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("label.worktree:nope", id="nonexistent_label_returns_none"),
+            pytest.param("has:label.bogus", id="nonexistent_label_key_exists_returns_none"),
+            pytest.param("label.note:x", id="annotations_not_queryable"),
+        ],
+    )
+    def test_nonexistent_label_matches_nothing(self, kql, compiler, label_index, query):
         conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("label.worktree:nope"))
-        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
-        assert ids == [], ids
-
-    def test_nonexistent_label_key_exists_returns_none(self, kql, compiler, label_index):
-        conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("has:label.bogus"))
-        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
-        assert ids == [], ids
-
-    def test_annotations_not_queryable(self, kql, compiler, label_index):
-        """annotations are NOT indexed: a label query on an annotation key finds nothing."""
-        conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("label.note:x"))
+        cq = compiler.compile(kql.parse(query))
         ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
         assert ids == [], ids
 

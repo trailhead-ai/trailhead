@@ -433,6 +433,7 @@ class TestAccountAuthenticationNeverBlocks:
     execution (`pytest -n auto`) for reasons that have nothing to do with
     whether this method blocks."""
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_reading_a_realistic_sized_credentials_file_never_spawns_or_dials_out(
         self, tmp_path, monkeypatch
     ):

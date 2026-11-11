@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+"""test-area-args — the pytest arguments that select one area of the default CI job, or one tier's paths.
+
+The default selection is split across parallel CI jobs by area. `[tool.trailhead.test-areas]` in
+pyproject.toml names the paths of each explicit area; the area `rest` is everything else in
+`testpaths`: the testpaths no explicit area names. A path added to `testpaths` later therefore
+lands in `rest`, so a test under it cannot fall between jobs. Prints the arguments
+space-separated, for `pytest -c pyproject.toml $(...)`.
+
+`--tier NAME` prints instead the paths the opt-in tier's CI job collects, from
+`[tool.trailhead.test-tiers]`. A test carrying the tier's marker outside those paths would run in
+no job, which `scripts/inert-test-gate` checks statically.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import tomllib
+from pathlib import Path
+
+REST = "rest"
+DEFAULT_CONFIG = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
+
+def area_args(areas: dict[str, list[str]], testpaths: list[str], area: str) -> list[str]:
+    if area == REST:
+        named = {path.rstrip("/") for paths in areas.values() for path in paths}
+        return [p for p in testpaths if p.rstrip("/") not in named]
+    if area not in areas:
+        raise KeyError(f"unknown area {area!r}; known: {', '.join([*areas, REST])}")
+    return list(areas[area])
+
+
+def tier_args(tiers: dict[str, list[str]], tier: str) -> list[str]:
+    if tier not in tiers:
+        raise KeyError(f"unknown tier {tier!r}; known: {', '.join(tiers)}")
+    return list(tiers[tier])
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="test-area-args", description=__doc__.splitlines()[0])
+    parser.add_argument("area", nargs="?")
+    parser.add_argument("--tier", help="print the paths this tier's CI job collects instead of an area's")
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG, help="pyproject.toml to read")
+    args = parser.parse_args(argv)
+    if (args.area is None) == (args.tier is None):
+        parser.error("give an area or --tier, not both and not neither")
+    try:
+        tool = tomllib.loads(args.config.read_text())["tool"]
+        testpaths = tool["pytest"]["ini_options"]["testpaths"]
+        if args.tier:
+            print(" ".join(tier_args(tool["trailhead"]["test-tiers"], args.tier)))
+        else:
+            print(" ".join(area_args(tool["trailhead"]["test-areas"], testpaths, args.area)))
+    except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+        print(f"test-area-args: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

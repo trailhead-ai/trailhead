@@ -60,7 +60,8 @@ point, receives a ``harness`` object.
 Browser lookup (``find_browser``): ``$OUTPOST_TEST_BROWSER``, then
 ``chrome-headless-shell`` on PATH, then the Playwright cache's headless shell,
 and only then full Chrome/Chromium (launched with ``--headless=new``). Every
-launch runs under a wall-clock timeout. With no browser found the calling test
+launch runs under a wall-clock timeout; one that hits it is killed and retried once with a fresh
+``--user-data-dir``, and a second timeout raises ``BrowserLaunchTimeout``. With no browser found the calling test
 is skipped, or failed when ``$OUTPOST_REQUIRE_BROWSER`` is set.
 """
 
@@ -270,6 +271,10 @@ class BrowserLaunchError(HarnessError):
     """The browser binary could not be run to completion."""
 
 
+class BrowserLaunchTimeout(BrowserLaunchError):
+    """The browser did not finish within the launch timeout and was killed."""
+
+
 class ServerStartError(HarnessError):
     """The loopback server for an HTTP-mode probe could not be started."""
 
@@ -320,7 +325,7 @@ def serve_folder(root: Path, *, port: int = 0) -> Iterator[str]:
         server = http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as err:
         raise ServerStartError(f"could not start the loopback server on 127.0.0.1:{port}: {err}") from err
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     thread.start()
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -399,9 +404,8 @@ def _launch(argv: list[str], browser: Browser, timeout: float, env: Mapping[str,
     except subprocess.TimeoutExpired:
         os.killpg(proc.pid, signal.SIGKILL)
         proc.communicate()
-        raise BrowserLaunchError(
-            f"{browser.path} did not finish within {timeout:g}s (killed); "
-            "the binary hung or will not run headless"
+        raise BrowserLaunchTimeout(
+            f"{browser.path} did not finish within {timeout:g}s (killed)"
         ) from None
     if proc.returncode != 0:
         raise BrowserLaunchError(
@@ -471,6 +475,7 @@ def _argv(
     window_size: tuple[int, int],
     virtual_time_budget: int,
     color_scheme: str | None,
+    profile: str = "profile",
 ) -> list[str]:
     argv = [str(browser.path)]
     if not browser.is_headless_shell:
@@ -480,7 +485,7 @@ def _argv(
     if color_scheme is not None:
         argv.append(f"--blink-settings=preferredColorScheme={_COLOR_SCHEMES[color_scheme]}")
     argv += [
-        f"--user-data-dir={Path(tmp) / 'profile'}",
+        f"--user-data-dir={Path(tmp) / profile}",
         f"--window-size={window_size[0]},{window_size[1]}",
         f"--virtual-time-budget={virtual_time_budget}",
         "--dump-dom",
@@ -523,14 +528,25 @@ def _run_launch(
     page_dir = Path(page_dir)
     with tempfile.TemporaryDirectory(prefix="chromium-harness-") as tmp:
         page = _prepare_copy(page_dir, tmp, entry, inject_into, wrapper, before_script)
-        argv = _argv(browser, env, tmp, window_size, virtual_time_budget, color_scheme)
         with contextlib.ExitStack() as stack:
             if serve:
                 base = stack.enter_context(serve_folder(page, port=serve_port))
-                argv.append(f"{base}/{entry}")
+                target = f"{base}/{entry}"
             else:
-                argv.append((page / entry).as_uri())
-            return _read_result(_launch(argv, browser, timeout, env), page_dir)
+                target = (page / entry).as_uri()
+            for attempt in (1, 2):
+                argv = _argv(
+                    browser, env, tmp, window_size, virtual_time_budget, color_scheme, f"profile-{attempt}"
+                )
+                argv.append(target)
+                try:
+                    return _read_result(_launch(argv, browser, timeout, env), page_dir)
+                except BrowserLaunchTimeout as err:
+                    if attempt == 2:
+                        raise BrowserLaunchTimeout(
+                            f"{err}; the launch was retried once with a fresh --user-data-dir "
+                            f"and timed out again after {timeout:g}s"
+                        ) from None
 
 
 def run_probe(

@@ -35,13 +35,43 @@ jobs:
         run: ruff check .
 
   pytest:
-    name: pytest (py${{ matrix.python-version }})
+    # The default selection, split by area into parallel jobs: `craft`, `lore-camp`, and `rest`
+    # (every other path in `testpaths`). The areas live in pyproject.toml under
+    # [tool.trailhead.test-areas]; scripts/test-area-args turns one into pytest arguments, and
+    # a test under a path added to `testpaths` later lands in `rest`. Each job collects only its
+    # own paths. The opt-in tiers run in the pytest-tiers job below.
+    name: pytest ${{ matrix.area }} (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         # Honor requires-python = ">=3.11"; test the floor plus current releases.
         python-version: ["3.11", "3.12", "3.13"]
+        area: [craft, lore-camp, rest]
+        include:
+          # `baseline` is the area's passed count in CI, and `max_skipped` its skipped count (identical
+          # on all three Pythons), from the last green run of this job layout plus the tests added since:
+          # a test that starts skipping lowers the passed count below `baseline` and raises the skipped count above
+          # `max_skipped`. `budget` is the job's median wall time plus two sample standard
+          # deviations over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute
+          # target). The history is every guarded run of this job layout: 7 runs x 3 Pythons = 21
+          # legs per job, guard wall times from the "Suite run-time guard" step. craft: median
+          # 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median 167.8, sd 19.9, so 207.5,
+          # budget 210. rest: median 56.2, sd 12.9, so 81.9, raised to 100 because one ordinary leg
+          # already reached 91.8 s. A leg over its budget is the signal to look for a cause before
+          # raising the number.
+          - area: craft
+            baseline: 3345
+            max_skipped: 18
+            budget: 170
+          - area: lore-camp
+            baseline: 7495
+            max_skipped: 8
+            budget: 210
+          - area: rest
+            baseline: 3220
+            max_skipped: 30
+            budget: 100
     steps:
       - name: Check out the repository
         # Deliberately shallow (depth 1): a test never reads this repository's
@@ -73,19 +103,101 @@ jobs:
         # for reproducible CI runs (matches the lint job's pinned ruff).
         run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
 
+      - name: Run the ${{ matrix.area }} area
+        # Invoked as `python -m pytest` so the repo root is on sys.path and the
+        # `trailhead` package imports without an editable install (the checkout IS
+        # the source). `-c pyproject.toml` makes the root config apply to every area, so a path
+        # under tools/craft does not resolve that tool's own (serial) config instead.
+        # addopts in pyproject.toml deselects `benchmark`-marked tests here — a
+        # wall-clock latency assertion is meaningless under xdist worker contention — and
+        # the opt-in tiers (`chromium`, `seam_real`), which run in the pytest-tiers job below.
+        # junit.xml feeds the run-time guard below: xunit1 carries each test's source file
+        # (how the guard assigns a test to an area) and duration_report=total counts fixture
+        # setup and teardown in a test's time, so the per-test cap sees them.
+        run: >-
+          python -m pytest -c pyproject.toml $(python scripts/test-area-args ${{ matrix.area }})
+          --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
+
+      - name: Run benchmark tests serially
+        # Timing/latency assertions need uncontended CPU to mean anything, so
+        # they run here with parallelism off instead of in the main step above.
+        # -o addopts= clears pyproject's `-n auto -m "not benchmark ..."` so this
+        # step isn't parallel and isn't deselecting the tests it exists to run.
+        # Whole-tree, once: in the smallest area's job.
+        if: matrix.area == 'rest'
+        run: python -m pytest -o addopts="" -n 0 -m benchmark
+
+      - name: Suite run-time guard
+        # Owner: the budgets and the passed-count baselines live in the matrix above, beside
+        # the job that enforces them. Raising a budget is a reviewed edit and its pull request
+        # states the newly measured spread; the failure text says so too. Runs after pytest even
+        # when pytest failed (the job is already red then); skipped only when the run is
+        # cancelled. The per-test cap is checked after the run, so a hung test still costs the
+        # job timeout. Per-test cap: twice the 60 s wall-clock the Chromium harness allows one
+        # launch, so a test that sits through a harness timeout and then some is named.
+        if: ${{ !cancelled() }}
+        run: >-
+          python scripts/suite-time-report junit.xml --tier ${{ matrix.area }}
+          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }} --max-skipped ${{ matrix.max_skipped }}
+          --summary "$GITHUB_STEP_SUMMARY"
+
+  pytest-tiers:
+    # The opt-in tiers, each its own job so they run in parallel with the default `pytest` job.
+    # `main` has no branch protection, so a pull request merges when every job of this workflow
+    # is green: these jobs gate merge exactly as the default job does. A tier job cannot go
+    # green vacuously: pytest exits nonzero when the selection is empty, and the guard fails the
+    # job when fewer tests pass than the tier's baseline (a skipped test counts as not passed).
+    name: pytest ${{ matrix.tier }} (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        tier: [chromium, seam_real]
+        include:
+          # The job collects only the directories holding the tier's tests, named in
+          # `[tool.trailhead.test-tiers]` in pyproject.toml, because collecting the whole tree
+          # costs 25-30 s per invocation.
+          # `baseline` is the tier's passed count in a clean run, with every test passing and none
+          # skipped, so `max_skipped` is 0. `budget` is the job's median wall time plus two sample standard deviations
+          # over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute target).
+          # seam_real: 21 legs (7 runs x 3 Pythons), median 86.2, sd 15.0, so 116.1, budget 120.
+          # chromium: PROVISIONAL. It runs one test at a time (`workers: 0`) and has 2 runs of that
+          # shape, 6 legs: median 100.4, sd 14.1, so 128.5, budget 130. Re-derive it from at
+          # least 5 runs.
+          # `workers` is the xdist worker count. The chromium tier runs nothing but browser
+          # launches, and any second browser starting alongside the two-copy storage-event test
+          # can starve it past its cross-copy barrier timeout, so the tier runs one test at a
+          # time; it still finishes well inside its budget.
+          - tier: chromium
+            workers: 0
+            baseline: 343
+            max_skipped: 0
+            budget: 130
+          - tier: seam_real
+            workers: auto
+            baseline: 312
+            max_skipped: 0
+            budget: 120
+    steps:
+      - name: Check out the repository
+        # Shallow on purpose; see the pytest job.
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
+
       - name: Install chrome-headless-shell
-        # The outpost kit-layout tests measure real layout in a headless browser.
-        # A pinned Chrome for Testing chrome-headless-shell is installed here
-        # (stdlib tooling only, no repo dependency) rather than relying on
-        # whatever full Chrome the runner image carries: the full binary can hang
-        # under --headless=new --dump-dom, the shell does not. The override env var
-        # points the harness at it; the require flag turns a missing browser into
-        # a failure instead of a skip.
+        # Pinned build, verified by checksum. The require flag turns a missing browser into a
+        # failure instead of a skip.
+        if: matrix.tier == 'chromium'
         run: |
           set -euo pipefail
-          # Version, URL and SHA-256 are pinned together; bumping them is deliberate, made when the
-          # tests have been run against the new build. To recompute the hash, download the zip for the
-          # new version from the Chrome for Testing storage bucket and run `sha256sum` on it.
           chrome_version="151.0.7922.34"
           url="https://storage.googleapis.com/chrome-for-testing-public/${chrome_version}/linux64/chrome-headless-shell-linux64.zip"
           sha256="3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14"
@@ -100,17 +212,19 @@ jobs:
           echo "OUTPOST_TEST_BROWSER=$bin" >> "$GITHUB_ENV"
           echo "OUTPOST_REQUIRE_BROWSER=1" >> "$GITHUB_ENV"
 
-      - name: Run the test suite
-        # Invoked as `python -m pytest` so the repo root is on sys.path and the
-        # `trailhead` package imports without an editable install (the checkout IS
-        # the source). testpaths in pyproject.toml span the CLI + all tool suites.
-        # addopts in pyproject.toml deselects `benchmark`-marked tests here — a
-        # wall-clock latency assertion is meaningless under xdist worker contention.
-        run: python -m pytest
+      - name: Run the ${{ matrix.tier }} tier
+        # `-m <tier>` replaces the default selection from pyproject's addopts. `-rs` prints why
+        # any test skipped.
+        run: >-
+          python -m pytest -c pyproject.toml -m "${{ matrix.tier }}" -rs -n ${{ matrix.workers }}
+          $(python scripts/test-area-args --tier ${{ matrix.tier }}) --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
 
-      - name: Run benchmark tests serially
-        # Timing/latency assertions need uncontended CPU to mean anything, so
-        # they run here with parallelism off instead of in the main step above.
-        # -o addopts= clears pyproject's `-n auto -m "not benchmark"` so this
-        # step isn't parallel and isn't deselecting the tests it exists to run.
-        run: python -m pytest -o addopts="" -n 0 -m benchmark
+      - name: Suite run-time guard
+        # Same guard as the pytest job, under this tier's own name, budget and passed-count
+        # baseline. Runs after pytest even when pytest failed; skipped only when cancelled.
+        if: ${{ !cancelled() }}
+        run: >-
+          python scripts/suite-time-report junit.xml --tier ${{ matrix.tier }}
+          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }} --max-skipped ${{ matrix.max_skipped }}
+          --repro-pytest-args "-m ${{ matrix.tier }} $(python scripts/test-area-args --tier ${{ matrix.tier }})"
+          --summary "$GITHUB_STEP_SUMMARY"

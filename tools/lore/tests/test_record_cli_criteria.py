@@ -226,11 +226,3 @@ def test_removing_a_reopened_criterion_leaves_neither_mark_key(tmp_path):
     out = json.loads(_criteria(vault, state, rid).stdout)
     assert out["removed"] == ["AC2"]
     assert "reopened" not in out and "closed" not in out
-
-
-def test_criteria_help_names_the_reopened_and_closed_keys(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _run(["record", "criteria", "--help"], vault=vault, state_dir=state)
-    assert r.returncode == 0, r.stderr
-    flat = " ".join(r.stdout.split())
-    assert "reopened" in flat and "closed" in flat

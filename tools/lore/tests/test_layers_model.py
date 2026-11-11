@@ -334,41 +334,21 @@ finally:
 
 
 class TestValidateLayerName:
-    def test_reject_dotdot(self) -> None:
-        """'../evil' raises LayerConfinementError."""
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("../evil", id="dotdot"),
+            pytest.param("..", id="dotdot_plain"),
+            pytest.param("foo/bar", id="forward_slash"),
+            pytest.param("foo\\bar", id="backslash"),
+            pytest.param("foo\x00bar", id="null_byte"),
+            pytest.param("", id="empty"),
+        ],
+    )
+    def test_unsafe_layer_name_is_rejected(self, name) -> None:
         m = _layers()
         with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("../evil")
-
-    def test_reject_dotdot_plain(self) -> None:
-        """'..' raises LayerConfinementError."""
-        m = _layers()
-        with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("..")
-
-    def test_reject_forward_slash(self) -> None:
-        """'foo/bar' raises LayerConfinementError."""
-        m = _layers()
-        with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("foo/bar")
-
-    def test_reject_backslash(self) -> None:
-        r"""'foo\bar' raises LayerConfinementError."""
-        m = _layers()
-        with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("foo\\bar")
-
-    def test_reject_null_byte(self) -> None:
-        """Name with null byte raises LayerConfinementError."""
-        m = _layers()
-        with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("foo\x00bar")
-
-    def test_reject_empty(self) -> None:
-        """Empty name raises LayerConfinementError."""
-        m = _layers()
-        with pytest.raises(m.LayerConfinementError):
-            m.validate_layer_name("")
+            m.validate_layer_name(name)
 
     def test_benign_name_passes(self) -> None:
         """A simple alphanumeric name passes without error."""

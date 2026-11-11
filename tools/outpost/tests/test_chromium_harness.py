@@ -50,6 +50,7 @@ def bare(tmp_path: Path):
     return path_dir, home, env
 
 
+@pytest.mark.chromium
 def test_pages_with_different_css_widths_measure_differently():
     probe = "return {width: document.getElementById('box').getBoundingClientRect().width};"
     narrow = ch.run_probe(FIXTURES / "widths-narrow", probe)
@@ -58,6 +59,7 @@ def test_pages_with_different_css_widths_measure_differently():
     assert wide == {"width": 250}
 
 
+@pytest.mark.chromium
 def test_page_script_and_font_from_its_own_folder_are_loaded():
     probe = """
       return {
@@ -70,12 +72,14 @@ def test_page_script_and_font_from_its_own_folder_are_loaded():
     assert result == {"fonts": ["loaded"], "made": True, "sample": 64}
 
 
+@pytest.mark.chromium
 def test_probe_that_never_reports_raises_named_error_naming_the_page():
     with pytest.raises(ch.ProbeNotReported) as err:
         ch.run_probe(FIXTURES / "never-ready", "return {};")
     assert "never-ready" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_probe_that_throws_raises_named_error_carrying_its_message():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe(FIXTURES / "widths-narrow", "throw new Error('boom from probe');")
@@ -237,6 +241,7 @@ FULL_STORAGE = (
 )
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
     # State is carried through sessionStorage, not localStorage: on a file:// page under load the
@@ -258,6 +263,7 @@ def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
     }
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
     read = "return Number(localStorage.getItem('c'));"
@@ -265,6 +271,7 @@ def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
     assert ch.run_probe_steps(FIXTURES / "counter", [read], serve=serve) == 1
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
     # sessionStorage is keyed by origin, so reading A's value on B shows the two folders share one;
@@ -283,12 +290,14 @@ def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
     assert result == {"x": "from-a", "page": "b/index.html"}
 
 
+@pytest.mark.chromium
 def test_a_step_that_does_not_move_on_is_reported_when_more_steps_remain():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe_steps(FIXTURES / "counter", ["return 1;", "return 2;"])
     assert "step 0 finished without" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_the_last_step_cannot_move_on_to_nothing():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe_steps(FIXTURES / "counter", ["harness.reload();"])
@@ -301,12 +310,66 @@ STORAGE_LISTENER = """
 """
 
 
+EXPECTED_STORAGE_WRITES = {"k1": "v1-", "k2": "v2-"}
+
+
+def assert_storage_events_carry(events, expected):
+    """``expected`` maps each key the writer sets to the prefix of the values it writes under that key.
+
+    Every event must name a written key with a value under it, and every written key must appear:
+    how many times each arrives is not the point, since the writer repeats its writes.
+    """
+    for event in events:
+        assert event["key"] in expected, f"storage event for unexpected key {event['key']!r} in {events}"
+        assert event["value"].startswith(expected[event["key"]]), (
+            f"storage event for {event['key']!r} carries the wrong value {event['value']!r}"
+        )
+    missing = set(expected) - {event["key"] for event in events}
+    assert not missing, f"no storage event arrived for {sorted(missing)} (received {events})"
+
+
+def test_storage_events_that_include_both_keys_with_their_values_pass_however_often_they_repeat():
+    events = [{"key": "k1", "value": "v1-0"}, {"key": "k1", "value": "v1-1"}, {"key": "k2", "value": "v2-1"}]
+    assert_storage_events_carry(events, EXPECTED_STORAGE_WRITES)
+
+
+@pytest.mark.parametrize(
+    ("events", "complaint"),
+    [
+        ([{"key": "k1", "value": "v1-0"}], "k2"),
+        (
+            [{"key": "k1", "value": "v1-0"}, {"key": "k2", "value": "v2-0"}, {"key": "other", "value": "v2-0"}],
+            "unexpected key 'other'",
+        ),
+        ([{"key": "k1", "value": "v1-0"}, {"key": "k1", "value": "v1-1"}], "k2"),
+        ([{"key": "k1", "value": "v1-0"}, {"key": "k2", "value": "v1-0"}], "k2"),
+        ([], "k1"),
+    ],
+    ids=[
+        "a-key-never-arrived",
+        "a-wrong-key",
+        "one-key-repeated-the-other-dropped",
+        "a-wrong-value",
+        "nothing-arrived",
+    ],
+)
+def test_storage_events_missing_a_key_or_carrying_the_wrong_one_fail_naming_it(events, complaint):
+    with pytest.raises(AssertionError, match=complaint):
+        assert_storage_events_carry(events, EXPECTED_STORAGE_WRITES)
+
+
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_key(serve):
+    # A `file://` page under load can drop a localStorage write, so copy 1 repeats its writes with
+    # changing values (an unchanged value fires no event) and copy 2 waits until both keys arrived.
     copy_1 = STORAGE_LISTENER + """
       await harness.barrier();
-      localStorage.setItem('k1', 'v1');
-      localStorage.setItem('k2', 'v2');
+      for (var attempt = 0; attempt < 20; attempt++) {
+        localStorage.setItem('k1', 'v1-' + attempt);
+        localStorage.setItem('k2', 'v2-' + attempt);
+        await new Promise(function (resolve) { setTimeout(resolve, 100); });
+      }
       await harness.barrier();
       return events;
     """
@@ -315,15 +378,22 @@ def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_
       await new Promise(function (resolve) { setTimeout(resolve, 50); });
       addEventListener('storage', function (e) { events.push({key: e.key, value: e.newValue}); });
       await harness.barrier();
-      await harness.waitFor('two storage events', function () { return events.length >= 2; });
+      function seen(key) { return events.some(function (e) { return e.key === key; }); }
+      try {
+        await harness.waitFor('storage events for both keys', function () { return seen('k1') && seen('k2'); });
+      } catch (err) {
+        throw new Error(
+          err.message + '; copy 2 received ' + events.length + ' storage events: ' + JSON.stringify(events));
+      }
       await harness.barrier();
       return events;
     """
     one, two = ch.run_probe_pair(FIXTURES / "widths-narrow", copy_1, copy_2, serve=serve)
-    assert two == [{"key": "k1", "value": "v1"}, {"key": "k2", "value": "v2"}]
+    assert_storage_events_carry(two, EXPECTED_STORAGE_WRITES)
     assert one == []
 
 
+@pytest.mark.chromium
 def test_each_copy_reads_its_own_result_and_a_throw_names_the_copy():
     one, two = ch.run_probe_pair(
         FIXTURES / "widths-narrow",
@@ -336,6 +406,7 @@ def test_each_copy_reads_its_own_result_and_a_throw_names_the_copy():
     assert "second copy" in str(err.value) and "copy two broke" in str(err.value)
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_before_script_that_denies_local_storage_is_in_force_for_the_pages_first_script(serve):
     read = "return window.__first;"
@@ -344,6 +415,7 @@ def test_a_before_script_that_denies_local_storage_is_in_force_for_the_pages_fir
     assert denied == {"threw": True, "name": "SecurityError"}
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_before_script_can_make_only_set_item_throw(serve):
     result = ch.run_probe(
@@ -352,6 +424,7 @@ def test_a_before_script_can_make_only_set_item_throw(serve):
     assert result == {"threw": True, "name": "QuotaExceededError"}
 
 
+@pytest.mark.chromium
 def test_a_before_script_applies_to_the_page_a_probe_moves_to():
     steps = ["harness.goto('../b/index.html');", "return typeof window.__beforeRan;"]
     result = ch.run_probe_steps(
@@ -364,6 +437,7 @@ def test_a_before_script_applies_to_the_page_a_probe_moves_to():
     assert result == "boolean"
 
 
+@pytest.mark.chromium
 def test_wait_for_returns_the_value_once_its_condition_holds():
     probe = """
       var calls = 0;
@@ -373,6 +447,7 @@ def test_wait_for_returns_the_value_once_its_condition_holds():
     assert ch.run_probe(FIXTURES / "widths-narrow", probe) == {"got": 3, "calls": 3}
 
 
+@pytest.mark.chromium
 def test_wait_for_that_never_holds_fails_naming_the_awaited_state():
     probe = "await harness.waitFor('the other tab to write k9', function () { return false; }, 300);"
     with pytest.raises(ch.ProbeFailed) as err:
@@ -396,6 +471,7 @@ def test_a_missing_browser_fails_rather_than_skips_for_every_entry_point(call):
     assert outcome.type is pytest.fail.Exception
 
 
+@pytest.mark.chromium
 def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_runs_out():
     probe = "await harness.waitFor('a state that never arrives', function () { return false; });"
     with pytest.raises(ch.ProbeFailed) as err:
@@ -403,6 +479,7 @@ def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_r
     assert "a state that never arrives" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_wait_for_without_a_timeout_started_late_still_fails_named_rather_than_unreported():
     probe = """
       await new Promise(function (resolve) { setTimeout(resolve, 2000); });
@@ -411,3 +488,72 @@ def test_wait_for_without_a_timeout_started_late_still_fails_named_rather_than_u
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe(FIXTURES / "widths-narrow", probe, virtual_time_budget=3000)
     assert "a state that never arrives late" in str(err.value)
+
+
+def test_serve_folder_teardown_does_not_wait_out_a_poll_interval(tmp_path):
+    (tmp_path / "index.html").write_text("<html></html>")
+    slowest = 0.0
+    for _ in range(8):
+        with ch.serve_folder(tmp_path) as base:
+            _fetch(f"{base}/index.html").read()
+            started = time.monotonic()
+        slowest = max(slowest, time.monotonic() - started)
+    assert slowest < 0.3
+
+
+def _flaky_launch_stub(path: Path, state: Path, hangs: int) -> Path:
+    """A browser that logs each launch's args to ``state``/<n>.args and hangs on the first ``hangs`` launches."""
+    state.mkdir(parents=True, exist_ok=True)
+    return _stub(
+        path,
+        f"""n=0
+for f in '{state}'/*.args; do [ -e "$f" ] && n=$((n + 1)); done
+printf '%s\\n' "$@" > '{state}'/$n.args
+if [ "$n" -lt {hangs} ]; then {shutil.which('sleep')} 60; fi
+echo '{STUB_DOM}'""",
+    )
+
+
+def _profile_dirs(state: Path) -> list[str]:
+    return [
+        next(a for a in f.read_text().splitlines() if a.startswith("--user-data-dir="))
+        for f in sorted(state.glob("*.args"))
+    ]
+
+
+def test_launch_that_hangs_once_is_retried_with_a_fresh_profile_and_succeeds(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    _flaky_launch_stub(path_dir / "chrome-headless-shell", state, hangs=1)
+    result = ch.run_probe(
+        FIXTURES / "widths-narrow", "return {};", timeout=1, env=env, lookup=_lookup(env, home)
+    )
+    assert result == {"stub": True}
+    profiles = _profile_dirs(state)
+    assert len(profiles) == 2
+    assert profiles[0] != profiles[1]
+
+
+def test_launch_that_hangs_twice_raises_naming_the_timeout_and_the_retry(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    _flaky_launch_stub(path_dir / "chrome-headless-shell", state, hangs=5)
+    with pytest.raises(ch.BrowserLaunchError) as err:
+        ch.run_probe(
+            FIXTURES / "widths-narrow", "return {};", timeout=1, env=env, lookup=_lookup(env, home)
+        )
+    message = str(err.value)
+    assert "1s" in message
+    assert "retried" in message
+    assert "machine load" not in message
+    assert len(_profile_dirs(state)) == 2
+
+
+def test_launch_that_exits_nonzero_is_not_retried(bare, tmp_path):
+    path_dir, home, env = bare
+    state = tmp_path / "launches"
+    state.mkdir()
+    _stub(path_dir / "chrome-headless-shell", f"echo x >> '{state}/runs'\nexit 3")
+    with pytest.raises(ch.BrowserLaunchError):
+        ch.run_probe(FIXTURES / "widths-narrow", "return {};", env=env, lookup=_lookup(env, home))
+    assert (state / "runs").read_text().count("x") == 1

@@ -17,6 +17,8 @@ import tempfile
 import traceback
 from pathlib import Path
 
+from trailhead.tests._git_support import _GIT_REDIRECTS
+
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 
 #: The `camp` entry script, for a caller that wants a real subprocess.
@@ -43,6 +45,11 @@ _PATH_BEARING_GIT_FILES = ("config", "FETCH_HEAD")
 #: templates: a handful of builds total, rather than one per test.
 _TEMPLATES: dict[bool, Path] = {}
 
+#: The local config each template had when it was built, before anything could
+#: write to it. A copy gets exactly this text, so nothing planted in a template
+#: afterwards (a `core.hooksPath`, an include) reaches a test.
+_PRISTINE_CONFIG: dict[Path, str] = {}
+
 
 def _template(origin: bool) -> Path:
     """Return the cached pristine repo for *origin*, building it on first use."""
@@ -54,6 +61,7 @@ def _template(origin: bool) -> Path:
     atexit.register(shutil.rmtree, root, True)
     repo = root / "repo"
     _build_git_repo(repo, origin=origin)
+    _PRISTINE_CONFIG[repo] = (repo / ".git" / "config").read_text()
     _TEMPLATES[origin] = repo
     return repo
 
@@ -62,10 +70,24 @@ def _build_git_repo(path: Path, *, origin: bool) -> None:
     """Create the repo `init_git_repo` promises, the long way, via git itself."""
     path.mkdir(parents=True, exist_ok=True)
 
-    def git(*args: str) -> None:
-        subprocess.run(["git", *args], check=True, capture_output=True)
+    # A commit's author comes from the environment before it comes from config,
+    # so a build that happens to run under the hermetic env would stamp that
+    # identity on the template instead of the one configured below.
+    # Nor may a GIT_DIR inherited from a hook send its config writes to the invoking repo.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in _GIT_REDIRECTS and not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))
+    }
 
-    git("init", "-b", "main", str(path))
+    def git(*args: str) -> None:
+        subprocess.run(["git", *args], check=True, capture_output=True, env=env)
+
+    # An empty `--template=` dir: no sample hooks, so a template copies fewer files.
+    with tempfile.TemporaryDirectory(prefix="camp-tests-empty-git-template-") as empty:
+        git("init", "-q", "-b", "main", f"--template={empty}", str(path))
+    (path / ".git" / "info").mkdir(exist_ok=True)
+    (path / ".git" / "info" / "exclude").write_text("")
     git("-C", str(path), "config", "user.email", "test@test.com")
     git("-C", str(path), "config", "user.name", "Test")
     (path / "README.md").write_text("# test\n")
@@ -98,6 +120,14 @@ def _clone_template(template: Path, path: Path) -> None:
         # at `shutil`'s own definition time is immune to that patch.
         copy_function=shutil.copy2,
     )
+
+    pristine = _PRISTINE_CONFIG.get(template)
+    if pristine is not None:
+        (path / ".git" / "config").write_text(pristine)
+    hooks = path / ".git" / "hooks"
+    if hooks.is_dir():
+        shutil.rmtree(hooks)
+        hooks.mkdir()
 
     for name in _PATH_BEARING_GIT_FILES:
         recorded = path / ".git" / name

@@ -258,85 +258,21 @@ def test_explicit_connect_timeout_resolves_to_that_value(
     assert connect_timeout_seconds() == 3.0
 
 
-def test_non_numeric_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.parametrize(
+    "toml",
+    [
+        pytest.param('connect_timeout = "soon"\n', id="non_numeric"),
+        pytest.param("connect_timeout = true\n", id="boolean"),
+        pytest.param("connect_timeout = 0\n", id="zero"),
+        pytest.param("connect_timeout = -5\n", id="negative"),
+        pytest.param("connect_timeout = nan\n", id="nan"),
+        pytest.param("connect_timeout = inf\n", id="infinite"),
+    ],
+)
+def test_invalid_connect_timeout_raises_naming_the_key(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml) -> None:
     config_dir = tmp_path / "cfg"
     _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, 'connect_timeout = "soon"\n')
-
-    with pytest.raises(HostConfigError) as exc_info:
-        connect_timeout_seconds()
-
-    assert "connect_timeout" in str(exc_info.value)
-
-
-def test_boolean_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`bool` is a subclass of `int` in Python, so `connect_timeout = true`
-    must be refused explicitly rather than silently coercing to `1.0`."""
-    config_dir = tmp_path / "cfg"
-    _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, "connect_timeout = true\n")
-
-    with pytest.raises(HostConfigError) as exc_info:
-        connect_timeout_seconds()
-
-    assert "connect_timeout" in str(exc_info.value)
-
-
-def test_zero_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_dir = tmp_path / "cfg"
-    _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, "connect_timeout = 0\n")
-
-    with pytest.raises(HostConfigError) as exc_info:
-        connect_timeout_seconds()
-
-    assert "connect_timeout" in str(exc_info.value)
-
-
-def test_negative_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    config_dir = tmp_path / "cfg"
-    _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, "connect_timeout = -5\n")
-
-    with pytest.raises(HostConfigError) as exc_info:
-        connect_timeout_seconds()
-
-    assert "connect_timeout" in str(exc_info.value)
-
-
-def test_nan_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`nan` compares false against both `> 0` and `<= 0`, so a bare
-    positivity check lets it slide through untouched — it must still
-    refuse, the same as any other non-positive value."""
-    config_dir = tmp_path / "cfg"
-    _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, "connect_timeout = nan\n")
-
-    with pytest.raises(HostConfigError) as exc_info:
-        connect_timeout_seconds()
-
-    assert "connect_timeout" in str(exc_info.value)
-
-
-def test_infinite_connect_timeout_raises_naming_the_key(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """`inf` is positive, so it must be refused by a finiteness check
-    rather than a bare positivity check — an infinite bound is not a
-    connect timeout ssh can be handed."""
-    config_dir = tmp_path / "cfg"
-    _point_at(monkeypatch, config_dir)
-    _write_hosts(config_dir, "connect_timeout = inf\n")
+    _write_hosts(config_dir, toml)
 
     with pytest.raises(HostConfigError) as exc_info:
         connect_timeout_seconds()

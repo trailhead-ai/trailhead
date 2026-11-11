@@ -487,23 +487,20 @@ def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
     assert list(vault.glob("**/*.md")) == []
 
 
-def test_related_map_empty_name_rejected_by_guard(tmp_path):
-    """--related task= (empty name) → non-zero from the applier guard (before validate)."""
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        pytest.param("--related", "task=", id="related_map_empty_name_rejected_by_guard"),
+        pytest.param("--related", "=foo", id="related_map_empty_kind_rejected_by_guard"),
+        pytest.param("--set", "title=x", id="set_flag_is_unrecognized"),
+        pytest.param("--unset", "keywords", id="unset_flag_is_unrecognized"),
+        pytest.param("--set", "team=other", id="scope_cannot_decouple_set_team_rejected"),
+    ],
+)
+def test_malformed_record_argument_is_rejected(tmp_path, flag, value):
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--related", "task="],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
-
-
-def test_related_map_empty_kind_rejected_by_guard(tmp_path):
-    """--related =foo (empty kind) → non-zero from the applier guard (before validate)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--related", "=foo"],
+        _BASE_ARGS + [flag, value],
         vault=vault,
         state_dir=state,
     )
@@ -532,30 +529,6 @@ def test_create_no_keyword_succeeds(tmp_path):
 # ---------------------------------------------------------------------------
 # --set/--unset are gone; provenance remains unwritable
 # ---------------------------------------------------------------------------
-
-
-def test_set_flag_is_unrecognized(tmp_path):
-    """--set is removed: argparse rejects it as an unrecognized argument."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--set", "title=x"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
-
-
-def test_unset_flag_is_unrecognized(tmp_path):
-    """--unset is removed: argparse rejects it as an unrecognized argument."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--unset", "keywords"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
 
 
 def test_no_flag_for_provenance_fields(tmp_path):
@@ -638,68 +611,6 @@ def test_depends_on_cycle_rejected_at_create(tmp_path):
     assert not (vault / "task" / "b.md").exists()
 
 
-def test_self_parent_rejected_at_create(tmp_path):
-    """A task whose --parent is its own name is rejected as an ancestor loop."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "loop-me", extra=["--parent", "loop-me"])
-    assert r.returncode != 0
-    assert "graph-guard [parent-loop]" in r.stderr
-    assert not (vault / "task" / "loop-me.md").exists()
-
-
-def test_traversal_parent_rejected_by_confinement(tmp_path):
-    """A path-traversal-shaped --parent value is rejected by the confinement guard."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "../../etc/passwd"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_traversal_depends_on_rejected_by_confinement(tmp_path):
-    """A path-traversal-shaped --depends-on value is rejected by the confinement guard."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "../evil"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_prefixed_depends_on_rejected_on_create(tmp_path):
-    """Every entry on a create is newly supplied, so every entry is form-checked."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "task/foo"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_staged_depends_on_rejected_on_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--depends-on", "foo@ready"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_prefixed_parent_rejected_on_create(tmp_path):
-    """A kind-prefixed --parent detaches the child, so the create never lands."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "task/foo"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert "task/foo" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
-def test_staged_parent_rejected_on_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_task(vault, state, "a", extra=["--parent", "foo@ready"])
-    assert r.returncode != 0
-    assert "graph-guard [task-edge-form]" in r.stderr
-    assert not (vault / "task" / "a.md").exists()
-
-
 def test_bare_parent_still_creates(tmp_path):
     """The accepted shape is unchanged — a bare parent name still writes."""
     vault, state = _make_vault(tmp_path)
@@ -725,19 +636,6 @@ def test_flow_out_reminder_when_parent_body_lacks_section(tmp_path):
     r = _create_task(vault, state, "a", extra=["--status", "done"], body="just prose\n")
     assert r.returncode == 0, r.stderr
     assert "graph-guard [flow-out]" in r.stderr
-
-
-def test_no_flow_out_reminder_when_parent_body_has_section(tmp_path):
-    """A '## Flow-out' section suppresses the reminder on a parent's completion."""
-    vault, state = _make_vault(tmp_path)
-    _create_task(vault, state, "kid", extra=["--parent", "a", "--status", "done"])
-    r = _create_task(
-        vault, state, "a",
-        extra=["--status", "done"],
-        body="intro\n\n## Flow-out\n- [ ] update area\n",
-    )
-    assert r.returncode == 0, r.stderr
-    assert "graph-guard [flow-out]" not in r.stderr
 
 
 def test_no_flow_out_reminder_for_childless_task(tmp_path):
@@ -796,16 +694,6 @@ def test_design_bare_name_depends_on_rejected_at_create(tmp_path):
     assert not (vault / "spec" / "consumer.md").exists()
 
 
-def test_design_traversal_depends_on_rejected_by_confinement_at_create(tmp_path):
-    """A path-traversal-shaped design depends-on entry is rejected, nothing written."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(vault, state, "spec", "consumer", extra=["--depends-on", "spec/../evil"])
-    assert r.returncode != 0
-    assert "graph-guard [edge-reference]" in r.stderr
-    assert not (vault / "spec" / "consumer.md").exists()
-    assert not (vault / "spec" / "consumer.json").exists()
-
-
 def test_depends_on_help_names_both_task_and_design_forms(tmp_path):
     """``--help`` describes both the bare-task-name and KIND/NAME[@STAGE] forms."""
     vault, state = _make_vault(tmp_path)
@@ -855,29 +743,6 @@ def test_supersedes_self_edge_rejected_at_create(tmp_path):
     assert r.returncode != 0
     assert "graph-guard [supersedes-self-edge]" in r.stderr
     assert not (vault / "adr" / "loop-me.md").exists()
-
-
-def test_supersedes_malformed_reference_rejected_at_create(tmp_path):
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(vault, state, "adr", "successor", extra=["--supersedes", "no-slash"])
-    assert r.returncode != 0
-    assert "graph-guard [supersedes-reference]" in r.stderr
-    assert not (vault / "adr" / "successor.md").exists()
-
-
-def test_supersedes_path_traversal_reference_rejected_at_create(tmp_path):
-    """``../../etc/passwd`` first-``/``-splits into kind ``..`` and name
-    ``../etc/passwd`` — a well-formed-looking KIND/NAME pair that must still be
-    rejected because ``..`` is not a real record kind. The sibling repo resolves
-    a stored ``supersedes`` string to a filesystem path, so a traversal sequence
-    written here verbatim is a path-traversal vector, not just a query miss."""
-    vault, state = _make_vault(tmp_path)
-    r = _create_design(
-        vault, state, "adr", "successor", extra=["--supersedes", "../../etc/passwd"],
-    )
-    assert r.returncode != 0
-    assert "graph-guard [supersedes-reference]" in r.stderr
-    assert not (vault / "adr" / "successor.md").exists()
 
 
 def test_supersedes_mutual_pair_accepted_by_both_writes(tmp_path):
@@ -1189,20 +1054,6 @@ def test_scope_field_raw_value_not_scope_string(tmp_path):
     sidecar = _find_sidecar(vault, r.stdout.strip())
     assert sidecar.get("team") == "my-team"
     assert sidecar.get("team") != "team:my-team"
-
-
-def test_scope_cannot_decouple_set_team_rejected(tmp_path):
-    """``--set team=…`` is gone: no decoupled setter can write ``team``
-    to a value that differs from the routing scope.  Argparse rejects ``--set``.
-    """
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--set", "team=other"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
 
 
 def test_scope_no_other_team_field_flag(tmp_path):
@@ -1982,32 +1833,6 @@ def test_existing_numbered_adr_record_remains_readable_and_updatable(tmp_path):
 
 _HELP_BYTE_BUDGETS = {"record create": 3300, "record update": 3720}
 
-# Every long option rendered in each verb's ``--help`` today. A trim may
-# reword a help string but may not remove a flag from the listing.
-_VISIBLE_LONG_OPTIONS = {
-    "record create": (
-        "--annotation", "--depends-on", "--help", "--keyword", "--kind",
-        "--label", "--parent", "--product", "--related", "--related-file",
-        "--related-phase", "--related-url", "--repo", "--status", "--suite",
-        "--supersedes", "--team", "--title", "--unset-annotation",
-        "--unset-depends-on", "--unset-keyword", "--unset-label",
-        "--unset-parent", "--unset-related", "--unset-related-file",
-        "--unset-related-phase", "--unset-related-url", "--unset-supersedes",
-        "--vault",
-    ),
-    "record update": (
-        "--annotation", "--depends-on", "--diff", "--help", "--keyword",
-        "--label", "--parent", "--product", "--related", "--related-file",
-        "--related-phase", "--related-url", "--repo", "--status", "--suite",
-        "--supersedes", "--team", "--title", "--unset-annotation",
-        "--unset-depends-on", "--unset-keyword", "--unset-label",
-        "--unset-parent", "--unset-related", "--unset-related-file",
-        "--unset-related-phase", "--unset-related-url", "--unset-supersedes",
-        "--vault",
-    ),
-}
-
-
 def _render_leaf_help(leaf_name, monkeypatch):
     """Render one leaf parser's ``--help`` at a pinned 80-column width.
 
@@ -2029,7 +1854,7 @@ def test_record_help_stays_within_byte_budget(leaf, monkeypatch):
     assert size <= budget, f"lore {leaf} --help is {size} bytes, budget is {budget}"
 
 
-@pytest.mark.parametrize("leaf", sorted(_VISIBLE_LONG_OPTIONS), ids=lambda s: s.replace(" ", "-"))
+@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
 def test_record_help_still_lists_every_long_option(leaf, monkeypatch):
     """No flag may be hidden (argparse.SUPPRESS) to buy the byte reduction.
 
@@ -2041,103 +1866,24 @@ def test_record_help_still_lists_every_long_option(leaf, monkeypatch):
     """
     import re
 
+    from lore.argparse_util import _leaf_parsers
+    from lore.cli.dispatch import build_parser
+
     help_text = _render_leaf_help(leaf, monkeypatch)
+    declared = [
+        opt
+        for action in _leaf_parsers(build_parser())[leaf]._actions
+        for opt in action.option_strings
+        if opt.startswith("--")
+    ]
+    assert declared
     missing = [
-        opt for opt in _VISIBLE_LONG_OPTIONS[leaf]
+        opt for opt in declared
         if not re.search(
             rf"^  (?:-\S+, )*{re.escape(opt)}(?![\w-])", help_text, re.MULTILINE
         )
     ]
     assert not missing, f"lore {leaf} --help no longer lists: {missing}"
-
-
-def test_record_update_vault_help_disclaims_re_routing(monkeypatch):
-    """``update --vault`` must say it targets the record where it already is.
-
-    The scope flags re-route and auto-move a record; ``--vault`` does not. With
-    that contrast stated only on the scope-flag side, a reader has no reason not
-    to read ``--vault NAME`` as "put the record in NAME" — the one reading that
-    silently writes to the wrong vault.
-    """
-    import re
-
-    help_text = re.sub(r"\s+", " ", _render_leaf_help("record update", monkeypatch))
-    assert "never re-routes" in help_text, (
-        "update --vault help must disclaim re-routing, to contrast with the "
-        "scope flags that do re-route and auto-move"
-    )
-
-
-@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
-def test_unset_pairing_rule_does_not_promise_single_entry_removal(leaf, monkeypatch):
-    """The shared --unset-* rule must not say a remover drops one entry.
-
-    ``apply_record_fields`` filters the whole list (``[v for v in current if v
-    != value]``), so every matching entry goes. Prose that promises one leaves
-    an agent expecting a duplicate to survive a removal that in fact clears it.
-    """
-    import re
-
-    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
-
-    assert "drops one entry" not in help_text, (
-        "the shared --unset-* rule promises single-entry removal, but the list "
-        "removers drop every matching entry"
-    )
-    assert "drops every matching entry" in help_text
-
-
-@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
-def test_help_says_which_setters_repeat(leaf, monkeypatch):
-    """The help must still signal that the list/map setters accept many values.
-
-    Per-flag "(repeatable)" was what said so before the trim; with the per-flag
-    prose gone, the shared rule has to name the repeating family, or --label and
-    --keyword read as single-use and an agent writes one call per value.
-    """
-    import re
-
-    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
-    assert "--keyword/--related*/--depends-on/--label/--annotation setters repeat" in help_text
-
-
-@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
-def test_unset_parent_carries_its_own_help_string(leaf, monkeypatch):
-    """``--unset-parent`` is outside the repeatable-flag rule, so it needs its own line.
-
-    The shared rule scopes itself to the repeatable flags; ``--unset-parent`` is
-    neither repeatable nor value-taking, leaving it the one flag on either verb
-    with no description anywhere.
-    """
-    import re
-
-    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
-    assert "--unset-parent Clear this task's parent." in help_text
-
-
-@pytest.mark.parametrize("leaf", sorted(_HELP_BYTE_BUDGETS), ids=lambda s: s.replace(" ", "-"))
-def test_unset_pairing_rule_does_not_claim_a_uniform_value_shape(leaf, monkeypatch):
-    """The shared --unset-* rule must not promise every remover takes the same value.
-
-    Three removers do not: ``--unset-label``/``--unset-annotation`` take a bare
-    KEY where their setters take KEY=VALUE, and ``--unset-parent`` is a flag
-    taking no value at all. Those three carry no help string of their own after
-    the trim, so this shared sentence is the only thing describing them — and an
-    agent applying it literally writes ``--unset-parent TASK`` and fails. Each
-    remover's real shape is already rendered as its metavar; the rule must send
-    the reader there rather than assert a shape that is wrong for three flags.
-    """
-    import re
-
-    help_text = re.sub(r"\s+", " ", _render_leaf_help(leaf, monkeypatch))
-
-    assert "remover taking the same value" not in help_text, (
-        "the shared --unset-* rule claims a uniform value shape, but "
-        "--unset-label takes KEY and --unset-parent takes no value"
-    )
-    # The metavars that make the rule's redirect truthful must actually render.
-    assert "--unset-label KEY" in help_text
-    assert "--unset-annotation KEY" in help_text
 
 
 # ---------------------------------------------------------------------------

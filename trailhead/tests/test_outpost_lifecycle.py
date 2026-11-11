@@ -1332,11 +1332,26 @@ def test_supervised_status_failed_linux_active_state_failed_without_start_limit_
     assert "reset-failed" in out
 
 
-def test_supervised_status_failed_darwin_nonzero_last_exit_reports_exit_failed(outpost, capsys):
+@pytest.mark.parametrize(
+    "launchctl_output",
+    [
+        pytest.param("state = not running\n\tlast exit code = 78\n", id="failed_darwin_nonzero_last_exit"),
+        pytest.param("state = not running\n\tlast exit code = 78: EX_CONFIG\n", id="darwin_named_exit_code_form"),
+        pytest.param(
+            (
+                "state = not running\n"
+                "\tlast exit code = 0\n"
+                "\tlast terminating signal = SIGKILL\n"
+            ),
+            id="darwin_terminating_signal",
+        ),
+    ],
+)
+def test_supervised_darwin_failed_status_reports_exit_failed(outpost, capsys, launchctl_output):
     _write_supervisor_entry(outpost, "darwin")
     runner = _RecordingRunner(
         stdout_by_prefix={
-            ("launchctl", "print"): "state = not running\n\tlast exit code = 78\n",
+            ("launchctl", "print"): launchctl_output,
         }
     )
 
@@ -1395,57 +1410,6 @@ def test_supervised_status_darwin_never_exited_form_reports_exit_stopped(outpost
     )
 
     assert rc == EXIT_STOPPED
-
-
-def test_supervised_status_darwin_named_exit_code_form_reports_exit_failed(outpost, capsys):
-    # A failed job can print `last exit code = 78: EX_CONFIG` — a leading
-    # integer followed by the symbolic name, not a bare integer.
-    _write_supervisor_entry(outpost, "darwin")
-    runner = _RecordingRunner(
-        stdout_by_prefix={
-            ("launchctl", "print"): "state = not running\n\tlast exit code = 78: EX_CONFIG\n",
-        }
-    )
-
-    rc = outpost_lifecycle.status(
-        env=outpost.env,
-        port=outpost.port,
-        platform="darwin",
-        supervisor_dir=outpost.supervisor_dir,
-        runner=runner,
-        uid=501,
-    )
-
-    assert rc == EXIT_FAILED
-    assert "trailhead outpost start" in capsys.readouterr().out
-
-
-def test_supervised_status_darwin_terminating_signal_reports_exit_failed(outpost, capsys):
-    # A job killed by a signal (e.g. OOM) prints a `last terminating signal`
-    # line instead of a nonzero `last exit code` — that must also read as a
-    # failure needing recovery, not a clean stop.
-    _write_supervisor_entry(outpost, "darwin")
-    runner = _RecordingRunner(
-        stdout_by_prefix={
-            ("launchctl", "print"): (
-                "state = not running\n"
-                "\tlast exit code = 0\n"
-                "\tlast terminating signal = SIGKILL\n"
-            ),
-        }
-    )
-
-    rc = outpost_lifecycle.status(
-        env=outpost.env,
-        port=outpost.port,
-        platform="darwin",
-        supervisor_dir=outpost.supervisor_dir,
-        runner=runner,
-        uid=501,
-    )
-
-    assert rc == EXIT_FAILED
-    assert "trailhead outpost start" in capsys.readouterr().out
 
 
 def test_supervised_status_linux_linger_no_prints_boot_warning(outpost, capsys):

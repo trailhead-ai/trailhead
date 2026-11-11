@@ -1,9 +1,10 @@
 """followup_dispose.py `dispose` (drops the gathered follow-ups a dispositions file names
 under one reason).
 
-End-to-end cases run the module's `main` against the real `lore` CLI reading a throwaway
-vault (the pattern of test_followup_parent.py); failure cases inject faults through the
-runner's hook.
+End-to-end cases call the module's `main` in-process with a `LoreRunner` (real lore run
+inside this interpreter against a throwaway vault, the pattern of test_followup_parent.py);
+failure cases inject faults through the runner's hook. The "seam" cases at the end run the
+script as a real subprocess, one per entry path.
 """
 
 from __future__ import annotations
@@ -16,14 +17,14 @@ from pathlib import Path
 
 import pytest
 
+from _lore_runner import LoreRunner
 from test_followup_gather import (  # noqa: F401
     _allow_real_publish_spawn,
     _isolate_ambient_env,
     _lore,
     _publish_spawn_guard,
-    _build_env,
     make_spec,
-    make_vault,
+    seam_env,
 )
 from test_followup_parent import (  # noqa: F401
     EnvRunner,
@@ -53,18 +54,13 @@ REASON = "superseded by the new importer"
 
 @pytest.fixture
 def lore_env(tmp_path):
-    """(env, vault_name): a child environment seeing exactly one throwaway vault."""
-    vault, _ = make_vault(tmp_path)
-    return _build_env(tmp_path, [("default", "default", vault)]), "default"
+    """(runner, vault_name): in-process lore seeing exactly one throwaway vault."""
+    return LoreRunner(tmp_path), "default"
 
 
 @pytest.fixture
 def two_vault_lore_env(tmp_path):
-    first, _ = make_vault(tmp_path)
-    second = tmp_path / "second"
-    second.mkdir()
-    env = _build_env(tmp_path, [("default", "default", first), ("other", "team", second)])
-    return env, ("default", "other")
+    return LoreRunner(tmp_path, vaults=("default", "other")), ("default", "other")
 
 
 @pytest.fixture
@@ -389,10 +385,7 @@ def edit_body(env, vault, name):
 
 
 def set_status(env, vault, name, status):
-    done = subprocess.run(
-        ["lore", "record", "update", f"task/{name}", "--vault", vault, "--status", status],
-        capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL,
-    )
+    done = env(["record", "update", f"task/{name}", "--vault", vault, "--status", status])
     assert done.returncode == 0, done.stderr
 
 
@@ -1885,3 +1878,56 @@ def test_a_merge_survivor_may_stay_included(lore_env, spec, trio, tmp_path, caps
     code, out, err = run_dispose(EnvRunner(env), spec, tmp_path, capsys, doc, preview=True)
     assert code == 0, err
     assert out["included"] == [trio[0]]
+
+
+# --- seams: the script's CLI as a real subprocess, one per entry path --------------------------
+
+
+def run_cli(env, *args):
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), *args], capture_output=True, text=True, env=env
+    )
+
+
+def test_the_cli_previews_then_writes_a_drop_as_a_subprocess(  # inert-gate: allow seam smoke
+    lore_env, spec, pile, tmp_path
+):
+    """Seam: preview then confirmed write through the script's CLI as a subprocess, exit 0
+    and JSON on stdout, the production runner piping the drop diff to real lore on stdin."""
+    env, vault = lore_env
+    cli_env = seam_env(env, tmp_path)
+    path = tmp_path / "dispositions.json"
+    path.write_text(json.dumps(file_for(env, vault, pile)))
+    previewed = run_cli(cli_env, "dispose", spec, "--dispositions", str(path), "--preview")
+    assert previewed.returncode == 0, previewed.stderr
+    written = run_cli(
+        cli_env, "dispose", spec, "--dispositions", str(path),
+        "--confirm", json.loads(previewed.stdout)["confirm"],
+    )
+    assert written.returncode == 0, written.stderr
+    assert sorted(d["name"] for d in json.loads(written.stdout)["dropped"]) == pile
+    assert {sidecar_of(env, vault, n)["status"] for n in pile} == {"dropped"}
+
+
+def test_the_cli_exits_one_on_a_refusal_as_a_subprocess(lore_env, spec, pile, tmp_path):
+    """Seam: a refusal through the script's CLI as a subprocess exits 1 with its reason
+    and writes nothing."""
+    env, vault = lore_env
+    path = tmp_path / "dispositions.json"
+    path.write_text(json.dumps(file_for(env, vault, pile)))
+    r = run_cli(
+        seam_env(env, tmp_path), "dispose", spec, "--dispositions", str(path), "--confirm", "zzzz"
+    )
+    assert r.returncode == 1
+    assert "reason-code: confirmation-mismatch" in r.stderr
+    assert not any(sidecar_of(env, vault, n)["status"] == "dropped" for n in pile)
+
+
+def test_the_cli_exits_two_on_an_error_as_a_subprocess(lore_env, tmp_path):
+    """Seam: an error through the script's CLI as a subprocess exits 2 with its reason."""
+    env, _ = lore_env
+    path = tmp_path / "dispositions.json"
+    path.write_text(json.dumps({"reason": REASON, "drops": [], "merges": []}))
+    r = run_cli(seam_env(env, tmp_path), "dispose", "no-such-spec", "--dispositions", str(path), "--preview")
+    assert r.returncode == 2
+    assert "reason-code: spec-not-found" in r.stderr

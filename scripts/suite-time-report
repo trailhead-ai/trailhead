@@ -1,0 +1,320 @@
+#!/usr/bin/env python3
+"""suite-time-report — measure a pytest run from its JUnit XML and fail it over budget.
+
+Reads the file written by `pytest --junitxml=PATH -o junit_family=xunit1
+-o junit_duration_report=total` and reports wall time, per-area totals, the
+slowest tests and pass/fail/skip counts. Exits 1 when the wall time passes
+--budget, when one test passes --per-test-cap, or when the passed count falls
+below --baseline-passed without a --deletions list that accounts for the drop, or when the
+skipped count passes --max-skipped.
+Exits 2 with `suite-time-report: <message>` when the XML cannot be read.
+
+Wall time is the `<testsuite time>` attribute: under pytest-xdist the merged
+file carries the controller's wall clock. xunit1 is what puts each test's source
+`file` in the XML, which is how a test is assigned to an area; without it the
+dotted classname is used. Per-test times are the setup+call+teardown total only
+when pytest ran with `junit_duration_report=total`.
+
+The report is built from parsed attributes only. A test's captured
+`system-out`, `system-err` and failure text are never read.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+import tomllib
+import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from pathlib import Path
+
+PROG = "suite-time-report"
+OTHER_AREA = "(other)"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+class ReportError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class Case:
+    id: str
+    area_key: str
+    seconds: float
+    outcome: str  # passed | failed | skipped
+
+
+@dataclass
+class Run:
+    wall: float
+    cases: list[Case]
+
+    def count(self, outcome: str) -> int:
+        return sum(1 for c in self.cases if c.outcome == outcome)
+
+
+def _float(value: str | None, what: str, path: Path) -> float:
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise ReportError(f"{path}: bad {what} {value!r}") from None
+
+
+def parse(path: Path) -> Run:
+    try:
+        root = ET.parse(path).getroot()
+    except OSError as exc:
+        raise ReportError(f"cannot read {path}: {exc.strerror or exc}") from None
+    except ET.ParseError as exc:
+        raise ReportError(
+            f"cannot parse {path}: {exc} (a truncated file usually means pytest or a worker crashed)"
+        ) from None
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    if not suites:
+        raise ReportError(f"{path} has no <testsuite> element; is it pytest's JUnit XML?")
+    wall = sum(_float(s.get("time"), "testsuite time", path) for s in suites)
+    cases = []
+    for suite in suites:
+        for tc in suite.findall("testcase"):
+            if tc.find("skipped") is not None:
+                outcome = "skipped"
+            elif tc.find("failure") is not None or tc.find("error") is not None:
+                outcome = "failed"
+            else:
+                outcome = "passed"
+            classname = tc.get("classname", "")
+            name = tc.get("name", "")
+            area_key = tc.get("file") or classname.replace(".", "/")
+            cases.append(
+                Case(
+                    f"{classname}::{name}",
+                    area_key,
+                    _float(tc.get("time"), "test time", path),
+                    outcome,
+                )
+            )
+    return Run(wall, cases)
+
+
+def default_areas() -> list[str]:
+    try:
+        data = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+        return list(data["tool"]["pytest"]["ini_options"]["testpaths"])
+    except (OSError, KeyError, tomllib.TOMLDecodeError):
+        return []
+
+
+def area_of(case: Case, areas: list[str]) -> str:
+    key = case.area_key.replace("\\", "/")
+    for area in areas:
+        prefix = area.rstrip("/")
+        if key == prefix or key.startswith(prefix + "/"):
+            return area
+    return OTHER_AREA
+
+
+def area_totals(run: Run, areas: list[str]) -> dict[str, float]:
+    totals = {a: 0.0 for a in areas}
+    for c in run.cases:
+        if c.outcome == "skipped":
+            continue
+        totals[area_of(c, areas)] = totals.get(area_of(c, areas), 0.0) + c.seconds
+    return {a: t for a, t in totals.items() if a != OTHER_AREA or t}
+
+
+def slowest(run: Run, n: int) -> list[Case]:
+    ran = [c for c in run.cases if c.outcome != "skipped"]
+    return sorted(ran, key=lambda c: (-c.seconds, c.id))[:n]
+
+
+def read_deletions(path: Path | None, run: Run) -> list[str]:
+    """Entries that still ran in this run are not deletions and do not count."""
+    if path is None:
+        return []
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        raise ReportError(f"cannot read deletions list {path}: {exc.strerror or exc}") from None
+    present = {c.id for c in run.cases}
+    entries = [ln.strip() for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+    return [e for e in entries if e not in present]
+
+
+def parse_area_baselines(items: list[str]) -> dict[str, float]:
+    out = {}
+    for item in items:
+        name, sep, value = item.rpartition("=")
+        if not sep or not name:
+            raise ReportError(f"--baseline-area wants PREFIX=SECONDS, got {item!r}")
+        out[name] = _float(value, "--baseline-area seconds", Path("--baseline-area"))
+    return out
+
+
+def fmt(seconds: float) -> str:
+    return f"{seconds:.1f}s"
+
+
+def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str], str]:
+    """Return (breaches, body lines, verdict-first line)."""
+    breaches: list[str] = []
+    passed, failed, skipped = run.count("passed"), run.count("failed"), run.count("skipped")
+    totals = area_totals(run, areas)
+    top = slowest(run, args.top)
+
+    if args.budget is not None and run.wall > args.budget:
+        breaches.append(
+            f"wall time {fmt(run.wall)} exceeds the budget of {fmt(args.budget)} "
+            f"(over by {fmt(run.wall - args.budget)})"
+        )
+    if args.per_test_cap is not None:
+        for c in sorted((c for c in run.cases if c.outcome != "skipped"), key=lambda c: -c.seconds):
+            if c.seconds > args.per_test_cap:
+                breaches.append(
+                    f"test {c.id} took {fmt(c.seconds)}, over the per-test cap of "
+                    f"{fmt(args.per_test_cap)}"
+                )
+    deleted = read_deletions(args.deletions, run)
+    drop = (args.baseline_passed - passed) if args.baseline_passed is not None else 0
+    if drop > 0 and len(deleted) < drop:
+        breaches.append(
+            f"passed count {passed} is {drop} below the recorded baseline of "
+            f"{args.baseline_passed} for tier {args.tier!r}, and the deletions list accounts for "
+            f"{len(deleted)} of them"
+        )
+
+    if args.max_skipped is not None and skipped > args.max_skipped:
+        breaches.append(
+            f"skipped count {skipped} is {skipped - args.max_skipped} above the recorded ceiling of "
+            f"{args.max_skipped} for tier {args.tier!r}"
+        )
+
+    verdict = (
+        f"{PROG}: FAIL tier {args.tier}: {breaches[0]}"
+        if breaches
+        else f"{PROG}: OK tier {args.tier}: wall time {fmt(run.wall)}"
+        + (f" within budget {fmt(args.budget)}" if args.budget is not None else "")
+    )
+
+    body: list[str] = []
+    if breaches:
+        body += [f"- {b}" for b in breaches[1:]]
+    if args.baseline_seconds is not None:
+        delta = run.wall - args.baseline_seconds
+        body.append(
+            f"Change against baseline: {fmt(run.wall)} vs {fmt(args.baseline_seconds)} "
+            f"({'+' if delta >= 0 else '-'}{fmt(abs(delta))})"
+        )
+    base_areas = parse_area_baselines(args.baseline_area)
+    if base_areas:
+        growth = {a: totals.get(a, 0.0) - base for a, base in base_areas.items()}
+        grew = max(growth, key=growth.get)
+        body.append(f"Area that grew most: {grew} ({'+' if growth[grew] >= 0 else '-'}{fmt(abs(growth[grew]))})")
+    elif totals:
+        biggest = max(totals, key=totals.get)
+        body.append(f"Largest area: {biggest} ({fmt(totals[biggest])})")
+    body.append(
+        f"Counts, tier {args.tier}: collected {len(run.cases)}, passed {passed}, "
+        f"failed {failed}, skipped {skipped}"
+        + (f"; baseline passed {args.baseline_passed}" if args.baseline_passed is not None else "")
+    )
+    if deleted:
+        body.append(f"Deletions list entries counted: {len(deleted)}")
+    body.append("Per-area totals (sum of test time, skipped excluded):")
+    body += [f"  {a}: {fmt(t)}" for a, t in totals.items()]
+    body.append(
+        f"Slowest {len(top)} tests (time is setup+call+teardown only when pytest ran with "
+        "-o junit_duration_report=total):"
+    )
+    body += [f"  {fmt(c.seconds)}  {c.id}" for c in top]
+    if breaches:
+        pytest_args = f" {args.repro_pytest_args}" if args.repro_pytest_args else ""
+        flags = ""
+        if args.budget is not None:
+            flags += f" --budget {args.budget:g}"
+        if args.per_test_cap is not None:
+            flags += f" --per-test-cap {args.per_test_cap:g}"
+        if args.baseline_passed is not None:
+            flags += f" --baseline-passed {args.baseline_passed}"
+        if args.max_skipped is not None:
+            flags += f" --max-skipped {args.max_skipped}"
+        body += [
+            "Where the budget lives: .github/workflows/tests.yml, beside the step that runs this "
+            "guard. Raising a budget is a reviewed edit; its pull request states the newly "
+            "measured spread.",
+            "The per-test cap is checked after the run, so a hung test still costs the job's "
+            "timeout.",
+            "Reproduce locally:",
+            f"  python -m pytest{pytest_args} --junitxml=junit.xml -o junit_family=xunit1 "
+            "-o junit_duration_report=total",
+            f"  scripts/suite-time-report junit.xml --tier {args.tier}{flags}",
+        ]
+    return breaches, body, verdict
+
+
+def markdown(args, verdict: str, body: list[str], run: Run, areas: list[str]) -> str:
+    totals = area_totals(run, areas)
+    top = slowest(run, args.top)
+    md = [f"## Suite time: {verdict.removeprefix(PROG + ': ')}", ""]
+    md += [f"- Wall time: {fmt(run.wall)}"]
+    md += [
+        f"- Tier {args.tier}: collected {len(run.cases)}, passed {run.count('passed')}, "
+        f"failed {run.count('failed')}, skipped {run.count('skipped')}",
+        "",
+        "| Area | Seconds |",
+        "| --- | ---: |",
+    ]
+    md += [f"| {a} | {t:.1f} |" for a, t in totals.items()]
+    md += ["", f"Slowest {len(top)} tests (seconds):", "", "| Seconds | Test |", "| ---: | --- |"]
+    md += [f"| {c.seconds:.1f} | {c.id.replace('|', chr(92) + '|')} |" for c in top]
+    prefixes = ("-", "Change", "Area that", "Largest", "Where", "The per", "Reproduce", "  python", "  scripts")
+    extra = [b for b in body if b.startswith(prefixes)]
+    if extra:
+        md += ["", *[("`" + e.strip() + "`" if e.startswith("  ") else e) for e in extra]]
+    return "\n".join(md) + "\n"
+
+
+def make_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog=PROG, description=__doc__.split("\n\n")[0])
+    p.add_argument("junit_xml", type=Path, help="pytest --junitxml output")
+    p.add_argument("--tier", default="default", help="tier name used in reports (default: default)")
+    p.add_argument("--budget", type=float, metavar="SECONDS", help="fail when wall time exceeds this")
+    p.add_argument("--per-test-cap", type=float, metavar="SECONDS", help="fail when any test exceeds this")
+    p.add_argument("--top", type=int, default=15, metavar="N", help="slowest tests to list (default 15)")
+    p.add_argument("--summary", type=Path, metavar="PATH", help="also write the report as markdown here")
+    p.add_argument("--area", action="append", default=[], metavar="PREFIX",
+                   help="area path prefix; repeatable (default: pyproject testpaths)")
+    p.add_argument("--baseline-seconds", type=float, metavar="SECONDS", help="recorded wall time, for the change line")
+    p.add_argument("--baseline-area", action="append", default=[], metavar="PREFIX=SECONDS",
+                   help="recorded area total; repeatable; names the area that grew")
+    p.add_argument("--baseline-passed", type=int, metavar="N",
+                   help="recorded passed count for this tier; fail below it unless --deletions accounts for the drop")
+    p.add_argument("--max-skipped", type=int, metavar="N",
+                   help="recorded skipped count for this tier; fail above it")
+    p.add_argument("--deletions", type=Path, metavar="FILE",
+                   help="file of deleted test ids (classname::name), one per line, # comments allowed")
+    p.add_argument("--repro-pytest-args", default="", metavar="ARGS",
+                   help="extra pytest arguments to show in the local repro command")
+    return p
+
+
+def main(argv: list[str]) -> int:
+    args = make_parser().parse_args(argv)
+    try:
+        run = parse(args.junit_xml)
+        areas = args.area or default_areas()
+        breaches, body, verdict = build_report(args, run, areas)
+        if args.summary:
+            args.summary.write_text(markdown(args, verdict, body, run, areas), encoding="utf-8")
+    except ReportError as exc:
+        print(f"{PROG}: {exc}", file=sys.stderr)
+        return 2
+    except OSError as exc:
+        print(f"{PROG}: cannot write summary: {exc.strerror or exc}", file=sys.stderr)
+        return 2
+    print("\n".join([verdict, *body]), file=sys.stderr if breaches else sys.stdout)
+    return 1 if breaches else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

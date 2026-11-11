@@ -20,6 +20,7 @@ covered by test_index_projection.py.)
 from __future__ import annotations
 
 from conftest import load_script
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -40,25 +41,22 @@ def _fm(text: str) -> dict:
 
 
 class TestBlockStyleListParsing:
-    def test_block_style_single_bare_slug(self):
-        """Block-style list with a bare slug entry."""
-        result = _fm("surfaces:\n  - synth-alpha")
+    @pytest.mark.parametrize(
+        "block",
+        [
+            pytest.param("surfaces:\n  - synth-alpha", id="single"),
+            pytest.param("surfaces:\n  - 'synth-alpha'", id="quoted"),
+            pytest.param('surfaces:\n  - "synth-alpha"', id="double_quoted"),
+        ],
+    )
+    def test_block_style_bare_slug_is_kept(self, block):
+        result = _fm(block)
         assert result["surfaces"] == ["synth-alpha"]
 
     def test_block_style_multiple_bare_slugs(self):
         """Block-style list with multiple bare slug entries."""
         result = _fm("surfaces:\n  - synth-alpha\n  - synth-beta")
         assert result["surfaces"] == ["synth-alpha", "synth-beta"]
-
-    def test_block_style_quoted_bare_slug(self):
-        """Block-style list item with single quotes around a bare slug."""
-        result = _fm("surfaces:\n  - 'synth-alpha'")
-        assert result["surfaces"] == ["synth-alpha"]
-
-    def test_block_style_double_quoted_bare_slug(self):
-        """Block-style list item with double quotes around a bare slug."""
-        result = _fm('surfaces:\n  - "synth-alpha"')
-        assert result["surfaces"] == ["synth-alpha"]
 
 
 # ---------------------------------------------------------------------------
@@ -67,42 +65,50 @@ class TestBlockStyleListParsing:
 
 
 class TestWikilinkUnwrapSlugReduced:
-    def test_block_wikilink_areas_prefix_stripped(self):
-        """Block-style [[area/synth-alpha]] → synth-alpha for surfaces key.
-        Singular vault dirs — area/ (not areas/)."""
-        result = _fm("surfaces:\n  - '[[area/synth-alpha]]'")
-        assert result["surfaces"] == ["synth-alpha"]
-
-    def test_block_wikilink_tools_prefix_stripped(self):
-        """Block-style [[tools/synth-tool]] → synth-tool for surfaces key."""
-        result = _fm("surfaces:\n  - '[[tools/synth-tool]]'")
-        assert result["surfaces"] == ["synth-tool"]
-
-    def test_block_wikilink_tasks_prefix_stripped(self):
-        """Block-style [[task/synth-task]] → synth-task for surfaces key.
-        Singular vault dirs — task/ (not tasks/)."""
-        result = _fm("surfaces:\n  - '[[task/synth-task]]'")
-        assert result["surfaces"] == ["synth-task"]
-
-    def test_block_wikilink_double_quoted(self):
-        """Block-style double-quoted wikilink → slug-reduced (singular prefix)."""
-        result = _fm('surfaces:\n  - "[[area/synth-alpha]]"')
-        assert result["surfaces"] == ["synth-alpha"]
+    @pytest.mark.parametrize(
+        ("block", "key", "expected"),
+        [
+            pytest.param(
+                "surfaces:\n  - '[[area/synth-alpha]]'",
+                "surfaces",
+                "synth-alpha",
+                id="block_wikilink_areas_prefix_stripped",
+            ),
+            pytest.param(
+                "surfaces:\n  - '[[tools/synth-tool]]'",
+                "surfaces",
+                "synth-tool",
+                id="block_wikilink_tools_prefix_stripped",
+            ),
+            pytest.param(
+                "surfaces:\n  - '[[task/synth-task]]'",
+                "surfaces",
+                "synth-task",
+                id="block_wikilink_tasks_prefix_stripped",
+            ),
+            pytest.param(
+                'surfaces:\n  - "[[area/synth-alpha]]"',
+                "surfaces",
+                "synth-alpha",
+                id="block_wikilink_double_quoted",
+            ),
+            pytest.param("areas:\n  - '[[area/synth-alpha]]'", "areas", "synth-alpha", id="areas_key_slug_reduced"),
+            pytest.param(
+                "related-areas:\n  - '[[area/synth-alpha]]'",
+                "related-areas",
+                "synth-alpha",
+                id="related_areas_key_slug_reduced",
+            ),
+        ],
+    )
+    def test_block_wikilink_is_unwrapped_and_slug_reduced(self, block, key, expected):
+        result = _fm(block)
+        assert result[key] == [expected]
 
     def test_inline_wikilink_list_areas_stripped(self):
         """Inline list with singular wikilink entries → slug-reduced."""
         result = _fm('surfaces: ["[[area/synth-alpha]]", "[[tools/synth-tool]]"]')
         assert result["surfaces"] == ["synth-alpha", "synth-tool"]
-
-    def test_areas_key_slug_reduced(self):
-        """areas: is an overlap key — slug-reduce applies with singular prefix."""
-        result = _fm("areas:\n  - '[[area/synth-alpha]]'")
-        assert result["areas"] == ["synth-alpha"]
-
-    def test_related_areas_key_slug_reduced(self):
-        """related-areas: is an overlap key — slug-reduce applies with singular prefix."""
-        result = _fm("related-areas:\n  - '[[area/synth-alpha]]'")
-        assert result["related-areas"] == ["synth-alpha"]
 
     def test_all_three_prefixes_for_each_overlap_key(self):
         """area/, tools/, task/ all strip for surfaces key (singular dirs)."""
@@ -158,15 +164,25 @@ class TestNonOverlapWikilinkFields:
 
 
 class TestRegressionGuard:
-    def test_inline_bare_slug_list_unchanged(self):
-        """Existing inline [a, b] bare-slug lists must still parse correctly."""
-        result = _fm("surfaces: [synth-alpha, synth-beta]")
-        assert result["surfaces"] == ["synth-alpha", "synth-beta"]
-
-    def test_inline_quoted_slug_list_unchanged(self):
-        """Existing inline ['a', 'b'] lists still parse."""
-        result = _fm("surfaces: ['synth-alpha', 'synth-beta']")
-        assert result["surfaces"] == ["synth-alpha", "synth-beta"]
+    @pytest.mark.parametrize(
+        ("text", "key"),
+        [
+            pytest.param("surfaces: [synth-alpha, synth-beta]", "surfaces", id="inline_bare_slug_list_unchanged"),
+            pytest.param(
+                "surfaces: ['synth-alpha', 'synth-beta']",
+                "surfaces",
+                id="inline_quoted_slug_list_unchanged",
+            ),
+            pytest.param(
+                "subsystems:\n  - synth-alpha\n  - synth-beta",
+                "subsystems",
+                id="block_bare_slug_regression",
+            ),
+        ],
+    )
+    def test_list_form_parses_to_bare_slugs(self, text, key):
+        result = _fm(text)
+        assert result[key] == ["synth-alpha", "synth-beta"]
 
     def test_scalar_no_wikilink_unchanged(self):
         """Ordinary scalar fields still parse as strings."""
@@ -177,8 +193,3 @@ class TestRegressionGuard:
         """Quoted scalar still strips outer quotes."""
         result = _fm('title: "My Note"')
         assert result["title"] == "My Note"
-
-    def test_block_bare_slug_regression(self):
-        """Block-style list with bare slugs (no wikilink) must parse as-is."""
-        result = _fm("subsystems:\n  - synth-alpha\n  - synth-beta")
-        assert result["subsystems"] == ["synth-alpha", "synth-beta"]

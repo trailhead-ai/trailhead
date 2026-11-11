@@ -37,9 +37,37 @@ def test_changed_line_inside_slices_entry_is_pipeline():
     assert same("spec", before, after)
 
 
-def test_change_one_line_above_slices_is_authored():
-    before = "Intro line A\n## Slices\n- x\n"
-    after = "Intro line B\n## Slices\n- x\n"
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        pytest.param(
+            "Intro line A\n## Slices\n- x\n",
+            "Intro line B\n## Slices\n- x\n",
+            id="change_one_line_above_slices_is_authored",
+        ),
+        pytest.param(
+            "```\n## Slices\n```\nauthored A\n",
+            "```\n## Slices\n```\nauthored B\n",
+            id="slices_heading_inside_fence_is_not_a_boundary",
+        ),
+        pytest.param(
+            "~~~\n## Slices\nfenced A\n~~~\n",
+            "~~~\n## Slices\nfenced B\n~~~\n",
+            id="text_inside_fence_that_mentions_slices_is_authored",
+        ),
+        pytest.param(
+            "<!--\n## Slices\n-->\nauthored A\n",
+            "<!--\n## Slices\n-->\nauthored B\n",
+            id="slices_heading_inside_comment_is_not_a_boundary",
+        ),
+        pytest.param(
+            "Intro\u2028## Slices\n- a\n",
+            "Intro\u2028## Slices\n- a\n- b\n",
+            id="unicode_line_separators_do_not_anchor_a_heading",
+        ),
+    ],
+)
+def test_change_outside_the_slices_section_is_authored(before, after):
     assert not same("spec", before, after)
 
 
@@ -65,24 +93,6 @@ def test_terminated_comment_does_not_hide_later_slices_heading():
     before = "<!-- closed -->\n" + LEDGER
     after = before + "- `task/two`, closed 2026-01-02\n"
     assert same("spec", before, after)
-
-
-def test_slices_heading_inside_fence_is_not_a_boundary():
-    before = "```\n## Slices\n```\nauthored A\n"
-    after = "```\n## Slices\n```\nauthored B\n"
-    assert not same("spec", before, after)
-
-
-def test_text_inside_fence_that_mentions_slices_is_authored():
-    before = "~~~\n## Slices\nfenced A\n~~~\n"
-    after = "~~~\n## Slices\nfenced B\n~~~\n"
-    assert not same("spec", before, after)
-
-
-def test_slices_heading_inside_comment_is_not_a_boundary():
-    before = "<!--\n## Slices\n-->\nauthored A\n"
-    after = "<!--\n## Slices\n-->\nauthored B\n"
-    assert not same("spec", before, after)
 
 
 def test_sections_are_found_on_the_text_the_guard_compares():
@@ -148,12 +158,6 @@ def test_commonmark_line_endings(eol):
     after = b("# Spec", "", "Intro", "## Slices", "- one", "- two")
     assert same("spec", before, after)
     assert not same("spec", before, b("# Spec", "", "Intro B", "## Slices", "- one"))
-
-
-def test_unicode_line_separators_do_not_anchor_a_heading():
-    before = "Intro ## Slices\n- a\n"
-    after = "Intro ## Slices\n- a\n- b\n"
-    assert not same("spec", before, after)
 
 
 def test_empty_body():

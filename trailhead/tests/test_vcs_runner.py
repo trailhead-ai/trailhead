@@ -25,19 +25,9 @@ from trailhead.vcs import runner as rp
 
 
 def _git_init_repo(path: Path) -> None:
-    """Create a minimal git repo with one commit under path."""
+    """Create a minimal git repo with one commit under path (identity and signing come from the hermetic env)."""
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.email", "test@example.com"],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(path), "config", "user.name", "Test"],
-        check=True,
-        capture_output=True,
-    )
     readme = path / "README.md"
     readme.write_text("init\n")
     subprocess.run(["git", "-C", str(path), "add", "."], check=True, capture_output=True)
@@ -103,14 +93,14 @@ class TestRunnerStub:
 
 
 class TestRunnerProduction:
-    def test_real_git_rev_parse_on_tmp_repo(self, tmp_path: Path) -> None:
+    def test_real_git_rev_parse_on_tmp_repo(self, tmp_path: Path, hermetic_git_env: dict[str, str]) -> None:
         repo = tmp_path / "my-repo"
         _git_init_repo(repo)
         result = rp.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(repo))
         assert result.returncode == 0
         assert result.stdout.strip() in ("main", "master")
 
-    def test_production_path_inherits_env(self, tmp_path: Path) -> None:
+    def test_production_path_inherits_env(self, tmp_path: Path, hermetic_git_env: dict[str, str]) -> None:
         """Env is inherited (not {}) — git can find system objects."""
         repo = tmp_path / "env-repo"
         _git_init_repo(repo)
@@ -158,7 +148,8 @@ class TestShellSafety:
 
 
 class TestRunnerTimeout:
-    def test_default_runner_passes_timeout_kwarg(self, tmp_path: Path) -> None:
+    # inert-gate: allow subject is the runner wrapper around subprocess.run
+    def test_default_runner_passes_timeout_kwarg(self, tmp_path: Path, hermetic_git_env: dict[str, str]) -> None:
         captured: list[dict] = []
 
         import subprocess as _sp

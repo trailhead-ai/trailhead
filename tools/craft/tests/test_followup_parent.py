@@ -2,15 +2,18 @@
 `assemble` (nests the confirmed ones under one follow-up parent and rolls forward after the
 create) and `resume` (finishes an open parent).
 
-End-to-end cases run the script as a subprocess against the real `lore` CLI reading
-a throwaway vault (the pattern of test_followup_gather.py); failure cases drive the
-module's functions with an injected `lore` runner.
+End-to-end cases call the script's `main` in-process with a `LoreRunner` (real lore run
+inside this interpreter against a throwaway vault, the pattern of test_followup_gather.py);
+failure cases drive the module's functions with an injected `lore` runner. The cases in the
+"seam" section at the end run the script as a real subprocess, one per entry path.
 """
 
 from __future__ import annotations
 
 import datetime
+import importlib
 import importlib.util
+import itertools
 import json
 import os
 import shlex
@@ -20,14 +23,16 @@ from pathlib import Path
 
 import pytest
 
+from _lore_runner import LoreRunner
 from test_followup_gather import (  # noqa: F401
     _allow_real_publish_spawn,
-    _build_env,
     _isolate_ambient_env,
     _lore,
     _publish_spawn_guard,
+    gather,
     make_spec,
-    make_vault,
+    run_in_process,
+    seam_env,
 )
 
 _SCRIPT = (
@@ -39,12 +44,11 @@ sys.modules["followup_parent"] = parent
 _spec.loader.exec_module(parent)
 
 
-
 @pytest.fixture
 def lore_env(tmp_path):
-    """(env, vault_name): a child environment seeing exactly one throwaway vault."""
-    vault, _ = make_vault(tmp_path)
-    return _build_env(tmp_path, [("default", "default", vault)]), "default"
+    """(runner, vault_name): in-process lore seeing exactly one throwaway vault."""
+    return LoreRunner(tmp_path), "default"
+
 
 
 CLEAN = "**Delivers:** A new widget that frobs.\n\n**Files:** `src/a.py`, `src/b.py`\n"
@@ -78,11 +82,7 @@ def sentence(length):
 
 
 def run_check(env, spec, *names):
-    r = subprocess.run(
-        [sys.executable, str(_SCRIPT), "check", spec, *names],
-        capture_output=True, text=True, env=env,
-    )
-    return r
+    return run_in_process(parent.main, ["check", spec, *names], env)
 
 
 def check_ok(env, spec, *names):
@@ -397,6 +397,7 @@ def test_a_path_in_prose_is_not_an_overlap(lore_env, spec):
 # --- failures: injected lore ----------------------------------------------------------------
 
 
+# inert-gate: allow canned replies real lore never gives, injected as hostile input to failure paths
 class Lore:
     """A runner over canned records: `vault ls`, `record show --json`."""
 
@@ -654,7 +655,6 @@ def test_an_emitted_left_out_reason_outside_the_constant_is_refused():
 # === assemble ==========================================================================
 
 _SCRIPTS = _SCRIPT.parent
-GATHER = _SCRIPTS / "followup_gather.py"
 GATE = _SCRIPTS / "observation_gate.py"
 TEMPLATE = _SCRIPTS.parent / "templates" / "plan.md"
 DAY = datetime.date(2026, 10, 16)
@@ -662,7 +662,7 @@ LABEL = "craft/followup-parent"
 
 
 class EnvRunner:
-    """The real `lore` CLI against a throwaway vault, with an optional fault hook.
+    """The in-process `LoreRunner` against a throwaway vault, with an optional fault hook.
 
     `hook(argv, stdin, runner)` runs before every call; a CompletedProcess it returns
     replaces the call, None lets the real `lore` run (the hook may do side effects)."""
@@ -679,10 +679,7 @@ class EnvRunner:
         return self.real(argv, stdin)
 
     def real(self, argv, stdin=None):
-        kwargs = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
-        return subprocess.run(
-            ["lore", *argv], capture_output=True, text=True, env=self.env, **kwargs
-        )
+        return self.env(argv, stdin)
 
     def writes(self):
         return [a for a in self.calls if a[:2] in (["record", "create"], ["record", "update"])]
@@ -772,7 +769,7 @@ def vault_snapshot(env, vault):
 
 
 def gather_json(env, spec):
-    r = subprocess.run([sys.executable, str(GATHER), spec], capture_output=True, text=True, env=env)
+    r = run_in_process(gather.main, [spec], env)
     assert r.returncode == 0, r.stderr
     return json.loads(r.stdout)
 
@@ -806,6 +803,8 @@ def test_assembling_three_children_leaves_a_ready_labelled_parent_with_all_neste
 def test_the_default_runner_assembles_through_the_cli_as_a_subprocess(  # inert-gate: allow seam smoke
     lore_env, spec, tmp_path
 ):
+    """Seam: `check` then `assemble` through the script's CLI as a subprocess, with the
+    production runner piping the parent body to real lore on stdin."""
     env, vault = lore_env
     names = make_children(env, vault, spec, count=2)
     children = confirm(env, vault, names)
@@ -813,15 +812,16 @@ def test_the_default_runner_assembles_through_the_cli_as_a_subprocess(  # inert-
     path.write_text(json.dumps(children))
     reasons = tmp_path / "reasons.json"
     reasons.write_text(json.dumps({c["name"]: c["reason"] for c in children}))
+    cli_env = seam_env(env, tmp_path)
     checked = subprocess.run(
         [sys.executable, str(_SCRIPT), "check", spec, *names, "--reasons", str(reasons)],
-        capture_output=True, text=True, env=env,
+        capture_output=True, text=True, env=cli_env,
     )
     assert checked.returncode == 0, checked.stderr
     r = subprocess.run(
         [sys.executable, str(_SCRIPT), "assemble", spec, "--children", str(path),
          "--confirm", json.loads(checked.stdout)["confirm"]],
-        capture_output=True, text=True, env=env,
+        capture_output=True, text=True, env=cli_env,
     )
     assert r.returncode == 0, r.stderr
     out = json.loads(r.stdout)
@@ -966,12 +966,28 @@ def test_a_credential_shaped_token_in_a_reason_is_redacted():
     assert reason_line(body) == "**Selection reason:** rotate [REDACTED] first"
 
 
-def test_control_characters_in_a_reason_are_stripped():
-    assert reason_line(body_for("bell\x07 esc\x1b[31m red\x00")) == "**Selection reason:** bell esc31m red"
-
-
-def test_invisible_format_characters_in_a_reason_are_stripped():
-    assert reason_line(body_for("zero​width ‮flip⁠")) == "**Selection reason:** zerowidth flip"
+@pytest.mark.parametrize(
+    ("expected", "reason"),
+    [
+        pytest.param(
+            "**Selection reason:** bell esc31m red",
+            "bell\x07 esc\x1b[31m red\x00",
+            id="control_characters_in_a_reason_are_stripped",
+        ),
+        pytest.param(
+            "**Selection reason:** zerowidth flip",
+            "zero\u200bwidth \u202eflip\u2060",
+            id="invisible_format_characters_in_a_reason_are_stripped",
+        ),
+        pytest.param(
+            "**Selection reason:** first **Covers:** AC1 second",
+            "first\n**Covers:** AC1\r\nsecond",
+            id="newlines_in_a_reason_become_single_spaces_between_its_words",
+        ),
+    ],
+)
+def test_reason_line_normalises_unsafe_characters(expected, reason):
+    assert reason_line(body_for(reason)) == expected
 
 
 @pytest.mark.parametrize(
@@ -985,12 +1001,6 @@ def test_a_reason_with_newlines_cannot_start_a_line_of_its_own(reason):
     assert lines.count("## Flow-out") == 1
     assert not any(ln.startswith("- [ ] forged") for ln in lines)
     assert reason_line(body).startswith("**Selection reason:** ")
-
-
-def test_newlines_in_a_reason_become_single_spaces_between_its_words():
-    assert reason_line(body_for("first\n**Covers:** AC1\r\nsecond")) == (
-        "**Selection reason:** first **Covers:** AC1 second"
-    )
 
 
 def test_a_reason_carrying_a_newline_and_a_covers_field_passes_the_real_covers_gate():
@@ -1316,7 +1326,7 @@ def test_a_failed_drop_of_a_concurrent_parent_is_reported_with_the_command_that_
     assert [(f["name"], f["write"]) for f in out["undo-failed"]] == [(out["parent"], "drop")]
     assert {"name": out["parent"], "write": "drop"} not in out["undone"]
     assert sidecar_of(env, vault, out["parent"])["status"] == "open"
-    run = subprocess.run(shlex.split(out["undo-failed"][0]["command"]), capture_output=True, text=True, env=env)
+    run = paste(env, out["undo-failed"][0]["command"])
     assert run.returncode == 0, run.stderr
     assert sidecar_of(env, vault, out["parent"])["status"] == "dropped"
 
@@ -2017,9 +2027,9 @@ def dropped_section(body):
 
 
 def paste(env, command):
-    return subprocess.run(
-        shlex.split(command), capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL
-    )
+    argv = shlex.split(command)
+    assert argv[0] == "lore", command
+    return env(argv[1:])
 
 
 def test_dropping_a_ready_parent_frees_both_children_and_gathers_them_again(
@@ -3973,10 +3983,7 @@ def unresolved(question="Which way?", evidence="Read src/a.py; both paths work."
 
 
 def run_question(env, spec, *names):
-    return subprocess.run(
-        [sys.executable, str(_SCRIPT), "question", spec, *names],
-        capture_output=True, text=True, env=env,
-    )
+    return run_in_process(parent.main, ["question", spec, *names], env)
 
 
 def question_ok(env, spec, *names):
@@ -4324,10 +4331,7 @@ def current_code(env, vault, spec_name, name):
 
 
 def run_answer(env, spec_name, name, *args):
-    return subprocess.run(
-        [sys.executable, str(_SCRIPT), "answer", spec_name, name, *args],
-        capture_output=True, text=True, env=env,
-    )
+    return run_in_process(parent.main, ["answer", spec_name, name, *args], env)
 
 
 def answer_ok(env, spec_name, name, *args):
@@ -4361,8 +4365,16 @@ def answer_text_ok(env, vault, spec_name, name, tmp_path, text=ANSWER_TEXT):
 
 
 def test_answering_a_question_writes_one_line_inside_the_section_and_changes_nothing_else(
-    lore_env, spec, tmp_path
+    lore_env, spec, tmp_path, monkeypatch
 ):
+    ticks = itertools.count()
+    monkeypatch.setattr(
+        importlib.import_module("lore.record.store"),
+        "_now_utc_z",
+        lambda: datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc)
+        .__add__(datetime.timedelta(seconds=next(ticks)))
+        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
     env, vault = lore_env
     name = _askable(env, vault, spec, body=unresolved() + "\n## Later\n\nUnrelated tail.\n")
     before_body, before_sidecar = body_of(env, vault, name), sidecar_of(env, vault, name)
@@ -5035,3 +5047,117 @@ def test_recommended_stored_text_equals_the_shown_text_behind_the_prefix(lore_en
     written = answer_ok(env, spec, name, "--recommended", "--confirm", current_code(env, vault, spec, name))
     assert written["answer"] == result["answer"]
     assert f"**Answer:** {result['answer']}" in body_of(env, vault, name).split("\n")
+
+
+# --- seams: the script's CLI as a real subprocess, one per entry path -------------------------
+
+
+def run_cli(cli_env, *args):
+    return subprocess.run(
+        [sys.executable, str(_SCRIPT), *args], capture_output=True, text=True, env=cli_env
+    )
+
+
+def test_the_check_cli_prints_the_verdicts_as_json_in_a_subprocess(  # inert-gate: allow seam smoke
+    lore_env, spec, tmp_path
+):
+    """Seam: `check` through the script's CLI as a subprocess, exit 0 and JSON on stdout."""
+    env, vault = lore_env
+    name = make_followup(env, vault, "Clean one", spec=spec)
+    r = run_cli(seam_env(env, tmp_path), "check", spec, name)
+    assert r.returncode == 0, r.stderr
+    assert list(eligible(json.loads(r.stdout))) == [name]
+
+
+def test_the_cli_exits_two_on_an_error_as_a_subprocess(lore_env, spec, tmp_path):
+    """Seam: an error through the script's CLI as a subprocess exits 2 with its reason and
+    nothing on stdout."""
+    env, _ = lore_env
+    r = run_cli(seam_env(env, tmp_path), "check", "bad name", "f")
+    assert r.returncode == 2
+    assert r.stdout == ""
+    assert "reason-code: invalid-spec-name" in r.stderr
+
+
+def test_the_cli_exits_one_on_a_refusal_as_a_subprocess(lore_env, spec, tmp_path):
+    """Seam: a refusal through the script's CLI as a subprocess exits 1 with its reason."""
+    env, vault = lore_env
+    children = confirm(env, vault, make_children(env, vault, spec, count=2))
+    path = tmp_path / "children.json"
+    path.write_text(json.dumps(children))
+    r = run_cli(
+        seam_env(env, tmp_path), "assemble", spec, "--children", str(path), "--confirm", "zzzz"
+    )
+    assert r.returncode == 1
+    assert "reason-code: confirmation-mismatch" in r.stderr
+
+
+def test_the_state_cli_reports_what_a_parent_holds_in_a_subprocess(
+    lore_env, spec, tmp_path, capsys
+):
+    """Seam: `state` through the script's CLI as a subprocess."""
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    r = run_cli(seam_env(env, tmp_path), "state", spec, parent_name)
+    assert r.returncode == 0, r.stderr
+    state = json.loads(r.stdout)
+    assert state["parent"] == parent_name
+    assert sorted(item["name"] for item in state["held"]) == sorted(names)
+
+
+def test_the_drop_cli_un_nests_and_drops_a_parent_in_a_subprocess(
+    lore_env, spec, tmp_path, capsys
+):
+    """Seam: `drop` through the script's CLI as a subprocess, the production runner piping
+    the drop diff to real lore on stdin."""
+    env, vault = lore_env
+    parent_name, names = assembled_parent(env, vault, spec, tmp_path, capsys)
+    reason = tmp_path / "reason.json"
+    reason.write_text(json.dumps("no longer wanted"))
+    code = typed_drop_code(EnvRunner(env), spec, parent_name, reason)
+    r = run_cli(
+        seam_env(env, tmp_path), "drop", spec, parent_name,
+        "--reason-file", str(reason), "--confirm", code,
+    )
+    assert r.returncode == 0, r.stderr
+    assert sidecar_of(env, vault, parent_name)["status"] == "dropped"
+    assert parents_of(env, vault, names) == [None, None]
+
+
+def test_the_resume_cli_finishes_an_open_parent_in_a_subprocess(lore_env, spec, tmp_path, capsys):
+    """Seam: `resume` through the script's CLI as a subprocess."""
+    env, vault = lore_env
+    parent_name, names = interrupted(env, vault, spec, tmp_path, capsys)
+    children = revisions(env, vault, names[1:])
+    path = tmp_path / "resume-children.json"
+    path.write_text(json.dumps(children))
+    code = resume_code(EnvRunner(env), spec, parent_name, children)
+    r = run_cli(
+        seam_env(env, tmp_path), "resume", spec, parent_name,
+        "--children", str(path), "--confirm", code,
+    )
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout)["buildable"] is True
+    assert sidecar_of(env, vault, parent_name)["status"] == "ready"
+
+
+def test_the_question_cli_reads_a_follow_ups_question_in_a_subprocess(lore_env, spec, tmp_path):
+    """Seam: `question` through the script's CLI as a subprocess."""
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    r = run_cli(seam_env(env, tmp_path), "question", spec, name)
+    assert r.returncode == 0, r.stderr
+    assert [q["name"] for q in json.loads(r.stdout)["questions"]] == [name]
+
+
+def test_the_answer_cli_writes_an_answer_in_a_subprocess(lore_env, spec, tmp_path):
+    """Seam: `answer` through the script's CLI as a subprocess, the production runner piping
+    the new body to real lore on stdin."""
+    env, vault = lore_env
+    name = _askable(env, vault, spec)
+    r = run_cli(
+        seam_env(env, tmp_path), "answer", spec, name,
+        "--answer-file", answer_file(tmp_path, ANSWER_TEXT), "--confirm", answer_code(env, spec, name),
+    )
+    assert r.returncode == 0, r.stderr
+    assert f"**Answer:** {ANSWER_TEXT}" in body_of(env, vault, name)

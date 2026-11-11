@@ -24,6 +24,7 @@ def test_resolve_user_sanitizes_lore_user():
         assert v.resolve_user() == "adalovelace"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_resolve_user_falls_back_to_git_config():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):
@@ -35,6 +36,7 @@ def test_resolve_user_falls_back_to_git_config():
             assert v.resolve_user() == "Grace Hopper"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_resolve_user_falls_back_to_literal_you():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):
@@ -46,6 +48,7 @@ def test_resolve_user_falls_back_to_literal_you():
             assert v.resolve_user() == "you"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_resolve_user_git_failure_falls_back_to_you():
     env = {k: val for k, val in os.environ.items() if k != "LORE_USER"}
     with mock.patch.dict(os.environ, env, clear=True):

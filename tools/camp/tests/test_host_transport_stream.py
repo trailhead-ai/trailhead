@@ -306,12 +306,11 @@ def test_connection_dying_without_closing_is_classified_within_a_bounded_time() 
 
 
 def test_streaming_past_the_bound_with_continuous_progress_is_not_killed() -> None:
-    # The gap between chunks must sit well under the liveness bound below
-    # (0.11s) so ordinary scheduling jitter on a loaded machine cannot stall
-    # a chunk past it, while the total still exceeds the bound severalfold —
-    # that excess is what makes this discriminating against an absolute
-    # deadline.
-    chunk_count = 20
+    # The gap between chunks (0.02s) is a small fraction of the liveness bound below (1.01s), so
+    # a producer or receiver that a loaded machine stalls for several hundred milliseconds, or
+    # that is slow to start, still reports progress inside the bound. The total (3s) is three
+    # times the bound, which is what makes this discriminating against an absolute deadline.
+    chunk_count = 150
     interval_between_chunks = 0.02
     script = (
         "import sys, time\n"
@@ -330,7 +329,7 @@ def test_streaming_past_the_bound_with_continuous_progress_is_not_killed() -> No
             stderr=subprocess.PIPE,
         )
 
-    interval, count_max, connect_timeout = 0.05, 2, 0.01
+    interval, count_max, connect_timeout = 0.5, 2, 0.01
     bound = interval * count_max + connect_timeout
     total_streaming_time = chunk_count * interval_between_chunks
 
@@ -431,11 +430,13 @@ def test_producer_wait_is_bounded_after_its_output_is_fully_drained() -> None:
 
     started = time.monotonic()
     outcome = transport.stream_camp(
-        _HOST, ["transfer-receive", "history"], producer, spawn=_consume_stdin_spawn
+        _HOST, ["transfer-receive", "history"], producer, spawn=_consume_stdin_spawn,
+        producer_wait_seconds=0.3,
     )
     elapsed = time.monotonic() - started
 
-    assert elapsed < 10.0, f"producer.wait() was not bounded — took {elapsed:.1f}s"
+    # The producer outlives the test by 30s: any return well before that means its wait was bounded.
+    assert elapsed < 15.0, f"producer.wait() was not bounded — took {elapsed:.1f}s"
     assert isinstance(outcome, transport.ProducerFailed)
     assert outcome.exit_code != 0
 

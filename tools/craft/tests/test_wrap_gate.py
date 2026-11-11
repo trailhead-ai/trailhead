@@ -179,24 +179,18 @@ class TestFencedAndCommentedExemptions:
     # masking exemption itself, never the unrelated unbreakable-word one.
     _OVER_LONG_PROSE = "aaaa bbbb cccc dddd eeee ffff gggg"
 
-    def test_over_long_line_inside_triple_backtick_fence_exits_zero(self, tmp_path):
-        body = f"# Title\n\n```\n{self._OVER_LONG_PROSE}\n```\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_tilde_fence_exits_zero(self, tmp_path):
-        body = f"# Title\n\n~~~\n{self._OVER_LONG_PROSE}\n~~~\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_a_longer_fence_wrapping_a_shorter_one(self, tmp_path):
-        body = f"# Title\n\n````\n```\n{self._OVER_LONG_PROSE}\n```\n````\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_html_comment_exits_zero(self, tmp_path):
-        body = f"# Title\n\n<!-- {self._OVER_LONG_PROSE} -->\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_unterminated_comment_running_to_eof_exits_zero(self, tmp_path):
-        body = f"# Title\n\n<!-- unterminated\n{self._OVER_LONG_PROSE}\n"
+    @pytest.mark.parametrize(
+        "template",
+        [
+            pytest.param("# Title\n\n```\n{prose}\n```\n", id="triple_backtick_fence"),
+            pytest.param("# Title\n\n~~~\n{prose}\n~~~\n", id="tilde_fence"),
+            pytest.param("# Title\n\n````\n```\n{prose}\n```\n````\n", id="longer_fence_wrapping_a_shorter_one"),
+            pytest.param("# Title\n\n<!-- {prose} -->\n", id="html_comment"),
+            pytest.param("# Title\n\n<!-- unterminated\n{prose}\n", id="unterminated_comment_running_to_eof"),
+        ],
+    )
+    def test_over_long_line_inside_a_fence_or_comment_exits_zero(self, tmp_path, template):
+        body = template.format(prose=self._OVER_LONG_PROSE)
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
 
@@ -289,16 +283,16 @@ class TestPrefixedUnbreakableUnits:
     exactly one over-budget unit fell outside the exemption — the very
     line `wrap_prose.py` emits (and cannot improve) for that input."""
 
-    def test_list_item_with_single_unbreakable_unit_exits_zero(self, tmp_path):
-        body = "# T\n\n- " + ("a" * 25) + "\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_blockquote_line_with_single_unbreakable_unit_exits_zero(self, tmp_path):
-        body = "# T\n\n> " + ("a" * 25) + "\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_nested_list_item_with_single_unbreakable_unit_exits_zero(self, tmp_path):
-        body = "# T\n\n- outer\n  - " + ("a" * 25) + "\n"
+    @pytest.mark.parametrize(
+        "prefix",
+        [
+            pytest.param("# T\n\n- ", id="list_item"),
+            pytest.param("# T\n\n> ", id="blockquote_line"),
+            pytest.param("# T\n\n- outer\n  - ", id="nested_list_item"),
+        ],
+    )
+    def test_single_unbreakable_unit_exits_zero(self, tmp_path, prefix):
+        body = prefix + ("a" * 25) + "\n"
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
     def test_list_item_with_unbreakable_unit_plus_breakable_text_is_over_budget(self, tmp_path):
@@ -376,43 +370,40 @@ class TestSiblingBlocksAreNotOneBlock:
     different nesting depth, and a fresh paragraph opener each terminate the
     preceding block exactly as a blank line already does."""
 
-    def test_first_of_two_short_sibling_list_items_is_not_under_filled(self, tmp_path):
-        # "- one two" (9 chars) could absorb "-" (the next item's own
-        # marker) by length alone, but the two are separate list items —
-        # joining them would merge them into one.
-        body = "# Title\n\n- one two\n- three four\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_wrapped_items_last_continuation_line_not_under_filled_against_next_marker(
-        self, tmp_path
-    ):
-        # "  five" (6 chars) is the last continuation line of the first
-        # item; the next item's marker line follows with no blank line
-        # between. Joining them would merge the continuation into the next
-        # item's own text.
-        body = "# Title\n\n- one two three four\n  five\n- six seven\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_wrapped_items_last_continuation_line_not_under_filled_against_a_nested_next_marker(
-        self, tmp_path
-    ):
-        body = "# Title\n\n- one two three four\n  five\n  - six seven\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_inner_list_item_is_not_a_continuation_of_its_outer_item(self, tmp_path):
-        # The outer item's own line, not a continuation line, is followed
-        # directly by a nested item — still not a continuation.
-        body = "# Title\n\n- one two three\n  - four five\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_paragraph_immediately_followed_by_a_list_item_is_not_under_filled(self, tmp_path):
-        body = "# Title\n\none two three\n- four five\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_block_quote_line_not_under_filled_against_a_line_at_different_quote_depth(
-        self, tmp_path
-    ):
-        body = "# Title\n\n> one two\n> > three four\n"
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(
+                "# Title\n\n- one two\n- three four\n",
+                id="first_of_two_short_sibling_list_items_is_not_under_filled",
+            ),
+            pytest.param(
+                "# Title\n\n- one two three four\n  five\n- six seven\n",
+                id="wrapped_items_last_continuation_line_not_under_filled_against_next_marker",
+            ),
+            pytest.param(
+                "# Title\n\n- one two three four\n  five\n  - six seven\n",
+                id="wrapped_items_last_continuation_line_not_under_filled_against_a_nested_next_marker",
+            ),
+            pytest.param(
+                "# Title\n\n- one two three\n  - four five\n",
+                id="inner_list_item_is_not_a_continuation_of_its_outer_item",
+            ),
+            pytest.param(
+                "# Title\n\none two three\n- four five\n",
+                id="paragraph_immediately_followed_by_a_list_item_is_not_under_filled",
+            ),
+            pytest.param(
+                "# Title\n\n> one two\n> > three four\n",
+                id="block_quote_line_not_under_filled_against_a_line_at_different_quote_depth",
+            ),
+            pytest.param(
+                "# Title\n\n> one two three\n> seven eight\n",
+                id="block_quote_continuation_at_the_same_depth_measured_by_its_real_word_not_its_marker",
+            ),
+        ],
+    )
+    def test_continuation_the_next_marker_cannot_absorb_is_not_under_filled(self, tmp_path, body):
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
     def test_block_quote_continuation_at_the_same_depth_is_still_reported_when_under_filled(
@@ -422,16 +413,6 @@ class TestSiblingBlocksAreNotOneBlock:
         result = run(doc(tmp_path, body), column=COL)
         assert result.returncode == 1
         assert "under-filled" in result.stderr
-
-    def test_block_quote_continuation_at_the_same_depth_measured_by_its_real_word_not_its_marker(
-        self, tmp_path
-    ):
-        # A raw tokenizer would see the next line's "> " marker as "the
-        # next word" (1 char, always fits) and wrongly flag this as
-        # under-filled. The real next word, "seven" (5 chars), does not fit
-        # — 15 + 1 + 5 = 21 > 20 — so this line is correctly left alone.
-        body = "# Title\n\n> one two three\n> seven eight\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
 
 
 class TestRealContentBrainstormSkill:

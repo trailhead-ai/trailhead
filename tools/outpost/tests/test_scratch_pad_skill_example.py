@@ -62,6 +62,7 @@ def test_the_skill_example_is_a_round_the_script_accepts():
     assert scratch_pad.check_round(skill_example_round()) == []
 
 
+@pytest.mark.chromium
 def test_the_skill_example_draws_every_option_and_includes_a_flow(tmp_path, monkeypatch):
     work = tmp_path / "cwd"
     work.mkdir()
@@ -81,6 +82,7 @@ def test_the_skill_example_draws_every_option_and_includes_a_flow(tmp_path, monk
     assert flows, "the example shows no flow option"
 
 
+@pytest.mark.chromium
 @pytest.mark.parametrize("flow", ["flowchart LR\nsubgraph g\nA --> B\nend", "flowchart LR\nA ==> B"])
 def test_a_broken_flow_in_the_example_is_caught_by_the_probe(tmp_path, monkeypatch, flow):
     work = tmp_path / "cwd"

@@ -17,6 +17,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from conftest import load_script
+import pytest
 
 
 def _fields():
@@ -269,31 +270,19 @@ def test_unset_related_pair_absent_kind_is_a_silent_noop():
     assert result["related"] == {"decision": ["good-id"]}
 
 
-def test_unset_related_pair_empty_kind_is_rejected():
+@pytest.mark.parametrize(
+    "pair",
+    [
+        pytest.param("=name", id="empty_kind"),
+        pytest.param("decision=", id="empty_name"),
+        pytest.param("decision-good-id", id="malformed_no_equals"),
+    ],
+)
+def test_malformed_unset_related_pair_is_rejected(pair):
     f = _fields()
     result, errors = f.apply_record_fields(
         {"related": {"decision": ["good-id"]}},
-        _args(unset_related_pairs=["=name"]),
-    )
-    assert errors
-    assert result["related"] == {"decision": ["good-id"]}
-
-
-def test_unset_related_pair_empty_name_is_rejected():
-    f = _fields()
-    result, errors = f.apply_record_fields(
-        {"related": {"decision": ["good-id"]}},
-        _args(unset_related_pairs=["decision="]),
-    )
-    assert errors
-    assert result["related"] == {"decision": ["good-id"]}
-
-
-def test_unset_related_pair_malformed_no_equals_is_rejected():
-    f = _fields()
-    result, errors = f.apply_record_fields(
-        {"related": {"decision": ["good-id"]}},
-        _args(unset_related_pairs=["decision-good-id"]),
+        _args(unset_related_pairs=[pair]),
     )
     assert errors
     assert result["related"] == {"decision": ["good-id"]}

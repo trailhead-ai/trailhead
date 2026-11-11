@@ -21,6 +21,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.seam_real
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SEEDER = REPO_ROOT / "tools" / "lore" / "scripts" / "seed-eval-vault"
 PYTHON = os.path.realpath(sys.executable)

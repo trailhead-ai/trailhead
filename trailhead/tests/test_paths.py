@@ -343,17 +343,17 @@ class TestOverrideValidation:
 
 
 class TestAppArgValidation:
-    def test_app_with_forward_slash_raises_named_error(self):
+    @pytest.mark.parametrize(
+        "app",
+        [
+            pytest.param("bad/app", id="forward_slash"),
+            pytest.param("bad\\app", id="backslash"),
+            pytest.param("../escape", id="dotdot"),
+        ],
+    )
+    def test_app_with_path_syntax_raises_named_error(self, app):
         with pytest.raises(PathResolutionError, match="app"):
-            config_dir("bad/app", platform="linux", env={"HOME": "/tmp"})
-
-    def test_app_with_backslash_raises_named_error(self):
-        with pytest.raises(PathResolutionError, match="app"):
-            config_dir("bad\\app", platform="linux", env={"HOME": "/tmp"})
-
-    def test_app_with_dotdot_raises_named_error(self):
-        with pytest.raises(PathResolutionError, match="app"):
-            config_dir("../escape", platform="linux", env={"HOME": "/tmp"})
+            config_dir(app, platform="linux", env={"HOME": "/tmp"})
 
     def test_app_with_os_sep_raises_named_error(self):
         bad_app = "a" + os.sep + "b"

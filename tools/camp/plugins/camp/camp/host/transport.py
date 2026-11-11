@@ -623,6 +623,7 @@ def stream_camp(
     server_alive_count_max: int = DEFAULT_SERVER_ALIVE_COUNT_MAX,
     extra_ssh_options: Sequence[str] = (),
     spawn: StreamSpawner = default_stream_spawner,
+    producer_wait_seconds: float = 5,
 ) -> TransportOutcome:
     """Run ``camp <remote_argv...>`` on ``host``, piping ``producer``'s stdout
     into its stdin verbatim and binary, and classify the outcome.
@@ -648,6 +649,9 @@ def stream_camp(
     killed and classified as :class:`StoppedResponding`. An actively
     streaming transfer of any length never trips it, since every chunk
     resets the bound.
+
+    Once the remote invocation has finished, ``producer`` gets
+    ``producer_wait_seconds`` to exit before it is killed.
 
     Reuses :func:`quote_and_join`, :func:`_fixed_ssh_options`, and
     :func:`_classify` — the same assembly and the same classifier
@@ -743,7 +747,7 @@ def stream_camp(
         stderr_reader.join(timeout=5)
         try:
             producer.kill()
-            producer.wait(timeout=5)
+            producer.wait(timeout=producer_wait_seconds)
         except Exception:
             pass
         return StoppedResponding(execution_timeout=bound)
@@ -753,7 +757,7 @@ def stream_camp(
     stderr_reader.join()
 
     try:
-        producer_exit = producer.wait(timeout=5)
+        producer_exit = producer.wait(timeout=producer_wait_seconds)
     except subprocess.TimeoutExpired:
         producer.kill()
         producer_exit = producer.wait()

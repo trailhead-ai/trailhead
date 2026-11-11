@@ -55,6 +55,7 @@ def _pad_round(*layouts):
     }
 
 
+@pytest.mark.chromium
 def test_the_pen_draws_an_option_handed_in_at_its_original_index_of_an_otherwise_empty_options_list(tmp_path):
     round_path = tmp_path / "round.json"
     round_path.write_text(json.dumps(_pad_round(LAYOUT_A, LAYOUT_B, LAYOUT_C)))
@@ -153,6 +154,7 @@ def test_only_the_named_page_files_are_copied_from_the_reference_source_folder(t
     assert {"index.html", "reference.css", "reference.js", "reference-data.js", "pen.js"} <= set(got)
 
 
+@pytest.mark.chromium
 def test_a_reference_of_one_chosen_layout_shows_one_card_with_the_title_and_a_traced_drawing(tmp_path):
     ref = _reference(_drawing(option=_opt("Logo left", "Cheap")), title="Header decision")
     got = _run(
@@ -175,6 +177,7 @@ def test_a_reference_of_one_chosen_layout_shows_one_card_with_the_title_and_a_tr
     assert got["strokes"] > 0
 
 
+@pytest.mark.chromium
 def test_three_drawings_across_two_rounds_show_three_cards_in_the_order_named_each_with_its_own_text(tmp_path):
     ref = _reference(
         _drawing(2, 1, "B", "Sign-in round", "Wrong password?", _opt("Lock out", "Hard", layout=LAYOUT_B)),
@@ -189,6 +192,7 @@ def test_three_drawings_across_two_rounds_show_three_cards_in_the_order_named_ea
     ]
 
 
+@pytest.mark.chromium
 def test_a_reference_read_from_a_pad_leaves_the_pads_other_options_out_of_every_file(tmp_path):
     pad_round = {
         "title": "Header round",
@@ -242,6 +246,7 @@ def test_an_option_key_the_pad_does_not_check_never_reaches_the_pages_files(tmp_
     assert "SMUGGLED" not in corpus
 
 
+@pytest.mark.chromium
 def test_a_chosen_layout_traces_its_boxes(tmp_path):
     got = _run(
         tmp_path,
@@ -254,6 +259,7 @@ def test_a_chosen_layout_traces_its_boxes(tmp_path):
     assert got["msg"] is None
 
 
+@pytest.mark.chromium
 def test_a_chosen_flow_draws_its_steps_and_arrows(tmp_path):
     flow = {"name": "F", "cost": "c", "pick": False, "flow": "flowchart LR\n  a[One] --> b[Two] --> c[Three]"}
     got = _run(
@@ -264,6 +270,7 @@ def test_a_chosen_flow_draws_its_steps_and_arrows(tmp_path):
     assert got == {"steps": 3, "arrows": 2, "msg": None}
 
 
+@pytest.mark.chromium
 def test_a_chosen_option_the_pen_cannot_draw_shows_the_message_in_its_card_while_the_others_draw(tmp_path):
     broken_layout = _opt("Broken layout", layout={"box": [{"nonsense": "x"}]})
     broken_flow = {"name": "Broken flow", "cost": "c", "pick": False, "flow": "flowchart LR\n  a[One] --> --> b"}
@@ -282,6 +289,7 @@ def test_a_chosen_option_the_pen_cannot_draw_shows_the_message_in_its_card_while
     assert got[2]["msg"][1].startswith("line 2")
 
 
+@pytest.mark.chromium
 def test_the_same_page_loaded_twice_at_one_width_draws_the_same_strokes(tmp_path):
     ref = _reference(
         _drawing(letter="A", option=_opt("L", layout=LAYOUT_B)),
@@ -295,6 +303,7 @@ def test_the_same_page_loaded_twice_at_one_width_draws_the_same_strokes(tmp_path
     assert all(len(strokes) > 0 for strokes in first)
 
 
+@pytest.mark.chromium
 def test_two_different_chosen_options_draw_different_strokes(tmp_path):
     ref = _reference(
         _drawing(letter="A", option=_opt("L", layout=LAYOUT_A)),
@@ -305,6 +314,7 @@ def test_two_different_chosen_options_draw_different_strokes(tmp_path):
     assert got[0] != got[1]
 
 
+@pytest.mark.chromium
 def test_an_option_is_drawn_from_its_original_place_so_the_same_option_elsewhere_draws_other_strokes(tmp_path):
     ref = _reference(
         _drawing(question=1, letter="A", option=_opt("L", layout=LAYOUT_A)),
@@ -341,6 +351,7 @@ def _hostile_reference(field, text):
     return _reference(_drawing(option=option, **kw), title=title)
 
 
+@pytest.mark.chromium
 @pytest.mark.parametrize("text", HOSTILE)
 @pytest.mark.parametrize(
     "field", ["title", "prompt", "round_title", "name", "cost", "layout label", "flow label"]
@@ -364,6 +375,7 @@ return {pwned: window.pwned === undefined ? null : window.pwned,
     assert text in got["shown"]
 
 
+@pytest.mark.chromium
 def test_the_date_line_shows_the_date_the_builder_was_given_and_another_date_gives_another_line(tmp_path):
     ref = _reference(_drawing())
     js = "return document.querySelector('#ref-chosen').textContent;"
@@ -375,6 +387,7 @@ def test_the_date_line_shows_the_date_the_builder_was_given_and_another_date_giv
     assert "sketches" in first
 
 
+@pytest.mark.chromium
 def test_the_builder_dates_the_page_today_when_given_no_date(tmp_path):
     folder = tmp_path / "out"
     scratch_pad.build_reference_page(folder, _reference(_drawing()))
@@ -382,6 +395,7 @@ def test_the_builder_dates_the_page_today_when_given_no_date(tmp_path):
     assert datetime.date.today().isoformat() in got
 
 
+@pytest.mark.chromium
 def test_the_font_notice_shows_when_the_font_file_is_gone_and_stays_hidden_when_it_is_there(tmp_path):
     ref = _reference(_drawing())
     js = "return document.getElementById('pad-font-notice').hidden;"
@@ -412,6 +426,7 @@ CONTROL_WORDS = {
 }
 
 
+@pytest.mark.chromium
 @pytest.mark.parametrize("control", list(CONTROLS))
 def test_the_page_has_no_such_control_though_its_source_pad_option_is_picked(tmp_path, control):
     option = _opt("Picked", "Cheap", pick=True, layout=LAYOUT_A)
@@ -430,6 +445,7 @@ return {{found: document.querySelectorAll({json.dumps(CONTROLS[control])}).lengt
         assert word not in got["text"]
 
 
+@pytest.mark.chromium
 def test_the_page_loads_only_files_beside_it_and_runs_under_the_pads_policy(tmp_path):
     folder = _build(tmp_path, _reference(_drawing()))
     html_text = (folder / "index.html").read_text(encoding="utf-8")
@@ -446,6 +462,7 @@ def test_the_page_loads_only_files_beside_it_and_runs_under_the_pads_policy(tmp_
         assert (folder / ref).is_file()
 
 
+@pytest.mark.chromium
 def test_the_data_file_is_ascii_json_handed_to_json_parse_and_non_ascii_text_still_shows(tmp_path):
     name = "Café ☕ </script>"
     folder = _build(tmp_path, _reference(_drawing(option=_opt(name, "Cheap"))))

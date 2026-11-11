@@ -179,20 +179,18 @@ class TestCampStatusExitCodes:
             with reconcile_lock(mpath.parent):
                 flip_member_state_unlocked(mpath, name, st)
 
-    def test_status_all_ready_exit_0(self, cli_env):
-        self._seed_states(cli_env, "st0", {"repo_a": "ready", "repo_b": "ready"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st0")
-        assert r.returncode == 0, f"expected 0, got {r.returncode}: {r.stderr}"
-
-    def test_status_some_pending_exit_2(self, cli_env):
-        self._seed_states(cli_env, "st2", {"repo_a": "ready", "repo_b": "pending"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st2")
-        assert r.returncode == 2, f"expected 2, got {r.returncode}: {r.stderr}"
-
-    def test_status_some_failed_exit_3(self, cli_env):
-        self._seed_states(cli_env, "st3", {"repo_a": "ready", "repo_b": "failed"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st3")
-        assert r.returncode == 3, f"expected 3, got {r.returncode}: {r.stderr}"
+    @pytest.mark.parametrize(
+        ("slug", "states", "expected"),
+        [
+            pytest.param("st0", {"repo_a": "ready", "repo_b": "ready"}, 0, id="all_ready_exit_0"),
+            pytest.param("st2", {"repo_a": "ready", "repo_b": "pending"}, 2, id="some_pending_exit_2"),
+            pytest.param("st3", {"repo_a": "ready", "repo_b": "failed"}, 3, id="some_failed_exit_3"),
+        ],
+    )
+    def test_status_exit_code_reflects_member_states(self, cli_env, slug, states, expected):
+        self._seed_states(cli_env, slug, states)
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", slug)
+        assert r.returncode == expected, f"expected {expected}, got {r.returncode}: {r.stderr}"
 
     def test_status_json_shape(self, cli_env):
         self._seed_states(cli_env, "stj", {"repo_a": "ready", "repo_b": "pending"})
@@ -275,41 +273,39 @@ class TestCampStatusTwoFacts:
         assert report["code"] == 0
         assert report["work_code"] == 3
 
-    def test_header_all_ready(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf3",
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf3")
-        assert r.stdout.splitlines()[0] == "camp status: twf3 — ready"
-
-    def test_header_mixed_boot_ready_work_pending(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf4",
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "pending"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf4")
-        assert r.stdout.splitlines()[0] == "camp status: twf4 — ready, work pending"
-
-    def test_header_failed(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf5",
-            {
-                "repo_a": {"provision_state": "failed", "work_state": "pending"},
-                "repo_b": {"provision_state": "ready", "work_state": "ready"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf5")
-        assert r.stdout.splitlines()[0] == "camp status: twf5 — failed"
+    @pytest.mark.parametrize(
+        ("facts", "header"),
+        [
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                    "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
+                },
+                "ready",
+                id="all_ready",
+            ),
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                    "repo_b": {"provision_state": "ready", "work_state": "pending"},
+                },
+                "ready, work pending",
+                id="mixed_boot_ready_work_pending",
+            ),
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "failed", "work_state": "pending"},
+                    "repo_b": {"provision_state": "ready", "work_state": "ready"},
+                },
+                "failed",
+                id="failed",
+            ),
+        ],
+    )
+    def test_header_reflects_the_member_facts(self, cli_env, facts, header):
+        self._seed_two_facts(cli_env, "twfh", facts)
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twfh")
+        assert r.stdout.splitlines()[0] == f"camp status: twfh — {header}"
 
     def test_per_member_line_carries_both_facts(self, cli_env):
         self._seed_two_facts(

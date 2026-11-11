@@ -376,13 +376,17 @@ class TestPrEvaluate:
     def _provider(self):
         return get_provider("github", runner=lambda cmd, **kw: None)
 
-    def test_done_on_mergeable_clean(self) -> None:
-        result = self._provider().pr.evaluate(_pr_payload("MERGEABLE", "CLEAN"))
-        assert result["action"] == "done"
-
-    def test_rebase_on_conflicting(self) -> None:
-        result = self._provider().pr.evaluate(_pr_payload("CONFLICTING", "DIRTY"))
-        assert result["action"] == "rebase"
+    @pytest.mark.parametrize(
+        ("expected", "mergeable", "merge_state"),
+        [
+            pytest.param("done", "MERGEABLE", "CLEAN", id="done_on_mergeable_clean"),
+            pytest.param("rebase", "CONFLICTING", "DIRTY", id="rebase_on_conflicting"),
+            pytest.param("wait", "UNKNOWN", "PENDING", id="wait_on_ci_pending"),
+        ],
+    )
+    def test_evaluate_action(self, expected, mergeable, merge_state) -> None:
+        result = self._provider().pr.evaluate(_pr_payload(mergeable, merge_state))
+        assert result["action"] == expected
 
     def test_rerun_ci_on_failing_no_annotations(self) -> None:
         status = _pr_payload(
@@ -418,10 +422,6 @@ class TestPrEvaluate:
 
     def test_wait_on_draft(self) -> None:
         result = self._provider().pr.evaluate(_pr_payload("MERGEABLE", "CLEAN", is_draft=True))
-        assert result["action"] == "wait"
-
-    def test_wait_on_ci_pending(self) -> None:
-        result = self._provider().pr.evaluate(_pr_payload("UNKNOWN", "PENDING"))
         assert result["action"] == "wait"
 
     def test_no_bot_configured_ignores_reviews(self) -> None:
@@ -1833,6 +1833,7 @@ class TestClassifyFixupDominance:
         assert empty.fixup_count == 0
         assert empty.series_length == 0
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_makes_no_subprocess_call_and_consults_only_its_argument(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -24,6 +24,8 @@ from pathlib import Path
 
 import pytest
 
+from trailhead.tests._git_support import hermetic_git_env  # noqa: F401
+
 
 @pytest.fixture(autouse=True)
 def _forbid_real_home(request, monkeypatch: pytest.MonkeyPatch) -> None:

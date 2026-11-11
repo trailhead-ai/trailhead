@@ -274,3 +274,454 @@ def test_skill_names_the_gate():
     assert "criterion_gate.py" in DOC.read_text()
 '''
     assert _run(str(_module(tmp_path, body))).returncode == 0
+
+
+# --- the real-lore-spawn rule ------------------------------------------------
+#
+# Craft tests reach lore through the in-process runner. A test that spawns a real
+# `lore` process belongs in the `seam_real` tier (a `*_seam.py` file, a module
+# `pytestmark`, or a marker on the test), where CI runs it as its own job. The rule
+# reads the direct form only: a subprocess call whose argv is a list starting with
+# the literal "lore". A spawn through a PATH shim or `python <cli>` cannot be told
+# from a craft script's own spawn without data-flow analysis, so it is not claimed.
+
+_SPAWNS_LORE = '''
+import subprocess
+def test_lists_the_vaults():
+    done = subprocess.run(["lore", "vault", "ls"], capture_output=True, text=True)
+    assert done.returncode == 0
+'''
+
+
+def _craft_module(tmp_path: Path, body: str, name: str = "test_seeded.py") -> Path:
+    directory = tmp_path / "tools" / "craft" / "tests"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_a_craft_test_that_spawns_lore_outside_a_seam_file_is_flagged(tmp_path):
+    result = _run(str(_craft_module(tmp_path, _SPAWNS_LORE)))
+    assert result.returncode == 1, (
+        f"the gate passed a craft test spawning real lore in the default tier:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "spawns a real lore process" in result.stderr
+
+
+def test_the_same_spawn_in_a_seam_file_is_left_alone(tmp_path):
+    """The satisfying file of the pair: byte-identical to the offender above, one
+    edit apart (its name)."""
+    seam = _craft_module(tmp_path, _SPAWNS_LORE, name="test_lists_vaults_seam.py")
+    result = _run(str(seam))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "marking",
+    [
+        "pytestmark = pytest.mark.seam_real\n",
+        "pytestmark = [pytest.mark.seam_real]\n",
+    ],
+    ids=["module-mark", "module-mark-list"],
+)
+def test_a_module_tier_mark_satisfies_the_rule(tmp_path, marking):
+    body = "import pytest\n" + marking + _SPAWNS_LORE
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_test_level_tier_mark_satisfies_the_rule_for_that_test_only(tmp_path):
+    body = '''
+import subprocess
+import pytest
+@pytest.mark.seam_real
+def test_marked():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+def test_unmarked():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1
+    assert "test_unmarked" in result.stderr
+    assert "test_marked " not in result.stderr
+
+
+def test_a_class_level_tier_mark_satisfies_the_rule(tmp_path):
+    body = '''
+import subprocess
+import pytest
+@pytest.mark.seam_real
+class TestReal:
+    def test_status(self):
+        assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_spawn_through_a_module_local_helper_is_flagged(tmp_path):
+    body = '''
+import subprocess
+def _lore(*args):
+    return subprocess.run(["lore", *args], capture_output=True, text=True)
+def test_lists_the_vaults():
+    assert _lore("vault", "ls").returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1
+    assert "spawns a real lore process" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+import subprocess
+def test_git_is_not_lore():
+    assert subprocess.run(["git", "--version"]).returncode == 0
+''',
+        '''
+import subprocess
+def test_a_timeout_error_naming_lore_is_not_a_spawn():
+    err = subprocess.TimeoutExpired(["lore", "status"], 1)
+    assert err.timeout == 1
+''',
+        '''
+from _lore_runner import LoreRunner
+def test_the_in_process_runner(tmp_path):
+    done = LoreRunner(tmp_path)(["vault", "ls"], None)
+    assert done.returncode == 0
+''',
+    ],
+    ids=["another-binary", "exception-naming-lore", "in-process-runner"],
+)
+def test_a_craft_test_that_does_not_spawn_lore_is_left_alone(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_rule_is_scoped_to_craft_tests(tmp_path):
+    """Lore's own tests spawn lore by design; the rule must not reach them."""
+    directory = tmp_path / "tools" / "lore" / "tests"
+    directory.mkdir(parents=True)
+    path = directory / "test_cli.py"
+    path.write_text(_SPAWNS_LORE, encoding="utf-8")
+    result = _run(str(path))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_exempts_a_lore_spawn_and_is_listed(tmp_path):
+    body = _SPAWNS_LORE.replace(
+        "def test_lists_the_vaults():",
+        "def test_lists_the_vaults():  # inert-gate: allow the one wiring smoke for this seam",
+    )
+    seeded = _craft_module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    listed = _run("--list-allowed", str(seeded))
+    assert "the one wiring smoke for this seam" in listed.stdout
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        '@pytest.mark.skipif(True, reason="runs in the seam_real tier")',
+        '@pytest.mark.skip(reason="chromium")',
+        '@some.decorator("seam_real")',
+        "@tiers.seam_real",
+    ],
+    ids=["skipif-reason", "skip-reason", "unrelated-decorator", "attribute-of-a-non-mark"],
+)
+def test_a_decorator_that_only_mentions_a_tier_does_not_exempt_a_lore_spawn(tmp_path, mark):
+    body = f'''
+import subprocess
+import pytest
+{mark}
+def test_status():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "spawns a real lore process" in result.stderr
+
+
+def test_a_module_mark_that_only_mentions_a_tier_does_not_exempt_a_lore_spawn(tmp_path):
+    body = 'import pytest\npytestmark = pytest.mark.skipif(False, reason="seam_real")\n' + _SPAWNS_LORE
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "mark",
+    ["@pytest.mark.seam_real", "@pytest.mark.seam_real()", "@pytest.mark.chromium"],
+    ids=["attribute", "call", "chromium"],
+)
+def test_a_real_tier_mark_in_any_spelling_exempts_a_lore_spawn(tmp_path, mark):
+    body = f'''
+import subprocess
+import pytest
+{mark}
+def test_status():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- the hand-rolled lore runner rule ----------------------------------------
+#
+# Craft tests take lore from `_lore_runner.LoreRunner`. A class in a craft test file that
+# answers lore calls with canned replies is the hand-rolled fake that runner replaced. The rule
+# reads two shapes: a class named like a lore fake, and a class that is callable, builds
+# `CompletedProcess` replies and handles `record` or `vault` arguments.
+
+_NAMED_FAKE = '''
+class FakeLore:
+    def __init__(self):
+        self.calls = []
+def test_uses_it():
+    assert FakeLore().calls == []
+'''
+
+_SHAPED_FAKE = '''
+import subprocess
+class Lore:
+    def __call__(self, argv):
+        if argv[:2] == ["vault", "ls"]:
+            return subprocess.CompletedProcess(argv, 0, "v\\n", "")
+        return subprocess.CompletedProcess(argv, 1, "", "no")
+def test_lists_vaults():
+    assert Lore()(["vault", "ls"]).returncode == 0
+'''
+
+
+@pytest.mark.parametrize("body", [_NAMED_FAKE, _SHAPED_FAKE], ids=["named", "shaped"])
+def test_a_hand_rolled_lore_fake_in_a_craft_test_is_flagged(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "hand-rolled lore runner" in result.stderr
+
+
+@pytest.mark.parametrize("body", [_NAMED_FAKE, _SHAPED_FAKE], ids=["named", "shaped"])
+def test_the_same_fake_outside_craft_tests_is_left_alone(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+import subprocess
+class Git:
+    def __call__(self, argv):
+        return subprocess.CompletedProcess(argv, 0, "", "")
+def test_git_reply():
+    assert Git()(["status"]).returncode == 0
+''',
+        '''
+class Holder:
+    def __call__(self, argv):
+        return [a for a in argv if a != "record"]
+def test_record_args():
+    assert Holder()(["record"]) == ["record"]
+''',
+    ],
+    ids=["canned-replies-without-lore-arguments", "lore-arguments-without-canned-replies"],
+)
+def test_a_class_that_is_only_half_the_fake_shape_is_left_alone(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_on_a_class_exempts_a_fake_and_is_listed(tmp_path):
+    body = _SHAPED_FAKE.replace(
+        "class Lore:", "# inert-gate: allow canned hostile replies real lore never gives\nclass Lore:"
+    )
+    seeded = _craft_module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    assert "canned hostile replies" in _run("--list-allowed", str(seeded)).stdout
+
+
+# --- the process-wide subprocess patch rule ----------------------------------
+#
+# A test that patches `subprocess.run` (or Popen and the other spawn functions) by that bare
+# name replaces the call for every caller in the process, including incidental ones, so the
+# code under test needs a `runner=` seam instead. Existing sites carry an allow marker; a new
+# one fails the gate.
+
+_PATCHES_SUBPROCESS = {
+    "patch-string": '''
+from unittest.mock import patch
+def test_runs_the_tool():
+    with patch("subprocess.run") as run:
+        run.return_value = 0
+        assert run() == 0
+''',
+    "monkeypatch-string": '''
+def test_runs_the_tool(monkeypatch):
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: None)
+    assert True
+''',
+    "monkeypatch-module-and-name": '''
+import subprocess
+def test_runs_the_tool(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+    assert subprocess.run() is None
+''',
+    "patch-object": '''
+import subprocess
+from unittest.mock import patch
+def test_runs_the_tool():
+    with patch.object(subprocess, "check_output") as out:
+        out.return_value = b""
+        assert out() == b""
+''',
+    "through-a-fixture": '''
+import subprocess
+import pytest
+@pytest.fixture
+def no_spawn(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+def test_runs_the_tool(no_spawn):
+    assert subprocess.run() is None
+''',
+}
+
+
+@pytest.mark.parametrize(
+    "body", _PATCHES_SUBPROCESS.values(), ids=list(_PATCHES_SUBPROCESS)
+)
+def test_a_process_wide_subprocess_patch_is_flagged(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "patches a process-wide subprocess function" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+from unittest.mock import patch
+def test_patch_where_the_consumer_looks_it_up():
+    with patch("camp.provision.tasks.subprocess.run") as run:
+        run.return_value = 0
+        assert run() == 0
+''',
+        '''
+def test_another_attribute(monkeypatch):
+    monkeypatch.setattr("os.rename", lambda *a: None)
+    assert True
+''',
+        '''
+def test_a_non_spawn_name_in_the_subprocess_module(monkeypatch):
+    monkeypatch.setattr("subprocess.DEVNULL", -1)
+    assert True
+''',
+        '''
+import subprocess
+def test_a_runner_argument_instead(tmp_path):
+    done = subprocess.run(["true"])
+    assert done.returncode == 0
+''',
+    ],
+    ids=["consumer-qualified", "another-function", "non-spawn-subprocess-name", "no-patch"],
+)
+def test_a_patch_that_is_not_process_wide_is_left_alone(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_exempts_a_subprocess_patch_and_is_listed(tmp_path):
+    body = _PATCHES_SUBPROCESS["patch-string"].replace(
+        "def test_runs",
+        "# inert-gate: allow subject is the wrapper around subprocess.run\ndef test_runs",
+    )
+    seeded = _module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    assert "subject is the wrapper" in _run("--list-allowed", str(seeded)).stdout
+
+
+# --- the tier-placement rule -------------------------------------------------
+#
+# A test carrying an opt-in tier mark runs only in that tier's CI job, which collects only the
+# paths named in `[tool.trailhead.test-tiers]`. A marked test outside them, or a tier that the
+# `addopts` exclusion, the tier table and the `pytest-tiers` matrix do not all name, runs nowhere.
+
+_TIER_ADDOPTS = 'addopts = "-n auto -m \\"not benchmark and not chromium and not seam_real\\""'
+_TIER_TABLE = 'chromium = ["web/tests"]\nseam_real = ["core/tests"]\n'
+_TIER_WORKFLOW = """
+jobs:
+  pytest:
+    steps:
+      - run: python -m pytest -o addopts="" -n 0 -m benchmark
+  pytest-tiers:
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+        tier: [chromium, seam_real]
+"""
+_MARKED = "import os\nimport pytest\n\n@pytest.mark.seam_real\ndef test_one():\n    assert os.getpid()\n"
+
+
+def _tier_project(tmp_path: Path, *, addopts=_TIER_ADDOPTS, table=_TIER_TABLE, workflow=_TIER_WORKFLOW,
+                  tests=None) -> subprocess.CompletedProcess:
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.pytest.ini_options]\n{addopts}\n[tool.trailhead.test-tiers]\n{table}", encoding="utf-8"
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "tests.yml").write_text(workflow, encoding="utf-8")
+    for relpath, body in (tests or {"core/tests/test_one.py": _MARKED}).items():
+        (tmp_path / relpath).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relpath).write_text(body, encoding="utf-8")
+    return _run("--project", str(tmp_path))
+
+
+def test_a_tier_marked_test_inside_its_paths_and_agreeing_tier_sources_pass(tmp_path):
+    result = _tier_project(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("edit", "complaint"),
+    [
+        ({"tests": {"elsewhere/test_one.py": _MARKED}}, "elsewhere/test_one.py: seam_real"),
+        ({"tests": {"core/tests_extra/test_one.py": _MARKED}}, "core/tests_extra/test_one.py: seam_real"),
+        (
+            {"tests": {"core/tests/test_one.py": "import os\nimport pytest\npytestmark = [pytest.mark.chromium]\n"
+                                                  "def test_one():\n    assert os.getpid()\n"}},
+            "core/tests/test_one.py: chromium",
+        ),
+        (
+            {"addopts": _TIER_ADDOPTS.replace("seam_real", "seam_real and not slow")},
+            "tier slow is missing from [tool.trailhead.test-tiers]",
+        ),
+        (
+            {"workflow": _TIER_WORKFLOW.replace("[chromium, seam_real]", "[chromium]")},
+            "tier seam_real is missing from the pytest-tiers matrix",
+        ),
+        (
+            {"addopts": _TIER_ADDOPTS.replace(" and not seam_real", "")},
+            "tier seam_real is missing from the addopts exclusion",
+        ),
+        (
+            {"workflow": _TIER_WORKFLOW.replace("-m benchmark", "-m slow")},
+            "benchmark is excluded by addopts but no CI step runs it",
+        ),
+    ],
+    ids=[
+        "marked-outside-its-paths",
+        "path-sharing-only-a-prefix",
+        "module-mark-for-another-tier",
+        "excluded-tier-not-in-the-table",
+        "table-tier-not-in-the-matrix",
+        "table-tier-not-excluded",
+        "benchmark-with-no-step",
+    ],
+)
+def test_the_one_edit_that_leaves_a_tier_running_nowhere_is_flagged(tmp_path, edit, complaint):
+    result = _tier_project(tmp_path, **edit)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert complaint in result.stderr

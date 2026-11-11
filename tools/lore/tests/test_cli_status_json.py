@@ -20,6 +20,8 @@ import pytest
 
 from conftest import write_vault_config
 
+pytestmark = pytest.mark.usefixtures("hermetic_git_env")
+
 
 def _readiness():
     from lore.cli import readiness
@@ -32,12 +34,7 @@ def _init():
 
 
 def _git(cwd, *args):
-    subprocess.run(
-        ["git", "-C", str(cwd), *args],
-        check=True, capture_output=True,
-        env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.com",
-             "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.com"},
-    )
+    subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True)
 
 
 def _git_vault(path, *, remote="https://example.invalid/team/vault.git"):
@@ -45,7 +42,7 @@ def _git_vault(path, *, remote="https://example.invalid/team/vault.git"):
     _git(path, "init", "-q")
     (path / "note.md").write_text("x\n", encoding="utf-8")
     _git(path, "add", "-A")
-    _git(path, "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init")
+    _git(path, "commit", "-q", "-m", "init")
     if remote:
         _git(path, "remote", "add", "origin", remote)
     return path

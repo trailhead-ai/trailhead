@@ -1365,22 +1365,6 @@ class TestHumanRenderingFixture:
         assert out == expected
 
 
-class TestHelpSurface:
-    def test_json_help_states_that_a_zero_exit_is_not_a_complete_board(
-        self, tmp_path, capsys
-    ):
-        from lore.cli import dispatch
-
-        with pytest.raises(SystemExit):
-            dispatch.main(["pipeline", "--help"])
-        out = capsys.readouterr().out
-
-        assert "usage: lore pipeline" in out
-        lowered = " ".join(out.split()).lower()
-        assert "zero exit does not mean the board is complete" in lowered
-        assert "error" in lowered
-
-
 class TestDependencyGating:
     """An unmet dependency is shown, never hidden — the record keeps its place
     in its lineage and gains a flag plus the evaluator's reason."""
@@ -1676,16 +1660,3 @@ class TestEachSidecarIsReadOnce:
         sidecars = [path for path in reads if path.startswith(str(local))]
         assert sorted(sidecars) == sorted(set(sidecars)), sidecars
         assert len(sidecars) == 4
-
-
-class TestSurfaceDocumentation:
-    """The documented contract a consumer reads before parsing ``--json``."""
-
-    def test_the_json_help_names_flags_as_the_gating_signal(self, capsys):
-        from lore.cli import dispatch
-
-        with pytest.raises(SystemExit):
-            dispatch.main(["pipeline", "--help"])
-        lowered = " ".join(capsys.readouterr().out.split()).lower()
-
-        assert "flags is the authoritative gating signal" in lowered

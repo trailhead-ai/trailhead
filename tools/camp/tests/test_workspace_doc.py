@@ -150,26 +150,10 @@ class TestWorkspaceDocCommandTable:
         write_workspace_doc(ws_dir, group, "feat-x")
         return (ws_dir / "CLAUDE.md").read_text()
 
-    def test_claude_md_contains_camp_activate_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp activate <member>'."""
+    @pytest.mark.parametrize("phrase", ["camp activate <member>", "camp status", "camp setup"])
+    def test_claude_md_contains_the_camp_command(self, tmp_path: Path, phrase):
         content = self._get_claude_md(tmp_path)
-        assert "camp activate <member>" in content, (
-            f"Expected 'camp activate <member>' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
-
-    def test_claude_md_contains_camp_status_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp status'."""
-        content = self._get_claude_md(tmp_path)
-        assert "camp status" in content, (
-            f"Expected 'camp status' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
-
-    def test_claude_md_contains_camp_setup_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp setup' (no --retry flag)."""
-        content = self._get_claude_md(tmp_path)
-        assert "camp setup" in content, (
-            f"Expected 'camp setup' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
+        assert phrase in content, f"Expected {phrase!r} in CLAUDE.md, not found.\nContent:\n{content}"
 
     def test_claude_md_does_not_contain_camp_setup_retry(self, tmp_path: Path):
         """CLAUDE.md must NOT contain 'camp setup --retry' — the flag was removed."""
@@ -950,42 +934,20 @@ doc_files = {doc_files_toml}
         cfg = load_group(f)
         assert cfg["harness"]["doc_files"] == ["AGENTS.md", "CLAUDE.md"]
 
-    def test_empty_list_raises(self, tmp_path: Path):
-        """An empty doc_files list → GroupConfigError."""
+    @pytest.mark.parametrize(
+        "doc_files",
+        [
+            pytest.param("[]", id="empty_list"),
+            pytest.param('["  "]', id="whitespace_token"),
+            pytest.param("[42]", id="non_string_token"),
+            pytest.param('"AGENTS.md"', id="not_a_list"),
+        ],
+    )
+    def test_invalid_doc_files_raises(self, tmp_path: Path, doc_files):
         from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files("[]"))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_whitespace_token_raises(self, tmp_path: Path):
-        """A whitespace-only token in doc_files → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files('["  "]'))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_non_string_token_raises(self, tmp_path: Path):
-        """A non-string token in doc_files → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files("[42]"))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_not_a_list_raises(self, tmp_path: Path):
-        """doc_files as a string (not a list) → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files('"AGENTS.md"'))
+        f.write_text(self._toml_with_doc_files(doc_files))
         with pytest.raises(GroupConfigError) as exc_info:
             load_group(f)
         assert "doc_files" in str(exc_info.value)

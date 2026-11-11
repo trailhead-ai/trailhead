@@ -261,43 +261,25 @@ class TestMalformedManifests:
 
 
 class TestConfinement:
-    def test_dotdot_traversal_in_base_raises(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("assignment", "context"),
+        [
+            pytest.param('base = ["../escape"]', "base", id="base_dotdot"),
+            pytest.param('base = ["/etc/passwd"]', "base", id="base_absolute"),
+            pytest.param('hooks_json = "../../../etc/passwd"', "hooks_json", id="hooks_json_dotdot"),
+            pytest.param('hooks_json = "/etc/passwd"', "hooks_json", id="hooks_json_absolute"),
+            pytest.param('cli_bin = "../../../etc/passwd"', "cli_bin", id="cli_bin_dotdot"),
+            pytest.param('cli_bin = "/etc/passwd"', "cli_bin", id="cli_bin_absolute"),
+            pytest.param('ruleset = "../../../etc/passwd"', "ruleset", id="ruleset_dotdot"),
+            pytest.param('ruleset = "/etc/passwd"', "ruleset", id="ruleset_absolute"),
+        ],
+    )
+    def test_path_escaping_the_plugin_root_raises(self, tmp_path, assignment, context):
         _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nbase = ["../escape"]\nvalidate = false\n'
-        with pytest.raises(ConfineError):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_absolute_path_in_base_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nbase = ["/etc/passwd"]\nvalidate = false\n'
-        with pytest.raises(ConfineError):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_hooks_json_traversal_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nhooks_json = "../../../etc/passwd"\nvalidate = false\n'
-        with pytest.raises(ConfineError):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_absolute_hooks_json_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nhooks_json = "/etc/passwd"\nvalidate = false\n'
-        with pytest.raises(ConfineError):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_cli_bin_traversal_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\ncli_bin = "../../../etc/passwd"\nvalidate = false\n'
+        content = f'[tool]\nname = "badtool"\n{assignment}\nvalidate = false\n'
         with pytest.raises(ConfineError) as exc_info:
             load_manifest(_write_manifest(tmp_path, content))
-        assert exc_info.value.context == "cli_bin"
-
-    def test_absolute_cli_bin_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\ncli_bin = "/etc/passwd"\nvalidate = false\n'
-        with pytest.raises(ConfineError) as exc_info:
-            load_manifest(_write_manifest(tmp_path, content))
-        assert exc_info.value.context == "cli_bin"
+        assert exc_info.value.context == context
 
 
 # ---------------------------------------------------------------------------
@@ -306,10 +288,17 @@ class TestConfinement:
 
 
 class TestValidate:
-    def test_missing_base_dir_raises(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("content", "match"),
+        [
+            pytest.param('[tool]\nname = "mytool"\nbase = ["skills/nonexistent"]\n', "nonexistent", id="base_dir"),
+            pytest.param('[tool]\nname = "mytool"\nhooks_json = "hooks/hooks.json"\n', "hooks", id="hooks_json"),
+            pytest.param('[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n', "mytool", id="cli_bin"),
+        ],
+    )
+    def test_missing_manifest_path_raises(self, tmp_path, content, match):
         _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\nbase = ["skills/nonexistent"]\n'
-        with pytest.raises(ManifestError, match="nonexistent"):
+        with pytest.raises(ManifestError, match=match):
             load_manifest(_write_manifest(tmp_path, content))
 
     def test_base_that_is_a_file_raises(self, tmp_path):
@@ -318,12 +307,6 @@ class TestValidate:
         (root / "skills" / "notadir").write_text("x")
         content = '[tool]\nname = "mytool"\nbase = ["skills/notadir"]\n'
         with pytest.raises(ManifestError, match="directory"):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_missing_hooks_json_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\nhooks_json = "hooks/hooks.json"\n'
-        with pytest.raises(ManifestError, match="hooks"):
             load_manifest(_write_manifest(tmp_path, content))
 
     def test_hooks_json_that_is_a_dir_raises(self, tmp_path):
@@ -338,12 +321,6 @@ class TestValidate:
         content = '[tool]\nname = "mytool"\nbase = ["skills/nope"]\nvalidate = false\n'
         # Must not raise even though skills/nope is missing.
         load_manifest(_write_manifest(tmp_path, content))
-
-    def test_missing_cli_bin_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n'
-        with pytest.raises(ManifestError, match="mytool"):
-            load_manifest(_write_manifest(tmp_path, content))
 
 
 # ---------------------------------------------------------------------------
@@ -436,20 +413,6 @@ class TestRuleset:
         """A declared ruleset must resolve under the plugin root and be readable."""
         m = load_manifest(_CRAFT_MANIFEST)
         assert m.ruleset_path().read_text(encoding="utf-8").strip() != ""
-
-    def test_ruleset_traversal_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nruleset = "../../../etc/passwd"\nvalidate = false\n'
-        with pytest.raises(ConfineError) as exc_info:
-            load_manifest(_write_manifest(tmp_path, content))
-        assert exc_info.value.context == "ruleset"
-
-    def test_absolute_ruleset_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "badtool")
-        content = '[tool]\nname = "badtool"\nruleset = "/etc/passwd"\nvalidate = false\n'
-        with pytest.raises(ConfineError) as exc_info:
-            load_manifest(_write_manifest(tmp_path, content))
-        assert exc_info.value.context == "ruleset"
 
     def test_ruleset_pointing_at_a_directory_raises(self, tmp_path):
         root = _make_plugin_dir(tmp_path, "mytool")
