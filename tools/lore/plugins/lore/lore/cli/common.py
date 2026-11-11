@@ -282,19 +282,8 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
     - **Valid config** → one ``(name, path)`` pair per vault, in config order,
       names already normalized by ``load_config``.
     """
-    config_path = _resolve_config_path()
-    floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
-    if not config_path.exists():
-        return floor, None
-    try:
-        vaults = vault_config_mod.load_config(str(config_path))
-    except (
-        vault_config_mod.VaultConfigError,
-        OSError,
-        ValueError,
-    ) as exc:
-        return floor, f"cannot read {config_path}: {exc}"
-    return [(v.name, Path(v.path)) for v in vaults], None
+    vaults, _read_only, error = _resolve_all_vaults_and_read_only()
+    return vaults, error
 
 
 def _drop_read_only_vaults(vaults, *, announce: bool = True) -> list:

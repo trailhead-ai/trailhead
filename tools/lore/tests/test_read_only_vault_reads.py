@@ -5,45 +5,15 @@ read-only`` and drives the real CLI, under injected ``XDG_STATE_HOME`` /
 ``XDG_CONFIG_HOME`` — never the live install.
 """
 
-import json
-import os
-import subprocess
-import sys
-
 import pytest
 
-from conftest import CLI_PATH
-
-
-def _run(args, *, tmp_path):
-    env = dict(os.environ)
-    env["XDG_STATE_HOME"] = str(tmp_path / "state")
-    env["XDG_CONFIG_HOME"] = str(tmp_path / "config")
-    env["LORE_EMAIL"] = "tester@example.com"
-    env.pop("LORE_VAULT", None)
-    return subprocess.run(
-        [sys.executable, str(CLI_PATH), *args], capture_output=True, text=True, env=env
-    )
+from test_vault_read_only_config import _foreign_vault, _run, _seed_default
 
 
 def _folder(tmp_path):
     """A plain folder (no .git) holding one blob record and one area."""
-    d = tmp_path / "ro"
-    (d / "blob").mkdir(parents=True)
+    d = _foreign_vault(tmp_path)
     (d / "area").mkdir()
-    (d / "blob" / "zebra-notes.json").write_text(
-        json.dumps(
-            {
-                "version": "v1",
-                "kind": "blob",
-                "title": "Zebra notes",
-                "status": "active",
-                "created-at": "2026-06-17T10:00:00Z",
-                "updated-at": "2026-06-17T10:00:00Z",
-            }
-        )
-    )
-    (d / "blob" / "zebra-notes.md").write_text("striped quadruped\n")
     (d / "area" / "zebra-area.md").write_text(
         "---\ntype: area\nname: zebra-area\nkeywords: [zebra]\nsummary: stripes\n---\n\n"
         "## Overview\n\nThis is the zebra-area area.\n"
@@ -52,9 +22,7 @@ def _folder(tmp_path):
 
 
 def _register(tmp_path, trust):
-    cfg = tmp_path / "config" / "lore" / "config.json"
-    cfg.parent.mkdir(parents=True, exist_ok=True)
-    cfg.write_text(json.dumps({"vaults": [{"name": "default", "scope": "default"}]}))
+    _seed_default(tmp_path)
     folder = _folder(tmp_path)
     assert not (folder / ".git").exists()
     r = _run(
@@ -88,7 +56,7 @@ def test_record_show_returns_the_body(tmp_path):
 
 
 def test_trusted_area_is_listed_and_shared_area_drops_out(tmp_path):
-    _register(tmp_path, "--trusted")
+    folder = _register(tmp_path, "--trusted")
     listed = _run(["areas"], tmp_path=tmp_path)
     assert listed.returncode == 0, listed.stderr
     assert "zebra-area" in listed.stdout
@@ -96,7 +64,7 @@ def test_trusted_area_is_listed_and_shared_area_drops_out(tmp_path):
     # same folder, re-registered as shared: trust, not read-only, decides
     assert _run(["vault", "delete", "ro"], tmp_path=tmp_path).returncode == 0
     r = _run(
-        ["vault", "add", "ro", "--scope", "read-only", "--path", str(tmp_path / "ro"), "--shared"],
+        ["vault", "add", "ro", "--scope", "read-only", "--path", str(folder), "--shared"],
         tmp_path=tmp_path,
     )
     assert r.returncode == 0, r.stderr

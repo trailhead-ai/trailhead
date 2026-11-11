@@ -315,11 +315,6 @@ def _resolve_config_path(env: dict | None = None) -> Path:
         return Path.home() / ".config" / "lore" / "config.json"
 
 
-def config_path(env: dict | None = None) -> Path:
-    """Public spelling of :func:`_resolve_config_path` for callers outside this module."""
-    return _resolve_config_path(env=env)
-
-
 def resolve_active_vault(env: dict | None = None) -> Path:
     """Return the active vault's ``Path`` from config, or the floor.
 

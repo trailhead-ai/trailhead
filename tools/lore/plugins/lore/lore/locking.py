@@ -151,7 +151,7 @@ def read_only_roots(env: dict[str, str] | None = None) -> dict[tuple[int, int], 
     """
     from .vault import config as vault_config
 
-    path = vault_config.config_path(env=env)
+    path = vault_config._resolve_config_path(env=env)
     try:
         vaults = vault_config.load_config(str(path), env=env)
     except FileNotFoundError:

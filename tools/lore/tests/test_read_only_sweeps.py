@@ -25,22 +25,14 @@ from pathlib import Path
 import pytest
 
 from conftest import make_bare_remote, make_git_vault, run_cli, write_vault_config
+from test_read_only_write_guard import MESSAGE, _refused, _snapshot
 
-MESSAGE = "lore: vault ro is read-only — its content is changed by hand outside lore"
 SKIP_LINE = f"{MESSAGE} — skipped"
 LINK_BODY = "see [[task/alpha]] for the origin\n"
 
 
 def _git(path: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
-
-
-def _snapshot(folder: Path) -> dict[str, bytes | None]:
-    """Every path under *folder* — ``.git/`` included — files by bytes, directories ``None``."""
-    out: dict[str, bytes | None] = {}
-    for p in sorted(folder.rglob("*")):
-        out[str(p.relative_to(folder))] = p.read_bytes() if p.is_file() else None
-    return out
 
 
 def _branch(vault: Path) -> str:
@@ -198,12 +190,6 @@ def test_flush_wait_syncs_the_writable_vaults_and_leaves_the_read_only_one_alone
 # ---------------------------------------------------------------------------
 # AC9 / AC10 — a named read-only vault is refused
 # ---------------------------------------------------------------------------
-
-
-def _refused(r):
-    assert r.returncode != 0, r.stdout
-    assert "Traceback" not in r.stderr, r.stderr
-    assert r.stderr.strip().splitlines() == [MESSAGE], r.stderr
 
 
 def test_sync_naming_the_read_only_vault_is_refused_and_nothing_changes(install):

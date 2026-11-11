@@ -8,11 +8,11 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
 from conftest import CLI_PATH, load_script
+from test_read_only_write_guard import _snapshot
 
 
 def _load(tmp_path, monkeypatch, vaults):
@@ -63,10 +63,6 @@ def _foreign_vault(tmp_path):
     )
     (d / "blob" / "zebra-notes.md").write_text("striped quadruped\n")
     return d
-
-
-def _snapshot(d):
-    return {str(p.relative_to(d)): (p.read_bytes() if p.is_file() else None) for p in sorted(d.rglob("*"))}
 
 
 # --- config ---------------------------------------------------------------
