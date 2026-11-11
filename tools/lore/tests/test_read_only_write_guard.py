@@ -17,7 +17,9 @@ from pathlib import Path
 
 import pytest
 
-from conftest import make_git_vault, make_vault, run_cli, write_vault_config
+from conftest import (
+    load_script, make_bare_remote, make_git_vault, make_vault, run_cli, write_vault_config,
+)
 from lore import locking
 
 SID = "aaaaaaaa-1111-4111-8111-111111111111"
@@ -230,6 +232,155 @@ def test_flush_of_a_read_only_session_vault_is_one_line_and_leaves_the_folder_al
     r = install.run(["flush", "--session-id", SID])
     _refused(r)
     assert _snapshot(install.default) == before
+
+
+SID2 = "bbbbbbbb-2222-4222-8222-222222222222"
+_CANDIDATE = ["session", "candidate", "--kind", "spec", "--phase", "Plan"]
+
+
+def test_session_referenced_into_a_read_only_session_vault_is_refused_and_lands_when_writable(
+    install,
+):
+    assert install.run(_CANDIDATE + ["--session-id", SID], stdin_text="x\n").returncode == 0
+    args = ["session", "referenced", "task/alpha", "--session-id", SID]
+
+    before_writable = _snapshot(install.default)
+    ok = install.run(args)
+    assert ok.returncode == 0, ok.stderr
+    assert _snapshot(install.default) != before_writable, "the control reference must land"
+
+    _alias_default_as_read_only(install)
+    before = _snapshot(install.default)
+    r = install.run(args)
+    _refused(r)
+    assert _snapshot(install.default) == before
+
+
+def _flush_and_revert_env(install, monkeypatch):
+    from lore.search import index as index_store
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(install.config_home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(install.state))
+    return lambda: index_store.open_index(env={"XDG_STATE_HOME": str(install.state)})
+
+
+def _sidecar_status(install):
+    return json.loads((install.default / "session" / f"{SID}.json").read_text())["status"]
+
+
+def test_revert_flush_of_a_read_only_session_vault_raises_and_a_writable_one_reverts(
+    install, monkeypatch
+):
+    from lore.session import store
+
+    open_index = _flush_and_revert_env(install, monkeypatch)
+    assert install.run(_CANDIDATE + ["--session-id", SID], stdin_text="x\n").returncode == 0
+    flushed = store.flush_session(
+        SID, vault_root=str(install.default), committer="t@example.com", open_index=open_index
+    )
+    assert flushed == store.FLUSH_FLUSHED
+    assert _sidecar_status(install) == "clean"
+
+    _alias_default_as_read_only(install)
+    before = _snapshot(install.default)
+    with pytest.raises(locking.ReadOnlyVaultError):
+        store.revert_flush(
+            SID, vault_root=str(install.default), committer="t@example.com",
+            open_index=open_index,
+        )
+    assert _snapshot(install.default) == before
+    assert _sidecar_status(install) == "clean"
+
+    install.config([("default", "default", install.default)])
+    store.revert_flush(
+        SID, vault_root=str(install.default), committer="t@example.com", open_index=open_index
+    )
+    assert _sidecar_status(install) == "dirty"
+
+
+def test_batch_flush_of_a_read_only_session_vault_is_one_line_and_a_writable_one_flushes(
+    tmp_path,
+):
+    inst = _Install(tmp_path)
+    make_git_vault(inst.default)
+    for sid in (SID, SID2):
+        assert inst.run(_CANDIDATE + ["--session-id", sid], stdin_text="x\n").returncode == 0
+    _alias_default_as_read_only(inst)
+    before = _snapshot(inst.default)
+    r = inst.run(["flush", "all", "--no-sync"])
+    _refused(r)
+    assert _snapshot(inst.default) == before
+    for sid in (SID, SID2):
+        assert json.loads((inst.default / "session" / f"{sid}.json").read_text())["status"] == "dirty"
+
+    inst.config([("default", "default", inst.default)])
+    ok = inst.run(["flush", "all", "--no-sync"])
+    assert ok.returncode == 0, ok.stderr
+    for sid in (SID, SID2):
+        assert json.loads((inst.default / "session" / f"{sid}.json").read_text())["status"] == "clean"
+
+
+def _git(path, *args):
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(path), *args], capture_output=True, text=True)
+
+
+def _behind_origin(tmp_path):
+    """A git vault one commit behind its origin, fetched."""
+    vault = make_git_vault(tmp_path / "pulled")
+    remote = make_bare_remote(tmp_path / "remote.git")
+    _git(vault, "remote", "add", "origin", str(remote))
+    branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    assert _git(vault, "push", "-u", "origin", branch).returncode == 0
+    other = make_git_vault(tmp_path / "other")
+    _git(other, "remote", "add", "origin", str(remote))
+    assert _git(other, "fetch", "origin").returncode == 0
+    assert _git(other, "reset", "--hard", f"origin/{branch}").returncode == 0
+    (other / "from-elsewhere.md").write_text("new\n")
+    _git(other, "add", "-A")
+    assert _git(other, "commit", "-m", "elsewhere").returncode == 0
+    assert _git(other, "push", "origin", branch).returncode == 0
+    assert _git(vault, "fetch", "origin").returncode == 0
+    return vault
+
+
+def _pull(sync, vault):
+    lines: list[str] = []
+    out = sync._pull_one(
+        vault, lines.append, lines.append, already_fetched=True,
+        resolve_conflicts=True, name="pulled", shared=False,
+    )
+    return out, lines
+
+
+def test_a_pull_into_a_read_only_vault_raises_rather_than_holding_it(tmp_path, monkeypatch):
+    vault = _behind_origin(tmp_path)
+    cfg = tmp_path / "cfg"
+    write_vault_config(cfg, [("default", "default", make_vault(tmp_path / "d")[0]),
+                             ("pulled", "read-only", vault)])
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    sync = load_script("lore.cli.sync")
+    state = load_script("lore.cli.resolve_state")
+    before = _snapshot(vault)
+    with pytest.raises(locking.ReadOnlyVaultError):
+        _pull(sync, vault)
+    assert _snapshot(vault) == before
+    assert not state.vault_is_held(vault)
+
+
+def test_a_pull_into_a_writable_vault_lands_the_commit(tmp_path, monkeypatch):
+    vault = _behind_origin(tmp_path)
+    cfg = tmp_path / "cfg"
+    write_vault_config(cfg, [("default", "default", make_vault(tmp_path / "d")[0]),
+                             ("pulled", "repo", vault)])
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "st"))
+    sync = load_script("lore.cli.sync")
+    (state_after, pulled), lines = _pull(sync, vault)
+    assert (state_after, pulled) == (sync.PULL_OK, 1), lines
+    assert (vault / "from-elsewhere.md").exists()
 
 
 # ---------------------------------------------------------------------------

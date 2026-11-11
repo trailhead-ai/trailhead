@@ -778,13 +778,25 @@ def _pull_one(
     # Tree mutation — locked, so a concurrent record write can never see a
     # half-replayed tree. The abort is part of the same critical section: the
     # vault must not be observable mid-rebase.
-    with locking.vault_write_lock(vault):
-        rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
-        if rc_rebase != 0:
-            # Abort unconditionally: whether the rebase stopped on a conflict or
-            # never started, the vault must come back to its pre-pull state before
-            # anything is reported. Verified below rather than trusted.
-            _git(vault, "rebase", "--abort")
+    try:
+        with locking.vault_write_lock(vault):
+            rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
+            if rc_rebase != 0:
+                # Abort unconditionally: whether the rebase stopped on a conflict or
+                # never started, the vault must come back to its pre-pull state before
+                # anything is reported. Verified below rather than trusted.
+                _git(vault, "rebase", "--abort")
+    except locking.ReadOnlyVaultError:
+        raise
+    except locking.VaultWriteRefusedError as exc:
+        # The write lock refused because the config cannot be read, so nothing
+        # was replayed. No person is present to read a traceback: hold the
+        # vault for one, the same ending an unsettled conflict reaches.
+        say_err(f"error: {exc}")
+        from . import resolve_state as resolve_state_mod
+
+        resolve_state_mod.mark_held(vault)
+        return PULL_AWAITING_PERSON, 0
     if rc_rebase != 0:
         if not resolve_conflicts:
             say_err("error: rebase onto origin failed — pull skipped")
