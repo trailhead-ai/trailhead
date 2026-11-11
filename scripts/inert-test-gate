@@ -22,6 +22,15 @@ behaviour, goes red on a reword, and passes a meaning-changing edit. A test that
 derives a value from a document and checks it against what the code produces is
 not this: the document is an input to a computation, and it is left alone.
 
+A third rule is scoped to `tools/craft/tests`. Craft tests reach lore through the in-process
+runner, and a test that spawns a real `lore` process belongs in the `seam_real` tier, where CI
+runs it as its own job. The gate flags a test, after one hop into module-local helpers, that
+calls a subprocess function with an argv list starting with the literal "lore", unless the test
+is tier-marked (a module `pytestmark`, a class or test decorator) or sits in a `*_seam.py` file.
+It reads the direct form only. A spawn through a PATH shim or `python <lore cli>` looks the same
+as a craft script's own spawn, so claiming it would need data-flow analysis and would flag the
+deliberate wiring smokes.
+
 What it deliberately does NOT do: judge whether an assertion is *about* the right
 thing. A test that runs a CLI and then asserts something trivial passes this gate.
 The gate catches the mechanical properties that can be checked mechanically.
@@ -95,6 +104,12 @@ _INPUT_FIXTURES = frozenset({"tmp_path", "tmp_path_factory", "capsys", "monkeypa
 #: Calls that ask "is it in there?" without deriving a value to check.
 _PROBE_CALLS = frozenset({"search", "match", "findall", "fullmatch", "finditer"})
 
+#: Markers that move a test out of the default run into an opt-in tier.
+_TIER_MARKS = ("seam_real", "chromium")
+
+#: Calls that start a process when handed an argv list.
+_SPAWN_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+
 _ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
 
 
@@ -155,6 +170,54 @@ def _executable_names(node: ast.AST) -> set[str]:
     return out
 
 
+def _is_craft_test_path(path: Path) -> bool:
+    parts = path.resolve().parts
+    return any(parts[i : i + 3] == ("tools", "craft", "tests") for i in range(len(parts) - 2))
+
+
+def _is_tier_marked(node: ast.AST) -> bool:
+    return any(tier in ast.dump(node) for tier in _TIER_MARKS)
+
+
+def _spawns_lore(node: ast.AST) -> bool:
+    """True if `node` calls a subprocess function with an argv list starting "lore"."""
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call) or not call.args:
+            continue
+        func = call.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        argv = call.args[0]
+        if (
+            name in _SPAWN_CALLS
+            and isinstance(argv, (ast.List, ast.Tuple))
+            and argv.elts
+            and isinstance(argv.elts[0], ast.Constant)
+            and argv.elts[0].value == "lore"
+        ):
+            return True
+    return False
+
+
+def _tiered_functions(tree: ast.Module) -> set[int]:
+    """ids of test-bearing function nodes a tier mark covers: the whole module through
+    `pytestmark`, or an enclosing class or the function's own decorator."""
+    module_marked = any(
+        isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Name) and t.id == "pytestmark" for t in n.targets)
+        and _is_tier_marked(n.value)
+        for n in tree.body
+    )
+    covered: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and any(_is_tier_marked(d) for d in node.decorator_list):
+            covered |= {id(f) for f in ast.walk(node) if isinstance(f, ast.FunctionDef)}
+        if isinstance(node, ast.FunctionDef) and (
+            module_marked or any(_is_tier_marked(d) for d in node.decorator_list)
+        ):
+            covered.add(id(node))
+    return covered
+
+
 def _allow_reason(source_lines: list[str], node: ast.FunctionDef) -> str | None:
     """The reason on an `# inert-gate: allow` comment for this def, if present.
 
@@ -191,6 +254,8 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
     }
 
     anchors = _repo_anchors(tree)
+    lore_scoped = _is_craft_test_path(path) and not path.name.endswith("_seam.py")
+    tiered = _tiered_functions(tree) if lore_scoped else set()
 
     findings: list[tuple[int, str, str]] = []
     allowed: list[tuple[int, str, str]] = []
@@ -209,6 +274,12 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
             verdict = "executes nothing before asserting"
         elif _probes_a_document(text, node, functions, referenced, params, anchors):
             verdict = "probes a shipped document it never varies"
+        elif (
+            lore_scoped
+            and id(node) not in tiered
+            and any(_spawns_lore(f) for f in [node, *(functions[h] for h in referenced)])
+        ):
+            verdict = "spawns a real lore process outside the seam_real tier"
         else:
             continue
 
@@ -289,8 +360,9 @@ def main(argv: list[str]) -> int:
     if total_findings:
         print(
             f"\ninert-test-gate: {total_findings} test(s) assert without running their "
-            f"subject, or assert only that a phrase is present in a document they "
-            f"never vary. Find the consumer and run it, or feed the subject an input "
+            f"subject, assert only that a phrase is present in a document they "
+            f"never vary, or (in craft) spawn a real lore outside the seam_real tier. "
+            f"Find the consumer and run it, or feed the subject an input "
             f"that changes the answer. A deliberate exemption — a seam smoke, a "
             f"closed vocabulary — is marked `# inert-gate: allow <reason>` on the "
             f"def line.",

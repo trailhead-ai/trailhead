@@ -230,6 +230,46 @@ it.
   cannot fail for a real reason is not coverage; it is a maintenance cost that
   reads as safety.
 
+## Keeping a test suite fast without weakening it
+
+A slow suite gets run less, and a suite that is run less catches less. Most of the cost
+comes from a few habits, and each has a cheaper form that proves the same thing.
+
+- **Run the real thing in-process where the process boundary is not the subject.** A test
+  that spawns a CLI to check logic the CLI's code path holds pays for an interpreter start
+  per call. Call the real code inside the test process, with its environment fenced, and
+  keep one test per seam that spawns the real process end to end. Prefer that real code to a
+  hand-rolled fake: a fake answers things the real one never does, and nothing keeps it
+  honest.
+- **Build shared setup once, copy it per test, and keep per-test state explicit.** A repository
+  or data directory that every test needs identically is built once per worker and copied.
+  Whatever a test depends on that differs from the template (dirty tree, no commits, an
+  identity) is a parameter the test passes, never something left behind in the template.
+  Copies must carry no absolute paths, hooks or config the test did not ask for. Time one case
+  against many before cutting case count: the cost is often per-file setup, and the copy may
+  save less than it seems.
+- **Use the real disk under the test's temp dir.** Make the failure real: a read-only
+  directory, a file where a directory is expected, a missing parent. Patch a filesystem call
+  only when no real trigger exists, such as a full disk.
+- **Wait on an observable, never on a duration.** A sleep is either too short, and the test
+  flakes, or long enough to cost real time on every run. Wait for the file, the sentinel line
+  or the process exit the test cares about. Where elapsed time is the subject, inject the
+  clock or the timeout so the test supplies it.
+- **Inject a collaborator when the test varies its answer or the code already takes one;
+  patch by module path only to stub an orchestrator's collaborator the test does not care
+  about.** A path patch names an import layout: it breaks when the code moves, and a patch of
+  `module.stdlib_module.function` also depends on how the module imports it. A patch of a
+  process-wide function such as `subprocess.run` catches every caller, including incidental ones.
+  Add an injectable seam instead.
+- **Re-home a slow test, never delete it for being slow.** Real-process tests move to an opt-in
+  tier that CI runs as its own required job. Say in the run's closing line that tiers were left
+  out, so a green default run is not read as covering them.
+- **Add a case to the file that already tests the subject.** Cases with the same shape and
+  different values are one parametrized test. A collapsed group still needs a mutation check
+  of its subject, or it can pass for the wrong reason.
+- **Budget the run.** A guard that fails the pull request that pushes run time past a budget
+  derived from measured history keeps the cost from creeping back unnoticed.
+
 ## Output wording
 
 This section is for text a person will read in the session. If another agent

@@ -183,7 +183,22 @@ fallback, no GNU `readlink -f`, macOS-safe).
   smoke, marked `# inert-gate: allow <reason>`. `scripts/inert-test-gate` enforces both
   halves and `--list-allowed` prints every exemption; see the craft ruleset for the full
   rule.
-- **Craft tests that need lore use `tools/craft/tests/_lore_runner.py`** (`LoreRunner`, or its `lore_runner` fixture): an in-process lore that is fenced on every call and fails closed outside the test's `tmp_path`. Do not spawn `lore` or hand-roll a `FakeLore`; `LoreRunner.inject` makes lore fail on demand.
+- **Craft tests that need lore use `tools/craft/tests/_lore_runner.py`** (`LoreRunner`, or its `lore_runner` fixture): an in-process lore that is fenced on every call and fails closed outside the test's `tmp_path`. Do not spawn `lore` or hand-roll a `FakeLore`; `LoreRunner.inject` makes lore fail on demand. `scripts/inert-test-gate` refuses a craft test that spawns `lore` with a literal `["lore", ...]` argv outside a `*_seam.py` file or a `seam_real` mark (it cannot see a spawn through a PATH shim, so the wiring smokes that use one carry `# inert-gate: allow`).
+- **Shared setup is a template copied per test, with per-test state explicit.** Lore's conftest
+  builds a vault once per process and copies it (`make_git_vault`, `make_bare_remote`); a copy
+  carries no remote and resets hooks and config, and what a test needs that differs is an
+  argument (`dirty=`, `commit=`, `identity=`), never left in the template. Measured gain is small
+  (building a vault costs about 7 ms, copying about 2 ms), so add a template only where setup
+  cost is measured, and time one case against many before cutting case count.
+- **Tests use the real disk under `tmp_path`.** Cause a real failure (a read-only directory, a
+  file where a directory is expected) instead of patching `os`, `shutil` or `open`; patch only
+  where no real trigger exists, such as a full disk.
+- **Wait on an observable, never a sleep.** Wait for the sentinel file, log line or process exit.
+  Where a duration is the subject, inject it (`stream_camp` takes `producer_wait_seconds`).
+- **Re-home a slow test, add a case to the existing file.** A slow real-process test moves to a
+  tier (above), never deleted. A new case goes in the file that already tests the subject, and
+  cases of one shape with different values are one `pytest.mark.parametrize` test, which needs a
+  mutation check of its subject so the collapse cannot pass for the wrong reason.
 - **A test that touches git belongs to one of three groups.** (1) Git only builds the
   fixture: make a real repo under `tmp_path` with the `hermetic_git_env` fixture (or
   `make_hermetic_git_env` from the area's `_git_support.py`) and, for history,
@@ -213,9 +228,16 @@ fallback, no GNU `readlink -f`, macOS-safe).
 - Modules carry long contract docstrings stating their invariants and security
   posture — read them before changing behavior; update them when the contract
   changes (Axiom 5).
-- Code is written for testability via dependency injection: real collaborators are
-  imported at module level so tests patch them (e.g. `patch("trailhead.install.wire")`),
-  and resolvers/pipelines take injectable `env=` / `runner=` / `platform=`.
+- Code is written for testability via dependency injection: resolvers and pipelines take
+  injectable `env=` / `runner=` / `platform=` / a clock, and real collaborators are imported
+  at module level. Use the seam when the test varies the collaborator's answer (about 3,300
+  test sites pass `runner=`, `env=`, `platform=`, `clock=` or `now=`). Patch by module path
+  (`patch("trailhead.install.wire")`, `monkeypatch.setattr`, about 130 `patch` and 1,000
+  `monkeypatch.setattr` sites) only to stub an orchestrator's collaborator the test does not
+  care about, patched where the consumer looks it up. Do not patch through a module's import
+  of a stdlib module (`camp.launch.inject.time.time_ns`; it breaks when `import time` becomes
+  `from time import ...`), or a process-wide function (`subprocess.run`, 30 sites, catches
+  every caller including incidental ones); add a `runner=` or clock seam to the code instead.
 - Error hygiene, CLI-wide: a named error prints a clean `trailhead: <message>` on
   stderr and exits nonzero — never a raw traceback. Normal output goes to stdout.
   No ANSI/color.

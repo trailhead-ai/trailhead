@@ -50,18 +50,24 @@ jobs:
         area: [craft, lore-camp, rest]
         include:
           # `baseline` is the area's passed count in a clean run of the default selection in a
-          # container that mirrors this job. `budget` is a first ceiling per area (about twice the
-          # wall time this area's share of the measured default job implies on the slowest leg);
-          # tighten it to median + 2 sd once each area job has CI history.
+          # container that mirrors this job. `budget` is the job's median wall time plus two
+          # sample standard deviations over its CI history, rounded up to 10 s, and never above
+          # 300 s (the 5-minute target). The history is every guarded run of this job layout:
+          # 7 runs x 3 Pythons = 21 legs per job, guard wall times from the "Suite run-time
+          # guard" step. craft: median 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median
+          # 167.8, sd 19.9, so 207.5, budget 210. rest: median 56.5, sd 27.2, so 110.9, budget
+          # 120; that history leaves out one 200.6 s leg whose cause, a lock-order starvation bug
+          # in the scratch-pad publisher, is fixed (with it in, the budget would be 140). A leg
+          # over its budget is the signal to look for a cause before raising the number.
           - area: craft
             baseline: 3343
-            budget: 300
+            budget: 170
           - area: lore-camp
             baseline: 7491
-            budget: 330
+            budget: 210
           - area: rest
             baseline: 3162
-            budget: 200
+            budget: 120
     steps:
       - name: Check out the repository
         # Deliberately shallow (depth 1): a test never reads this repository's
@@ -148,9 +154,12 @@ jobs:
           # `paths` limits collection to the directories holding the tier's tests, because
           # collecting the whole tree costs 25-30 s per invocation.
           # `baseline` is the tier's passed count in a clean run, with every test passing and none
-          # skipped. `budget` is a first ceiling set from container timings (chromium about 143 s,
-          # seam_real about 39 s) at roughly four times the measured wall; tighten it to
-          # median + 2 sd once this job has CI history.
+          # skipped. `budget` is the job's median wall time plus two sample standard deviations
+          # over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute target).
+          # seam_real: 21 legs (7 runs x 3 Pythons), median 86.2, sd 15.0, so 116.1, budget 120.
+          # chromium: PROVISIONAL. It has run one test at a time (`workers: 0`) in only 2 runs,
+          # 6 legs: median 100.4, sd 14.1, so 128.5, budget 130. Re-derive it from at least 5
+          # runs of this shape (it was 600 and then ran in 52 to 79 s on two workers).
           # `workers` is the xdist worker count. The chromium tier runs nothing but browser
           # launches, and any second browser starting alongside the two-copy storage-event test
           # can starve it past its cross-copy barrier timeout, so the tier runs one test at a
@@ -159,12 +168,12 @@ jobs:
             paths: tools/outpost/tests
             workers: 0
             baseline: 343
-            budget: 600
+            budget: 130
           - tier: seam_real
             paths: trailhead/tests tools/craft/tests tools/lore/tests
             workers: auto
             baseline: 319
-            budget: 240
+            budget: 120
     steps:
       - name: Check out the repository
         # Shallow on purpose; see the pytest job.

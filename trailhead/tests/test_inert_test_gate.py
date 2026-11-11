@@ -274,3 +274,150 @@ def test_skill_names_the_gate():
     assert "criterion_gate.py" in DOC.read_text()
 '''
     assert _run(str(_module(tmp_path, body))).returncode == 0
+
+
+# --- the real-lore-spawn rule ------------------------------------------------
+#
+# Craft tests reach lore through the in-process runner. A test that spawns a real
+# `lore` process belongs in the `seam_real` tier (a `*_seam.py` file, a module
+# `pytestmark`, or a marker on the test), where CI runs it as its own job. The rule
+# reads the direct form only: a subprocess call whose argv is a list starting with
+# the literal "lore". A spawn through a PATH shim or `python <cli>` cannot be told
+# from a craft script's own spawn without data-flow analysis, so it is not claimed.
+
+_SPAWNS_LORE = '''
+import subprocess
+def test_lists_the_vaults():
+    done = subprocess.run(["lore", "vault", "ls"], capture_output=True, text=True)
+    assert done.returncode == 0
+'''
+
+
+def _craft_module(tmp_path: Path, body: str, name: str = "test_seeded.py") -> Path:
+    directory = tmp_path / "tools" / "craft" / "tests"
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / name
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_a_craft_test_that_spawns_lore_outside_a_seam_file_is_flagged(tmp_path):
+    result = _run(str(_craft_module(tmp_path, _SPAWNS_LORE)))
+    assert result.returncode == 1, (
+        f"the gate passed a craft test spawning real lore in the default tier:\n"
+        f"{result.stdout}{result.stderr}"
+    )
+    assert "spawns a real lore process" in result.stderr
+
+
+def test_the_same_spawn_in_a_seam_file_is_left_alone(tmp_path):
+    """The satisfying file of the pair: byte-identical to the offender above, one
+    edit apart (its name)."""
+    seam = _craft_module(tmp_path, _SPAWNS_LORE, name="test_lists_vaults_seam.py")
+    result = _run(str(seam))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "marking",
+    [
+        "pytestmark = pytest.mark.seam_real\n",
+        "pytestmark = [pytest.mark.seam_real]\n",
+    ],
+    ids=["module-mark", "module-mark-list"],
+)
+def test_a_module_tier_mark_satisfies_the_rule(tmp_path, marking):
+    body = "import pytest\n" + marking + _SPAWNS_LORE
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_test_level_tier_mark_satisfies_the_rule_for_that_test_only(tmp_path):
+    body = '''
+import subprocess
+import pytest
+@pytest.mark.seam_real
+def test_marked():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+def test_unmarked():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1
+    assert "test_unmarked" in result.stderr
+    assert "test_marked " not in result.stderr
+
+
+def test_a_class_level_tier_mark_satisfies_the_rule(tmp_path):
+    body = '''
+import subprocess
+import pytest
+@pytest.mark.seam_real
+class TestReal:
+    def test_status(self):
+        assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_a_spawn_through_a_module_local_helper_is_flagged(tmp_path):
+    body = '''
+import subprocess
+def _lore(*args):
+    return subprocess.run(["lore", *args], capture_output=True, text=True)
+def test_lists_the_vaults():
+    assert _lore("vault", "ls").returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1
+    assert "spawns a real lore process" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+import subprocess
+def test_git_is_not_lore():
+    assert subprocess.run(["git", "--version"]).returncode == 0
+''',
+        '''
+import subprocess
+def test_a_timeout_error_naming_lore_is_not_a_spawn():
+    err = subprocess.TimeoutExpired(["lore", "status"], 1)
+    assert err.timeout == 1
+''',
+        '''
+from _lore_runner import LoreRunner
+def test_the_in_process_runner(tmp_path):
+    done = LoreRunner(tmp_path)(["vault", "ls"], None)
+    assert done.returncode == 0
+''',
+    ],
+    ids=["another-binary", "exception-naming-lore", "in-process-runner"],
+)
+def test_a_craft_test_that_does_not_spawn_lore_is_left_alone(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_rule_is_scoped_to_craft_tests(tmp_path):
+    """Lore's own tests spawn lore by design; the rule must not reach them."""
+    directory = tmp_path / "tools" / "lore" / "tests"
+    directory.mkdir(parents=True)
+    path = directory / "test_cli.py"
+    path.write_text(_SPAWNS_LORE, encoding="utf-8")
+    result = _run(str(path))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_exempts_a_lore_spawn_and_is_listed(tmp_path):
+    body = _SPAWNS_LORE.replace(
+        "def test_lists_the_vaults():",
+        "def test_lists_the_vaults():  # inert-gate: allow the one wiring smoke for this seam",
+    )
+    seeded = _craft_module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    listed = _run("--list-allowed", str(seeded))
+    assert "the one wiring smoke for this seam" in listed.stdout
