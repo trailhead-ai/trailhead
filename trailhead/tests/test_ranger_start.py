@@ -317,7 +317,7 @@ def test_other_refusal_prints_its_message(tmp_path, stub, capsys):
             "trailhead_bad_output",
             502,
             "the hub launch was refused; run `trailhead session-start --role hub "
-            "--account acme --json` to see why",
+            "--account acme --json --broker-session diagnostic` to see why",
         ),
         ("tmux_failed", 502, "tmux failed; run `trailhead doctor`"),
         ("invalid_account", 400, "the account name 'acme' is invalid"),

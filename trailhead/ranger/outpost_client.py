@@ -18,6 +18,11 @@ HUB_SOCKET = "outpost-hubs"
 START_TIMEOUT_SECONDS = 180.0
 
 
+# Hub start refuses a launch with no broker session; this id passes the shape check so the
+# diagnostic reaches the real refusal. session-start only prints a launch, so it has no effect.
+DIAGNOSTIC_BROKER_SESSION = "diagnostic"
+
+
 class OutpostRefusal(Exception):
     """A plain, human-readable reason the hub could not be started."""
 
@@ -78,7 +83,8 @@ def _canned_detail(error: object, account: str) -> str | None:
     return {
         "trailhead_bad_output": (
             "the hub launch was refused; run "
-            f"`trailhead session-start --role hub --account {account} --json` to see why"
+            f"`trailhead session-start --role hub --account {account} --json "
+            f"--broker-session {DIAGNOSTIC_BROKER_SESSION}` to see why"
         ),
         "tmux_failed": "tmux failed; run `trailhead doctor`",
         "invalid_account": f"the account name {account!r} is invalid",

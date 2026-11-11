@@ -9,6 +9,7 @@ import http.server
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -30,6 +31,7 @@ from trailhead.launch_profile import (
     hub_home,
     resolve_profile,
 )
+from trailhead.ranger import outpost_client
 from trailhead.ranger.config import HubConfig, write_hub_config
 
 REPO = Path(__file__).resolve().parents[2]
@@ -797,6 +799,23 @@ def test_cli_refuses_a_never_widen_violation_with_a_clean_message(tmp_path, monk
     rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     err = capsys.readouterr().err
     assert rc != 0 and err.startswith("trailhead: ") and lore in err
+
+
+def test_the_diagnostic_ranger_prints_for_a_refused_hub_launch_reproduces_the_never_widen_refusal(
+    tmp_path, monkeypatch, capsys
+):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    home, lore, cache = _hub_roots(env)
+    user = _write_user_settings(env, {"model": "opus"})
+    detail = outpost_client._canned_detail("trailhead_bad_output", "a")
+    command = re.search(r"`([^`]+)`", detail).group(1)
+    argv = shlex.split(command)
+    assert argv[0] == "trailhead"
+    rc = _run_cli(monkeypatch, env, argv[1:])
+    err = capsys.readouterr().err
+    assert rc != 0 and "no broker session was given" not in err
+    assert f"Add {lore} to 'sandbox.filesystem.allowWrite' in {user}" in err
 
 
 @pytest.mark.parametrize("kind", ["missing", "directory", "not-utf8"])
