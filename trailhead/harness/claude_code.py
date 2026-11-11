@@ -88,6 +88,7 @@ subprocess or reports installed state refuses instead of guessing
 from __future__ import annotations
 
 import errno
+import fnmatch
 import hashlib
 import json
 import os
@@ -96,7 +97,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
@@ -880,6 +881,18 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 _SETTINGS_FILENAME = "settings.json"
 _READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
 
+#: Where Claude Code reads managed settings on Linux (``managed-settings.json`` then every
+#: ``managed-settings.d/*.json`` in alphabetical order). Managed settings outrank the
+#: session's own, so a denial there that covers a path the profile needs defeats the profile.
+_MANAGED_SETTINGS_DIR = Path("/etc/claude-code")
+_MANAGED_FILENAME = "managed-settings.json"
+_MANAGED_DROP_IN_DIR = "managed-settings.d"
+
+#: Characters a ``Read()`` path glob may carry that this check cannot evaluate; a rule using
+#: one is refused rather than guessed at (``*``, ``**`` and ``?`` are understood).
+_UNSUPPORTED_GLOB_RE = re.compile(r"[\[\]{}\\]|^!")
+_GLOB_RE = re.compile(r"[*?]")
+
 
 def _resolve_settings_path(entry: str, home: Path, launch_dir: Path) -> Path:
     """A path as a settings entry spells it, made absolute and symlink-free.
@@ -910,12 +923,111 @@ def _host_allowed(host: str, allowed: list[str]) -> bool:
     return False
 
 
-class _UserSettings:
-    """The parts of an account's user-level settings a launch must not widen."""
+_Source = tuple[Path, str]  # (settings file, "user-level" | "managed")
 
-    def __init__(self, path: Path, home: Path, launch_dir: Path) -> None:
+
+class _ReadRule:
+    """A ``Read()`` deny path, as a pattern over path segments that can say whether it covers a root.
+
+    Segments are ``("lit", name)`` (compared exactly) or ``("glob", pattern)`` (``*``, ``?``,
+    ``**`` for any number of segments). A rule covers a root when it matches the root or any
+    ancestor of it, since a denial of a directory denies everything under it.
+    """
+
+    def __init__(self, segments: list[tuple[str, str]]) -> None:
+        self.segments = segments
+
+    def covers(self, root: Path) -> bool:
+        return any(self._match(self.segments, root.parts[:k]) for k in range(1, len(root.parts) + 1))
+
+    @classmethod
+    def _match(cls, pattern: list[tuple[str, str]], parts: tuple[str, ...]) -> bool:
+        if not pattern:
+            return not parts
+        (kind, text), rest = pattern[0], pattern[1:]
+        if kind == "glob" and text == "**":
+            return any(cls._match(rest, parts[i:]) for i in range(len(parts) + 1))
+        if not parts:
+            return False
+        same = parts[0] == text if kind == "lit" else fnmatch.fnmatchcase(parts[0], text)
+        return same and cls._match(rest, parts[1:])
+
+
+def _read_rule_pattern(
+    rule: str, spec: str, source: _Source, anchor: Path | None, home: Path, launch_dir: Path
+) -> _ReadRule:
+    """Resolve a ``Read(<spec>)`` deny rule the way Claude Code does, or raise.
+
+    Claude Code (permissions docs, "How path patterns match"): ``//path`` is an absolute
+    path; ``~/path`` is home-relative; ``/path`` is relative to the settings source (for user
+    settings, the config dir holding the file); ``./path`` is relative to the working
+    directory; a bare pattern matches at any depth under the working directory. Syntax is
+    gitignore's. A source with no documented anchor (managed settings) cannot be resolved for
+    a single-slash rule, and a glob this check cannot evaluate cannot be proven not to cover
+    a profile root: both refuse the launch.
+    """
+    path, kind = source
+    if _UNSUPPORTED_GLOB_RE.search(spec):
+        raise HarnessError(
+            f"{path}: the {kind} read rule {rule!r} uses a glob this check cannot evaluate "
+            "(only '*', '**' and '?' are understood), so it cannot be proven not to cover a "
+            "path the profile allows; rewrite it as Read(//absolute/path/**) or remove it; "
+            "refusing the launch"
+        )
+    for tail in ("/**", "/*"):
+        if spec.endswith(tail):
+            spec = spec[: -len(tail)]
+    floating = False
+    if spec in ("", ".", "**", "*"):
+        base, rest = launch_dir, ""
+    elif spec.startswith("//"):
+        base, rest = Path("/"), spec[2:]
+    elif spec == "~" or spec.startswith("~/"):
+        base, rest = home, spec[2:]
+    elif spec.startswith("/"):
+        if anchor is None:
+            raise HarnessError(
+                f"{path}: the {kind} read rule {rule!r} is a single-slash path, which is "
+                "relative to the settings source, and that source's anchor is not documented, "
+                "so it cannot be resolved; rewrite it as Read(//absolute/path/**); "
+                "refusing the launch"
+            )
+        base, rest = anchor, spec[1:]
+    elif spec.startswith("./"):
+        base, rest = launch_dir, spec[2:]
+    else:
+        base, rest, floating = launch_dir, spec, True
+    names = [n for n in rest.split("/") if n]
+    if floating:
+        return _ReadRule(
+            [("lit", part) for part in launch_dir.parts]
+            + [("glob", "**")]
+            + [("glob", n) for n in names]
+        )
+    literal: list[str] = []
+    while names and not _GLOB_RE.search(names[0]):
+        literal.append(names.pop(0))
+    anchor_dir = Path(os.path.realpath(base.joinpath(*literal)))
+    segments = [("lit", part) for part in anchor_dir.parts]
+    segments += [("glob", n) for n in names]
+    return _ReadRule(segments)
+
+
+class _UserSettings:
+    """The parts of an account's settings a launch must not widen.
+
+    Built from the user-level file; :meth:`absorb` folds in the managed files, whose lists
+    merge with it the way Claude Code merges them. Every entry remembers the file it came
+    from, so a refusal names the file to change.
+    """
+
+    def __init__(
+        self, path: Path, home: Path, launch_dir: Path, *, kind: str = "user-level"
+    ) -> None:
         self.path = path
-        data = self._load(path)
+        self.kind = kind
+        data = self._load(path, kind)
+        source: _Source = (path, kind)
         sandbox = data.get("sandbox", {})
         if not isinstance(sandbox, dict):
             raise HarnessError(f"{path}: 'sandbox' must be an object; refusing the launch")
@@ -927,8 +1039,14 @@ class _UserSettings:
         fs = self._section(path, sandbox, "filesystem")
         net = self._section(path, sandbox, "network")
         permissions = self._section(path, data, "permissions")
-        self.allow_write = self._strings(path, fs, "allowWrite", "sandbox.filesystem.allowWrite")
-        self.deny_write = self._strings(path, fs, "denyWrite", "sandbox.filesystem.denyWrite") or []
+        allow_write = self._strings(path, fs, "allowWrite", "sandbox.filesystem.allowWrite")
+        self.allow_write: list[tuple[str, _Source]] | None = (
+            None if allow_write is None else [(e, source) for e in allow_write]
+        )
+        self.deny_write: list[tuple[str, _Source]] = [
+            (e, source)
+            for e in self._strings(path, fs, "denyWrite", "sandbox.filesystem.denyWrite") or []
+        ]
         self.allowed_domains = self._strings(
             path, net, "allowedDomains", "sandbox.network.allowedDomains"
         )
@@ -937,36 +1055,44 @@ class _UserSettings:
         )
         deny_read = self._strings(path, fs, "denyRead", "sandbox.filesystem.denyRead") or []
         rules = self._strings(path, permissions, "deny", "permissions.deny") or []
-        self.deny_read: list[tuple[str, Path]] = [
-            (entry, _resolve_settings_path(entry, home, launch_dir)) for entry in deny_read
-        ]
+        self.deny_read: list[tuple[str, Callable[[Path], bool], _Source]] = []
+        for entry in deny_read:
+            denied = _resolve_settings_path(entry, home, launch_dir)
+            self.deny_read.append((entry, lambda root, d=denied: _covers(d, root), source))
         for rule in rules:
             match = _READ_RULE_RE.match(rule)
-            if not match:
-                continue
-            spec = match.group("spec")
-            for tail in ("/**", "/*"):
-                if spec.endswith(tail):
-                    spec = spec[: -len(tail)]
-            spec = spec[1:] if spec.startswith("//") else spec
-            if spec.startswith("/") or spec.startswith("~/") or spec == "~":
-                self.deny_read.append((rule, _resolve_settings_path(spec, home, launch_dir)))
+            if match:
+                pattern = _read_rule_pattern(
+                    rule, match.group("spec"), source,
+                    path.parent if kind == "user-level" else None, home, launch_dir,
+                )
+                self.deny_read.append((rule, pattern.covers, source))
         self.home, self.launch_dir = home, launch_dir
 
+    def absorb(self, other: _UserSettings) -> None:
+        """Merge *other*'s lists into this one: allowances and denials union."""
+        if other.allow_write is not None:
+            self.allow_write = [*(self.allow_write or []), *other.allow_write]
+        self.deny_write += other.deny_write
+        self.deny_read += other.deny_read
+        self.excluded_commands += [c for c in other.excluded_commands if c not in self.excluded_commands]
+        if other.allowed_domains is not None:
+            self.allowed_domains = [*(self.allowed_domains or []), *other.allowed_domains]
+
     @staticmethod
-    def _load(path: Path) -> dict:
+    def _load(path: Path, kind: str) -> dict:
         try:
             text = path.read_text()
         except FileNotFoundError:
             return {}
         except OSError as exc:
-            raise HarnessError(f"{path}: cannot read user-level settings ({exc}); refusing the launch") from exc
+            raise HarnessError(f"{path}: cannot read {kind} settings ({exc}); refusing the launch") from exc
         try:
             data = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise HarnessError(f"{path}: malformed user-level settings ({exc}); refusing the launch") from exc
+            raise HarnessError(f"{path}: malformed {kind} settings ({exc}); refusing the launch") from exc
         if not isinstance(data, dict):
-            raise HarnessError(f"{path}: user-level settings must be a JSON object; refusing the launch")
+            raise HarnessError(f"{path}: {kind} settings must be a JSON object; refusing the launch")
         return data
 
     @staticmethod
@@ -984,6 +1110,27 @@ class _UserSettings:
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
             raise HarnessError(f"{path}: {label!r} must be a list of strings; refusing the launch")
         return value
+
+
+def _managed_settings(home: Path, launch_dir: Path) -> list[_UserSettings]:
+    """The managed settings files in the order Claude Code merges them; none when absent.
+
+    A file or drop-in directory that exists but cannot be read, or a file that is not a JSON
+    object, refuses the launch: what policy applies cannot be established.
+    """
+    base = _MANAGED_SETTINGS_DIR
+    paths = [base / _MANAGED_FILENAME]
+    try:
+        names = sorted(os.listdir(base / _MANAGED_DROP_IN_DIR))
+    except (FileNotFoundError, NotADirectoryError):
+        names = []
+    except OSError as exc:
+        raise HarnessError(
+            f"{base / _MANAGED_DROP_IN_DIR}: cannot read the managed settings directory ({exc}); "
+            "refusing the launch"
+        ) from exc
+    paths += [base / _MANAGED_DROP_IN_DIR / n for n in names if n.endswith(".json") and not n.startswith(".")]
+    return [_UserSettings(p, home, launch_dir, kind="managed") for p in paths]
 
 
 def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
@@ -1010,41 +1157,54 @@ def _derive_write_confinement(
     not allow. A directory that contains a profile root is never denied, since the denial
     would win over the root.
 
+    A user with no ``allowWrite`` list at all allows only the launch directory, so a profile
+    root outside it is refused too (and the refusal names the key to add); the profile's
+    own ``allowWrite`` would otherwise widen writes past what the user permits.
+
     Raises :class:`HarnessError` naming the offending entry when a profile root is
     not covered by the user's writable list or the launch directory, when a user-level writable root contains
     a profile root (it cannot be narrowed without denying the profile root), or when
     a user-level write denial covers a profile root.
     """
-    for entry in user.deny_write:
+    for entry, (source_path, kind) in user.deny_write:
         denied = _resolve_settings_path(entry, user.home, user.launch_dir)
         if any(_covers(denied, root) for root in roots):
             raise HarnessError(
-                f"{user.path}: the user-level write denial {entry!r} covers a path this "
+                f"{source_path}: the {kind} write denial {entry!r} covers a path this "
                 "profile writes; refusing the launch"
             )
-    if user.allow_write is None:
-        return []
-    allowed = [(e, _resolve_settings_path(e, user.home, user.launch_dir)) for e in user.allow_write]
-    for entry, resolved in allowed:
+    allowed = [
+        (e, _resolve_settings_path(e, user.home, user.launch_dir), src)
+        for e, src in user.allow_write or []
+    ]
+    for entry, resolved, (source_path, kind) in allowed:
         if any(resolved in root.parents for root in roots):
             raise HarnessError(
-                f"{user.path}: the user-level writable root {entry!r} contains a path this "
+                f"{source_path}: the {kind} writable root {entry!r} contains a path this "
                 "profile writes, so it cannot be narrowed without denying that path; "
                 "refusing the launch"
             )
     for root in roots:
         if not _covers(user.launch_dir, root) and not any(
-            _covers(resolved, root) for _, resolved in allowed
+            _covers(resolved, root) for _, resolved, _ in allowed
         ):
             raise HarnessError(
                 f"the profile writes {root}, which {user.path} does not allow "
-                "(a profile may narrow the user-level settings, never widen them)"
+                "(a profile may narrow the user-level settings, never widen them); "
+                + (
+                    f"it sets no 'sandbox.filesystem.allowWrite' list, so only the working "
+                    f"directory {user.launch_dir} is writable. "
+                    if user.allow_write is None
+                    else ""
+                )
+                + f"Add {root} to 'sandbox.filesystem.allowWrite' in {user.path} to allow it; "
+                "refusing the launch"
             )
     scratch = {
         Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())
     }
     deny: list[str] = []
-    for _, resolved in allowed:
+    for _, resolved, _ in allowed:
         if (
             resolved in scratch
             or any(_covers(root, resolved) for root in roots)
@@ -1053,12 +1213,43 @@ def _derive_write_confinement(
             continue
         deny.append(str(resolved))
     if (
-        (_covers(user.launch_dir, tmux_socket_dir) or any(_covers(r, tmux_socket_dir) for _, r in allowed))
+        (_covers(user.launch_dir, tmux_socket_dir) or any(_covers(r, tmux_socket_dir) for _, r, _ in allowed))
         and not any(_covers(tmux_socket_dir, root) for root in roots)
         and str(tmux_socket_dir) not in deny
     ):
         deny.append(str(tmux_socket_dir))
     return deny
+
+
+def _refuse_helper_code_under_write_roots(
+    header_command: tuple[str, ...], env: Mapping[str, str], write_roots: list[Path]
+) -> None:
+    """Refuse a launch whose headers helper's code the session could rewrite.
+
+    The helper runs outside the sandbox with the operator's access, so every file it executes
+    must be out of the session's reach: ``bin/trailhead`` (as named, and where it resolves),
+    the checkout's ``bin`` directory, ``trailhead`` package and ``pyproject.toml`` (the
+    launcher reads its interpreter floor there), and each ``python3`` on PATH it might exec.
+    A path overlaps a write root when either contains the other, by whole segments.
+    """
+    binary = Path(header_command[0])
+    lexical = Path(os.path.realpath(binary.parent)) / binary.name
+    resolved = Path(os.path.realpath(binary))
+    checkout = resolved.parent.parent
+    code = [lexical, resolved, resolved.parent, checkout / "trailhead", checkout / "pyproject.toml"]
+    for entry in (env.get("PATH") or "").split(os.pathsep):
+        candidate = Path(entry) / "python3"
+        if entry and os.path.isabs(entry) and candidate.is_file() and os.access(candidate, os.X_OK):
+            code += [Path(os.path.realpath(candidate.parent)) / "python3", Path(os.path.realpath(candidate))]
+    for path in code:
+        for root in write_roots:
+            if _covers(root, path) or _covers(path, root):
+                raise HarnessError(
+                    f"the headers helper's code {path} overlaps {root}, which the hub session may "
+                    "write; the helper runs outside the sandbox with your access, so the session "
+                    f"could replace it. Run trailhead from a checkout (and a python3) outside "
+                    f"{root}, then start the hub again; refusing the launch"
+                )
 
 
 _GIT_ADMIN_NAMES = ("config", "hooks", "info")
@@ -1154,10 +1345,10 @@ def _git_admin_denials(guarded: list[Path], writable: list[Path]) -> list[str]:
 def _check_reads_and_network(
     user: _UserSettings, roots: list[Path], hosts: tuple[str, ...]
 ) -> None:
-    for entry, denied in user.deny_read:
-        if any(_covers(denied, root) for root in roots):
+    for entry, covers, (source_path, kind) in user.deny_read:
+        if any(covers(root) for root in roots):
             raise HarnessError(
-                f"{user.path}: the user-level read denial {entry!r} covers a path this "
+                f"{source_path}: the {kind} read denial {entry!r} covers a path this "
                 "profile allows; refusing the launch"
             )
     if user.allowed_domains is not None:
@@ -2119,6 +2310,19 @@ class ClaudeCodeHarness(Harness):
         neither names nor covers a named host with is denied. A user wildcard that covers
         a named host stays, since denying it would deny that host too.
 
+        Settings sources: the user-level file and Linux managed settings
+        (``/etc/claude-code/managed-settings.json`` then ``managed-settings.d/*.json``) are
+        read and merged; a managed denial a profile root falls under refuses the launch like a
+        user one. Project and local settings in the session directory are not read (the
+        session cannot write ``<directory>/.claude``; the operator owns what is there), and
+        server-managed or MDM policy is not visible to a file read. A user with no
+        ``sandbox.filesystem.allowWrite`` allows only the working directory.
+
+        Headers helper code: a launch whose helper (``bin/trailhead``, the ``trailhead``
+        package, ``pyproject.toml`` beside it, or a ``python3`` on PATH) overlaps any path the
+        session may write (profile roots, the session directory, system temp) is refused,
+        since the helper runs outside the sandbox with the operator's access.
+
         Raises :class:`HarnessError` for a *directory* that is not an existing directory,
         a profile naming the broker server with no *broker*, a profile that would widen
         the user-level settings, an unreadable or malformed user-level settings or
@@ -2150,7 +2354,14 @@ class ClaudeCodeHarness(Harness):
             home,
             launch_dir,
         )
+        for managed in _managed_settings(home, launch_dir):
+            user.absorb(managed)
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
+        if wants_broker:
+            scratch = {Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())}
+            _refuse_helper_code_under_write_roots(
+                broker.header_command, source, [*roots, launch_dir, *sorted(scratch)]
+            )
         deny_write = [
             str(launch_dir / ".claude"),
             str(launch_dir / ".mcp.json"),
