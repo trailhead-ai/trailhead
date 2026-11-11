@@ -20,7 +20,10 @@ from portage import holds
 from portage.cli import dispatch
 from portage.cli import pr as pr_cli
 
+from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
 from trailhead.vcs.github import GitHubProvider
+
+pytestmark = pytest.mark.usefixtures("hermetic_git_env")
 
 
 class _SpyRunner:
@@ -61,7 +64,7 @@ def state(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def repo(tmp_path, hermetic_git_env):
+def repo(tmp_path):
     r = tmp_path / "repo"
     r.mkdir()
     for cmd in (["init", "-q", "-b", "feat"], ["commit", "-q", "--allow-empty", "-m", "x"]):

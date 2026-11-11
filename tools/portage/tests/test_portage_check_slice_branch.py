@@ -14,6 +14,8 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 
 from portage.cli import dispatch
 
+from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
+
 pytestmark = pytest.mark.usefixtures("hermetic_git_env")
 
 OK, UNREADABLE, DEFAULT_BRANCH, NOT_RECORD_BRANCH = 0, 2, 3, 4
