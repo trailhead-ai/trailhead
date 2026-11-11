@@ -84,36 +84,30 @@ class TestAgreement:
 
 
 class TestDrift:
-    def test_heading_with_no_entry_is_drift(self, tmp_path):
-        body = IN_AGREEMENT.replace("## Beta\n\nText.\n\n", "## Beta\n\nText.\n\n## Omega\n\nText.\n\n")
+    @pytest.mark.parametrize(
+        ("old", "new", "named"),
+        [
+            pytest.param(
+                "## Beta\n\nText.\n\n",
+                "## Beta\n\nText.\n\n## Omega\n\nText.\n\n",
+                "Omega",
+                id="heading_with_no_entry",
+            ),
+            pytest.param("- Beta\n", "- Beta\n- Phantom\n", "Phantom", id="entry_naming_no_heading"),
+            pytest.param("## Alpha", "## Alpha, revised", "Alpha, revised", id="renaming_a_heading_alone"),
+            pytest.param("  - Beta one", "- Beta one", "Beta one", id="wrong_nesting_level"),
+        ],
+    )
+    def test_edit_that_breaks_agreement_is_drift(self, tmp_path, old, new, named):
+        body = IN_AGREEMENT.replace(old, new)
         result = run(doc(tmp_path, body))
         assert result.returncode == 1
-        assert "Omega" in result.stderr
-
-    def test_entry_naming_no_heading_is_drift(self, tmp_path):
-        body = IN_AGREEMENT.replace("- Beta\n", "- Beta\n- Phantom\n")
-        result = run(doc(tmp_path, body))
-        assert result.returncode == 1
-        assert "Phantom" in result.stderr
-
-    def test_renaming_a_heading_alone_is_drift(self, tmp_path):
-        """The stale-block failure this gate exists for: the document moved on."""
-        body = IN_AGREEMENT.replace("## Alpha", "## Alpha, revised")
-        result = run(doc(tmp_path, body))
-        assert result.returncode == 1
-        assert "Alpha, revised" in result.stderr
+        assert named in result.stderr
 
     def test_wrong_order_is_drift(self, tmp_path):
         body = IN_AGREEMENT.replace("- Alpha\n- Beta\n", "- Beta\n- Alpha\n")
         result = run(doc(tmp_path, body))
         assert result.returncode == 1
-
-    def test_wrong_nesting_level_is_drift(self, tmp_path):
-        """A `###` section is a two-space-indented entry; flattening it is drift."""
-        body = IN_AGREEMENT.replace("  - Beta one", "- Beta one")
-        result = run(doc(tmp_path, body))
-        assert result.returncode == 1
-        assert "Beta one" in result.stderr
 
 
 class TestFailClosed:
@@ -190,51 +184,48 @@ class TestForgedStructure:
         # bullets would pass on the wrong message.
         assert "no contents block" in result.stderr.lower()
 
-    def test_a_fenced_example_does_not_shadow_the_real_block(self, tmp_path):
-        """A document showing the convention and then using it is consistent.
-
-        Reading the illustration as the block finds one with no live entries,
-        which fails closed on a document that is in fact correct.
-        """
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            pytest.param(
+                "Opening preamble.",
+                (
+                    "Opening preamble. The shape is:\n"
+                    "\n"
+                    "```markdown\n"
+                    "<!-- toc:start -->\n"
+                    "- Illustration\n"
+                    "<!-- toc:end -->\n"
+                    "```"
+                ),
+                id="a_fenced_example_does_not_shadow_the_real_block",
+            ),
+            pytest.param(
+                "  - Beta one\n",
+                "  - Beta one\n\n```\n- Not an entry\n```\n",
+                id="bullet_inside_a_nested_fence_is_not_an_entry",
+            ),
+            pytest.param(
+                "Opening preamble.",
+                "Opening preamble.\u2028## Forged",
+                id="line_separator_cannot_forge_a_heading",
+            ),
+            pytest.param("## Alpha", "<!-- ## Hidden -->\n\n## Alpha", id="html_comment_cannot_hide_a_real_heading"),
+            pytest.param(
+                "Opening preamble.",
+                (
+                    "Opening preamble. Write `<!-- toc:start -->` above the first section.\n"
+                    "\n"
+                    "- A preamble bullet that is not an entry"
+                ),
+                id="inline_marker_in_prose_does_not_open_the_block",
+            ),
+        ],
+    )
+    def test_prose_resembling_markup_keeps_the_toc_in_agreement(self, tmp_path, old, new):
         body = IN_AGREEMENT.replace(
-            "Opening preamble.",
-            "Opening preamble. The shape is:\n\n"
-            "```markdown\n<!-- toc:start -->\n- Illustration\n<!-- toc:end -->\n```",
-        )
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_bullet_inside_a_nested_fence_is_not_an_entry(self, tmp_path):
-        body = IN_AGREEMENT.replace(
-            "  - Beta one\n",
-            "  - Beta one\n\n```\n- Not an entry\n```\n",
-        )
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_line_separator_cannot_forge_a_heading(self, tmp_path):
-        """U+2028 ends a line for some renderers and not for `str.split`.
-
-        A gate that treats it as a line break sees a heading the block cannot
-        name, and reddens on a document that is actually consistent.
-        """
-        body = IN_AGREEMENT.replace("Opening preamble.", "Opening preamble. ## Forged")
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_html_comment_cannot_hide_a_real_heading(self, tmp_path):
-        """A commented-out heading is not a section a reader can reach."""
-        body = IN_AGREEMENT.replace("## Alpha", "<!-- ## Hidden -->\n\n## Alpha")
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_inline_marker_in_prose_does_not_open_the_block(self, tmp_path):
-        """A document explaining the convention names the marker in a sentence.
-
-        Matching the marker anywhere in a line rather than as the whole line
-        would let that sentence open the block early and sweep unrelated
-        preamble bullets in as entries.
-        """
-        body = IN_AGREEMENT.replace(
-            "Opening preamble.",
-            "Opening preamble. Write `<!-- toc:start -->` above the first section.\n\n"
-            "- A preamble bullet that is not an entry",
+            old,
+            new,
         )
         assert run(doc(tmp_path, body)).returncode == 0
 
@@ -297,13 +288,26 @@ class TestCommonMarkStructure:
     is how two gates start disagreeing about the same document.
     """
 
-    def test_tilde_fence_hides_a_template_heading(self, tmp_path):
-        body = IN_AGREEMENT + "\n~~~markdown\n## Findings\n~~~\n"
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_longer_fence_may_wrap_a_shorter_one(self, tmp_path):
-        body = IN_AGREEMENT + "\n````markdown\n```\n## Findings\n```\n````\n"
-        assert run(doc(tmp_path, body)).returncode == 0
+    @pytest.mark.parametrize(
+        ("hidden", "expected"),
+        [
+            pytest.param("\n~~~markdown\n## Findings\n~~~\n", 0, id="tilde_fence_hides_a_template_heading"),
+            pytest.param(
+                "\n````markdown\n```\n## Findings\n```\n````\n",
+                0,
+                id="longer_fence_may_wrap_a_shorter_one",
+            ),
+            pytest.param(
+                "\n<!--\n## Commented out\n-->\n",
+                0,
+                id="heading_inside_a_multi_line_comment_is_not_a_section",
+            ),
+            pytest.param("\n<!--\nstill open at end of file\n", 2, id="unterminated_comment_exits_two"),
+        ],
+    )
+    def test_masked_block_exit_code(self, tmp_path, hidden, expected):
+        body = IN_AGREEMENT + hidden
+        assert run(doc(tmp_path, body)).returncode == expected
 
     @pytest.mark.parametrize(
         ("old", "new"),
@@ -322,14 +326,6 @@ class TestCommonMarkStructure:
             old, new
         )
         assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_heading_inside_a_multi_line_comment_is_not_a_section(self, tmp_path):
-        body = IN_AGREEMENT + "\n<!--\n## Commented out\n-->\n"
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_unterminated_comment_exits_two(self, tmp_path):
-        body = IN_AGREEMENT + "\n<!--\nstill open at end of file\n"
-        assert run(doc(tmp_path, body)).returncode == 2
 
     def test_crlf_input_is_read_the_same(self, tmp_path):
         path = tmp_path / "crlf.md"

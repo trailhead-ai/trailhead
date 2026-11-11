@@ -179,24 +179,18 @@ class TestFencedAndCommentedExemptions:
     # masking exemption itself, never the unrelated unbreakable-word one.
     _OVER_LONG_PROSE = "aaaa bbbb cccc dddd eeee ffff gggg"
 
-    def test_over_long_line_inside_triple_backtick_fence_exits_zero(self, tmp_path):
-        body = f"# Title\n\n```\n{self._OVER_LONG_PROSE}\n```\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_tilde_fence_exits_zero(self, tmp_path):
-        body = f"# Title\n\n~~~\n{self._OVER_LONG_PROSE}\n~~~\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_a_longer_fence_wrapping_a_shorter_one(self, tmp_path):
-        body = f"# Title\n\n````\n```\n{self._OVER_LONG_PROSE}\n```\n````\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_html_comment_exits_zero(self, tmp_path):
-        body = f"# Title\n\n<!-- {self._OVER_LONG_PROSE} -->\n"
-        assert run(doc(tmp_path, body), column=COL).returncode == 0
-
-    def test_over_long_line_inside_unterminated_comment_running_to_eof_exits_zero(self, tmp_path):
-        body = f"# Title\n\n<!-- unterminated\n{self._OVER_LONG_PROSE}\n"
+    @pytest.mark.parametrize(
+        "template",
+        [
+            pytest.param("# Title\n\n```\n{prose}\n```\n", id="triple_backtick_fence"),
+            pytest.param("# Title\n\n~~~\n{prose}\n~~~\n", id="tilde_fence"),
+            pytest.param("# Title\n\n````\n```\n{prose}\n```\n````\n", id="longer_fence_wrapping_a_shorter_one"),
+            pytest.param("# Title\n\n<!-- {prose} -->\n", id="html_comment"),
+            pytest.param("# Title\n\n<!-- unterminated\n{prose}\n", id="unterminated_comment_running_to_eof"),
+        ],
+    )
+    def test_over_long_line_inside_a_fence_or_comment_exits_zero(self, tmp_path, template):
+        body = template.format(prose=self._OVER_LONG_PROSE)
         assert run(doc(tmp_path, body), column=COL).returncode == 0
 
 

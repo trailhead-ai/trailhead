@@ -15,6 +15,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 
 CRAFT = Path(__file__).parent.parent / "plugins" / "craft"
@@ -301,30 +302,19 @@ def test_partial_covers_allowlist_shape_accepts_the_documented_worked_example():
     )
 
 
-def test_partial_covers_allowlist_shape_rejects_a_value_carrying_an_unescaped_double_quote():
+@pytest.mark.parametrize(
+    ("malicious", "carrying"),
+    [
+        pytest.param('AC7"; touch pwned #', "an unescaped double quote", id="unescaped_double_quote"),
+        pytest.param("AC7`whoami`", "a backtick", id="backtick"),
+        pytest.param("AC7\nrm -rf /", "a newline", id="newline"),
+    ],
+)
+def test_partial_covers_allowlist_shape_rejects_a_value_carrying(malicious, carrying):
     shape = _documented_partial_covers_shape()
-    malicious = 'AC7"; touch pwned #'
     assert re.match(shape, malicious) is None, (
         f"the documented --partial-covers allow-list shape {shape!r} must "
-        f"reject a value carrying an unescaped double quote: {malicious!r}"
-    )
-
-
-def test_partial_covers_allowlist_shape_rejects_a_value_carrying_a_backtick():
-    shape = _documented_partial_covers_shape()
-    malicious = "AC7`whoami`"
-    assert re.match(shape, malicious) is None, (
-        f"the documented --partial-covers allow-list shape {shape!r} must "
-        f"reject a value carrying a backtick: {malicious!r}"
-    )
-
-
-def test_partial_covers_allowlist_shape_rejects_a_value_carrying_a_newline():
-    shape = _documented_partial_covers_shape()
-    malicious = "AC7\nrm -rf /"
-    assert re.match(shape, malicious) is None, (
-        f"the documented --partial-covers allow-list shape {shape!r} must "
-        f"reject a value carrying a newline: {malicious!r}"
+        f"reject a value carrying {carrying}: {malicious!r}"
     )
 
 

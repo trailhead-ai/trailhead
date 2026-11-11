@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 SCRIPTS = REPO_ROOT / "plugins" / "craft" / "scripts"
 FORMATTER = SCRIPTS / "wrap_prose.py"
@@ -134,25 +136,22 @@ class TestIdempotence:
 class TestPassthroughByteIdentity:
     _OVER_LONG = "aaaa bbbb cccc dddd eeee ffff gggg"
 
-    def test_fenced_block_contents_byte_identical(self, tmp_path):
-        body = f"# Title\n\n```\n{self._OVER_LONG}\n```\n"
-        assert wrap_prose.format_text(body, COL) == body
-
-    def test_html_comment_contents_byte_identical(self, tmp_path):
-        body = f"# Title\n\n<!-- {self._OVER_LONG} -->\n"
-        assert wrap_prose.format_text(body, COL) == body
-
-    def test_table_row_byte_identical(self, tmp_path):
-        body = f"# Title\n\n| h1 | h2 |\n|----|----|\n| {self._OVER_LONG} | y |\n"
+    @pytest.mark.parametrize(
+        "template",
+        [
+            pytest.param("# Title\n\n```\n{prose}\n```\n", id="fenced_block_contents"),
+            pytest.param("# Title\n\n<!-- {prose} -->\n", id="html_comment_contents"),
+            pytest.param("# Title\n\n| h1 | h2 |\n|----|----|\n| {prose} | y |\n", id="table_row"),
+            pytest.param("# {prose}\n\nshort\n", id="heading"),
+        ],
+    )
+    def test_passthrough_content_is_byte_identical(self, tmp_path, template):
+        body = template.format(prose=self._OVER_LONG)
         assert wrap_prose.format_text(body, COL) == body
 
     def test_pipe_as_or_prose_is_reflowed_not_left_byte_identical(self, tmp_path):
         body = "# Title\n\naaaa `SHIP` | `FAIL` | `HOLD` bbbb cccc dddd\n"
         assert wrap_prose.format_text(body, COL) != body
-
-    def test_heading_byte_identical(self, tmp_path):
-        body = f"# {self._OVER_LONG}\n\nshort\n"
-        assert wrap_prose.format_text(body, COL) == body
 
 
 class TestFrontmatterMask:
