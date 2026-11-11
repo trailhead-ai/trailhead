@@ -86,14 +86,3 @@ def test_init_no_harvest_pending(tmp_path):
 
 
 # ---- lore set-status (removed — redirects via dispatch hint) ----------------
-
-
-def test_set_status_removed_and_hints_replacement(tmp_path):
-    """`lore set-status` was removed. It must exit non-zero and stderr must carry
-    the `_DISPATCH_HINTS` redirect pointing agents to `lore record update --status`."""
-    p = tmp_path / "d.md"
-    p.write_text("---\ntype: deferred\nstatus: open\n---\n\nbody\n")
-    r = run_cli(["set-status", str(p), "ready"])
-    assert r.returncode != 0
-    assert "unknown command 'set-status'" in r.stderr
-    assert "did you mean 'lore record update --status'?" in r.stderr

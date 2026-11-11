@@ -814,22 +814,6 @@ def test_group_help_documents_flags() -> None:
         assert token in out, f"expected {token!r} in group --help:\n{out}"
 
 
-def test_init_help_documents_new_flags() -> None:
-    """`camp group --help` documents --member / --scaffold / --force modes.
-
-    Legacy name kept for backward-compat; routes to group --help.
-    """
-    result = subprocess.run(
-        [sys.executable, str(_CLI_CAMP), "group", "--help"],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0
-    out = result.stdout + result.stderr
-    for token in ("--member", "--scaffold", "--force"):
-        assert token in out, f"expected {token!r} in group --help:\n{out}"
-
-
 def test_scaffold_stub_write_uses_utf8_encoding() -> None:
     """Every group-config write_text() call in cli/group.py must pin
     encoding="utf-8" explicitly rather than relying on the platform's

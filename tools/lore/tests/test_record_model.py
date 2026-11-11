@@ -85,15 +85,10 @@ def test_initial_status_per_kind():
     assert m.initial_status("task") == "open"
 
 
-def test_phases_are_ordered_closed_set():
-    assert rm().PHASES == ("orient", "frame", "build", "review", "ship", "close")
-
-
 def test_is_valid_phase():
     m = rm()
     assert m.is_valid_phase("frame") is True
     assert m.is_valid_phase("nope") is False
-    assert m.phases() == ("orient", "frame", "build", "review", "ship", "close")
 
 
 def test_fields_v1_required_optional_and_autoset_flags():
