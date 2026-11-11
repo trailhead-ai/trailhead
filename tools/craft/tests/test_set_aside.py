@@ -765,6 +765,38 @@ def test_a_released_entry_alone_in_build_mode_is_entry_exists_and_nothing_is_wri
     assert fake.updates() == []
 
 
+NARROWED = PARENT_PLAIN.replace("AC2, AC4, AC5", "AC2, AC5")
+
+
+def test_a_rerun_after_a_complete_set_aside_writes_nothing_and_reports_both_records_already_done(
+    build, entries_file, capsys
+):
+    fake = build(NARROWED, spec_body=spec_with(waiting_text("AC4", words=BUILD_WORDS)))
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert rc == 0, err
+    assert out.splitlines() == ["set aside: AC4", "spec: already-present", "parent: already-updated"]
+    assert fake.updates() == []
+    assert fake.parent_body() == NARROWED
+
+
+def test_a_criterion_off_the_parent_with_no_set_aside_entry_is_still_refused_not_on_this_slice(
+    build, entries_file, capsys
+):
+    fake = build(NARROWED)
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-on-this-slice")
+    assert fake.updates() == []
+
+
+def test_a_criterion_off_the_parent_whose_entry_was_released_is_not_already_done_and_is_entry_exists(
+    build, entries_file, capsys
+):
+    fake = build(NARROWED, spec_body=spec_with(waiting_text("AC4", "released")))
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "entry-exists")
+    assert fake.updates() == []
+
+
 def test_each_mode_writes_its_own_history_wording_never_the_callers_text(build, world, entries_file, capsys):
     sliced = world()
     run(sliced, entries_file([item("AC4", "ZZ-MARKER")]), capsys)

@@ -286,16 +286,18 @@ def _lists_without(state: parent_coverage.ParentCoverage, criteria: list[str]) -
     return [c for c in state.covers if c not in drop], [c for c in state.partial if c not in drop]
 
 
-def _refuse_unfit_claim(state: parent_coverage.ParentCoverage, criteria: list[str]) -> None:
+def _refuse_unfit_claim(
+    state: parent_coverage.ParentCoverage, criteria: list[str], set_aside_on_spec: set[str]
+) -> None:
     on_parent = set(state.covers) | set(state.partial)
-    off = [c for c in criteria if c not in on_parent]
+    off = [c for c in criteria if c not in on_parent and c not in set_aside_on_spec]
     if off:
         raise Refusal(
             f"{', '.join(off)} is not on this parent's '**Covers:**' or '**Partially covers:**'",
             "not-on-this-slice",
             1,
         )
-    if not any(_lists_without(state, criteria)):
+    if on_parent.intersection(criteria) and not any(_lists_without(state, criteria)):
         raise Refusal(
             "setting these aside would leave the parent covering nothing — drop the slice instead",
             "would-empty-slice",
@@ -343,7 +345,9 @@ def build_mode(args, runner) -> int:
     criteria = [entry["criterion"] for entry in entries]
     vault = sw.resolve_vault(runner, args.spec, args.vault)
     sidecar, body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
-    _refuse_unfit_claim(_read_parent(sidecar, body, args.spec), criteria)
+    _, spec_body, _, _ = sw.read_record(runner, vault, f"spec/{args.spec}", "spec-not-found")
+    set_aside_on_spec = {key[0] for key, e in sw.spec_entries(spec_body).items() if e.kind == _SET_ASIDE}
+    _refuse_unfit_claim(_read_parent(sidecar, body, args.spec), criteria, set_aside_on_spec)
     spec_body, spec_status = set_aside_in_spec(runner, vault, args.spec, entries, _BUILD_WORDS)
     parent_status = _narrow_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
     for criterion in criteria:
