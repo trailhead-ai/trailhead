@@ -297,6 +297,34 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
     return [(v.name, Path(v.path)) for v in vaults], None
 
 
+def _resolve_all_vaults_and_read_only() -> tuple[list[tuple[str, Path]], set[str], str | None]:
+    """``_resolve_all_vaults`` plus the names of the ``read-only`` vaults, from the
+    same single ``load_config`` read, so the list and the declarations cannot
+    disagree.
+
+    Same three-case contract as :func:`_resolve_all_vaults`; the read-only name
+    set (``Vault.read_only``) is empty in both floor cases.
+    """
+    config_path = _resolve_config_path()
+    if not config_path.exists():
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
+        return floor, set(), None
+    try:
+        vaults = vault_config_mod.load_config(str(config_path))
+    except (
+        vault_config_mod.VaultConfigError,
+        OSError,
+        ValueError,
+    ) as exc:
+        floor = [("default", Path(vault_config_mod.resolve_active_vault()))]
+        return floor, set(), f"cannot read {config_path}: {exc}"
+    return (
+        [(v.name, Path(v.path)) for v in vaults],
+        {v.name for v in vaults if v.read_only},
+        None,
+    )
+
+
 def _resolve_all_vaults_strict(what: str) -> list[tuple[str, Path]] | None:
     """``_resolve_all_vaults`` that REFUSES on an unreadable config.
 
