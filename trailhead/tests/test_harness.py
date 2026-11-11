@@ -637,11 +637,19 @@ class TestClaudeCodeSessionTranscriptStoredUnder:
         self._seed(tmp_path / ".claude", deep, "sess-1")
         assert self._stored_under(tmp_path, "sess-1", ws) is True
 
-    def test_true_for_the_root_itself(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("seeded_id", "expected", "queried_id"),
+        [
+            pytest.param("sess-1", True, "sess-1", id="true_for_the_root_itself"),
+            pytest.param("sess-1", False, "*", id="false_for_a_glob_pattern_id_that_would_match_a_stored_transcript"),
+            pytest.param("other-sess", False, "sess-1", id="false_when_the_session_has_no_stored_transcript"),
+        ],
+    )
+    def test_stored_under_root(self, tmp_path, seeded_id, expected, queried_id):
         ws = tmp_path.resolve() / "ws"
         ws.mkdir()
-        self._seed(tmp_path / ".claude", ws, "sess-1")
-        assert self._stored_under(tmp_path, "sess-1", ws) is True
+        self._seed(tmp_path / ".claude", ws, seeded_id)
+        assert self._stored_under(tmp_path, queried_id, ws) is expected
 
     def test_false_for_an_existing_sibling_whose_name_extends_root_with_a_dash(self, tmp_path):
         base = tmp_path.resolve()
@@ -703,24 +711,12 @@ class TestClaudeCodeSessionTranscriptStoredUnder:
         (deeper / "sess-1.jsonl").write_text("{}\n")
         assert self._stored_under(tmp_path, "sess-1", ws) is False
 
-    def test_false_for_a_glob_pattern_id_that_would_match_a_stored_transcript(self, tmp_path):
-        ws = tmp_path.resolve() / "ws"
-        ws.mkdir()
-        self._seed(tmp_path / ".claude", ws, "sess-1")
-        assert self._stored_under(tmp_path, "*", ws) is False
-
     def test_false_for_an_unusable_session_id(self, tmp_path):
         ws = tmp_path.resolve() / "ws"
         ws.mkdir()
         (tmp_path / ".claude" / "projects" / _projects_key(ws)).mkdir(parents=True)
         (tmp_path / ".claude" / "projects" / "escape.jsonl").write_text("{}\n")
         assert self._stored_under(tmp_path, "../escape", ws) is False
-
-    def test_false_when_the_session_has_no_stored_transcript(self, tmp_path):
-        ws = tmp_path.resolve() / "ws"
-        ws.mkdir()
-        self._seed(tmp_path / ".claude", ws, "other-sess")
-        assert self._stored_under(tmp_path, "sess-1", ws) is False
 
     def test_honors_claude_config_dir_env(self, tmp_path):
         ws = tmp_path.resolve() / "ws"

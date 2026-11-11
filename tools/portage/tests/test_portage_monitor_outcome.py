@@ -21,29 +21,33 @@ from trailhead.vcs.github import (
 import pytest
 
 
-def test_parses_merged_with_no_argument():
-    assert parse_monitor_outcome("MERGED") == ("MERGED", "")
-
-
-def test_parses_ready_with_its_reason():
-    assert parse_monitor_outcome("READY awaiting-human-approval") == (
-        "READY",
-        "awaiting-human-approval",
-    )
-
-
-def test_parses_blocked_with_its_reason():
-    assert parse_monitor_outcome("BLOCKED 3 fix cycles without progress") == (
-        "BLOCKED",
-        "3 fix cycles without progress",
-    )
-
-
-def test_parses_stopped_with_its_reason():
-    assert parse_monitor_outcome("STOPPED auto_merge disabled") == (
-        "STOPPED",
-        "auto_merge disabled",
-    )
+@pytest.mark.parametrize(
+    ("line", "token", "argument"),
+    [
+        pytest.param("MERGED", "MERGED", "", id="parses_merged_with_no_argument"),
+        pytest.param(
+            "READY awaiting-human-approval",
+            "READY",
+            "awaiting-human-approval",
+            id="parses_ready_with_its_reason",
+        ),
+        pytest.param(
+            "BLOCKED 3 fix cycles without progress",
+            "BLOCKED",
+            "3 fix cycles without progress",
+            id="parses_blocked_with_its_reason",
+        ),
+        pytest.param(
+            "STOPPED auto_merge disabled",
+            "STOPPED",
+            "auto_merge disabled",
+            id="parses_stopped_with_its_reason",
+        ),
+        pytest.param("MERGED\nextra junk after the first line", "MERGED", "", id="only_the_first_line_is_parsed"),
+    ],
+)
+def test_parses_token_and_argument(line, token, argument):
+    assert parse_monitor_outcome(line) == (token, argument)
 
 
 @pytest.mark.parametrize(
@@ -58,10 +62,6 @@ def test_unparseable_line_is_refused(line, argument):
     token, parsed_argument = parse_monitor_outcome(line)
     assert token is None
     assert parsed_argument == argument
-
-
-def test_only_the_first_line_is_parsed():
-    assert parse_monitor_outcome("MERGED\nextra junk after the first line") == ("MERGED", "")
 
 
 def test_read_missing_file_synthesizes_a_failure(tmp_path):
