@@ -33,6 +33,15 @@ vault.
 
 Session records are read, because a reference may point at one, but a session is never reported.
 
+A target can be confirmed missing only if every configured vault was read. When any vault cannot
+be read, or holds records that were not read because they lie outside the vault root, the check is
+skipped for every vault, with the reason naming that vault, rather than reporting references into
+it as dangling.
+
+A target must look like a record id: an optional kind, then a name in lore's name characters and
+length. A wikilink whose text is anything else is reported as a malformed reference, naming the
+linking record and the field but never repeating the text.
+
 Every record id, field name and target shown comes from a vault and is untrusted. Before display,
 each is rendered with control and invisible format characters escaped, so a finding is always one
 line and can never carry a terminal escape.
@@ -47,7 +56,9 @@ line and can never carry a terminal escape.
    20 unless more were asked for, then a line counting the rest and a line naming what acts on
    them.
 
-Records checked counts the records a check judged: every record in the vault except sessions.
+Records checked counts the records a check judged: every readable record in the vault except
+sessions. The index line counts every record read, sessions included, because the index holds
+sessions too, so its number is larger than the summary's.
 
 ## State — No findings
 
@@ -62,7 +73,7 @@ default     dangling-links  1,204    0         no
 trailhead   dangling-links  4,511    0         no
 levr        dangling-links  310      0         no
 
-Records read match the index: 6,402 read, 6,402 indexed.
+Records read match the index (sessions included): 6,402 read, 6,402 indexed.
 
 dangling-links — no findings.
 ```
@@ -78,7 +89,7 @@ lore health — 1 vault (targets looked up in all 3)
 vault       check           records  findings  skipped
 trailhead   dangling-links  4,511    1         no
 
-Records read match the index: 4,890 read, 4,890 indexed.
+Records read match the index (sessions included): 4,890 read, 4,890 indexed.
 
 dangling-links — 1 finding, oldest first
   trailhead/decision/use-a-pooled-client  2026-03-14  related decision → decision/pool-size-limits: not found in any vault
@@ -90,7 +101,8 @@ alone.
 
 ## State — Findings beyond the cap
 
-Past 20 findings in a check, the group stops and counts the rest, and says how to see them:
+Past 20 findings in a check, the group stops and counts the rest, and says how to see them. The
+suggested command repeats `--vault <name>` when the run was narrowed to one vault:
 
 ```
 dangling-links — 145 findings, oldest first
@@ -102,12 +114,12 @@ Act on these with /lore:correct: point the reference at the record that replaced
 
 ## State — Record count differs from the index
 
-When the records read and the index's count for the same vaults differ, the index line says so,
-with both numbers and what to do. The findings are still shown, because they come from the records
-on disk, not from the index:
+When the records read and the index's count differ for any vault, the index line names each such
+vault with both numbers and says what to do. The findings are still shown, because they come from
+the records on disk, not from the index:
 
 ```
-Records read differ from the index: 6,402 read, 6,396 indexed. Run `lore reindex`, then run the report again.
+Records read differ from the index for default: 1,301 read, 1,295 indexed. Run `lore reindex`, then run the report again.
 ```
 
 When the index cannot be opened, the line says the count could not be confirmed rather than
@@ -124,6 +136,13 @@ with any such record gets one line after the summary:
 trailhead: 2 records could not be read and were not checked.
 ```
 
+Records whose files lie outside the vault root are not read at all. They are counted, never named,
+and they skip the check as described above:
+
+```
+shared-notes: 3 records lie outside the vault root and were not read.
+```
+
 ## State — Report cannot run
 
 When the report cannot run at all, it prints one `lore:` line to stderr and exits unsuccessfully.
@@ -134,12 +153,19 @@ names a vault that is not configured.
 lore: cannot run the health report: no vault named 'scratch' is configured (configured: default, trailhead, levr)
 ```
 
-A vault whose directory cannot be read once the run has started does not stop the run. Its row is
-marked skipped with the reason, every other vault is still checked, and the report exits
+A vault whose directory cannot be read once the run has started does not stop the run, but no
+target can then be confirmed missing, so the dangling-link check is skipped on every row, with the
+reason naming that vault. No finding and no "no findings" line is printed, and the report exits
 successfully:
 
 ```
-scratch     dangling-links  —        —         yes: the vault's directory could not be read
+vault       check           records  findings  skipped
+default     dangling-links  —        —         yes: vault scratch could not be read, so no target can be confirmed missing
+trailhead   dangling-links  —        —         yes: vault scratch could not be read, so no target can be confirmed missing
+scratch     dangling-links  —        —         yes: its directory could not be read
+
+dangling-links — skipped.
 ```
 
-In every case other than these two, the report exits successfully, with or without findings.
+In every case other than these two, the report exits successfully, with or without findings. An
+unexpected internal error prints one `lore:` line, never a traceback, and exits unsuccessfully.
