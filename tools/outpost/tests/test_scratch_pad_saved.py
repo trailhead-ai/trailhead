@@ -18,6 +18,8 @@ import pytest
 import chromium_harness as ch
 from test_scratch_pad_answering import HELPERS, REPLY_HELPERS, _round
 
+pytestmark = pytest.mark.chromium
+
 SKILL_DIR = Path(__file__).parent.parent / "plugins" / "outpost" / "skills" / "scratch-pad"
 
 _spec = importlib.util.spec_from_file_location("scratch_pad", SKILL_DIR / "scratch_pad.py")

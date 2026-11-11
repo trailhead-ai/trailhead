@@ -62,6 +62,9 @@ from pathlib import Path
 from conftest import load_script, make_bare_remote, write_vault_config
 from test_vault_write_lock import _spawn_holder
 
+import pytest
+pytestmark = pytest.mark.seam_real
+
 sync_mod = importlib.import_module("lore.cli.sync")
 resolve_state_mod = importlib.import_module("lore.cli.resolve_state")
 resolve_mod = importlib.import_module("lore.cli.resolve")

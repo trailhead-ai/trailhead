@@ -1029,6 +1029,7 @@ def test_a_reference_run_with_no_vault_name_syncs_bare(mod, vault, capfd):
     assert capfd.readouterr().out.splitlines()[-1] == _link(vault)
 
 
+@pytest.mark.chromium
 def test_the_published_reference_opens_from_the_vault_folder_and_draws(mod, rig, vault, tmp_path):
     env, work, _state, kit = rig
     drawable = {

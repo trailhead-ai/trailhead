@@ -50,6 +50,7 @@ def bare(tmp_path: Path):
     return path_dir, home, env
 
 
+@pytest.mark.chromium
 def test_pages_with_different_css_widths_measure_differently():
     probe = "return {width: document.getElementById('box').getBoundingClientRect().width};"
     narrow = ch.run_probe(FIXTURES / "widths-narrow", probe)
@@ -58,6 +59,7 @@ def test_pages_with_different_css_widths_measure_differently():
     assert wide == {"width": 250}
 
 
+@pytest.mark.chromium
 def test_page_script_and_font_from_its_own_folder_are_loaded():
     probe = """
       return {
@@ -70,12 +72,14 @@ def test_page_script_and_font_from_its_own_folder_are_loaded():
     assert result == {"fonts": ["loaded"], "made": True, "sample": 64}
 
 
+@pytest.mark.chromium
 def test_probe_that_never_reports_raises_named_error_naming_the_page():
     with pytest.raises(ch.ProbeNotReported) as err:
         ch.run_probe(FIXTURES / "never-ready", "return {};")
     assert "never-ready" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_probe_that_throws_raises_named_error_carrying_its_message():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe(FIXTURES / "widths-narrow", "throw new Error('boom from probe');")
@@ -237,6 +241,7 @@ FULL_STORAGE = (
 )
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
     # State is carried through sessionStorage, not localStorage: on a file:// page under load the
@@ -258,6 +263,7 @@ def test_a_probe_that_reloads_carries_on_in_the_reloaded_page(serve):
     }
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
     read = "return Number(localStorage.getItem('c'));"
@@ -265,6 +271,7 @@ def test_a_second_run_of_the_same_page_starts_from_a_fresh_profile(serve):
     assert ch.run_probe_steps(FIXTURES / "counter", [read], serve=serve) == 1
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
     # sessionStorage is keyed by origin, so reading A's value on B shows the two folders share one;
@@ -283,12 +290,14 @@ def test_a_value_stored_on_page_a_is_read_on_page_b_in_another_folder(serve):
     assert result == {"x": "from-a", "page": "b/index.html"}
 
 
+@pytest.mark.chromium
 def test_a_step_that_does_not_move_on_is_reported_when_more_steps_remain():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe_steps(FIXTURES / "counter", ["return 1;", "return 2;"])
     assert "step 0 finished without" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_the_last_step_cannot_move_on_to_nothing():
     with pytest.raises(ch.ProbeFailed) as err:
         ch.run_probe_steps(FIXTURES / "counter", ["harness.reload();"])
@@ -301,6 +310,7 @@ STORAGE_LISTENER = """
 """
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_key(serve):
     copy_1 = STORAGE_LISTENER + """
@@ -324,6 +334,7 @@ def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_
     assert one == []
 
 
+@pytest.mark.chromium
 def test_each_copy_reads_its_own_result_and_a_throw_names_the_copy():
     one, two = ch.run_probe_pair(
         FIXTURES / "widths-narrow",
@@ -336,6 +347,7 @@ def test_each_copy_reads_its_own_result_and_a_throw_names_the_copy():
     assert "second copy" in str(err.value) and "copy two broke" in str(err.value)
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_before_script_that_denies_local_storage_is_in_force_for_the_pages_first_script(serve):
     read = "return window.__first;"
@@ -344,6 +356,7 @@ def test_a_before_script_that_denies_local_storage_is_in_force_for_the_pages_fir
     assert denied == {"threw": True, "name": "SecurityError"}
 
 
+@pytest.mark.chromium
 @SERVE_MODES
 def test_a_before_script_can_make_only_set_item_throw(serve):
     result = ch.run_probe(
@@ -352,6 +365,7 @@ def test_a_before_script_can_make_only_set_item_throw(serve):
     assert result == {"threw": True, "name": "QuotaExceededError"}
 
 
+@pytest.mark.chromium
 def test_a_before_script_applies_to_the_page_a_probe_moves_to():
     steps = ["harness.goto('../b/index.html');", "return typeof window.__beforeRan;"]
     result = ch.run_probe_steps(
@@ -364,6 +378,7 @@ def test_a_before_script_applies_to_the_page_a_probe_moves_to():
     assert result == "boolean"
 
 
+@pytest.mark.chromium
 def test_wait_for_returns_the_value_once_its_condition_holds():
     probe = """
       var calls = 0;
@@ -373,6 +388,7 @@ def test_wait_for_returns_the_value_once_its_condition_holds():
     assert ch.run_probe(FIXTURES / "widths-narrow", probe) == {"got": 3, "calls": 3}
 
 
+@pytest.mark.chromium
 def test_wait_for_that_never_holds_fails_naming_the_awaited_state():
     probe = "await harness.waitFor('the other tab to write k9', function () { return false; }, 300);"
     with pytest.raises(ch.ProbeFailed) as err:
@@ -396,6 +412,7 @@ def test_a_missing_browser_fails_rather_than_skips_for_every_entry_point(call):
     assert outcome.type is pytest.fail.Exception
 
 
+@pytest.mark.chromium
 def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_runs_out():
     probe = "await harness.waitFor('a state that never arrives', function () { return false; });"
     with pytest.raises(ch.ProbeFailed) as err:
@@ -403,6 +420,7 @@ def test_wait_for_without_a_timeout_fails_named_before_the_virtual_time_budget_r
     assert "a state that never arrives" in str(err.value)
 
 
+@pytest.mark.chromium
 def test_wait_for_without_a_timeout_started_late_still_fails_named_rather_than_unreported():
     probe = """
       await new Promise(function (resolve) { setTimeout(resolve, 2000); });

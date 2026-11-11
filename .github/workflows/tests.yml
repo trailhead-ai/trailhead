@@ -105,7 +105,8 @@ jobs:
         # `trailhead` package imports without an editable install (the checkout IS
         # the source). testpaths in pyproject.toml span the CLI + all tool suites.
         # addopts in pyproject.toml deselects `benchmark`-marked tests here — a
-        # wall-clock latency assertion is meaningless under xdist worker contention.
+        # wall-clock latency assertion is meaningless under xdist worker contention — and
+        # the opt-in tiers (`chromium`, `seam_real`), which run in the pytest-tiers job below.
         # junit.xml feeds the run-time guard below: xunit1 carries each test's source file
         # (how the guard assigns a test to an area) and duration_report=total counts fixture
         # setup and teardown in a test's time, so the per-test cap sees them.
@@ -128,7 +129,8 @@ jobs:
         # The per-test cap is checked after the run, so a hung test still costs the job timeout.
         if: ${{ !cancelled() }}
         run: |
-          # Budget per leg = median + 2 sample standard deviations of the "Run the test suite"
+          # Budget per leg (set before tiers were split out, so a ceiling for the default tier only until
+          # its own spread is measured) = median + 2 sample standard deviations of the "Run the test suite"
           # step over the 20 most recent successful runs of this workflow (2026-11-10), rounded
           # up to 10 s:  py3.11 1484 + 2*270 = 2024 -> 2030;  py3.12 1780 + 2*303 = 2386 -> 2390;
           # py3.13 1702 + 2*278 = 2258 -> 2260.
@@ -137,11 +139,89 @@ jobs:
             3.12) budget=2390 ;;
             3.13) budget=2260 ;;
           esac
-          # Passed-count floor for the default tier: the lowest passed count (14381) among the
-          # distinct counts logged by those runs (14381, 14385, 14405). Tighten it to the count
-          # this guard prints once it has run on main.
+          # Passed-count floor for the default tier: the passed count of a clean run of the default
+          # selection in a container that mirrors this job (14027, no failures, 58 skipped there).
+          # Tighten it to the count this guard prints once it has run on main.
           # Per-test cap: twice the 60 s wall-clock the Chromium harness allows one launch, so a
           # test that sits through a harness timeout and then some is named.
           python scripts/suite-time-report junit.xml --tier default \
-            --budget "$budget" --per-test-cap 120 --baseline-passed 14474 \
+            --budget "$budget" --per-test-cap 120 --baseline-passed 14027 \
             --summary "$GITHUB_STEP_SUMMARY"
+
+  pytest-tiers:
+    # The opt-in tiers, each its own job so they run in parallel with the default `pytest` job.
+    # `main` has no branch protection, so a pull request merges when every job of this workflow
+    # is green: these jobs gate merge exactly as the default job does. A tier job cannot go
+    # green vacuously: pytest exits nonzero when the selection is empty, and the guard fails the
+    # job when fewer tests pass than the tier's baseline (a skipped test counts as not passed).
+    name: pytest ${{ matrix.tier }} (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+        tier: [chromium, seam_real]
+        include:
+          # `paths` limits collection to the directories holding the tier's tests, because
+          # collecting the whole tree costs 25-30 s per invocation.
+          # `baseline` is the tier's passed count in a clean run, with every test passing and none
+          # skipped. `budget` is a first ceiling set from container timings (chromium about 143 s,
+          # seam_real about 46 s) at roughly four times the measured wall; tighten it to
+          # median + 2 sd once this job has CI history.
+          - tier: chromium
+            paths: tools/outpost/tests
+            baseline: 343
+            budget: 600
+          - tier: seam_real
+            paths: tools/craft/tests tools/lore/tests
+            baseline: 312
+            budget: 240
+    steps:
+      - name: Check out the repository
+        # Shallow on purpose; see the pytest job.
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
+
+      - name: Install chrome-headless-shell
+        # Same pinned build and checksum as the pytest job. The require flag turns a missing
+        # browser into a failure instead of a skip.
+        if: matrix.tier == 'chromium'
+        run: |
+          set -euo pipefail
+          chrome_version="151.0.7922.34"
+          url="https://storage.googleapis.com/chrome-for-testing-public/${chrome_version}/linux64/chrome-headless-shell-linux64.zip"
+          sha256="3cfc2bd00d1bafcf8a68dc74c9c92bb7150ddc8d26ade948a776316e1cec4f14"
+          dest="$RUNNER_TEMP/chrome-headless-shell"
+          mkdir -p "$dest"
+          curl --proto '=https' --tlsv1.2 -fsSL -o "$dest/shell.zip" "$url"
+          echo "$sha256  $dest/shell.zip" | sha256sum -c -
+          unzip -q "$dest/shell.zip" -d "$dest"
+          bin=$(find "$dest" -type f -name chrome-headless-shell | head -n 1)
+          chmod +x "$bin"
+          "$bin" --version
+          echo "OUTPOST_TEST_BROWSER=$bin" >> "$GITHUB_ENV"
+          echo "OUTPOST_REQUIRE_BROWSER=1" >> "$GITHUB_ENV"
+
+      - name: Run the ${{ matrix.tier }} tier
+        # `-m <tier>` replaces the default selection from pyproject's addopts. `-rs` prints why
+        # any test skipped.
+        run: >-
+          python -m pytest -m "${{ matrix.tier }}" -rs ${{ matrix.paths }}
+          --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
+
+      - name: Suite run-time guard
+        # Same guard as the pytest job, under this tier's own name, budget and passed-count
+        # baseline. Runs after pytest even when pytest failed; skipped only when cancelled.
+        if: ${{ !cancelled() }}
+        run: >-
+          python scripts/suite-time-report junit.xml --tier ${{ matrix.tier }}
+          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }}
+          --repro-pytest-args '-m ${{ matrix.tier }} ${{ matrix.paths }}'
+          --summary "$GITHUB_STEP_SUMMARY"

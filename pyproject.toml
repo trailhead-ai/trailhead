@@ -35,10 +35,17 @@ testpaths = [
 # timing/latency assertions from the parallel run — worker contention makes
 # wall-clock latency meaningless, not the benchmark broken; those run serially
 # as a dedicated CI step instead (see .github/workflows/tests.yml).
-addopts = "-n auto -m \"not benchmark\""
+# The same expression leaves the opt-in tiers (`chromium`, `seam_real`) out; each runs as its
+# own CI job. The all-tiers command is `-m "not benchmark"`, which replaces this expression.
+# A misspelled marker is a collection error instead of a silently unselected test. Set as
+# an ini option, not `--strict-markers` in addopts, which pytest 9.0 does not apply.
+strict_markers = true
+addopts = "-n auto -m \"not benchmark and not chromium and not seam_real\""
 markers = [
     "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
     "benchmark: a timing/latency assertion that requires uncontended CPU — excluded from the parallel run, run serially instead",
+    "chromium: drives a real headless Chromium — an opt-in tier excluded from the default run, run as its own CI job (`-m chromium`)",
+    "seam_real: its subject is a real lore or git process, driven end to end — an opt-in tier excluded from the default run, run as its own CI job (`-m seam_real`)",
 ]
 
 [tool.ruff]

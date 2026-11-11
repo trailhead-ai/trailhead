@@ -13,3 +13,12 @@ requires-python = ">=3.11"
 # size-capped temp filesystem when several workspaces run suites at once.
 tmp_path_retention_policy = "failed"
 testpaths = ["tests"]
+# The opt-in tiers are left out of the default run, as in the repository root config.
+strict_markers = true
+addopts = "-m \"not chromium and not seam_real\""
+markers = [
+    "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
+    "benchmark: a timing/latency assertion that requires uncontended CPU — excluded from the parallel run, run serially instead",
+    "chromium: drives a real headless Chromium — an opt-in tier excluded from the default run, run as its own CI job (`-m chromium`)",
+    "seam_real: its subject is a real lore or git process, driven end to end — an opt-in tier excluded from the default run, run as its own CI job (`-m seam_real`)",
+]

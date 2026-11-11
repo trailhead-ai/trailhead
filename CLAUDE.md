@@ -84,7 +84,9 @@ use bare `python`; direnv trusts by path, so every worktree needs its own allow.
 ```sh
 scripts/bootstrap-venv            # create/converge .venv (idempotent, cheap to re-run)
 pip install -e .                  # editable install (optional; bin/trailhead works without it)
-.venv/bin/python -m pytest        # whole suite (root pyproject testpaths span CLI + all tool tests)
+.venv/bin/python -m pytest        # default run: everything except the opt-in tiers below
+.venv/bin/python -m pytest -m "not benchmark"   # ALL tiers: the default run plus every tier
+.venv/bin/python -m pytest -m chromium tools/outpost/tests   # one tier (`-m seam_real tools/craft/tests tools/lore/tests` for the other)
 .venv/bin/python -m pytest trailhead/tests/test_compose.py             # one CLI test file
 .venv/bin/python -m pytest trailhead/tests/test_paths.py::TestMacosBranch  # one class/test
 .venv/bin/python -m pytest tools/lore/tests                            # one tool's suite
@@ -106,6 +108,28 @@ Wherever `-n auto` IS in effect, `--pdb` does not work, and `-p no:xdist` is
 **not** a valid way to go serial — xdist stays registered either way. The only
 serial escape hatch is `-n 0`, e.g.
 `.venv/bin/python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
+
+**Opt-in test tiers.** Two kinds of test are left out of the default command because they
+launch real processes and dominate its run time: `chromium` (drives a real headless
+Chromium) and `seam_real` (its subject is a real lore or git process end to end). A default
+run ends with `deselected tiers: ... — run them with <command>`; that line means the green
+result does not cover them, so run the all-tiers command before calling work done. The three
+tool configs (`tools/craft`, `tools/lore`, `tools/camp`) carry the same exclusion and register
+the same markers, so a path-scoped run behaves the same way, and `strict_markers` makes a
+misspelled marker a collection error. Mark a new test with `pytestmark = pytest.mark.<tier>`
+(a whole file) or `@pytest.mark.<tier>` (one test) when its subject needs the real process;
+an unmarked test stays in the default run. Keep one wiring smoke per seam unmarked, and the
+in-process lore runner's contract test. Tests are re-homed to a tier, never deleted for being
+slow.
+
+**What gates merge.** `main` has no branch protection or ruleset, so a pull request merges
+when every job of the `tests` workflow is green. Each tier is a job of that workflow
+(`pytest-tiers`), beside the default `pytest` job. Every one of them runs the run-time guard
+with its own tier name, budget and passed-count baseline, so a tier job that selects nothing
+(pytest exits nonzero) or skips a test it should run (the passed count falls under its
+baseline) fails. To undo the split, delete `and not chromium and not seam_real` from the
+`addopts` in the root `pyproject.toml` and the three tool configs: the default command then
+runs everything again.
 
 There is no separate lint step configured in-repo. Path resolvers accept injected
 `platform=` / `env=` — use those plus `tmp_path` so tests never touch real

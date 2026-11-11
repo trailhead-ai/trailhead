@@ -106,6 +106,7 @@ def _publish(tmp_path: Path) -> Path:
     return root.resolve() / "grp" / "worktrees" / "ws" / "sites"
 
 
+@pytest.mark.chromium
 def test_a_workspace_pad_draws_answers_and_stays_inert_when_served_over_http(tmp_path):
     sites = _publish(tmp_path)
 
@@ -133,6 +134,7 @@ def test_a_workspace_pad_draws_answers_and_stays_inert_when_served_over_http(tmp
     assert got["pwned"] is None
 
 
+@pytest.mark.chromium
 def test_a_multi_round_workspace_pad_shows_its_switcher_when_served_over_http(tmp_path):
     sites = _publish(tmp_path)
     member = tmp_path / "camp-state" / "grp" / "worktrees" / "ws" / "repo"

@@ -14,6 +14,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.seam_real
+
 _LORE_TESTS = Path(__file__).resolve().parents[2] / "lore" / "tests"
 _SCRIPT = Path(__file__).resolve().parents[1] / "plugins" / "craft" / "scripts" / "found_work.py"
 
