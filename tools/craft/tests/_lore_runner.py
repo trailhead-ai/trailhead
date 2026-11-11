@@ -200,6 +200,19 @@ class LoreRunner:
                 raise LoreRunnerEscape(f"vault path {path} is outside {root}")
 
 
+def seam_env(runner, tmp_path):
+    """The runner's fenced environment, with a `lore` shim running this checkout's lore
+    first on PATH: what a real subprocess (a script, or `lore`) is given."""
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir(exist_ok=True)
+    shim = shim_dir / "lore"
+    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{lore_conftest.CLI_PATH}" "$@"\n')
+    shim.chmod(0o755)
+    env = runner.env()
+    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
+    return env
+
+
 @pytest.fixture
 def lore_runner(tmp_path):
     """A ``LoreRunner`` with one default vault, confined to this test's ``tmp_path``."""

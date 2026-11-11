@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from _lore_runner import LoreRunner
+from _lore_runner import LoreRunner, seam_env
 
 _LORE_TESTS = Path(__file__).resolve().parents[2] / "lore" / "tests"
 _SCRIPTS = Path(__file__).resolve().parents[1] / "plugins" / "craft" / "scripts"
@@ -834,19 +833,6 @@ def test_an_argument_is_refused_as_invalid_arguments(capsys, shelf):
 # --- seam: the script as a subprocess against the real lore CLI ---------------
 
 
-def _seam_env(lore, tmp_path):
-    """The runner's fenced environment, with a `lore` shim running this checkout's lore
-    first on PATH: what the script run as a subprocess is given."""
-    shim_dir = tmp_path / "bin"
-    shim_dir.mkdir(exist_ok=True)
-    shim = shim_dir / "lore"
-    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{_lore_conftest.CLI_PATH}" "$@"\n')
-    shim.chmod(0o755)
-    env = lore.env()
-    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
-    return env
-
-
 def test_the_script_lists_a_waiting_entry_through_the_real_lore_cli(  # inert-gate: allow seam smoke
     tmp_path,
 ):
@@ -854,7 +840,7 @@ def test_the_script_lists_a_waiting_entry_through_the_real_lore_cli(  # inert-ga
     body = spec_body(pending("AC32", "seam-slice", "see the seam", "run it"))
     name = add(lore, "default", "seam-spec", body)
     r = subprocess.run([sys.executable, str(_SCRIPT)], capture_output=True, text=True,
-                       env=_seam_env(lore, tmp_path))
+                       env=seam_env(lore, tmp_path))
     assert r.returncode == 0, r.stderr
     assert r.stdout == (
         "1 check waiting, in 1 spec.\n"

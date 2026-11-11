@@ -49,14 +49,6 @@ _TEMPLATES: dict[bool, Path] = {}
 _PRISTINE_CONFIG: dict[Path, str] = {}
 
 
-def empty_template_dir() -> tempfile.TemporaryDirectory:
-    """A throwaway empty dir for ``git init --template=``: no sample hooks.
-
-    Kept here, not imported, because test modules load this file by path.
-    """
-    return tempfile.TemporaryDirectory(prefix="camp-tests-empty-git-template-")
-
-
 def _template(origin: bool) -> Path:
     """Return the cached pristine repo for *origin*, building it on first use."""
     cached = _TEMPLATES.get(origin)
@@ -84,7 +76,8 @@ def _build_git_repo(path: Path, *, origin: bool) -> None:
     def git(*args: str) -> None:
         subprocess.run(["git", *args], check=True, capture_output=True, env=env)
 
-    with empty_template_dir() as empty:
+    # An empty `--template=` dir: no sample hooks, so a template copies fewer files.
+    with tempfile.TemporaryDirectory(prefix="camp-tests-empty-git-template-") as empty:
         git("init", "-q", "-b", "main", f"--template={empty}", str(path))
     (path / ".git" / "info").mkdir(exist_ok=True)
     (path / ".git" / "info" / "exclude").write_text("")

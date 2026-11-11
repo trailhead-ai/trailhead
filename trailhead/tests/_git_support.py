@@ -1,15 +1,17 @@
-"""Hermetic git environment for trailhead's tests.
+"""Hermetic git environment for the repository's tests.
 
 One definition of "git sees nothing of the machine it runs on", used at the
 subprocess boundary (the env dict) and in-process (the `hermetic_git_env`
-fixture in conftest, which applies the same dict to ``os.environ`` so every
-spawned git inherits it).
+fixture, which applies the same dict to ``os.environ`` so every spawned git
+inherits it). Trailhead's, camp's and lore's conftests import both from here.
 """
 from __future__ import annotations
 
 import os
 from collections.abc import Mapping
 from pathlib import Path
+
+import pytest
 
 HERMETIC_GIT_IDENTITY = ("Test", "t@e.st")
 
@@ -52,4 +54,21 @@ def make_hermetic_git_env(base: Mapping[str, str], root: Path) -> dict[str, str]
         GIT_CONFIG_VALUE_1=os.devnull,
         GIT_CEILING_DIRECTORIES=str(root.resolve()),
     )
+    return env
+
+
+@pytest.fixture
+def hermetic_git_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Apply :func:`make_hermetic_git_env` to this process and its children.
+
+    Opt-in: a test whose subject is how git reacts to a hostile config builds
+    its own environment instead. Returns the env dict for tests that pass
+    ``env=`` explicitly.
+    """
+    env = make_hermetic_git_env(os.environ, tmp_path)
+    for key in [k for k in os.environ if k.startswith("GIT_")]:
+        monkeypatch.delenv(key)
+    for key, value in env.items():
+        if key.startswith("GIT_"):
+            monkeypatch.setenv(key, value)
     return env

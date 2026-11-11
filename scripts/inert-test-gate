@@ -120,8 +120,6 @@ _TIER_MARKS = ("seam_real", "chromium")
 #: Calls that start a process when handed an argv list.
 _SPAWN_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
 
-_SUBPROCESS_FUNCTIONS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
-
 _LORE_FAKE_NAME_RE = re.compile(r"(Fake|Stub|Mock|Canned)\w*Lore|Lore\w*(Fake|Stub|Mock)")
 
 _ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
@@ -141,6 +139,11 @@ def _repo_anchors(tree: ast.Module) -> set[str]:
     return out
 
 
+def _call_name(call: ast.Call) -> str | None:
+    """The called name: `f` for `f(...)`, `attr` for `x.attr(...)`, else None."""
+    return getattr(call.func, "attr", None) or getattr(call.func, "id", None)
+
+
 def _is_presence_probe(test: ast.expr) -> bool:
     """True if this assertion only asks whether something is present.
 
@@ -151,8 +154,7 @@ def _is_presence_probe(test: ast.expr) -> bool:
     if isinstance(test, ast.Compare) and len(test.ops) == 1:
         return isinstance(test.ops[0], (ast.In, ast.NotIn))
     if isinstance(test, ast.Call):
-        name = getattr(test.func, "attr", None) or getattr(test.func, "id", None)
-        return name in _PROBE_CALLS
+        return _call_name(test) in _PROBE_CALLS
     if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
         return _is_presence_probe(test.operand)
     if isinstance(test, ast.BoolOp):
@@ -206,11 +208,9 @@ def _spawns_lore(node: ast.AST) -> bool:
     for call in ast.walk(node):
         if not isinstance(call, ast.Call) or not call.args:
             continue
-        func = call.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
         argv = call.args[0]
         if (
-            name in _SPAWN_CALLS
+            _call_name(call) in _SPAWN_CALLS
             and isinstance(argv, (ast.List, ast.Tuple))
             and argv.elts
             and isinstance(argv.elts[0], ast.Constant)
@@ -245,21 +245,19 @@ def _patches_subprocess(node: ast.AST) -> bool:
     for call in ast.walk(node):
         if not isinstance(call, ast.Call) or not call.args:
             continue
-        func = call.func
-        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-        if name not in {"patch", "setattr", "object"}:
+        if _call_name(call) not in {"patch", "setattr", "object"}:
             continue
         first = call.args[0]
         if isinstance(first, ast.Constant) and isinstance(first.value, str):
             module, _, function = first.value.partition(".")
-            if module == "subprocess" and function in _SUBPROCESS_FUNCTIONS:
+            if module == "subprocess" and function in _SPAWN_CALLS:
                 return True
         elif (
             isinstance(first, ast.Name)
             and first.id == "subprocess"
             and len(call.args) > 1
             and isinstance(call.args[1], ast.Constant)
-            and call.args[1].value in _SUBPROCESS_FUNCTIONS
+            and call.args[1].value in _SPAWN_CALLS
         ):
             return True
     return False
@@ -273,11 +271,7 @@ def _is_lore_fake_class(node: ast.ClassDef) -> bool:
     )
     if not callable_:
         return False
-    calls = {
-        getattr(c.func, "attr", None) or getattr(c.func, "id", None)
-        for c in ast.walk(node)
-        if isinstance(c, ast.Call)
-    }
+    calls = {_call_name(c) for c in ast.walk(node) if isinstance(c, ast.Call)}
     words = {c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
     return "CompletedProcess" in calls and bool(words & {"record", "vault"})
 
@@ -334,6 +328,7 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
         referenced = (names | params) & set(functions)
         for helper in referenced:
             names |= _executable_names(functions[helper])
+        scope = [node, *(functions[h] for h in referenced)]
 
         if not (names - INERT_CALLS):
             verdict = "executes nothing before asserting"
@@ -342,10 +337,10 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
         elif (
             lore_scoped
             and id(node) not in tiered
-            and any(_spawns_lore(f) for f in [node, *(functions[h] for h in referenced)])
+            and any(_spawns_lore(f) for f in scope)
         ):
             verdict = "spawns a real lore process outside the seam_real tier"
-        elif any(_patches_subprocess(f) for f in [node, *(functions[h] for h in referenced)]):
+        elif any(_patches_subprocess(f) for f in scope):
             verdict = "patches a process-wide subprocess function"
         else:
             continue

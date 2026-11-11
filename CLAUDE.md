@@ -201,7 +201,7 @@ fallback, no GNU `readlink -f`, macOS-safe).
   mutation check of its subject so the collapse cannot pass for the wrong reason.
 - **A test that touches git belongs to one of three groups.** (1) Git only builds the
   fixture: make a real repo under `tmp_path` with the `hermetic_git_env` fixture (or
-  `make_hermetic_git_env` from the area's `_git_support.py`) and, for history,
+  `make_hermetic_git_env` from `trailhead/tests/_git_support.py`) and, for history,
   `build_history` in lore's conftest. (2) Git's own behaviour is the subject (transfer,
   sync, rebase, conflicts): keep real git with the same hermetic env. (3) Our code only
   reads git's output: use real git with the same hermetic env. Lore's and camp's `_git`

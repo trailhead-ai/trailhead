@@ -655,7 +655,6 @@ def test_an_emitted_left_out_reason_outside_the_constant_is_refused():
 # === assemble ==========================================================================
 
 _SCRIPTS = _SCRIPT.parent
-GATHER = _SCRIPTS / "followup_gather.py"
 GATE = _SCRIPTS / "observation_gate.py"
 TEMPLATE = _SCRIPTS.parent / "templates" / "plan.md"
 DAY = datetime.date(2026, 10, 16)

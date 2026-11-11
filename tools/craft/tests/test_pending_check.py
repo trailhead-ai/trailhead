@@ -24,7 +24,7 @@ pc = importlib.util.module_from_spec(_spec)
 sys.modules["pending_check"] = pc
 _spec.loader.exec_module(pc)
 
-from _lore_runner import LoreRunner  # noqa: E402
+from _lore_runner import LoreRunner, seam_env  # noqa: E402
 import waiting  # noqa: E402
 import waiting_gate  # noqa: E402
 from gate_plumbing import Refusal  # noqa: E402
@@ -916,17 +916,7 @@ from lore_tests_conftest_for_pending_check import (  # noqa: E402,F401
 
 
 def _seam_env(runner, tmp_path):
-    """The runner's fenced environment, with a `lore` shim running this checkout's lore first
-    on PATH: what a real subprocess (the script, or `lore`) is given."""
-    shim_dir = tmp_path / "bin"
-    shim_dir.mkdir(exist_ok=True)
-    shim = shim_dir / "lore"
-    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{_lore_conftest.CLI_PATH}" "$@"\n')
-    shim.chmod(0o755)
-    env = runner.env()
-    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
-    env["CRAFT_WAITING_GATE_TODAY"] = TODAY
-    return env
+    return {**seam_env(runner, tmp_path), "CRAFT_WAITING_GATE_TODAY": TODAY}
 
 
 def test_the_script_closes_a_manual_check_through_the_real_lore_cli(  # inert-gate: allow seam smoke

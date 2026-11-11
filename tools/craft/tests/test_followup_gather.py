@@ -15,7 +15,6 @@ import contextlib
 import importlib.util
 import io
 import json
-import os
 import re
 import subprocess
 import sys
@@ -23,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from _lore_runner import LoreRunner
+from _lore_runner import LoreRunner, seam_env
 
 _LORE_TESTS = Path(__file__).resolve().parents[2] / "lore" / "tests"
 _SCRIPT = (
@@ -373,19 +372,6 @@ def lore_env(tmp_path):
 @pytest.fixture
 def two_vault_lore_env(tmp_path):
     return LoreRunner(tmp_path, vaults=("default", "other")), ("default", "other")
-
-
-def seam_env(runner, tmp_path):
-    """The runner's fenced environment, with a `lore` shim running this checkout's
-    lore first on PATH: what a real subprocess (the script, or `lore`) is given."""
-    shim_dir = tmp_path / "bin"
-    shim_dir.mkdir(exist_ok=True)
-    shim = shim_dir / "lore"
-    shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{_lore_conftest.CLI_PATH}" "$@"\n')
-    shim.chmod(0o755)
-    env = runner.env()
-    env["PATH"] = f"{shim_dir}{os.pathsep}{env['PATH']}"
-    return env
 
 
 def run_in_process(main, argv, runner, **kwargs):

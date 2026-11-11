@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from ._git_support import make_hermetic_git_env
+from trailhead.tests._git_support import make_hermetic_git_env
 from ._helpers import _build_git_repo, _template, init_git_repo
 
 
