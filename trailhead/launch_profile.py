@@ -94,7 +94,7 @@ def operator_token_store(
     *, env: dict[str, str] | None = None, platform: str | None = None
 ) -> Path:
     """Outpost's operator directory, which holds the operator ``credential`` file."""
-    return state_dir("outpost", env=env, platform=platform) / "operator"
+    return outpost_state(env=env, platform=platform) / "operator"
 
 
 def outpost_state(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
@@ -112,20 +112,25 @@ def validate_broker_session(session_id: str) -> str:
     return session_id
 
 
+def _broker_session_dir(
+    session_id: str, *, env: dict[str, str] | None, platform: str | None
+) -> Path:
+    validate_broker_session(session_id)
+    return outpost_state(env=env, platform=platform) / "sessions" / session_id
+
+
 def broker_credential_path(
     session_id: str, *, env: dict[str, str] | None = None, platform: str | None = None
 ) -> Path:
     """Where Outpost writes a hub session's broker client credentials."""
-    validate_broker_session(session_id)
-    return state_dir("outpost", env=env, platform=platform) / "sessions" / session_id / "broker-client.json"
+    return _broker_session_dir(session_id, env=env, platform=platform) / "broker-client.json"
 
 
 def broker_mcp_config_path(
     session_id: str, *, env: dict[str, str] | None = None, platform: str | None = None
 ) -> Path:
     """Where Outpost writes a hub session's MCP config, beside its credentials."""
-    validate_broker_session(session_id)
-    return state_dir("outpost", env=env, platform=platform) / "sessions" / session_id / "mcp-config.json"
+    return _broker_session_dir(session_id, env=env, platform=platform) / "mcp-config.json"
 
 
 @dataclass(frozen=True)

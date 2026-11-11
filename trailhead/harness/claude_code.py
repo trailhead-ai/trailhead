@@ -1133,6 +1133,11 @@ def _managed_settings(home: Path, launch_dir: Path) -> list[_UserSettings]:
     return [_UserSettings(p, home, launch_dir, kind="managed") for p in paths]
 
 
+def _scratch_dirs() -> set[Path]:
+    """System temp, symlink-free: ``/tmp``, ``/private/tmp`` and the platform temp dir."""
+    return {Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())}
+
+
 def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
     """The directory tmux keeps its default sockets in: ``<TMUX_TMPDIR or /tmp>/tmux-<uid>``,
     symlink-free (``/tmp`` is ``/private/tmp`` on macOS)."""
@@ -1200,9 +1205,7 @@ def _derive_write_confinement(
                 + f"Add {root} to 'sandbox.filesystem.allowWrite' in {user.path} to allow it; "
                 "refusing the launch"
             )
-    scratch = {
-        Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())
-    }
+    scratch = _scratch_dirs()
     deny: list[str] = []
     for _, resolved, _ in allowed:
         if (
@@ -2358,9 +2361,8 @@ class ClaudeCodeHarness(Harness):
             user.absorb(managed)
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
         if wants_broker:
-            scratch = {Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())}
             _refuse_helper_code_under_write_roots(
-                broker.header_command, source, [*roots, launch_dir, *sorted(scratch)]
+                broker.header_command, source, [*roots, launch_dir, *sorted(_scratch_dirs())]
             )
         deny_write = [
             str(launch_dir / ".claude"),
