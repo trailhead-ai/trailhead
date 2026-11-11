@@ -1320,9 +1320,7 @@ def _kill_pidfile(pidfile):
             pass
 
 
-def test_no_relay_line_prints_after_the_streamed_call_returns_while_a_descendant_writes_stderr(
-    mod, tmp_path, capfd, monkeypatch
-):
+def _slow_relay_with_backlog(mod, tmp_path, monkeypatch, lines=300):
     real_line = mod._line
 
     def slow_line(*args):
@@ -1331,20 +1329,39 @@ def test_no_relay_line_prints_after_the_streamed_call_returns_while_a_descendant
 
     monkeypatch.setattr(mod, "_line", slow_line)
     pidfile = tmp_path / "child.pid"
-    script = f'(while :; do echo tick >&2; done) & echo $! > "{pidfile}"; exit 0'
-    env = {"PATH": "/usr/bin:/bin", "TMPDIR": str(tmp_path)}
-    late = []
-    for _ in range(25):
-        capfd.readouterr()
-        try:
-            mod._stream_publisher(["/bin/sh", "-c", script], env, drain=0.02)
-            print("MARKER", file=sys.stderr, flush=True)
-            time.sleep(0.1)
-        finally:
-            _kill_pidfile(pidfile)
-        err = capfd.readouterr().err
-        late.append(err[err.index("MARKER") + len("MARKER") :].strip())
-    assert [tail for tail in late if tail] == []
+    script = (
+        f'(i=0; while [ $i -lt {lines} ]; do echo tick >&2; i=$((i+1)); done) & echo $! > "{pidfile}"; exit 0'
+    )
+    return pidfile, ["/bin/sh", "-c", script], {"PATH": "/usr/bin:/bin", "TMPDIR": str(tmp_path)}
+
+
+def test_the_streamed_call_returns_within_its_drain_while_a_descendant_still_has_stderr_queued(
+    mod, tmp_path, monkeypatch
+):
+    pidfile, cmd, env = _slow_relay_with_backlog(mod, tmp_path, monkeypatch)
+    started = time.monotonic()
+    try:
+        mod._stream_publisher(cmd, env, drain=0.02)
+        elapsed = time.monotonic() - started
+    finally:
+        _kill_pidfile(pidfile)
+
+    assert elapsed < 2.0
+
+
+def test_no_relay_line_prints_after_the_streamed_call_returns_while_a_descendant_writes_stderr(
+    mod, tmp_path, capfd, monkeypatch
+):
+    pidfile, cmd, env = _slow_relay_with_backlog(mod, tmp_path, monkeypatch)
+    try:
+        mod._stream_publisher(cmd, env, drain=0.02)
+        print("MARKER", file=sys.stderr, flush=True)
+        time.sleep(0.3)
+    finally:
+        _kill_pidfile(pidfile)
+    err = capfd.readouterr().err
+
+    assert err[err.index("MARKER") + len("MARKER") :].strip() == ""
 
 
 def test_a_failed_publish_whose_last_stderr_line_missed_the_drain_still_gives_its_exit_status(
