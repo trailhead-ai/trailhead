@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead import __version__
+from trailhead import __version__, broker_header
 from trailhead.capabilities import ConfineError, ManifestError
 from trailhead.compose import (
     CollisionError,
@@ -223,6 +223,12 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
         args.outpost_parser.print_help(file=sys.stderr)
         return 2
     return handler()
+
+
+def _cmd_broker_header(args: argparse.Namespace) -> int:
+    code, text = broker_header.run(args.credential_file)
+    print(text, file=sys.stderr if code else sys.stdout)
+    return code
 
 
 def _cmd_session_start(args: argparse.Namespace) -> int:
@@ -480,6 +486,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
+    broker_p = subparsers.add_parser(
+        "broker-header",
+        help="Print the Authorization header for a session's broker credentials (JSON, for a header helper).",
+    )
+    broker_p.add_argument(
+        "--credential-file", required=True, metavar="PATH", help="The session's broker-client.json."
+    )
+
     return parser
 
 
@@ -500,6 +514,7 @@ def main() -> int:
         "shellenv": _cmd_shellenv,
         "outpost": _cmd_outpost,
         "session-start": _cmd_session_start,
+        "broker-header": _cmd_broker_header,
     }
     handler = dispatch.get(args.command)
     if handler is None:
