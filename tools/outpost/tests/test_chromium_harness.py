@@ -337,11 +337,21 @@ def test_storage_events_that_include_both_keys_with_their_values_pass_however_of
     ("events", "complaint"),
     [
         ([{"key": "k1", "value": "v1-0"}], "k2"),
-        ([{"key": "k1", "value": "v1-0"}, {"key": "other", "value": "v2-0"}], "other"),
+        (
+            [{"key": "k1", "value": "v1-0"}, {"key": "k2", "value": "v2-0"}, {"key": "other", "value": "v2-0"}],
+            "unexpected key 'other'",
+        ),
+        ([{"key": "k1", "value": "v1-0"}, {"key": "k1", "value": "v1-1"}], "k2"),
         ([{"key": "k1", "value": "v1-0"}, {"key": "k2", "value": "v1-0"}], "k2"),
         ([], "k1"),
     ],
-    ids=["a-key-never-arrived", "a-wrong-key", "a-wrong-value", "nothing-arrived"],
+    ids=[
+        "a-key-never-arrived",
+        "a-wrong-key",
+        "one-key-repeated-the-other-dropped",
+        "a-wrong-value",
+        "nothing-arrived",
+    ],
 )
 def test_storage_events_missing_a_key_or_carrying_the_wrong_one_fail_naming_it(events, complaint):
     with pytest.raises(AssertionError, match=complaint):

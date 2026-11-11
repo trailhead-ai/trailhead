@@ -641,3 +641,87 @@ def test_an_allow_marker_exempts_a_subprocess_patch_and_is_listed(tmp_path):
     seeded = _module(tmp_path, body)
     assert _run(str(seeded)).returncode == 0
     assert "subject is the wrapper" in _run("--list-allowed", str(seeded)).stdout
+
+
+# --- the tier-placement rule -------------------------------------------------
+#
+# A test carrying an opt-in tier mark runs only in that tier's CI job, which collects only the
+# paths named in `[tool.trailhead.test-tiers]`. A marked test outside them, or a tier that the
+# `addopts` exclusion, the tier table and the `pytest-tiers` matrix do not all name, runs nowhere.
+
+_TIER_ADDOPTS = 'addopts = "-n auto -m \\"not benchmark and not chromium and not seam_real\\""'
+_TIER_TABLE = 'chromium = ["web/tests"]\nseam_real = ["core/tests"]\n'
+_TIER_WORKFLOW = """
+jobs:
+  pytest:
+    steps:
+      - run: python -m pytest -o addopts="" -n 0 -m benchmark
+  pytest-tiers:
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+        tier: [chromium, seam_real]
+"""
+_MARKED = "import os\nimport pytest\n\n@pytest.mark.seam_real\ndef test_one():\n    assert os.getpid()\n"
+
+
+def _tier_project(tmp_path: Path, *, addopts=_TIER_ADDOPTS, table=_TIER_TABLE, workflow=_TIER_WORKFLOW,
+                  tests=None) -> subprocess.CompletedProcess:
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.pytest.ini_options]\n{addopts}\n[tool.trailhead.test-tiers]\n{table}", encoding="utf-8"
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "tests.yml").write_text(workflow, encoding="utf-8")
+    for relpath, body in (tests or {"core/tests/test_one.py": _MARKED}).items():
+        (tmp_path / relpath).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / relpath).write_text(body, encoding="utf-8")
+    return _run("--project", str(tmp_path))
+
+
+def test_a_tier_marked_test_inside_its_paths_and_agreeing_tier_sources_pass(tmp_path):
+    result = _tier_project(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    ("edit", "complaint"),
+    [
+        ({"tests": {"elsewhere/test_one.py": _MARKED}}, "elsewhere/test_one.py: seam_real"),
+        ({"tests": {"core/tests_extra/test_one.py": _MARKED}}, "core/tests_extra/test_one.py: seam_real"),
+        (
+            {"tests": {"core/tests/test_one.py": "import os\nimport pytest\npytestmark = [pytest.mark.chromium]\n"
+                                                  "def test_one():\n    assert os.getpid()\n"}},
+            "core/tests/test_one.py: chromium",
+        ),
+        (
+            {"addopts": _TIER_ADDOPTS.replace("seam_real", "seam_real and not slow")},
+            "tier slow is missing from [tool.trailhead.test-tiers]",
+        ),
+        (
+            {"workflow": _TIER_WORKFLOW.replace("[chromium, seam_real]", "[chromium]")},
+            "tier seam_real is missing from the pytest-tiers matrix",
+        ),
+        (
+            {"addopts": _TIER_ADDOPTS.replace(" and not seam_real", "")},
+            "tier seam_real is missing from the addopts exclusion",
+        ),
+        (
+            {"workflow": _TIER_WORKFLOW.replace("-m benchmark", "-m slow")},
+            "benchmark is excluded by addopts but no CI step runs it",
+        ),
+    ],
+    ids=[
+        "marked-outside-its-paths",
+        "path-sharing-only-a-prefix",
+        "module-mark-for-another-tier",
+        "excluded-tier-not-in-the-table",
+        "table-tier-not-in-the-matrix",
+        "table-tier-not-excluded",
+        "benchmark-with-no-step",
+    ],
+)
+def test_the_one_edit_that_leaves_a_tier_running_nowhere_is_flagged(tmp_path, edit, complaint):
+    result = _tier_project(tmp_path, **edit)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert complaint in result.stderr

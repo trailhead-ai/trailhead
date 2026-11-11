@@ -41,6 +41,15 @@ through a fixture or helper) is flagged, because that replaces the call for ever
 process; the code under test needs a `runner=` seam. Existing sites carry `# inert-gate: allow`,
 which a class accepts on its `class` line as a test accepts it on its `def` line.
 
+A fourth rule is repo-level, and runs when the gate scans the whole project: no opt-in tier may
+run in no CI job. A test file carrying a tier mark (`<x>.mark.seam_real`, `<x>.mark.chromium`,
+bare or called, on a test, a class or a module `pytestmark`) must sit under that tier's paths in
+`[tool.trailhead.test-tiers]`, because the tier's job collects only those paths. And the tiers
+named by the `addopts` marker exclusion, by that table and by the `pytest-tiers` matrix in
+`.github/workflows/tests.yml` must be the same set, with `benchmark` (excluded by `addopts`, run
+whole-tree) needing a `-m benchmark` step in the workflow. The workflow is read with a regex for
+its `tier: [...]` matrix line, not parsed as YAML.
+
 What it deliberately does NOT do: judge whether an assertion is *about* the right
 thing. A test that runs a CLI and then asserts something trivial passes this gate.
 The gate catches the mechanical properties that can be checked mechanically.
@@ -60,6 +69,7 @@ Usage:
   scripts/inert-test-gate                 # every test_*.py under the repo
   scripts/inert-test-gate <path> [...]    # the given files or directories
   scripts/inert-test-gate --list-allowed  # every current exemption and its reason
+  scripts/inert-test-gate --project <dir> # the whole project at <dir> instead of this repo
 
 Exit: 0 clean · 1 one or more findings (prints relpath:lineno: name).
 """
@@ -69,6 +79,7 @@ from __future__ import annotations
 import ast
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -391,6 +402,57 @@ def _probes_a_document(
     return bool(asserts) and all(_is_presence_probe(a) for a in asserts)
 
 
+def _marked_tiers(tree: ast.Module, tiers: set[str]) -> set[str]:
+    """The tiers named by a real `<x>.mark.<tier>` attribute anywhere in the module."""
+    return {
+        n.attr
+        for n in ast.walk(tree)
+        if isinstance(n, ast.Attribute)
+        and n.attr in tiers
+        and isinstance(n.value, ast.Attribute)
+        and n.value.attr == "mark"
+    }
+
+
+def _under(relpath: str, paths: list[str]) -> bool:
+    return any(relpath == p.rstrip("/") or relpath.startswith(p.rstrip("/") + "/") for p in paths)
+
+
+def tier_findings(project: Path, modules: list[Path]) -> list[str]:
+    """Where an opt-in tier would run in no CI job: a marked test outside the tier's paths, or
+    tier sources that disagree. Static only: ASTs, the pyproject tables and the workflow text."""
+    config = tomllib.loads((project / "pyproject.toml").read_text(encoding="utf-8"))
+    table: dict[str, list[str]] = config["tool"]["trailhead"]["test-tiers"]
+    addopts = config["tool"]["pytest"]["ini_options"].get("addopts", "")
+    excluded = set(re.findall(r"\bnot (\w+)", addopts))
+    workflow = (project / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8")
+    matrix = re.search(r"pytest-tiers:.*?^\s*tier:\s*\[([^\]]*)\]", workflow, re.DOTALL | re.MULTILINE)
+
+    out: list[str] = []
+    sources = {
+        "the addopts exclusion": excluded - {"benchmark"},
+        "[tool.trailhead.test-tiers]": set(table),
+        "the pytest-tiers matrix": {t.strip() for t in matrix.group(1).split(",") if t.strip()} if matrix else set(),
+    }
+    if not matrix:
+        out.append("no `tier: [...]` matrix found under pytest-tiers in .github/workflows/tests.yml")
+    for tier in sorted(set().union(*sources.values())):
+        out.extend(f"tier {tier} is missing from {name}" for name, tiers in sources.items() if tier not in tiers)
+    if "benchmark" in excluded and not re.search(r"-m\s+benchmark\b", workflow):
+        out.append("benchmark is excluded by addopts but no CI step runs it")
+
+    for path in modules:
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            relpath = path.relative_to(project).as_posix()
+        except (SyntaxError, ValueError):
+            continue
+        for tier in sorted(_marked_tiers(tree, set(table) | set(_TIER_MARKS))):
+            if not _under(relpath, table.get(tier, [])):
+                out.append(f"{relpath}: {tier} test outside the paths of the {tier} job")
+    return out
+
+
 def test_modules(paths: list[Path]) -> list[Path]:
     out: set[Path] = set()
     for path in paths:
@@ -403,18 +465,21 @@ def test_modules(paths: list[Path]) -> list[Path]:
 
 def main(argv: list[str]) -> int:
     args = argv[1:]
+    project = REPO_ROOT
+    if args[:1] == ["--project"]:
+        project, args = Path(args[1]).resolve(), args[2:]
     list_allowed = args[:1] == ["--list-allowed"]
     if list_allowed:
         args = args[1:]
 
-    roots = [Path(a).resolve() for a in args] or [REPO_ROOT]
+    roots = [Path(a).resolve() for a in args] or [project]
     modules = test_modules(roots)
 
     total_findings = 0
     for path in modules:
         findings, allowed = findings_for(path)
         try:
-            shown = path.relative_to(REPO_ROOT)
+            shown = path.relative_to(project)
         except ValueError:
             shown = path
         if list_allowed:
@@ -427,6 +492,10 @@ def main(argv: list[str]) -> int:
 
     if list_allowed:
         return 0
+
+    tier_problems = [] if args else tier_findings(project, modules)
+    for problem in tier_problems:
+        print(f"inert-test-gate: {problem}", file=sys.stderr)
 
     if total_findings:
         print(
@@ -441,7 +510,7 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    return 0
+    return 1 if tier_problems else 0
 
 
 if __name__ == "__main__":

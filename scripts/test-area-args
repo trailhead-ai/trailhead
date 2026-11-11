@@ -9,7 +9,7 @@ space-separated, for `pytest -c pyproject.toml $(...)`.
 
 `--tier NAME` prints instead the paths the opt-in tier's CI job collects, from
 `[tool.trailhead.test-tiers]`. A test carrying the tier's marker outside those paths would run in
-no job, which `trailhead/tests/test_test_tiers_real_tree.py` checks against the real tree.
+no job, which `scripts/inert-test-gate` checks statically.
 """
 
 from __future__ import annotations
