@@ -1039,7 +1039,8 @@ def test_reopen_abandoned_with_an_unknown_task_exits_2_lookup_failed(seam):
 
 
 def _statuses(seam, spec_id):
-    return {e.id: (e.status_kind, e.status_detail, e.found) for e in followups.parse_followups(show(seam, spec_id)["body"])}
+    entries = followups.parse_followups(show(seam, spec_id)["body"])
+    return {e.id: (e.status_kind, e.status_detail, e.found) for e in entries}
 
 
 def test_a_drop_naming_a_real_task_then_a_restore_land_through_lores_base_check_and_the_gate(seam):

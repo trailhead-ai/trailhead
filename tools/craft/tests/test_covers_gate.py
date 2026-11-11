@@ -25,7 +25,6 @@ import sys
 from pathlib import Path
 import pytest
 
-import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "covers_gate.py"

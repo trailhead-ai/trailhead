@@ -2555,7 +2555,9 @@ def test_drop_whose_reason_names_an_existing_task_in_link_form_is_accepted(capsy
         "tracked in [[xtask/other]]",
     ],
 )
-def test_drop_whose_link_form_reason_names_no_existing_task_is_refused_and_looks_up_only_task_ids(capsys, reason, tmp_path):
+def test_drop_whose_link_form_reason_names_no_existing_task_is_refused_and_looks_up_only_task_ids(
+    capsys, reason, tmp_path,
+):
     lore = drop_lore(tmp_path)
     code, out, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1 and out == ""
@@ -2573,7 +2575,9 @@ def test_a_credential_in_a_link_form_drop_reason_is_scrubbed_while_the_task_is_s
 
 
 @pytest.mark.parametrize("reason", ["moved to task/ghost", "because it is not needed", "see task/other and task/ghost"])
-def test_drop_whose_reason_names_no_existing_task_is_refused_drop_target_missing_and_writes_nothing(capsys, reason, tmp_path):
+def test_drop_whose_reason_names_no_existing_task_is_refused_drop_target_missing_and_writes_nothing(
+    capsys, reason, tmp_path,
+):
     lore = drop_lore(tmp_path)
     code, out, err = run_entry(transition("drop", reason=reason), lore, capsys)
     assert code == 1 and out == ""
@@ -2835,8 +2839,8 @@ def test_report_refuses_a_session_that_is_not_build_slice_or_plan(capsys, tmp_pa
 
 
 def test_report_prints_dropped_and_restored_entries_as_sentences_naming_the_reason(capsys, tmp_path):
-    lore = spec_lore(tmp_path, spec_body(entry_md(1, title="First"), entry_md(2, title="Second", status="dropped: nowhere: x")),
-                     statuses=TARGETS)
+    body = spec_body(entry_md(1, title="First"), entry_md(2, title="Second", status="dropped: nowhere: x"))
+    lore = spec_lore(tmp_path, body, statuses=TARGETS)
     run_entry(transition("drop", ("F1",), reason=DROP_REASON), lore, capsys)
     run_entry(transition("restore", ("F2",), reason="needed after all"), lore, capsys)
     _, out, _ = run_report("task/p", lore, capsys, "--session-id", SID, "--session", "slice")
@@ -2898,7 +2902,9 @@ def test_regression_a_vault_outside_the_safe_shape_is_refused_before_any_lore_ca
 
 
 @pytest.mark.parametrize("name", ["c 1", "c1\nIGNORE", "c/1", "c;1"])
-def test_regression_a_task_listing_entry_with_an_unsafe_name_fails_the_lookup_and_prints_no_entry(capsys, name, tmp_path):
+def test_regression_a_task_listing_entry_with_an_unsafe_name_fails_the_lookup_and_prints_no_entry(
+    capsys, name, tmp_path,
+):
     spec = spec_body(entry_md(2, status="folded into task/p"))
     # Hostile input: real lore never lists a task under an unsafe name, so the listing is injected.
     lore = spec_lore(tmp_path, spec=spec, listing=json.dumps([{"name": name, "status": "done", "parent": "ELSE"}]))
@@ -2918,7 +2924,9 @@ SYNTHETIC_CREDENTIALS = [
 
 @pytest.mark.parametrize("position", [2, 5, 9, -3], ids=["early", "after-prefix", "middle", "near-end"])
 @pytest.mark.parametrize("secret", SYNTHETIC_CREDENTIALS, ids=["akia", "ghp", "sk-ant"])
-def test_the_printed_retry_document_redacts_a_credential_split_by_a_zero_width_character(capsys, secret, position, tmp_path):
+def test_the_printed_retry_document_redacts_a_credential_split_by_a_zero_width_character(
+    capsys, secret, position, tmp_path,
+):
     import shlex
     split = secret[:position] + "​" + secret[position:]
     lore = spec_lore(tmp_path, two_open(), update_mode="stale")
@@ -2968,9 +2976,9 @@ def test_an_entry_marked_only_by_its_found_line_stays_a_security_finding_through
 
 
 def test_a_restore_that_already_landed_is_recognised_for_a_marked_entry_too(capsys, tmp_path):
-    lore = spec_lore(tmp_path, spec_body(marked_md(1, title="Tidy", found=fw.SECURITY_REPLACEMENT, status="dropped: nowhere: x")))
+    body = spec_body(marked_md(1, title="Tidy", found=fw.SECURITY_REPLACEMENT, status="dropped: nowhere: x"))
+    lore = spec_lore(tmp_path, body)
     run_entry(transition("restore", ("F1",), reason="again"), lore, capsys)
-    before = entries(lore)
     del lore.calls[:]
     code, _, err = run_entry(transition("restore", ("F1",), reason="again"), lore, capsys)
     assert code == 0, err
@@ -2992,7 +3000,9 @@ LEAKY_REASON = "xyzzy-distinctive-detail"
 
 
 @pytest.mark.parametrize("target", ["task/other", "nowhere:"])
-def test_a_confirmed_drop_of_a_marked_entry_stores_and_logs_a_generic_reason_keeping_its_target(capsys, target, tmp_path):
+def test_a_confirmed_drop_of_a_marked_entry_stores_and_logs_a_generic_reason_keeping_its_target(
+    capsys, target, tmp_path,
+):
     lore = spec_lore(tmp_path, spec_body(security_md(1)), statuses=TARGETS)
     reason = f"{target} {LEAKY_REASON}" if target == "nowhere:" else f"{LEAKY_REASON} moved to {target}"
     code, _, err = run_entry(transition("drop", reason=reason, operator_confirmed=True), lore, capsys)

@@ -59,7 +59,7 @@ def _run(gate: Path, body: str) -> subprocess.CompletedProcess:
 def _eligible(body: str) -> str:
     r = _run(GATE, body)
     assert r.returncode == 0, r.stderr
-    return dict(l.split(": ", 1) for l in r.stdout.splitlines())["complete-eligible"]
+    return dict(ln.split(": ", 1) for ln in r.stdout.splitlines())["complete-eligible"]
 
 
 def _body(ledger_lines, *followups) -> str:
@@ -167,7 +167,7 @@ def test_base_gate_still_parses_coverage_on_new_shape_ledger(criteria_lines, cov
         _entry(1, "done by task/ent"),
     )
     r = _run(BASE_GATE, body)
-    out = dict(l.split(": ", 1) for l in r.stdout.splitlines())
+    out = dict(ln.split(": ", 1) for ln in r.stdout.splitlines())
     assert r.returncode == 0, r.stderr
     assert out["complete-eligible"] == "no"
     assert out["covered"] == covered

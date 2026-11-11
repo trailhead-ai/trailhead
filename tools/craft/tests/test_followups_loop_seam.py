@@ -70,7 +70,7 @@ def _tokens(stdout):
     [(["F1", "F2"], "none", "yes"), (["F1"], "F2", "no")],
     ids=["every-entry-built", "one-entry-left-open"],
 )
-def test_an_entries_only_slice_ends_the_loop_only_when_no_entry_is_left_open(seam, folded, open_after, eligible):
+def test_an_entries_only_slice_ends_the_loop_only_when_no_entry_is_left_open(seam, folded, open_after, eligible):  # noqa: F811
     spec_id = make_spec(seam, BODY)
     assert spec_id == "spec/fixture-spec"
     parent = make_task(seam, "Entries slice", "the slice\n", "in-progress")

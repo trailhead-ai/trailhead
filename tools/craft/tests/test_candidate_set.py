@@ -1806,7 +1806,8 @@ def test_a_waiting_criterion_leaves_candidates_and_blocks_completion():
 def test_the_waiting_line_sits_after_partial_and_before_complete_eligible():
     r = _run(_with_waiting(_spec(_THREE, _AC1_COVERED), _waiting_entry("AC2")))
     assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
-        "criteria", "covered", "candidates", "partial", "waiting", "entries-open", "entries-folded", "complete-eligible",
+        "criteria", "covered", "candidates", "partial",
+        "waiting", "entries-open", "entries-folded", "complete-eligible",
     ]
 
 
@@ -1901,7 +1902,8 @@ def test_the_criteria_state_lines_still_follow_complete_eligible_in_order(tmp_pa
     r = _run_flag(body, _state(tmp_path, ["AC1", "AC3"], []))
     assert r.returncode == 0, r.stderr
     assert [ln.split(":")[0] for ln in r.stdout.splitlines()] == [
-        "criteria", "covered", "candidates", "partial", "waiting", "entries-open", "entries-folded", "complete-eligible",
+        "criteria", "covered", "candidates", "partial",
+        "waiting", "entries-open", "entries-folded", "complete-eligible",
         "void", "closed", "closed-uncounted",
     ]
     assert _tokens(r.stdout)["waiting"] == "AC3"
