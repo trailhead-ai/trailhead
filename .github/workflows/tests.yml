@@ -151,12 +151,17 @@ jobs:
           # skipped. `budget` is a first ceiling set from container timings (chromium about 143 s,
           # seam_real about 39 s) at roughly four times the measured wall; tighten it to
           # median + 2 sd once this job has CI history.
+          # `workers` is the xdist worker count. The chromium tier runs nothing but browser
+          # launches, so four at once on a 4-vCPU runner starves the two-copy storage-event test
+          # past its cross-copy barrier timeout; two workers leave it room at little wall cost.
           - tier: chromium
             paths: tools/outpost/tests
+            workers: 2
             baseline: 343
             budget: 600
           - tier: seam_real
             paths: trailhead/tests tools/craft/tests tools/lore/tests
+            workers: auto
             baseline: 319
             budget: 240
     steps:
@@ -196,8 +201,8 @@ jobs:
         # `-m <tier>` replaces the default selection from pyproject's addopts. `-rs` prints why
         # any test skipped.
         run: >-
-          python -m pytest -c pyproject.toml -m "${{ matrix.tier }}" -rs ${{ matrix.paths }}
-          --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
+          python -m pytest -c pyproject.toml -m "${{ matrix.tier }}" -rs -n ${{ matrix.workers }}
+          ${{ matrix.paths }} --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
 
       - name: Suite run-time guard
         # Same guard as the pytest job, under this tier's own name, budget and passed-count
