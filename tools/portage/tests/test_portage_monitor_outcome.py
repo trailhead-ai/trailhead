@@ -55,9 +55,9 @@ def test_parses_stopped_with_its_reason():
     ],
 )
 def test_unparseable_line_is_refused(line, argument):
-    token, argument = parse_monitor_outcome(line)
+    token, parsed_argument = parse_monitor_outcome(line)
     assert token is None
-    assert argument == argument
+    assert parsed_argument == argument
 
 
 def test_only_the_first_line_is_parsed():

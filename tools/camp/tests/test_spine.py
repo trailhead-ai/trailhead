@@ -68,9 +68,9 @@ def test_no_dev_env_in_sys_modules_after_import() -> None:
 def test_normalize_slug(raw, expected, changed) -> None:
     from camp.spine import normalize_slug
 
-    result, changed = normalize_slug(raw)
+    result, was_changed = normalize_slug(raw)
     assert result == expected
-    assert changed is changed
+    assert was_changed is changed
 
 
 def test_validate_slug_accepts_valid() -> None:
