@@ -1,0 +1,32 @@
+## Follow-ups
+
+- **F1.** Synthetic entry one
+  - status: folded into task/example-parent
+  - what: A generic description of synthetic follow-up one.
+  - where: `example/pkg/mod_1.py`, `example/pkg/mod_2.py`
+  - found: synthetic review
+- **F2.** Synthetic entry two
+  - status: folded into task/example-parent
+  - what: A generic description of synthetic follow-up two.
+  - where: `example/pkg/mod_2.py`, `example/pkg/mod_3.py`
+  - found: synthetic review
+- **F3.** Synthetic entry three
+  - status: open
+  - what: A generic description of synthetic follow-up three.
+  - where: `example/pkg/mod_3.py`
+  - found: synthetic review
+- **F4.** Synthetic entry four
+  - status: open
+  - what: A generic description of synthetic follow-up four.
+  - where: `example/pkg/mod_4.py`
+  - found: synthetic review
+- **F5.** Security finding at example/pkg/mod_5.py:54 (ref bbbb0005)
+  - status: folded into task/example-parent
+  - what: security finding — see example/pkg/mod_5.py:54
+  - where: `example/pkg/mod_5.py`
+  - found: security finding — see location
+- **F6.** Synthetic entry six
+  - status: open
+  - what: A generic description of synthetic follow-up six.
+  - where: `example/pkg/mod_6.py`, `example/pkg/mod_1.py`
+  - found: synthetic review

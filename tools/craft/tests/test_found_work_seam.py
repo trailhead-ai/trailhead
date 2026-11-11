@@ -1036,3 +1036,41 @@ def test_reopen_abandoned_with_an_unknown_task_exits_2_lookup_failed(seam):
     assert done.returncode == 2
     assert "reason-code: lookup-failed" in done.stderr
     assert {e.id: e.status_kind for e in followups.parse_followups(show(seam, spec_id)["body"])} == {"F1": "folded"}
+
+
+def _statuses(seam, spec_id):
+    entries = followups.parse_followups(show(seam, spec_id)["body"])
+    return {e.id: (e.status_kind, e.status_detail, e.found) for e in entries}
+
+
+def test_a_drop_naming_a_real_task_then_a_restore_land_through_lores_base_check_and_the_gate(seam):
+    spec_id = make_spec(seam, SPEC_BODY + SECTION)
+    parent = make_task(seam, "Slice parent", "the slice\n", "in-progress")
+    elsewhere = make_task(seam, "Work done elsewhere", "the work\n", "open")
+
+    ghost = run_entry_cli(seam, transition_doc("drop", ["F1"], parent, reason="moved to task/no-such-task"))
+    assert ghost.returncode == 1
+    assert "reason-code: drop-target-missing" in ghost.stderr
+    assert _statuses(seam, spec_id)["F1"][0] == "open"
+
+    reason = f"moved to {elsewhere}"
+    drop = run_entry_cli(seam, transition_doc("drop", ["F1"], parent, reason=reason))
+    assert drop.returncode == 0, drop.stderr
+    assert drop.stdout.splitlines() == [
+        "found-work-result: written | parent: " + parent
+        + " | finding: First thing | record: spec/fixture-spec#F1 | reason-code: none"
+    ]
+    assert _statuses(seam, spec_id)["F1"][:2] == ("dropped", reason)
+
+    restore = run_entry_cli(seam, transition_doc("restore", ["F1"], parent, reason="needed after all"))
+    assert restore.returncode == 0, restore.stderr
+    after = _statuses(seam, spec_id)
+    assert after["F1"][:2] == ("dropped", reason)
+    assert after["F3"] == ("open", None, "restored from F1")
+
+    assert seam.report(parent).stdout.splitlines() == [
+        f"Dropped spec/fixture-spec#F1: First thing, because {reason}.",
+        "Restored dropped work as spec/fixture-spec#F3: First thing, because needed after all.",
+    ]
+    empty = seam.script("report", "--parent", "task/nobody", "--session", "slice", "--session-id", SID)
+    assert empty.stdout.strip() == "The slice made no decisions about found work."

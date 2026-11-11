@@ -46,3 +46,11 @@ Every clause holds.
 ## Addendum 2026-11-09
 
 The seeded done child's **Delivers** now carries `Resolves spec/tally-report#F1: Close the file the counting helper opens.` on its own line, after the sentence about what the tool prints, instead of in the same sentence. `names_entry` accepts a `Resolves` token only at the start of a line, so a mid-sentence token no longer names an entry. The pre-registered sections above are unchanged.
+
+## Addendum 2026-11-10 (carriers of the sweep, written after the runs it describes)
+
+The carriers of the sweep's moves, enumerated by `grep -rn "folded-into\|entry-reopened\|entry-done\|reopen" skills scripts agents` over the plugin: the `_shared/execute.md` Phase 5 sweep paragraph and its sibling Phase 5 bullet, the `scripts/found_work.py` docstring (`entry`, `reopen-abandoned`, `report`), and, readable from the same plugin, `skills/slice/SKILL.md` (`reopen-abandoned`) and `skills/plan/SKILL.md` (the `reopen` document). Baseline A above ran green because the prompt let the agent read all of them.
+
+The prompt now tells the agent to work from the `craft:execute` skill and the documents under `skills/_shared/` it points to, to open no other skill, and to read no script's source or docstring. The prose under test is `skills/_shared/execute.md`, the only carrier mapped in `eval-gate.json`: with that text removed and the `found_work.py` docstring and the slice and plan skills left in place, the case goes red on every grader.
+
+Pre-registered for the rerun, before it: the baseline is `_shared/execute.md` with the sweep paragraph, its sibling bullet and the report-sentence clause removed, in a plugin copy; expected red on all six graders. Treatment: the committed prose, 3 runs, 2 of 3 at the gate's bar.

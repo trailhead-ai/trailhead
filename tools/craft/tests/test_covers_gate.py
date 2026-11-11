@@ -19,10 +19,12 @@ Exit-code contract (matches `leak_gate.py`):
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
 import pytest
+
 
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "covers_gate.py"
@@ -67,6 +69,7 @@ def _run(
     covers: str | None,
     spec_body: str,
     partial_covers: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     cmd = [sys.executable, str(GATE)]
     if covers is not None:
@@ -487,3 +490,187 @@ def test_neither_covers_nor_partial_covers_given_carries_its_own_reason_code():
     r = _run(None, NINE_CRITERIA_SPEC)
     assert r.returncode == 2, r.stderr + r.stdout
     assert "reason-code: no-coverage-list-given" in r.stderr, r.stderr
+
+
+# ---- --folds: certify the follow-ups a slice folds -------------------------
+
+
+def _entry(fid: str, status: str = "open") -> str:
+    return (
+        f"- **{fid}.** Title {fid}\n"
+        f"  - status: {status}\n"
+        "  - what: do the thing\n"
+        "  - where: `a/b.py`\n"
+        "  - found: while building\n"
+    )
+
+
+FOLLOWUPS_SECTION = (
+    "\n## Follow-ups\n\n"
+    + _entry("F1")
+    + _entry("F2", "folded into task/x")
+    + _entry("F3")
+    + _entry("F4", "done by task/y")
+    + _entry("F5", "dropped: not worth it")
+)
+WITH_FOLLOWUPS_SPEC = NINE_CRITERIA_SPEC + FOLLOWUPS_SECTION
+ZERO_CRITERIA_WITH_FOLLOWUPS_SPEC = ZERO_CRITERIA_SPEC + FOLLOWUPS_SECTION
+
+
+def _run_folds(
+    folds: str | None,
+    spec_body: str,
+    covers: str | None = None,
+    partial_covers: str | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
+    cmd = [sys.executable, str(GATE)]
+    if folds is not None:
+        cmd += ["--folds", folds]
+    if covers is not None:
+        cmd += ["--covers", covers]
+    if partial_covers is not None:
+        cmd += ["--partial-covers", partial_covers]
+    return subprocess.run(cmd, input=spec_body, capture_output=True, text=True, env=env)
+
+
+def test_folds_alone_over_open_entries_exits_0_on_a_spec_with_criteria():
+    r = _run_folds("F1, F3", WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_folds_alone_exits_0_on_a_spec_with_zero_criterion_identifiers():
+    r = _run_folds("F1, F3", ZERO_CRITERIA_WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_folds_alone_exits_0_on_a_spec_with_no_acceptance_criteria_heading():
+    r = _run_folds("F1", MISSING_HEADING_SPEC + FOLLOWUPS_SECTION)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_covers_with_folds_both_certified_exits_0():
+    r = _run_folds("F1", WITH_FOLLOWUPS_SPEC, covers="AC2")
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_unknown_covers_with_valid_folds_exits_1_naming_the_criterion():
+    r = _run_folds("F1", WITH_FOLLOWUPS_SPEC, covers="AC99")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC99" in r.stderr
+
+
+def test_partial_covers_with_folds_still_runs_the_criteria_path():
+    r = _run_folds("F1", WITH_FOLLOWUPS_SPEC, partial_covers="AC99")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "AC99" in r.stderr
+
+
+def test_covers_with_folds_on_zero_criterion_spec_keeps_the_criteria_exit_2():
+    r = _run_folds("F1", ZERO_CRITERIA_WITH_FOLLOWUPS_SPEC, covers="AC1")
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert _ZERO_CRITERIA_REASON_CODE in r.stderr
+
+
+@pytest.mark.parametrize("fid", ["F2", "F4", "F5", "F9"])
+def test_folds_naming_a_non_open_or_absent_entry_exits_1_naming_it(fid):
+    r = _run_folds(fid, WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert fid in r.stderr
+
+
+def test_folds_with_one_open_and_one_non_open_names_only_the_bad_one():
+    r = _run_folds("F1, F2", WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "F2" in r.stderr
+    assert "F1" not in r.stderr
+
+
+@pytest.mark.parametrize("value", ["F1, F1", "AC1", "", "F0", "F1,F3 ", "F1; F3"])
+def test_folds_with_bad_shape_exits_1(value):
+    r = _run_folds(value, WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+
+
+def test_folds_repeat_names_the_repeated_id():
+    r = _run_folds("F1, F1", WITH_FOLLOWUPS_SPEC)
+    assert "F1" in r.stderr
+
+
+def test_folds_without_comma_space_is_accepted():
+    r = _run_folds("F1,F3", WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 0, r.stderr + r.stdout
+
+
+def test_folds_on_a_spec_with_no_followups_section_exits_1_naming_the_id():
+    r = _run_folds("F1", NINE_CRITERIA_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "F1" in r.stderr
+
+
+def test_folds_over_a_malformed_followups_section_exits_2():
+    spec = NINE_CRITERIA_SPEC + "\n## Follow-ups\n\n- **F1.** Title\n  - status: bogus\n"
+    r = _run_folds("F1", spec)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: " in r.stderr
+
+
+def test_folds_certifies_when_the_interpreter_does_not_put_the_script_directory_on_sys_path():
+    env = {**os.environ, "PYTHONSAFEPATH": "1"}
+    r = _run_folds("F1, F3", WITH_FOLLOWUPS_SPEC, env=env)
+    assert r.returncode == 0, r.stderr + r.stdout
+    assert "ModuleNotFoundError" not in r.stderr
+
+
+def test_folds_refuses_a_duplicated_followups_heading_with_exit_2_when_the_script_directory_is_not_on_sys_path():
+    spec = WITH_FOLLOWUPS_SPEC + "\n## Follow-ups\n\n- **F9.** Another\n"
+    r = _run_folds("F1", spec, env={**os.environ, "PYTHONSAFEPATH": "1"})
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-followups-heading" in r.stderr
+
+
+@pytest.mark.parametrize("covers", [None, "AC1"])
+def test_folds_over_a_duplicated_followups_heading_exits_2_with_the_reason_code(covers):
+    spec = WITH_FOLLOWUPS_SPEC + "\n## Follow-ups\n\n- **F9.** Another\n"
+    r = _run_folds("F1", spec, covers=covers)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: duplicate-followups-heading" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_folds_refusal_reports_the_reason_code_without_echoing_vault_text():
+    spec = (
+        NINE_CRITERIA_SPEC
+        + "\n## Follow-ups\n\n- **F1** zebra-quokka-marker no period after the id\n"
+    )
+    r = _run_folds("F1", spec)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: " in r.stderr
+    assert "zebra-quokka-marker" not in r.stderr
+
+
+def test_no_flag_at_all_still_exits_2_no_coverage_list_given():
+    r = _run_folds(None, WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 2, r.stderr + r.stdout
+    assert "reason-code: no-coverage-list-given" in r.stderr
+
+
+@pytest.mark.parametrize("order", [("covers_gate", "followups"), ("followups", "covers_gate")])
+def test_covers_gate_and_followups_import_in_either_order(order):
+    scripts = str(GATE.parent)
+    code = f"import sys; sys.path.insert(0, {scripts!r}); import {order[0]}; import {order[1]}"
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_covers_with_a_non_open_fold_exits_1_naming_the_fold():
+    r = _run_folds("F2", WITH_FOLLOWUPS_SPEC, covers="AC2")
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "F2" in r.stderr
+
+
+@pytest.mark.parametrize("value", ["F0", "AC1", "", "F1,F3 ", "F1; F3"])
+def test_folds_shape_violation_is_reported_as_a_shape_error_not_an_unknown_id(value):
+    r = _run_folds(value, WITH_FOLLOWUPS_SPEC)
+    assert r.returncode == 1, r.stderr + r.stdout
+    assert "not a valid follow-up id list" in r.stderr

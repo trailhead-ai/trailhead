@@ -107,7 +107,7 @@ def test_amended_away_criterion_is_void_through_the_real_lore_cli(  # inert-gate
     lines = gate.stdout.splitlines()
     assert "covered: AC1" in lines
     assert "candidates: AC3" in lines
-    assert lines[6] == "void: AC2 (removed by amend)"
+    assert lines[8] == "void: AC2 (removed by amend)"
 
 
 BODY_DUPLICATED = """# Seam spec
@@ -189,6 +189,8 @@ _SNAPSHOT_OF_TWO_STDOUT = (
     "candidates: AC2, AC3\n"
     "partial: none\n"
     "waiting: none\n"
+    "entries-open: none\n"
+    "entries-folded: none\n"
     "complete-eligible: yes\n"
     "void: AC2 (reopened by amend)\n"
     "closed: AC1\n"

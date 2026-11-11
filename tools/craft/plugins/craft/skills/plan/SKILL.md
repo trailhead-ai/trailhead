@@ -890,17 +890,20 @@ every Critical finding has a disposition. Important and Minor findings do not bl
 
 ### 9. Present for Approval
 
-**With folded entries, the presentation lists where each went.** Run
-`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<parent-name>` and put its
-sentences, as printed, in your final message, with which entries became part of which task and which
-were reopened and why; a report left in an earlier message is not in the closing one. A plan with no
-folded entries adds nothing here.
+**Every plan's closing message carries the found-work report.** Run
+`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<parent-name> --session plan` and
+put its sentences, as printed, in your final message; a report left in an earlier message is not in
+the closing one. With folded entries it lists where each went, which entries became part of which
+task and which were reopened and why. A plan that made no found-work decision prints the one line
+the command returns, `The plan made no decisions about found work.`, and that line goes in the
+closing message all the same.
 
-**Under `--unattended`, nothing below applies, except that this closing message goes just before the
-`outcome:` line, which stays last: the approval wait is skipped and no handoff command is printed.**
-Confirm every Critical from step 8.5 is dispositioned in `## Council Review`, report the plan path
-and a short summary in prose, set `**Outcome:** plan-ready` on the run block as the run section
-above says, and end on `outcome: plan-ready task/<parent-name> parked=0`.
+**Under `--unattended`, nothing below applies, except that this closing message, with the report
+above in it, goes just before the `outcome:` line, which stays last: the approval wait is skipped
+and no handoff command is printed.** Confirm every Critical from step 8.5 is dispositioned in
+`## Council Review`, report the plan path and a short summary in prose, set
+`**Outcome:** plan-ready` on the run block as the run section above says, and end on
+`outcome: plan-ready task/<parent-name> parked=0`.
 
 Share the plan path and a short summary, then wait for explicit user approval before writing any
 implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan

@@ -72,7 +72,11 @@ An entry with neither coverage token (predates both fields) contributes no
 identifier to either set and makes the coverage union unverifiable as
 complete — it is a legacy entry, never a fabricated full-coverage claim. An
 entry carrying either field, or both, is a modern entry for eligibility
-purposes: only an entry carrying neither keeps `complete-eligible: no`. Full
+purposes: only an entry carrying neither keeps `complete-eligible: no` —
+unless the spec's `## Follow-ups` section has an entry whose status is
+`done by task/<that entry's own task id>`, which credits that entry as
+carrying a token (a `folded into` or `dropped` entry credits nothing, and an
+unparseable section credits nothing). Full
 coverage wins over partial for the same identifier regardless of which
 ledger line carries which field — the union across lines is order-free, so a
 later full-coverage entry resolves an earlier partial claim on the same
@@ -94,9 +98,12 @@ Stdout on success (exit 0), one token per line, in this order:
     candidates: AC3, ..., AC9
     partial: AC7
     waiting: AC2
+    entries-open: F1
+    entries-folded: F2, F3
     complete-eligible: yes
 
-`covered:`, `candidates:`, `partial:` and `waiting:` print `none` when empty.
+`covered:`, `candidates:`, `partial:`, `waiting:`, `entries-open:` and
+`entries-folded:` print `none` when empty.
 `candidates:` is computed against the fully covered set and the waiting set —
 a criterion covered only partially remains a candidate on every subsequent
 pass, and it is never listed on `partial:` once a later entry fully covers it.
@@ -106,7 +113,12 @@ declared identifiers in declared order; entries whose latest status is
 `passed`, `failed` or `released` exclude nothing. The `## Waiting` section is
 read only through `waiting.parse_waiting`. Any waiting entry, including one
 naming an identifier the spec does not declare, makes `complete-eligible:`
-`no` whatever the ledger says. `complete-eligible:` is `yes` only when every
+`no` whatever the ledger says. `entries-open:` and `entries-folded:` list, in
+section order, the ids of the spec's `## Follow-ups` entries whose status is
+`open` and `folded into task/<id>`; `done by` and `dropped` entries appear in
+neither, and a spec with no such section prints `none` for both. Any entry in
+either list makes `complete-eligible:` `no`, and neither list changes
+`candidates:`. `complete-eligible:` is `yes` only when every
 ledger entry carries at least one coverage token
 (`covers`, `partially covers`, or both) and every non-blank line in the
 section either belongs to a canonical entry (its bullet or one of its
@@ -188,7 +200,11 @@ Exit codes:
        unmasked `## Slices` heading
        (`reason-code: duplicate-slices-heading`); or a `covers` or
        `partially covers` token that does not parse as an identifier list
-       (`reason-code: malformed-coverage-token`); with `--criteria-state`, a
+       (`reason-code: malformed-coverage-token`); a
+       `## Follow-ups` section that does not parse, or carries a second
+       unmasked heading (`reason-code: malformed-followups-section`, the
+       parser's own code on stderr — the operator repairs the section by a
+       direct edit, then re-runs); with `--criteria-state`, a
        state file that is unreadable, a symlink, not a regular file, over
        1 MiB, not JSON, or not the shape above
        (`reason-code: malformed-criteria-state`); or a state whose `declared`
@@ -222,11 +238,21 @@ from covers_gate import (  # noqa: E402
     parse_covers,
     parse_criteria,
 )
+from followups import FollowupsError, parse_followups  # noqa: E402
 from waiting import WaitingParseError, parse_waiting  # noqa: E402
 
-# Stdout line keys: the first six always, the last three only with
+# Stdout line keys: `STDOUT_LINE_KEYS` always, `CRITERIA_STATE_LINE_KEYS` only with
 # `--criteria-state`. A consumer derives the output grammar from these.
-STDOUT_LINE_KEYS = ("criteria", "covered", "candidates", "partial", "waiting", "complete-eligible")
+STDOUT_LINE_KEYS = (
+    "criteria",
+    "covered",
+    "candidates",
+    "partial",
+    "waiting",
+    "entries-open",
+    "entries-folded",
+    "complete-eligible",
+)
 CRITERIA_STATE_LINE_KEYS = ("void", "closed", "closed-uncounted")
 VOID_REMOVED_ANNOTATION = "removed by amend"
 VOID_REOPENED_ANNOTATION = "reopened by amend"
@@ -246,6 +272,7 @@ _DUPLICATE_SLICES_HEADING_REASON_CODE = "duplicate-slices-heading"
 _MALFORMED_CRITERIA_STATE_REASON_CODE = "malformed-criteria-state"
 _CRITERIA_STATE_CONTRADICTS_BODY_REASON_CODE = "criteria-state-contradicts-body"
 _MALFORMED_WAITING_REASON_CODE = "malformed-waiting-section"
+_MALFORMED_FOLLOWUPS_REASON_CODE = "malformed-followups-section"
 
 _CRITERIA_STATE_MAX_BYTES = 1024 * 1024
 _CRITERIA_STATE_REQUIRED_KEYS = frozenset({"record", "declared", "removed"})
@@ -399,6 +426,7 @@ def parse_ledger_voiding(
     removed: frozenset[str],
     reopened: dict[str, list[str]] | None = None,
     closed: frozenset[str] = frozenset(),
+    credited: frozenset[str] = frozenset(),
 ) -> tuple[list[str], list[str], bool, list[tuple[str, str]], list[str]]:
     """`parse_ledger` with every `covers`/`partially covers` token voided that
     names an identifier in `removed`, or a `reopened` identifier whose entry's
@@ -408,7 +436,12 @@ def parse_ledger_voiding(
     voided token still counts as the entry's coverage token, so it never
     changes `eligible`. A `closed` identifier that any live token names, in
     either field, is added to the covered set and returned, in numeric order,
-    as the fifth element."""
+    as the fifth element.
+
+    A ledger line in the canonical four-field shape (`task/<id>`, `closed
+    <date>`, no coverage token) does not make `eligible` false when its own
+    task id is in `credited` — the task ids that follow-up entries record as
+    `done by`. A line of any other shape earns no credit."""
     reopened = reopened or {}
     lines = _COMMONMARK_LINE_RE.split(spec_body)
     fenced = _mask_fenced_lines(lines)
@@ -465,8 +498,12 @@ def parse_ledger_voiding(
             partial_value = None
             head = paren_text
         fields = _LEDGER_FIELDS_RE.match(head)
-        if fields is None or (fields.group("covers") is None and partial_value is None):
+        if fields is None:
             eligible = False
+            continue
+        if fields.group("covers") is None and partial_value is None:
+            if task_id not in credited:
+                eligible = False
             continue
         if fields.group("covers") is not None:
             covered.update(dict.fromkeys(_parse_field(fields.group("covers"), task_id)))
@@ -671,6 +708,21 @@ def find_unclaimed_ledger_lines(spec_body: str) -> list[int]:
     return unclaimed
 
 
+def credited_task_ids(spec_body: str) -> frozenset[str]:
+    """Task ids that follow-up entries record as `done by task/<id>`. A section
+    that does not parse grants no credit: the ledger then reads exactly as it
+    would without the section."""
+    try:
+        entries = parse_followups(spec_body)
+    except (FollowupsError, DuplicateHeadingError):
+        return frozenset()
+    return frozenset(
+        e.status_detail.removeprefix("task/")
+        for e in entries
+        if e.status_kind == "done" and e.status_detail
+    )
+
+
 class CriteriaStateError(ValueError):
     """The `--criteria-state` file is unreadable or not the documented shape."""
 
@@ -860,7 +912,7 @@ def main(argv: list[str]) -> int:
 
     try:
         covered, partial, eligible, voided, closed_counted = parse_ledger_voiding(
-            spec_body, criteria, removed, reopened, frozenset(closed)
+            spec_body, criteria, removed, reopened, frozenset(closed), credited_task_ids(spec_body)
         )
     except DuplicateHeadingError as e:
         _err(f"reason: {e}")
@@ -892,14 +944,31 @@ def main(argv: list[str]) -> int:
     if waiting_ids:
         eligible = False
 
+    try:
+        followups = parse_followups(spec_body)
+    except (FollowupsError, DuplicateHeadingError) as e:
+        _err(f"reason: the spec's `## Follow-ups` section is not readable ({e.reason_code})")
+        _err(f"reason-code: {_MALFORMED_FOLLOWUPS_REASON_CODE}")
+        return 2
+    entries_open = [e.id for e in followups if e.status_kind == "open"]
+    entries_folded = [e.id for e in followups if e.status_kind == "folded"]
+    if entries_open or entries_folded:
+        eligible = False
+
     candidates = [c for c in criteria if c not in covered and c not in waiting_ids]
 
-    print(f"{STDOUT_LINE_KEYS[0]}: {', '.join(criteria)}")
-    print(f"{STDOUT_LINE_KEYS[1]}: {', '.join(covered) if covered else 'none'}")
-    print(f"{STDOUT_LINE_KEYS[2]}: {', '.join(candidates) if candidates else 'none'}")
-    print(f"{STDOUT_LINE_KEYS[3]}: {', '.join(partial) if partial else 'none'}")
-    print(f"{STDOUT_LINE_KEYS[4]}: {', '.join(waiting) if waiting else 'none'}")
-    print(f"{STDOUT_LINE_KEYS[5]}: {'yes' if eligible else 'no'}")
+    values = (
+        ", ".join(criteria),
+        ", ".join(covered) if covered else "none",
+        ", ".join(candidates) if candidates else "none",
+        ", ".join(partial) if partial else "none",
+        ", ".join(waiting) if waiting else "none",
+        ", ".join(entries_open) if entries_open else "none",
+        ", ".join(entries_folded) if entries_folded else "none",
+        "yes" if eligible else "no",
+    )
+    for key, value in zip(STDOUT_LINE_KEYS, values, strict=True):
+        print(f"{key}: {value}")
     if args.criteria_state is not None:
         void_key, closed_key, uncounted_key = CRITERIA_STATE_LINE_KEYS
         uncounted = sorted(set(closed) - set(closed_counted), key=lambda i: int(i[2:]))

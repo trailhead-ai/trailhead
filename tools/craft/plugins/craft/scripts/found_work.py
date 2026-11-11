@@ -4,7 +4,7 @@ about work it finds, and reports those calls back.
 
 Usage:
     found_work.py decide [--session-id ID] < decision.json
-    found_work.py report --parent <task id> [--session-id ID]
+    found_work.py report --parent <task id> [--session build|slice|plan] [--session-id ID]
     found_work.py entries --spec spec/<id> (--folded-into task/<id> --vault NAME | --open)
     found_work.py entry [--session-id ID] [--vault NAME] < transition.json
     found_work.py reopen-abandoned --spec spec/<id> [--session-id ID] [--vault NAME]
@@ -137,11 +137,13 @@ or exactly `NO_DECISIONS_LINE`. A session that does not exist yet reads as no
 decisions; any other failure to read it exits 2 `session-unreadable` rather than
 claiming there were none.
 
-`entry` moves a batch of one spec's follow-up entries through `fold`, `done` or `reopen`. It reads ONE
-JSON document on stdin:
+`entry` moves a batch of one spec's follow-up entries through `fold`, `done`, `reopen`, `drop` or `restore`. It
+reads ONE JSON document on stdin:
 
-    {"transition": "fold"|"done"|"reopen", "parent": "task/<id>", "spec": "spec/<id>",
-     "entries": ["F2", ...], "reason": "<why>"}
+    {"transition": "fold"|"done"|"reopen"|"drop"|"restore", "parent": "task/<id>", "spec": "spec/<id>",
+     "entries": ["F2", ...], "reason": "<why>", "operator_confirmed": true}
+
+`operator_confirmed` (optional boolean, read by `drop` only) is the operator's confirmation to drop a security finding.
 
 `--vault NAME` names the vault whose task listing `done` reads (as `entries --folded-into` does); `done`
 without it is refused `malformed-input`. When given, it is also the vault the spec is read from, updated in and
@@ -152,6 +154,14 @@ read back from, in `entries`, `entry` and `reopen-abandoned` alike. `reason` is 
     changes -> compose the whole body (only status lines change; the entry grammar is untouched) ->
     certify with `followups_gate.py --prior` -> `lore record update spec/<id> --base` (one write) ->
     read back and parse -> capture one result line per changing entry.
+`drop` needs `open` or `folded into` this parent (else `entry-not-open`) and sets `dropped: <reason>`. The reason
+must begin `nowhere:` or name a `task/<id>` that `lore record show` can read (else `drop-target-missing`); an entry
+whose `found:` or title marks a security finding is refused `drop-needs-operator` unless `operator_confirmed` is true,
+and its decision line's `why` then ends " (operator confirmed)". An entry already `dropped` with the same reason is a
+no-op. `restore` needs a `dropped` entry (else `entry-not-dropped`) and appends a new `open` entry under the next
+unused id (dropped ids included) carrying its title, `what` and `where`, with `found: restored from F<n>`; the
+dropped entry is left as it is. Its decision and result lines name the new entry's id, and a re-run while that new
+entry is still `open` appends nothing more. Both need a reason.
 Allowed moves: `fold` needs `open`; `done` and `reopen` need `folded into` this parent; `done` also needs a
 child of this parent at `done` whose `**Delivers:**` names the entry (`names_entry`), else `entry-not-built`.
 An entry already in the target state (`folded into` this parent for `fold`, `done by` this parent for
@@ -171,7 +181,10 @@ write failed (`failed` result lines carry the gate's or lore's reason-code, then
 command that runs as pasted). `reopen_entries(spec, [(parent, entry id, reason), ...], runner, session_id)`
 runs the same pipeline for entries folded into several parents in one composed write.
 A wrong `done by` is terminal: the gate refuses any change to it, and only `lore record amend` corrects it.
-`report --parent` renders the kinds as "Folded spec/x#F2 into this slice: <title>, because <why>.",
+`report --session` names the session in the no-decisions line ("The build made no decisions about found work.",
+likewise "The slice ..." and "The plan ..."); the default is `build`.
+`report --parent` renders the kinds as "Dropped spec/x#F2: <title>, because <why>.", "Restored dropped work as
+spec/x#F7: <title>, because <why>.", "Folded spec/x#F2 into this slice: <title>, because <why>.",
 "Marked spec/x#F2 done by this slice: <title>." and "Returned spec/x#F2 to open: <title>, because <why>.". An
 entry's failed write is reported "the spec was not changed" only for a code where the write was refused (the gate's
 codes, `gate-refused`, `stale-base`); for `write-failed` and `readback-failed` the write may have landed, so it says
@@ -212,7 +225,7 @@ import subprocess
 import sys
 import tempfile
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -267,6 +280,9 @@ REASON_CODES = frozenset(
         "entry-not-open",
         "entry-not-folded-here",
         "entry-not-built",
+        "entry-not-dropped",
+        "drop-target-missing",
+        "drop-needs-operator",
     }
     | GATE_CODES
 )
@@ -277,11 +293,21 @@ EXIT_CAPTURE_FAILED = 2
 EXIT_WRITE_FAILED = 3
 
 KNOWN_DECISIONS = ("folded", "deferred", "separate", "brainstorm", "dropped")
-TRANSITIONS = {"fold": "entry-folded", "done": "entry-done", "reopen": "entry-reopened"}
+TRANSITIONS = {
+    "fold": "entry-folded",
+    "done": "entry-done",
+    "reopen": "entry-reopened",
+    "drop": "entry-dropped",
+    "restore": "entry-restored",
+}
 ENTRY_KINDS = tuple(TRANSITIONS.values())
 NEEDS_OPERATOR_HEADING = "Needs the operator:"
 RECOVERED_NOTE = " An earlier attempt failed and left a task candidate; discard it at flush."
-NO_DECISIONS_LINE = "The build made no decisions about found work."
+SESSIONS = ("build", "slice", "plan")
+NO_DECISIONS_LINES = {name: f"The {name} made no decisions about found work." for name in SESSIONS}
+NO_DECISIONS_LINE = NO_DECISIONS_LINES["build"]
+NOWHERE_PREFIX = "nowhere:"
+CONFIRMED_NOTE = " (operator confirmed)"
 SECURITY_REPLACEMENT_PREFIX = "security finding — see"
 SECURITY_REPLACEMENT = SECURITY_REPLACEMENT_PREFIX + " location"
 SECURITY_TITLE_PREFIX = "Security finding at"
@@ -294,6 +320,8 @@ _SPEC_RECORD_RE = re.compile(r"spec/[A-Za-z0-9._-]+")
 _ID_RE = re.compile(r"[A-Za-z0-9._/-]+")
 _RECORD_RE = re.compile(r"[A-Za-z0-9._-]+/[A-Za-z0-9._-]+(?:#F[1-9][0-9]*)?")
 _TASK_RECORD_RE = re.compile(r"task/[A-Za-z0-9._-]+")
+_DOT_ID_RE = re.compile(r"task/\.{1,2}")
+_NAMED_TASK_RE = re.compile(r"(?<![A-Za-z0-9._/-])(task/[A-Za-z0-9._-]+?)(?=[.,;:!?)`\]]*(?:\s|$))")
 _CODE_RE = re.compile(r"[a-z0-9-]+")
 _LOCATION_RE = re.compile(r".+:[0-9]+(?:-[0-9]+)?")
 _PATH_SHAPE_RE = re.compile(r"[A-Za-z0-9._/-]+(?::[0-9]+(?:-[0-9]+)?)?")
@@ -579,13 +607,18 @@ def _strip_invisible(text: str) -> str:
     )
 
 
-def _clean(text: str) -> str:
+def _scrub(text: str) -> str:
+    """`text` with credential-shaped runs replaced, including one split by invisible characters."""
     collapsed = _strip_invisible(text)
     if collapsed != text:
         scrubbed = scrub_credential_shaped(collapsed)
         if scrubbed != collapsed:
-            return _neutralize(scrubbed)
-    return _neutralize(scrub_credential_shaped(text))
+            return scrubbed
+    return scrub_credential_shaped(text)
+
+
+def _clean(text: str) -> str:
+    return _neutralize(_scrub(text))
 
 
 def _check_path(path: str) -> None:
@@ -877,6 +910,10 @@ def _sentence(e: Logged) -> str:
         return f"Marked {e.record} done by this slice: {e.title}."
     if e.kind == "entry-reopened":
         return f"Returned {e.record} to open: {e.title}{_because(e.why)}."
+    if e.kind == "entry-dropped":
+        return f"Dropped {e.record}: {e.title}{_because(e.why)}."
+    if e.kind == "entry-restored":
+        return f"Restored dropped work as {e.record}: {e.title}{_because(e.why)}."
     if e.kind == "folded":
         return f"Folded into this build: {e.title}{_because(e.why)}."
     if e.kind == "dropped":
@@ -888,10 +925,10 @@ def _sentence(e: Logged) -> str:
     return f"Needs a brainstorm: {e.title}{_because(e.why)}."
 
 
-def report(parent: str, runner, session_id: str | None) -> str:
+def report(parent: str, runner, session_id: str | None, session: str = "build") -> str:
     entries = [e for e in _read_log(runner, session_id) if e.parent == parent]
     if not entries:
-        return NO_DECISIONS_LINE
+        return NO_DECISIONS_LINES[session]
     operator: list[str] = []
     plain: list[str] = []
     recovered: set[int] = set()
@@ -1071,6 +1108,27 @@ class Move:
     parent: str  # task/<id>
     entry_id: str
     reason: str
+    confirmed: bool = False  # drop only: the document carried "operator_confirmed": true
+
+
+def _is_marked(entry: followups.Entry) -> bool:
+    return entry.found.startswith(SECURITY_REPLACEMENT_PREFIX) or entry.title.startswith(SECURITY_TITLE_PREFIX)
+
+
+def _restored_found(entry: followups.Entry) -> str:
+    """The `found:` of the entry a restore appends: the restored-from note, behind the security marker when `entry`
+    is marked so the restored entry is still recognised as a security finding."""
+    note = _restored_from(entry.id)
+    return f"{SECURITY_REPLACEMENT}; {note}" if _is_marked(entry) else note
+
+
+def _generic_drop_reason(reason: str) -> str:
+    """`reason` for a security finding's drop: the `nowhere:` marker or the `task/<id>` targets it names, and nothing
+    else of it."""
+    if reason.startswith(NOWHERE_PREFIX):
+        return f"{NOWHERE_PREFIX} {SECURITY_REPLACEMENT}"
+    named = list(dict.fromkeys(_NAMED_TASK_RE.findall(reason)))
+    return " ".join([SECURITY_REPLACEMENT_PREFIX, *named])
 
 
 @dataclass(frozen=True)
@@ -1078,6 +1136,15 @@ class Planned:
     move: Move
     entry: followups.Entry
     changes: bool
+    new_id: str | None = None  # restore only: the id of the entry it appends (or already appended)
+
+    @property
+    def record_id(self) -> str:
+        return self.new_id or self.entry.id
+
+    @property
+    def consumed_confirmation(self) -> bool:
+        return self.move.kind == "drop" and self.move.confirmed and _is_marked(self.entry)
 
     @property
     def decision(self) -> Decision:
@@ -1090,22 +1157,44 @@ class Planned:
             where=tuple(_redact_where(w) for w in self.entry.where),
             found="",
             security=False,
-            reason=self.move.reason,
+            reason=self.move.reason + (CONFIRMED_NOTE if self.consumed_confirmation else ""),
         )
 
 
 def _target_status(move: Move) -> tuple[str, str | None]:
-    return {"fold": ("folded", move.parent), "done": ("done", move.parent), "reopen": ("open", None)}[move.kind]
+    return {
+        "fold": ("folded", move.parent),
+        "done": ("done", move.parent),
+        "reopen": ("open", None),
+        "drop": ("dropped", move.reason),
+    }[move.kind]
 
 
 def _status_text(move: Move) -> str:
-    return {"fold": f"folded into {move.parent}", "done": f"done by {move.parent}", "reopen": "open"}[move.kind]
+    return {
+        "fold": f"folded into {move.parent}",
+        "done": f"done by {move.parent}",
+        "reopen": "open",
+        "drop": f"dropped: {move.reason}",
+    }[move.kind]
+
+
+def _restored_from(entry_id: str) -> str:
+    return f"restored from {entry_id}"
 
 
 def _classify(move: Move, e: followups.Entry) -> bool:
     """True when `e` must change, False when it is already in the target state; refuses otherwise."""
+    if move.kind == "restore":
+        if e.status_kind != "dropped":
+            raise Refusal(f"{e.id} is not dropped", "entry-not-dropped")
+        return True
     if (e.status_kind, e.status_detail) == _target_status(move):
         return False
+    if move.kind == "drop":
+        if e.status_kind != "open" and (e.status_kind, e.status_detail) != ("folded", move.parent):
+            raise Refusal(f"{e.id} is neither open nor folded into {move.parent}", "entry-not-open")
+        return True
     if move.kind == "fold":
         if e.status_kind != "open":
             raise Refusal(f"{e.id} is not open", "entry-not-open")
@@ -1123,7 +1212,7 @@ def _compose(body: str, planned: list[Planned]) -> str:
     )
     start, end = located
     for p in planned:
-        if not p.changes:
+        if not p.changes or p.move.kind == "restore":
             continue
         current = None
         for i in range(start + 1, end):
@@ -1136,7 +1225,34 @@ def _compose(body: str, planned: list[Planned]) -> str:
             if m:
                 lines[i] = f"{m.group(1)} {_status_text(p.move)}"
                 break
-    return "\n".join(lines)
+    composed = "\n".join(lines)
+    for p in planned:
+        if p.changes and p.move.kind == "restore":
+            e = p.entry
+            try:
+                text = followups.compose_entry(p.new_id, e.title, _clean(e.what), e.where, _restored_found(e))
+            except followups.FollowupsError as exc:
+                raise Refusal(f"{e.id} cannot be composed as a new entry", exc.reason_code)
+            composed = followups.append_entry(composed, text)
+    return composed
+
+
+def _check_drop(move: Move, entry: followups.Entry, runner, vault: str | None) -> None:
+    """Refuse a drop of a security finding the operator has not confirmed, and one whose reason does not say where
+    the work went: it begins `nowhere:` or names a `task/<id>` that lore can read."""
+    if _is_marked(entry) and not move.confirmed:
+        raise Refusal(
+            f"{entry.id} is a security finding; dropping it needs the operator's confirmation", "drop-needs-operator"
+        )
+    if move.reason.startswith(NOWHERE_PREFIX):
+        return
+    named = list(dict.fromkeys(_NAMED_TASK_RE.findall(move.reason)))
+    if (
+        not named
+        or any(_DOT_ID_RE.fullmatch(task) or not _TASK_RECORD_RE.fullmatch(task) for task in named)
+        or any(_read_record(runner, task, vault) is None for task in named)
+    ):
+        raise Refusal("a drop's reason must begin 'nowhere:' or name an existing task/<id>", "drop-target-missing")
 
 
 def _plan(spec: str, moves: list[Move], runner, vault: str | None) -> tuple[list[Planned], dict, str]:
@@ -1144,11 +1260,26 @@ def _plan(spec: str, moves: list[Move], runner, vault: str | None) -> tuple[list
         raise Refusal("each entry may appear once", "malformed-input")
     parsed, doc, doc_json = _read_entries(runner, spec, vault)
     entries = {e.id: e for e in parsed}
+    next_id = max((int(e.id[1:]) for e in parsed), default=0)
     planned = []
     for m in moves:
         if m.entry_id not in entries:
             raise Refusal(f"{m.entry_id} is not an entry of {spec}", "unknown-entry")
-        planned.append(Planned(m, entries[m.entry_id], _classify(m, entries[m.entry_id])))
+        e = entries[m.entry_id]
+        if m.kind == "drop" and _is_marked(e):
+            m = replace(m, reason=_generic_drop_reason(m.reason))
+        changes = _classify(m, e)
+        new_id = None
+        if m.kind == "restore":
+            prior = [r.id for r in parsed if r.status_kind == "open" and r.found == _restored_found(e)]
+            if prior:
+                new_id, changes = prior[0], False
+            else:
+                next_id += 1
+                new_id = f"F{next_id}"
+        if changes and m.kind == "drop":
+            _check_drop(m, e, runner, vault)
+        planned.append(Planned(m, e, changes, new_id))
     built = [p for p in planned if p.changes and p.move.kind == "done"]
     if built:
         if not (vault and _NAME_RE.fullmatch(vault)):
@@ -1168,11 +1299,17 @@ def _readback_ok(runner, spec: str, planned: list[Planned], vault: str | None) -
         landed = {e.id: e for e in followups.parse_followups(after[0]["body"])} if after else {}
     except (followups.FollowupsError, followups.DuplicateHeadingError):
         return False
-    return all(
-        p.move.entry_id in landed
-        and (landed[p.move.entry_id].status_kind, landed[p.move.entry_id].status_detail) == _target_status(p.move)
-        for p in planned
-    )
+    return all(_landed_ok(landed, p) for p in planned)
+
+
+def _landed_ok(landed: dict[str, followups.Entry], p: Planned) -> bool:
+    if p.move.kind == "restore":
+        new = landed.get(p.new_id)
+        return bool(
+            new and (new.status_kind, new.title, new.found) == ("open", p.entry.title, _restored_found(p.entry))
+        )
+    got = landed.get(p.move.entry_id)
+    return got is not None and (got.status_kind, got.status_detail) == _target_status(p.move)
 
 
 def apply_moves(
@@ -1187,15 +1324,15 @@ def apply_moves(
     results: dict[str, str] = {}
 
     def line_for(p: Planned, code: str | None) -> str:
-        return result_line(p.decision, f"{spec}#{p.entry.id}", code)
+        return result_line(p.decision, f"{spec}#{p.record_id}", code)
 
     for p in planned:
         if not p.changes:
             results[p.entry.id] = line_for(p, None)
     for p in changing:
-        if not _capture(runner, "found-work", decision_line(p.decision, f"{spec}#{p.entry.id}"), session_id):
+        if not _capture(runner, "found-work", decision_line(p.decision, f"{spec}#{p.record_id}"), session_id):
             retry = f"\nretry: {retry_command}" if retry_command else ""
-            text = f"capture-failed: no decision was logged for {spec}#{p.entry.id}; nothing was written.{retry}"
+            text = f"capture-failed: no decision was logged for {spec}#{p.record_id}; nothing was written.{retry}"
             return EXIT_CAPTURE_FAILED, text
 
     code = None
@@ -1366,11 +1503,16 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     ids = doc.get("entries")
     if not (isinstance(ids, list) and ids and all(isinstance(i, str) for i in ids)):
         raise Refusal("entries must be a non-empty list of F<n>", "malformed-input")
-    moves = [Move(kind, parent, i, _clean(reason)) for i in ids]
+    confirmed = doc.get("operator_confirmed", False)
+    if not isinstance(confirmed, bool):
+        raise Refusal("operator_confirmed must be a boolean", "malformed-input")
+    moves = [Move(kind, parent, i, _clean(reason), confirmed) for i in ids]
     for m in moves:
         _check_move(m)
-    scrubbed = scrub_credential_shaped(reason)
-    return spec, moves, {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": scrubbed}
+    retry_doc = {"transition": kind, "parent": parent, "spec": spec, "entries": ids, "reason": _scrub(reason)}
+    if confirmed:
+        retry_doc["operator_confirmed"] = True
+    return spec, moves, retry_doc
 
 
 def _rerun_command(args: list[str], session_id: str | None, vault: str | None) -> str:
@@ -1413,6 +1555,7 @@ def _parser() -> argparse.ArgumentParser:
     d.add_argument("--session-id", default=None)
     r = sub.add_parser("report")
     r.add_argument("--parent", required=True)
+    r.add_argument("--session", choices=SESSIONS, default="build")
     r.add_argument("--session-id", default=None)
     e = sub.add_parser("entries")
     e.add_argument("--spec", required=True)
@@ -1492,7 +1635,7 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
             return _entry_command(args, sys.stdin.read() if stdin is None else stdin, runner)
         if not _ID_RE.fullmatch(args.parent):
             raise Refusal(f"parent id must match {_ID_RE.pattern}", "unsafe-id")
-        print(report(args.parent, runner, args.session_id))
+        print(report(args.parent, runner, args.session_id, args.session))
         return EXIT_DONE
     except Refusal as r:
         print(f"reason: {r}", file=sys.stderr)

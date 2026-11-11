@@ -7,16 +7,26 @@ Usage:
     lore record show spec/<name> | covers_gate.py --covers "AC2, AC5"
     lore record show spec/<name> | covers_gate.py --partial-covers "AC7"
     lore record show spec/<name> | covers_gate.py --covers "AC2" --partial-covers "AC5"
+    lore record show spec/<name> | covers_gate.py --folds "F1, F3"
+    lore record show spec/<name> | covers_gate.py --covers "AC2" --folds "F1"
 
 The spec body arrives on stdin; the drafted identifier list(s) are `--covers`
 and/or `--partial-covers` arguments composed by the caller from identifiers
-alone, never from vault prose. At least one of the two flags is required — a
-gate invoked with neither fails closed rather than certifying an empty
+alone, never from vault prose. At least one of the three flags is required —
+a gate invoked with none fails closed rather than certifying an empty
 claim. Both flags share the same grammar and go through the same
 `parse_covers`, so they can never disagree about what a valid identifier
 list looks like. An identifier named in both lists is rejected: a slice
 cannot coherently claim it both fully and partially delivers the same
-criterion. The gate reads no parent record and writes no temp file — it
+criterion.
+
+`--folds "F1, F3"` names follow-up entries (`^F[1-9][0-9]*(, ?F...)*$`, no
+repeats) the slice folds, certified against the spec body's `## Follow-ups`
+section: each id must exist and be `open`. `--folds` alone certifies no
+criterion, so the criteria checks are skipped and a spec with no criteria
+(or no `## Acceptance Criteria` heading) still passes. With `--covers` or
+`--partial-covers` also given, the criteria path runs exactly as without
+`--folds`, then the folds are certified. The gate reads no parent record and writes no temp file — it
 runs while the parent body is still a string in hand.
 
 The `--covers` / `--partial-covers` grammar is exact and identifier-only:
@@ -55,13 +65,14 @@ ordinary prose paragraph is ordinary line content here too, not structure.
 Exit codes:
     0  clean   — every identifier in every list given names a real spec
        criterion, both lists' grammar is valid, and the two lists share no
-       identifier.
+       identifier; every `--folds` id names an `open` follow-up entry.
     1  violation — bad grammar in either list, an unknown identifier in
        either list, a duplicate identifier within a list, or an identifier
-       claimed in both `--covers` and `--partial-covers` (prints a
-       `reason:` line to stderr).
-    2  error   — fail-closed: neither `--covers` nor `--partial-covers`
-       given (`reason-code: no-coverage-list-given` — the caller's own
+       claimed in both `--covers` and `--partial-covers`, or a `--folds`
+       value with bad shape, a repeated id, or an id that is absent or not
+       `open` (prints a `reason:` line to stderr naming it).
+    2  error   — fail-closed: none of `--covers`, `--partial-covers` and
+       `--folds` given (`reason-code: no-coverage-list-given` — the caller's own
        invocation is what needs fixing here, not the spec), empty or
        non-UTF-8 stdin, no `## Acceptance Criteria` heading
        in the spec body, a spec declaring zero criterion identifiers under
@@ -71,7 +82,9 @@ Exit codes:
        unmasked `## Acceptance Criteria` heading
        (`reason-code: duplicate-acceptance-criteria-heading` — a
        first-match-wins scan would silently certify against whichever
-       occurrence it saw first). NEVER exits 0 when it could not actually
+       occurrence it saw first), or — with `--folds` — a malformed or
+       duplicate-headed `## Follow-ups` section (that section's own
+       `reason-code:` line). NEVER exits 0 when it could not actually
        certify the drafted list(s).
 """
 
@@ -80,11 +93,15 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from pathlib import Path
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
 
 _AC_HEADING = "## Acceptance Criteria"
 _AC_HEADING_RE = re.compile(r"^## Acceptance Criteria$", re.IGNORECASE)
 _CRITERION_RE = re.compile(r"^-\s+\*\*(AC\d+)\.\*\*")
 _COVERS_RE = re.compile(r"\AAC\d+(,\ ?AC\d+)*\Z")
+_FOLDS_RE = re.compile(r"\AF[1-9][0-9]*(,\ ?F[1-9][0-9]*)*\Z")
 _FENCE_START_RE = re.compile(r"^(`{3,}|~{3,})")
 _HTML_COMMENT_START_RE = re.compile(r"^<!--")
 _ZERO_CRITERIA_REASON_CODE = "zero-criterion-identifiers"
@@ -340,6 +357,45 @@ def parse_covers(value: str, flag: str = "--covers") -> list[str]:
     return identifiers
 
 
+def parse_folds(value: str) -> list[str]:
+    """Parse the `--folds` grammar: one or more `Fn` tokens separated by `,`
+    or `, `, no repeats. Raises ValueError naming the reason on a violation."""
+    if not _FOLDS_RE.match(value):
+        raise ValueError(f"--folds value is not a valid follow-up id list: {value!r}")
+    ids = [t.lstrip(" ") for t in value.split(",")]
+    seen: set[str] = set()
+    for fid in ids:
+        if fid in seen:
+            raise ValueError(f"--folds value repeats identifier {fid!r}")
+        seen.add(fid)
+    return ids
+
+
+def _certify_folds(spec_body: str, folds: list[str]) -> int:
+    # Imported here: followups imports this module at its top level. Run as a
+    # script, that import loads a second copy of this module, so the heading
+    # error followups raises is a different class from this file's own.
+    if str(_SCRIPT_DIR) not in sys.path:
+        sys.path.insert(0, str(_SCRIPT_DIR))
+    import followups
+
+    try:
+        entries = followups.parse_followups(spec_body)
+    except (DuplicateHeadingError, followups.DuplicateHeadingError, followups.FollowupsError) as e:
+        _err(f"reason-code: {e.reason_code}")
+        return 2
+    status = {e.id: e.status_kind for e in entries}
+    bad = [
+        f"{fid} ({'not open: ' + status[fid] if fid in status else 'not in the follow-ups section'})"
+        for fid in folds
+        if status.get(fid) != "open"
+    ]
+    if bad:
+        _err(f"reason: --folds names follow-up(s) that cannot be folded: {', '.join(bad)}")
+        return 1
+    return 0
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(
         description=(
@@ -352,10 +408,14 @@ def main(argv: list[str]) -> int:
         "--partial-covers",
         help="comma-separated ACn identifiers partially covered, e.g. 'AC2, AC5'",
     )
+    ap.add_argument(
+        "--folds",
+        help="comma-separated Fn follow-up ids the slice folds, e.g. 'F1, F3'",
+    )
     args = ap.parse_args(argv)
 
-    if args.covers is None and args.partial_covers is None:
-        _err("reason: at least one of --covers or --partial-covers is required")
+    if args.covers is None and args.partial_covers is None and args.folds is None:
+        _err("reason: at least one of --covers, --partial-covers or --folds is required")
         _err(f"reason-code: {_NO_COVERAGE_LIST_GIVEN_REASON_CODE}")
         _err("failing closed — cannot certify an empty claim")
         return 2
@@ -368,6 +428,16 @@ def main(argv: list[str]) -> int:
     if not spec_body.strip():
         _err("spec body on stdin is empty")
         return 2
+
+    folds: list[str] = []
+    if args.folds is not None:
+        try:
+            folds = parse_folds(args.folds)
+        except ValueError as e:
+            _err(f"reason: {e}")
+            return 1
+        if args.covers is None and args.partial_covers is None:
+            return _certify_folds(spec_body, folds)
 
     try:
         criteria = parse_criteria(spec_body)
@@ -424,6 +494,9 @@ def main(argv: list[str]) -> int:
             f"covered: {', '.join(overlap)}"
         )
         return 1
+
+    if args.folds is not None:
+        return _certify_folds(spec_body, folds)
 
     return 0
 

@@ -220,9 +220,15 @@
         "skills/slice/SKILL.md"
       ]
     },
+    "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
     "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
       "measures": [
-        "skills/plan/SKILL.md"
+        "skills/plan/SKILL.md",
+        "scripts/found_work.py"
       ]
     },
     "build-close-marks-folded-entries": {
