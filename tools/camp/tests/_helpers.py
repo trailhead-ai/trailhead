@@ -17,6 +17,8 @@ import tempfile
 import traceback
 from pathlib import Path
 
+from trailhead.tests._git_support import _GIT_REDIRECTS
+
 _PLUGIN_DIR = Path(__file__).resolve().parents[1] / "plugins" / "camp"
 
 #: The `camp` entry script, for a caller that wants a real subprocess.
@@ -71,7 +73,12 @@ def _build_git_repo(path: Path, *, origin: bool) -> None:
     # A commit's author comes from the environment before it comes from config,
     # so a build that happens to run under the hermetic env would stamp that
     # identity on the template instead of the one configured below.
-    env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    # Nor may a GIT_DIR inherited from a hook send its config writes to the invoking repo.
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in _GIT_REDIRECTS and not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))
+    }
 
     def git(*args: str) -> None:
         subprocess.run(["git", *args], check=True, capture_output=True, env=env)

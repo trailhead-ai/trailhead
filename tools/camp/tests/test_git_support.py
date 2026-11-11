@@ -202,3 +202,18 @@ def test_a_template_built_while_the_hermetic_env_is_active_still_carries_the_rep
     _build_git_repo(built, origin=False)
 
     assert _git(built, "log", "-1", "--format=%an <%ae>").stdout.strip() == "Test <test@test.com>"
+
+
+def test_a_git_dir_in_the_environment_does_not_redirect_a_template_build_to_that_repo(tmp_path, monkeypatch):
+    host = tmp_path / "host"
+    host.mkdir()
+    _git(host, "init", "-q")
+    before = (host / ".git" / "config").read_text()
+    monkeypatch.setenv("GIT_DIR", str(host / ".git"))
+    built = tmp_path / "built"
+
+    _build_git_repo(built, origin=False)
+
+    assert (host / ".git" / "config").read_text() == before
+    monkeypatch.delenv("GIT_DIR")
+    assert _git(built, "config", "--local", "user.email").stdout.strip() == "test@test.com"

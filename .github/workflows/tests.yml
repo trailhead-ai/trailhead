@@ -65,7 +65,7 @@ jobs:
             max_skipped: 18
             budget: 170
           - area: lore-camp
-            baseline: 7493
+            baseline: 7495
             max_skipped: 8
             budget: 210
           - area: rest

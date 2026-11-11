@@ -14,6 +14,7 @@ import pytest
 # The hermetic git env and its fixture: one definition for the repository's tests. An absolute
 # import, so it also resolves when craft loads this file by path under a unique module name.
 from trailhead.tests._git_support import (  # noqa: F401
+    _GIT_REDIRECTS,
     HERMETIC_GIT_IDENTITY,
     hermetic_git_env,
     make_hermetic_git_env,
@@ -402,7 +403,8 @@ def _template_build_env() -> dict:
     before it comes from config, and an `init` under the hermetic env (no global
     config) picks a different default branch than one under the ambient config —
     which breaks a clone of a bare template for a vault built by hand. So the
-    build sees the startup environment minus any identity, with an empty home.
+    build sees the startup environment minus any identity and any variable that
+    redirects git to another repository, with an empty home.
     """
     if not _TEMPLATE_HOME:
         import shutil
@@ -411,7 +413,11 @@ def _template_build_env() -> dict:
         home = Path(tempfile.mkdtemp(prefix="lore-tests-template-home-"))
         atexit.register(shutil.rmtree, home, True)
         _TEMPLATE_HOME.append(home)
-    env = {k: v for k, v in _STARTUP_ENV.items() if not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))}
+    env = {
+        k: v
+        for k, v in _STARTUP_ENV.items()
+        if k not in _GIT_REDIRECTS and not k.startswith(("GIT_AUTHOR_", "GIT_COMMITTER_"))
+    }
     env["HOME"] = str(_TEMPLATE_HOME[0])
     env["XDG_CONFIG_HOME"] = str(_TEMPLATE_HOME[0] / "xdg")
     return env

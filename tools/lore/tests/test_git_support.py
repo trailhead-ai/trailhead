@@ -355,3 +355,20 @@ def test_a_repository_built_for_a_template_follows_the_startup_env_not_the_herme
     lore_conftest._git_init(bare, "--bare")
 
     assert (bare / "HEAD").read_text().strip() == "ref: refs/heads/trunk"
+
+
+def test_a_git_dir_in_the_startup_env_does_not_redirect_a_template_build_to_that_repo(tmp_path, monkeypatch):
+    import conftest as lore_conftest
+
+    host = tmp_path / "host"
+    host.mkdir()
+    _git(host, "init", "-q")
+    before = (host / ".git" / "config").read_text()
+    monkeypatch.setitem(lore_conftest._STARTUP_ENV, "GIT_DIR", str(host / ".git"))
+    built = tmp_path / "built"
+
+    lore_conftest._git_init(built)
+    lore_conftest._run_git(built, "config", "user.email", "t@e.st")
+
+    assert (host / ".git" / "config").read_text() == before
+    assert _git(built, "config", "--local", "user.email").stdout.strip() == "t@e.st"
