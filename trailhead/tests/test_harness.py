@@ -1392,24 +1392,22 @@ class TestClaudeCodeParseSessionListFailures:
         with pytest.raises(HarnessError):
             ClaudeCodeHarness().parse_session_list('{"sessionId": "s1"}')
 
-    def test_record_missing_session_id_raises_naming_the_field(self, tmp_path):
-        payload = f'[{{"cwd": "{tmp_path}", "kind": "interactive"}}]'
-        with pytest.raises(HarnessError, match="sessionId"):
-            ClaudeCodeHarness().parse_session_list(payload)
-
-    def test_record_with_invalid_session_id_raises(self, tmp_path):
-        payload = f'[{{"sessionId": "../evil", "cwd": "{tmp_path}", "kind": "interactive"}}]'
-        with pytest.raises(HarnessError, match="sessionId"):
-            ClaudeCodeHarness().parse_session_list(payload)
-
-    def test_record_missing_cwd_raises_naming_the_field(self):
-        payload = '[{"sessionId": "s1", "kind": "interactive"}]'
-        with pytest.raises(HarnessError, match="cwd"):
-            ClaudeCodeHarness().parse_session_list(payload)
-
-    def test_record_missing_kind_raises_naming_the_field(self, tmp_path):
-        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}"}}]'
-        with pytest.raises(HarnessError, match="kind"):
+    @pytest.mark.parametrize(
+        ("record", "field"),
+        [
+            pytest.param({"cwd": "{cwd}", "kind": "interactive"}, "sessionId",
+                         id="missing_session_id_names_the_field"),
+            pytest.param({"sessionId": "../evil", "cwd": "{cwd}", "kind": "interactive"},
+                         "sessionId", id="invalid_session_id"),
+            pytest.param({"sessionId": "s1", "kind": "interactive"}, "cwd",
+                         id="missing_cwd_names_the_field"),
+            pytest.param({"sessionId": "s1", "cwd": "{cwd}"}, "kind",
+                         id="missing_kind_names_the_field"),
+        ],
+    )
+    def test_a_record_with_a_bad_required_field_raises_naming_it(self, tmp_path, record, field):
+        payload = json.dumps([{k: v.replace("{cwd}", str(tmp_path)) for k, v in record.items()}])
+        with pytest.raises(HarnessError, match=field):
             ClaudeCodeHarness().parse_session_list(payload)
 
     def _assert_started_at_degrades_keeping_the_record(self, payload):
@@ -1423,46 +1421,21 @@ class TestClaudeCodeParseSessionListFailures:
         assert records[0].session_id == "s1"
         assert records[0].started_at is None
 
-    def test_started_at_epoch_micros_degrades_to_none(self, tmp_path):
-        """A CLI that switched millis -> MICROS is the drift the spec anticipates."""
+    @pytest.mark.parametrize(
+        "started_at",
+        [
+            # A CLI that switched millis -> MICROS is the drift the spec anticipates.
+            pytest.param("1755100800123000", id="epoch_micros"),
+            pytest.param("1755100800123000000", id="epoch_nanos"),
+            # ``json.loads`` accepts bare ``Infinity`` and ``NaN``, so they reach the parser.
+            pytest.param("Infinity", id="infinity"),
+            pytest.param("NaN", id="nan"),
+        ],
+    )
+    def test_an_unusable_started_at_degrades_to_none(self, tmp_path, started_at):
         self._assert_started_at_degrades_keeping_the_record(
-            json.dumps(
-                [
-                    {
-                        "sessionId": "s1",
-                        "cwd": str(tmp_path),
-                        "kind": "interactive",
-                        "startedAt": 1755100800123000,
-                    }
-                ]
-            )
-        )
-
-    def test_started_at_epoch_nanos_degrades_to_none(self, tmp_path):
-        self._assert_started_at_degrades_keeping_the_record(
-            json.dumps(
-                [
-                    {
-                        "sessionId": "s1",
-                        "cwd": str(tmp_path),
-                        "kind": "interactive",
-                        "startedAt": 1755100800123000000,
-                    }
-                ]
-            )
-        )
-
-    def test_started_at_infinity_degrades_to_none(self, tmp_path):
-        """``json.loads`` accepts a bare ``Infinity``, so it reaches the parser."""
-        self._assert_started_at_degrades_keeping_the_record(
-            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
-            '"startedAt": Infinity}]' % tmp_path
-        )
-
-    def test_started_at_nan_degrades_to_none(self, tmp_path):
-        self._assert_started_at_degrades_keeping_the_record(
-            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", '
-            '"startedAt": NaN}]' % tmp_path
+            '[{"sessionId": "s1", "cwd": "%s", "kind": "interactive", "startedAt": %s}]'
+            % (tmp_path, started_at)
         )
 
     def test_one_unreadable_started_at_does_not_lose_its_sibling_records(self, tmp_path):
@@ -1498,28 +1471,17 @@ class TestClaudeCodeParseSessionListEmpty:
 
 
 class TestClaudeCodeParseSessionListOptionalFields:
-    def test_absent_optional_fields_map_to_none(self, tmp_path):
-        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"}}]'
-        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
-        assert rec.name is None
-        assert rec.pid is None
-        assert rec.started_at is None
-
-    def test_null_optional_fields_map_to_none(self, tmp_path):
-        payload = (
-            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
-            '"name": null, "pid": null, "startedAt": null}]'
-        )
-        rec = ClaudeCodeHarness().parse_session_list(payload)[0]
-        assert rec.name is None
-        assert rec.pid is None
-        assert rec.started_at is None
-
-    def test_wrongly_typed_optional_fields_map_to_none(self, tmp_path):
-        payload = (
-            f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive", '
-            '"name": 5, "pid": "not-an-int", "startedAt": "not-a-number"}]'
-        )
+    @pytest.mark.parametrize(
+        "optional_fields",
+        [
+            pytest.param("", id="absent"),
+            pytest.param(', "name": null, "pid": null, "startedAt": null', id="null"),
+            pytest.param(', "name": 5, "pid": "not-an-int", "startedAt": "not-a-number"',
+                         id="wrongly_typed"),
+        ],
+    )
+    def test_unusable_optional_fields_map_to_none(self, tmp_path, optional_fields):
+        payload = f'[{{"sessionId": "s1", "cwd": "{tmp_path}", "kind": "interactive"{optional_fields}}}]'
         rec = ClaudeCodeHarness().parse_session_list(payload)[0]
         assert rec.name is None
         assert rec.pid is None

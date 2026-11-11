@@ -749,26 +749,25 @@ class TestOutpostGap:
         assert "source checkout is 3 commits behind" in out
         assert "Outpost checkout is 2 commits behind" in out
 
-    def test_outpost_ok_with_a_current_install_stays_quiet(self, tmp_path):
-        result = {
-            **OK_EXAMPLE,
-            "outpost": {"outcome": "ok", "commits_behind": 0, "reason": None},
-        }
-        assert self._render(tmp_path, result) is None
-
-    def test_unanswerable_outpost_with_a_current_install_stays_quiet(self, tmp_path):
-        result = {
-            **OK_EXAMPLE,
-            "outpost": {"outcome": "unanswerable", "commits_behind": None, "reason": "x"},
-        }
-        assert self._render(tmp_path, result) is None
-
-    def test_a_non_integer_outpost_count_is_ignored(self, tmp_path):
-        result = {
-            **OK_EXAMPLE,
-            "outpost": {"outcome": "behind", "commits_behind": "2; rm -rf ~", "reason": None},
-        }
-        assert self._render(tmp_path, result) is None
+    @pytest.mark.parametrize(
+        "outpost",
+        [
+            pytest.param(
+                {"outcome": "ok", "commits_behind": 0, "reason": None},
+                id="outpost_ok_with_a_current_install",
+            ),
+            pytest.param(
+                {"outcome": "unanswerable", "commits_behind": None, "reason": "x"},
+                id="unanswerable_outpost_with_a_current_install",
+            ),
+            pytest.param(
+                {"outcome": "behind", "commits_behind": "2; rm -rf ~", "reason": None},
+                id="non_integer_outpost_count_is_ignored",
+            ),
+        ],
+    )
+    def test_an_outpost_with_nothing_to_report_stays_quiet(self, tmp_path, outpost):
+        assert self._render(tmp_path, {**OK_EXAMPLE, "outpost": outpost}) is None
 
     def test_a_producer_predating_the_outpost_field_still_notifies_for_the_install(
         self, tmp_path

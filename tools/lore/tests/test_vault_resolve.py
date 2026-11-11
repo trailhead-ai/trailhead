@@ -311,27 +311,20 @@ def test_default_vault_eligible_for_any_kind():
 # ---------------------------------------------------------------------------
 
 
-def test_suite_outranks_team():
-    """Suite scope has higher precedence than team."""
+@pytest.mark.parametrize(
+    ("higher", "lower"),
+    [
+        pytest.param("suite", "team", id="suite_outranks_team"),
+        pytest.param("product", "suite", id="product_outranks_suite"),
+    ],
+)
+def test_higher_scope_outranks_lower_scope(higher, lower):
     mod = vr()
     config = [
         _make_vault("default", "default"),
-        _make_vault("my-suite", "suite"),
-        _make_vault("my-team", "team"),
+        _make_vault(f"my-{higher}", higher),
+        _make_vault(f"my-{lower}", lower),
     ]
-    result = mod.resolve_vault({"suite": "my-suite", "team": "my-team"}, "blob", config)
-    assert result.name == "my-suite"
-    assert result.scope == "suite"
-
-
-def test_product_outranks_suite():
-    """Product scope has higher precedence than suite."""
-    mod = vr()
-    config = [
-        _make_vault("default", "default"),
-        _make_vault("my-product", "product"),
-        _make_vault("my-suite", "suite"),
-    ]
-    result = mod.resolve_vault({"product": "my-product", "suite": "my-suite"}, "blob", config)
-    assert result.name == "my-product"
-    assert result.scope == "product"
+    result = mod.resolve_vault({higher: f"my-{higher}", lower: f"my-{lower}"}, "blob", config)
+    assert result.name == f"my-{higher}"
+    assert result.scope == higher

@@ -892,38 +892,23 @@ class TestStatusExitCodes:
             with reconcile_lock(mpath.parent):
                 flip_member_state_unlocked(mpath, name, state)
 
-    def test_all_ready_exit_0(self, two_member_group):
+    @pytest.mark.parametrize(
+        ("states", "exit_code"),
+        [
+            pytest.param({"repo_a": "ready", "repo_b": "ready"}, 0, id="all_ready_exit_0"),
+            pytest.param({"repo_a": "ready", "repo_b": "pending"}, 2, id="some_pending_exit_2"),
+            pytest.param({"repo_a": "ready", "repo_b": "failed"}, 3, id="some_failed_exit_3"),
+            pytest.param({"repo_a": "pending", "repo_b": "failed"}, 3,
+                         id="failed_takes_precedence_over_pending"),
+        ],
+    )
+    def test_exit_code_reflects_member_states(self, two_member_group, states, exit_code):
         from camp.provision.lifecycle import provision_status_code
 
         g = two_member_group
-        self._seed_states(g["group"], "s1", g["env"], {"repo_a": "ready", "repo_b": "ready"})
-        code, _ = provision_status_code(g["group"], "s1", env=g["env"])
-        assert code == 0
-
-    def test_some_pending_exit_2(self, two_member_group):
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed_states(g["group"], "s2", g["env"], {"repo_a": "ready", "repo_b": "pending"})
-        code, _ = provision_status_code(g["group"], "s2", env=g["env"])
-        assert code == 2
-
-    def test_some_failed_exit_3(self, two_member_group):
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed_states(g["group"], "s3", g["env"], {"repo_a": "ready", "repo_b": "failed"})
-        code, _ = provision_status_code(g["group"], "s3", env=g["env"])
-        assert code == 3
-
-    def test_failed_takes_precedence_over_pending(self, two_member_group):
-        """When both pending and failed exist, failed (3) wins."""
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed_states(g["group"], "s4", g["env"], {"repo_a": "pending", "repo_b": "failed"})
-        code, _ = provision_status_code(g["group"], "s4", env=g["env"])
-        assert code == 3
+        self._seed_states(g["group"], "sx", g["env"], states)
+        code, _ = provision_status_code(g["group"], "sx", env=g["env"])
+        assert code == exit_code
 
     def test_json_shape_stable(self, two_member_group):
         from camp.provision.lifecycle import provision_status_code

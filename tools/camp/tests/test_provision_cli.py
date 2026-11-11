@@ -273,41 +273,39 @@ class TestCampStatusTwoFacts:
         assert report["code"] == 0
         assert report["work_code"] == 3
 
-    def test_header_all_ready(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf3",
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf3")
-        assert r.stdout.splitlines()[0] == "camp status: twf3 — ready"
-
-    def test_header_mixed_boot_ready_work_pending(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf4",
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "pending"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf4")
-        assert r.stdout.splitlines()[0] == "camp status: twf4 — ready, work pending"
-
-    def test_header_failed(self, cli_env):
-        self._seed_two_facts(
-            cli_env,
-            "twf5",
-            {
-                "repo_a": {"provision_state": "failed", "work_state": "pending"},
-                "repo_b": {"provision_state": "ready", "work_state": "ready"},
-            },
-        )
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twf5")
-        assert r.stdout.splitlines()[0] == "camp status: twf5 — failed"
+    @pytest.mark.parametrize(
+        ("facts", "header"),
+        [
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                    "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
+                },
+                "ready",
+                id="all_ready",
+            ),
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "ready", "work_state": "ready"},
+                    "repo_b": {"provision_state": "ready", "work_state": "pending"},
+                },
+                "ready, work pending",
+                id="mixed_boot_ready_work_pending",
+            ),
+            pytest.param(
+                {
+                    "repo_a": {"provision_state": "failed", "work_state": "pending"},
+                    "repo_b": {"provision_state": "ready", "work_state": "ready"},
+                },
+                "failed",
+                id="failed",
+            ),
+        ],
+    )
+    def test_header_reflects_the_member_facts(self, cli_env, facts, header):
+        self._seed_two_facts(cli_env, "twfh", facts)
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "twfh")
+        assert r.stdout.splitlines()[0] == f"camp status: twfh — {header}"
 
     def test_per_member_line_carries_both_facts(self, cli_env):
         self._seed_two_facts(

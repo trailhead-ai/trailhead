@@ -538,22 +538,13 @@ class TestParseFlushedAtReader:
 
     @pytest.mark.parametrize("raw", [
         None, "", "not-a-date", "2026/06/24", "June 24 2026", "12345",
+        pytest.param("2026-06-24T12:00:00", id="naive_datetime"),
+        pytest.param("2026-06-24T12:00:00+05:30", id="non_utc_offset"),
+        pytest.param(12345, id="non_string"),
     ])
     def test_missing_or_corrupt_returns_none(self, raw):
         store = load_script("lore.session.store")
         assert store.parse_flushed_at(raw) is None
-
-    def test_naive_datetime_returns_none(self):
-        store = load_script("lore.session.store")
-        assert store.parse_flushed_at("2026-06-24T12:00:00") is None
-
-    def test_non_utc_offset_returns_none(self):
-        store = load_script("lore.session.store")
-        assert store.parse_flushed_at("2026-06-24T12:00:00+05:30") is None
-
-    def test_non_string_returns_none(self):
-        store = load_script("lore.session.store")
-        assert store.parse_flushed_at(12345) is None
 
     def test_fallback_means_all_candidates_outstanding(self, tmp_path):
         """A corrupt flushed-at → None → cutoff is epoch → ALL candidates outstanding.

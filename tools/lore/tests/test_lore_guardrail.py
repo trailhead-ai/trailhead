@@ -538,34 +538,33 @@ class TestGuardExemptZone:
                 f"stderr={result.stderr!r}"
             )
 
-    def test_record_write_in_the_same_vault_is_still_denied(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("parts", "why"),
+        [
+            pytest.param(
+                ("adr", "some-decision.md"),
+                "the exemption must not leak past the sites subtree — a record write "
+                "in the same vault stays denied",
+                id="record_write_in_the_same_vault",
+            ),
+            pytest.param(
+                ("task", "some-task", "sites", "index.html"),
+                "a sites directory nested deeper than the vault top level is a record "
+                "tree, not the free-write zone (``*`` matches ONE segment)",
+                id="sites_dir_nested_below_the_vault_top_level",
+            ),
+            pytest.param(
+                ("sites-archive", "index.html"),
+                "a directory that merely shares the 'sites' prefix must not be exempt "
+                "(the segment must match whole)",
+                id="sibling_directory_sharing_the_prefix",
+            ),
+        ],
+    )
+    def test_a_write_outside_the_top_level_sites_zone_is_denied(self, tmp_path, parts, why):
         vaults_root, vault = self._vaults(tmp_path)
-        target = vault / "adr" / "some-decision.md"
-        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
-        assert result.returncode == 2, (
-            "the exemption must not leak past the sites subtree — a record write "
-            f"in the same vault stays denied; stderr={result.stderr!r}"
-        )
-
-    def test_sites_dir_nested_below_the_vault_top_level_is_denied(self, tmp_path):
-        """``*`` matches ONE segment, so only a vault's top-level sites is exempt."""
-        vaults_root, vault = self._vaults(tmp_path)
-        target = vault / "task" / "some-task" / "sites" / "index.html"
-        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
-        assert result.returncode == 2, (
-            "a sites directory nested deeper than the vault top level is a record "
-            f"tree, not the free-write zone; stderr={result.stderr!r}"
-        )
-
-    def test_sibling_directory_sharing_the_prefix_is_denied(self, tmp_path):
-        """``sites-archive`` is not ``sites`` — the segment must match whole."""
-        vaults_root, vault = self._vaults(tmp_path)
-        target = vault / "sites-archive" / "index.html"
-        result = _run_guard(target, [vaults_root], exempt=[self._pattern(vaults_root)])
-        assert result.returncode == 2, (
-            "a directory that merely shares the 'sites' prefix must not be "
-            f"exempt; stderr={result.stderr!r}"
-        )
+        result = _run_guard(vault.joinpath(*parts), [vaults_root], exempt=[self._pattern(vaults_root)])
+        assert result.returncode == 2, f"{why}; stderr={result.stderr!r}"
 
     def test_sites_write_through_an_inside_pointing_default_symlink_is_allowed(
         self, tmp_path

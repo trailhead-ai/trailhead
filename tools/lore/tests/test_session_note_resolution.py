@@ -10,7 +10,10 @@ import importlib
 import os
 import subprocess
 import sys
+
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 PLUGIN_ROOT = REPO_ROOT / "plugins" / "lore"
@@ -59,41 +62,24 @@ def _write_session_record(session_dir: Path, session_id: str, *, extra: str = ""
 # find_session_note_by_session_id
 # ---------------------------------------------------------------------------
 
-def test_by_session_id_matches_singular_record(tmp_path):
-    """By-id resolver finds the singular session/<id>.md record by stem + header."""
+@pytest.mark.parametrize(
+    ("other_id", "wanted_id"),
+    [
+        pytest.param("aaa", "bbb", id="matches_singular_record"),
+        pytest.param("aaa", "bbb", id="matches_frontmatter"),
+        pytest.param("flat", "bucketed", id="matches_bucketed_note"),
+    ],
+)
+def test_by_session_id_finds_the_matching_record_among_several(tmp_path, other_id, wanted_id):
+    """By-id resolver finds the record whose stem and header carry the id, among multiple."""
     vault = tmp_path / "v"
     sd = vault / "session"
     sd.mkdir(parents=True)
-    _write_session_record(sd, "aaa")
-    want = _write_session_record(sd, "bbb")
+    _write_session_record(sd, other_id)
+    want = _write_session_record(sd, wanted_id)
 
     v = load_script("lore.vault.vault")
-    assert v.find_session_note_by_session_id(vault, "bbb") == want
-
-
-def test_by_session_id_matches_frontmatter(tmp_path):
-    """By-id resolver finds the correct singular record among multiple."""
-    vault = tmp_path / "v"
-    sd = vault / "session"
-    sd.mkdir(parents=True)
-    _write_session_record(sd, "aaa")
-    want = _write_session_record(sd, "bbb")
-
-    v = load_script("lore.vault.vault")
-    assert v.find_session_note_by_session_id(vault, "bbb") == want
-
-
-def test_by_session_id_matches_bucketed_note(tmp_path):
-    """By-id resolution finds a singular session record (no bucket nesting needed
-    for the session/ dir — records are flat under session/)."""
-    vault = tmp_path / "v"
-    sd = vault / "session"
-    sd.mkdir(parents=True)
-    _write_session_record(sd, "flat")
-    want = _write_session_record(sd, "bucketed")
-
-    v = load_script("lore.vault.vault")
-    assert v.find_session_note_by_session_id(vault, "bucketed") == want
+    assert v.find_session_note_by_session_id(vault, wanted_id) == want
 
 
 def test_by_session_id_ignores_body_mentions(tmp_path):

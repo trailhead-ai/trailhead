@@ -277,17 +277,18 @@ class TestLockedCompileTable:
         assert param_key in cq.params
         assert param_value in cq.params
 
-    def test_phase_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("phase:build"))
+    @pytest.mark.parametrize(
+        ("query", "facet_key", "value"),
+        [
+            pytest.param("phase:build", "related-phases", "build", id="phase_alias"),
+            pytest.param("keyword:foo", "keywords", "foo", id="keyword_alias"),
+        ],
+    )
+    def test_alias_resolves_to_facet_exists(self, kql, compiler, query, facet_key, value):
+        cq = compiler.compile(kql.parse(query))
         assert "EXISTS" in cq.where
-        assert "related-phases" in cq.params
-        assert "build" in cq.params
-
-    def test_keyword_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("keyword:foo"))
-        assert "EXISTS" in cq.where
-        assert "keywords" in cq.params
-        assert "foo" in cq.params
+        assert facet_key in cq.params
+        assert value in cq.params
 
     def test_compare_gt(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at > "2025-01-01"'))

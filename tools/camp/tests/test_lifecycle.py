@@ -1434,53 +1434,27 @@ class TestStatusTwoFacts:
         by_name = {m["name"]: m["work_state"] for m in report["members"]}
         assert by_name == {"repo_a": "ready", "repo_b": "pending"}
 
-    def test_work_code_rollup_ready_when_all_ready_or_not_applicable(self, two_member_group):
+    @pytest.mark.parametrize(
+        ("repo_b", "work_code"),
+        [
+            pytest.param({"provision_state": "ready", "work_state": "not-applicable"}, 0,
+                         id="ready_when_all_ready_or_not_applicable"),
+            pytest.param({"provision_state": "ready", "work_state": "pending"}, 2, id="pending"),
+            pytest.param({"provision_state": "ready", "work_state": "failed"}, 3, id="failed"),
+        ],
+    )
+    def test_work_code_rollup(self, two_member_group, repo_b, work_code):
         from camp.provision.lifecycle import provision_status_code
 
         g = two_member_group
         self._seed(
             g["group"],
-            "wf2",
+            "wfr",
             g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
-            },
+            {"repo_a": {"provision_state": "ready", "work_state": "ready"}, "repo_b": repo_b},
         )
-        _code, report = provision_status_code(g["group"], "wf2", env=g["env"])
-        assert report["work_code"] == 0
-
-    def test_work_code_rollup_pending(self, two_member_group):
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed(
-            g["group"],
-            "wf3",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "pending"},
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf3", env=g["env"])
-        assert report["work_code"] == 2
-
-    def test_work_code_rollup_failed(self, two_member_group):
-        from camp.provision.lifecycle import provision_status_code
-
-        g = two_member_group
-        self._seed(
-            g["group"],
-            "wf4",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "failed"},
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf4", env=g["env"])
-        assert report["work_code"] == 3
+        _code, report = provision_status_code(g["group"], "wfr", env=g["env"])
+        assert report["work_code"] == work_code
 
     def test_exit_code_derives_from_boot_readiness_alone(self, two_member_group):
         """A member whose work_state is failed must not push the process exit
@@ -1503,56 +1477,36 @@ class TestStatusTwoFacts:
         assert report["code"] == 0
         assert report["work_code"] == 3
 
-    def test_status_header_all_ready(self, two_member_group):
+    @pytest.mark.parametrize(
+        ("repo_a", "repo_b", "header"),
+        [
+            pytest.param(
+                {"provision_state": "ready", "work_state": "ready"},
+                {"provision_state": "ready", "work_state": "not-applicable"},
+                "ready",
+                id="all_ready",
+            ),
+            pytest.param(
+                {"provision_state": "ready", "work_state": "ready"},
+                {"provision_state": "ready", "work_state": "pending"},
+                "ready, work pending",
+                id="mixed_boot_ready_work_pending",
+            ),
+            pytest.param(
+                {"provision_state": "failed", "work_state": "pending"},
+                {"provision_state": "ready", "work_state": "ready"},
+                "failed",
+                id="failed_takes_precedence",
+            ),
+        ],
+    )
+    def test_status_header(self, two_member_group, repo_a, repo_b, header):
         from camp.provision.lifecycle import provision_status_code, status_header
 
         g = two_member_group
-        self._seed(
-            g["group"],
-            "wf7",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "not-applicable"},
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf7", env=g["env"])
-        assert status_header(report) == "ready"
-
-    def test_status_header_mixed_boot_ready_work_pending(self, two_member_group):
-        """The headline behavior change: a workspace whose members are all
-        boot-ready but still installing dependencies gets a header that says
-        so, distinct from both "ready" and the old hardcoded "provisioning"."""
-        from camp.provision.lifecycle import provision_status_code, status_header
-
-        g = two_member_group
-        self._seed(
-            g["group"],
-            "wf8",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "ready", "work_state": "ready"},
-                "repo_b": {"provision_state": "ready", "work_state": "pending"},
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf8", env=g["env"])
-        assert status_header(report) == "ready, work pending"
-
-    def test_status_header_failed_takes_precedence(self, two_member_group):
-        from camp.provision.lifecycle import provision_status_code, status_header
-
-        g = two_member_group
-        self._seed(
-            g["group"],
-            "wf9",
-            g["env"],
-            {
-                "repo_a": {"provision_state": "failed", "work_state": "pending"},
-                "repo_b": {"provision_state": "ready", "work_state": "ready"},
-            },
-        )
-        _code, report = provision_status_code(g["group"], "wf9", env=g["env"])
-        assert status_header(report) == "failed"
+        self._seed(g["group"], "wfh", g["env"], {"repo_a": repo_a, "repo_b": repo_b})
+        _code, report = provision_status_code(g["group"], "wfh", env=g["env"])
+        assert status_header(report) == header
 
 
 # ---------------------------------------------------------------------------

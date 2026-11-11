@@ -926,16 +926,18 @@ def test_kind_gated_fields_table_exact():
     }
 
 
-def test_depends_on_in_fields_v1_as_list_str():
+@pytest.mark.parametrize(
+    ("field", "type_tag"),
+    [
+        pytest.param("depends-on", "list[str]", id="depends_on_as_list_str"),
+        pytest.param("parent", "str", id="parent_as_str"),
+        pytest.param("supersedes", "list[str]", id="supersedes_as_list_str"),
+    ],
+)
+def test_optional_field_in_fields_v1(field, type_tag):
     fields = rm().FIELDS_V1
-    assert fields["depends-on"].type_tag == "list[str]"
-    assert fields["depends-on"].required is False
-
-
-def test_parent_in_fields_v1_as_str():
-    fields = rm().FIELDS_V1
-    assert fields["parent"].type_tag == "str"
-    assert fields["parent"].required is False
+    assert fields[field].type_tag == type_tag
+    assert fields[field].required is False
 
 
 def test_depends_on_accepted_on_task():
@@ -1091,12 +1093,6 @@ def test_adr_off_vocab_status_rejected(status):
 
 
 # --- supersedes: an ungated list[str] edge (peer of depends-on) ------------
-
-
-def test_supersedes_in_fields_v1_as_list_str():
-    fields = rm().FIELDS_V1
-    assert fields["supersedes"].type_tag == "list[str]"
-    assert fields["supersedes"].required is False
 
 
 def test_supersedes_not_in_kind_gated_fields():
