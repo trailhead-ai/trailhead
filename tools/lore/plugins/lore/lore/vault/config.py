@@ -621,7 +621,15 @@ def _validate_config(data: dict, env: dict | None) -> list:
         raw_name = entry.get("name", "")
         scope = entry.get("scope", "")
         records = entry.get("records", [])
-        shared = bool(entry.get("shared", scope == "read-only"))
+        if scope == "read-only":
+            shared = entry.get("shared", True)
+            if not isinstance(shared, bool):
+                raise VaultConfigError(
+                    f"lore: vault {raw_name!r} has invalid shared {shared!r}; "
+                    "a read-only vault's shared must be a bool (true or false)"
+                )
+        else:
+            shared = bool(entry.get("shared", False))
         explicit_path = entry.get("path")
         raw_auto_publish = entry.get("auto_publish", True)
         if not isinstance(raw_auto_publish, bool):

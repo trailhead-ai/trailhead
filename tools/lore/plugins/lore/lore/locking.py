@@ -194,6 +194,23 @@ def read_only_vault_name(root: str | Path, *, env: dict[str, str] | None = None)
     return read_only_name_of(root, read_only_roots(env))
 
 
+def assert_tree_writable(root: str | Path, *, env: dict[str, str] | None = None) -> None:
+    """Raise :class:`ReadOnlyVaultError` if *root* is, or holds, a read-only vault's folder.
+
+    For an operation that removes a whole folder: a read-only vault nested
+    anywhere inside it would go too. Containment is by path segment, so a sibling
+    ``team-x`` is not inside ``team``.
+    """
+    roots = read_only_roots(env)
+    name = read_only_name_of(root, roots)
+    if name is not None:
+        raise ReadOnlyVaultError(name)
+    top = _root_key(root)
+    for key, vault_name in roots.items():
+        if isinstance(key, str) and os.path.commonpath([top, key]) == top:
+            raise ReadOnlyVaultError(vault_name)
+
+
 def assert_writable(root: str | Path, *, env: dict[str, str] | None = None) -> None:
     """Raise :class:`ReadOnlyVaultError` if *root* is a read-only vault's folder."""
     name = read_only_vault_name(root, env=env)

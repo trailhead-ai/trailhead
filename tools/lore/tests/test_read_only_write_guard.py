@@ -419,6 +419,59 @@ def test_vault_delete_remove_from_disk_refuses_a_read_only_folder(install):
     assert any(v["name"] == "ro" for v in _config_vaults(install))
 
 
+def _nested_install(install):
+    """A writable vault ``team`` under the vaults root holding a read-only ``ncore``."""
+    vaults = install.state / "lore" / "vaults"
+    team = vaults / "team"
+    nested = team / "nested-core"
+    nested.mkdir(parents=True)
+    (nested / "kept.md").write_text("by hand\n", encoding="utf-8")
+    (team / "own.md").write_text("team record\n", encoding="utf-8")
+    install.config(
+        [
+            ("default", "default", install.default),
+            ("team", "repo", team),
+            ("ncore", "read-only", nested),
+        ]
+    )
+    return team, nested
+
+
+def test_vault_delete_remove_from_disk_refuses_a_folder_holding_a_read_only_vault(install):
+    team, nested = _nested_install(install)
+    before = _snapshot(team)
+    r = install.run(["vault", "delete", "team", "--remove-from-disk", "--yes"])
+    assert r.returncode != 0
+    assert "Traceback" not in r.stderr, r.stderr
+    assert r.stderr.strip().splitlines() == [
+        "lore: vault ncore is read-only — its content is changed by hand outside lore"
+    ], r.stderr
+    assert _snapshot(team) == before
+    assert any(v["name"] == "team" for v in _config_vaults(install))
+
+
+def test_vault_delete_remove_from_disk_of_a_folder_beside_a_read_only_one_is_removed(install):
+    vaults = install.state / "lore" / "vaults"
+    team = vaults / "team"
+    team.mkdir(parents=True)
+    (team / "own.md").write_text("team record\n", encoding="utf-8")
+    sib = vaults / "team-x"
+    sib.mkdir()
+    (sib / "own.md").write_text("sibling\n", encoding="utf-8")
+    install.config(
+        [
+            ("default", "default", install.default),
+            ("team", "repo", team),
+            ("sibx", "read-only", sib),
+        ]
+    )
+    before = _snapshot(sib)
+    r = install.run(["vault", "delete", "team", "--remove-from-disk", "--yes"])
+    assert r.returncode == 0, r.stderr
+    assert not team.exists()
+    assert _snapshot(sib) == before
+
+
 def test_plain_vault_delete_of_a_read_only_entry_removes_only_the_config_entry(install):
     before = _snapshot(install.ro)
     r = install.run(["vault", "delete", "ro"])

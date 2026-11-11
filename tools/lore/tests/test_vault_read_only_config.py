@@ -82,6 +82,26 @@ def test_read_only_without_shared_key_loads_shared(tmp_path, monkeypatch):
     assert vaults["ro"].shared is True
 
 
+@pytest.mark.parametrize("bad", [None, 0, 1, "", "true", [], {}])
+def test_read_only_with_a_non_bool_shared_is_refused_naming_the_vault(tmp_path, monkeypatch, bad):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    vc = load_script("lore.vault.config")
+    data = {
+        "vaults": [
+            {"name": "default", "scope": "default"},
+            {"name": "ro", "scope": "read-only", "shared": bad},
+        ]
+    }
+    with pytest.raises(vc.VaultConfigError) as exc:
+        vc.validate_config(data)
+    assert "'ro'" in str(exc.value) and "shared" in str(exc.value)
+
+
+def test_non_read_only_entry_keeps_its_lenient_shared_coercion(tmp_path, monkeypatch):
+    vaults = _load(tmp_path, monkeypatch, [{"name": "p", "scope": "product", "shared": 0}])
+    assert vaults["p"].shared is False
+
+
 def test_product_without_shared_key_loads_trusted_and_not_read_only(tmp_path, monkeypatch):
     vaults = _load(tmp_path, monkeypatch, [{"name": "p", "scope": "product"}])
     assert vaults["p"].shared is False

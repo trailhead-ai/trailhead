@@ -89,3 +89,31 @@ def test_shared_hit_is_inside_the_shared_fence(tmp_path):
     out = r.stdout
     assert '<external-memory layer="shared"' in out
     assert out.index("<external-memory") < out.index("Zebra notes") < out.index("</external-memory>")
+
+
+def _stale_journal(tmp_path, folder):
+    from lore.record import journal
+
+    jdir = journal.journal_dir(folder, env={"XDG_STATE_HOME": str(tmp_path / "state")})
+    jdir.mkdir(parents=True, mode=0o700)
+    (jdir / "deadbeef.json").write_text("{}")
+    return jdir
+
+
+@pytest.mark.parametrize("verb", ["show", "history", "criteria"])
+def test_a_stale_write_journal_for_a_read_only_vault_does_not_block_its_reads(tmp_path, verb):
+    folder = _register(tmp_path, "--trusted")
+    jdir = _stale_journal(tmp_path, folder)
+    before = {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()}
+
+    r = _run(["record", verb, "blob/zebra-notes"], tmp_path=tmp_path)
+
+    assert "its content is changed by hand" not in r.stderr, r.stderr
+    assert "Traceback" not in r.stderr, r.stderr
+    notices = [line for line in r.stderr.splitlines() if "pending write journal" in line]
+    assert len(notices) == 1 and "ro" in notices[0], r.stderr
+    if verb == "show":
+        assert r.returncode == 0, r.stderr
+        assert "striped quadruped" in r.stdout
+    assert (jdir / "deadbeef.json").read_text() == "{}"
+    assert {p: p.read_bytes() for p in folder.rglob("*") if p.is_file()} == before
