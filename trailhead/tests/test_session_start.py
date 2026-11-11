@@ -1516,6 +1516,7 @@ def test_a_managed_write_denial_over_a_hub_root_is_refused_naming_the_source(tmp
     with pytest.raises(HarnessError, match="managed") as raised:
         _start(env)
     assert lore in str(raised.value) and str(managed) in str(raised.value)
+    assert f"Remove or narrow it in {managed} so it no longer covers {lore}" in str(raised.value)
 
 
 @pytest.mark.parametrize("drop_in", [None, "20-sec.json"])
@@ -1546,20 +1547,22 @@ def test_a_managed_drop_in_read_denial_over_a_hub_root_is_refused(tmp_path):
     env = _fence(tmp_path)
     home, lore, cache = _hub_roots(env)
     _permissive_user(env)
-    _write_managed(
+    managed = _write_managed(
         tmp_path, {"sandbox": {"filesystem": {"denyRead": [cache]}}}, drop_in="20-sec.json"
     )
-    with pytest.raises(HarnessError, match=cache):
+    with pytest.raises(HarnessError, match=cache) as raised:
         _start(env)
+    assert f"Remove or narrow it in {managed} so it no longer covers {cache}" in str(raised.value)
 
 
 def test_a_managed_read_permission_rule_over_a_hub_root_is_refused(tmp_path):
     env = _fence(tmp_path)
     home, lore, cache = _hub_roots(env)
     _permissive_user(env)
-    _write_managed(tmp_path, {"permissions": {"deny": [f"Read(/{lore}/**)"]}})
-    with pytest.raises(HarnessError, match=lore):
+    managed = _write_managed(tmp_path, {"permissions": {"deny": [f"Read(/{lore}/**)"]}})
+    with pytest.raises(HarnessError, match=lore) as raised:
         _start(env)
+    assert f"Remove or narrow it in {managed} so it no longer covers {lore}" in str(raised.value)
 
 
 def test_a_managed_denial_elsewhere_does_not_block_the_launch(tmp_path):
@@ -1638,8 +1641,9 @@ def test_a_wildcard_read_rule_that_matches_a_hub_root_is_refused(tmp_path):
     parent = str(Path(cache).parent.parent)
     rule = f"Read(/{parent}/*/{Path(cache).name}/**)"
     _permissive_user(env, permissions={"deny": [rule]})
-    with pytest.raises(HarnessError, match=re.escape(rule)):
+    with pytest.raises(HarnessError, match=re.escape(rule)) as raised:
         _start(env)
+    assert f"so it no longer covers {cache}" in str(raised.value)
 
 
 def test_a_wildcard_read_rule_that_matches_no_hub_root_passes(tmp_path):
@@ -1660,7 +1664,8 @@ def test_a_read_glob_the_check_cannot_evaluate_is_refused_naming_the_rule_and_th
     with pytest.raises(HarnessError) as raised:
         _start(env)
     assert rule in str(raised.value)
-    assert "//" in str(raised.value) and "refusing the launch" in str(raised.value)
+    assert "rewrite it as Read(//absolute/path/**)" in str(raised.value)
+    assert "refusing the launch" in str(raised.value)
 
 
 def test_a_bare_read_everything_rule_covers_the_hub_home_and_is_refused(tmp_path):
@@ -1732,7 +1737,8 @@ def test_a_helper_checkout_under_a_hub_write_root_is_refused_naming_path_and_rem
     with pytest.raises(HarnessError) as raised:
         _launch_with_bin(env, binary)
     assert binary in str(raised.value) and root in str(raised.value)
-    assert "outside" in str(raised.value) and "refusing the launch" in str(raised.value)
+    assert "Run trailhead from a checkout outside" in str(raised.value)
+    assert "refusing the launch" in str(raised.value)
 
 
 def test_a_helper_checkout_under_system_temp_is_refused(tmp_path):
@@ -1779,7 +1785,75 @@ def test_a_python3_on_path_under_a_hub_write_root_is_refused(off_temp):
     env["PATH"] = f"{pybin}:{env['PATH']}"
     with pytest.raises(HarnessError, match="python3") as raised:
         _start(env)
-    assert str(python) in str(raised.value)
+    assert str(pybin) in str(raised.value)
+
+
+@pytest.mark.parametrize("entry", ["bin", "./bin", ""])
+def test_a_relative_or_empty_path_entry_is_refused_naming_the_entry_and_the_remedy(off_temp, entry):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    env["PATH"] = f"/usr/bin:{entry}:/bin"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert "PATH" in text and (repr(entry) in text or entry == "")
+    assert "Remove it from the PATH Outpost runs with" in text
+    assert "refusing the launch" in text
+
+
+def test_a_path_entry_under_a_hub_write_root_is_refused_even_when_it_holds_no_python3(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    entry = f"{_hub_roots(env)[2]}/tools"
+    env["PATH"] = f"{entry}:{env['PATH']}"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert entry in text and "PATH" in text and "refusing the launch" in text
+    assert f"Put a PATH outside {_hub_roots(env)[2]}" in text
+
+
+def test_a_path_entry_that_contains_a_hub_write_root_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    entry = str(Path(_hub_roots(env)[2]).parent)
+    env["PATH"] = f"{entry}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="PATH"):
+        _start(env)
+
+
+def test_a_path_entry_symlinked_into_a_hub_write_root_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    cache = Path(_hub_roots(env)[2])
+    real = cache / "real-bin"
+    real.mkdir(parents=True)
+    link = off_temp.resolve() / "elsewhere-bin"
+    link.symlink_to(real)
+    env["PATH"] = f"{link}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="real-bin"):
+        _start(env)
+
+
+def test_a_path_entry_inside_a_hub_write_root_that_links_out_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    cache = Path(_hub_roots(env)[2])
+    cache.mkdir(parents=True)
+    outside = off_temp.resolve() / "outside-bin"
+    outside.mkdir()
+    link = cache / "link-bin"
+    link.symlink_to(outside)
+    env["PATH"] = f"{link}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="link-bin"):
+        _start(env)
+
+
+def test_a_path_entry_that_only_shares_a_name_prefix_with_a_write_root_passes(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    env["PATH"] = f"{_hub_roots(env)[2]}-tools:{env['PATH']}"
+    assert _start(env) is not None
 
 
 def test_the_same_launch_with_the_helper_code_outside_every_write_root_passes(off_temp):

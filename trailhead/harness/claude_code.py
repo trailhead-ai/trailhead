@@ -1178,10 +1178,12 @@ def _derive_write_confinement(
     """
     for entry, (source_path, kind) in user.deny_write:
         denied = _resolve_settings_path(entry, user.home, user.launch_dir)
-        if any(_covers(denied, root) for root in roots):
+        covered = next((root for root in roots if _covers(denied, root)), None)
+        if covered is not None:
             raise HarnessError(
                 f"{source_path}: the {kind} write denial {entry!r} covers a path this "
-                "profile writes; refusing the launch"
+                f"profile writes. Remove or narrow it in {source_path} so it no longer covers "
+                f"{covered}; refusing the launch"
             )
     allowed = [
         (e, _resolve_settings_path(e, user.home, user.launch_dir), src)
@@ -1237,27 +1239,49 @@ def _refuse_helper_code_under_write_roots(
     The helper runs outside the sandbox with the operator's access, so every file it executes
     must be out of the session's reach: ``bin/trailhead`` (as named, and where it resolves),
     the checkout's ``bin`` directory, ``trailhead`` package and ``pyproject.toml`` (the
-    launcher reads its interpreter floor there), and each ``python3`` on PATH it might exec.
-    A path overlaps a write root when either contains the other, by whole segments.
+    launcher reads its interpreter floor there), and every directory of the PATH it runs with.
+    The helper is spawned by the harness, whose environment is the one this launch was
+    started from (``env_set`` carries only ``CLAUDE_CONFIG_DIR`` and ``env_unset`` names no
+    ``PATH``), so *env*'s ``PATH`` is the one it resolves bash, grep, head, dirname, readlink
+    and python3 through. An entry that is relative or empty, or whose lexical path or realpath
+    overlaps a write root, is refused whether or not it exists yet: the session could create
+    it. A path overlaps a write root when either contains the other, by whole segments.
     """
     binary = Path(header_command[0])
     lexical = Path(os.path.realpath(binary.parent)) / binary.name
     resolved = Path(os.path.realpath(binary))
     checkout = resolved.parent.parent
     code = [lexical, resolved, resolved.parent, checkout / "trailhead", checkout / "pyproject.toml"]
-    for entry in (env.get("PATH") or "").split(os.pathsep):
-        candidate = Path(entry) / "python3"
-        if entry and os.path.isabs(entry) and candidate.is_file() and os.access(candidate, os.X_OK):
-            code += [Path(os.path.realpath(candidate.parent)) / "python3", Path(os.path.realpath(candidate))]
     for path in code:
         for root in write_roots:
             if _covers(root, path) or _covers(path, root):
                 raise HarnessError(
                     f"the headers helper's code {path} overlaps {root}, which the hub session may "
                     "write; the helper runs outside the sandbox with your access, so the session "
-                    f"could replace it. Run trailhead from a checkout (and a python3) outside "
+                    f"could replace it. Run trailhead from a checkout outside "
                     f"{root}, then start the hub again; refusing the launch"
                 )
+    if "PATH" not in env:
+        return
+    for entry in env["PATH"].split(os.pathsep):
+        if not os.path.isabs(entry):
+            raise HarnessError(
+                f"PATH entry {entry!r} is not absolute; the headers helper runs outside the sandbox "
+                "and resolves bash, grep, head, dirname, readlink and python3 through PATH, so a "
+                "relative or empty entry lets the session plant them in its working directory. "
+                "Remove it from the PATH Outpost runs with, then start the hub again; "
+                "refusing the launch"
+            )
+        for path in {Path(entry), Path(os.path.realpath(entry))}:
+            for root in write_roots:
+                if _covers(root, path) or _covers(path, root):
+                    raise HarnessError(
+                        f"PATH entry {entry} ({path}) overlaps {root}, which the hub session may write; "
+                        "the headers helper runs outside the sandbox and resolves bash, grep, head, "
+                        "dirname, readlink and python3 through PATH, so the session could plant them "
+                        f"there. Put a PATH outside {root} in the environment Outpost runs with, "
+                        "then start the hub again; refusing the launch"
+                    )
 
 
 _GIT_ADMIN_NAMES = ("config", "hooks", "info")
@@ -1354,10 +1378,12 @@ def _check_reads_and_network(
     user: _UserSettings, roots: list[Path], hosts: tuple[str, ...]
 ) -> None:
     for entry, covers, (source_path, kind) in user.deny_read:
-        if any(covers(root) for root in roots):
+        covered = next((root for root in roots if covers(root)), None)
+        if covered is not None:
             raise HarnessError(
                 f"{source_path}: the {kind} read denial {entry!r} covers a path this "
-                "profile allows; refusing the launch"
+                f"profile allows. Remove or narrow it in {source_path} so it no longer covers "
+                f"{covered}; refusing the launch"
             )
     if user.allowed_domains is not None:
         for host in hosts:
