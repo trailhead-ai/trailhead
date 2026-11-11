@@ -566,29 +566,20 @@ class TestIsClaudeLaunch:
         p = resolve_harness_profile(self._group())
         assert p.is_claude_launch() is True
 
-    def test_explicit_claude_binary_is_claude_launch(self):
+    @pytest.mark.parametrize(
+        ("expected", "binary"),
+        [
+            pytest.param(True, "claude", id="explicit_claude_binary_is"),
+            pytest.param(False, "codex", id="codex_is_not"),
+            pytest.param(False, "cursor", id="other_binary_is_not"),
+            pytest.param(True, "/usr/local/bin/claude", id="path_to_claude_binary_is"),
+        ],
+    )
+    def test_is_claude_launch_by_binary(self, expected, binary):
         from camp.launch.profile import resolve_harness_profile
 
-        p = resolve_harness_profile(self._group({"binary": "claude"}))
-        assert p.is_claude_launch() is True
-
-    def test_codex_is_not_claude_launch(self):
-        from camp.launch.profile import resolve_harness_profile
-
-        p = resolve_harness_profile(self._group({"binary": "codex"}))
-        assert p.is_claude_launch() is False
-
-    def test_other_binary_is_not_claude_launch(self):
-        from camp.launch.profile import resolve_harness_profile
-
-        p = resolve_harness_profile(self._group({"binary": "cursor"}))
-        assert p.is_claude_launch() is False
-
-    def test_path_to_claude_binary_is_claude_launch(self):
-        from camp.launch.profile import resolve_harness_profile
-
-        p = resolve_harness_profile(self._group({"binary": "/usr/local/bin/claude"}))
-        assert p.is_claude_launch() is True
+        p = resolve_harness_profile(self._group({"binary": binary}))
+        assert p.is_claude_launch() is expected
 
     def test_empty_binary_is_not_claude_launch_no_raise(self):
         """Directly-built profile with empty binary must answer False, not raise."""

@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -173,22 +174,18 @@ def test_is_retired_session_name_accepts_live_observed_forms():
     assert is_retired_session_name("camp-ets-workshop-e2026480") is True
 
 
-def test_is_retired_session_name_accepts_degraded_root_unknown_form():
+@pytest.mark.parametrize(
+    ("expected", "name"),
+    [
+        pytest.param(True, "camp-f4919a6f", id="accepts_degraded_root_unknown_form"),
+        pytest.param(False, "other-audio-assebly-f4919a6f", id="rejects_missing_camp_prefix"),
+        pytest.param(False, "camp-audio-assembly-notahexxx", id="rejects_non_hex_tail"),
+    ],
+)
+def test_is_retired_session_name(expected, name):
     from camp.launch.naming import is_retired_session_name
 
-    assert is_retired_session_name("camp-f4919a6f") is True
-
-
-def test_is_retired_session_name_rejects_missing_camp_prefix():
-    from camp.launch.naming import is_retired_session_name
-
-    assert is_retired_session_name("other-audio-assebly-f4919a6f") is False
-
-
-def test_is_retired_session_name_rejects_non_hex_tail():
-    from camp.launch.naming import is_retired_session_name
-
-    assert is_retired_session_name("camp-audio-assembly-notahexxx") is False
+    assert is_retired_session_name(name) is expected
 
 
 def test_is_retired_session_name_rejects_hex_tail_wrong_length():

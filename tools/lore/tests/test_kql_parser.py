@@ -25,18 +25,41 @@ def kql():
 # ---------------------------------------------------------------------------
 
 
-def test_kind_field_eq(kql):
-    ast = kql.parse("kind:spec")
+@pytest.mark.parametrize(
+    ("query", "field", "value"),
+    [
+        pytest.param("kind:spec", "kind", "spec", id="kind_field_eq"),
+        pytest.param(
+            'repo:"trailhead-ai/trailhead"',
+            "repo",
+            "trailhead-ai/trailhead",
+            id="repo_slash_requires_quotes",
+        ),
+        pytest.param('team:"platform infra"', "team", "platform infra", id="team_space_requires_quotes"),
+    ],
+)
+def test_field_eq(kql, query, field, value):
+    ast = kql.parse(query)
     assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "kind"
-    assert ast.value == "spec"
+    assert ast.field == field
+    assert ast.value == value
 
 
-def test_area_facet_membership(kql):
-    ast = kql.parse("area:penny")
+@pytest.mark.parametrize(
+    ("query", "facet", "value"),
+    [
+        pytest.param("area:penny", "area", "penny", id="area"),
+        pytest.param("phase:build", "phase", "build", id="phase"),
+        pytest.param("keyword:python", "keyword", "python", id="keyword"),
+        pytest.param('supersedes:"adr/foo"', "supersedes", "adr/foo", id="supersedes_field_parses_as"),
+        pytest.param('superseded-by:"adr/bar"', "superseded-by", "adr/bar", id="superseded_by_field_parses_as"),
+    ],
+)
+def test_facet_membership(kql, query, facet, value):
+    ast = kql.parse(query)
     assert isinstance(ast, kql.FacetMembership)
-    assert ast.facet == "area"
-    assert ast.value == "penny"
+    assert ast.facet == facet
+    assert ast.value == value
 
 
 def test_status_and_kind(kql):
@@ -182,31 +205,9 @@ def test_three_term_implicit_and(kql):
     assert isinstance(ast, kql.And)
 
 
-def test_phase_facet_membership(kql):
-    ast = kql.parse("phase:build")
-    assert isinstance(ast, kql.FacetMembership)
-    assert ast.facet == "phase"
-    assert ast.value == "build"
-
-
-def test_keyword_facet_membership(kql):
-    ast = kql.parse("keyword:python")
-    assert isinstance(ast, kql.FacetMembership)
-    assert ast.facet == "keyword"
-    assert ast.value == "python"
-
-
 # ---------------------------------------------------------------------------
 # Quoting rules
 # ---------------------------------------------------------------------------
-
-
-def test_repo_slash_requires_quotes(kql):
-    # repo:"trailhead-ai/trailhead" — slash forces quoting; parses correctly
-    ast = kql.parse('repo:"trailhead-ai/trailhead"')
-    assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "repo"
-    assert ast.value == "trailhead-ai/trailhead"
 
 
 def test_created_at_unquoted_in_compare(kql):
@@ -214,13 +215,6 @@ def test_created_at_unquoted_in_compare(kql):
     ast = kql.parse('created-at >= "2026-01-01"')
     assert isinstance(ast, kql.Compare)
     assert ast.field == "created-at"
-
-
-def test_team_space_requires_quotes(kql):
-    ast = kql.parse('team:"platform infra"')
-    assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "team"
-    assert ast.value == "platform infra"
 
 
 def test_unquoted_value_space_is_boundary(kql):
@@ -256,11 +250,30 @@ def test_related_kind_field_parses_for_every_kind(kql):
         assert ast.value == "foo"
 
 
-def test_related_notakind_field_is_unknown(kql):
-    # A related-<x> field where <x> is not a real kind is still a hard error —
-    # the derivation is exact, not a blanket "related-*" pass-through.
-    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
-        kql.parse("related-notakind:foo")
+@pytest.mark.parametrize(
+    ("query", "match"),
+    [
+        pytest.param("related-notakind:foo", "unknown field", id="related_notakind_field_is_unknown"),
+        pytest.param(
+            'supersedes-notreal:"adr/foo"',
+            "unknown field",
+            id="unknown_field_adjacent_to_supersedes_still_raises",
+        ),
+        pytest.param("pen*", "wildcard|not supported", id="error_wildcard_prefix"),
+        pytest.param("foo~", "fuzzy|not supported", id="error_fuzzy"),
+        pytest.param("title^2", "boost|not supported", id="error_boost"),
+        pytest.param("/re/", "regex|not supported", id="error_regex"),
+        pytest.param("bogusfield:value", "unknown field", id="error_unknown_field"),
+        pytest.param("label.worktree:s5*", "wildcard|not supported", id="label_value_wildcard_rejected"),
+        pytest.param("label.worktree:s5~", "fuzzy|not supported", id="label_value_fuzzy_rejected"),
+        pytest.param("label.worktree*:s5", "wildcard|not supported", id="label_key_wildcard_rejected"),
+        pytest.param("annotation:foo", "unknown field", id="annotation_field_is_unknown"),
+        pytest.param("annotation.worktree:foo", "unknown field", id="annotation_dot_field_is_unknown"),
+    ],
+)
+def test_unsupported_query_is_a_parse_error_with_message(kql, query, match):
+    with pytest.raises(kql.KqlParseError, match=match):
+        kql.parse(query)
 
 
 # ---------------------------------------------------------------------------
@@ -268,32 +281,9 @@ def test_related_notakind_field_is_unknown(kql):
 # ---------------------------------------------------------------------------
 
 
-def test_supersedes_field_parses_as_facet_membership(kql):
-    # A <kind>/<name> value contains '/', which the tokenizer requires quoted
-    # (same rule that forces repo:"trailhead-ai/trailhead").
-    ast = kql.parse('supersedes:"adr/foo"')
-    assert isinstance(ast, kql.FacetMembership)
-    assert ast.facet == "supersedes"
-    assert ast.value == "adr/foo"
-
-
-def test_superseded_by_field_parses_as_facet_membership(kql):
-    ast = kql.parse('superseded-by:"adr/bar"')
-    assert isinstance(ast, kql.FacetMembership)
-    assert ast.facet == "superseded-by"
-    assert ast.value == "adr/bar"
-
-
 def test_supersedes_and_superseded_by_are_valid_fields(kql):
     assert "supersedes" in kql.VALID_FIELDS
     assert "superseded-by" in kql.VALID_FIELDS
-
-
-def test_unknown_field_adjacent_to_supersedes_still_raises(kql):
-    # The allowlist widens by exactly two names (supersedes, superseded-by) —
-    # an adjacent unknown field must still be a hard error.
-    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
-        kql.parse('supersedes-notreal:"adr/foo"')
 
 
 # ---------------------------------------------------------------------------
@@ -301,49 +291,21 @@ def test_unknown_field_adjacent_to_supersedes_still_raises(kql):
 # ---------------------------------------------------------------------------
 
 
-def test_error_unbalanced_quote(kql):
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param('"unfinished', id="error_unbalanced_quote"),
+        pytest.param("(kind:spec", id="error_unbalanced_paren"),
+        pytest.param("", id="error_empty_query"),
+        pytest.param("   ", id="error_whitespace_only_query"),
+        pytest.param("kind:spec)", id="extra_close_paren_is_error"),
+        pytest.param("()", id="empty_group_is_error"),
+        pytest.param("label.claude-code/model:x", id="label_bare_slash_rejected"),
+    ],
+)
+def test_malformed_query_is_a_parse_error(kql, query):
     with pytest.raises(kql.KqlParseError):
-        kql.parse('"unfinished')
-
-
-def test_error_unbalanced_paren(kql):
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("(kind:spec")
-
-
-def test_error_empty_query(kql):
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("")
-
-
-def test_error_whitespace_only_query(kql):
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("   ")
-
-
-def test_error_wildcard_prefix(kql):
-    with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
-        kql.parse("pen*")
-
-
-def test_error_fuzzy(kql):
-    with pytest.raises(kql.KqlParseError, match=r"fuzzy|not supported"):
-        kql.parse("foo~")
-
-
-def test_error_boost(kql):
-    with pytest.raises(kql.KqlParseError, match=r"boost|not supported"):
-        kql.parse("title^2")
-
-
-def test_error_regex(kql):
-    with pytest.raises(kql.KqlParseError, match=r"regex|not supported"):
-        kql.parse("/re/")
-
-
-def test_error_unknown_field(kql):
-    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
-        kql.parse("bogusfield:value")
+        kql.parse(query)
 
 
 # ---------------------------------------------------------------------------
@@ -418,16 +380,6 @@ def test_ast_equality(kql):
 # ---------------------------------------------------------------------------
 
 
-def test_extra_close_paren_is_error(kql):
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("kind:spec)")
-
-
-def test_empty_group_is_error(kql):
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("()")
-
-
 def test_suite_field(kql):
     ast = kql.parse("suite:search")
     assert isinstance(ast, kql.FieldEq)
@@ -450,11 +402,19 @@ def test_product_field(kql):
 # ---------------------------------------------------------------------------
 
 
-def test_label_eq_simple_key(kql):
-    ast = kql.parse("label.worktree:s5")
+@pytest.mark.parametrize(
+    ("query", "key", "value"),
+    [
+        pytest.param("label.worktree:s5", "worktree", "s5", id="simple_key"),
+        pytest.param("label.claude-code.model:opus", "claude-code/model", "opus", id="namespaced_key_dot_for_slash"),
+        pytest.param('label.worktree:"s5 env"', "worktree", "s5 env", id="quoted_value"),
+    ],
+)
+def test_label_eq(kql, query, key, value):
+    ast = kql.parse(query)
     assert isinstance(ast, kql.LabelEq)
-    assert ast.key == "worktree"
-    assert ast.value == "s5"
+    assert ast.key == key
+    assert ast.value == value
 
 
 def test_label_exists_simple_key(kql):
@@ -463,25 +423,10 @@ def test_label_exists_simple_key(kql):
     assert ast.key == "worktree"
 
 
-def test_label_eq_namespaced_key_dot_for_slash(kql):
-    # label.claude-code.model:opus → stored key 'claude-code/model'
-    ast = kql.parse("label.claude-code.model:opus")
-    assert isinstance(ast, kql.LabelEq)
-    assert ast.key == "claude-code/model"
-    assert ast.value == "opus"
-
-
 def test_label_exists_namespaced_key_dot_for_slash(kql):
     ast = kql.parse("has:label.claude-code.model")
     assert isinstance(ast, kql.LabelExists)
     assert ast.key == "claude-code/model"
-
-
-def test_label_eq_quoted_value(kql):
-    ast = kql.parse('label.worktree:"s5 env"')
-    assert isinstance(ast, kql.LabelEq)
-    assert ast.key == "worktree"
-    assert ast.value == "s5 env"
 
 
 def test_label_eq_composes_with_and(kql):
@@ -518,27 +463,6 @@ def test_label_eq_negation(kql):
 # -- disallowed chars still rejected on the label path ----------------------
 
 
-def test_label_value_wildcard_rejected(kql):
-    with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
-        kql.parse("label.worktree:s5*")
-
-
-def test_label_value_fuzzy_rejected(kql):
-    with pytest.raises(kql.KqlParseError, match=r"fuzzy|not supported"):
-        kql.parse("label.worktree:s5~")
-
-
-def test_label_bare_slash_rejected(kql):
-    # A raw slash in the key (not the dot-for-slash form) is still a lexer error.
-    with pytest.raises(kql.KqlParseError):
-        kql.parse("label.claude-code/model:x")
-
-
-def test_label_key_wildcard_rejected(kql):
-    with pytest.raises(kql.KqlParseError, match=r"wildcard|not supported"):
-        kql.parse("label.worktree*:s5")
-
-
 # -- wrong form → actionable error pointing at the dot-form ------------------
 
 
@@ -551,16 +475,6 @@ def test_old_equals_form_rejected_with_guidance(kql):
 
 
 # -- annotations get NO selector --------------------------------------------
-
-
-def test_annotation_field_is_unknown(kql):
-    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
-        kql.parse("annotation:foo")
-
-
-def test_annotation_dot_field_is_unknown(kql):
-    with pytest.raises(kql.KqlParseError, match=r"unknown field"):
-        kql.parse("annotation.worktree:foo")
 
 
 def test_has_without_label_prefix_rejected(kql):

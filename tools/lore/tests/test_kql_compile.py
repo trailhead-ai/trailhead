@@ -205,35 +205,46 @@ def _ids(rows, conn):
 class TestLockedCompileTable:
     """Each LOCKED compile-table row → expected SQL fragment + params."""
 
-    def test_kind_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("kind:spec"))
-        assert "records.kind = ?" in cq.where
-        assert "spec" in cq.params
-
-    def test_status_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("status:active"))
-        assert "records.status = ?" in cq.where
-        assert "active" in cq.params
-
-    def test_repo_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse('repo:"trailhead-ai/trailhead"'))
-        assert "records.repo = ?" in cq.where
-        assert "trailhead-ai/trailhead" in cq.params
-
-    def test_team_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse('team:"platform infra"'))
-        assert "records.team = ?" in cq.where
-        assert "platform infra" in cq.params
-
-    def test_product_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("product:lore"))
-        assert "records.product = ?" in cq.where
-        assert "lore" in cq.params
-
-    def test_suite_scalar_field_eq(self, kql, compiler):
-        cq = compiler.compile(kql.parse("suite:search"))
-        assert "records.suite = ?" in cq.where
-        assert "search" in cq.params
+    @pytest.mark.parametrize(
+        ("where_fragment", "param", "query"),
+        [
+            pytest.param("records.kind = ?", "spec", "kind:spec", id="kind_scalar_field_eq"),
+            pytest.param("records.status = ?", "active", "status:active", id="status_scalar_field_eq"),
+            pytest.param(
+                "records.repo = ?",
+                "trailhead-ai/trailhead",
+                'repo:"trailhead-ai/trailhead"',
+                id="repo_scalar_field_eq",
+            ),
+            pytest.param("records.team = ?", "platform infra", 'team:"platform infra"', id="team_scalar_field_eq"),
+            pytest.param("records.product = ?", "lore", "product:lore", id="product_scalar_field_eq"),
+            pytest.param("records.suite = ?", "search", "suite:search", id="suite_scalar_field_eq"),
+            pytest.param("EXISTS", "related-area", "related-area:penny", id="related_area_real_key_passthrough"),
+            pytest.param(
+                "EXISTS",
+                "related-phases",
+                "related-phases:build",
+                id="related_phases_real_key_passthrough",
+            ),
+            pytest.param("EXISTS", "keywords", "keywords:foo", id="keywords_real_key_passthrough"),
+            pytest.param(
+                "records.created_at >= ?",
+                "2026-01-01",
+                'created-at >= "2026-01-01"',
+                id="compare_gte_created_at",
+            ),
+            pytest.param(
+                "records.updated_at <= ?",
+                "2026-06-01",
+                'updated-at <= "2026-06-01"',
+                id="compare_lte_updated_at",
+            ),
+        ],
+    )
+    def test_scalar_field_eq(self, kql, compiler, where_fragment, param, query):
+        cq = compiler.compile(kql.parse(query))
+        assert where_fragment in cq.where
+        assert param in cq.params
 
     def test_area_alias_resolves_to_facet_exists(self, kql, compiler):
         cq = compiler.compile(kql.parse("area:penny"))
@@ -253,21 +264,6 @@ class TestLockedCompileTable:
         assert "EXISTS" in cq.where
         assert "keywords" in cq.params
         assert "foo" in cq.params
-
-    def test_related_area_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("related-area:penny"))
-        assert "EXISTS" in cq.where
-        assert "related-area" in cq.params
-
-    def test_related_phases_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("related-phases:build"))
-        assert "EXISTS" in cq.where
-        assert "related-phases" in cq.params
-
-    def test_keywords_real_key_passthrough(self, kql, compiler):
-        cq = compiler.compile(kql.parse("keywords:foo"))
-        assert "EXISTS" in cq.where
-        assert "keywords" in cq.params
 
     def test_related_task_kind_field_compiles_no_sql_changes(self, kql, compiler):
         """A kind-derived ``related-<kind>`` field compiles exactly like the
@@ -295,16 +291,6 @@ class TestLockedCompileTable:
         assert "record_facet" in cq.where
         assert "superseded-by" in cq.params
         assert "adr/bar" in cq.params
-
-    def test_compare_gte_created_at(self, kql, compiler):
-        cq = compiler.compile(kql.parse('created-at >= "2026-01-01"'))
-        assert "records.created_at >= ?" in cq.where
-        assert "2026-01-01" in cq.params
-
-    def test_compare_lte_updated_at(self, kql, compiler):
-        cq = compiler.compile(kql.parse('updated-at <= "2026-06-01"'))
-        assert "records.updated_at <= ?" in cq.where
-        assert "2026-06-01" in cq.params
 
     def test_compare_gt(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at > "2025-01-01"'))
@@ -464,8 +450,16 @@ class TestRankingSelection:
     the pre-computed ``rank.score``. So these assert the locked weights appear in
     the assembled query, not literally inside ``order_by``."""
 
-    def test_fulltext_query_uses_bm25_order(self, kql, compiler):
-        cq = compiler.compile(kql.parse("foo"))
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("foo", id="fulltext_query_uses_bm25_order"),
+            pytest.param('"penny worker"', id="phrase_query_uses_bm25_order"),
+            pytest.param("foo and kind:spec", id="mixed_fulltext_and_facet_uses_bm25"),
+        ],
+    )
+    def test_fulltext_query_uses_bm25_order(self, kql, compiler, query):
+        cq = compiler.compile(kql.parse(query))
         assert "rank.score" in cq.order_by
         assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
@@ -475,16 +469,6 @@ class TestRankingSelection:
         assert "last_referenced_at" in cq.order_by
         assert "bm25" not in cq.order_by
         assert "bm25" not in cq.full_query()
-
-    def test_phrase_query_uses_bm25_order(self, kql, compiler):
-        cq = compiler.compile(kql.parse('"penny worker"'))
-        assert "rank.score" in cq.order_by
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
-
-    def test_mixed_fulltext_and_facet_uses_bm25(self, kql, compiler):
-        cq = compiler.compile(kql.parse("foo and kind:spec"))
-        assert "rank.score" in cq.order_by
-        assert "bm25(record_fts, 3.0, 2.0, 1.0)" in cq.full_query()
 
     def test_bm25_orders_title_hit_before_body_hit(self, kql, compiler, ranking_index):
         """A title-hit row sorts before a body-only-hit row under the bm25 ORDER BY."""
@@ -1024,22 +1008,17 @@ class TestLabelCompile:
         assert ids == [i for i in ids if i.endswith("/spec/two-labels")]
         assert any(i.endswith("/spec/two-labels") for i in ids), ids
 
-    def test_nonexistent_label_returns_none(self, kql, compiler, label_index):
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("label.worktree:nope", id="nonexistent_label_returns_none"),
+            pytest.param("has:label.bogus", id="nonexistent_label_key_exists_returns_none"),
+            pytest.param("label.note:x", id="annotations_not_queryable"),
+        ],
+    )
+    def test_nonexistent_label_matches_nothing(self, kql, compiler, label_index, query):
         conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("label.worktree:nope"))
-        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
-        assert ids == [], ids
-
-    def test_nonexistent_label_key_exists_returns_none(self, kql, compiler, label_index):
-        conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("has:label.bogus"))
-        ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
-        assert ids == [], ids
-
-    def test_annotations_not_queryable(self, kql, compiler, label_index):
-        """annotations are NOT indexed: a label query on an annotation key finds nothing."""
-        conn, vault, env = label_index
-        cq = compiler.compile(kql.parse("label.note:x"))
+        cq = compiler.compile(kql.parse(query))
         ids = _ids(conn.execute(cq.full_query(), cq.params).fetchall(), conn)
         assert ids == [], ids
 

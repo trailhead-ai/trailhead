@@ -950,42 +950,20 @@ doc_files = {doc_files_toml}
         cfg = load_group(f)
         assert cfg["harness"]["doc_files"] == ["AGENTS.md", "CLAUDE.md"]
 
-    def test_empty_list_raises(self, tmp_path: Path):
-        """An empty doc_files list → GroupConfigError."""
+    @pytest.mark.parametrize(
+        "doc_files",
+        [
+            pytest.param("[]", id="empty_list"),
+            pytest.param('["  "]', id="whitespace_token"),
+            pytest.param("[42]", id="non_string_token"),
+            pytest.param('"AGENTS.md"', id="not_a_list"),
+        ],
+    )
+    def test_invalid_doc_files_raises(self, tmp_path: Path, doc_files):
         from camp.group.config import GroupConfigError, load_group
 
         f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files("[]"))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_whitespace_token_raises(self, tmp_path: Path):
-        """A whitespace-only token in doc_files → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files('["  "]'))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_non_string_token_raises(self, tmp_path: Path):
-        """A non-string token in doc_files → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files("[42]"))
-        with pytest.raises(GroupConfigError) as exc_info:
-            load_group(f)
-        assert "doc_files" in str(exc_info.value)
-
-    def test_not_a_list_raises(self, tmp_path: Path):
-        """doc_files as a string (not a list) → GroupConfigError."""
-        from camp.group.config import GroupConfigError, load_group
-
-        f = tmp_path / "g.toml"
-        f.write_text(self._toml_with_doc_files('"AGENTS.md"'))
+        f.write_text(self._toml_with_doc_files(doc_files))
         with pytest.raises(GroupConfigError) as exc_info:
             load_group(f)
         assert "doc_files" in str(exc_info.value)

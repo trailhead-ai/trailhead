@@ -25,6 +25,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -263,12 +264,26 @@ def test_a_stale_socket_with_no_server_listening_is_an_empty_listing(monkeypatch
     assert result.sessions == ()
 
 
-def test_no_server_running_on_with_no_operand_is_unanswered(monkeypatch) -> None:
-    """The stale-socket shape always names the socket it found dead —
-    `no server running on <socket>`. A stderr line that merely ends in the
-    bare phrase, with nothing after the trailing space, is not that shape
-    (real tmux answers always carry an operand) and must not be read as an
-    empty server."""
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        pytest.param("camp: no server running on ", id="no_server_running_on_with_no_operand_is_unanswered"),
+        pytest.param(
+            "/etc/tmux.conf: 3: No such file or directory",
+            id="an_unrelated_error_mentioning_a_missing_file_is_unanswered",
+        ),
+        pytest.param(
+            "directory /tmp/tmux-501 has unsafe permissions",
+            id="an_unsafe_socket_directory_is_unanswered_not_empty",
+        ),
+        pytest.param(
+            "error connecting to /some/very/long/path (File name too long)",
+            id="an_unreachable_socket_is_unanswered_not_empty",
+        ),
+        pytest.param("some new tmux error text", id="an_unrecognised_stderr_on_non_zero_exit_routes_to_unanswered"),
+    ],
+)
+def test_unrecognised_stderr_is_unanswered(monkeypatch, stderr) -> None:
     from camp.launch import stop
 
     monkeypatch.setattr(
@@ -276,83 +291,8 @@ def test_no_server_running_on_with_no_operand_is_unanswered(monkeypatch) -> None
         "run",
         lambda *a, **k: _completed(
             returncode=1,
-            stderr="camp: no server running on ",
+            stderr=stderr,
         ),
-    )
-
-    result = stop.Tmux().list_sessions()
-
-    assert result is stop.UNANSWERED
-
-
-def test_an_unrelated_error_mentioning_a_missing_file_is_unanswered(monkeypatch) -> None:
-    """The no-server condition is `error connecting to <socket> (No such
-    file or directory)`. A non-zero exit that merely CARRIES that phrase —
-    a config file tmux could not source, a shell wrapper's own complaint —
-    is an outage, and reading it as an empty server would render every
-    workspace `none` during a live one: a wrong answer wearing a right
-    answer's clothes."""
-    from camp.launch import stop
-
-    monkeypatch.setattr(
-        stop.subprocess,
-        "run",
-        lambda *a, **k: _completed(
-            returncode=1,
-            stderr="/etc/tmux.conf: 3: No such file or directory",
-        ),
-    )
-
-    result = stop.Tmux().list_sessions()
-
-    assert result is stop.UNANSWERED
-
-
-def test_an_unsafe_socket_directory_is_unanswered_not_empty(monkeypatch) -> None:
-    """A live outage, not an empty server: this is the test that fails if the
-    implementation keys on the exit status alone."""
-    from camp.launch import stop
-
-    monkeypatch.setattr(
-        stop.subprocess,
-        "run",
-        lambda *a, **k: _completed(
-            returncode=1,
-            stderr="directory /tmp/tmux-501 has unsafe permissions",
-        ),
-    )
-
-    result = stop.Tmux().list_sessions()
-
-    assert result is stop.UNANSWERED
-
-
-def test_an_unreachable_socket_is_unanswered_not_empty(monkeypatch) -> None:
-    from camp.launch import stop
-
-    monkeypatch.setattr(
-        stop.subprocess,
-        "run",
-        lambda *a, **k: _completed(
-            returncode=1,
-            stderr="error connecting to /some/very/long/path (File name too long)",
-        ),
-    )
-
-    result = stop.Tmux().list_sessions()
-
-    assert result is stop.UNANSWERED
-
-
-def test_an_unrecognised_stderr_on_non_zero_exit_routes_to_unanswered(monkeypatch) -> None:
-    """The conservative default: a future tmux rewording degrades to unknown
-    rather than to a confident wrong answer."""
-    from camp.launch import stop
-
-    monkeypatch.setattr(
-        stop.subprocess,
-        "run",
-        lambda *a, **k: _completed(returncode=1, stderr="some new tmux error text"),
     )
 
     result = stop.Tmux().list_sessions()

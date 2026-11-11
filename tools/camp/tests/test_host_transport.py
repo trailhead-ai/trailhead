@@ -129,10 +129,23 @@ def test_remote_command_is_prefixed_with_camp_bin() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_connect_timeout_classifies_as_unreachable() -> None:
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        pytest.param("ssh: connect to host andromeda port 22: Connection timed out\r\n", id="connect_timeout"),
+        pytest.param("ssh: connect to host andromeda port 22: Connection refused\r\n", id="refused_connection"),
+        pytest.param("ssh: connect to host andromeda port 22: No route to host\r\n", id="no_route_to_host"),
+        pytest.param("ssh: connect to host andromeda port 22: Network is unreachable\r\n", id="network_unreachable"),
+        pytest.param(
+            "ssh: connect to host andromeda port 22: Operation timed out\r\n",
+            id="darwin_operation_timed_out",
+        ),
+    ],
+)
+def test_ssh_failure_classifies_as_unreachable(stderr) -> None:
     fake = _FakeRunner(
         result=transport.RawResult(
-            stdout="", stderr="ssh: connect to host andromeda port 22: Connection timed out\r\n", exit_code=255
+            stdout="", stderr=stderr, exit_code=255
         )
     )
 
@@ -150,103 +163,23 @@ def test_execution_timeout_classifies_as_stopped_responding() -> None:
     assert outcome.execution_timeout == 60.0
 
 
-def test_refused_connection_classifies_as_unreachable() -> None:
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        pytest.param("bash: line 1: camp: command not found\n", id="missing_remote_binary"),
+        pytest.param(
+            "bash: line 1: /opt/wrong/camp: No such file or directory\n",
+            id="exit_127_with_bash_no_such_file_wording",
+        ),
+        pytest.param("/bin/sh: 1: camp: not found\n", id="exit_127_with_dash_not_found_wording"),
+        pytest.param("", id="exit_127_with_no_recognizable_wording_still"),
+    ],
+)
+def test_exit_127_classifies_as_camp_not_resolvable(stderr) -> None:
     fake = _FakeRunner(
         result=transport.RawResult(
-            stdout="", stderr="ssh: connect to host andromeda port 22: Connection refused\r\n", exit_code=255
+            stdout="", stderr=stderr, exit_code=127
         )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.Unreachable)
-
-
-def test_no_route_to_host_classifies_as_unreachable() -> None:
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="", stderr="ssh: connect to host andromeda port 22: No route to host\r\n", exit_code=255
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.Unreachable)
-
-
-def test_network_unreachable_classifies_as_unreachable() -> None:
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="", stderr="ssh: connect to host andromeda port 22: Network is unreachable\r\n", exit_code=255
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.Unreachable)
-
-
-def test_darwin_operation_timed_out_classifies_as_unreachable() -> None:
-    # macOS strerror(ETIMEDOUT), distinct from the existing "Connection timed
-    # out" — the operator runs two Macs, so this wording is a live path.
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="", stderr="ssh: connect to host andromeda port 22: Operation timed out\r\n", exit_code=255
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.Unreachable)
-
-
-def test_missing_remote_binary_classifies_as_camp_not_resolvable() -> None:
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="", stderr="bash: line 1: camp: command not found\n", exit_code=127
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.CampNotResolvable)
-
-
-def test_exit_127_with_bash_no_such_file_wording_classifies_as_camp_not_resolvable() -> None:
-    # A wrong camp_bin PATH (as opposed to a missing bare command) produces
-    # this wording under bash — "command not found" alone would miss it.
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="",
-            stderr="bash: line 1: /opt/wrong/camp: No such file or directory\n",
-            exit_code=127,
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.CampNotResolvable)
-
-
-def test_exit_127_with_dash_not_found_wording_classifies_as_camp_not_resolvable() -> None:
-    # dash/ash say "not found" (no "command") for BOTH causes — a missing
-    # bare command and a wrong path.
-    fake = _FakeRunner(
-        result=transport.RawResult(
-            stdout="", stderr="/bin/sh: 1: camp: not found\n", exit_code=127
-        )
-    )
-
-    outcome = transport.run_camp(_HOST, ["list"], runner=fake)
-
-    assert isinstance(outcome, transport.CampNotResolvable)
-
-
-def test_exit_127_with_no_recognizable_wording_still_classifies_as_camp_not_resolvable() -> None:
-    # Exit 127 alone is unambiguous against every transport failure (all of
-    # which are 255) — the message is not required to classify it.
-    fake = _FakeRunner(
-        result=transport.RawResult(stdout="", stderr="", exit_code=127)
     )
 
     outcome = transport.run_camp(_HOST, ["list"], runner=fake)

@@ -1115,28 +1115,19 @@ def test_session_complete_is_rejected():
     assert any("complete" in e for e in result.errors)
 
 
-def test_session_shelved_is_rejected():
-    """shelved was never valid; still rejected."""
+@pytest.mark.parametrize(
+    ("message", "status"),
+    [
+        pytest.param("shelved must be rejected for session kind", "shelved", id="shelved"),
+        pytest.param("handoff must be rejected for session kind", "handoff", id="handoff"),
+        pytest.param("finalized must be rejected for session kind", "finalized", id="finalized"),
+    ],
+)
+def test_session_status_is_rejected(message, status):
     m = rm()
-    sidecar = _base_sidecar_with(kind="session", status="shelved")
+    sidecar = _base_sidecar_with(kind="session", status=status)
     result = m.validate(sidecar)
-    assert result.errors, "shelved must be rejected for session kind"
-
-
-def test_session_handoff_is_rejected():
-    """handoff is not in the session vocab; rejected."""
-    m = rm()
-    sidecar = _base_sidecar_with(kind="session", status="handoff")
-    result = m.validate(sidecar)
-    assert result.errors, "handoff must be rejected for session kind"
-
-
-def test_session_finalized_is_rejected():
-    """finalized is not in the session vocab; rejected."""
-    m = rm()
-    sidecar = _base_sidecar_with(kind="session", status="finalized")
-    result = m.validate(sidecar)
-    assert result.errors, "finalized must be rejected for session kind"
+    assert result.errors, message
 
 
 # --- adr kind: status vocab {draft, active, superseded, dropped} -----------

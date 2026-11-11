@@ -20,6 +20,7 @@ covered by test_index_projection.py.)
 from __future__ import annotations
 
 from conftest import load_script
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -40,25 +41,22 @@ def _fm(text: str) -> dict:
 
 
 class TestBlockStyleListParsing:
-    def test_block_style_single_bare_slug(self):
-        """Block-style list with a bare slug entry."""
-        result = _fm("surfaces:\n  - synth-alpha")
+    @pytest.mark.parametrize(
+        "block",
+        [
+            pytest.param("surfaces:\n  - synth-alpha", id="single"),
+            pytest.param("surfaces:\n  - 'synth-alpha'", id="quoted"),
+            pytest.param('surfaces:\n  - "synth-alpha"', id="double_quoted"),
+        ],
+    )
+    def test_block_style_bare_slug_is_kept(self, block):
+        result = _fm(block)
         assert result["surfaces"] == ["synth-alpha"]
 
     def test_block_style_multiple_bare_slugs(self):
         """Block-style list with multiple bare slug entries."""
         result = _fm("surfaces:\n  - synth-alpha\n  - synth-beta")
         assert result["surfaces"] == ["synth-alpha", "synth-beta"]
-
-    def test_block_style_quoted_bare_slug(self):
-        """Block-style list item with single quotes around a bare slug."""
-        result = _fm("surfaces:\n  - 'synth-alpha'")
-        assert result["surfaces"] == ["synth-alpha"]
-
-    def test_block_style_double_quoted_bare_slug(self):
-        """Block-style list item with double quotes around a bare slug."""
-        result = _fm('surfaces:\n  - "synth-alpha"')
-        assert result["surfaces"] == ["synth-alpha"]
 
 
 # ---------------------------------------------------------------------------

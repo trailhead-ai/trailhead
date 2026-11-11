@@ -150,31 +150,18 @@ def test_trailing_slash_base_matches_no_trailing_slash(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_schemeless_base_rejected_and_default_used(tmp_path):
+@pytest.mark.parametrize(
+    "base",
+    [
+        pytest.param("127.0.0.1:9999", id="schemeless_base_rejected_and_default_used"),
+        pytest.param("ftp://example.test:6666", id="unsupported_scheme_base_rejected_and_default_used"),
+        pytest.param("http:nonsense", id="scheme_without_netloc_base_rejected_and_default_used"),
+        pytest.param("http://[oops", id="an_unparseable_base_falls_back_instead_of_raising"),
+    ],
+)
+def test_unusable_record_url_base_falls_back_to_the_default(tmp_path, base):
     env = _make_env(tmp_path)
-    env["LORE_RECORD_URL_BASE"] = "127.0.0.1:9999"
-    mod = ru()
-    with pytest.warns(RuntimeWarning):
-        result = mod.build_record_url("v", "task", "s", env=env)
-    assert result.startswith("http://127.0.0.1:7313/")
-
-
-def test_unsupported_scheme_base_rejected_and_default_used(tmp_path):
-    env = _make_env(tmp_path)
-    env["LORE_RECORD_URL_BASE"] = "ftp://example.test:6666"
-    mod = ru()
-    with pytest.warns(RuntimeWarning):
-        result = mod.build_record_url("v", "task", "s", env=env)
-    assert result.startswith("http://127.0.0.1:7313/")
-
-
-def test_scheme_without_netloc_base_rejected_and_default_used(tmp_path):
-    """A base with an allowed scheme but no netloc (e.g. ``http:nonsense``,
-    which urlsplit parses as scheme "http" with an empty netloc) is rejected
-    the same way a missing/unsupported scheme is — never yielding a link like
-    ``http:nonsense/records/...``."""
-    env = _make_env(tmp_path)
-    env["LORE_RECORD_URL_BASE"] = "http:nonsense"
+    env["LORE_RECORD_URL_BASE"] = base
     mod = ru()
     with pytest.warns(RuntimeWarning):
         result = mod.build_record_url("v", "task", "s", env=env)
@@ -224,19 +211,6 @@ def test_a_dot_only_segment_cannot_be_normalized_away(tmp_path):
     url = mod.build_record_url("v", "..", "s", env=env)
     assert "/.." not in url
     assert url.endswith("/records/v/%2E%2E/s")
-
-
-def test_an_unparseable_base_falls_back_instead_of_raising(tmp_path):
-    """A base ``urlsplit`` itself refuses to parse is rejected like any other
-    invalid base. ``urlsplit("http://[oops")`` raises ValueError on the
-    unclosed IPv6 bracket; letting that escape would abort a write verb that
-    has already committed its record."""
-    env = _make_env(tmp_path)
-    env["LORE_RECORD_URL_BASE"] = "http://[oops"
-    mod = ru()
-    with pytest.warns(RuntimeWarning):
-        result = mod.build_record_url("v", "task", "s", env=env)
-    assert result.startswith("http://127.0.0.1:7313/")
 
 
 def test_a_base_carrying_a_query_or_fragment_is_rejected(tmp_path):
