@@ -24,13 +24,22 @@ The stub serves two kinds of call:
 * ``ignore_term``: ignore SIGTERM in the background process.
 * ``bind_first_then_fail``: bind the first ``-L`` port, then exit 255 on the second with ssh's own
   bind-failure lines (``fixtures/env_forward_bind_failure_linux_openssh_9_6.txt``).
-* ``parent_delay``: seconds the foreground process lingers after forking, so a test can act while
-  ``ssh -f`` has not yet returned.
+* ``parent_hold``: the foreground process lingers after forking until the test calls
+  ``AttachRig.release_parent()`` (at most ``HOLD_CAP_SECONDS``), so a test can act while ``ssh -f``
+  has not yet returned. ``AttachRig.wait_parent_held()`` returns once it is lingering, and
+  ``AttachRig.wait_backgrounded()`` once the forked forward has finished setting itself up (it is
+  then signalable and in its own session).
 
-``AttachRig.delay_ps(seconds)`` makes every stub ``ps`` call wait before answering, so the window in
-which an attach reads the process table, starts its forward or relay and reads the table again stays
-open for a second attach to arrive in. It holds the window open for a relay start as well as a
-forward start.
+``AttachRig.hold_inventory()`` makes every ``docker`` call and every inventory ``ssh`` wait until
+``AttachRig.release_inventory()``, so several attaches can be held after their first look at the process
+table and let on to the attach lock together; ``AttachRig.wait_inventory_held(n)`` returns once *n* reads
+are waiting.
+
+``AttachRig.hold_ps()`` makes every stub ``ps`` call wait until ``AttachRig.release_ps()`` (at most
+``HOLD_CAP_SECONDS``), so the window in which an attach reads the process table, starts its forward or
+relay and reads the table again stays open for a second attach to arrive in. It holds the window open
+for a relay start as well as a forward start; ``AttachRig.wait_ps_held()`` returns once a ``ps`` call is
+waiting.
 
 Using the rig from another test file::
 
@@ -87,6 +96,9 @@ BIND_FAILURE_TAIL = (
 # --- the stub ssh ------------------------------------------------------------------------------
 
 
+HOLD_CAP_SECONDS = 60.0
+
+
 def _root() -> Path:
     return Path(__file__).resolve().parent.parent
 
@@ -141,6 +153,11 @@ def _inventory(args: list[str]) -> None:
     dest = _destination(args)
     with open(_root() / "inventory.log", "a") as log:
         log.write(json.dumps({"dest": dest}) + "\n")
+    with open(_root() / "inventory.held", "a") as held:
+        held.write("x\n")
+    deadline = time.monotonic() + HOLD_CAP_SECONDS
+    while (_root() / "inventory.hold").exists() and time.monotonic() < deadline:
+        time.sleep(0.01)
     reply = _root() / "inventory" / (dest or "")
     if dest is None or not reply.is_file():
         _die(255, f"ssh: Could not resolve hostname {dest}")
@@ -204,16 +221,22 @@ def _forward(args: list[str]) -> None:
 
     if fork:
         if os.fork():
-            time.sleep(float(cfg.get("parent_delay", 0)))
+            if cfg.get("parent_hold"):
+                (_root() / "parent.holding").write_text("")
+                deadline = time.monotonic() + HOLD_CAP_SECONDS
+                while not (_root() / "parent.release").exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
             os._exit(0)
         os.setsid()
         null = os.open(os.devnull, os.O_RDWR)
         for fd in (0, 1, 2):
             os.dup2(null, fd)
-    if cfg.get("die_after_fork"):
-        os._exit(0)
     if cfg.get("ignore_term"):
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open(_root() / "backgrounded.log", "a") as log:
+        log.write(f"{os.getpid()}\n")
+    if cfg.get("die_after_fork"):
+        os._exit(0)
 
     while True:
         ready, _, _ = select.select(list(listeners), [], [])
@@ -241,6 +264,9 @@ _CLI_CAMP = Path(__file__).resolve().parents[1] / "plugins" / "camp" / "cli" / "
 _PS_ARGV = ["ps", "-axwwo", "pid=,uid=,command="]
 
 _DOCKER_STUB = """#!/bin/sh
+echo x >> "$STUB_DIR/inventory.held"
+i=0
+while [ -f "$STUB_DIR/inventory.hold" ] && [ "$i" -lt 3000 ]; do sleep 0.02; i=$((i + 1)); done
 [ -f "$STUB_DIR/docker.stdout" ] && cat "$STUB_DIR/docker.stdout"
 exit 0
 """
@@ -249,8 +275,11 @@ _PS_STUB = """#!/bin/sh
 n=$(cat "$STUB_DIR/ps.count" 2>/dev/null || echo 0)
 n=$((n + 1))
 echo "$n" > "$STUB_DIR/ps.count"
-delay=$(cat "$STUB_DIR/ps.delay" 2>/dev/null)
-[ -n "$delay" ] && sleep "$delay"
+if [ -f "$STUB_DIR/ps.hold" ]; then
+  : > "$STUB_DIR/ps.held"
+  i=0
+  while [ -f "$STUB_DIR/ps.hold" ] && [ "$i" -lt 3000 ]; do sleep 0.02; i=$((i + 1)); done
+fi
 limit=$(cat "$STUB_DIR/ps.limit" 2>/dev/null)
 if [ -n "$limit" ] && [ "$n" -gt "$limit" ]; then
   echo "ps: simulated failure" >&2
@@ -438,12 +467,60 @@ class AttachRig:
     def configure(self, **switches) -> None:
         (self.root / "stub.json").write_text(json.dumps(switches))
 
-    def delay_ps(self, seconds: float) -> None:
-        """Every ``ps`` call waits *seconds* before answering."""
+    def hold_ps(self) -> None:
+        """Every ``ps`` call waits until ``release_ps``."""
         sleep = self.bin / "sleep"
         if not sleep.exists():
             sleep.symlink_to(shutil.which("sleep"))
-        (self.root / "ps.delay").write_text(str(seconds))
+        (self.root / "ps.hold").write_text("")
+
+    def hold_inventory(self) -> None:
+        """Every ``docker`` call and every inventory ``ssh`` waits until ``release_inventory``."""
+        sleep = self.bin / "sleep"
+        if not sleep.exists():
+            sleep.symlink_to(shutil.which("sleep"))
+        (self.root / "inventory.hold").write_text("")
+
+    def release_inventory(self) -> None:
+        (self.root / "inventory.hold").unlink(missing_ok=True)
+
+    def wait_inventory_held(self, count: int, timeout: float = 60.0) -> None:
+        """Return once *count* inventory reads are waiting on ``hold_inventory``."""
+        held = self.root / "inventory.held"
+        self._wait(
+            lambda: held.exists() and len(held.read_text().split()) >= count,
+            timeout,
+            f"fewer than {count} inventory reads reached the hold",
+        )
+
+    def release_ps(self) -> None:
+        (self.root / "ps.hold").unlink(missing_ok=True)
+
+    def wait_ps_held(self, timeout: float = 60.0) -> None:
+        """Return once some ``ps`` call is waiting on ``hold_ps``."""
+        self._wait(lambda: (self.root / "ps.held").exists(), timeout, "no ps call reached the hold")
+
+    def release_parent(self) -> None:
+        (self.root / "parent.release").write_text("")
+
+    def wait_parent_held(self, timeout: float = 60.0) -> None:
+        """Return once a foreground ``ssh -f`` is lingering on ``parent_hold``."""
+        self._wait(lambda: (self.root / "parent.holding").exists(), timeout, "no ssh -f reached the parent hold")
+
+    def wait_backgrounded(self, timeout: float = 60.0) -> list[int]:
+        """Pids of forwards that have forked, left their session and finished setting themselves up."""
+        log = self.root / "backgrounded.log"
+        self._wait(lambda: log.exists() and log.read_text().strip(), timeout, "no forward finished backgrounding")
+        return [int(line) for line in log.read_text().split()]
+
+    @staticmethod
+    def _wait(predicate, timeout: float, failure: str) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.01)
+        raise AssertionError(failure)
 
     def break_ps_after(self, calls: int) -> None:
         """Every ``ps`` call after the first *calls* fails; 0 fails them all."""
@@ -471,30 +548,6 @@ class AttachRig:
                 return pids
             time.sleep(0.05)
         raise AssertionError("no forward carrying this rig's namespace appeared")
-
-    def wait_backgrounded(self, timeout: float = 10.0) -> None:
-        """Wait until camp itself recognises two of this rig's forwards at once: the foreground
-        process (kept alive by ``parent_delay``) and the background one it forked. Recognition is
-        camp's own rule, so a stub still re-executing, or not yet forked, does not count."""
-        plugin = str(Path(__file__).resolve().parents[1] / "plugins" / "camp")
-        if plugin not in sys.path:
-            sys.path.insert(0, plugin)
-        from camp.env.attachment import NAMESPACE_ENV, attachments
-
-        deadline = time.monotonic() + timeout
-        previous = os.environ.get(NAMESPACE_ENV)
-        os.environ[NAMESPACE_ENV] = self.ns
-        try:
-            while time.monotonic() < deadline:
-                if len(attachments()) >= 2:
-                    return
-                time.sleep(0.05)
-        finally:
-            if previous is None:
-                os.environ.pop(NAMESPACE_ENV, None)
-            else:
-                os.environ[NAMESPACE_ENV] = previous
-        raise AssertionError("the forward was not seen backgrounded (two recognised processes)")
 
     # -- running -------------------------------------------------------------------------------
 

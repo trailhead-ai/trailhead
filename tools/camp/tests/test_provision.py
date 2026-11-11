@@ -89,6 +89,20 @@ def two_member_group(tmp_path: Path):
     return {"group": group, "repo_a": repo_a, "repo_b": repo_b, "env": env, "tmp_path": tmp_path}
 
 
+def _wait_until(predicate, failure: str, *, timeout: float = 60.0, interval: float = 0.02) -> None:
+    """Poll `predicate` until it is true; fail with `failure` once `timeout` runs out.
+
+    The timeout is only the bound on a hung child, never a duration the test
+    relies on: a loaded host takes longer to get there, it does not fail.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return
+        time.sleep(interval)
+    raise AssertionError(failure)
+
+
 # ===========================================================================
 # Test 1: real survival (BLOCKING gate)
 # ===========================================================================
@@ -101,19 +115,26 @@ class TestU1RealSurvival:
     def test_detached_provisioner_survives_parent_exec(self, tmp_path: Path) -> None:
         scratch = tmp_path / "u1"
         scratch.mkdir()
+        started = scratch / "started.txt"
+        gate = scratch / "go"
         sentinel = scratch / "sentinel.txt"
         logfile = scratch / "setup.log"
 
-        # No-op provisioner script (stands in for `camp setup --background`):
-        # sleeps so the parent definitely exec's first, then writes the sentinel.
+        # No-op provisioner script (stands in for `camp setup --background`).
+        # It announces itself, then blocks on a gate file the test only opens
+        # once the parent process is gone, so the sentinel can only be written
+        # by a child that outlived the parent's exec — ordering comes from the
+        # gate, not from a sleep.
         provisioner = scratch / "noop_provisioner.py"
         provisioner.write_text(
             textwrap.dedent(f"""\
-            import time, os
-            time.sleep(0.8)
+            import os, time
+            with open({str(started)!r}, "w") as f:
+                f.write(f"{{os.getpid()}}\\n")
+            while not os.path.exists({str(gate)!r}):
+                time.sleep(0.01)
             with open({str(sentinel)!r}, "w") as f:
                 f.write(f"done pid={{os.getpid()}}\\n")
-            print("provisioner completed", flush=True)
             """),
             encoding="utf-8",
         )
@@ -136,37 +157,37 @@ class TestU1RealSurvival:
             encoding="utf-8",
         )
 
-        result = subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
+        result = subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=60)
         assert result.returncode == 0, (
             f"parent exited non-zero: {result.returncode}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
 
-        deadline = time.monotonic() + 8.0
-        while not sentinel.exists() and time.monotonic() < deadline:
-            time.sleep(0.05)
-
-        assert sentinel.exists(), (
-            "detached child did not survive the parent os.execvp — "
-            "async provisioning architecture is broken"
+        # The parent is gone. The child must still be up and waiting on the gate.
+        _wait_until(
+            lambda: started.exists() and started.read_text().strip(),
+            "the detached child never announced itself after the parent exec'd",
         )
-        assert "done" in sentinel.read_text()
+        child_pid = int(started.read_text())
+        os.kill(child_pid, 0)  # raises ProcessLookupError if the child died with the parent
+        assert not sentinel.exists(), "sentinel written before the gate opened"
+
+        gate.write_text("go", encoding="utf-8")
+        _wait_until(
+            lambda: "done" in sentinel.read_text() if sentinel.exists() else False,
+            "detached child did not survive the parent os.execvp — "
+            "async provisioning architecture is broken",
+        )
+        assert sentinel.read_text() == f"done pid={child_pid}\n"
 
     def test_logfile_captures_child_output_after_exec(self, tmp_path: Path) -> None:
         scratch = tmp_path / "u1log"
         scratch.mkdir()
-        sentinel = scratch / "sentinel.txt"
         logfile = scratch / "setup.log"
 
         provisioner = scratch / "noop_provisioner.py"
         provisioner.write_text(
-            textwrap.dedent(f"""\
-            import time, os
-            time.sleep(0.5)
-            with open({str(sentinel)!r}, "w") as f:
-                f.write("done\\n")
-            print("provisioner completed", flush=True)
-            """),
+            'print("provisioner completed", flush=True)\n',
             encoding="utf-8",
         )
 
@@ -185,19 +206,12 @@ class TestU1RealSurvival:
             encoding="utf-8",
         )
 
-        subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=15)
+        subprocess.run([_VENV_PYTHON, str(parent)], capture_output=True, timeout=60)
 
-        # Wait for the logfile to carry the child's output — not for the
-        # sentinel. The child writes the sentinel BEFORE it prints, so a
-        # sentinel-gated wait can return while the print is still in flight
-        # and read an empty logfile.
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline:
-            if logfile.exists() and "provisioner completed" in logfile.read_text():
-                break
-            time.sleep(0.05)
-
-        assert logfile.exists(), "setup.log never created"
+        _wait_until(
+            lambda: logfile.exists() and "provisioner completed" in logfile.read_text(),
+            "setup.log never carried the child's output",
+        )
         assert "provisioner completed" in logfile.read_text()
 
     def test_setup_log_written_0600(self, tmp_path: Path) -> None:
@@ -1281,6 +1295,34 @@ def _provision_task(name: str, steps: list[dict], *, required: bool = False) -> 
     }
 
 
+def _sleeps_on_the_task_clock(monkeypatch) -> None:
+    """Run the steps `_sleep_cmd` builds against a task clock they advance by their own length, so a
+    budget measured in seconds elapses without anyone waiting for it. A sleep longer than its step's
+    timeout times out at that timeout, as the real subprocess would; every other step runs for real
+    and takes no time on the task clock."""
+    import re
+    import types
+
+    from camp.provision import tasks
+
+    now = [0.0]
+    real_run_argv = tasks._run_argv
+
+    def run_argv(argv, *, cwd, timeout):
+        sleeping = re.fullmatch(r"import time; time\.sleep\(([0-9.]+)\)", argv[-1])
+        if argv[:1] != [_VENV_PYTHON] or sleeping is None:
+            return real_run_argv(argv, cwd=cwd, timeout=timeout)
+        seconds = float(sleeping.group(1))
+        if seconds > timeout:
+            now[0] += timeout
+            return False, f"timed out after {timeout}s: {argv}"
+        now[0] += seconds
+        return True, ""
+
+    monkeypatch.setattr(tasks, "_run_argv", run_argv)
+    monkeypatch.setattr(tasks, "time", types.SimpleNamespace(monotonic=lambda: now[0]))
+
+
 class TestBootPathBudget:
     """The SessionStart hook path (reconcile_worktree) bounds provision-phase
     TASKS by a tight boot budget — git fetch / worktree add keep their own
@@ -1335,17 +1377,51 @@ class TestBootPathBudget:
         entry = read_central_manifest(mpath)["members"][0]
         assert entry["tasks"]["slow"]["state"] == "over-budget"
 
+    def test_a_step_still_running_when_the_budget_runs_out_is_killed_then(self, tmp_path, monkeypatch):
+        """The budget bounds a real step that is still running: it is killed when the budget runs
+        out, long before the step would have finished, and the task is recorded over-budget (not
+        failed). A single step is the whole task, so loaded-host spawn time cannot use up the budget
+        before the step starts."""
+        import camp.provision.reconcile as reconcile
+        from camp.group.manifest import read_central_manifest
+
+        monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 1.0)
+
+        repo = tmp_path / "repo"
+        init_git_repo(repo, origin=True)
+        env = camp_state_env(tmp_path)
+        group = _make_group_config(
+            "bootbudgetkillg",
+            [
+                {
+                    "name": "repo",
+                    "repo_root": str(repo),
+                    "base": "origin/main",
+                    "tasks": [_provision_task("slow", [_step("only", _sleep_cmd(60))])],
+                }
+            ],
+        )
+
+        started = time.monotonic()
+        reconcile.reconcile_worktree(group, "s", env=env)
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 30, f"the running step was not killed at the budget: {elapsed:.1f}s"
+        mpath = _workspace_dir("bootbudgetkillg", "s", env) / "manifest.json"
+        entry = read_central_manifest(mpath)["members"][0]
+        assert entry["tasks"]["slow"]["state"] == "over-budget"
+
     def test_over_budget_task_is_not_reexecuted_on_next_reconcile(self, tmp_path, monkeypatch):
         """Once a task is recorded over-budget, a later reconcile_worktree
         call (the next SessionStart) does not re-run it."""
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        # Generous headroom for the trivial "mark" write step to reliably
-        # complete under contention before the budget check bites — the
-        # proof is the clamp on "second", not on how tight "mark"'s own
-        # window is.
+        # The budget is measured on the task clock, which only the sleep step
+        # advances: the trivial "mark" write step takes no budget however loaded
+        # the host is, and the clamp on "second" costs no real time.
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
+        _sleeps_on_the_task_clock(monkeypatch)
 
         repo = tmp_path / "repo"
         init_git_repo(repo, origin=True)
@@ -1436,13 +1512,11 @@ class TestBootPathBudget:
         import camp.provision.reconcile as reconcile
         from camp.group.manifest import read_central_manifest
 
-        # Deliberately generous relative to the original 0.05s: the "later"
-        # task below is a genuinely fast, trivial subprocess spawn that must
-        # complete WITHIN budget for this test to prove anything — a budget
-        # this tight to process-spawn/scheduling overhead under contention
-        # would make "later" spuriously over-budget too, collapsing the two
-        # outcomes this test exists to distinguish.
+        # The budget is measured on the task clock, which only the sleep step
+        # advances: the "later" task's trivial subprocess spawn takes no budget
+        # however loaded the host is, so it can only be in budget.
         monkeypatch.setattr(reconcile, "BOOT_TASK_BUDGET_SECONDS", 5.0)
+        _sleeps_on_the_task_clock(monkeypatch)
 
         repo = tmp_path / "repo"
         init_git_repo(repo, origin=True)

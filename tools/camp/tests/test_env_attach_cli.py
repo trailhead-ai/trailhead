@@ -478,9 +478,12 @@ def test_an_unreadable_process_table_refuses_with_its_reason_before_any_host_is_
 # --- ending what this attach started ------------------------------------------------------------
 
 
-def run_interrupted(rig: AttachRig) -> subprocess.Popen:
+def run_interrupted(rig: AttachRig, **switches) -> subprocess.Popen:
+    """Interrupt an attach once its forward is backgrounded and camp is still waiting on ``ssh -f``."""
+    rig.configure(parent_hold=True, **switches)
     proc = rig.popen_camp("env", "attach", "perseus/levr/main")
     rig.wait_backgrounded()
+    rig.wait_parent_held()
     proc.send_signal(signal.SIGINT)
     proc.wait(timeout=30)
     return proc
@@ -489,9 +492,8 @@ def run_interrupted(rig: AttachRig) -> subprocess.Popen:
 @pytest.mark.parametrize("ignore_term", [False, True], ids=["term", "ignores-term"])
 def test_an_interrupt_after_the_forward_started_leaves_no_forward_running(rig: AttachRig, ignore_term: bool) -> None:
     env = attached_rig(rig)
-    rig.configure(parent_delay=30, ignore_term=ignore_term)
 
-    proc = run_interrupted(rig)
+    proc = run_interrupted(rig, ignore_term=ignore_term)
 
     assert proc.returncode == 130
     assert proc.stderr.read() == "camp env: attach interrupted; the forward it started was ended\n"
@@ -521,13 +523,14 @@ def test_an_unexpected_exception_after_the_forward_started_still_ends_the_forwar
 
 def test_failure_cleanup_ends_only_this_attachs_forward(rig: AttachRig) -> None:
     env = attached_rig(rig)
-    rig.configure(die_after_fork=True, parent_delay=2)
+    rig.configure(die_after_fork=True, parent_hold=True)
     proc = rig.popen_camp("env", "attach", "perseus/levr/main")
-    wait_for(lambda: rig.forwards() != [])
+    rig.wait_parent_held()
     decoy = rig.decoy_forward("other1")
-    wait_for(lambda: rig.tagged_pids() != [])
+    assert decoy.pid in rig.tagged_pids()
 
-    proc.wait(timeout=30)
+    rig.release_parent()
+    proc.wait(timeout=60)
 
     assert proc.returncode == 1
     assert decoy.poll() is None
@@ -1067,13 +1070,29 @@ def refusal(shown: str, *, note: bool) -> str:
     return f"camp env: {shown} is attached; run camp env detach before attaching another{suffix}\n"
 
 
-def race(rig: AttachRig, *targets: str) -> "list[tuple[str, int, str, str]]":
-    """Start `camp env attach` for each target at once; each target's (target, exit, stdout, stderr)."""
-    procs = [(t, rig.popen_camp("env", "attach", t)) for t in targets]
+def race(rig: AttachRig, first: str, second: str, *, hold: str) -> "list[tuple[str, int, str, str]]":
+    """Start `camp env attach` for both targets with both past their first look at the process table,
+    let them reach the attach lock together, and keep whichever takes it inside its start (``hold`` is
+    ``"parent"``: ``ssh -f`` not returning, or ``"ps"``: the process table not answering) until the
+    other has said it is waiting for the lock. Each target's (target, exit, stdout, stderr)."""
+    rig.hold_inventory()
+    procs = [(t, rig.popen_camp("env", "attach", t)) for t in (first, second)]
+    rig.wait_inventory_held(2)
+    if hold == "parent":
+        rig.configure(parent_hold=True)
+    else:
+        rig.hold_ps()
+    rig.release_inventory()
+    ready = []
+    while not ready:
+        ready, _, _ = select.select([proc.stderr for _, proc in procs], [], [], 0.05)
+    first_words = {proc.stderr: proc.stderr.readline() for _, proc in procs if proc.stderr in ready}
+    assert list(first_words.values()) == [WAITING], f"expected one attach waiting for the lock: {first_words}"
+    (rig.release_parent if hold == "parent" else rig.release_ps)()
     done = []
     for target, proc in procs:
         out, err = proc.communicate(timeout=60)
-        done.append((target, proc.returncode, out, err))
+        done.append((target, proc.returncode, out, first_words.get(proc.stderr, "") + err))
     return done
 
 
@@ -1093,9 +1112,8 @@ def one_winner(done) -> "tuple[tuple, tuple]":
 
 def test_two_simultaneous_attaches_of_one_remote_environment_end_with_one_attachment(rig: AttachRig) -> None:
     env = attached_rig(rig, "main")
-    rig.configure(parent_delay=1.5)
 
-    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/main"))
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/main", hold="parent"))
 
     assert winner[2] == success_line("perseus", env)
     assert loser[3] == WAITING + refusal("perseus/levr/main", note=True)
@@ -1112,9 +1130,8 @@ def test_the_loser_of_two_remote_attaches_to_different_environments_starts_no_fo
     main = attached_rig(rig, "main")
     other = rig.environment("other")
     rig.host_inventory("perseus", main, other)
-    rig.configure(parent_delay=1.5)
 
-    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/other"))
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "perseus/levr/other", hold="parent"))
 
     won, lost = (main, other) if winner[0].endswith("main") else (other, main)
     assert winner[2] == success_line("perseus", won)
@@ -1130,10 +1147,8 @@ def test_a_remote_attach_and_a_local_attach_started_together_end_with_one_attach
 ) -> None:
     remote = attached_rig(rig, "main")
     local = local_rig(rig, "main")
-    rig.configure(parent_delay=1.5)
-    rig.delay_ps(0.5)
 
-    winner, loser = one_winner(race(rig, "perseus/levr/main", "local/levr/main"))
+    winner, loser = one_winner(race(rig, "perseus/levr/main", "local/levr/main", hold="parent"))
 
     remote_won = winner[0].startswith("perseus")
     won, lost = (remote, local) if remote_won else (local, remote)
@@ -1156,9 +1171,8 @@ def test_two_local_attaches_started_together_end_with_one_relay_and_no_stray_one
         other = rig.environment("other")
         rig.docker_inventory(main, other)
     second = "local/levr/main" if same_environment else "local/levr/other"
-    rig.delay_ps(0.5)
 
-    winner, loser = one_winner(race(rig, "local/levr/main", second))
+    winner, loser = one_winner(race(rig, "local/levr/main", second, hold="ps"))
 
     won, lost = (main, other) if winner[0].endswith("main") else (other, main)
     assert winner[2] == success_line("local", won)
@@ -1262,7 +1276,7 @@ def test_a_lock_wait_that_runs_out_leaves_the_winner_still_attaching_untouched(
 
     env = attached_rig(rig)
     short_connect_timeout(rig)
-    rig.configure(parent_delay=3.0)
+    rig.configure(parent_hold=True)
     real = env_cli.attachments
     calls: list[int] = []
 
@@ -1282,7 +1296,8 @@ def test_a_lock_wait_that_runs_out_leaves_the_winner_still_attaching_untouched(
     assert exit_.value.code == 1
     assert capsys.readouterr().err == WAITING + STILL_STARTING
     started = set(rig.tagged_pids())
-    out, _ = winner.communicate(timeout=30)
+    rig.release_parent()
+    out, _ = winner.communicate(timeout=60)
     assert (winner.returncode, out) == (0, success_line("perseus", env))
     assert len(rig.forwards()) == 1
     (still_running,) = rig.tagged_pids()
@@ -1368,7 +1383,7 @@ def test_an_interrupt_while_waiting_for_the_lock_exits_130_starts_nothing_and_le
     rig: AttachRig,
 ) -> None:
     env = attached_rig(rig)
-    rig.configure(parent_delay=3.0)
+    rig.configure(parent_hold=True)
     first = rig.popen_camp("env", "attach", "perseus/levr/main")
     second = rig.popen_camp("env", "attach", "perseus/levr/main")
     waiting = None
@@ -1379,14 +1394,15 @@ def test_an_interrupt_while_waiting_for_the_lock_exits_130_starts_nothing_and_le
     assert waiting is not None, "neither attach reported waiting for the lock"
     loser, winner = (first, second) if waiting is first.stderr else (second, first)
     assert loser.stderr.readline() == WAITING
-    wait_for(lambda: rig.tagged_pids())
+    rig.wait_parent_held()
 
     loser.send_signal(signal.SIGINT)
     out, err = loser.communicate(timeout=10)
 
     assert loser.returncode == 130
     assert (out, err) == ("", "camp env: interrupted\n")
-    wout, werr = winner.communicate(timeout=30)
+    rig.release_parent()
+    wout, werr = winner.communicate(timeout=60)
     assert (winner.returncode, wout, werr) == (0, success_line("perseus", env), "")
     assert len(rig.forwards()) == 1
     assert len(rig.tagged_pids()) == 1

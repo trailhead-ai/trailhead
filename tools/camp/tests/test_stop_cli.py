@@ -344,12 +344,29 @@ def test_no_slug_refuses_naming_the_missing_slug_never_reads_stdin(
     assert "slug" in captured.err
 
 
+def _run_on_a_fake_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make `camp stop`'s wait for the session to disappear run on a clock that only its own sleeps
+    advance, so the full poll budget elapses without anyone waiting for it."""
+    stop_cli = _stop_module()
+    real = stop_cli.stop_workspace
+    now = [0.0]
+
+    def advance(seconds: float) -> None:
+        now[0] += seconds
+
+    def on_fake_clock(*args, **kwargs):
+        return real(*args, sleep=advance, monotonic=lambda: now[0], **kwargs)
+
+    monkeypatch.setattr(stop_cli, "stop_workspace", on_fake_clock)
+
+
 def test_json_still_present_carries_outcome_and_exit_one(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
 ) -> None:
     _isolated_env(tmp_path, monkeypatch)
     tmux = _ScriptedTmux(initial=True, poll_sequence=(True, True, True))
     _wire_one_workspace(monkeypatch, tmp_path=tmp_path, tmux=tmux, slug="camp-cli")
+    _run_on_a_fake_clock(monkeypatch)
 
     code = _run(
         ["stop", "camp-cli", "--group", "g", "--json"], monkeypatch

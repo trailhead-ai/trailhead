@@ -431,11 +431,13 @@ def test_producer_wait_is_bounded_after_its_output_is_fully_drained() -> None:
 
     started = time.monotonic()
     outcome = transport.stream_camp(
-        _HOST, ["transfer-receive", "history"], producer, spawn=_consume_stdin_spawn
+        _HOST, ["transfer-receive", "history"], producer, spawn=_consume_stdin_spawn,
+        producer_wait_seconds=0.3,
     )
     elapsed = time.monotonic() - started
 
-    assert elapsed < 10.0, f"producer.wait() was not bounded — took {elapsed:.1f}s"
+    # The producer outlives the test by 30s: any return well before that means its wait was bounded.
+    assert elapsed < 15.0, f"producer.wait() was not bounded — took {elapsed:.1f}s"
     assert isinstance(outcome, transport.ProducerFailed)
     assert outcome.exit_code != 0
 
