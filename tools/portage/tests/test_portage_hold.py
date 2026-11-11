@@ -87,8 +87,24 @@ def _merge(tmp_path, monkeypatch, repo, toml, *, operator_directed=False, view=N
 AUTO = "[release]\nauto_merge = true\n"
 
 
-def test_merge_on_an_unheld_branch_proceeds(tmp_path, monkeypatch, repo):
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
+@pytest.mark.parametrize("steps, view", [
+    pytest.param([], None, id="no-hold"),
+    pytest.param([["hold", "{repo}", "other"]], None, id="hold-on-another-branch"),
+    pytest.param([["hold", "{repo}", "feat"], ["release", "{repo}", "feat"]], None,
+                 id="held-then-released"),
+    pytest.param([["hold", "{other}", "feat"]], None, id="same-branch-held-in-another-repo"),
+    pytest.param([["hold", "{repo}", "feat"]], {"headRefName": "other"},
+                 id="checked-out-branch-held-but-not-the-pr-head"),
+    pytest.param([["hold", "{repo}", "main"]], {"headRefName": "feat"},
+                 id="base-branch-held-but-not-the-pr-head"),
+])
+def test_merge_proceeds_when_the_pr_head_is_not_held(tmp_path, monkeypatch, repo, steps, view):
+    other = tmp_path / "other"
+    other.mkdir()
+    for step in steps:
+        argv = [a.format(repo=repo, other=other) for a in step]
+        assert dispatch.main(argv) == 0
+    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view=view)
     assert spy.merge_attempted()
     assert rc == 0
 
@@ -108,19 +124,6 @@ def test_hold_blocks_merge_even_when_operator_directed(tmp_path, monkeypatch, re
     rc, spy = _merge(tmp_path, monkeypatch, repo, "[release]\n", operator_directed=True)
     assert rc == 2
     assert not spy.merge_attempted()
-
-
-def test_hold_on_another_branch_does_not_block(tmp_path, monkeypatch, repo):
-    dispatch.main(["hold", str(repo), "other"])
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
-    assert spy.merge_attempted()
-
-
-def test_release_lets_merge_proceed(tmp_path, monkeypatch, repo):
-    dispatch.main(["hold", str(repo), "feat"])
-    assert dispatch.main(["release", str(repo), "feat"]) == 0
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
-    assert spy.merge_attempted()
 
 
 def test_holding_twice_is_one_hold(tmp_path, repo):
@@ -144,14 +147,6 @@ def test_invalid_branch_name_is_refused(repo, capsys, verb, branch):
     assert capsys.readouterr().err.startswith("portage: ")
 
 
-def test_hold_is_keyed_by_repo_too(tmp_path, monkeypatch, repo):
-    other = tmp_path / "other"
-    other.mkdir()
-    dispatch.main(["hold", str(other), "feat"])
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO)
-    assert spy.merge_attempted()
-
-
 def test_held_head_branch_refuses_when_a_different_branch_is_checked_out(
     tmp_path, monkeypatch, repo, capsys
 ):
@@ -163,22 +158,6 @@ def test_held_head_branch_refuses_when_a_different_branch_is_checked_out(
     assert rc == 2
     assert spy.only_views()
     assert "held" in err and "feat" in err
-
-
-def test_unheld_head_branch_proceeds_even_when_the_checked_out_branch_is_held(
-    tmp_path, monkeypatch, repo
-):
-    dispatch.main(["hold", str(repo), "feat"])
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view={"headRefName": "other"})
-    assert spy.merge_attempted()
-
-
-def test_the_base_branch_being_held_does_not_refuse_a_pr_whose_head_is_not_held(
-    tmp_path, monkeypatch, repo
-):
-    dispatch.main(["hold", str(repo), "main"])
-    rc, spy = _merge(tmp_path, monkeypatch, repo, AUTO, view={"headRefName": "feat"})
-    assert spy.merge_attempted()
 
 
 def test_the_head_branch_is_read_in_the_pairs_repo(tmp_path, monkeypatch, repo):
@@ -216,12 +195,6 @@ def test_a_repo_with_no_hold_never_asks_for_the_head_branch(tmp_path, monkeypatc
     # the merge itself reads the PR once; the hold check adds no further read
     assert len(asked) == 1
     assert spy.merge_attempted()
-
-
-def test_a_corrupt_hold_entry_counts_as_held(repo):
-    holds._holds_dir().mkdir(parents=True, exist_ok=True)
-    (holds._holds_dir() / "garbage.json").write_text("{not json")
-    assert holds.has_any_hold(str(repo)) is True
 
 
 def test_a_hold_entry_for_another_repo_does_not_count(tmp_path, repo):
@@ -282,17 +255,14 @@ def test_a_hold_through_a_relative_path_never_reports_success_for_a_hold_merge_m
     assert spy.merge_attempted()
 
 
-def test_a_hold_entry_named_for_the_repo_counts_even_when_its_repo_field_is_wrong(repo):
+@pytest.mark.parametrize("entry_body", [
+    pytest.param({"repo": "/somewhere/else", "branch": "feat"}, id="repo-field-wrong"),
+    pytest.param({"branch": "feat"}, id="repo-field-missing"),
+])
+def test_a_hold_entry_named_for_the_repo_counts_whatever_its_repo_field_says(repo, entry_body):
     holds.hold(str(repo), "feat")
     (entry,) = holds._holds_dir().iterdir()
-    entry.write_text(json.dumps({"repo": "/somewhere/else", "branch": "feat"}))
-    assert holds.has_any_hold(str(repo)) is True
-
-
-def test_a_hold_entry_named_for_the_repo_counts_even_when_its_repo_field_is_missing(repo):
-    holds.hold(str(repo), "feat")
-    (entry,) = holds._holds_dir().iterdir()
-    entry.write_text(json.dumps({"branch": "feat"}))
+    entry.write_text(json.dumps(entry_body))
     assert holds.has_any_hold(str(repo)) is True
 
 
@@ -305,8 +275,8 @@ def test_a_hold_entry_named_for_another_repo_with_a_wrong_field_does_not_count(t
     assert holds.has_any_hold(str(repo)) is False
 
 
-@pytest.mark.parametrize("body", ["[]", '"held"', "7", "null"])
-def test_a_hold_entry_holding_json_that_is_not_an_object_counts_as_held(repo, body):
+@pytest.mark.parametrize("body", ["{not json", "[]", '"held"', "7", "null"])
+def test_a_hold_entry_that_is_not_a_json_object_counts_as_held(repo, body):
     holds._holds_dir().mkdir(parents=True, exist_ok=True)
     (holds._holds_dir() / "odd.json").write_text(body)
     assert holds.has_any_hold(str(repo)) is True
