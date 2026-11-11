@@ -929,6 +929,26 @@ def _host_allowed(host: str, allowed: list[str]) -> bool:
 
 _Source = tuple[Path, str]  # (settings file, "user-level" | "managed")
 
+#: Boolean sandbox settings a launch must pin, with the value that widens the session. A
+#: managed value outranks the session's ``--settings`` and cannot be overridden, so it refuses
+#: the launch; a user-level one is overridden by rendering the safe value.
+#: (https://code.claude.com/docs/en/settings.md#settings-precedence)
+_SANDBOX_FLAGS = {
+    "sandbox.enabled": False,
+    "sandbox.allowUnsandboxedCommands": True,
+    "sandbox.filesystem.disabled": True,
+    "sandbox.network.allowLocalBinding": True,
+    "sandbox.network.allowAllUnixSockets": True,
+}
+#: The flags above that the hub's own settings can pin off when only the user file sets them
+#: (``enabled`` and ``allowUnsandboxedCommands`` are always rendered safe).
+_PINNED_OFF = tuple(
+    label for label in _SANDBOX_FLAGS if label not in ("sandbox.enabled", "sandbox.allowUnsandboxedCommands")
+)
+#: Tools that write files under ``Edit(path)`` permission rules, which are the only thing
+#: the file tools obey: the Bash sandbox does not apply to them.
+_FILE_WRITE_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
+
 
 class _ReadRule:
     """A ``Read()`` deny path, as a pattern over path segments that can say whether it covers a root.
@@ -1035,14 +1055,39 @@ class _UserSettings:
         sandbox = data.get("sandbox", {})
         if not isinstance(sandbox, dict):
             raise HarnessError(f"{path}: 'sandbox' must be an object; refusing the launch")
-        if "enabled" in sandbox and not isinstance(sandbox["enabled"], bool):
-            raise HarnessError(
-                f"{path}: 'sandbox.enabled' must be true or false; the sandbox cannot be "
-                "confirmed, refusing the launch"
-            )
         fs = self._section(path, sandbox, "filesystem")
         net = self._section(path, sandbox, "network")
         permissions = self._section(path, data, "permissions")
+        self.sandbox_flags: dict[str, tuple[bool, _Source]] = {}
+        for label in _SANDBOX_FLAGS:
+            _, *parents, key = label.split(".")
+            holder = {(): sandbox, ("filesystem",): fs, ("network",): net}[tuple(parents)]
+            if key in holder:
+                if not isinstance(holder[key], bool):
+                    raise HarnessError(
+                        f"{path}: {label!r} must be true or false; the sandbox cannot be "
+                        "confirmed, refusing the launch"
+                    )
+                self.sandbox_flags[label] = (holder[key], source)
+        self.managed_flags: dict[str, tuple[bool, _Source]] = (
+            dict(self.sandbox_flags) if kind == "managed" else {}
+        )
+        self.unix_sockets: list[tuple[str, _Source]] = [
+            (e, source)
+            for e in self._strings(path, net, "allowUnixSockets", "sandbox.network.allowUnixSockets")
+            or []
+        ]
+        self.file_grants: list[tuple[str, _Source]] = [
+            (r, source)
+            for r in self._strings(path, permissions, "allow", "permissions.allow") or []
+            if r.split("(", 1)[0] in _FILE_WRITE_TOOLS
+        ] + [
+            (d, source)
+            for d in self._strings(
+                path, permissions, "additionalDirectories", "permissions.additionalDirectories"
+            )
+            or []
+        ]
         allow_write = self._strings(path, fs, "allowWrite", "sandbox.filesystem.allowWrite")
         self.allow_write: list[tuple[str, _Source]] | None = (
             None if allow_write is None else [(e, source) for e in allow_write]
@@ -1078,6 +1123,9 @@ class _UserSettings:
         if other.allow_write is not None:
             self.allow_write = [*(self.allow_write or []), *other.allow_write]
         self.deny_write += other.deny_write
+        self.managed_flags.update(other.managed_flags)
+        self.unix_sockets += other.unix_sockets
+        self.file_grants += other.file_grants
         self.deny_read += other.deny_read
         self.excluded_commands += [c for c in other.excluded_commands if c not in self.excluded_commands]
         if other.allowed_domains is not None:
@@ -1231,6 +1279,84 @@ def _derive_write_confinement(
     return deny
 
 
+def _helper_code(header_command: tuple[str, ...]) -> list[tuple[Path, bool]]:
+    """The headers helper's code as ``(path, is_directory)``: ``bin/trailhead`` as named and
+    where it resolves, the checkout's ``bin`` directory, ``trailhead`` package and
+    ``pyproject.toml``."""
+    binary = Path(header_command[0])
+    lexical = Path(os.path.realpath(binary.parent)) / binary.name
+    resolved = Path(os.path.realpath(binary))
+    checkout = resolved.parent.parent
+    return [
+        (lexical, False),
+        (resolved, False),
+        (resolved.parent, True),
+        (checkout / "trailhead", True),
+        (checkout / "pyproject.toml", False),
+    ]
+
+
+def _edit_denials(
+    user: _UserSettings,
+    header_command: tuple[str, ...],
+    env: Mapping[str, str],
+    state_dirs: list[Path],
+) -> list[str]:
+    """``Edit`` deny rules over everything the headers helper runs or reads from, and Outpost's state.
+
+    The Bash sandbox does not apply to Claude's file tools; they obey only permission rules
+    (https://code.claude.com/docs/en/sandboxing.md, "What runs outside the sandbox"), and an
+    ``Edit`` rule covers every built-in tool that edits files, ``Write`` and ``NotebookEdit``
+    included (permissions.md, "What Read and Edit rules cover"). A deny from any scope beats
+    an allow from any scope, ``--settings`` included (permissions.md, "Settings precedence"),
+    so a user or managed ``Edit``/``Write`` allow or ``additionalDirectories`` entry cannot
+    reach these paths. The helper's checkout and *state_dirs* are always denied; PATH directories
+    only when a visible grant could reach them, since the hub cannot otherwise edit outside its
+    own directory, and a symlinked entry is denied at its real location too.
+    """
+    dirs: list[Path] = []
+    files: list[Path] = []
+    for path, is_dir in _helper_code(header_command):
+        (dirs if is_dir else files).append(path)
+    dirs += [files[0].parent, *state_dirs]
+    if user.file_grants:
+        for entry in env.get("PATH", "").split(os.pathsep):
+            if os.path.isabs(entry):
+                dirs += [Path(entry), Path(os.path.realpath(entry))]
+    rules: list[str] = []
+    for rule in [*(f"Edit(/{p}/**)" for p in dirs), *(f"Edit(/{p})" for p in files)]:
+        if rule not in rules:
+            rules.append(rule)
+    return rules
+
+
+def _refuse_unconfinable_sandbox(user: _UserSettings) -> None:
+    """Refuse settings the hub's own ``--settings`` cannot override.
+
+    Managed settings outrank ``--settings``, so a managed ``sandbox.enabled: false``,
+    ``allowUnsandboxedCommands: true``, ``filesystem.disabled: true``, ``allowLocalBinding`` or
+    ``allowAllUnixSockets`` leaves the session able to run commands outside the sandbox, with
+    the helper's code and Outpost's state in reach. Unix-socket allow-lists merge across scopes,
+    so a non-empty one at any scope cannot be narrowed. A managed value that a later managed
+    file reverses is not in force and does not refuse.
+    """
+    for label, (value, (path, kind)) in user.managed_flags.items():
+        if value is _SANDBOX_FLAGS[label]:
+            raise HarnessError(
+                f"{path}: the {kind} setting {label} is {str(value).lower()}, which the hub's own "
+                "settings cannot override (managed settings outrank them) and which lets the "
+                "session run outside the sandbox that keeps it from the headers helper's code. "
+                f"Remove {label} from {path}; refusing the launch"
+            )
+    for entry, (path, kind) in user.unix_sockets:
+        raise HarnessError(
+            f"{path}: the {kind} setting sandbox.network.allowUnixSockets lists {entry!r}; lists "
+            "merge across settings scopes, so the hub's own settings cannot narrow it, and a "
+            "socket it names can lead out of the sandbox. "
+            f"Remove sandbox.network.allowUnixSockets from {path}; refusing the launch"
+        )
+
+
 def _refuse_helper_code_under_write_roots(
     header_command: tuple[str, ...], env: Mapping[str, str], write_roots: list[Path]
 ) -> None:
@@ -1247,12 +1373,7 @@ def _refuse_helper_code_under_write_roots(
     overlaps a write root, is refused whether or not it exists yet: the session could create
     it. A path overlaps a write root when either contains the other, by whole segments.
     """
-    binary = Path(header_command[0])
-    lexical = Path(os.path.realpath(binary.parent)) / binary.name
-    resolved = Path(os.path.realpath(binary))
-    checkout = resolved.parent.parent
-    code = [lexical, resolved, resolved.parent, checkout / "trailhead", checkout / "pyproject.toml"]
-    for path in code:
+    for path, _ in _helper_code(header_command):
         for root in write_roots:
             if _covers(root, path) or _covers(path, root):
                 raise HarnessError(
@@ -2361,6 +2482,15 @@ class ClaudeCodeHarness(Harness):
         sandbox with the operator's access. A broker launch emits the PATH it checked in
         ``env_set`` so the session runs with exactly that PATH.
 
+        File tools and the sandbox: the Bash sandbox does not apply to Claude's file tools, so a
+        user or managed ``Edit``/``Write`` allow or ``additionalDirectories`` entry could let the
+        hub rewrite the helper's code. A broker launch therefore renders ``Edit`` deny rules over
+        the helper's code and Outpost's state (see :func:`_edit_denials`); deny beats allow across
+        scopes. Managed ``sandbox.enabled: false``, ``allowUnsandboxedCommands: true``,
+        ``filesystem.disabled``, ``allowLocalBinding``, ``allowAllUnixSockets``, or any
+        ``allowUnixSockets`` entry refuse the launch (see :func:`_refuse_unconfinable_sandbox`);
+        the same flags set true in the user file are rendered false.
+
         Raises :class:`HarnessError` for a *directory* that is not an existing directory,
         a profile naming the broker server with no *broker*, a profile that would widen
         the user-level settings, an unreadable or malformed user-level settings or
@@ -2394,6 +2524,7 @@ class ClaudeCodeHarness(Harness):
         )
         for managed in _managed_settings(home, launch_dir, platform):
             user.absorb(managed)
+        _refuse_unconfinable_sandbox(user)
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
         if wants_broker:
             _refuse_helper_code_under_write_roots(
@@ -2430,6 +2561,16 @@ class ClaudeCodeHarness(Harness):
             },
             "permissions": {
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
+                + (
+                    _edit_denials(
+                        user,
+                        broker.header_command,
+                        source,
+                        [*denied_reads, Path(os.path.realpath(Path(broker.config_path).parent))],
+                    )
+                    if wants_broker
+                    else []
+                )
                 + [f"Bash({command})" for command in user.excluded_commands]
             },
             "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
@@ -2444,6 +2585,13 @@ class ClaudeCodeHarness(Harness):
             network["deniedDomains"] = denied_domains
         if network:
             settings["sandbox"]["network"] = network
+        for label in _PINNED_OFF:
+            if user.sandbox_flags.get(label, (False,))[0]:
+                _, *parents, key = label.split(".")
+                holder = settings["sandbox"]
+                for parent in parents:
+                    holder = holder.setdefault(parent, {})
+                holder[key] = False
         files: tuple[SessionFile, ...] = ()
         if wants_broker:
             config = {

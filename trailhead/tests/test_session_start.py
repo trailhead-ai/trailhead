@@ -599,7 +599,9 @@ def test_settings_place_resolved_paths_under_the_keys_claude_reads(tmp_path):
     assert sandbox["allowUnsandboxedCommands"] is False
     assert sandbox["filesystem"]["allowWrite"] == [str(p) for p in resolved.writable]
     assert sandbox["filesystem"]["denyRead"] == [token]
-    assert settings["permissions"]["deny"] == [f"Read(/{token}/**)"]
+    deny = settings["permissions"]["deny"]
+    assert [r for r in deny if r.startswith("Read(")] == [f"Read(/{token}/**)"]
+    assert f"Edit(/{token}/**)" in deny
     assert "model" not in settings
     assert settings["enabledMcpjsonServers"] == []
 
@@ -627,7 +629,6 @@ def test_each_user_unsandboxed_command_exemption_is_denied_in_the_session(tmp_pa
     _write_user_settings(env, settings)
     start = _start(env)
     assert _bash_denies(start) == [f"Bash({e})" for e in exclusions]
-    assert len(_settings_of(start)["permissions"]["deny"]) == 1 + len(exclusions)
 
 
 @pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
@@ -1886,6 +1887,194 @@ def test_the_same_launch_with_the_helper_code_outside_every_write_root_passes(of
     env = _fence(tmp_path)
     _permissive_user(env)
     assert _launch_with_bin(env, "/opt/trailhead-checkout/bin/trailhead") is not None
+
+
+# -- settings that let the hub write the helper's code through a tool, or leave the sandbox ---------
+
+
+def _edit_denies(start: SessionStart) -> list[str]:
+    return [r for r in _settings_of(start)["permissions"]["deny"] if r.startswith("Edit(")]
+
+
+def test_a_user_edit_allow_over_the_checkout_leaves_the_helper_code_denied_to_every_edit_tool(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    checkout = Path(env["HOME"]) / "code" / "trailhead"
+    _permissive_user(env, permissions={"allow": ["Edit(~/code/**)"]})
+    start = _launch_with_bin(env, f"{checkout}/bin/trailhead")
+    denies = _edit_denies(start)
+    for guarded in (
+        f"Edit(/{checkout}/bin/**)",
+        f"Edit(/{checkout}/trailhead/**)",
+        f"Edit(/{checkout}/pyproject.toml)",
+        f"Edit(/{checkout}/bin/trailhead)",
+    ):
+        assert guarded in denies
+
+
+def test_the_denied_helper_code_follows_where_the_checkout_is(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"allow": ["Edit(~/code/**)"]})
+    start = _launch_with_bin(env, "/opt/trailhead-checkout/bin/trailhead")
+    denies = _edit_denies(start)
+    assert "Edit(//opt/trailhead-checkout/bin/**)" in denies
+    assert not any(str(Path(env["HOME"]) / "code") in r for r in denies)
+
+
+def test_a_symlinked_helper_has_its_real_location_denied_too(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    real = tmp_path.resolve() / "real-checkout" / "bin"
+    real.mkdir(parents=True)
+    (real / "trailhead").write_text("#!/bin/sh\n")
+    link_dir = tmp_path.resolve() / "link-checkout" / "bin"
+    link_dir.mkdir(parents=True)
+    (link_dir / "trailhead").symlink_to(real / "trailhead")
+    denies = _edit_denies(_launch_with_bin(env, str(link_dir / "trailhead")))
+    assert f"Edit(/{link_dir}/**)" in denies and f"Edit(/{real}/**)" in denies
+
+
+def test_outpost_state_is_denied_to_every_edit_tool_wherever_it_is(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    state = tmp_path.resolve() / "elsewhere-state"
+    env["OUTPOST_STATE_DIR"] = str(state)
+    denies = _edit_denies(_start(env))
+    assert f"Edit(/{state}/**)" in denies
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"permissions": {"allow": ["Edit"]}},
+        {"permissions": {"allow": ["Write"]}},
+        {"permissions": {"allow": ["Edit(//opt/**)"]}},
+        {"permissions": {"additionalDirectories": ["/opt"]}},
+    ],
+)
+def test_path_directories_are_denied_to_edit_tools_when_user_settings_grant_file_access(tmp_path, extra):
+    env = _fence(tmp_path)
+    _permissive_user(env, **extra)
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" in _edit_denies(_start(env))
+
+
+def test_path_directories_are_left_alone_when_nothing_grants_file_access(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"allow": ["Bash(ls)"]})
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" not in _edit_denies(_start(env))
+
+
+def test_a_managed_edit_allow_also_denies_path_directories(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"permissions": {"allow": ["Write"]}})
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" in _edit_denies(_start(env))
+
+
+@pytest.mark.parametrize(
+    "setting, key",
+    [
+        ({"enabled": False}, "sandbox.enabled"),
+        ({"allowUnsandboxedCommands": True}, "sandbox.allowUnsandboxedCommands"),
+    ],
+)
+def test_managed_settings_that_turn_the_sandbox_off_refuse_naming_file_key_and_remedy(tmp_path, setting, key):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, {"sandbox": setting})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(managed) in text and key in text
+    assert f"Remove {key} from {managed}" in text and "refusing the launch" in text
+
+
+def test_a_managed_drop_in_that_turns_the_sandbox_back_on_wins_over_the_base_file(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"sandbox": {"enabled": False}})
+    _write_managed(tmp_path, {"sandbox": {"enabled": True}}, drop_in="50-on.json")
+    assert _settings_of(_start(env))["sandbox"]["enabled"] is True
+
+
+def test_a_user_level_sandbox_off_is_overridden_by_the_hubs_own_settings(tmp_path):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"].update({"enabled": False, "allowUnsandboxedCommands": True})
+    _write_user_settings(env, user)
+    sandbox = _settings_of(_start(env))["sandbox"]
+    assert sandbox["enabled"] is True and sandbox["allowUnsandboxedCommands"] is False
+
+
+_WIDENERS = [
+    (("network",), "allowLocalBinding"),
+    (("network",), "allowAllUnixSockets"),
+    (("filesystem",), "disabled"),
+]
+
+
+def _sandbox_with(section: tuple[str, ...], key: str, value) -> dict:
+    return {"sandbox": {"enabled": True, section[0]: {key: value}}}
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_user_level_widening_flag_is_rendered_false_for_the_hub(tmp_path, section, key):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"].setdefault(section[0], {})[key] = True
+    _write_user_settings(env, user)
+    assert _settings_of(_start(env))["sandbox"][section[0]][key] is False
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_flag_the_user_leaves_unset_or_false_renders_nothing(tmp_path, section, key):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    _write_user_settings(env, user)
+    assert key not in _settings_of(_start(env))["sandbox"].get(section[0], {})
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_managed_widening_flag_refuses_naming_file_key_and_remedy(tmp_path, section, key):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, _sandbox_with(section, key, True))
+    label = f"sandbox.{section[0]}.{key}"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(managed) in text and label in text
+    assert f"Remove {label} from {managed}" in text and "refusing the launch" in text
+
+
+@pytest.mark.parametrize("where", ["user", "managed"])
+def test_a_non_empty_unix_socket_allow_list_refuses_because_lists_cannot_be_narrowed(tmp_path, where):
+    env = _fence(tmp_path)
+    sockets = {"network": {"allowUnixSockets": ["/var/run/docker.sock"]}}
+    if where == "user":
+        user = _user_allowing_hub(env)
+        user["sandbox"].update(sockets)
+        source = _write_user_settings(env, user)
+    else:
+        _permissive_user(env)
+        source = _write_managed(tmp_path, {"sandbox": sockets})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(source) in text and "sandbox.network.allowUnixSockets" in text
+    assert f"Remove sandbox.network.allowUnixSockets from {source}" in text
+
+
+def test_an_empty_unix_socket_allow_list_launches(tmp_path):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"]["network"] = {"allowUnixSockets": []}
+    _write_user_settings(env, user)
+    assert _start(env) is not None
 
 
 def test_a_bare_read_rule_matches_at_any_depth_under_the_launch_directory_but_a_dot_slash_rule_does_not(tmp_path):
