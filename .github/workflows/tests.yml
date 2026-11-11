@@ -49,9 +49,9 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
         area: [craft, lore-camp, rest]
         include:
-          # `baseline` is the area's passed count in CI, and `max_skipped` its skipped count, from the
-          # last green run of this job layout (identical on all three Pythons): a test that starts
-          # skipping lowers the passed count below `baseline` and raises the skipped count above
+          # `baseline` is the area's passed count in CI, and `max_skipped` its skipped count (identical
+          # on all three Pythons), from the last green run of this job layout plus the tests added since:
+          # a test that starts skipping lowers the passed count below `baseline` and raises the skipped count above
           # `max_skipped`. `budget` is the job's median wall time plus two sample standard
           # deviations over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute
           # target). The history is every guarded run of this job layout: 7 runs x 3 Pythons = 21
@@ -61,7 +61,7 @@ jobs:
           # already reached 91.8 s. A leg over its budget is the signal to look for a cause before
           # raising the number.
           - area: craft
-            baseline: 3343
+            baseline: 3345
             max_skipped: 18
             budget: 170
           - area: lore-camp
@@ -69,7 +69,7 @@ jobs:
             max_skipped: 8
             budget: 210
           - area: rest
-            baseline: 3199
+            baseline: 3213
             max_skipped: 30
             budget: 100
     steps:
@@ -176,7 +176,7 @@ jobs:
             budget: 130
           - tier: seam_real
             workers: auto
-            baseline: 319
+            baseline: 321
             max_skipped: 0
             budget: 120
     steps:

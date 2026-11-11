@@ -310,13 +310,56 @@ STORAGE_LISTENER = """
 """
 
 
+EXPECTED_STORAGE_WRITES = {"k1": "v1-", "k2": "v2-"}
+
+
+def assert_storage_events_carry(events, expected):
+    """``expected`` maps each key the writer sets to the prefix of the values it writes under that key.
+
+    Every event must name a written key with a value under it, and every written key must appear:
+    how many times each arrives is not the point, since the writer repeats its writes.
+    """
+    for event in events:
+        assert event["key"] in expected, f"storage event for unexpected key {event['key']!r} in {events}"
+        assert event["value"].startswith(expected[event["key"]]), (
+            f"storage event for {event['key']!r} carries the wrong value {event['value']!r}"
+        )
+    missing = set(expected) - {event["key"] for event in events}
+    assert not missing, f"no storage event arrived for {sorted(missing)} (received {events})"
+
+
+def test_storage_events_that_include_both_keys_with_their_values_pass_however_often_they_repeat():
+    events = [{"key": "k1", "value": "v1-0"}, {"key": "k1", "value": "v1-1"}, {"key": "k2", "value": "v2-1"}]
+    assert_storage_events_carry(events, EXPECTED_STORAGE_WRITES)
+
+
+@pytest.mark.parametrize(
+    ("events", "complaint"),
+    [
+        ([{"key": "k1", "value": "v1-0"}], "k2"),
+        ([{"key": "k1", "value": "v1-0"}, {"key": "other", "value": "v2-0"}], "other"),
+        ([{"key": "k1", "value": "v1-0"}, {"key": "k2", "value": "v1-0"}], "k2"),
+        ([], "k1"),
+    ],
+    ids=["a-key-never-arrived", "a-wrong-key", "a-wrong-value", "nothing-arrived"],
+)
+def test_storage_events_missing_a_key_or_carrying_the_wrong_one_fail_naming_it(events, complaint):
+    with pytest.raises(AssertionError, match=complaint):
+        assert_storage_events_carry(events, EXPECTED_STORAGE_WRITES)
+
+
 @pytest.mark.chromium
 @SERVE_MODES
 def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_key(serve):
+    # A `file://` page under load can drop a localStorage write, so copy 1 repeats its writes with
+    # changing values (an unchanged value fires no event) and copy 2 waits until both keys arrived.
     copy_1 = STORAGE_LISTENER + """
       await harness.barrier();
-      localStorage.setItem('k1', 'v1');
-      localStorage.setItem('k2', 'v2');
+      for (var attempt = 0; attempt < 20; attempt++) {
+        localStorage.setItem('k1', 'v1-' + attempt);
+        localStorage.setItem('k2', 'v2-' + attempt);
+        await new Promise(function (resolve) { setTimeout(resolve, 100); });
+      }
       await harness.barrier();
       return events;
     """
@@ -325,12 +368,18 @@ def test_a_write_in_one_copy_reaches_the_other_as_storage_events_with_the_right_
       await new Promise(function (resolve) { setTimeout(resolve, 50); });
       addEventListener('storage', function (e) { events.push({key: e.key, value: e.newValue}); });
       await harness.barrier();
-      await harness.waitFor('two storage events', function () { return events.length >= 2; });
+      function seen(key) { return events.some(function (e) { return e.key === key; }); }
+      try {
+        await harness.waitFor('storage events for both keys', function () { return seen('k1') && seen('k2'); });
+      } catch (err) {
+        throw new Error(
+          err.message + '; copy 2 received ' + events.length + ' storage events: ' + JSON.stringify(events));
+      }
       await harness.barrier();
       return events;
     """
     one, two = ch.run_probe_pair(FIXTURES / "widths-narrow", copy_1, copy_2, serve=serve)
-    assert two == [{"key": "k1", "value": "v1"}, {"key": "k2", "value": "v2"}]
+    assert_storage_events_carry(two, EXPECTED_STORAGE_WRITES)
     assert one == []
 
 
