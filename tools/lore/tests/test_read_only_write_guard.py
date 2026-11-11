@@ -419,7 +419,8 @@ def _config_vaults(install):
 def test_vault_reformat_reaching_a_read_only_vault_is_one_line_not_a_traceback(install):
     before = _snapshot(install.ro)
     r = install.run(["vault", "reformat"])
-    assert r.returncode != 0
+    # A sweep skips a read-only vault with one line and otherwise succeeds.
+    assert r.returncode == 0, r.stderr
     assert "Traceback" not in r.stderr, r.stderr
     assert MESSAGE in r.stderr
     assert _snapshot(install.ro) == before
@@ -439,7 +440,8 @@ def test_sync_reports_a_read_only_vault_by_message_not_as_a_silent_lock_skip(tmp
     assert "Traceback" not in r.stderr, r.stderr
     assert MESSAGE in r.stderr
     assert "failed to acquire vault lock" not in r.stderr
-    assert r.returncode != 0
+    # A sweep skips a read-only vault with one line and otherwise succeeds.
+    assert r.returncode == 0, r.stderr
     assert _snapshot(ro) == before
     # The read-only vault does not strand the writable one: it is still synced.
     assert "default:" in r.stdout, r.stdout
