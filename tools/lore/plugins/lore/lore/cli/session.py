@@ -5,6 +5,7 @@ import datetime as dt
 import os
 import sys
 
+from .. import locking
 from .common import (
     StdinSilentError,
     _add_session_selectors,
@@ -310,6 +311,8 @@ def _cmd_session_candidate(args) -> int:
             committer=committer,
             open_index=_open_session_index,
         )
+    except locking.VaultWriteRefusedError:
+        raise
     except Exception as exc:
         print(f"error: session candidate write failed: {exc}", file=sys.stderr)
         return 1
@@ -366,6 +369,8 @@ def _cmd_session_referenced(args) -> int:
             committer=committer,
             open_index=_open_session_index,
         )
+    except locking.VaultWriteRefusedError:
+        raise
     except Exception as exc:
         print(f"error: session referenced write failed: {exc}", file=sys.stderr)
         return 1

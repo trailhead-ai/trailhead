@@ -587,6 +587,8 @@ def _flush_one_session(vault: Path, key: str, committer: str, *, push: bool) -> 
                 committer=committer,
                 open_index=_open_session_index,
             )
+        except locking.VaultWriteRefusedError:
+            raise
         except Exception as exc:
             print(f"error: session flush failed: {exc}", file=sys.stderr)
             return 1
@@ -817,6 +819,9 @@ def _flush_batch(args, *, query: str, scope_label: str, push: bool) -> int:
                 rc = _flush_commit(vault, key, push=False)
                 if rc != 0:
                     raise RuntimeError(f"commit failed (rc={rc})")
+        except locking.VaultWriteRefusedError:
+            # Refused before the flip, so there is nothing to roll back.
+            raise
         except Exception as exc:
             # Per-session atomicity: the flip happened before the commit, so on a
             # commit failure roll the flip BACK to `dirty` (shared with the

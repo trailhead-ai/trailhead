@@ -1638,6 +1638,12 @@ def cmd_sync(args) -> int:
                     say(f"sync already in progress for {name!r} — skipped")
                     outcomes[name] = SYNC_IN_PROGRESS
                     continue
+                except locking.VaultWriteRefusedError as exc:
+                    # Refused before any lock file exists (a read-only vault):
+                    # name it and skip the vault, never the silent OSError skip.
+                    say_map[name][1](f"{exc} — skipped")
+                    commit_rc[name] = 1
+                    continue
                 except locking.VaultRecoveryError as exc:
                     # Not an OSError on purpose: the lock was acquired, the
                     # rollback of an interrupted write failed. Say so, by record.

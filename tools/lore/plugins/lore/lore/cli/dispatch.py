@@ -174,8 +174,9 @@ def main(argv: list[str] | None = None) -> int:
         raise
     try:
         return args.func(args)
-    except locking.VaultRecoveryError as exc:
+    except (locking.VaultRecoveryError, locking.VaultWriteRefusedError) as exc:
         # Any command that takes a vault lock can trip the on-acquire recovery
-        # hook; the message is already user-facing (``lore: …``, names the record).
+        # hook, and any lock acquisition can be refused (read-only vault, unreadable
+        # config); the message is already user-facing (``lore: …``).
         print(exc, file=sys.stderr)
         return 1

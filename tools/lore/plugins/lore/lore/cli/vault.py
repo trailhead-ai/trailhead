@@ -255,6 +255,9 @@ def _cmd_vault_delete(args) -> int:
     # --remove-from-disk gating happens BEFORE any config/index mutation so a
     # refused destructive request leaves everything intact.
     if args.remove_from_disk:
+        from .. import locking
+
+        locking.assert_writable(vault.path)
         vaults_root = _resolve_vaults_root()
         # The LITERAL configured path (pre-resolution) is what we guard: a symlink
         # at the configured path must be refused even when its target resolves

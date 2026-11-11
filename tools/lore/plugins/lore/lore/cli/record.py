@@ -291,7 +291,7 @@ def _handle_write_error(exc: Exception, op: str) -> int:
     if isinstance(exc, record_store_mod.ProvenanceError):
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    if isinstance(exc, locking.VaultRecoveryError):
+    if isinstance(exc, (locking.VaultRecoveryError, locking.VaultWriteRefusedError)):
         print(exc, file=sys.stderr)
         return 1
     print(f"error: record {op} failed: {exc}", file=sys.stderr)
@@ -1017,6 +1017,8 @@ def _cmd_record_delete(args) -> int:
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except locking_mod.VaultWriteRefusedError:
+        raise
     except Exception as exc:
         print(f"error: record delete failed: {exc}", file=sys.stderr)
         return 1
@@ -1091,6 +1093,7 @@ def _cmd_record_rename(args) -> int:
     nothing, so a rename interrupted between the move and the rewrite is
     repaired by simply issuing it again.
     """
+    from .. import locking
     from ..record import rename as rename_mod
     from ..record import store as record_store_mod
 
@@ -1130,6 +1133,8 @@ def _cmd_record_rename(args) -> int:
     ) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    except locking.VaultWriteRefusedError:
+        raise
     except Exception as exc:
         print(f"error: record rename failed: {exc}", file=sys.stderr)
         return 1
