@@ -166,6 +166,13 @@ def _cmd_vault_add(args) -> int:
         )
         return 1
 
+    # A folder some configured read-only vault already names is never scaffolded
+    # under a second entry: `.gitignore` below would land in it.
+    if not read_only:
+        from .. import locking
+
+        locking.assert_writable(vault.path)
+
     # Create the vault directory when it does not yet exist.  Existing
     # directories (already-populated repos registered via --path, or a prior
     # partial add) are left untouched.
