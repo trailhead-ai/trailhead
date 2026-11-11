@@ -246,12 +246,36 @@ class TestLockedCompileTable:
         assert where_fragment in cq.where
         assert param in cq.params
 
-    def test_area_alias_resolves_to_facet_exists(self, kql, compiler):
-        cq = compiler.compile(kql.parse("area:penny"))
+    @pytest.mark.parametrize(
+        ("param_key", "param_value", "query"),
+        [
+            pytest.param("related-area", "penny", "area:penny", id="area_alias_resolves_to_facet_exists"),
+            pytest.param(
+                "related-task",
+                "my-task",
+                "related-task:my-task",
+                id="related_task_kind_field_compiles_no_sql_changes",
+            ),
+            pytest.param(
+                "supersedes",
+                "adr/foo",
+                'supersedes:"adr/foo"',
+                id="supersedes_field_compiles_no_sql_changes",
+            ),
+            pytest.param(
+                "superseded-by",
+                "adr/bar",
+                'superseded-by:"adr/bar"',
+                id="superseded_by_field_compiles_no_sql_changes",
+            ),
+        ],
+    )
+    def test_facet_query_binds_its_facet_and_value(self, kql, compiler, param_key, param_value, query):
+        cq = compiler.compile(kql.parse(query))
         assert "EXISTS" in cq.where
         assert "record_facet" in cq.where
-        assert "related-area" in cq.params
-        assert "penny" in cq.params
+        assert param_key in cq.params
+        assert param_value in cq.params
 
     def test_phase_alias_resolves_to_facet_exists(self, kql, compiler):
         cq = compiler.compile(kql.parse("phase:build"))
@@ -264,33 +288,6 @@ class TestLockedCompileTable:
         assert "EXISTS" in cq.where
         assert "keywords" in cq.params
         assert "foo" in cq.params
-
-    def test_related_task_kind_field_compiles_no_sql_changes(self, kql, compiler):
-        """A kind-derived ``related-<kind>`` field compiles exactly like the
-        pre-existing ``related-area``/``related-phases`` real-key fields — the
-        facet name is bound as a plain SQL param, so the compiler needed no
-        change to support the new per-kind fields."""
-        cq = compiler.compile(kql.parse("related-task:my-task"))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "related-task" in cq.params
-        assert "my-task" in cq.params
-
-    def test_supersedes_field_compiles_no_sql_changes(self, kql, compiler):
-        """``supersedes`` compiles exactly like ``related-<kind>`` real-key
-        fields — a plain facet-name param, no compiler code required."""
-        cq = compiler.compile(kql.parse('supersedes:"adr/foo"'))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "supersedes" in cq.params
-        assert "adr/foo" in cq.params
-
-    def test_superseded_by_field_compiles_no_sql_changes(self, kql, compiler):
-        cq = compiler.compile(kql.parse('superseded-by:"adr/bar"'))
-        assert "EXISTS" in cq.where
-        assert "record_facet" in cq.where
-        assert "superseded-by" in cq.params
-        assert "adr/bar" in cq.params
 
     def test_compare_gt(self, kql, compiler):
         cq = compiler.compile(kql.parse('created-at > "2025-01-01"'))

@@ -21,6 +21,7 @@ from __future__ import annotations
 import re
 
 from conftest import load_script
+import pytest
 
 
 def _graph():
@@ -533,36 +534,19 @@ def test_evaluate_dependencies_short_of_stage():
     assert status.reason
 
 
-def test_evaluate_dependencies_target_failed_superseded():
+@pytest.mark.parametrize(
+    ("node", "kind", "target_status", "dependency"),
+    [
+        pytest.param("spec/foo", "spec", "superseded", "spec/foo@ready", id="superseded"),
+        pytest.param("adr/bar", "adr", "dropped", "adr/bar@active", id="dropped"),
+        pytest.param("spec/foo", "spec", "superseded", "spec/foo", id="overrides_unqualified_entry"),
+        pytest.param("spec/foo", "spec", "dropped", "spec/foo@ready", id="overrides_already_passed_stage"),
+    ],
+)
+def test_dependency_on_a_failed_target_is_unmet(node, kind, target_status, dependency):
     g = _graph()
-    design_graph = {"spec/foo": _design("spec", "superseded")}
-    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
-    assert status.met is False
-    assert status.reason_code == "target-failed"
-
-
-def test_evaluate_dependencies_target_failed_dropped():
-    g = _graph()
-    design_graph = {"adr/bar": _design("adr", "dropped")}
-    [status] = g.evaluate_dependencies(design_graph, ["adr/bar@active"])
-    assert status.met is False
-    assert status.reason_code == "target-failed"
-
-
-def test_evaluate_dependencies_target_failed_overrides_unqualified_entry():
-    g = _graph()
-    design_graph = {"spec/foo": _design("spec", "superseded")}
-    [status] = g.evaluate_dependencies(design_graph, ["spec/foo"])
-    assert status.met is False
-    assert status.reason_code == "target-failed"
-
-
-def test_evaluate_dependencies_target_failed_overrides_already_passed_stage():
-    g = _graph()
-    design_graph = {"spec/foo": _design("spec", "dropped")}
-    # "ready" is earlier on the chain than where the target would have been
-    # before it failed — target-failed still wins over a stage comparison.
-    [status] = g.evaluate_dependencies(design_graph, ["spec/foo@ready"])
+    design_graph = {node: _design(kind, target_status)}
+    [status] = g.evaluate_dependencies(design_graph, [dependency])
     assert status.met is False
     assert status.reason_code == "target-failed"
 

@@ -150,26 +150,10 @@ class TestWorkspaceDocCommandTable:
         write_workspace_doc(ws_dir, group, "feat-x")
         return (ws_dir / "CLAUDE.md").read_text()
 
-    def test_claude_md_contains_camp_activate_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp activate <member>'."""
+    @pytest.mark.parametrize("phrase", ["camp activate <member>", "camp status", "camp setup"])
+    def test_claude_md_contains_the_camp_command(self, tmp_path: Path, phrase):
         content = self._get_claude_md(tmp_path)
-        assert "camp activate <member>" in content, (
-            f"Expected 'camp activate <member>' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
-
-    def test_claude_md_contains_camp_status_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp status'."""
-        content = self._get_claude_md(tmp_path)
-        assert "camp status" in content, (
-            f"Expected 'camp status' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
-
-    def test_claude_md_contains_camp_setup_exact(self, tmp_path: Path):
-        """CLAUDE.md contains the exact string 'camp setup' (no --retry flag)."""
-        content = self._get_claude_md(tmp_path)
-        assert "camp setup" in content, (
-            f"Expected 'camp setup' in CLAUDE.md, not found.\nContent:\n{content}"
-        )
+        assert phrase in content, f"Expected {phrase!r} in CLAUDE.md, not found.\nContent:\n{content}"
 
     def test_claude_md_does_not_contain_camp_setup_retry(self, tmp_path: Path):
         """CLAUDE.md must NOT contain 'camp setup --retry' — the flag was removed."""

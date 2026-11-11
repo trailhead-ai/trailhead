@@ -212,41 +212,27 @@ def test_unknown_key_rejected_naming_it():
     assert "foo" in joined
 
 
-def test_invalid_kind_rejected():
+@pytest.mark.parametrize(
+    "kind",
+    [
+        pytest.param("widget", id="unknown"),
+        pytest.param("backlog", id="retired_backlog"),
+        pytest.param("plan", id="retired_plan"),
+    ],
+)
+def test_unknown_or_retired_kind_is_rejected_naming_it(kind):
     sidecar = _worked_example_spec_sidecar()
-    sidecar["kind"] = "widget"
+    sidecar["kind"] = kind
     result = rm().validate(sidecar)
-    assert any("widget" in e for e in result.errors)
+    assert any(kind in e for e in result.errors)
 
 
-def test_backlog_kind_rejected_naming_it():
-    """``backlog`` was retired in favor of ``task`` — rejected, naming it."""
+@pytest.mark.parametrize("key", ["backlog", "plan"])
+def test_retired_kind_rejected_as_related_map_key_naming_it(key):
     sidecar = _worked_example_spec_sidecar()
-    sidecar["kind"] = "backlog"
+    sidecar["related"] = {key: ["x"]}
     result = rm().validate(sidecar)
-    assert any("backlog" in e for e in result.errors)
-
-
-def test_plan_kind_rejected_naming_it():
-    """``plan`` was retired in favor of ``task`` — rejected, naming it."""
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["kind"] = "plan"
-    result = rm().validate(sidecar)
-    assert any("plan" in e for e in result.errors)
-
-
-def test_backlog_rejected_as_related_map_key_naming_it():
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["related"] = {"backlog": ["x"]}
-    result = rm().validate(sidecar)
-    assert any("related.backlog" in e for e in result.errors)
-
-
-def test_plan_rejected_as_related_map_key_naming_it():
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["related"] = {"plan": ["x"]}
-    result = rm().validate(sidecar)
-    assert any("related.plan" in e for e in result.errors)
+    assert any(f"related.{key}" in e for e in result.errors)
 
 
 def test_status_outside_vocab_rejected_naming_value_and_allowed_set():
@@ -291,11 +277,21 @@ def test_missing_auto_set_keys_tolerated():
     assert result.errors == []
 
 
-def test_keywords_as_string_rejected_naming_key():
+@pytest.mark.parametrize(
+    ("bad_value", "field", "named"),
+    [
+        pytest.param("not-a-list", "keywords", "keywords", id="keywords_as_string_rejected_naming_key"),
+        pytest.param("not-a-date", "created-at", "created-at", id="datetime_not_iso_rejected_naming_key"),
+        pytest.param("2026-06-17T14:32:00", "created-at", "created-at", id="datetime_naive_rejected"),
+        pytest.param("2026-06-17T14:32:00+05:00", "created-at", "created-at", id="datetime_non_utc_offset_rejected"),
+        pytest.param("v2", "version", "v2", id="version_non_v1_rejected_with_named_error"),
+    ],
+)
+def test_invalid_field_value_is_rejected_naming_it(bad_value, field, named):
     sidecar = _worked_example_spec_sidecar()
-    sidecar["keywords"] = "not-a-list"
+    sidecar[field] = bad_value
     result = rm().validate(sidecar)
-    assert any("keywords" in e for e in result.errors)
+    assert any(named in e for e in result.errors)
 
 
 def test_related_not_a_map_rejected():
@@ -319,35 +315,12 @@ def test_related_value_not_list_of_str_names_path():
     assert any("related.task" in e for e in result.errors)
 
 
-def test_datetime_not_iso_rejected_naming_key():
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["created-at"] = "not-a-date"
-    result = rm().validate(sidecar)
-    assert any("created-at" in e for e in result.errors)
-
-
 def test_datetime_explicit_utc_offset_accepted():
     """A zero UTC offset (`+00:00`) is the same instant as `Z` — accepted."""
     sidecar = _worked_example_spec_sidecar()
     sidecar["created-at"] = "2026-06-17T14:32:00+00:00"
     result = rm().validate(sidecar)
     assert result.errors == []
-
-
-def test_datetime_naive_rejected():
-    """A naive timestamp carries no UTC guarantee — rejected (contract is UTC)."""
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["created-at"] = "2026-06-17T14:32:00"
-    result = rm().validate(sidecar)
-    assert any("created-at" in e for e in result.errors)
-
-
-def test_datetime_non_utc_offset_rejected():
-    """A non-zero offset is not UTC — rejected, matching the 'UTC' error text."""
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["created-at"] = "2026-06-17T14:32:00+05:00"
-    result = rm().validate(sidecar)
-    assert any("created-at" in e for e in result.errors)
 
 
 def test_non_str_kind_does_not_raise():
@@ -369,13 +342,6 @@ def test_version_absent_defaults_to_v1_no_error():
     result = rm().validate(sidecar)
     assert result.errors == []
     assert result.sidecar["version"] == "v1"
-
-
-def test_version_non_v1_rejected_with_named_error():
-    sidecar = _worked_example_spec_sidecar()
-    sidecar["version"] = "v2"
-    result = rm().validate(sidecar)
-    assert any("v2" in e for e in result.errors)
 
 
 def test_related_empty_list_boundary_clean():
@@ -499,33 +465,19 @@ def test_annotations_non_map_rejected_naming_key():
     assert any("annotations" in e for e in result.errors)
 
 
-def test_labels_non_string_value_int_rejected_naming_key():
-    """A map value that is an int is rejected, naming the key."""
-    sidecar = _base_sidecar_with(labels={"worktree": 1})
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        pytest.param("worktree", 1, id="int"),
+        pytest.param("flag", True, id="bool"),
+        pytest.param("nested", {"a": "b"}, id="dict"),
+        pytest.param("items", ["a", "b"], id="list"),
+    ],
+)
+def test_labels_non_string_value_is_rejected_naming_key(key, value):
+    sidecar = _base_sidecar_with(labels={key: value})
     result = rm().validate(sidecar)
-    joined = " ".join(result.errors)
-    assert "worktree" in joined
-
-
-def test_labels_non_string_value_bool_rejected():
-    """A map value that is True is rejected."""
-    sidecar = _base_sidecar_with(labels={"flag": True})
-    result = rm().validate(sidecar)
-    assert any("flag" in e for e in result.errors)
-
-
-def test_labels_non_string_value_dict_rejected():
-    """A map value that is a dict is rejected."""
-    sidecar = _base_sidecar_with(labels={"nested": {"a": "b"}})
-    result = rm().validate(sidecar)
-    assert any("nested" in e for e in result.errors)
-
-
-def test_labels_non_string_value_list_rejected():
-    """A map value that is a list is rejected."""
-    sidecar = _base_sidecar_with(labels={"items": ["a", "b"]})
-    result = rm().validate(sidecar)
-    assert any("items" in e for e in result.errors)
+    assert any(key in e for e in result.errors)
 
 
 def test_labels_empty_string_key_rejected():
@@ -535,54 +487,22 @@ def test_labels_empty_string_key_rejected():
     assert result.errors  # some error emitted for the bad key
 
 
-def test_labels_uppercase_key_rejected_naming_key():
-    """An uppercase key is rejected, naming the offender."""
-    sidecar = _base_sidecar_with(labels={"MyKey": "val"})
+@pytest.mark.parametrize(
+    ("key", "named"),
+    [
+        pytest.param("MyKey", "MyKey", id="uppercase_key"),
+        pytest.param("-bad", "-bad", id="leading_dash_key"),
+        pytest.param("bad-", "bad-", id="trailing_dash_key"),
+        pytest.param("bad_key", "bad_key", id="illegal_char_key"),
+        pytest.param("a/b/c", "a/b/c", id="multi_segment_namespace"),
+        pytest.param("/x", "/x", id="empty_namespace_segment"),
+        pytest.param("foo\n", "foo", id="trailing_newline_key"),
+    ],
+)
+def test_invalid_label_key_is_rejected_naming_it(key, named):
+    sidecar = _base_sidecar_with(labels={key: "val"})
     result = rm().validate(sidecar)
-    assert any("MyKey" in e for e in result.errors)
-
-
-def test_labels_leading_dash_key_rejected_naming_key():
-    """A key beginning with '-' is rejected."""
-    sidecar = _base_sidecar_with(labels={"-bad": "val"})
-    result = rm().validate(sidecar)
-    assert any("-bad" in e for e in result.errors)
-
-
-def test_labels_trailing_dash_key_rejected_naming_key():
-    """A key ending with '-' is rejected."""
-    sidecar = _base_sidecar_with(labels={"bad-": "val"})
-    result = rm().validate(sidecar)
-    assert any("bad-" in e for e in result.errors)
-
-
-def test_labels_illegal_char_key_rejected_naming_key():
-    """A key containing an illegal char (e.g. '_') is rejected."""
-    sidecar = _base_sidecar_with(labels={"bad_key": "val"})
-    result = rm().validate(sidecar)
-    assert any("bad_key" in e for e in result.errors)
-
-
-def test_labels_multi_segment_namespace_rejected_naming_key():
-    """a/b/c (two slashes) is rejected — at most one namespace segment."""
-    sidecar = _base_sidecar_with(labels={"a/b/c": "val"})
-    result = rm().validate(sidecar)
-    assert any("a/b/c" in e for e in result.errors)
-
-
-def test_labels_empty_namespace_segment_rejected_naming_key():
-    """/x (empty namespace before slash) is rejected."""
-    sidecar = _base_sidecar_with(labels={"/x": "val"})
-    result = rm().validate(sidecar)
-    assert any("/x" in e for e in result.errors)
-
-
-def test_labels_trailing_newline_key_rejected_naming_key():
-    """A key with a trailing newline is rejected — the regex anchors with \\Z, not
-    $, so 'foo\\n' cannot sneak past validation and into the index."""
-    sidecar = _base_sidecar_with(labels={"foo\n": "val"})
-    result = rm().validate(sidecar)
-    assert any("foo" in e for e in result.errors)
+    assert any(named in e for e in result.errors)
 
 
 def test_labels_absent_omitted_from_schema_not_unsupported():
@@ -869,20 +789,48 @@ def test_every_refusal_names_the_unset_escape():
         assert f"--unset-label {key}" in _label_key_error(key)
 
 
-def test_related_prefixed_kind_suffix_points_at_the_related_flag():
-    """``related-<kind>`` names the edge map, whose setter is ``--related``."""
-    assert _label_key_error("related-area") == (
-        "labels: `related-area` names a relation — use `--related area=<name>`."
-        " Already storing it? `--unset-label related-area` clears the key."
-    )
-
-
-def test_bare_related_label_key_points_at_the_related_flag():
-    """The bare ``related`` key's refusal names ``--related KIND=NAME`` as the
-    fix — the real edge-map field it collides with."""
-    assert _label_key_error("related") == (
-        "labels: `related` names a relation — use `--related KIND=NAME`."
-        " Already storing it? `--unset-label related` clears the key."
+@pytest.mark.parametrize(
+    ("expected_message", "key"),
+    [
+        pytest.param(
+            (
+                "labels: `related-area` names a relation — use `--related "
+                "area=<name>`. Already storing it? `--unset-label related-area` clears the key."
+            ),
+            "related-area",
+            id="related_prefixed_kind_suffix_points_at_the_related_flag",
+        ),
+        pytest.param(
+            (
+                "labels: `related` names a relation — use `--related KIND=NAME`. "
+                "Already storing it? `--unset-label related` clears the key."
+            ),
+            "related",
+            id="bare_related_label_key_points_at_the_related_flag",
+        ),
+        pytest.param(
+            (
+                "labels: `related-subsystems` reads as a relation but names no field — "
+                "use `--annotation related-subsystems=<value>` for a free attribute, "
+                "or a namespaced key (`<ns>/related-subsystems`). Already storing it? "
+                "`--unset-label related-subsystems` clears the key."
+            ),
+            "related-subsystems",
+            id="related_prefixed_key_with_no_field_falls_through_to_annotation",
+        ),
+        pytest.param(
+            (
+                "labels: `area` is a record kind — use `--related area=<name>`. "
+                "Already storing it? `--unset-label area` clears the key."
+            ),
+            "area",
+            id="record_kind_label_key_points_at_the_related_flag",
+        ),
+    ],
+)
+def test_label_key_error_points_at_the_right_flag(expected_message, key):
+    assert _label_key_error(key) == (
+        expected_message
     )
 
 
@@ -903,24 +851,6 @@ def test_related_prefixed_list_field_names_its_own_flag():
             f" Already storing it? `--unset-label {key}` clears the key."
         )
         assert "--annotation" not in msg
-
-
-def test_related_prefixed_key_with_no_field_falls_through_to_annotation():
-    """``related-subsystems`` names no real field, so a free attribute is the fix."""
-    assert _label_key_error("related-subsystems") == (
-        "labels: `related-subsystems` reads as a relation but names no field —"
-        " use `--annotation related-subsystems=<value>` for a free attribute, or"
-        " a namespaced key (`<ns>/related-subsystems`)."
-        " Already storing it? `--unset-label related-subsystems` clears the key."
-    )
-
-
-def test_record_kind_label_key_points_at_the_related_flag():
-    """A bare kind name is an edge the author meant to draw."""
-    assert _label_key_error("area") == (
-        "labels: `area` is a record kind — use `--related area=<name>`."
-        " Already storing it? `--unset-label area` clears the key."
-    )
 
 
 def test_every_record_kind_message_names_the_related_flag():
@@ -1092,37 +1022,22 @@ def test_session_dirty_is_valid_status():
     assert result.errors == []
 
 
-def test_session_active_is_rejected():
-    """active is not a valid session status."""
-    m = rm()
-    sidecar = _base_sidecar_with(kind="session", status="active")
-    result = m.validate(sidecar)
-    assert result.errors, "active must be rejected for session kind"
-    assert any("active" in e for e in result.errors)
-
-
-def test_session_complete_is_rejected():
-    """complete is not a valid session status."""
-    m = rm()
-    sidecar = _base_sidecar_with(kind="session", status="complete")
-    result = m.validate(sidecar)
-    assert result.errors, "complete must be rejected for session kind"
-    assert any("complete" in e for e in result.errors)
-
-
 @pytest.mark.parametrize(
-    ("message", "status"),
+    "status",
     [
-        pytest.param("shelved must be rejected for session kind", "shelved", id="shelved"),
-        pytest.param("handoff must be rejected for session kind", "handoff", id="handoff"),
-        pytest.param("finalized must be rejected for session kind", "finalized", id="finalized"),
+        pytest.param("shelved", id="shelved"),
+        pytest.param("handoff", id="handoff"),
+        pytest.param("finalized", id="finalized"),
+        pytest.param("active", id="active"),
+        pytest.param("complete", id="complete"),
     ],
 )
-def test_session_status_is_rejected(message, status):
+def test_session_status_is_rejected(status):
     m = rm()
     sidecar = _base_sidecar_with(kind="session", status=status)
     result = m.validate(sidecar)
-    assert result.errors, message
+    assert result.errors, f"{status} must be rejected for session kind"
+    assert any(status in e for e in result.errors)
 
 
 # --- adr kind: status vocab {draft, active, superseded, dropped} -----------

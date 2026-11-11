@@ -179,20 +179,18 @@ class TestCampStatusExitCodes:
             with reconcile_lock(mpath.parent):
                 flip_member_state_unlocked(mpath, name, st)
 
-    def test_status_all_ready_exit_0(self, cli_env):
-        self._seed_states(cli_env, "st0", {"repo_a": "ready", "repo_b": "ready"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st0")
-        assert r.returncode == 0, f"expected 0, got {r.returncode}: {r.stderr}"
-
-    def test_status_some_pending_exit_2(self, cli_env):
-        self._seed_states(cli_env, "st2", {"repo_a": "ready", "repo_b": "pending"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st2")
-        assert r.returncode == 2, f"expected 2, got {r.returncode}: {r.stderr}"
-
-    def test_status_some_failed_exit_3(self, cli_env):
-        self._seed_states(cli_env, "st3", {"repo_a": "ready", "repo_b": "failed"})
-        r = _camp(cli_env, "status", "--group", "mygroup", "--name", "st3")
-        assert r.returncode == 3, f"expected 3, got {r.returncode}: {r.stderr}"
+    @pytest.mark.parametrize(
+        ("slug", "states", "expected"),
+        [
+            pytest.param("st0", {"repo_a": "ready", "repo_b": "ready"}, 0, id="all_ready_exit_0"),
+            pytest.param("st2", {"repo_a": "ready", "repo_b": "pending"}, 2, id="some_pending_exit_2"),
+            pytest.param("st3", {"repo_a": "ready", "repo_b": "failed"}, 3, id="some_failed_exit_3"),
+        ],
+    )
+    def test_status_exit_code_reflects_member_states(self, cli_env, slug, states, expected):
+        self._seed_states(cli_env, slug, states)
+        r = _camp(cli_env, "status", "--group", "mygroup", "--name", slug)
+        assert r.returncode == expected, f"expected {expected}, got {r.returncode}: {r.stderr}"
 
     def test_status_json_shape(self, cli_env):
         self._seed_states(cli_env, "stj", {"repo_a": "ready", "repo_b": "pending"})

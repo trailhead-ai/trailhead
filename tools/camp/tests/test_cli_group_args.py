@@ -135,11 +135,23 @@ def test_missing_group_name_is_refused(capsys) -> None:
     assert capsys.readouterr().err == "camp group: a group name is required\n"
 
 
-def test_second_positional_is_refused(capsys) -> None:
+@pytest.mark.parametrize(
+    ("message", "arg"),
+    [
+        pytest.param("camp group: unexpected argument 'extra'\n", "extra", id="second_positional"),
+        pytest.param("camp group: --member requires a NAME=PATH value\n", "--member", id="member_without_a_value"),
+        pytest.param(
+            "camp group: --branch-pattern requires a value\n",
+            "--branch-pattern",
+            id="branch_pattern_without_a_value",
+        ),
+    ],
+)
+def test_malformed_group_args_are_refused(capsys, message, arg) -> None:
     with pytest.raises(SystemExit) as exc:
-        _parse_init_args(["grp", "extra"])
+        _parse_init_args(["grp", arg])
     assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp group: unexpected argument 'extra'\n"
+    assert capsys.readouterr().err == message
 
 
 @pytest.mark.parametrize("flag", ["--bogus", "--forc", "-z"])
@@ -150,20 +162,6 @@ def test_unknown_flag_is_refused_naming_it(flag: str, capsys) -> None:
         _parse_init_args(["grp", flag])
     assert exc.value.code == 1
     assert capsys.readouterr().err == f"camp group: unknown flag {flag!r}\n"
-
-
-def test_member_without_a_value_is_refused(capsys) -> None:
-    with pytest.raises(SystemExit) as exc:
-        _parse_init_args(["grp", "--member"])
-    assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp group: --member requires a NAME=PATH value\n"
-
-
-def test_branch_pattern_without_a_value_is_refused(capsys) -> None:
-    with pytest.raises(SystemExit) as exc:
-        _parse_init_args(["grp", "--branch-pattern"])
-    assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp group: --branch-pattern requires a value\n"
 
 
 @pytest.mark.parametrize(

@@ -107,23 +107,34 @@ class TestHelpAtEveryLevel:
 class TestUnknownCommandHint:
     """The custom ``_unknown_command_hint`` redirect table survives the split."""
 
-    def test_retired_recall_redirects_to_search(self, tmp_path):
-        result = _run(["recall"], tmp_path)
+    @pytest.mark.parametrize(
+        ("message", "hint", "command"),
+        [
+            pytest.param(
+                "unknown command 'recall'",
+                "did you mean 'lore search'?",
+                "recall",
+                id="retired_recall_redirects_to_search",
+            ),
+            pytest.param(
+                "unknown command 'set-status'",
+                "did you mean 'lore record update --status'?",
+                "set-status",
+                id="retired_set_status_redirects_to_record_update",
+            ),
+            pytest.param(
+                "unknown command 'boguscmd'",
+                "Run 'lore --help'",
+                "boguscmd",
+                id="unknown_command_without_hint_points_at_help",
+            ),
+        ],
+    )
+    def test_unknown_command_gets_its_hint(self, tmp_path, message, hint, command):
+        result = _run([command], tmp_path)
         assert result.returncode == 2
-        assert "unknown command 'recall'" in result.stderr
-        assert "did you mean 'lore search'?" in result.stderr
-
-    def test_retired_set_status_redirects_to_record_update(self, tmp_path):
-        result = _run(["set-status"], tmp_path)
-        assert result.returncode == 2
-        assert "unknown command 'set-status'" in result.stderr
-        assert "did you mean 'lore record update --status'?" in result.stderr
-
-    def test_unknown_command_without_hint_points_at_help(self, tmp_path):
-        result = _run(["boguscmd"], tmp_path)
-        assert result.returncode == 2
-        assert "unknown command 'boguscmd'" in result.stderr
-        assert "Run 'lore --help'" in result.stderr
+        assert message in result.stderr
+        assert hint in result.stderr
 
 
 class TestNearestMatchSuggestion:

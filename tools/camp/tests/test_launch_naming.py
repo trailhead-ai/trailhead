@@ -41,32 +41,33 @@ if str(_PLUGIN_DIR) not in sys.path:
     sys.path.insert(0, str(_PLUGIN_DIR))
 
 
-def test_name_varies_with_group():
+@pytest.mark.parametrize(
+    ("group_a", "slug_a", "group_b", "slug_b"),
+    [
+        pytest.param("groupa", "myslug", "groupb", "myslug", id="name_varies_with_group"),
+        pytest.param("mygroup", "sluga", "mygroup", "slugb", id="name_varies_with_slug"),
+        pytest.param(
+            "my.team",
+            "web",
+            "my-team",
+            "web",
+            id="same_slug_different_groups_differing_only_by_folded_character",
+        ),
+        pytest.param(
+            "camp-cli",
+            "web",
+            "camp-cli-",
+            "web",
+            id="boundary_hyphen_survives_so_same_slug_different_groups_never_collide",
+        ),
+        pytest.param("mygroup", "a.b", "mygroup", "a:b", id="separator_folding_does_not_collapse_distinct_siblings"),
+    ],
+)
+def test_distinct_inputs_give_distinct_session_names(group_a, slug_a, group_b, slug_b):
     from camp.launch.naming import workspace_session_name
 
-    name_a = workspace_session_name("groupa", "myslug")
-    name_b = workspace_session_name("groupb", "myslug")
-    assert name_a != name_b
-
-
-def test_name_varies_with_slug():
-    from camp.launch.naming import workspace_session_name
-
-    name_a = workspace_session_name("mygroup", "sluga")
-    name_b = workspace_session_name("mygroup", "slugb")
-    assert name_a != name_b
-
-
-def test_same_slug_different_groups_differing_only_by_folded_character():
-    from camp.launch.naming import workspace_session_name
-
-    # "my.team" and "my-team" read alike but fold differently: "." is
-    # escaped while "-" passes through literally. Same slug, two groups
-    # that collapse to the same characters under a coarser fold must still
-    # derive different session names -- the exact collision the group
-    # qualification exists to prevent.
-    name_a = workspace_session_name("my.team", "web")
-    name_b = workspace_session_name("my-team", "web")
+    name_a = workspace_session_name(group_a, slug_a)
+    name_b = workspace_session_name(group_b, slug_b)
     assert name_a != name_b
 
 
@@ -106,18 +107,6 @@ def test_component_level_injectivity_across_folded_characters():
     assert len(names) == len(components)
 
 
-def test_boundary_hyphen_survives_so_same_slug_different_groups_never_collide():
-    from camp.launch.naming import workspace_session_name
-
-    # AC13: two workspaces sharing a slug in different groups must never
-    # resolve to one session name. "camp-cli" and "camp-cli-" are both legal
-    # group names (_VALID_GROUP_RE is ^[a-z0-9-]+$), and differ only at a
-    # boundary hyphen.
-    name_a = workspace_session_name("camp-cli", "web")
-    name_b = workspace_session_name("camp-cli-", "web")
-    assert name_a != name_b
-
-
 def test_a_group_that_is_only_hyphens_does_not_collide_with_the_fallback_word():
     from camp.launch.naming import workspace_session_name
 
@@ -146,14 +135,6 @@ def test_separator_characters_are_folded_out_of_the_name():
     name = workspace_session_name("my.group", "my:slug")
     assert "." not in name
     assert ":" not in name
-
-
-def test_separator_folding_does_not_collapse_distinct_siblings():
-    from camp.launch.naming import workspace_session_name
-
-    name_a = workspace_session_name("mygroup", "a.b")
-    name_b = workspace_session_name("mygroup", "a:b")
-    assert name_a != name_b
 
 
 def test_component_that_folds_to_nothing_falls_back_without_empty_segment():

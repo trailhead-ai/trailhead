@@ -351,11 +351,18 @@ def test_deterministic_suggestion_sorted_field_list(kql):
         pytest.fail("expected KqlParseError for unknown field 'boguz'")
 
 
-def test_valid_field_zero_matches_no_error(kql):
-    """A valid field produces an AST (no error) even if it matches nothing at query time."""
-    ast = kql.parse("kind:nonexistent-kind-value")
+@pytest.mark.parametrize(
+    ("query", "field"),
+    [
+        pytest.param("kind:nonexistent-kind-value", "kind", id="valid_field_zero_matches_no_error"),
+        pytest.param("suite:search", "suite", id="suite_field"),
+        pytest.param("product:lore", "product", id="product_field"),
+    ],
+)
+def test_valid_scalar_field_parses_without_error(kql, query, field):
+    ast = kql.parse(query)
     assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "kind"
+    assert ast.field == field
 
 
 # ---------------------------------------------------------------------------
@@ -378,18 +385,6 @@ def test_ast_equality(kql):
 # ---------------------------------------------------------------------------
 # Edge cases
 # ---------------------------------------------------------------------------
-
-
-def test_suite_field(kql):
-    ast = kql.parse("suite:search")
-    assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "suite"
-
-
-def test_product_field(kql):
-    ast = kql.parse("product:lore")
-    assert isinstance(ast, kql.FieldEq)
-    assert ast.field == "product"
 
 
 # ---------------------------------------------------------------------------

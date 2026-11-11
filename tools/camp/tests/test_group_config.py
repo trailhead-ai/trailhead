@@ -1678,28 +1678,26 @@ def test_launch_roots_notice_fires_once_per_distinct_config_path(
     assert captured.err.count(f"roots in {second.resolve()}") == 1
 
 
-def test_launch_unknown_key_raises(tmp_path: Path) -> None:
-    """An unrecognized key inside [launch] fails closed — [launch] configures a
-    containment boundary, so a typo must never be silently ignored."""
+@pytest.mark.parametrize(
+    ("key", "toml"),
+    [
+        pytest.param("rootz", '[launch]\nrootz = ["~/code"]\n', id="unknown_key_raises"),
+        pytest.param("bogus", "[launch]\nbogus = 1\n", id="bogus_key_raises_naming_it"),
+        pytest.param(
+            "bogus",
+            '[launch]\naccount = "~/.claude-levr"\nbogus = "x"\n',
+            id="unknown_key_still_raises_with_account_known",
+        ),
+    ],
+)
+def test_launch_unknown_key_raises(tmp_path: Path, key, toml) -> None:
     from camp.group.config import GroupConfigError
 
     with pytest.raises(GroupConfigError) as exc_info:
-        _write_and_load(tmp_path, '[launch]\nrootz = ["~/code"]\n')
+        _write_and_load(tmp_path, toml)
     msg = str(exc_info.value)
     assert "launch" in msg
-    assert "rootz" in msg
-
-
-def test_launch_bogus_key_raises_naming_it(tmp_path: Path) -> None:
-    """A key other than `roots`/`account` is still refused outright, naming
-    itself — `roots` staying a known key does not widen what else is allowed."""
-    from camp.group.config import GroupConfigError
-
-    with pytest.raises(GroupConfigError) as exc_info:
-        _write_and_load(tmp_path, "[launch]\nbogus = 1\n")
-    msg = str(exc_info.value)
-    assert "launch" in msg
-    assert "bogus" in msg
+    assert key in msg
 
 
 def test_launch_not_a_table_raises(tmp_path: Path) -> None:
@@ -1781,18 +1779,6 @@ def test_launch_account_keeps_ordinary_non_ascii(tmp_path: Path) -> None:
     home directory can legitimately be spelled in any script."""
     cfg = _write_and_load(tmp_path, '[launch]\naccount = "~/Comptes/café/.claude"\n')
     assert cfg["launch"]["account"] == "~/Comptes/café/.claude"
-
-
-def test_launch_unknown_key_still_raises_with_account_known(tmp_path: Path) -> None:
-    """Regression on _LAUNCH_KEYS: an unrelated unknown key still fails closed
-    now that 'account' is a recognized key too."""
-    from camp.group.config import GroupConfigError
-
-    with pytest.raises(GroupConfigError) as exc_info:
-        _write_and_load(tmp_path, '[launch]\naccount = "~/.claude-levr"\nbogus = "x"\n')
-    msg = str(exc_info.value)
-    assert "launch" in msg
-    assert "bogus" in msg
 
 
 # ---------------------------------------------------------------------------

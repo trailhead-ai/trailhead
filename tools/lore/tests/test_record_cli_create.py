@@ -487,23 +487,20 @@ def test_related_map_invalid_kind_nonzero_names_kind(tmp_path):
     assert list(vault.glob("**/*.md")) == []
 
 
-def test_related_map_empty_name_rejected_by_guard(tmp_path):
-    """--related task= (empty name) → non-zero from the applier guard (before validate)."""
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        pytest.param("--related", "task=", id="related_map_empty_name_rejected_by_guard"),
+        pytest.param("--related", "=foo", id="related_map_empty_kind_rejected_by_guard"),
+        pytest.param("--set", "title=x", id="set_flag_is_unrecognized"),
+        pytest.param("--unset", "keywords", id="unset_flag_is_unrecognized"),
+        pytest.param("--set", "team=other", id="scope_cannot_decouple_set_team_rejected"),
+    ],
+)
+def test_malformed_record_argument_is_rejected(tmp_path, flag, value):
     vault, state = _make_vault(tmp_path)
     r = _run(
-        _BASE_ARGS + ["--related", "task="],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
-
-
-def test_related_map_empty_kind_rejected_by_guard(tmp_path):
-    """--related =foo (empty kind) → non-zero from the applier guard (before validate)."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--related", "=foo"],
+        _BASE_ARGS + [flag, value],
         vault=vault,
         state_dir=state,
     )
@@ -532,30 +529,6 @@ def test_create_no_keyword_succeeds(tmp_path):
 # ---------------------------------------------------------------------------
 # --set/--unset are gone; provenance remains unwritable
 # ---------------------------------------------------------------------------
-
-
-def test_set_flag_is_unrecognized(tmp_path):
-    """--set is removed: argparse rejects it as an unrecognized argument."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--set", "title=x"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
-
-
-def test_unset_flag_is_unrecognized(tmp_path):
-    """--unset is removed: argparse rejects it as an unrecognized argument."""
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--unset", "keywords"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
 
 
 def test_no_flag_for_provenance_fields(tmp_path):
@@ -1081,20 +1054,6 @@ def test_scope_field_raw_value_not_scope_string(tmp_path):
     sidecar = _find_sidecar(vault, r.stdout.strip())
     assert sidecar.get("team") == "my-team"
     assert sidecar.get("team") != "team:my-team"
-
-
-def test_scope_cannot_decouple_set_team_rejected(tmp_path):
-    """``--set team=…`` is gone: no decoupled setter can write ``team``
-    to a value that differs from the routing scope.  Argparse rejects ``--set``.
-    """
-    vault, state = _make_vault(tmp_path)
-    r = _run(
-        _BASE_ARGS + ["--set", "team=other"],
-        vault=vault,
-        state_dir=state,
-    )
-    assert r.returncode != 0
-    assert list(vault.glob("**/*.md")) == []
 
 
 def test_scope_no_other_team_field_flag(tmp_path):

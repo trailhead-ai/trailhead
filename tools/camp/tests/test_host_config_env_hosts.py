@@ -96,58 +96,31 @@ def test_self_name_is_accepted_without_a_host_table(
     assert env_host_names() == ["sunrise"]
 
 
-def test_name_matching_neither_a_table_nor_self_name_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.parametrize(
+    ("toml", "named"),
+    [
+        pytest.param(
+            'self_name = "sunrise"\nenv_hosts = ["ghost"]\n[hosts.a]\n',
+            "ghost",
+            id="name_matching_neither_a_table_nor_self_name",
+        ),
+        pytest.param('env_hosts = ["a", "a"]\n[hosts.a]\n', "'a'", id="duplicate_name"),
+        pytest.param('env_hosts = "a"\n[hosts.a]\n', "env_hosts", id="non_list"),
+        pytest.param("env_hosts = [7]\n[hosts.a]\n", "7", id="non_string_element"),
+    ],
+)
+def test_invalid_env_hosts_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, toml, named) -> None:
     path = _write_hosts(
         monkeypatch,
         tmp_path,
-        'self_name = "sunrise"\nenv_hosts = ["ghost"]\n[hosts.a]\n',
+        toml,
     )
 
     with pytest.raises(HostConfigError) as exc:
         env_host_names()
 
     assert str(path) in str(exc.value)
-    assert "ghost" in str(exc.value)
-
-
-def test_duplicate_name_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = _write_hosts(
-        monkeypatch, tmp_path, 'env_hosts = ["a", "a"]\n[hosts.a]\n'
-    )
-
-    with pytest.raises(HostConfigError) as exc:
-        env_host_names()
-
-    assert str(path) in str(exc.value)
-    assert "'a'" in str(exc.value)
-
-
-def test_non_list_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = _write_hosts(monkeypatch, tmp_path, 'env_hosts = "a"\n[hosts.a]\n')
-
-    with pytest.raises(HostConfigError) as exc:
-        env_host_names()
-
-    assert str(path) in str(exc.value)
-    assert "env_hosts" in str(exc.value)
-
-
-def test_non_string_element_is_refused(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    path = _write_hosts(monkeypatch, tmp_path, 'env_hosts = [7]\n[hosts.a]\n')
-
-    with pytest.raises(HostConfigError) as exc:
-        env_host_names()
-
-    assert str(path) in str(exc.value)
-    assert "7" in str(exc.value)
+    assert named in str(exc.value)
 
 
 @pytest.mark.parametrize("bad", ["-oProxyCommand=x", "Upper", "", "a b"])

@@ -100,13 +100,34 @@ def test_declared_flag_is_not_refused(capsys) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_extra_positional_is_refused_as_unexpected_argument(capsys) -> None:
-    """A second positional has no slot, and refuses as an argument rather than as
-    a flag — the two refusals are worded differently on purpose."""
+@pytest.mark.parametrize(
+    ("message", "first", "second"),
+    [
+        pytest.param(
+            "camp launch: unexpected argument 'two'\n",
+            "one",
+            "two",
+            id="extra_positional_is_refused_as_unexpected_argument",
+        ),
+        pytest.param(
+            "camp launch: --group requires a value\n",
+            "--group",
+            "--json",
+            id="valued_flag_swallows_no_following_flag",
+        ),
+        pytest.param(
+            "camp launch: unknown flag '--gro'\n",
+            "--gro",
+            "trailhead",
+            id="flag_abbreviation_is_not_accepted",
+        ),
+    ],
+)
+def test_malformed_launch_args_are_refused(capsys, message, first, second) -> None:
     with pytest.raises(SystemExit) as exc:
-        _launch_parser().parse_args(["one", "two"])
+        _launch_parser().parse_args([first, second])
     assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp launch: unexpected argument 'two'\n"
+    assert capsys.readouterr().err == message
 
 
 # ---------------------------------------------------------------------------
@@ -122,35 +143,9 @@ def test_valued_flag_without_a_value_is_refused(capsys) -> None:
     assert capsys.readouterr().err == "camp launch: --group requires a value\n"
 
 
-def test_valued_flag_swallows_no_following_flag(capsys) -> None:
-    """``--group --json`` must refuse rather than take ``--json`` as the group name.
-
-    argparse already declines to consume a following option as a value; this pins
-    that camp's wording for it is the missing-value refusal, not a stray
-    unknown-flag report about ``--json``.
-    """
-    with pytest.raises(SystemExit) as exc:
-        _launch_parser().parse_args(["--group", "--json"])
-    assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp launch: --group requires a value\n"
-
-
 # ---------------------------------------------------------------------------
 # Abbreviations stay off.
 # ---------------------------------------------------------------------------
-
-
-def test_flag_abbreviation_is_not_accepted(capsys) -> None:
-    """``--gro`` is an unknown flag, not a shorthand for ``--group``.
-
-    argparse's default (`allow_abbrev=True`) would accept it, silently widening
-    every camp flag into all of its unambiguous prefixes — a surface camp never
-    declared and could not later narrow without breaking whoever found it.
-    """
-    with pytest.raises(SystemExit) as exc:
-        _launch_parser().parse_args(["--gro", "trailhead"])
-    assert exc.value.code == 1
-    assert capsys.readouterr().err == "camp launch: unknown flag '--gro'\n"
 
 
 # ---------------------------------------------------------------------------

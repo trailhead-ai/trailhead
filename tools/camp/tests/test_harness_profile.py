@@ -74,25 +74,24 @@ class TestHarnessConfigValidation:
             self._load(tmp_path, '[harness]\nbinary = "  "\n')
         assert "non-empty" in str(exc.value).lower() or "empty" in str(exc.value).lower()
 
-    def test_harness_cwd_unknown_placeholder_rejected(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("named", "toml"),
+        [
+            pytest.param("nope", '[harness]\ncwd = "{nope}"\n', id="cwd_unknown_placeholder"),
+            pytest.param("session_id", '[harness]\ncwd = "{session_id}"\n', id="session_id_placeholder"),
+            pytest.param("telepathy", '[harness]\ninject = "telepathy"\n', id="inject_unknown_value"),
+            pytest.param("pretrust", '[harness]\npretrust = "yes"\n', id="pretrust_non_bool"),
+        ],
+    )
+    def test_invalid_harness_setting_is_rejected(self, tmp_path, named, toml):
         from camp.group.config import GroupConfigError
 
         with pytest.raises(GroupConfigError) as exc:
             self._load(
                 tmp_path,
-                '[harness]\ncwd = "{nope}"\n',
+                toml,
             )
-        assert "nope" in str(exc.value)
-
-    def test_harness_session_id_placeholder_rejected(self, tmp_path):
-        """{session_id} is NOT a substitutable placeholder — camp does not launch the
-        harness, so it never has a session id to fill in. It must fail at load
-        rather than KeyError at substitution time."""
-        from camp.group.config import GroupConfigError
-
-        with pytest.raises(GroupConfigError) as exc:
-            self._load(tmp_path, '[harness]\ncwd = "{session_id}"\n')
-        assert "session_id" in str(exc.value)
+        assert named in str(exc.value)
 
     def test_harness_inject_stdout_parses(self, tmp_path):
         cfg = self._load(tmp_path, '[harness]\ninject = "stdout"\n')
@@ -105,13 +104,6 @@ class TestHarnessConfigValidation:
     def test_harness_inject_absent_not_in_parsed(self, tmp_path):
         cfg = self._load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
         assert "inject" not in cfg["harness"]
-
-    def test_harness_inject_unknown_value_rejected(self, tmp_path):
-        from camp.group.config import GroupConfigError
-
-        with pytest.raises(GroupConfigError) as exc:
-            self._load(tmp_path, '[harness]\ninject = "telepathy"\n')
-        assert "telepathy" in str(exc.value)
 
     def test_harness_inject_non_string_rejected(self, tmp_path):
         from camp.group.config import GroupConfigError
@@ -130,13 +122,6 @@ class TestHarnessConfigValidation:
     def test_harness_pretrust_absent_not_in_parsed(self, tmp_path):
         cfg = self._load(tmp_path, '[harness]\ndoc_files = ["AGENTS.md"]\n')
         assert "pretrust" not in cfg["harness"]
-
-    def test_harness_pretrust_non_bool_rejected(self, tmp_path):
-        from camp.group.config import GroupConfigError
-
-        with pytest.raises(GroupConfigError) as exc:
-            self._load(tmp_path, '[harness]\npretrust = "yes"\n')
-        assert "pretrust" in str(exc.value)
 
 
 # ---------------------------------------------------------------------------

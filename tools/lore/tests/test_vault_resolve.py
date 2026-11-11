@@ -19,6 +19,7 @@ Covers the test contract:
 """
 
 from conftest import load_script
+import pytest
 
 
 def vr():
@@ -112,46 +113,42 @@ def test_worked_c_absent_team_scope_resolves_to_default():
 # ---------------------------------------------------------------------------
 
 
-def test_worked_d_repo_excluded_falls_through_to_team():
-    """(d) Both scopes participate. Repo outranks team but excludes blob;
-    fall through to product-engineering (team), which accepts blob."""
+@pytest.mark.parametrize(
+    ("kind", "expected_vault", "expected_scope", "repo"),
+    [
+        pytest.param(
+            "blob",
+            "product-engineering",
+            "team",
+            "trailhead-ai_trailhead",
+            id="excluded_falls_through_to_team",
+        ),
+        pytest.param(
+            "blob",
+            "product-engineering",
+            "team",
+            "trailhead-ai/trailhead",
+            id="slash_normalizes_to_match_stored",
+        ),
+        pytest.param(
+            "spec",
+            "trailhead-ai_trailhead",
+            "repo",
+            "trailhead-ai/trailhead",
+            id="eligible_kind_resolves_to_repo",
+        ),
+    ],
+)
+def test_resolves_across_team_and_repo_scopes(kind, expected_vault, expected_scope, repo):
     mod = vr()
     config = _spec_config()
     result = mod.resolve_vault(
-        {"team": "product-engineering", "repo": "trailhead-ai_trailhead"},
-        "blob",
+        {"team": "product-engineering", "repo": repo},
+        kind,
         config,
     )
-    assert result.name == "product-engineering"
-    assert result.scope == "team"
-
-
-def test_worked_d_repo_slash_normalizes_to_match_stored():
-    """(d) ``--repo trailhead-ai/trailhead`` (with ``/``) normalizes to
-    ``trailhead-ai_trailhead`` and matches the stored vault."""
-    mod = vr()
-    config = _spec_config()
-    # Raw flag value with '/' — resolver normalizes before matching
-    result = mod.resolve_vault(
-        {"team": "product-engineering", "repo": "trailhead-ai/trailhead"},
-        "blob",
-        config,
-    )
-    assert result.name == "product-engineering"
-    assert result.scope == "team"
-
-
-def test_worked_d_repo_eligible_kind_resolves_to_repo():
-    """Symmetry: with kind=spec (in repo's allowlist), repo wins."""
-    mod = vr()
-    config = _spec_config()
-    result = mod.resolve_vault(
-        {"team": "product-engineering", "repo": "trailhead-ai/trailhead"},
-        "spec",
-        config,
-    )
-    assert result.name == "trailhead-ai_trailhead"
-    assert result.scope == "repo"
+    assert result.name == expected_vault
+    assert result.scope == expected_scope
 
 
 # ---------------------------------------------------------------------------
