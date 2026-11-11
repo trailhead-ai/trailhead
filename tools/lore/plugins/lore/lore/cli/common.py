@@ -297,6 +297,31 @@ def _resolve_all_vaults() -> tuple[list[tuple[str, Path]], str | None]:
     return [(v.name, Path(v.path)) for v in vaults], None
 
 
+def _drop_read_only_vaults(vaults, *, announce: bool = True) -> list:
+    """*vaults* (``(name, path)`` pairs) without the ``read-only`` ones, order kept.
+
+    The target-set filter for every command that acts on every vault. A read-only
+    vault's folder is changed by hand outside lore, and git writes ``.git/``
+    (``FETCH_HEAD``, remote-ref logs, the index) without any lore lock, so such a
+    vault is dropped BEFORE the first git call rather than left to the write lock.
+    With *announce* each dropped vault is named on stderr in one line, the write
+    guard's own message plus ``skipped``. Identity is the folder
+    (:func:`locking.read_only_vault_name`), so an alias entry reaching a read-only
+    folder is dropped too. Raises :class:`locking.VaultWriteRefusedError` on a
+    config that cannot be read, like every other check of the declaration.
+    """
+    from .. import locking
+
+    kept = []
+    for entry in vaults:
+        name, path = entry[0], entry[1]
+        if locking.read_only_vault_name(path) is None:
+            kept.append(entry)
+        elif announce:
+            print(f"{locking.read_only_message(name)} — skipped", file=sys.stderr)
+    return kept
+
+
 def _resolve_all_vaults_and_read_only() -> tuple[list[tuple[str, Path]], set[str], str | None]:
     """``_resolve_all_vaults`` plus the names of the ``read-only`` vaults, from the
     same single ``load_config`` read, so the list and the declarations cannot

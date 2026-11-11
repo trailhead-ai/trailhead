@@ -86,6 +86,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -522,6 +523,10 @@ def sweep_references(
     guess wrong on the crash-resume path, where the record sits at a stem the
     caller resolved by title.
 
+    **Read-only vaults are dropped from the sweep** before any record in them is
+    read, one stderr line each: their content is changed by hand outside lore, so
+    a link there is the operator's to repoint.
+
     **Fault isolation.** The sweep runs AFTER the primary move has landed, so it
     must never abort partway and leave the operator with a moved record and no
     account of the references. Each record is handled independently: an
@@ -546,6 +551,10 @@ def sweep_references(
     """
     rewrites: list[Rewrite] = []
     for vault in vaults:
+        if locking.read_only_vault_name(vault.root) is not None:
+            # Changed by hand outside lore: not scanned, not rewritten, not reported.
+            print(f"{locking.read_only_message(vault.name)} — skipped", file=sys.stderr)
+            continue
         skip = vault.shared and not include_shared
         for record_id, rec_kind, body_path in _iter_records(vault.root):
             try:

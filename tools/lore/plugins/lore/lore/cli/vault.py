@@ -528,11 +528,12 @@ def _cmd_vault_reformat(args) -> int:
     ``record create`` / ``record update`` / ``flush``.
     """
     from . import resolve_state as resolve_state_mod
-    from .common import _resolve_all_vaults_strict
+    from .common import _drop_read_only_vaults, _resolve_all_vaults_strict
 
     targets = _resolve_all_vaults_strict("reformat")
     if targets is None:
         return 1
+    targets = _drop_read_only_vaults(targets)
 
     for name, path in targets:
         if not path.is_dir():

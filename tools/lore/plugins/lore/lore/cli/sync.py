@@ -106,6 +106,7 @@ from ..record import model as record_model
 from .common import (
     SYNC_REFUSAL_MESSAGES,
     _git,
+    _drop_read_only_vaults,
     _resolve_all_vaults,
     _resolve_lore_state_dir,
     _shared_vault_paths,
@@ -1410,6 +1411,10 @@ def implicit_pull(vault_root: str | Path) -> None:
         print(f"  lore: {name}: {text}", file=sys.stderr)
 
     try:
+        # Before the throttle stamp and any git: the write this precedes is refused
+        # for a read-only vault, and a fetch would write its ``.git/`` first.
+        if locking.read_only_vault_name(vault) is not None:
+            return
         if _fetch_is_fresh(vault):
             return
         _stamp_fetch_attempt(vault)
@@ -1437,10 +1442,12 @@ def implicit_pull(vault_root: str | Path) -> None:
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     """Resolve the vaults to sync. Returns ``(targets, exit_code)``.
 
-    A non-empty ``targets`` always pairs with exit code 0. An unreadable config or
-    an unknown ``--vault`` name yields ``([], 1)`` with the diagnostic already
-    printed — both are refusals, never a silent fallback to syncing ``default``
-    alone, which would recreate the very gap this command closes.
+    An unreadable config or an unknown ``--vault`` name yields ``([], 1)`` with the
+    diagnostic already printed — both are refusals, never a silent fallback to
+    syncing ``default`` alone, which would recreate the very gap this command
+    closes. A ``read-only`` vault is dropped from a sweep (one skip line each, so
+    ``targets`` may come back empty with exit code 0) and a ``--vault`` naming one
+    raises :class:`locking.ReadOnlyVaultError`; either way before any git call.
     """
     from ..vault import config as vault_config_mod
 
@@ -1451,7 +1458,7 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
         return [], 1
 
     if vault_filter is None:
-        return targets, 0
+        return _drop_read_only_vaults(targets), 0
 
     wanted = vault_config_mod.normalize_vault_name(vault_filter)
     selected = [(n, p) for n, p in targets if n == wanted]
@@ -1460,6 +1467,7 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
         print(f"error: unknown vault: {vault_filter!r}", file=sys.stderr)
         print(f"  configured vaults: {known}", file=sys.stderr)
         return [], 1
+    locking.assert_writable(selected[0][1])
     return selected, 0
 
 
@@ -1560,6 +1568,10 @@ def cmd_sync(args) -> int:
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
         return rc
+    if not targets:
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(render_sync_json([]), indent=2))
+        return 0
 
     # ``None`` means every vault gets its OWN generated message, computed from
     # what THAT vault actually stages — see ``_stage_and_commit_one`` /

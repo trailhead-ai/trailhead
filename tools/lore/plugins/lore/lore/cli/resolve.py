@@ -1235,6 +1235,8 @@ def _select_vault(wanted: str | None) -> tuple[str, Path] | None:
     normalized = vault_config_mod.normalize_vault_name(wanted or "")
     for name, path in targets:
         if name == normalized or Path(path).name == wanted:
+            # Resolving fetches and rebases: git in a read-only vault's folder.
+            locking.assert_writable(path)
             return name, Path(path)
 
     known = ", ".join(n for n, _ in targets) or "(none)"
