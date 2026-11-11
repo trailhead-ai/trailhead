@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from ._tier_runs import REPO, run_pytest
+from ._tier_runs import REPO, run_pytest, tier_ids_outside_its_paths, tier_paths
 
 SCRIPT = REPO / "scripts" / "test-area-args"
 
@@ -56,3 +56,43 @@ def test_an_unknown_area_exits_nonzero_naming_the_known_ones(tmp_path):
     )
     assert result.returncode == 2
     assert "first" in result.stderr and "rest" in result.stderr
+
+
+def _tier_project(tmp_path: Path, marked_dirs: list[str]) -> Path:
+    for name in ("inside", "outside"):
+        (tmp_path / name).mkdir()
+    for name in marked_dirs:
+        (tmp_path / name / f"test_{name}.py").write_text(
+            f"import pytest\n\n@pytest.mark.seam_real\ndef test_{name}():\n    pass\n"
+        )
+    config = tmp_path / "pyproject.toml"
+    config.write_text(
+        '[tool.pytest.ini_options]\nmarkers = ["seam_real: x"]\ntestpaths = ["inside", "outside"]\n'
+        '[tool.trailhead.test-areas]\nfirst = ["inside"]\n'
+        '[tool.trailhead.test-tiers]\nseam_real = ["inside"]\n'
+    )
+    return config
+
+
+def test_a_tier_names_the_paths_its_job_collects(tmp_path):
+    config = _tier_project(tmp_path, [])
+    assert tier_paths("seam_real", config) == ["inside"]
+
+
+def test_an_unknown_tier_exits_nonzero_naming_the_known_ones(tmp_path):
+    config = _tier_project(tmp_path, [])
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--tier", "chromium", "--config", str(config)], capture_output=True, text=True
+    )
+    assert result.returncode == 2
+    assert "seam_real" in result.stderr
+
+
+def test_a_tier_marked_test_inside_its_paths_is_not_stray(tmp_path):
+    config = _tier_project(tmp_path, ["inside"])
+    assert tier_ids_outside_its_paths("seam_real", config, tmp_path) == frozenset()
+
+
+def test_a_tier_marked_test_outside_its_paths_is_reported_as_stray(tmp_path):
+    config = _tier_project(tmp_path, ["inside", "outside"])
+    assert tier_ids_outside_its_paths("seam_real", config, tmp_path) == {"outside/test_outside.py::test_outside"}

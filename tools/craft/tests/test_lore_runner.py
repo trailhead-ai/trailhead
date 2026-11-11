@@ -11,7 +11,7 @@ import sys
 import pytest
 
 import _lore_runner
-from _lore_runner import LoreRunner, LoreRunnerEscape, lore_conftest
+from _lore_runner import LoreRunner, LoreRunnerEscape, lore_conftest, seam_env
 
 lore_runner = _lore_runner.lore_runner
 
@@ -140,6 +140,20 @@ def test_a_config_pointing_outside_the_root_raises_before_lore_runs(
     with pytest.raises(LoreRunnerEscape, match="elsewhere"):
         runner(["vault", "ls"])
     assert ran == []
+
+
+def test_an_out_of_root_config_raises_when_the_environment_is_handed_to_a_subprocess(tmp_path):
+    runner = LoreRunner(tmp_path / "root")
+    runner.write_config([("default", "default", tmp_path / "elsewhere")])
+    with pytest.raises(LoreRunnerEscape, match="elsewhere"):
+        seam_env(runner, tmp_path)
+
+
+def test_a_confined_runner_hands_out_its_environment_with_the_lore_shim_first(tmp_path):
+    runner = LoreRunner(tmp_path / "root")
+    env = seam_env(runner, tmp_path)
+    assert env["PATH"].split(os.pathsep)[0] == str(tmp_path / "bin")
+    assert env["HOME"] == str(runner.home)
 
 
 def test_a_vault_that_symlinks_out_of_the_root_raises(tmp_path):

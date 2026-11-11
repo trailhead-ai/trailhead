@@ -86,7 +86,7 @@ scripts/bootstrap-venv            # create/converge .venv (idempotent, cheap to 
 pip install -e .                  # editable install (optional; bin/trailhead works without it)
 .venv/bin/python -m pytest        # default run: everything except the opt-in tiers below
 .venv/bin/python -m pytest -m "not benchmark"   # ALL tiers: the default run plus every tier
-.venv/bin/python -m pytest -m chromium tools/outpost/tests   # one tier (`-m seam_real tools/craft/tests tools/lore/tests` for the other)
+.venv/bin/python -m pytest -m chromium $(.venv/bin/python scripts/test-area-args --tier chromium)   # one tier, over the paths its CI job collects (`--tier seam_real` for the other)
 .venv/bin/python -m pytest trailhead/tests/test_compose.py             # one CLI test file
 .venv/bin/python -m pytest trailhead/tests/test_paths.py::TestMacosBranch  # one class/test
 .venv/bin/python -m pytest tools/lore/tests                            # one tool's suite
@@ -239,7 +239,8 @@ fallback, no GNU `readlink -f`, macOS-safe).
   `inject.py` to `from time import time_ns` left all 41 tests in `test_inject.py` green while the
   patch silently stopped applying, so the collision test no longer collides), or a process-wide
   function (`subprocess.run`, which catches every caller including incidental ones;
-  `scripts/inert-test-gate` flags a new one and lists the existing sites as allowed). Add a
+  `scripts/inert-test-gate` flags a new bare `subprocess.run` patch and lists the existing sites as
+  allowed; it does not match the `mod.subprocess.run` form). Add a
   `runner=` or clock seam to the code instead. The counts above and the verdict on when
   path-patching is right are a judgment from reading the sites, not a measured result.
 - Error hygiene, CLI-wide: a named error prints a clean `trailhead: <message>` on

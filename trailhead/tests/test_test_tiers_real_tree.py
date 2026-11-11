@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from ._tier_runs import REPO, TIERS, collected_ids
+from ._tier_runs import REPO, TIERS, collected_ids, tier_ids_outside_its_paths
 
 pytestmark = pytest.mark.seam_real
 
@@ -59,3 +59,8 @@ def test_a_path_scoped_run_honours_the_exclusion(area, tier):
     selected = collected_ids(path, "-m", tier)
     assert selected, f"{path} holds no {tier} test"
     assert not collected_ids(path) & selected
+
+
+@pytest.mark.parametrize("tier", TIERS)
+def test_every_test_of_a_tier_is_inside_the_paths_its_ci_job_collects(tier):
+    assert tier_ids_outside_its_paths(tier, REPO / "pyproject.toml", REPO) == frozenset()

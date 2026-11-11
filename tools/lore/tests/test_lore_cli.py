@@ -83,6 +83,3 @@ def test_init_no_harvest_pending(tmp_path):
     assert res.returncode == 0, res.stderr
     default_vault = state / "lore" / "vaults" / "default"
     assert not (default_vault / "harvest-pending.md").exists()
-
-
-# ---- lore set-status (removed — redirects via dispatch hint) ----------------

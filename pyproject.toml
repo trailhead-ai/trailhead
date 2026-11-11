@@ -54,6 +54,13 @@ markers = [
 craft = ["tools/craft/tests"]
 lore-camp = ["tools/lore/tests", "tools/camp/tests"]
 
+# The paths each opt-in tier's CI job collects (collecting the whole tree costs 25-30 s per
+# invocation). The tier job reads them through `scripts/test-area-args --tier`, and the real-tree
+# tier test fails when a test carrying the tier's marker sits outside them.
+[tool.trailhead.test-tiers]
+chromium = ["tools/outpost/tests"]
+seam_real = ["trailhead/tests", "tools/craft/tests", "tools/lore/tests"]
+
 [tool.ruff]
 # PEP 8 style enforcement. PEP 8 explicitly allows teams to relax the 79-column
 # rule; this codebase de-facto targets <=100, so we enforce 120 rather than churn

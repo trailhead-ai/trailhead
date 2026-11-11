@@ -49,26 +49,28 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
         area: [craft, lore-camp, rest]
         include:
-          # `baseline` is the area's passed count in a clean run of the default selection in a
-          # container that mirrors this job. `budget` is the job's median wall time plus two
-          # sample standard deviations over its CI history, rounded up to 10 s, and never above
-          # 300 s (the 5-minute target). The history is every guarded run of this job layout:
-          # 7 runs x 3 Pythons = 21 legs per job, guard wall times from the "Suite run-time
-          # guard" step. craft: median 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median
-          # 167.8, sd 19.9, so 207.5, budget 210. rest: 19 legs, median 56.2, sd 12.9, so 81.9,
-          # raised to 100 because one ordinary leg already reached 91.8 s. That history leaves out the two rest legs of one run (200.6 s on py3.11 and
-          # 164.6 s on py3.12): both were held up by the same test, which waited out a
-          # lock-order starvation bug in the scratch-pad publisher (158.5 s and 117.5 s against
-          # about 5 s), now fixed. A leg over its budget is the signal to look for a cause before
+          # `baseline` is the area's passed count in CI, and `max_skipped` its skipped count, from the
+          # last green run of this job layout (identical on all three Pythons): a test that starts
+          # skipping lowers the passed count below `baseline` and raises the skipped count above
+          # `max_skipped`. `budget` is the job's median wall time plus two sample standard
+          # deviations over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute
+          # target). The history is every guarded run of this job layout: 7 runs x 3 Pythons = 21
+          # legs per job, guard wall times from the "Suite run-time guard" step. craft: median
+          # 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median 167.8, sd 19.9, so 207.5,
+          # budget 210. rest: median 56.2, sd 12.9, so 81.9, raised to 100 because one ordinary leg
+          # already reached 91.8 s. A leg over its budget is the signal to look for a cause before
           # raising the number.
           - area: craft
             baseline: 3343
+            max_skipped: 18
             budget: 170
           - area: lore-camp
-            baseline: 7491
+            baseline: 7493
+            max_skipped: 8
             budget: 210
           - area: rest
-            baseline: 3162
+            baseline: 3199
+            max_skipped: 30
             budget: 100
     steps:
       - name: Check out the repository
@@ -136,7 +138,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           python scripts/suite-time-report junit.xml --tier ${{ matrix.area }}
-          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }}
+          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }} --max-skipped ${{ matrix.max_skipped }}
           --summary "$GITHUB_STEP_SUMMARY"
 
   pytest-tiers:
@@ -153,28 +155,29 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
         tier: [chromium, seam_real]
         include:
-          # `paths` limits collection to the directories holding the tier's tests, because
-          # collecting the whole tree costs 25-30 s per invocation.
+          # The job collects only the directories holding the tier's tests, named in
+          # `[tool.trailhead.test-tiers]` in pyproject.toml, because collecting the whole tree
+          # costs 25-30 s per invocation.
           # `baseline` is the tier's passed count in a clean run, with every test passing and none
-          # skipped. `budget` is the job's median wall time plus two sample standard deviations
+          # skipped, so `max_skipped` is 0. `budget` is the job's median wall time plus two sample standard deviations
           # over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute target).
           # seam_real: 21 legs (7 runs x 3 Pythons), median 86.2, sd 15.0, so 116.1, budget 120.
-          # chromium: PROVISIONAL. It has run one test at a time (`workers: 0`) in only 2 runs,
-          # 6 legs: median 100.4, sd 14.1, so 128.5, budget 130. Re-derive it from at least 5
-          # runs of this shape (it was 600 and then ran in 52 to 79 s on two workers).
+          # chromium: PROVISIONAL. It runs one test at a time (`workers: 0`) and has 2 runs of that
+          # shape, 6 legs: median 100.4, sd 14.1, so 128.5, budget 130. Re-derive it from at
+          # least 5 runs.
           # `workers` is the xdist worker count. The chromium tier runs nothing but browser
           # launches, and any second browser starting alongside the two-copy storage-event test
           # can starve it past its cross-copy barrier timeout, so the tier runs one test at a
           # time; it still finishes well inside its budget.
           - tier: chromium
-            paths: tools/outpost/tests
             workers: 0
             baseline: 343
+            max_skipped: 0
             budget: 130
           - tier: seam_real
-            paths: trailhead/tests tools/craft/tests tools/lore/tests
             workers: auto
             baseline: 319
+            max_skipped: 0
             budget: 120
     steps:
       - name: Check out the repository
@@ -190,8 +193,8 @@ jobs:
         run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
 
       - name: Install chrome-headless-shell
-        # Same pinned build and checksum as the pytest job. The require flag turns a missing
-        # browser into a failure instead of a skip.
+        # Pinned build, verified by checksum. The require flag turns a missing browser into a
+        # failure instead of a skip.
         if: matrix.tier == 'chromium'
         run: |
           set -euo pipefail
@@ -214,7 +217,7 @@ jobs:
         # any test skipped.
         run: >-
           python -m pytest -c pyproject.toml -m "${{ matrix.tier }}" -rs -n ${{ matrix.workers }}
-          ${{ matrix.paths }} --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
+          $(python scripts/test-area-args --tier ${{ matrix.tier }}) --junitxml=junit.xml -o junit_family=xunit1 -o junit_duration_report=total
 
       - name: Suite run-time guard
         # Same guard as the pytest job, under this tier's own name, budget and passed-count
@@ -222,6 +225,6 @@ jobs:
         if: ${{ !cancelled() }}
         run: >-
           python scripts/suite-time-report junit.xml --tier ${{ matrix.tier }}
-          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }}
-          --repro-pytest-args '-m ${{ matrix.tier }} ${{ matrix.paths }}'
+          --budget ${{ matrix.budget }} --per-test-cap 120 --baseline-passed ${{ matrix.baseline }} --max-skipped ${{ matrix.max_skipped }}
+          --repro-pytest-args "-m ${{ matrix.tier }} $(python scripts/test-area-args --tier ${{ matrix.tier }})"
           --summary "$GITHUB_STEP_SUMMARY"

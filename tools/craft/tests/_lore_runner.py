@@ -202,7 +202,9 @@ class LoreRunner:
 
 def seam_env(runner, tmp_path):
     """The runner's fenced environment, with a `lore` shim running this checkout's lore
-    first on PATH: what a real subprocess (a script, or `lore`) is given."""
+    first on PATH: what a real subprocess (a script, or `lore`) is given. Raises
+    ``LoreRunnerEscape`` if the runner is not confined, as a call through it would."""
+    runner._assert_confined()
     shim_dir = tmp_path / "bin"
     shim_dir.mkdir(exist_ok=True)
     shim = shim_dir / "lore"

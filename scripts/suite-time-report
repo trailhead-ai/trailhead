@@ -5,7 +5,8 @@ Reads the file written by `pytest --junitxml=PATH -o junit_family=xunit1
 -o junit_duration_report=total` and reports wall time, per-area totals, the
 slowest tests and pass/fail/skip counts. Exits 1 when the wall time passes
 --budget, when one test passes --per-test-cap, or when the passed count falls
-below --baseline-passed without a --deletions list that accounts for the drop.
+below --baseline-passed without a --deletions list that accounts for the drop, or when the
+skipped count passes --max-skipped.
 Exits 2 with `suite-time-report: <message>` when the XML cannot be read.
 
 Wall time is the `<testsuite time>` attribute: under pytest-xdist the merged
@@ -182,6 +183,12 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
             f"{len(deleted)} of them"
         )
 
+    if args.max_skipped is not None and skipped > args.max_skipped:
+        breaches.append(
+            f"skipped count {skipped} is {skipped - args.max_skipped} above the recorded ceiling of "
+            f"{args.max_skipped} for tier {args.tier!r}"
+        )
+
     verdict = (
         f"{PROG}: FAIL tier {args.tier}: {breaches[0]}"
         if breaches
@@ -229,6 +236,8 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
             flags += f" --per-test-cap {args.per_test_cap:g}"
         if args.baseline_passed is not None:
             flags += f" --baseline-passed {args.baseline_passed}"
+        if args.max_skipped is not None:
+            flags += f" --max-skipped {args.max_skipped}"
         body += [
             "Where the budget lives: .github/workflows/tests.yml, beside the step that runs this "
             "guard. Raising a budget is a reviewed edit; its pull request states the newly "
@@ -280,6 +289,8 @@ def make_parser() -> argparse.ArgumentParser:
                    help="recorded area total; repeatable; names the area that grew")
     p.add_argument("--baseline-passed", type=int, metavar="N",
                    help="recorded passed count for this tier; fail below it unless --deletions accounts for the drop")
+    p.add_argument("--max-skipped", type=int, metavar="N",
+                   help="recorded skipped count for this tier; fail above it")
     p.add_argument("--deletions", type=Path, metavar="FILE",
                    help="file of deleted test ids (classname::name), one per line, # comments allowed")
     p.add_argument("--repro-pytest-args", default="", metavar="ARGS",

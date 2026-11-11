@@ -197,6 +197,35 @@ def test_passed_at_baseline_passes_and_tier_name_is_reported(tmp_path):
     assert "Counts, tier slow: collected 3, passed 3" in r.stdout
 
 
+def test_skipped_above_the_ceiling_exits_nonzero_naming_the_ceiling(tmp_path):
+    cases = [_case("ok", 1.0), _case("s1", 0.0, outcome="skipped"), _case("s2", 0.0, outcome="skipped")]
+    r = _run(tmp_path, cases, 5.0, "--max-skipped", "1", "--tier", "slow")
+    assert r.returncode == 1
+    assert "skipped count 2 is 1 above the recorded ceiling of 1 for tier 'slow'" in r.stderr
+
+
+def test_skipped_at_the_ceiling_passes(tmp_path):
+    cases = [_case("ok", 1.0), _case("s1", 0.0, outcome="skipped")]
+    r = _run(tmp_path, cases, 5.0, "--max-skipped", "1")
+    assert r.returncode == 0, _out(r)
+
+
+def test_a_zero_ceiling_fails_on_the_first_skip(tmp_path):
+    r = _run(tmp_path, [_case("ok", 1.0), _case("s1", 0.0, outcome="skipped")], 5.0, "--max-skipped", "0")
+    assert r.returncode == 1
+    assert "1 above the recorded ceiling of 0" in r.stderr
+
+
+def test_without_a_ceiling_skips_are_not_a_breach(tmp_path):
+    r = _run(tmp_path, [_case("ok", 1.0), _case("s1", 0.0, outcome="skipped")], 5.0)
+    assert r.returncode == 0, _out(r)
+
+
+def test_a_skip_breach_repro_command_carries_the_ceiling(tmp_path):
+    r = _run(tmp_path, [_case("ok", 1.0), _case("s1", 0.0, outcome="skipped")], 5.0, "--max-skipped", "0")
+    assert "--max-skipped 0" in r.stderr
+
+
 def test_summary_is_written_and_never_contains_captured_output(tmp_path):
     cases = [_case("t", 1.0, out=MARKER), _case("u", 2.0, outcome="failed", out=MARKER)]
     summary = tmp_path / "summary.md"
