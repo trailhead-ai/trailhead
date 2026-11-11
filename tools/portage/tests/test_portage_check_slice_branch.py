@@ -14,15 +14,13 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 
 from portage.cli import dispatch
 
+pytestmark = pytest.mark.usefixtures("hermetic_git_env")
+
 OK, UNREADABLE, DEFAULT_BRANCH, NOT_RECORD_BRANCH = 0, 2, 3, 4
 
 
 def _git(repo, *args):
-    subprocess.run(
-        ["git", "-C", str(repo), "-c", "user.email=t@e.x", "-c", "user.name=T",
-         "-c", "commit.gpgsign=false", *args],
-        check=True, capture_output=True,
-    )
+    subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
 def _member(tmp_path, name, default, head_set=True):

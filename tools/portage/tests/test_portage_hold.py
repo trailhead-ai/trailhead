@@ -61,11 +61,10 @@ def state(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, hermetic_git_env):
     r = tmp_path / "repo"
     r.mkdir()
-    for cmd in (["init", "-q", "-b", "feat"], ["-c", "user.email=t@e.x", "-c", "user.name=T",
-                "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "x"]):
+    for cmd in (["init", "-q", "-b", "feat"], ["commit", "-q", "--allow-empty", "-m", "x"]):
         subprocess.run(["git", "-C", str(r), *cmd], check=True)
     return r
 
@@ -334,6 +333,9 @@ def test_the_shipped_cli_refuses_a_held_head_branch_and_never_runs_gh_pr_merge( 
     """The shipped `bin/portage` wired end to end: `hold` then `merge` as separate processes
     sharing a state directory, with a `gh` on PATH that answers the PR's head branch and logs
     every call."""
+    # merge reads user.email in the directory it runs from (the repo, below); the hermetic env has
+    # no global config to supply it
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "t@e.st"], check=True)
     bindir = tmp_path / "bin"
     bindir.mkdir()
     log = tmp_path / "gh.log"
@@ -357,7 +359,7 @@ def test_the_shipped_cli_refuses_a_held_head_branch_and_never_runs_gh_pr_merge( 
            "PORTAGE_STATE_DIR": str(tmp_path / "state")}
 
     def run(*args):
-        return subprocess.run([str(wrapper), *args], env=env, capture_output=True, text=True)
+        return subprocess.run([str(wrapper), *args], env=env, cwd=repo, capture_output=True, text=True)
 
     assert run("hold", str(repo), "feat").returncode == 0
     merge = run("merge", "--manifest", str(manifest), "--toml", str(group), f"{repo}:42:api")
