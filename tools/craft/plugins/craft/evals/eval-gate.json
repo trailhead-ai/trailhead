@@ -569,6 +569,16 @@
         "skills/_shared/execute.md",
         "skills/drive/SKILL.md"
       ]
+    },
+    "slice-sets-aside-what-needs-an-outside-account": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-builds-against-a-stand-in-instead-of-setting-aside": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
     }
   }
 }
