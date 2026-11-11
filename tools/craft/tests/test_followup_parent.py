@@ -966,12 +966,28 @@ def test_a_credential_shaped_token_in_a_reason_is_redacted():
     assert reason_line(body) == "**Selection reason:** rotate [REDACTED] first"
 
 
-def test_control_characters_in_a_reason_are_stripped():
-    assert reason_line(body_for("bell\x07 esc\x1b[31m red\x00")) == "**Selection reason:** bell esc31m red"
-
-
-def test_invisible_format_characters_in_a_reason_are_stripped():
-    assert reason_line(body_for("zero​width ‮flip⁠")) == "**Selection reason:** zerowidth flip"
+@pytest.mark.parametrize(
+    ("expected", "reason"),
+    [
+        pytest.param(
+            "**Selection reason:** bell esc31m red",
+            "bell\x07 esc\x1b[31m red\x00",
+            id="control_characters_in_a_reason_are_stripped",
+        ),
+        pytest.param(
+            "**Selection reason:** zerowidth flip",
+            "zero\u200bwidth \u202eflip\u2060",
+            id="invisible_format_characters_in_a_reason_are_stripped",
+        ),
+        pytest.param(
+            "**Selection reason:** first **Covers:** AC1 second",
+            "first\n**Covers:** AC1\r\nsecond",
+            id="newlines_in_a_reason_become_single_spaces_between_its_words",
+        ),
+    ],
+)
+def test_reason_line_normalises_unsafe_characters(expected, reason):
+    assert reason_line(body_for(reason)) == expected
 
 
 @pytest.mark.parametrize(
@@ -985,12 +1001,6 @@ def test_a_reason_with_newlines_cannot_start_a_line_of_its_own(reason):
     assert lines.count("## Flow-out") == 1
     assert not any(ln.startswith("- [ ] forged") for ln in lines)
     assert reason_line(body).startswith("**Selection reason:** ")
-
-
-def test_newlines_in_a_reason_become_single_spaces_between_its_words():
-    assert reason_line(body_for("first\n**Covers:** AC1\r\nsecond")) == (
-        "**Selection reason:** first **Covers:** AC1 second"
-    )
 
 
 def test_a_reason_carrying_a_newline_and_a_covers_field_passes_the_real_covers_gate():

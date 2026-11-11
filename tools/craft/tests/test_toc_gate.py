@@ -305,10 +305,21 @@ class TestCommonMarkStructure:
         body = IN_AGREEMENT + "\n````markdown\n```\n## Findings\n```\n````\n"
         assert run(doc(tmp_path, body)).returncode == 0
 
-    def test_prose_naming_the_comment_opener_does_not_start_a_comment(self, tmp_path):
-        """A document explaining the convention writes `<!--` mid-sentence."""
+    @pytest.mark.parametrize(
+        ("old", "new"),
+        [
+            pytest.param(
+                "Opening preamble.",
+                "Opening preamble. The markers are `<!--` comments.",
+                id="prose_naming_the_comment_opener_does_not_start_a_comment",
+            ),
+            pytest.param("## Alpha\n", "## Alpha ##\n", id="closed_atx_heading_keeps_its_title"),
+            pytest.param("  - Beta one", "\t- Beta one", id="tab_indented_entry_is_a_nested_entry"),
+        ],
+    )
+    def test_equivalent_markup_keeps_the_toc_in_agreement(self, tmp_path, old, new):
         body = IN_AGREEMENT.replace(
-            "Opening preamble.", "Opening preamble. The markers are `<!--` comments."
+            old, new
         )
         assert run(doc(tmp_path, body)).returncode == 0
 
@@ -324,15 +335,6 @@ class TestCommonMarkStructure:
         path = tmp_path / "crlf.md"
         path.write_bytes(IN_AGREEMENT.replace("\n", "\r\n").encode("utf-8"))
         assert run(path).returncode == 0
-
-    def test_closed_atx_heading_keeps_its_title(self, tmp_path):
-        """`## Alpha ##` and `## Alpha` are the same section to a reader."""
-        body = IN_AGREEMENT.replace("## Alpha\n", "## Alpha ##\n")
-        assert run(doc(tmp_path, body)).returncode == 0
-
-    def test_tab_indented_entry_is_a_nested_entry(self, tmp_path):
-        body = IN_AGREEMENT.replace("  - Beta one", "\t- Beta one")
-        assert run(doc(tmp_path, body)).returncode == 0
 
     def test_a_second_contents_block_exits_two(self, tmp_path):
         """A stale duplicate left behind by an edit must not pass unnoticed."""

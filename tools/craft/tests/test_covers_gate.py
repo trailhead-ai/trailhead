@@ -22,6 +22,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import pytest
 
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "covers_gate.py"
@@ -78,9 +79,28 @@ def _run(
 # ---- clean path --------------------------------------------------------
 
 
-def test_known_identifier_against_nine_criterion_spec_exits_0():
-    r = _run("AC2", NINE_CRITERIA_SPEC)
-    assert r.returncode == 0, r.stderr + r.stdout
+@pytest.mark.parametrize(
+    ("covers", "expected"),
+    [
+        pytest.param("AC2", 0, id="known_identifier_against_nine_criterion_spec_exits_0"),
+        pytest.param("AC2 also covers login", 1, id="covers_value_with_prose_alongside_identifier_exits_1"),
+        pytest.param("this covers the login flow", 1, id="covers_value_with_free_text_and_no_identifier_exits_1"),
+        pytest.param("AC2, AC2", 1, id="duplicate_identifier_exits_1"),
+        pytest.param("", 1, id="empty_covers_value_exits_1"),
+        pytest.param("AC1,AC2", 0, id="no_space_after_comma_parses_and_exits_0"),
+        pytest.param("AC1, AC2", 0, id="single_space_after_comma_parses_and_exits_0"),
+        pytest.param("AC1,AC2,", 1, id="trailing_comma_exits_1"),
+        pytest.param(
+            "AC1,AC2,AC3,AC4,AC5,AC6,AC7,AC8,AC9",
+            0,
+            id="parser_ignores_grouping_subheading_and_nested_bullet",
+        ),
+        pytest.param("AC10", 1, id="parser_rejects_a_nested_bullet_as_a_bare_criterion"),
+    ],
+)
+def test_covers_value_exits_with_the_expected_code(covers, expected):
+    r = _run(covers, NINE_CRITERIA_SPEC)
+    assert r.returncode == expected, r.stderr + r.stdout
 
 
 # ---- unknown identifier -------------------------------------------------
@@ -95,26 +115,6 @@ def test_unknown_identifier_exits_1_and_names_it():
 # ---- anti-heuristic grammar cases ---------------------------------------
 
 
-def test_covers_value_with_prose_alongside_identifier_exits_1():
-    r = _run("AC2 also covers login", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
-
-
-def test_covers_value_with_free_text_and_no_identifier_exits_1():
-    r = _run("this covers the login flow", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
-
-
-def test_duplicate_identifier_exits_1():
-    r = _run("AC2, AC2", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
-
-
-def test_empty_covers_value_exits_1():
-    r = _run("", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
-
-
 def test_neither_covers_nor_partial_covers_given_exits_2():
     """At least one of `--covers` or `--partial-covers` is required; an
     invocation naming neither flag must fail closed rather than certifying an
@@ -124,21 +124,6 @@ def test_neither_covers_nor_partial_covers_given_exits_2():
 
 
 # ---- whitespace grammar ---------------------------------------------------
-
-
-def test_no_space_after_comma_parses_and_exits_0():
-    r = _run("AC1,AC2", NINE_CRITERIA_SPEC)
-    assert r.returncode == 0, r.stderr + r.stdout
-
-
-def test_single_space_after_comma_parses_and_exits_0():
-    r = _run("AC1, AC2", NINE_CRITERIA_SPEC)
-    assert r.returncode == 0, r.stderr + r.stdout
-
-
-def test_trailing_comma_exits_1():
-    r = _run("AC1,AC2,", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
 
 
 # ---- stdin / spec fail-closed --------------------------------------------
@@ -164,23 +149,6 @@ def test_inline_prose_mention_of_heading_does_not_satisfy_the_anchor():
 
 
 # ---- spec parser: sub-headings and nested bullets ------------------------
-
-
-def test_parser_ignores_grouping_subheading_and_nested_bullet():
-    """The fixture spec has a `###` grouping sub-heading and a nested
-    sub-bullet under AC4 — neither should be countable as a criterion, so a
-    `--covers` value naming only real top-level identifiers (AC1-AC9) must
-    still exit 0, proving the parser didn't choke on or miscount them."""
-    r = _run("AC1,AC2,AC3,AC4,AC5,AC6,AC7,AC8,AC9", NINE_CRITERIA_SPEC)
-    assert r.returncode == 0, r.stderr + r.stdout
-
-
-def test_parser_rejects_a_nested_bullet_as_a_bare_criterion():
-    """The nested sub-bullet under AC4 forms no criterion of its own, so no
-    identifier for it exists — asserting an out-of-range identifier like
-    AC10 (there is no tenth criterion) exits 1."""
-    r = _run("AC10", NINE_CRITERIA_SPEC)
-    assert r.returncode == 1, r.stderr + r.stdout
 
 
 # ---- heading anchor: line-start only, never a loosely-indented match -----
