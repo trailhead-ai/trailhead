@@ -494,3 +494,33 @@ def test_real_tmux_attach_then_detach_leaves_session(tmp_path):
             except (OSError, ChildProcessError):
                 pass
         subprocess.run(base + ["kill-server"], env=env, capture_output=True, timeout=15)
+
+
+def test_the_default_start_budget_outlasts_two_worst_case_outpost_starts(monkeypatch):
+    # Outpost's bounds (server/operator/hubs.ts): tmux calls 10s, trailhead session-start 30s,
+    # settle 1.5s. Worst single start: reconcile (has-session, list-panes, kill) 30s, then
+    # has-session, list-panes, kill 30s, session-start 30s, new-session 10s, settle 1.5s,
+    # list-panes 10s, capture-pane 10s, rollback kill 10s. A start queued behind another
+    # on the per-account lock waits for a whole one before its own.
+    from trailhead.ranger import outpost_client
+
+    tmux, session_start, settle = 10.0, 30.0, 1.5
+    one_start = 3 * tmux + 3 * tmux + session_start + tmux + settle + 3 * tmux
+    seen = {}
+
+    class _Opener:
+        def open(self, request, timeout):
+            seen["timeout"] = timeout
+
+            class _Ok:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            return _Ok()
+
+    monkeypatch.setattr(outpost_client, "_opener", lambda: _Opener())
+    outpost_client.start_hub("acme", "cred")
+    assert seen["timeout"] >= 2 * one_start

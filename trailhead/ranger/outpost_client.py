@@ -11,11 +11,12 @@ from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
 HUB_SOCKET = "outpost-hubs"
-# Outpost's worst case for one start request, from its server bounds (server/operator/hubs.ts):
-# has-session 10s + trailhead session-start 30s + new-session 10s + settle 1.5s +
-# list/capture/kill up to 30s = 81.5s, and the per-account lock can make the request wait
-# behind one more such request. 180s covers both with margin.
-START_TIMEOUT_SECONDS = 180.0
+# Outpost's worst case for one start request, from its server bounds (server/operator/hubs.ts,
+# server/timeline/reconciler.ts): the pre-start reconcile's has-session, list-panes and kill
+# 30s, then has-session, list-panes and kill 30s, trailhead session-start 30s, new-session 10s,
+# settle 1.5s, list-panes, capture-pane and rollback kill 30s = 131.5s. The per-account lock
+# can make the request wait behind one more such request: 263s. 300s covers both with margin.
+START_TIMEOUT_SECONDS = 300.0
 
 
 # Hub start refuses a launch with no broker session; this id passes the shape check so the
