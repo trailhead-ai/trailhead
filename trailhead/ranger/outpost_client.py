@@ -79,14 +79,22 @@ def _body(exc: urllib.error.HTTPError) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _diagnostic(account: str) -> str:
+    return (
+        f"run `trailhead session-start --role hub --account {account} --json "
+        f"--broker-session {DIAGNOSTIC_BROKER_SESSION}` to see why"
+    )
+
+
+#: Outpost answers these when trailhead's own launch was refused or its output was unusable.
+_DIAGNOSABLE = ("trailhead_refused", "trailhead_bad_output")
+
+
 def _canned_detail(error: object, account: str) -> str | None:
     """The fix to print for an Outpost error code whose reply carried no message."""
     return {
-        "trailhead_bad_output": (
-            "the hub launch was refused; run "
-            f"`trailhead session-start --role hub --account {account} --json "
-            f"--broker-session {DIAGNOSTIC_BROKER_SESSION}` to see why"
-        ),
+        "trailhead_refused": f"the hub launch was refused; {_diagnostic(account)}",
+        "trailhead_bad_output": f"the hub launch was refused; {_diagnostic(account)}",
         "tmux_failed": "tmux failed; run `trailhead doctor`",
         "invalid_account": f"the account name {account!r} is invalid",
         "internal": "Outpost failed; check its log with `trailhead outpost status`",
@@ -122,8 +130,11 @@ def start_hub(
             raise OutpostRefusal(f"hub exited at launch:\n{body.get('output', '')}")
         if exc.code == 504:
             raise OutpostRefusal("Outpost timed out starting the hub")
+        message = body.get("message")
+        if message and body.get("error") in _DIAGNOSABLE:
+            message = f"{message}; {_diagnostic(account)}"
         detail = (
-            body.get("message")
+            message
             or _canned_detail(body.get("error"), account)
             or body.get("error")
             or f"HTTP {exc.code}"

@@ -300,14 +300,29 @@ def test_401_says_restart_outpost(tmp_path, stub, capsys):
     assert "trailhead outpost restart" in capsys.readouterr().err
 
 
-def test_other_refusal_prints_its_message(tmp_path, stub, capsys):
+#: Outpost's fixed 422 bodies for a refused session start (server/operator/hubs.ts REFUSAL_MESSAGES).
+OUTPOST_REFUSAL_BODIES = [
+    {"error": "trailhead_refused", "message": "trailhead refused the session start"},
+    {"error": "trailhead_refused", "message": "trailhead output has no valid broker section"},
+    {"error": "trailhead_refused", "message": "trailhead output has no valid files list"},
+]
+DIAGNOSTIC = (
+    "run `trailhead session-start --role hub --account acme --json "
+    "--broker-session diagnostic` to see why"
+)
+
+
+@pytest.mark.parametrize("body", OUTPOST_REFUSAL_BODIES, ids=lambda b: b["message"])
+def test_outposts_refusal_prints_its_message_and_the_diagnostic_command(tmp_path, stub, capsys, body):
     env = _env(tmp_path)
     _configure(env, "acme")
     _write_credential(env)
-    s = stub(status=422, body={"error": "trailhead_refused", "message": "no such launch account"})
+    s = stub(status=422, body=body)
     rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
     assert rc != 0 and ex.calls == []
-    assert "no such launch account" in capsys.readouterr().err
+    assert body["message"] in err
+    assert DIAGNOSTIC in err
 
 
 @pytest.mark.parametrize(
@@ -347,6 +362,7 @@ def test_a_message_in_the_reply_still_wins_over_the_canned_fix(tmp_path, stub, c
     rc, ex = _start(env, port=s.port)
     err = capsys.readouterr().err
     assert "no server running" in err and "trailhead doctor" not in err
+    assert "session-start" not in err
 
 
 def test_unresponsive_start_times_out_without_exec(tmp_path, stub, capsys):
