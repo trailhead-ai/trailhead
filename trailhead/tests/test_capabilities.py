@@ -306,10 +306,17 @@ class TestConfinement:
 
 
 class TestValidate:
-    def test_missing_base_dir_raises(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("content", "match"),
+        [
+            pytest.param('[tool]\nname = "mytool"\nbase = ["skills/nonexistent"]\n', "nonexistent", id="base_dir"),
+            pytest.param('[tool]\nname = "mytool"\nhooks_json = "hooks/hooks.json"\n', "hooks", id="hooks_json"),
+            pytest.param('[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n', "mytool", id="cli_bin"),
+        ],
+    )
+    def test_missing_manifest_path_raises(self, tmp_path, content, match):
         _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\nbase = ["skills/nonexistent"]\n'
-        with pytest.raises(ManifestError, match="nonexistent"):
+        with pytest.raises(ManifestError, match=match):
             load_manifest(_write_manifest(tmp_path, content))
 
     def test_base_that_is_a_file_raises(self, tmp_path):
@@ -318,12 +325,6 @@ class TestValidate:
         (root / "skills" / "notadir").write_text("x")
         content = '[tool]\nname = "mytool"\nbase = ["skills/notadir"]\n'
         with pytest.raises(ManifestError, match="directory"):
-            load_manifest(_write_manifest(tmp_path, content))
-
-    def test_missing_hooks_json_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\nhooks_json = "hooks/hooks.json"\n'
-        with pytest.raises(ManifestError, match="hooks"):
             load_manifest(_write_manifest(tmp_path, content))
 
     def test_hooks_json_that_is_a_dir_raises(self, tmp_path):
@@ -338,12 +339,6 @@ class TestValidate:
         content = '[tool]\nname = "mytool"\nbase = ["skills/nope"]\nvalidate = false\n'
         # Must not raise even though skills/nope is missing.
         load_manifest(_write_manifest(tmp_path, content))
-
-    def test_missing_cli_bin_raises(self, tmp_path):
-        _make_plugin_dir(tmp_path, "mytool")
-        content = '[tool]\nname = "mytool"\ncli_bin = "bin/mytool"\n'
-        with pytest.raises(ManifestError, match="mytool"):
-            load_manifest(_write_manifest(tmp_path, content))
 
 
 # ---------------------------------------------------------------------------

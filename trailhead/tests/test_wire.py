@@ -250,17 +250,17 @@ class TestCraftSubsetWiring:
             runner=_noop_runner,
         )
 
-    def test_standard_lore_dest_exists(self, tmp_path):
+    @pytest.mark.parametrize(
+        "tool",
+        [
+            pytest.param("lore", id="lore"),
+            pytest.param("camp", id="camp"),
+            pytest.param("craft", id="craft"),
+        ],
+    )
+    def test_standard_dest_exists(self, tmp_path, tool):
         self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "lore").exists()
-
-    def test_standard_camp_dest_exists(self, tmp_path):
-        self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "camp").exists()
-
-    def test_standard_craft_dest_exists(self, tmp_path):
-        self._wire_standard(tmp_path)
-        assert _live_dest(tmp_path, "craft").exists()
+        assert _live_dest(tmp_path, tool).exists()
 
     def test_unselected_council_agents_absent(self, tmp_path):
         """The council four are absent when craft is wired with a subset that excludes them.

@@ -1167,8 +1167,16 @@ class TestOutpostStatesExecuted:
         assert sb.run(after["fix"]).returncode == 0
         assert sb.outpost()["state"] == "ok"
 
-    def test_a_rerun_is_a_no_op(self, tmp_path):
-        sb = self._sb(tmp_path, "A-no-config")
+    @pytest.mark.parametrize(
+        "scenario",
+        [
+            pytest.param("A-no-config", id="a"),
+            pytest.param("B-no-checkout-key", id="b"),
+            pytest.param("C-checkout-absent", id="c"),
+        ],
+    )
+    def test_rerun_is_a_no_op(self, tmp_path, scenario):
+        sb = self._sb(tmp_path, scenario)
         fix = sb.outpost()["fix"]
         assert sb.run(fix).returncode == 0
         snapshot = (sb.cfg.read_bytes(), sb.tree(), sb.gh_log.read_bytes())
@@ -1193,14 +1201,6 @@ class TestOutpostStatesExecuted:
         assert sb.tree() - before == {sb.home / "code", sb.default_checkout}
         assert sb.outpost()["state"] == "missing" and "not built" in sb.outpost()["summary"]
 
-    def test_b_rerun_is_a_no_op(self, tmp_path):
-        sb = self._sb(tmp_path, "B-no-checkout-key")
-        fix = sb.outpost()["fix"]
-        assert sb.run(fix).returncode == 0
-        snapshot = (sb.cfg.read_bytes(), sb.tree(), sb.gh_log.read_bytes())
-        assert sb.run(fix).returncode == 0
-        assert (sb.cfg.read_bytes(), sb.tree(), sb.gh_log.read_bytes()) == snapshot
-
     def test_c_absent_checkout_is_cloned_where_the_config_says_and_becomes_not_built(self, tmp_path):
         sb = self._sb(tmp_path, "C-checkout-absent")
         target = sb.tmp / "far away" / "outpost"
@@ -1215,14 +1215,6 @@ class TestOutpostStatesExecuted:
         assert sb.cfg.read_bytes() == config_before
         after = sb.outpost()
         assert after["state"] == "missing" and "not built" in after["summary"]
-
-    def test_c_rerun_is_a_no_op(self, tmp_path):
-        sb = self._sb(tmp_path, "C-checkout-absent")
-        fix = sb.outpost()["fix"]
-        assert sb.run(fix).returncode == 0
-        snapshot = (sb.cfg.read_bytes(), sb.tree(), sb.gh_log.read_bytes())
-        assert sb.run(fix).returncode == 0
-        assert (sb.cfg.read_bytes(), sb.tree(), sb.gh_log.read_bytes()) == snapshot
 
     def test_d_not_built_is_built_in_the_configured_checkout(self, tmp_path):
         sb = self._sb(tmp_path, "D-not-built")

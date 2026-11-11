@@ -18,6 +18,7 @@ from trailhead.vcs.github import (
     get_commit_series,
     resolve_merge_strategy,
 )
+import pytest
 
 
 def test_parses_merged_with_no_argument():
@@ -45,26 +46,22 @@ def test_parses_stopped_with_its_reason():
     )
 
 
-def test_unrecognized_token_is_refused():
-    token, argument = parse_monitor_outcome("FOO bar")
+@pytest.mark.parametrize(
+    ("line", "argument"),
+    [
+        pytest.param("FOO bar", "FOO bar", id="unrecognized_token"),
+        pytest.param("READY", "READY", id="argument_requiring_token_missing_its_argument"),
+        pytest.param("", "", id="empty_line"),
+    ],
+)
+def test_unparseable_line_is_refused(line, argument):
+    token, argument = parse_monitor_outcome(line)
     assert token is None
-    assert argument == "FOO bar"
-
-
-def test_argument_requiring_token_missing_its_argument_is_refused():
-    token, argument = parse_monitor_outcome("READY")
-    assert token is None
-    assert argument == "READY"
+    assert argument == argument
 
 
 def test_only_the_first_line_is_parsed():
     assert parse_monitor_outcome("MERGED\nextra junk after the first line") == ("MERGED", "")
-
-
-def test_empty_line_is_refused():
-    token, argument = parse_monitor_outcome("")
-    assert token is None
-    assert argument == ""
 
 
 def test_read_missing_file_synthesizes_a_failure(tmp_path):

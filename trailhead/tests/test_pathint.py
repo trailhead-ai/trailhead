@@ -96,22 +96,18 @@ class TestCreateShims:
         assert (res.shim_dir / "camp").exists()
         assert not (res.shim_dir / "lore").exists()
 
-    def test_rejects_unsafe_trailhead_root(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("root", "shim", "bin_path"),
+        [
+            pytest.param('/repo"; evil', "camp", "/repo/bin/camp", id="trailhead_root"),
+            pytest.param("/repo", "camp", '/repo/bin/camp"; evil', id="bin_path"),
+            pytest.param("/repo", 'camp"; evil', "/repo/bin/camp", id="shim_name"),
+        ],
+    )
+    def test_rejects_unsafe_shim_input(self, tmp_path, root, shim, bin_path):
         with pytest.raises(PathIntegrationError):
             create_shims(
-                {"camp": Path("/repo/bin/camp")}, '/repo"; evil', env=_env(tmp_path)
-            )
-
-    def test_rejects_unsafe_bin_path(self, tmp_path):
-        with pytest.raises(PathIntegrationError):
-            create_shims(
-                {"camp": Path('/repo/bin/camp"; evil')}, "/repo", env=_env(tmp_path)
-            )
-
-    def test_rejects_unsafe_shim_name(self, tmp_path):
-        with pytest.raises(PathIntegrationError):
-            create_shims(
-                {'camp"; evil': Path("/repo/bin/camp")}, "/repo", env=_env(tmp_path)
+                {shim: Path(bin_path)}, root, env=_env(tmp_path)
             )
 
 

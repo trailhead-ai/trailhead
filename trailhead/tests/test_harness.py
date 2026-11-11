@@ -1379,25 +1379,22 @@ class TestClaudeCodeParseSessionListControllable:
 
 @pytest.mark.real_home  # the error excerpt redacts the real home, so it must resolve it
 class TestClaudeCodeParseSessionListFailures:
-    def test_non_json_stdout_raises_with_offending_field_named(self):
-        with pytest.raises(HarnessError, match="decode"):
-            ClaudeCodeHarness().parse_session_list("not json at all")
-
-    def test_empty_stdout_raises(self):
-        with pytest.raises(HarnessError, match="decode"):
-            ClaudeCodeHarness().parse_session_list("")
-
-    def test_whitespace_only_stdout_raises(self):
-        with pytest.raises(HarnessError, match="decode"):
-            ClaudeCodeHarness().parse_session_list("   \n\t  ")
+    @pytest.mark.parametrize(
+        ("stdout", "match"),
+        [
+            pytest.param("not json at all", "decode", id="non_json_stdout_raises_with_offending_field_named"),
+            pytest.param("", "decode", id="empty_stdout_raises"),
+            pytest.param("   \n\t  ", "decode", id="whitespace_only_stdout_raises"),
+            pytest.param("[1, 2]", "object", id="non_dict_element_raises"),
+        ],
+    )
+    def test_unparseable_session_list_raises(self, stdout, match):
+        with pytest.raises(HarnessError, match=match):
+            ClaudeCodeHarness().parse_session_list(stdout)
 
     def test_json_object_instead_of_array_raises(self):
         with pytest.raises(HarnessError):
             ClaudeCodeHarness().parse_session_list('{"sessionId": "s1"}')
-
-    def test_non_dict_element_raises(self):
-        with pytest.raises(HarnessError, match="object"):
-            ClaudeCodeHarness().parse_session_list("[1, 2]")
 
     def test_record_missing_session_id_raises_naming_the_field(self, tmp_path):
         payload = f'[{{"cwd": "{tmp_path}", "kind": "interactive"}}]'

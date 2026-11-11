@@ -592,21 +592,15 @@ class TestExtractRelativeLinks:
         result = extract_relative_links(text)
         assert "../lore" in result
 
-    def test_absolute_https_link_not_extracted(self):
-        """[label](https://...) is NOT extracted."""
-        text = "[docs](https://example.com/docs)"
-        result = extract_relative_links(text)
-        assert result == set()
-
-    def test_anchor_link_not_extracted(self):
-        """[label](#section) is NOT extracted."""
-        text = "[section](#install)"
-        result = extract_relative_links(text)
-        assert result == set()
-
-    def test_non_relative_bare_path_not_extracted(self):
-        """[label](LICENSE) without leading ./ is NOT extracted."""
-        text = "[LICENSE](LICENSE)"
+    @pytest.mark.parametrize(
+        "text",
+        [
+            pytest.param("[docs](https://example.com/docs)", id="absolute_https_link"),
+            pytest.param("[section](#install)", id="anchor_link"),
+            pytest.param("[LICENSE](LICENSE)", id="non_relative_bare_path"),
+        ],
+    )
+    def test_link_is_not_extracted(self, text):
         result = extract_relative_links(text)
         assert result == set()
 
