@@ -702,6 +702,7 @@ class TestRegistrySequencing:
             f"unexpected per-tool marketplace ref in install: {installs}"
         )
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_runner_never_invokes_real_subprocess(self, tmp_path):
         """wire with a stub runner must not touch subprocess.run."""
         from trailhead.wire import wire

@@ -272,6 +272,7 @@ def test_a_spec_without_a_merge_produces_no_merge_commit(hermetic_git_env, tmp_p
     assert _git(repo, "rev-list", "--count", "main").stdout.strip() == "2"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_the_whole_history_is_built_in_a_single_git_spawn(hermetic_git_env, tmp_path, monkeypatch):
     repo = _empty_repo(tmp_path)
     spawns: list[list[str]] = []

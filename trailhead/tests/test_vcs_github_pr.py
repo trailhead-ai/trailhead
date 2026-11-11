@@ -1833,6 +1833,7 @@ class TestClassifyFixupDominance:
         assert empty.fixup_count == 0
         assert empty.series_length == 0
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_makes_no_subprocess_call_and_consults_only_its_argument(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

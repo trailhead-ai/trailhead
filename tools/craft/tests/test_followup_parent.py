@@ -397,6 +397,7 @@ def test_a_path_in_prose_is_not_an_overlap(lore_env, spec):
 # --- failures: injected lore ----------------------------------------------------------------
 
 
+# inert-gate: allow canned replies real lore never gives, injected as hostile input to failure paths
 class Lore:
     """A runner over canned records: `vault ls`, `record show --json`."""
 

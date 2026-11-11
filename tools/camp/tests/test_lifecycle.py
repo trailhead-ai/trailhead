@@ -1583,6 +1583,7 @@ def _seed_ready_member_with_activate_task(
 
 
 class TestSetupActivatePhaseRetry:
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_retries_failed_activate_task_with_cleanup_first(self, tmp_path):
         """camp setup retries a FAILED activate-phase task, running cleanup
         first — reusing the same body camp activate's detached run executes."""
@@ -1616,6 +1617,7 @@ class TestSetupActivatePhaseRetry:
         data = read_central_manifest(mpath)
         assert data["members"][0]["tasks"]["npm-ci"]["state"] == "ok"
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_does_not_rerun_activate_task_recorded_ok(self, tmp_path):
         """A task recorded 'ok' is not re-run by camp setup."""
         from camp.provision.lifecycle import cmd_setup_group
@@ -1637,6 +1639,7 @@ class TestSetupActivatePhaseRetry:
 
         mock_run.assert_not_called()
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_activate_retry_does_not_hold_reconcile_lock_across_task_subprocess(self, tmp_path):
         """The point of the slice: while camp setup runs a long activate-phase
         task, a concurrent reconcile on the same slug must not stall for the
@@ -1708,6 +1711,7 @@ class TestSetupActivatePhaseRetry:
             t.join(timeout=15.0)
         assert not errors, errors
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_activate_retry_manifest_write_happens_under_reconcile_lock(self, tmp_path):
         """Narrowing lock scope must not drop the lock from the write it
         protects: the manifest persist still happens while .reconcile.lock is
@@ -1758,6 +1762,7 @@ class TestSetupActivatePhaseRetry:
             "the manifest write must happen while .reconcile.lock is held"
         )
 
+    # inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
     def test_activate_retry_crash_mid_task_leaves_no_lock_held_and_member_retryable(
         self, tmp_path
     ):

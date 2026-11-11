@@ -55,10 +55,13 @@ jobs:
           # 300 s (the 5-minute target). The history is every guarded run of this job layout:
           # 7 runs x 3 Pythons = 21 legs per job, guard wall times from the "Suite run-time
           # guard" step. craft: median 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median
-          # 167.8, sd 19.9, so 207.5, budget 210. rest: median 56.5, sd 27.2, so 110.9, budget
-          # 120; that history leaves out one 200.6 s leg whose cause, a lock-order starvation bug
-          # in the scratch-pad publisher, is fixed (with it in, the budget would be 140). A leg
-          # over its budget is the signal to look for a cause before raising the number.
+          # 167.8, sd 19.9, so 207.5, budget 210. rest: 19 legs, median 56.2, sd 12.9, so 81.9,
+          # budget 90. That history leaves out the two rest legs of one run (200.6 s on py3.11 and
+          # 164.6 s on py3.12): both were held up by the same test, which waited out a
+          # lock-order starvation bug in the scratch-pad publisher (158.5 s and 117.5 s against
+          # about 5 s), now fixed. One earlier leg (91.8 s) sits above the 90 s budget; the next
+          # run of this job shows whether the budget needs one more step. A leg over its budget
+          # is the signal to look for a cause before raising the number.
           - area: craft
             baseline: 3343
             budget: 170
@@ -67,7 +70,7 @@ jobs:
             budget: 210
           - area: rest
             baseline: 3162
-            budget: 120
+            budget: 90
     steps:
       - name: Check out the repository
         # Deliberately shallow (depth 1): a test never reads this repository's

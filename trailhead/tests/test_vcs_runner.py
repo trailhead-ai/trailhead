@@ -148,6 +148,7 @@ class TestShellSafety:
 
 
 class TestRunnerTimeout:
+    # inert-gate: allow subject is the runner wrapper around subprocess.run
     def test_default_runner_passes_timeout_kwarg(self, tmp_path: Path, hermetic_git_env: dict[str, str]) -> None:
         captured: list[dict] = []
 

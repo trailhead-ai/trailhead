@@ -31,6 +31,16 @@ It reads the direct form only. A spawn through a PATH shim or `python <lore cli>
 as a craft script's own spawn, so claiming it would need data-flow analysis and would flag the
 deliberate wiring smokes.
 
+Two more rules guard patterns the testing conventions rule out. A class in a craft test file
+that answers lore calls with canned replies is the hand-rolled fake the in-process runner
+replaced: the gate flags a class named like a lore fake, and a callable class that builds
+`CompletedProcess` replies and handles `record` or `vault` arguments. And a test that patches a
+spawn function process-wide by its bare name (`patch("subprocess.run")`,
+`monkeypatch.setattr(subprocess, "run", ...)`, `patch.object(subprocess, "Popen")`, directly or
+through a fixture or helper) is flagged, because that replaces the call for every caller in the
+process; the code under test needs a `runner=` seam. Existing sites carry `# inert-gate: allow`,
+which a class accepts on its `class` line as a test accepts it on its `def` line.
+
 What it deliberately does NOT do: judge whether an assertion is *about* the right
 thing. A test that runs a CLI and then asserts something trivial passes this gate.
 The gate catches the mechanical properties that can be checked mechanically.
@@ -110,6 +120,10 @@ _TIER_MARKS = ("seam_real", "chromium")
 #: Calls that start a process when handed an argv list.
 _SPAWN_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
 
+_SUBPROCESS_FUNCTIONS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
+
+_LORE_FAKE_NAME_RE = re.compile(r"(Fake|Stub|Mock|Canned)\w*Lore|Lore\w*(Fake|Stub|Mock)")
+
 _ALLOW_RE = re.compile(r"#\s*inert-gate:\s*allow\b[ \t]*(?P<reason>.*)$")
 
 
@@ -176,7 +190,15 @@ def _is_craft_test_path(path: Path) -> bool:
 
 
 def _is_tier_marked(node: ast.AST) -> bool:
-    return any(tier in ast.dump(node) for tier in _TIER_MARKS)
+    """True if `node` contains a real `<x>.mark.seam_real` / `<x>.mark.chromium` attribute,
+    bare or called. A string that merely names a tier, such as a skip reason, is not a mark."""
+    return any(
+        isinstance(n, ast.Attribute)
+        and n.attr in _TIER_MARKS
+        and isinstance(n.value, ast.Attribute)
+        and n.value.attr == "mark"
+        for n in ast.walk(node)
+    )
 
 
 def _spawns_lore(node: ast.AST) -> bool:
@@ -218,6 +240,48 @@ def _tiered_functions(tree: ast.Module) -> set[int]:
     return covered
 
 
+def _patches_subprocess(node: ast.AST) -> bool:
+    """True if `node` patches a spawn function process-wide by its bare name."""
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call) or not call.args:
+            continue
+        func = call.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name not in {"patch", "setattr", "object"}:
+            continue
+        first = call.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            module, _, function = first.value.partition(".")
+            if module == "subprocess" and function in _SUBPROCESS_FUNCTIONS:
+                return True
+        elif (
+            isinstance(first, ast.Name)
+            and first.id == "subprocess"
+            and len(call.args) > 1
+            and isinstance(call.args[1], ast.Constant)
+            and call.args[1].value in _SUBPROCESS_FUNCTIONS
+        ):
+            return True
+    return False
+
+
+def _is_lore_fake_class(node: ast.ClassDef) -> bool:
+    if _LORE_FAKE_NAME_RE.search(node.name):
+        return True
+    callable_ = any(
+        isinstance(m, ast.FunctionDef) and m.name == "__call__" for m in node.body
+    )
+    if not callable_:
+        return False
+    calls = {
+        getattr(c.func, "attr", None) or getattr(c.func, "id", None)
+        for c in ast.walk(node)
+        if isinstance(c, ast.Call)
+    }
+    words = {c.value for c in ast.walk(node) if isinstance(c, ast.Constant) and isinstance(c.value, str)}
+    return "CompletedProcess" in calls and bool(words & {"record", "vault"})
+
+
 def _allow_reason(source_lines: list[str], node: ast.FunctionDef) -> str | None:
     """The reason on an `# inert-gate: allow` comment for this def, if present.
 
@@ -254,7 +318,8 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
     }
 
     anchors = _repo_anchors(tree)
-    lore_scoped = _is_craft_test_path(path) and not path.name.endswith("_seam.py")
+    craft_test = _is_craft_test_path(path)
+    lore_scoped = craft_test and not path.name.endswith("_seam.py")
     tiered = _tiered_functions(tree) if lore_scoped else set()
 
     findings: list[tuple[int, str, str]] = []
@@ -280,6 +345,8 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
             and any(_spawns_lore(f) for f in [node, *(functions[h] for h in referenced)])
         ):
             verdict = "spawns a real lore process outside the seam_real tier"
+        elif any(_patches_subprocess(f) for f in [node, *(functions[h] for h in referenced)]):
+            verdict = "patches a process-wide subprocess function"
         else:
             continue
 
@@ -287,6 +354,15 @@ def findings_for(path: Path) -> tuple[list[tuple[int, str]], list[tuple[int, str
             allowed.append((node.lineno, node.name, reason))
         else:
             findings.append((node.lineno, node.name, verdict))
+
+    if craft_test:
+        for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+            if not _is_lore_fake_class(cls):
+                continue
+            if (reason := _allow_reason(lines, cls)) is not None:
+                allowed.append((cls.lineno, cls.name, reason))
+            else:
+                findings.append((cls.lineno, cls.name, "is a hand-rolled lore runner"))
     return findings, allowed
 
 
@@ -361,7 +437,8 @@ def main(argv: list[str]) -> int:
         print(
             f"\ninert-test-gate: {total_findings} test(s) assert without running their "
             f"subject, assert only that a phrase is present in a document they "
-            f"never vary, or (in craft) spawn a real lore outside the seam_real tier. "
+            f"never vary, or (in craft) spawn a real lore outside the seam_real tier or hand-roll a "
+            f"lore runner, or patch a subprocess function process-wide. "
             f"Find the consumer and run it, or feed the subject an input "
             f"that changes the answer. A deliberate exemption — a seam smoke, a "
             f"closed vocabulary — is marked `# inert-gate: allow <reason>` on the "

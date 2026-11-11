@@ -151,6 +151,7 @@ def test_resolve_slug_flag_refusal_names_the_offending_input() -> None:
 # ---------------------------------------------------------------------------
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_git_forms_correct_argv(tmp_path: Path) -> None:
     """_git forms [git, -C, <root>, ...args] and passes shell=False."""
     from camp.gitutil import _git
@@ -164,6 +165,7 @@ def test_git_forms_correct_argv(tmp_path: Path) -> None:
     assert call_args.kwargs.get("shell") is not True
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
     from camp.gitutil import _git_out
 
@@ -173,6 +175,7 @@ def test_git_out_returns_stripped_stdout(tmp_path: Path) -> None:
     assert result == "main"
 
 
+# inert-gate: allow process-wide subprocess patch from before the rule; the code under test needs a runner= seam
 def test_git_out_returns_empty_on_nonzero(tmp_path: Path) -> None:
     from camp.gitutil import _git_out
 

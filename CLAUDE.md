@@ -235,9 +235,13 @@ fallback, no GNU `readlink -f`, macOS-safe).
   (`patch("trailhead.install.wire")`, `monkeypatch.setattr`, about 130 `patch` and 1,000
   `monkeypatch.setattr` sites) only to stub an orchestrator's collaborator the test does not
   care about, patched where the consumer looks it up. Do not patch through a module's import
-  of a stdlib module (`camp.launch.inject.time.time_ns`; it breaks when `import time` becomes
-  `from time import ...`), or a process-wide function (`subprocess.run`, 30 sites, catches
-  every caller including incidental ones); add a `runner=` or clock seam to the code instead.
+  of a stdlib module (`camp.launch.inject.time.time_ns`: measured in a container, rewriting
+  `inject.py` to `from time import time_ns` left all 41 tests in `test_inject.py` green while the
+  patch silently stopped applying, so the collision test no longer collides), or a process-wide
+  function (`subprocess.run`, which catches every caller including incidental ones;
+  `scripts/inert-test-gate` flags a new one and lists the existing sites as allowed). Add a
+  `runner=` or clock seam to the code instead. The counts above and the verdict on when
+  path-patching is right are a judgment from reading the sites, not a measured result.
 - Error hygiene, CLI-wide: a named error prints a clean `trailhead: <message>` on
   stderr and exits nonzero — never a raw traceback. Normal output goes to stdout.
   No ANSI/color.

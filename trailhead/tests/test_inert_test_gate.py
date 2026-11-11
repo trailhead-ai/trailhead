@@ -421,3 +421,223 @@ def test_an_allow_marker_exempts_a_lore_spawn_and_is_listed(tmp_path):
     assert _run(str(seeded)).returncode == 0
     listed = _run("--list-allowed", str(seeded))
     assert "the one wiring smoke for this seam" in listed.stdout
+
+
+@pytest.mark.parametrize(
+    "mark",
+    [
+        '@pytest.mark.skipif(True, reason="runs in the seam_real tier")',
+        '@pytest.mark.skip(reason="chromium")',
+        '@some.decorator("seam_real")',
+        "@tiers.seam_real",
+    ],
+    ids=["skipif-reason", "skip-reason", "unrelated-decorator", "attribute-of-a-non-mark"],
+)
+def test_a_decorator_that_only_mentions_a_tier_does_not_exempt_a_lore_spawn(tmp_path, mark):
+    body = f'''
+import subprocess
+import pytest
+{mark}
+def test_status():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "spawns a real lore process" in result.stderr
+
+
+def test_a_module_mark_that_only_mentions_a_tier_does_not_exempt_a_lore_spawn(tmp_path):
+    body = 'import pytest\npytestmark = pytest.mark.skipif(False, reason="seam_real")\n' + _SPAWNS_LORE
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "mark",
+    ["@pytest.mark.seam_real", "@pytest.mark.seam_real()", "@pytest.mark.chromium"],
+    ids=["attribute", "call", "chromium"],
+)
+def test_a_real_tier_mark_in_any_spelling_exempts_a_lore_spawn(tmp_path, mark):
+    body = f'''
+import subprocess
+import pytest
+{mark}
+def test_status():
+    assert subprocess.run(["lore", "status"]).returncode == 0
+'''
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- the hand-rolled lore runner rule ----------------------------------------
+#
+# Craft tests take lore from `_lore_runner.LoreRunner`. A class in a craft test file that
+# answers lore calls with canned replies is the hand-rolled fake that runner replaced. The rule
+# reads two shapes: a class named like a lore fake, and a class that is callable, builds
+# `CompletedProcess` replies and handles `record` or `vault` arguments.
+
+_NAMED_FAKE = '''
+class FakeLore:
+    def __init__(self):
+        self.calls = []
+def test_uses_it():
+    assert FakeLore().calls == []
+'''
+
+_SHAPED_FAKE = '''
+import subprocess
+class Lore:
+    def __call__(self, argv):
+        if argv[:2] == ["vault", "ls"]:
+            return subprocess.CompletedProcess(argv, 0, "v\\n", "")
+        return subprocess.CompletedProcess(argv, 1, "", "no")
+def test_lists_vaults():
+    assert Lore()(["vault", "ls"]).returncode == 0
+'''
+
+
+@pytest.mark.parametrize("body", [_NAMED_FAKE, _SHAPED_FAKE], ids=["named", "shaped"])
+def test_a_hand_rolled_lore_fake_in_a_craft_test_is_flagged(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "hand-rolled lore runner" in result.stderr
+
+
+@pytest.mark.parametrize("body", [_NAMED_FAKE, _SHAPED_FAKE], ids=["named", "shaped"])
+def test_the_same_fake_outside_craft_tests_is_left_alone(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+import subprocess
+class Git:
+    def __call__(self, argv):
+        return subprocess.CompletedProcess(argv, 0, "", "")
+def test_git_reply():
+    assert Git()(["status"]).returncode == 0
+''',
+        '''
+class Holder:
+    def __call__(self, argv):
+        return [a for a in argv if a != "record"]
+def test_record_args():
+    assert Holder()(["record"]) == ["record"]
+''',
+    ],
+    ids=["canned-replies-without-lore-arguments", "lore-arguments-without-canned-replies"],
+)
+def test_a_class_that_is_only_half_the_fake_shape_is_left_alone(tmp_path, body):
+    result = _run(str(_craft_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_on_a_class_exempts_a_fake_and_is_listed(tmp_path):
+    body = _SHAPED_FAKE.replace(
+        "class Lore:", "# inert-gate: allow canned hostile replies real lore never gives\nclass Lore:"
+    )
+    seeded = _craft_module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    assert "canned hostile replies" in _run("--list-allowed", str(seeded)).stdout
+
+
+# --- the process-wide subprocess patch rule ----------------------------------
+#
+# A test that patches `subprocess.run` (or Popen and the other spawn functions) by that bare
+# name replaces the call for every caller in the process, including incidental ones, so the
+# code under test needs a `runner=` seam instead. Existing sites carry an allow marker; a new
+# one fails the gate.
+
+_PATCHES_SUBPROCESS = {
+    "patch-string": '''
+from unittest.mock import patch
+def test_runs_the_tool():
+    with patch("subprocess.run") as run:
+        run.return_value = 0
+        assert run() == 0
+''',
+    "monkeypatch-string": '''
+def test_runs_the_tool(monkeypatch):
+    monkeypatch.setattr("subprocess.Popen", lambda *a, **k: None)
+    assert True
+''',
+    "monkeypatch-module-and-name": '''
+import subprocess
+def test_runs_the_tool(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+    assert subprocess.run() is None
+''',
+    "patch-object": '''
+import subprocess
+from unittest.mock import patch
+def test_runs_the_tool():
+    with patch.object(subprocess, "check_output") as out:
+        out.return_value = b""
+        assert out() == b""
+''',
+    "through-a-fixture": '''
+import subprocess
+import pytest
+@pytest.fixture
+def no_spawn(monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: None)
+def test_runs_the_tool(no_spawn):
+    assert subprocess.run() is None
+''',
+}
+
+
+@pytest.mark.parametrize(
+    "body", _PATCHES_SUBPROCESS.values(), ids=list(_PATCHES_SUBPROCESS)
+)
+def test_a_process_wide_subprocess_patch_is_flagged(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "patches a process-wide subprocess function" in result.stderr
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        '''
+from unittest.mock import patch
+def test_patch_where_the_consumer_looks_it_up():
+    with patch("camp.provision.tasks.subprocess.run") as run:
+        run.return_value = 0
+        assert run() == 0
+''',
+        '''
+def test_another_attribute(monkeypatch):
+    monkeypatch.setattr("os.rename", lambda *a: None)
+    assert True
+''',
+        '''
+def test_a_non_spawn_name_in_the_subprocess_module(monkeypatch):
+    monkeypatch.setattr("subprocess.DEVNULL", -1)
+    assert True
+''',
+        '''
+import subprocess
+def test_a_runner_argument_instead(tmp_path):
+    done = subprocess.run(["true"])
+    assert done.returncode == 0
+''',
+    ],
+    ids=["consumer-qualified", "another-function", "non-spawn-subprocess-name", "no-patch"],
+)
+def test_a_patch_that_is_not_process_wide_is_left_alone(tmp_path, body):
+    result = _run(str(_module(tmp_path, body)))
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_allow_marker_exempts_a_subprocess_patch_and_is_listed(tmp_path):
+    body = _PATCHES_SUBPROCESS["patch-string"].replace(
+        "def test_runs",
+        "# inert-gate: allow subject is the wrapper around subprocess.run\ndef test_runs",
+    )
+    seeded = _module(tmp_path, body)
+    assert _run(str(seeded)).returncode == 0
+    assert "subject is the wrapper" in _run("--list-allowed", str(seeded)).stdout
