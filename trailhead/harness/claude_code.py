@@ -881,10 +881,14 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 _SETTINGS_FILENAME = "settings.json"
 _READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
 
-#: Where Claude Code reads managed settings on Linux (``managed-settings.json`` then every
-#: ``managed-settings.d/*.json`` in alphabetical order). Managed settings outrank the
+#: Where Claude Code reads managed settings files (``managed-settings.json`` then every
+#: ``managed-settings.d/*.json`` in alphabetical order), by platform
+#: (https://code.claude.com/docs/en/managed-settings.md). Managed settings outrank the
 #: session's own, so a denial there that covers a path the profile needs defeats the profile.
-_MANAGED_SETTINGS_DIR = Path("/etc/claude-code")
+_MANAGED_SETTINGS_DIRS = {
+    "linux": Path("/etc/claude-code"),
+    "darwin": Path("/Library/Application Support/ClaudeCode"),
+}
 _MANAGED_FILENAME = "managed-settings.json"
 _MANAGED_DROP_IN_DIR = "managed-settings.d"
 
@@ -1112,13 +1116,14 @@ class _UserSettings:
         return value
 
 
-def _managed_settings(home: Path, launch_dir: Path) -> list[_UserSettings]:
+def _managed_settings(home: Path, launch_dir: Path, platform: str | None = None) -> list[_UserSettings]:
     """The managed settings files in the order Claude Code merges them; none when absent.
 
     A file or drop-in directory that exists but cannot be read, or a file that is not a JSON
     object, refuses the launch: what policy applies cannot be established.
     """
-    base = _MANAGED_SETTINGS_DIR
+    plat = platform if platform is not None else sys.platform
+    base = _MANAGED_SETTINGS_DIRS["darwin" if plat == "darwin" else "linux"]
     paths = [base / _MANAGED_FILENAME]
     try:
         names = sorted(os.listdir(base / _MANAGED_DROP_IN_DIR))
@@ -2250,6 +2255,7 @@ class ClaudeCodeHarness(Harness):
         env: dict[str, str] | None = None,
         uid: int | None = None,
         broker: BrokerLaunch | None = None,
+        platform: str | None = None,
     ) -> SessionStart:
         """Render *profile* into a confined, never-prompting ``claude`` launch.
 
@@ -2313,10 +2319,11 @@ class ClaudeCodeHarness(Harness):
         neither names nor covers a named host with is denied. A user wildcard that covers
         a named host stays, since denying it would deny that host too.
 
-        Settings sources: the user-level file and Linux managed settings
-        (``/etc/claude-code/managed-settings.json`` then ``managed-settings.d/*.json``) are
-        read and merged; a managed denial a profile root falls under refuses the launch like a
-        user one. Project and local settings in the session directory are not read (the
+        Settings sources: the user-level file and the platform's managed
+        settings (``/etc/claude-code/managed-settings.json`` then ``managed-settings.d/*.json``
+        on Linux, the same under ``/Library/Application Support/ClaudeCode`` on macOS; *platform*
+        defaults to ``sys.platform``) are read and merged; a managed denial a profile root falls
+        under refuses the launch like a user one. Project and local settings in the session directory are not read (the
         session cannot write ``<directory>/.claude``; the operator owns what is there), and
         server-managed or MDM policy is not visible to a file read. A user with no
         ``sandbox.filesystem.allowWrite`` allows only the working directory.
@@ -2357,7 +2364,7 @@ class ClaudeCodeHarness(Harness):
             home,
             launch_dir,
         )
-        for managed in _managed_settings(home, launch_dir):
+        for managed in _managed_settings(home, launch_dir, platform):
             user.absorb(managed)
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
         if wants_broker:

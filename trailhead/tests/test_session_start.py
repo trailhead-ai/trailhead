@@ -59,11 +59,17 @@ def _fence(tmp_path: Path) -> dict[str, str]:
 @pytest.fixture(autouse=True)
 def _fenced_managed_settings(tmp_path, monkeypatch):
     """Point the managed-settings location at a fenced, initially absent directory."""
-    monkeypatch.setattr(claude_code, "_MANAGED_SETTINGS_DIR", tmp_path / "managed-fence")
+    monkeypatch.setattr(
+        claude_code,
+        "_MANAGED_SETTINGS_DIRS",
+        {"linux": tmp_path / "managed-fence", "darwin": tmp_path / "managed-fence-darwin"},
+    )
 
 
-def _write_managed(tmp_path: Path, data, *, drop_in: str | None = None) -> Path:
-    base = tmp_path / "managed-fence"
+def _write_managed(
+    tmp_path: Path, data, *, drop_in: str | None = None, fence: str = "managed-fence"
+) -> Path:
+    base = tmp_path / fence
     if drop_in:
         base = base / "managed-settings.d"
     base.mkdir(parents=True, exist_ok=True)
@@ -115,6 +121,7 @@ def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=N
     """Start the hub. Unless *bare*, the user is first given a write list (see above)."""
     if not bare:
         _give_user_a_write_list(env, account)
+    extra.setdefault("platform", "linux")
     if BROKER_SERVER in profile.mcp_servers and "broker" not in extra:
         extra["broker"] = broker_launch("s1", env=env)
     resolved = _resolved(env, profile)
@@ -1509,6 +1516,30 @@ def test_a_managed_write_denial_over_a_hub_root_is_refused_naming_the_source(tmp
     with pytest.raises(HarnessError, match="managed") as raised:
         _start(env)
     assert lore in str(raised.value) and str(managed) in str(raised.value)
+
+
+@pytest.mark.parametrize("drop_in", [None, "20-sec.json"])
+def test_macos_managed_settings_are_read_from_the_application_support_directory(tmp_path, drop_in):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    managed = _write_managed(
+        tmp_path, {"sandbox": {"filesystem": {"denyWrite": [lore]}}}, drop_in=drop_in, fence="managed-fence-darwin"
+    )
+    with pytest.raises(HarnessError, match="managed") as raised:
+        _start(env, platform="darwin")
+    assert lore in str(raised.value) and str(managed) in str(raised.value)
+
+
+def test_linux_managed_settings_do_not_apply_on_macos_and_macos_ones_do_not_apply_on_linux(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [lore]}}})
+    assert _start(env, platform="darwin") is not None
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [cache]}}}, fence="managed-fence-darwin")
+    with pytest.raises(HarnessError, match="managed"):
+        _start(env, platform="linux")
 
 
 def test_a_managed_drop_in_read_denial_over_a_hub_root_is_refused(tmp_path):
