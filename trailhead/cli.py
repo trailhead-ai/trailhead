@@ -35,7 +35,7 @@ from trailhead.launch_profile import (
     BROKER_SERVER,
     HUB_PROFILE,
     LaunchProfileError,
-    broker_credential_path,
+    broker_launch,
     hub_home,
     resolve_profile,
 )
@@ -236,13 +236,7 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
     env = dict(os.environ)
-    broker = None
-    if args.broker_session is not None:
-        broker = {
-            "server": BROKER_SERVER,
-            "scope": BROKER_SCOPE,
-            "credential_path": str(broker_credential_path(args.broker_session, env=env)),
-        }
+    launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
     config = read_hub_config(args.account, env=env)
     profile = resolve_profile(HUB_PROFILE, args.account, env=env)
     directory = hub_home(args.account, env=env)
@@ -259,7 +253,7 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         return 1
     launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
     start = harnesses[0].session_start(
-        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env
+        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env, broker=launch
     )
     if start is None:
         print(
@@ -273,8 +267,15 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         "env_unset": start.env_unset,
         "directory": str(directory),
     }
-    if broker is not None:
-        output["broker"] = broker
+    if launch is not None:
+        output["broker"] = {
+            "server": BROKER_SERVER,
+            "scope": BROKER_SCOPE,
+            "credential_path": launch.credential_path,
+        }
+        output["files"] = [
+            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
+        ]
     print(json.dumps(output))
     return 0
 

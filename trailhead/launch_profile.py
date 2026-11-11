@@ -24,6 +24,7 @@ All resolution goes through ``trailhead.paths`` and creates nothing.
 from __future__ import annotations
 
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +40,8 @@ _ACCOUNT_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 BROKER_SESSION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 BROKER_SERVER = "outpost"
 BROKER_SCOPE = "ranger"
+BROKER_TOOLS = ("timeline_since",)
+BROKER_MCP_PATH = "/broker/mcp"
 _BROKER_SESSION_ID_RE = re.compile(BROKER_SESSION_ID_PATTERN)
 
 
@@ -94,6 +97,12 @@ def operator_token_store(
     return state_dir("outpost", env=env, platform=platform) / "operator"
 
 
+def outpost_state(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
+    """Outpost's whole state directory: the database, the operator ``credential`` and
+    every session's broker credentials."""
+    return state_dir("outpost", env=env, platform=platform)
+
+
 def validate_broker_session(session_id: str) -> str:
     if not _BROKER_SESSION_ID_RE.fullmatch(session_id):
         raise InvalidBrokerSessionError(
@@ -111,11 +120,65 @@ def broker_credential_path(
     return state_dir("outpost", env=env, platform=platform) / "sessions" / session_id / "broker-client.json"
 
 
+def broker_mcp_config_path(
+    session_id: str, *, env: dict[str, str] | None = None, platform: str | None = None
+) -> Path:
+    """Where Outpost writes a hub session's MCP config, beside its credentials."""
+    validate_broker_session(session_id)
+    return state_dir("outpost", env=env, platform=platform) / "sessions" / session_id / "mcp-config.json"
+
+
+@dataclass(frozen=True)
+class BrokerLaunch:
+    """What a harness needs to wire one session to the Outpost broker.
+
+    ``header_command`` is the argv of a program that prints the Authorization header as a
+    JSON object; ``config_path`` is where the rendered MCP config is written, a location
+    the session can neither read nor write.
+    """
+
+    server: str
+    url: str
+    tools: tuple[str, ...]
+    credential_path: str
+    config_path: str
+    header_command: tuple[str, ...]
+
+    @property
+    def header_shell_command(self) -> str:
+        return shlex.join(self.header_command)
+
+
+def broker_launch(
+    session_id: str,
+    *,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+    trailhead_bin: str | None = None,
+    port: int | None = None,
+) -> BrokerLaunch:
+    """The broker wiring for *session_id*; the trailhead executable and the port are injectable."""
+    from trailhead import outpost_lifecycle
+    from trailhead.pathint import repo_root
+
+    credential = str(broker_credential_path(session_id, env=env, platform=platform))
+    binary = trailhead_bin if trailhead_bin is not None else str(repo_root() / "bin" / "trailhead")
+    number = port if port is not None else outpost_lifecycle.DAEMON_PORT
+    return BrokerLaunch(
+        server=BROKER_SERVER,
+        url=f"http://{outpost_lifecycle.DAEMON_HOST}:{number}{BROKER_MCP_PATH}",
+        tools=BROKER_TOOLS,
+        credential_path=credential,
+        config_path=str(broker_mcp_config_path(session_id, env=env, platform=platform)),
+        header_command=(binary, "broker-header", "--credential-file", credential),
+    )
+
+
 _ROLE_RESOLVERS = {
     ROLE_HUB_HOME: lambda a, e, p: hub_home(a, env=e, platform=p),
     ROLE_LORE_STATE: lambda a, e, p: state_dir("lore", env=e, platform=p),
     ROLE_CACHE: lambda a, e, p: cache_home(env=e, platform=p),
-    ROLE_TOKEN_STORE: lambda a, e, p: operator_token_store(env=e, platform=p),
+    ROLE_TOKEN_STORE: lambda a, e, p: outpost_state(env=e, platform=p),
 }
 
 
@@ -156,7 +219,7 @@ HUB_PROFILE = LaunchProfile(
     git_guarded_roles=(ROLE_LORE_STATE,),
     read_denied_roles=(ROLE_TOKEN_STORE,),
     network_allowed_hosts=(),
-    mcp_servers=(),
+    mcp_servers=(BROKER_SERVER,),
     never_prompt=True,
     model=None,
     effort="medium",

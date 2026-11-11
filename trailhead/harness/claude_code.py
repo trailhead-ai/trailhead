@@ -107,13 +107,15 @@ from trailhead.harness.base import (
     EvalRunner,
     Harness,
     HarnessError,
+    SessionFile,
     SessionRecord,
     SessionStart,
     SessionTranscript,
 )
+from trailhead.launch_profile import BROKER_SERVER
 
 if TYPE_CHECKING:
-    from trailhead.launch_profile import ResolvedProfile
+    from trailhead.launch_profile import BrokerLaunch, ResolvedProfile
 
 _REGISTERED_MARKER = ".trailhead-registered"
 #: Ledger dir inside the composed tree holding one file per Claude config dir
@@ -2053,6 +2055,7 @@ class ClaudeCodeHarness(Harness):
         account: str | None,
         env: dict[str, str] | None = None,
         uid: int | None = None,
+        broker: BrokerLaunch | None = None,
     ) -> SessionStart:
         """Render *profile* into a confined, never-prompting ``claude`` launch.
 
@@ -2099,9 +2102,27 @@ class ClaudeCodeHarness(Harness):
         lets it write. A missing or non-directory *directory* is refused before anything
         is written.
 
+        Broker server: a profile naming :data:`BROKER_SERVER` is rendered as an HTTP MCP
+        server in a config file delivered by ``--mcp-config <path>`` with
+        ``--strict-mcp-config``; the file comes back in ``SessionStart.files`` for the
+        launcher to write, and its definition never appears on argv. The server's
+        Authorization header comes from a headers helper, which the harness runs outside
+        the Bash sandbox with the operator's access, so the file must be unreadable and
+        unwritable by the session: it lives in *broker*'s config path, under Outpost's
+        state directory, which the profile's ``token-store`` role denies for reading and
+        this method denies for writing. The broker tools are allowed by exact name
+        (``mcp__<server>__<tool>``) so ``dontAsk`` does not refuse them. A profile naming
+        the server without a *broker* is refused.
+
+        Network narrowing: ``sandbox.network.deniedDomains`` accumulates across settings
+        scopes and narrows an allow-list, so every user-level allowed domain the profile
+        neither names nor covers a named host with is denied. A user wildcard that covers
+        a named host stays, since denying it would deny that host too.
+
         Raises :class:`HarnessError` for a *directory* that is not an existing directory,
-        a profile that would widen the user-level settings, an unreadable or malformed
-        user-level settings or ``.claude.json``, a profile that may prompt, and a prompt that would parse as a flag.
+        a profile naming the broker server with no *broker*, a profile that would widen
+        the user-level settings, an unreadable or malformed user-level settings or
+        ``.claude.json``, a profile that may prompt, and a prompt that would parse as a flag.
         """
         if not profile.profile.never_prompt:
             raise HarnessError("session_start only starts never-prompt profiles")
@@ -2111,6 +2132,12 @@ class ClaudeCodeHarness(Harness):
             raise HarnessError(
                 f"the hub home {directory} is not an existing directory; "
                 "run `ranger setup --account <A>` for this hub's account to create it"
+            )
+        wants_broker = BROKER_SERVER in profile.profile.mcp_servers
+        if wants_broker and broker is None:
+            raise HarnessError(
+                f"the profile names the {BROKER_SERVER!r} broker server but no broker session "
+                "was given; refusing to start a session without it"
             )
         source = env if env is not None else dict(os.environ)
         env_set = self.session_launch_env_set(account, env=source)
@@ -2127,6 +2154,7 @@ class ClaudeCodeHarness(Harness):
         deny_write = [
             str(launch_dir / ".claude"),
             str(launch_dir / ".mcp.json"),
+            *([os.path.realpath(Path(broker.config_path).parent)] if wants_broker else []),
             *_derive_write_confinement(
                 user, roots, _tmux_socket_dir(source, os.getuid() if uid is None else uid)
             ),
@@ -2154,10 +2182,37 @@ class ClaudeCodeHarness(Harness):
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
                 + [f"Bash({command})" for command in user.excluded_commands]
             },
-            "enabledMcpjsonServers": list(profile.profile.mcp_servers),
+            "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
         }
+        network: dict = {}
         if hosts:
-            settings["sandbox"]["network"] = {"allowedDomains": list(hosts)}
+            network["allowedDomains"] = list(hosts)
+        denied_domains = [
+            d for d in (user.allowed_domains or []) if not any(_host_allowed(h, [d]) for h in hosts)
+        ]
+        if denied_domains:
+            network["deniedDomains"] = denied_domains
+        if network:
+            settings["sandbox"]["network"] = network
+        files: tuple[SessionFile, ...] = ()
+        if wants_broker:
+            config = {
+                "mcpServers": {
+                    broker.server: {
+                        "type": "http",
+                        "url": broker.url,
+                        "headersHelper": broker.header_shell_command,
+                    }
+                }
+            }
+            files = (
+                SessionFile(
+                    path=broker.config_path,
+                    content=json.dumps(config, sort_keys=True, indent=2) + "\n",
+                    mode="0600",
+                ),
+            )
+            settings["permissions"]["allow"] = [f"mcp__{broker.server}__{t}" for t in broker.tools]
         if profile.profile.model is not None:
             settings["model"] = profile.profile.model
 
@@ -2173,13 +2228,15 @@ class ClaudeCodeHarness(Harness):
             argv.append("-p")
         argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
         argv += ["--permission-mode", "dontAsk"]
+        if files:
+            argv += ["--mcp-config", files[0].path, "--strict-mcp-config"]
         if not interactive:
             argv += ["--permission-prompts", "none"]
         if profile.profile.effort is not None:
             argv += ["--effort", profile.profile.effort]
         if prompt:
             argv.append(prompt)
-        return SessionStart(argv=argv, env_set=env_set, env_unset=env_unset)
+        return SessionStart(argv=argv, env_set=env_set, env_unset=env_unset, files=files)
 
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None

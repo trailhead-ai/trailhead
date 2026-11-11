@@ -21,8 +21,10 @@ from trailhead import cli
 from trailhead.harness.base import Harness, HarnessError, SessionStart
 from trailhead.harness.claude_code import ClaudeCodeHarness
 from trailhead.launch_profile import (
+    BROKER_SERVER,
     HUB_PROFILE,
     LaunchProfile,
+    broker_launch,
     hub_home,
     resolve_profile,
 )
@@ -31,6 +33,7 @@ from trailhead.ranger.config import HubConfig, write_hub_config
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).parent / "fixtures" / "session_start_hub.json"
 ROOT_TOKEN = "<ROOT>"
+_HUB_ARGV = ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1"]
 
 
 def _fence(tmp_path: Path) -> dict[str, str]:
@@ -73,6 +76,8 @@ def _resolved(env: dict[str, str], profile: LaunchProfile = HUB_PROFILE):
 
 
 def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=None, **extra):
+    if BROKER_SERVER in profile.mcp_servers and "broker" not in extra:
+        extra["broker"] = broker_launch("s1", env=env)
     resolved = _resolved(env, profile)
     home = hub_home("a", env=env, platform="linux")
     home.mkdir(parents=True, exist_ok=True)
@@ -94,7 +99,8 @@ def _hub_roots(env) -> tuple[str, str, str]:
 def _protected(env) -> list[str]:
     """The hub's own future-settings paths, which the hub may never write."""
     home = _hub_roots(env)[0]
-    return [f"{home}/.claude", f"{home}/.mcp.json"]
+    session_dir = Path(broker_launch("s1", env=env).config_path).parent
+    return [f"{home}/.claude", f"{home}/.mcp.json", str(session_dir)]
 
 
 def _user_allowing_hub(env) -> dict:
@@ -225,7 +231,8 @@ def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_pa
     for env in (first, second):
         deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
         home = _hub_roots(env)[0]
-        assert deny == [f"{home}/.claude", f"{home}/.mcp.json", *_later_vault_globs(env)]
+        assert deny == [*_protected(env), *_later_vault_globs(env)]
+        assert deny[:2] == [f"{home}/.claude", f"{home}/.mcp.json"]
     assert _protected(first) != _protected(second)
 
 
@@ -420,7 +427,8 @@ def test_a_refused_launch_does_not_touch_the_trust_file(tmp_path):
 def _start_in(env, directory):
     Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
     return ClaudeCodeHarness().session_start(
-        _resolved(env), directory, None, interactive=True, account=None, env=env
+        _resolved(env), directory, None, interactive=True, account=None, env=env,
+        broker=broker_launch("s1", env=env),
     )
 
 
@@ -454,7 +462,7 @@ def test_cli_refuses_a_missing_hub_home_with_a_clean_message(tmp_path, monkeypat
     _configure_hub(env)
     shutil.rmtree(hub_home("a", env=env), ignore_errors=True)
     _write_user_settings(env, _user_allowing_hub(env))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     captured = capsys.readouterr()
     assert rc != 0 and captured.out == ""
     assert captured.err.startswith("trailhead: ") and "ranger setup --account <A>" in captured.err
@@ -610,7 +618,8 @@ def test_trust_is_seeded_for_the_realpath_of_the_directory_preserving_other_keys
     link = tmp_path.resolve() / "hub-link"
     link.symlink_to(hub)
     ClaudeCodeHarness().session_start(
-        _resolved(env), link, None, interactive=True, account=None, env=env
+        _resolved(env), link, None, interactive=True, account=None, env=env,
+        broker=broker_launch("s1", env=env),
     )
     data = json.loads(config.read_text())
     assert data["numStartups"] == 7
@@ -741,7 +750,7 @@ def test_cli_refuses_a_never_widen_violation_with_a_clean_message(tmp_path, monk
     _configure_hub(env)
     home, lore, cache = _hub_roots(env)
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache]))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     err = capsys.readouterr().err
     assert rc != 0 and err.startswith("trailhead: ") and lore in err
 
@@ -761,7 +770,7 @@ def test_cli_refuses_an_unreadable_prompt_file_with_a_clean_message(
     rc = _run_cli(
         monkeypatch,
         env,
-        ["session-start", "--role", "hub", "--account", "a", "--json", "--headless",
+        ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1", "--headless",
          "--prompt-file", str(path)],
     )
     captured = capsys.readouterr()
@@ -781,15 +790,15 @@ def test_cli_prints_argv_env_and_directory_and_headless_reads_the_prompt_file(
     rc = _run_cli(
         monkeypatch,
         env,
-        ["session-start", "--role", "hub", "--account", "a", "--json", "--headless",
+        ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1", "--headless",
          "--prompt-file", str(prompt)],
     )
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert set(out) == {"argv", "env_set", "env_unset", "directory"}
+    assert set(out) == {"argv", "env_set", "env_unset", "directory", "broker", "files"}
     assert "-p" in out["argv"] and out["argv"][-1] == "do the thing\n"
     assert out["directory"] == str(hub_home("a", env=env))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     out = json.loads(capsys.readouterr().out)
     assert "-p" not in out["argv"]
 
@@ -803,7 +812,7 @@ def test_cli_maps_launch_account_default_and_declared_to_the_env_binding(
     (Path(env["HOME"]) / ".claude").mkdir()
     _configure_hub(env, launch="~/.claude-x")
     _write_user_settings(env, _user_allowing_hub(env), account_dir=acct)
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     out = json.loads(capsys.readouterr().out)
     assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct)}
 
@@ -962,6 +971,10 @@ def _golden_scenario(tmp_path: Path):
     return env
 
 
+def _normalised(text: str, tmp_path: Path) -> str:
+    return text.replace(str(tmp_path.resolve()), ROOT_TOKEN).replace(str(REPO), "<TRAILHEAD>")
+
+
 def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # inert-gate: allow wiring seam smoke
     tmp_path,
 ):
@@ -970,12 +983,12 @@ def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # iner
     foreign.mkdir()
     result = subprocess.run(
         [str(REPO / "bin" / "trailhead"), "session-start", "--role", "hub", "--account", "a",
-         "--json"],
+         "--json", "--broker-session", "sess-1"],
         cwd=foreign, env=env, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    actual = json.loads(result.stdout.replace(str(tmp_path.resolve()), ROOT_TOKEN))
-    assert set(actual) == {"argv", "env_set", "env_unset", "directory"}
+    actual = json.loads(_normalised(result.stdout, tmp_path))
+    assert set(actual) == {"argv", "env_set", "env_unset", "directory", "broker", "files"}
     assert actual == json.loads(GOLDEN.read_text())
 
 
@@ -1223,12 +1236,6 @@ def test_broker_credential_path_follows_the_outpost_state_dir(tmp_path, monkeypa
     assert out["broker"]["credential_path"].startswith(moved + "/")
 
 
-def test_without_broker_session_the_output_has_no_broker_section(tmp_path, monkeypatch, capsys):
-    env = _broker_ready(tmp_path)
-    _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
-    assert "broker" not in json.loads(capsys.readouterr().out)
-
-
 @pytest.mark.parametrize(
     "bad", ["a/b", "..", "a..b", "../x", "a\x00b", "a\nb", "a\tb", "a\x7fb", "", "-lead", "x" * 65, "a b"]
 )
@@ -1257,3 +1264,167 @@ def test_the_code_constants_match_the_contract_fixture():  # inert-gate: allow c
     assert launch_profile.BROKER_SESSION_ID_PATTERN == CONTRACT["broker_session_id_pattern"]
     assert launch_profile.BROKER_SERVER == CONTRACT["broker_server"]
     assert launch_profile.BROKER_SCOPE == CONTRACT["broker_scope"]
+
+
+# -- the broker MCP server ---------------------------------------------------
+
+SECRET = "s3cret-client-secret-value"
+
+
+
+def _flag_value(argv, flag):
+    return argv[argv.index(flag) + 1]
+
+
+def _covered_by(denied: list[str], path: Path) -> bool:
+    return any(path == Path(d) or Path(d) in path.parents for d in denied)
+
+
+def _run_subprocess(env, cwd, *extra):
+    return subprocess.run(
+        [str(REPO / "bin" / "trailhead"), "session-start", "--role", "hub", "--account", "a", "--json", *extra],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
+    )
+
+
+def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow_rules(tmp_path):
+    env = _broker_ready(tmp_path)
+    cred = Path(env["OUTPOST_STATE_DIR"]) / "sessions" / "sess-1" / "broker-client.json"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(json.dumps({"client_id": "cid", "client_secret": SECRET}))
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    result = _run_subprocess(env, foreign, "--broker-session", "sess-1")
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    (file,) = out["files"]
+    config = json.loads(file["content"])
+    server = config["mcpServers"][CONTRACT["broker_server"]]
+    assert server["type"] == "http"
+    assert server["url"].endswith(CONTRACT["broker_mcp_path"])
+    assert server["url"].startswith("http://127.0.0.1:")
+    helper = server["headersHelper"]
+    assert helper.startswith(str(REPO / "bin" / "trailhead") + " broker-header --credential-file ")
+    assert helper.endswith(out["broker"]["credential_path"])
+    assert _flag_value(out["argv"], "--mcp-config") == file["path"]
+    assert "--strict-mcp-config" in out["argv"]
+    settings = json.loads(_flag_value(out["argv"], "--settings"))
+    assert settings["permissions"]["allow"] == [
+        f"mcp__{CONTRACT['broker_server']}__{CONTRACT['broker_tool']}"
+    ]
+    assert file["mode"] == "0600"
+    assert SECRET not in result.stdout
+    assert "headersHelper" not in " ".join(out["argv"]) and server["url"] not in " ".join(out["argv"])
+    assert SECRET not in json.dumps(out["env_set"])
+
+
+def test_the_mcp_config_file_sits_in_the_session_directory_the_hub_can_neither_read_nor_write(tmp_path):
+    env = _fence(tmp_path)
+    start = _start(env)
+    (file,) = start.files
+    settings = _settings_of(start)
+    fs = settings["sandbox"]["filesystem"]
+    path = Path(file.path)
+    assert path.parent == Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "s1"
+    assert _covered_by(fs["denyRead"], path)
+    assert _covered_by(fs["denyWrite"], path)
+
+
+def test_a_profile_naming_no_mcp_server_renders_none(tmp_path):
+    env = _fence(tmp_path)
+    profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
+    start = _start(env, profile=profile, broker=broker_launch("s1", env=env))
+    assert start.files == ()
+    assert "--mcp-config" not in start.argv and "--strict-mcp-config" not in start.argv
+    assert "allow" not in _settings_of(start)["permissions"]
+
+
+def test_a_profile_naming_the_broker_server_is_refused_without_a_broker_session(tmp_path):
+    env = _fence(tmp_path)
+    resolved = _resolved(env)
+    home = hub_home("a", env=env, platform="linux")
+    home.mkdir(parents=True)
+    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    with pytest.raises(HarnessError, match="broker"):
+        ClaudeCodeHarness().session_start(
+            resolved, home, None, interactive=True, account=None, env=env
+        )
+
+
+def test_cli_refuses_a_hub_start_without_a_broker_session_cleanly(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "broker" in captured.err
+
+
+def test_the_helper_command_runs_by_absolute_path_from_a_foreign_cwd(tmp_path):
+    env = _broker_ready(tmp_path)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    out = json.loads(_run_subprocess(env, foreign, "--broker-session", "sess-1").stdout)
+    helper = json.loads(out["files"][0]["content"])["mcpServers"]["outpost"]["headersHelper"]
+    ran = subprocess.run(
+        ["sh", "-c", helper], cwd=foreign, env={**env, "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert ran.returncode == 1 and ran.stdout == ""
+    assert "credential-missing" in ran.stderr
+
+
+def test_a_helper_path_with_a_space_survives_the_shell(tmp_path):
+    env = _fence(tmp_path)
+    launch = broker_launch("s1", env=env, trailhead_bin="/opt/my tools/trailhead")
+    start = _start(env, broker=launch)
+    helper = json.loads(start.files[0].content)["mcpServers"]["outpost"]["headersHelper"]
+    import shlex
+
+    assert shlex.split(helper)[0] == "/opt/my tools/trailhead"
+    assert shlex.split(helper)[-1] == launch.credential_path
+
+
+def test_the_denied_reads_cover_the_database_and_session_credentials_and_follow_the_state_dir(tmp_path):
+    for name in ("one", "two"):
+        env = {**_fence(tmp_path), "OUTPOST_STATE_DIR": str(tmp_path.resolve() / name)}
+        settings = _settings_of(_start(env))
+        denied = settings["sandbox"]["filesystem"]["denyRead"]
+        base = Path(env["OUTPOST_STATE_DIR"])
+        assert _covered_by(denied, base / "state.db")
+        assert _covered_by(denied, base / "sessions" / "s1" / "broker-client.json")
+        assert _covered_by(denied, base / "operator" / "credential")
+        assert all(Path(d) == base for d in denied)
+
+
+def test_user_allowed_domains_the_profile_does_not_name_are_denied_in_the_session(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["a.example", "b.example"])
+    )
+    profile = LaunchProfile(
+        writable_roles=HUB_PROFILE.writable_roles, network_allowed_hosts=("a.example",)
+    )
+    assert _settings_of(_start(env, profile=profile))["sandbox"]["network"]["deniedDomains"] == ["b.example"]
+    bare = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles)
+    assert _settings_of(_start(env, profile=bare))["sandbox"]["network"]["deniedDomains"] == [
+        "a.example",
+        "b.example",
+    ]
+
+
+def test_a_wildcard_user_domain_covering_a_named_host_is_not_denied(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["*.a.example", "b.example"])
+    )
+    profile = LaunchProfile(
+        writable_roles=HUB_PROFILE.writable_roles, network_allowed_hosts=("x.a.example",)
+    )
+    assert _settings_of(_start(env, profile=profile))["sandbox"]["network"]["deniedDomains"] == ["b.example"]
+
+
+def test_no_user_allow_list_renders_no_denied_domains(tmp_path):
+    env = _fence(tmp_path)
+    assert "deniedDomains" not in _settings_of(_start(env))["sandbox"].get("network", {})
