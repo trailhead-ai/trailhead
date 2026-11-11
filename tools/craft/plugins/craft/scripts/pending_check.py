@@ -105,11 +105,9 @@ skips the waiting gate.
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import re
 import sys
-from contextlib import redirect_stderr
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -122,6 +120,7 @@ import criterion_gate  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import markdown_section  # noqa: E402
 import observation_gate as obs  # noqa: E402
+import parent_coverage  # noqa: E402
 import spec_write as sw  # noqa: E402
 import waiting  # noqa: E402
 import waiting_gate  # noqa: E402
@@ -210,38 +209,18 @@ def _pending_line(criterion: str, spec: str, evidence: str) -> str:
     return f"- **{criterion}** — {_PENDING} — waiting entry on spec/{spec}; {evidence}"
 
 
-class _Parent:
+class _Parent(parent_coverage.ParentCoverage):
     """A parent body read through observation_gate's own parsers."""
 
     def __init__(self, body: str):
-        self.body = body
         try:
-            self.lines, self.masked, self.covers, self.partial = obs.read_covers_fields(body)
-            self.observations = obs.parse_observations(self.lines, self.masked)
-            self.attestations = obs.parse_attestations(self.lines, self.masked)
-            self.obs_lines = self._observation_lines()
+            super().__init__(body)
         except ValueError:
             raise Refusal(
                 "the parent's covers fields or observations cannot be read unambiguously",
                 "unreadable-parent",
                 2,
             )
-
-    def _observation_lines(self) -> dict[str, int]:
-        start = covers_gate._find_unique_heading(
-            self.lines, self.masked, obs._OBSERVATIONS_HEADING_RE, obs._OBSERVATIONS_HEADING,
-            obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE,
-        )
-        if start is None:
-            return {}
-        found = obs._scan_section(self.lines, self.masked, start, obs._OBSERVATION_LINE_RE)
-        return {identifier: idx for identifier, (_rest, idx) in found.items()}
-
-    def _field_index(self, field_re) -> int | None:
-        for i, line in enumerate(self.lines):
-            if not self.masked[i] and field_re.match(line):
-                return i
-        return None
 
     def classify(self, criteria: list[str], spec_body: str) -> list[str]:
         """The criteria still to move; the rest are already pending. Refuses any
@@ -275,20 +254,7 @@ class _Parent:
                 unrecorded.append(_pending_line(criterion, spec, _NO_OBSERVATION))
         covers = [c for c in self.covers if c not in moving]
         partial = self.partial + moving
-        covers_idx = self._field_index(obs._COVERS_FIELD_RE)
-        partial_idx = self._field_index(obs._PARTIALLY_COVERS_FIELD_RE)
-        partial_line = f"**Partially covers:** {', '.join(partial)}"
-        if partial_idx is not None:
-            lines[partial_idx] = partial_line
-            if covers:
-                lines[covers_idx] = f"**Covers:** {', '.join(covers)}"
-            else:
-                del lines[covers_idx]
-        elif covers:
-            lines[covers_idx] = f"**Covers:** {', '.join(covers)}"
-            lines.insert(covers_idx + 1, partial_line)
-        else:
-            lines[covers_idx] = partial_line
+        lines = self.rewrite_lists(lines, covers, partial)
         body = "\n".join(lines)
         if unrecorded:
             body = sw.append_to_section(
@@ -297,21 +263,8 @@ class _Parent:
         return body, covers, partial
 
 
-def _is_slice_parent(sidecar: dict, spec: str, statuses: tuple[str, ...]) -> bool:
-    """A task in one of `statuses`, labelled a slice parent, related to `spec`."""
-    related = sidecar.get("related")
-    specs = related.get("spec") if isinstance(related, dict) else None
-    linked = {v.removeprefix("spec/") for v in specs if isinstance(v, str)} if isinstance(specs, list) else set()
-    return (
-        sidecar.get("kind") == "task"
-        and sidecar.get("status") in statuses
-        and gather.SLICE_LABEL in gather._labels(sidecar)
-        and spec in linked
-    )
-
-
 def _check_parent(sidecar: dict, spec: str) -> None:
-    if not _is_slice_parent(sidecar, spec, ("in-progress",)):
+    if not parent_coverage.is_slice_parent(sidecar, spec, ("in-progress",)):
         raise Refusal(
             "the parent is not an in-progress slice parent related to this spec",
             "not-a-slice-parent",
@@ -339,34 +292,12 @@ def _with_entries(body: str, items: list[dict], parent: str) -> str:
     return sw.append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
 
 
-def _certify_covers(spec_body: str, covers: list[str], partial: list[str]) -> None:
-    argv = []
-    if covers:
-        argv += ["--covers", ", ".join(covers)]
-    argv += ["--partial-covers", ", ".join(partial)]
-    saved = sys.stdin
-    sys.stdin = io.TextIOWrapper(io.BytesIO(spec_body.encode("utf-8")), encoding="utf-8")
-    captured = io.StringIO()
-    try:
-        with redirect_stderr(captured):
-            rc = covers_gate.main(argv)
-    finally:
-        sys.stdin = saved
-    if rc == 0:
-        return
-    codes = re.findall(r"reason-code: (\S+)", captured.getvalue())
-    raise Refusal(
-        "covers_gate refused the moved identifier lists", codes[-1] if codes else "covers-refused",
-        rc if rc in (1, 2) else 2,
-    )
-
-
 def _precertify_covers(state: _Parent, moving: list[str], spec: str, spec_body: str) -> None:
     """The lists the parent will carry, certified before the spec entry is written so a
     criterion the spec does not declare leaves nothing behind."""
     if moving:
         _, covers, partial = state.moved(moving, spec)
-        _certify_covers(spec_body, covers, partial)
+        parent_coverage.certify_covers(spec_body, covers, partial)
 
 
 def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
@@ -377,7 +308,7 @@ def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
     if not todo:
         return "already-updated"
     new_body, covers, partial = state.moved(todo, spec)
-    _certify_covers(spec_body, covers, partial)
+    parent_coverage.certify_covers(spec_body, covers, partial)
     done = sw.write_record(runner, sw.update_argv(f"task/{parent}", vault, revision), new_body)
     if done is not None and done.returncode == 0:
         return "updated"
@@ -598,9 +529,9 @@ def stuck_mode(args, runner) -> int:
         raise _refuse_stuck("this lore's 'record update' has no --base, so no close could write", "lore-too-old")
     vault = sw.resolve_vault(runner, args.spec, args.vault, refusal_exit=2)
     sidecar, parent_body, _, _ = _read_or_fail(runner, vault, f"task/{args.parent}", "parent-not-found")
-    if _is_slice_parent(sidecar, args.spec, ("blocked",)):
+    if parent_coverage.is_slice_parent(sidecar, args.spec, ("blocked",)):
         raise _refuse_stuck("the parent is blocked; only an in-progress parent is certified", "parent-blocked")
-    if not _is_slice_parent(sidecar, args.spec, ("in-progress",)):
+    if not parent_coverage.is_slice_parent(sidecar, args.spec, ("in-progress",)):
         raise _refuse_stuck("the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent")
     if gather._labels(sidecar).get("craft/push") == "failed":
         raise _refuse_stuck("the parent's last push failed and needs settling by hand", "push-failed")

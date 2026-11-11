@@ -52,11 +52,11 @@ Prose.
 """
 
 
-def waiting_text(criterion, status="waiting", waits_on="the vendor ships the API", *extra):
+def waiting_text(criterion, status="waiting", waits_on="the vendor ships the API", *extra, words=None):
     lines = [
         f"- **{criterion}.** set aside",
         f"  - waits on: {waits_on}",
-        f"  - 2026-11-01 waiting: {WORDS}",
+        f"  - 2026-11-01 waiting: {words or WORDS}",
     ]
     if status != "waiting":
         lines.append(f"  - 2026-11-02 {status}: the operator's words")
@@ -392,6 +392,408 @@ def test_a_spec_that_is_not_in_the_vault_is_refused_spec_not_found(world, entrie
 # ---------------------------------------------------------------------------
 # Reason-codes: the codes a document names for this writer are ones the module declares.
 # ---------------------------------------------------------------------------
+
+
+PARENT = "the-parent"
+PARENT_ID = f"task/{PARENT}"
+BUILD_WORDS = "set aside by a build session until the outside thing it waits on is done"
+
+PARENT_PLAIN = """**Value claim:** the slice ships.
+
+**Covers:** AC2, AC4, AC5
+
+**Partially covers:** AC3
+
+## Notes
+
+Prose.
+"""
+
+PARENT_OBSERVED = """**Value claim:** the slice ships.
+
+**Covers:** AC2, AC4, AC5
+
+**Partially covers:** AC3
+
+## Criterion observations
+
+- **AC2** — manual-check — looked at the banner
+- **AC4** — manual-check — opened the report by hand
+- **AC5** — manual-check — checked the archive size
+- **AC3** — pending-check — waiting entry on spec/the-spec; no observation recorded before close
+
+## Operator attestations
+
+- **AC2** — the operator saw the banner
+- **AC4** — the operator opened the report
+- **AC5** — the operator checked the size
+"""
+
+
+class BuildWorld(World):
+    """A spec and an `in-progress` slice parent, both real lore records."""
+
+    def __init__(self, root, parent_body=PARENT_PLAIN, *, status="in-progress", labels=None, related=None,
+                 spec_body=SPEC_BODY, close=()):
+        super().__init__(root, spec_body, close=close)
+        labels = {"craft/slice-parent": ""} if labels is None else labels
+        related = {"spec": [SPEC]} if related is None else related
+        extras = [f"--label={k}={v}" for k, v in labels.items()]
+        extras += [f"--related={kind}={name}" for kind, names in related.items() for name in names]
+        r = self.runner(["record", "create", "--kind", "task", "--title", "The parent", "--status", status,
+                         "--vault", VAULT, *extras], parent_body)
+        assert r.returncode == 0, r.stderr
+        self.runner.calls.clear()
+
+    def update_ids(self):
+        return [a[2] for a, _ in self.updates()]
+
+    def parent_show(self):
+        r = self.runner(["record", "show", "--json", "--vault", VAULT, PARENT_ID])
+        self.runner.calls.pop()
+        assert r.returncode == 0, r.stderr
+        return json.loads(r.stdout)
+
+    def parent_body(self):
+        return self.parent_show()["body"]
+
+    def parent_updates(self):
+        return [(a, s) for a, s in self.updates() if a[2] == PARENT_ID]
+
+    def edit_parent(self, transform):
+        body = self.parent_body()
+        r = self.runner(["record", "update", PARENT_ID, "--vault", VAULT], transform(body))
+        self.runner.calls.pop()
+        assert r.returncode == 0, r.stderr
+
+    def fail_parent_update(self, *, after_other_writer=None):
+        busy = []
+
+        def watch(argv, _stdin):
+            if busy or argv[:3] != ["record", "update", PARENT_ID]:
+                return False
+            if after_other_writer is not None:
+                busy.append(True)
+                after_other_writer()
+                busy.clear()
+            return True
+
+        self.runner.inject(watch, returncode=1, stderr="boom", times=1)
+
+
+@pytest.fixture
+def build(tmp_path):
+    made = []
+
+    def make(*args, **kwargs):
+        made.append(None)
+        return BuildWorld(tmp_path / f"build{len(made)}", *args, **kwargs)
+
+    return make
+
+
+def run_build(fake, entries_path, capsys, *, parent=PARENT, spec=SPEC, vault=VAULT):
+    argv = [f"--spec={spec}", f"--parent={parent}", "--entries", str(entries_path), f"--vault={vault}"]
+    rc = sa.main(argv, runner=fake.runner)
+    out = capsys.readouterr()
+    return rc, out.out, out.err
+
+
+def cover_lines(body):
+    return [ln for ln in body.splitlines() if ln.startswith(("**Covers:**", "**Partially covers:**"))]
+
+
+def test_a_covered_criterion_is_set_aside_and_leaves_the_parents_other_covers_in_order(build, entries_file, capsys):
+    fake = build()
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert rc == 0, err
+    assert out.splitlines() == ["set aside: AC4", "spec: written", "parent: updated"]
+    assert fake.update_ids() == [SPEC_ID, PARENT_ID]
+    assert [e.criterion_id for e in waiting.parse_waiting(fake.body())] == ["AC4"]
+    assert fake.parent_body() == PARENT_PLAIN.replace("**Covers:** AC2, AC4, AC5", "**Covers:** AC2, AC5")
+
+
+@pytest.mark.parametrize(
+    "parent_body,expected",
+    [
+        (PARENT_PLAIN, PARENT_PLAIN.replace("**Partially covers:** AC3\n", "")),
+        (
+            PARENT_PLAIN.replace("**Partially covers:** AC3", "**Partially covers:** AC3, AC1"),
+            PARENT_PLAIN.replace("**Partially covers:** AC3", "**Partially covers:** AC1"),
+        ),
+    ],
+    ids=["emptied-line-is-removed", "remaining-identifier-stays"],
+)
+def test_a_partially_covered_criterion_is_set_aside_and_an_emptied_line_is_removed(
+    build, entries_file, capsys, parent_body, expected
+):
+    fake = build(parent_body)
+    rc, out, err = run_build(fake, entries_file([item("AC3")]), capsys)
+    assert rc == 0, err
+    assert out.splitlines() == ["set aside: AC3", "spec: written", "parent: updated"]
+    assert fake.parent_body() == expected
+
+
+@pytest.mark.parametrize(
+    "parent_body,criteria",
+    [
+        (PARENT_PLAIN.replace("**Covers:** AC2, AC4, AC5", "**Covers:** AC2"), ["AC2", "AC3"]),
+        (PARENT_PLAIN.replace("**Covers:** AC2, AC4, AC5", "**Covers:** AC2").replace(
+            "\n**Partially covers:** AC3\n", ""), ["AC2"]),
+        (PARENT_PLAIN.replace("**Partially covers:** AC3", "**Partially covers:** AC3, AC1"), ["AC2", "AC4", "AC5", "AC3", "AC1"]),
+    ],
+    ids=["covers-and-partial-both-emptied", "only-covered-criterion", "everything-at-once"],
+)
+def test_a_set_aside_that_would_leave_the_parent_covering_nothing_is_refused_and_nothing_is_written(
+    build, entries_file, capsys, parent_body, criteria
+):
+    fake = build(parent_body)
+    rc, out, err = run_build(fake, entries_file([item(c) for c in criteria]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "would-empty-slice")
+    assert fake.updates() == []
+    assert fake.parent_body() == parent_body
+
+
+def test_a_criterion_that_is_not_on_the_parent_is_refused_not_on_this_slice_and_nothing_is_written(
+    build, entries_file, capsys
+):
+    fake = build()
+    rc, out, err = run_build(fake, entries_file([item("AC4"), item("AC1")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-on-this-slice")
+    assert "AC1" in err
+    assert fake.updates() == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"status": "done"}, {"labels": {"x/y": ""}}, {"related": {"spec": ["another-spec"]}}],
+    ids=["done", "unlabelled", "other-spec"],
+)
+def test_a_parent_that_is_not_an_in_progress_slice_parent_of_this_spec_is_refused_and_nothing_is_written(
+    build, entries_file, capsys, kwargs
+):
+    fake = build(**kwargs)
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-a-slice-parent")
+    assert fake.updates() == []
+
+
+def test_a_parent_whose_covers_cannot_be_read_is_refused_unreadable_parent_and_nothing_is_written(
+    build, entries_file, capsys
+):
+    fake = build(PARENT_PLAIN + "\n**Covers:** AC2\n")
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (2, "", "unreadable-parent")
+    assert fake.updates() == []
+
+
+def test_a_parent_that_does_not_exist_is_refused_parent_not_found(build, entries_file, capsys):
+    fake = build()
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys, parent="no-such-parent")
+    assert (rc, out, code_of(err)) == (1, "", "parent-not-found")
+    assert fake.updates() == []
+
+
+def test_a_parent_write_refused_as_stale_leaves_the_spec_entry_and_a_rerun_finishes_the_parent(
+    build, entries_file, capsys
+):
+    fake = build()
+    fake.fail_parent_update(after_other_writer=lambda: fake.edit_parent(lambda b: b + "\nA note.\n"))
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (2, "", "stale-parent")
+    assert "spec entry already landed" in err
+    assert [e.criterion_id for e in waiting.parse_waiting(fake.body())] == ["AC4"]
+    assert fake.parent_body() == PARENT_PLAIN + "\nA note.\n"
+
+    fake.calls.clear()
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert rc == 0, err
+    assert out.splitlines() == ["set aside: AC4", "spec: already-present", "parent: updated"]
+    assert fake.update_ids() == [PARENT_ID]
+    assert fake.parent_body() == (PARENT_PLAIN + "\nA note.\n").replace("AC2, AC4, AC5", "AC2, AC5")
+
+
+def test_a_parent_write_that_fails_with_an_unchanged_revision_is_parent_write_failed(build, entries_file, capsys):
+    fake = build()
+    fake.fail_parent_update()
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (2, "", "parent-write-failed")
+    assert "spec entry already landed" in err
+    assert fake.parent_body() == PARENT_PLAIN
+
+
+def test_the_parent_is_written_with_the_revision_of_the_read_after_the_spec_write(build, entries_file, capsys):
+    fake = build()
+    first_revision = fake.parent_show()["revision"]
+    fired = []
+
+    # another writer edits the parent after the spec write lands, before the writer re-reads it
+    real_runner = fake.runner
+
+    class Wrapped:
+        def __getattr__(self, name):
+            return getattr(real_runner, name)
+
+        def __call__(self, argv, stdin=None):
+            result = real_runner(argv, stdin)
+            if argv[:3] == ["record", "update", SPEC_ID] and result.returncode == 0 and not fired:
+                fired.append(True)
+                fake.edit_parent(lambda b: b + "\nEdited between the reads.\n")
+            return result
+
+    rc = sa.main([f"--spec={SPEC}", f"--parent={PARENT}", "--entries", str(entries_file([item("AC4")])),
+                  f"--vault={VAULT}"], runner=Wrapped())
+    assert rc == 0, capsys.readouterr().err
+    [(argv, body)] = fake.parent_updates()
+    second_revision_base = argv[argv.index("--base") + 1]
+    assert second_revision_base != first_revision
+    assert "Edited between the reads." in body
+    assert "**Covers:** AC2, AC5" in body
+
+
+def test_a_parent_narrowed_elsewhere_after_the_spec_write_is_already_updated_and_not_rewritten(
+    build, entries_file, capsys
+):
+    fake = build()
+    real_runner = fake.runner
+    fired = []
+
+    class Wrapped:
+        def __getattr__(self, name):
+            return getattr(real_runner, name)
+
+        def __call__(self, argv, stdin=None):
+            result = real_runner(argv, stdin)
+            if argv[:3] == ["record", "update", SPEC_ID] and result.returncode == 0 and not fired:
+                fired.append(True)
+                fake.edit_parent(lambda b: b.replace("AC2, AC4, AC5", "AC2, AC5"))
+            return result
+
+    rc = sa.main([f"--spec={SPEC}", f"--parent={PARENT}", "--entries", str(entries_file([item("AC4")])),
+                  f"--vault={VAULT}"], runner=Wrapped())
+    out = capsys.readouterr()
+    assert rc == 0, out.err
+    assert out.out.splitlines() == ["set aside: AC4", "spec: written", "parent: already-updated"]
+    assert fake.parent_updates() == []
+
+
+def certify_covers_in_process(spec_body, covers, partial, monkeypatch):
+    import io
+    import covers_gate
+
+    argv = []
+    if covers:
+        argv += ["--covers", ", ".join(covers)]
+    if partial:
+        argv += ["--partial-covers", ", ".join(partial)]
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(spec_body.encode("utf-8")), encoding="utf-8"))
+    return covers_gate.main(argv)
+
+
+def test_a_narrowed_parent_passes_the_close_paths_covers_and_observation_gates(
+    build, entries_file, capsys, monkeypatch
+):
+    import observation_gate
+
+    fake = build(PARENT_OBSERVED)
+    observation_gate.certify(PARENT_OBSERVED)
+    rc, _, err = run_build(fake, entries_file([item("AC3")]), capsys)
+    assert rc == 0, err
+    narrowed = fake.parent_body()
+    covers, observations, partial = observation_gate.certify(narrowed)
+    assert (covers, partial) == (["AC2", "AC4", "AC5"], [])
+    assert set(observations) == {"AC2", "AC4", "AC5"}
+    assert certify_covers_in_process(fake.body(), covers, partial, monkeypatch) == 0
+
+
+def test_a_criterion_carrying_an_observation_line_loses_that_line_and_the_observation_gate_certifies(
+    build, entries_file, capsys
+):
+    import observation_gate
+
+    fake = build(PARENT_OBSERVED)
+    rc, _, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert rc == 0, err
+    narrowed = fake.parent_body()
+    assert "- **AC4** — manual-check" not in narrowed
+    assert narrowed == (
+        PARENT_OBSERVED.replace("AC2, AC4, AC5", "AC2, AC5").replace(
+            "- **AC4** — manual-check — opened the report by hand\n", "")
+    )
+    covers, observations, partial = observation_gate.certify(narrowed)
+    assert (covers, set(observations), partial) == (["AC2", "AC5"], {"AC2", "AC5", "AC3"}, ["AC3"])
+
+    left_in = PARENT_OBSERVED.replace("AC2, AC4, AC5", "AC2, AC5")
+    with pytest.raises(observation_gate.ObservationViolation, match="AC4"):
+        observation_gate.certify(left_in)
+
+
+def test_a_partially_covered_criterion_with_an_observation_line_loses_it_too(build, entries_file, capsys):
+    import observation_gate
+
+    fake = build(PARENT_OBSERVED)
+    rc, _, err = run_build(fake, entries_file([item("AC3")]), capsys)
+    assert rc == 0, err
+    narrowed = fake.parent_body()
+    assert "AC3" not in narrowed
+    observation_gate.certify(narrowed)
+
+
+def test_a_remaining_identifier_the_covers_gate_refuses_leaves_the_parent_unwritten(build, entries_file, capsys):
+    fake = build(PARENT_PLAIN.replace("AC2, AC4, AC5", "AC2, AC9, AC5"))
+    rc, out, err = run_build(fake, entries_file([item("AC2")]), capsys)
+    assert rc in (1, 2) and out == ""
+    assert code_of(err) not in sa.REASON_CODES
+    assert fake.parent_updates() == []
+
+
+def test_a_partial_build_rerun_with_the_entry_present_narrows_the_parent_and_writes_nothing_to_the_spec(
+    build, entries_file, capsys
+):
+    fake = build(spec_body=spec_with(waiting_text("AC4", words=BUILD_WORDS)))
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert rc == 0, err
+    assert out.splitlines() == ["set aside: AC4", "spec: already-present", "parent: updated"]
+    assert fake.update_ids() == [PARENT_ID]
+    assert fake.parent_body() == PARENT_PLAIN.replace("AC2, AC4, AC5", "AC2, AC5")
+
+
+def test_a_released_entry_alone_in_build_mode_is_entry_exists_and_nothing_is_written(build, entries_file, capsys):
+    fake = build(spec_body=spec_with(waiting_text("AC4", "released")))
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "entry-exists")
+    assert fake.updates() == []
+
+
+def test_each_mode_writes_its_own_history_wording_never_the_callers_text(build, world, entries_file, capsys):
+    sliced = world()
+    run(sliced, entries_file([item("AC4", "ZZ-MARKER")]), capsys)
+    built = build()
+    run_build(built, entries_file([item("AC4", "ZZ-MARKER")]), capsys)
+    [slice_entry] = waiting.parse_waiting(sliced.body())
+    [build_entry] = waiting.parse_waiting(built.body())
+    slice_words, build_words = slice_entry.history[0][2], build_entry.history[0][2]
+    assert slice_words == WORDS
+    assert build_words == BUILD_WORDS
+    assert "slice pass" not in build_words and "ZZ-MARKER" not in build_words
+
+
+def test_an_unusable_parent_name_is_refused_before_any_lore_call(build, entries_file, capsys):
+    fake = build()
+    rc, out, err = run_build(fake, entries_file([item("AC4")]), capsys, parent="bad name")
+    assert (rc, out, code_of(err)) == (2, "", "invalid-name")
+    assert fake.calls == []
+
+
+def test_the_build_mode_codes_are_declared(build, entries_file, capsys):
+    emitted = set()
+    for kwargs in ({"status": "done"}, {}):
+        fake = build(**kwargs)
+        for criteria in (["AC1"], ["AC2", "AC4", "AC5", "AC3"]):
+            _, _, err = run_build(fake, entries_file([item(c) for c in criteria]), capsys)
+            emitted.add(code_of(err))
+    assert {"not-a-slice-parent", "not-on-this-slice", "would-empty-slice"} <= emitted <= sa.REASON_CODES
+
 
 DOCUMENTS = (CRAFT / "skills" / "slice" / "SKILL.md", CRAFT / "skills" / "_shared" / "execute.md")
 _TOKEN_RE = re.compile(r"`([a-z]+(?:-[a-z]+)+)`")

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Set-aside writer — sets a candidate criterion aside from a slice pass.
+"""Set-aside writer — sets a candidate criterion aside from a slice pass or a build session.
 
 Usage:
     set_aside.py --spec <n> --entries <path> [--vault <v>]
+    set_aside.py --spec <n> --parent <n> --entries <path> [--vault <v>]
 
 `--entries` names a JSON list of `{criterion, waits_on}` objects: `criterion` an `ACn` (once
 each), `waits_on` one plain line naming the outside thing and what unblocks it, at most
@@ -25,10 +26,26 @@ proposed body is certified by `waiting_gate.certify` against the body it was com
 refusals exit with the gate's own code) and written with `lore record update --base <revision
 read>`; a failed or timed-out write is decided by re-reading (landed, `stale-spec` or
 `spec-write-failed`), as `spec_write.certify_and_write` does for every `## Waiting` writer.
-A re-run whose entries are all present with status `waiting` writes nothing.
+A re-run whose entries are all present with status `waiting` writes nothing. The history line's
+words are the writer's own, one fixed text per mode (a slice pass or a build session).
 
-Stdout on success: one `set aside: ACn` per entry, then `spec: written|already-present`. Entry
-text is never echoed in a `reason:` line.
+With `--parent` (a build session): the parent must be an `in-progress` slice parent related to
+the spec (`not-a-slice-parent`; a parent that is not found is `parent-not-found`), every
+criterion must be on its `**Covers:**` or `**Partially covers:**` (`not-on-this-slice`), and the
+set-aside must leave it covering something (`would-empty-slice`); all three are refused before
+anything is written. Then the spec entry lands first, exactly as above. Then the parent is read
+again (never the first read): each criterion is taken off whichever coverage list holds it (an
+emptied line is dropped) and its `## Criterion observations` line is removed (a leftover one
+makes the observation gate refuse the close), the remaining lists are certified by
+`covers_gate` in-process against the spec now on the vault, and the parent is written with
+`--base` of that re-read. A parent write that does not take is `stale-parent` or
+`parent-write-failed` (exit 2) and says the spec entry already landed: a re-run finds the entry
+present and finishes the parent. A criterion already off the parent at the re-read leaves it
+unwritten (`parent: already-updated`).
+
+Stdout on success: one `set aside: ACn` per entry, then `spec: written|already-present`, and
+with `--parent` `parent: updated|already-updated`. Entry text is never echoed in a `reason:`
+line.
 
 Exit codes: 0 done; 1 refused (stable `reason-code:`); 2 could not complete.
 `REASON_CODES` declares the codes this script raises itself; the waiting gate's and lore's own
@@ -53,6 +70,7 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 import candidate_set  # noqa: E402
 import followup_gather as gather  # noqa: E402
+import parent_coverage  # noqa: E402
 import spec_write as sw  # noqa: E402
 import waiting  # noqa: E402
 import waiting_gate  # noqa: E402
@@ -76,9 +94,17 @@ REASON_CODES = frozenset(
         "malformed-prior-section",
         "shared-layer-prior",
         "candidates-unreadable",
+        "parent-not-found",
+        "not-a-slice-parent",
+        "not-on-this-slice",
+        "would-empty-slice",
+        "unreadable-parent",
+        "stale-parent",
+        "parent-write-failed",
     }
 )
-_WORDS = "set aside by a slice pass until the outside thing it waits on is done"
+_SLICE_WORDS = "set aside by a slice pass until the outside thing it waits on is done"
+_BUILD_WORDS = "set aside by a build session until the outside thing it waits on is done"
 _CRITERION_RE = re.compile(r"AC[1-9][0-9]{0,8}")
 _ENTRY_KEYS = {"criterion", "waits_on"}
 _LINE_BREAKS = "\n\r\x0b\x0c\x85  "
@@ -140,21 +166,21 @@ def _refuse_unfit_text(entries: list[dict]) -> None:
             )
 
 
-def _entry_lines(entry: dict, today: str) -> list[str]:
+def _entry_lines(entry: dict, today: str, words: str) -> list[str]:
     return [
         f"- **{entry['criterion']}.** {_SET_ASIDE}",
         f"  - waits on: {entry['waits_on']}",
-        f"  - {today} waiting: {_WORDS}",
+        f"  - {today} waiting: {words}",
     ]
 
 
-def _with_entries(body: str, entries: list[dict]) -> str:
+def _with_entries(body: str, entries: list[dict], words: str) -> str:
     today = waiting_gate._today().isoformat()
     block: list[str] = []
     for entry in entries:
         if block:
             block.append("")
-        block += _entry_lines(entry, today)
+        block += _entry_lines(entry, today, words)
     return sw.append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
 
 
@@ -193,8 +219,8 @@ def _candidates(runner, vault: str, spec_id: str, spec_body: str) -> set[str]:
     raise Refusal("the candidate set printed no candidates line", "candidates-unreadable", 2)
 
 
-def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict]) -> tuple[str, str]:
-    """Land `entries` on `spec`'s `## Waiting` section; returns (the spec body now on the vault,
+def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict], words: str) -> tuple[str, str]:
+    """Land `entries` on `spec`'s `## Waiting` section, their history line reading `words`; returns (the spec body now on the vault,
     `written` or `already-present`). Refusals are `Refusal`s and leave the spec untouched."""
     spec_id = f"spec/{spec}"
     _, spec_body, spec_rev, _ = sw.read_record(runner, vault, spec_id, "spec-not-found")
@@ -223,7 +249,7 @@ def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict]) -> tup
                 "not-a-candidate",
                 1,
             )
-    drafted = _with_entries(spec_body, missing)
+    drafted = _with_entries(spec_body, missing, words)
     body = sw.certify_and_write(
         runner, vault, spec_id, spec_body, spec_rev, drafted, [(e["criterion"], None) for e in missing]
     )
@@ -235,16 +261,102 @@ def write_mode(args, runner) -> int:
     entries = _load_entries(args.entries)
     _refuse_unfit_text(entries)
     vault = sw.resolve_vault(runner, args.spec, args.vault)
-    _, status = set_aside_in_spec(runner, vault, args.spec, entries)
+    _, status = set_aside_in_spec(runner, vault, args.spec, entries, _SLICE_WORDS)
     for entry in entries:
         print(f"set aside: {entry['criterion']}")
     print(f"spec: {status}")
     return 0
 
 
+def _read_parent(sidecar: dict, body: str, spec: str) -> parent_coverage.ParentCoverage:
+    if not parent_coverage.is_slice_parent(sidecar, spec, ("in-progress",)):
+        raise Refusal(
+            "the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent", 1
+        )
+    try:
+        return parent_coverage.ParentCoverage(body)
+    except ValueError:
+        raise Refusal(
+            "the parent's covers fields or observations cannot be read unambiguously", "unreadable-parent", 2
+        )
+
+
+def _lists_without(state: parent_coverage.ParentCoverage, criteria: list[str]) -> tuple[list[str], list[str]]:
+    drop = set(criteria)
+    return [c for c in state.covers if c not in drop], [c for c in state.partial if c not in drop]
+
+
+def _refuse_unfit_claim(state: parent_coverage.ParentCoverage, criteria: list[str]) -> None:
+    on_parent = set(state.covers) | set(state.partial)
+    off = [c for c in criteria if c not in on_parent]
+    if off:
+        raise Refusal(
+            f"{', '.join(off)} is not on this parent's '**Covers:**' or '**Partially covers:**'",
+            "not-on-this-slice",
+            1,
+        )
+    if not any(_lists_without(state, criteria)):
+        raise Refusal(
+            "setting these aside would leave the parent covering nothing — drop the slice instead",
+            "would-empty-slice",
+            1,
+        )
+
+
+def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[str], spec_body: str) -> str:
+    landed = "the spec entry already landed; re-run to finish the parent"
+    record = f"task/{parent}"
+    sidecar, body, revision, _ = sw.read_record(runner, vault, record, "parent-not-found")
+    state = _read_parent(sidecar, body, spec)
+    on_parent = set(state.covers) | set(state.partial)
+    todo = [c for c in criteria if c in on_parent]
+    if not todo:
+        return "already-updated"
+    covers, partial = _lists_without(state, todo)
+    if not covers and not partial:
+        raise Refusal(
+            f"the parent changed since it was read and setting these aside would now leave it covering "
+            f"nothing; {landed}",
+            "would-empty-slice",
+            1,
+        )
+    lines: list[str | None] = list(state.lines)
+    for criterion in todo:
+        if criterion in state.obs_lines:
+            lines[state.obs_lines[criterion]] = None
+    lines = state.rewrite_lists(lines, covers, partial)
+    parent_coverage.certify_covers(spec_body, covers, partial)
+    new_body = "\n".join(line for line in lines if line is not None)
+    done = sw.write_record(runner, sw.update_argv(record, vault, revision), new_body)
+    if done is not None and done.returncode == 0:
+        return "updated"
+    sw.refuse_if_base_rejected(done)
+    if sw.revision_changed(runner, vault, record, revision, "parent-not-found"):
+        raise Refusal(f"{record} changed after it was read; {landed}", "stale-parent", 2)
+    raise Refusal(f"lore could not write {record}; {landed}", "parent-write-failed", 2)
+
+
+def build_mode(args, runner) -> int:
+    sw.check_names(args.spec, args.parent, args.vault)
+    entries = _load_entries(args.entries)
+    _refuse_unfit_text(entries)
+    criteria = [entry["criterion"] for entry in entries]
+    vault = sw.resolve_vault(runner, args.spec, args.vault)
+    sidecar, body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
+    _refuse_unfit_claim(_read_parent(sidecar, body, args.spec), criteria)
+    spec_body, spec_status = set_aside_in_spec(runner, vault, args.spec, entries, _BUILD_WORDS)
+    parent_status = _narrow_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
+    for criterion in criteria:
+        print(f"set aside: {criterion}")
+    print(f"spec: {spec_status}")
+    print(f"parent: {parent_status}")
+    return 0
+
+
 def _parse(argv: list[str]):
     ap = _Parser(prog="set_aside.py", description=__doc__.splitlines()[0])
     ap.add_argument("--spec", required=True)
+    ap.add_argument("--parent")
     ap.add_argument("--vault")
     ap.add_argument("--entries", required=True)
     return ap.parse_args(argv)
@@ -253,7 +365,8 @@ def _parse(argv: list[str]):
 def main(argv: list[str], runner=None) -> int:
     runner = runner or lore_runner
     try:
-        return write_mode(_parse(argv), runner)
+        args = _parse(argv)
+        return (build_mode if args.parent is not None else write_mode)(args, runner)
     except Refusal as r:
         return emit_refusal(PROG, r)
 
