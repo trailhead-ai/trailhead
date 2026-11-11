@@ -30,7 +30,15 @@ from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError, detect_harnesses, get_harness
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
-from trailhead.launch_profile import HUB_PROFILE, LaunchProfileError, hub_home, resolve_profile
+from trailhead.launch_profile import (
+    BROKER_SCOPE,
+    BROKER_SERVER,
+    HUB_PROFILE,
+    LaunchProfileError,
+    broker_credential_path,
+    hub_home,
+    resolve_profile,
+)
 from trailhead.outpost_lifecycle import (
     OutpostLifecycleError,
     open_ui,
@@ -222,6 +230,13 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
     env = dict(os.environ)
+    broker = None
+    if args.broker_session is not None:
+        broker = {
+            "server": BROKER_SERVER,
+            "scope": BROKER_SCOPE,
+            "credential_path": str(broker_credential_path(args.broker_session, env=env)),
+        }
     config = read_hub_config(args.account, env=env)
     profile = resolve_profile(HUB_PROFILE, args.account, env=env)
     directory = hub_home(args.account, env=env)
@@ -246,16 +261,15 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
-        json.dumps(
-            {
-                "argv": start.argv,
-                "env_set": start.env_set,
-                "env_unset": start.env_unset,
-                "directory": str(directory),
-            }
-        )
-    )
+    output = {
+        "argv": start.argv,
+        "env_set": start.env_set,
+        "env_unset": start.env_unset,
+        "directory": str(directory),
+    }
+    if broker is not None:
+        output["broker"] = broker
+    print(json.dumps(output))
     return 0
 
 
@@ -458,6 +472,12 @@ def _build_parser() -> argparse.ArgumentParser:
         "--headless", action="store_true", default=False, help="Start a non-interactive session."
     )
     session_p.add_argument("--harness", metavar="NAME", default=None, help="Default: first detected.")
+    session_p.add_argument(
+        "--broker-session",
+        metavar="ID",
+        default=None,
+        help="Outpost's session id; adds a broker section naming where its credentials live.",
+    )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
     return parser

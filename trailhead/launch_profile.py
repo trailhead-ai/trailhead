@@ -36,6 +36,11 @@ ROLE_TOKEN_STORE = "token-store"
 
 _ACCOUNT_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
+BROKER_SESSION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+BROKER_SERVER = "outpost"
+BROKER_SCOPE = "ranger"
+_BROKER_SESSION_ID_RE = re.compile(BROKER_SESSION_ID_PATTERN)
+
 
 class LaunchProfileError(ValueError):
     """Base class for launch-profile errors."""
@@ -47,6 +52,10 @@ class InvalidAccountError(LaunchProfileError):
 
 class UnknownRoleError(LaunchProfileError):
     """A profile names a directory role the resolver does not know."""
+
+
+class InvalidBrokerSessionError(LaunchProfileError):
+    """The broker session id does not match the shared contract's session-id shape."""
 
 
 def validate_account(account: str) -> str:
@@ -83,6 +92,23 @@ def operator_token_store(
 ) -> Path:
     """Outpost's operator directory, which holds the operator ``credential`` file."""
     return state_dir("outpost", env=env, platform=platform) / "operator"
+
+
+def validate_broker_session(session_id: str) -> str:
+    if not _BROKER_SESSION_ID_RE.fullmatch(session_id):
+        raise InvalidBrokerSessionError(
+            f"broker session id {session_id!r} is not a valid session id; "
+            f"it must match {BROKER_SESSION_ID_PATTERN}"
+        )
+    return session_id
+
+
+def broker_credential_path(
+    session_id: str, *, env: dict[str, str] | None = None, platform: str | None = None
+) -> Path:
+    """Where Outpost writes a hub session's broker client credentials."""
+    validate_broker_session(session_id)
+    return state_dir("outpost", env=env, platform=platform) / "sessions" / session_id / "broker-client.json"
 
 
 _ROLE_RESOLVERS = {

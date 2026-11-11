@@ -1184,3 +1184,76 @@ def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_recor
     assert _refused(info_w) and not (v / ".git" / "info" / "attributes").exists()
     assert _refused(move_w) and (v / ".git").is_dir()
     assert _refused(late_w) and not (paths["lore"] / "vaults" / "late" / ".git" / "config").exists()
+
+
+# -- the broker section ------------------------------------------------------
+
+CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ranger-contract.json").read_text())
+
+
+def _broker_argv(session_id):
+    return ["session-start", "--role", "hub", "--account", "a", "--json",
+            f"{CONTRACT['broker_session_arg']}={session_id}"]
+
+
+def _broker_ready(tmp_path):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    _write_user_settings(env, _user_allowing_hub(env))
+    return env
+
+
+def test_broker_session_adds_a_broker_section_shaped_by_the_contract(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv("sess-1"))
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert list(out["broker"]) == CONTRACT["broker_output_keys"]
+    assert out["broker"]["server"] == CONTRACT["broker_server"]
+    assert out["broker"]["scope"] == CONTRACT["broker_scope"]
+    expected = CONTRACT["broker_credential_path"].replace("<session-id>", "sess-1")
+    assert out["broker"]["credential_path"] == str(Path(env["OUTPOST_STATE_DIR"]) / expected)
+
+
+def test_broker_credential_path_follows_the_outpost_state_dir(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    moved = str(tmp_path.resolve() / "elsewhere")
+    _run_cli(monkeypatch, {**env, "OUTPOST_STATE_DIR": moved}, _broker_argv("sess-1"))
+    out = json.loads(capsys.readouterr().out)
+    assert out["broker"]["credential_path"].startswith(moved + "/")
+
+
+def test_without_broker_session_the_output_has_no_broker_section(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    assert "broker" not in json.loads(capsys.readouterr().out)
+
+
+@pytest.mark.parametrize(
+    "bad", ["a/b", "..", "a..b", "../x", "a\x00b", "a\nb", "a\tb", "a\x7fb", "", "-lead", "x" * 65, "a b"]
+)
+def test_a_session_id_outside_the_shape_is_refused_with_nothing_printed(
+    tmp_path, monkeypatch, capsys, bad
+):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv(bad))
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "unexpected" not in captured.err
+
+
+@pytest.mark.parametrize("good", ["s", "Sess_1-x", "0" * 64])
+def test_a_session_id_inside_the_shape_is_accepted(tmp_path, monkeypatch, capsys, good):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv(good))
+    assert rc == 0 and json.loads(capsys.readouterr().out)["broker"]["credential_path"].endswith(
+        f"sessions/{good}/broker-client.json"
+    )
+
+
+def test_the_code_constants_match_the_contract_fixture():  # inert-gate: allow cross-repo contract seam
+    from trailhead import launch_profile
+
+    assert launch_profile.BROKER_SESSION_ID_PATTERN == CONTRACT["broker_session_id_pattern"]
+    assert launch_profile.BROKER_SERVER == CONTRACT["broker_server"]
+    assert launch_profile.BROKER_SCOPE == CONTRACT["broker_scope"]
