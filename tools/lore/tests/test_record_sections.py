@@ -393,29 +393,25 @@ UNATTENDED_1 = "\n## Unattended run\n\n- **Session:** one\n- **Outcome:** pendin
 UNATTENDED_2 = "\n## Unattended run\n\n- **Session:** two\n- **Outcome:** pending\n"
 
 
-def test_unattended_run_first_block_appended_is_pipeline():
-    assert same("task", UNATTENDED_BASE, UNATTENDED_BASE + UNATTENDED_1)
+@pytest.mark.parametrize("before, after", [
+    pytest.param(UNATTENDED_BASE, UNATTENDED_BASE + UNATTENDED_1, id="first-block-appended"),
+    pytest.param(UNATTENDED_BASE + UNATTENDED_1, UNATTENDED_BASE + UNATTENDED_1 + UNATTENDED_2,
+                 id="second-block-appended"),
+    pytest.param(UNATTENDED_BASE + UNATTENDED_1,
+                 (UNATTENDED_BASE + UNATTENDED_1).replace("pending", "pr-ready"),
+                 id="outcome-line-edited"),
+])
+def test_an_unattended_run_change_alone_is_pipeline(before, after):
+    assert same("task", before, after)
 
 
-def test_unattended_run_second_block_appended_is_pipeline():
-    before = UNATTENDED_BASE + UNATTENDED_1
-    assert same("task", before, before + UNATTENDED_2)
-
-
-def test_unattended_run_outcome_line_edited_is_pipeline():
-    before = UNATTENDED_BASE + UNATTENDED_1
-    assert same("task", before, before.replace("pending", "pr-ready"))
-
-
-def test_unattended_run_block_plus_authored_change_is_authored():
-    before = UNATTENDED_BASE + UNATTENDED_1
-    after = (before + UNATTENDED_2).replace("Step A", "Step B")
-    assert not same("task", before, after)
-
-
-def test_authored_change_alone_beside_unattended_run_is_authored():
-    before = UNATTENDED_BASE + UNATTENDED_1
-    assert not same("task", before, before.replace("Step A", "Step B"))
+@pytest.mark.parametrize("after", [
+    pytest.param((UNATTENDED_BASE + UNATTENDED_1 + UNATTENDED_2).replace("Step A", "Step B"),
+                 id="beside-a-block-change"),
+    pytest.param((UNATTENDED_BASE + UNATTENDED_1).replace("Step A", "Step B"), id="alone"),
+])
+def test_an_authored_change_beside_an_unattended_run_is_authored(after):
+    assert not same("task", UNATTENDED_BASE + UNATTENDED_1, after)
 
 
 @pytest.mark.parametrize("mask", ["```\n{h}\n- **Outcome:** x\n```\n", "<!--\n{h}\n- **Outcome:** x\n-->\n"])

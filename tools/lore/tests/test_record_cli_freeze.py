@@ -372,50 +372,33 @@ def _done_task(tmp_path, body):
     return vault, state, _create(vault, state, "task", "done", body=body)
 
 
-def test_done_task_first_unattended_run_block_appended_is_allowed(tmp_path):
-    vault, state, rid = _done_task(tmp_path, TASK)
+@pytest.mark.parametrize("before, after", [
+    pytest.param(TASK, TASK + UNATTENDED_1, id="first-block-appended"),
+    pytest.param(TASK + UNATTENDED_1, TASK + UNATTENDED_1 + UNATTENDED_2, id="second-block-appended"),
+    pytest.param(TASK + UNATTENDED_1, (TASK + UNATTENDED_1).replace("pending", "pr-ready"),
+                 id="outcome-line-edited"),
+    pytest.param(TASK + UNATTENDED_1, TASK + UNATTENDED_1 + "\n" + TASK_RUN,
+                 id="driver-run-beside-an-unattended-block"),
+])
+def test_done_task_unattended_run_change_alone_is_allowed(tmp_path, before, after):
+    vault, state, rid = _done_task(tmp_path, before)
 
-    r = _update(vault, state, rid, TASK + UNATTENDED_1)
-
-    assert r.returncode == 0, r.stderr
-    assert "- **Outcome:** pending" in _paths(vault, rid)[0].read_text(encoding="utf-8")
-
-
-def test_done_task_second_unattended_run_block_appended_is_allowed(tmp_path):
-    vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
-
-    r = _update(vault, state, rid, TASK + UNATTENDED_1 + UNATTENDED_2)
-
-    assert r.returncode == 0, r.stderr
-    assert _paths(vault, rid)[0].read_text(encoding="utf-8").count("## Unattended run") == 2
-
-
-def test_done_task_unattended_run_outcome_line_edited_is_allowed(tmp_path):
-    vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
-
-    r = _update(vault, state, rid, (TASK + UNATTENDED_1).replace("pending", "pr-ready"))
+    r = _update(vault, state, rid, after)
 
     assert r.returncode == 0, r.stderr
-    assert "pr-ready" in _paths(vault, rid)[0].read_text(encoding="utf-8")
+    assert _paths(vault, rid)[0].read_text(encoding="utf-8").endswith(after)
 
 
-def test_done_task_change_outside_unattended_run_alongside_a_block_change_is_refused(tmp_path):
+@pytest.mark.parametrize("after", [
+    pytest.param((TASK + UNATTENDED_1 + UNATTENDED_2).replace("intro text", "intro TEXT"),
+                 id="alongside-a-block-change"),
+    pytest.param((TASK + UNATTENDED_1).replace("intro text", "intro TEXT"), id="alone"),
+])
+def test_done_task_change_outside_unattended_run_is_refused(tmp_path, after):
     vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
     before = _snapshot(vault)
 
-    r = _update(vault, state, rid,
-                (TASK + UNATTENDED_1 + UNATTENDED_2).replace("intro text", "intro TEXT"))
-
-    assert r.returncode != 0
-    assert "[frozen-body]" in r.stderr
-    assert _snapshot(vault) == before
-
-
-def test_done_task_change_outside_unattended_run_alone_is_refused(tmp_path):
-    vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
-    before = _snapshot(vault)
-
-    r = _update(vault, state, rid, (TASK + UNATTENDED_1).replace("intro text", "intro TEXT"))
+    r = _update(vault, state, rid, after)
 
     assert r.returncode != 0
     assert "[frozen-body]" in r.stderr
@@ -443,14 +426,6 @@ def test_in_progress_task_takes_an_unattended_run_block_as_a_plain_update(tmp_pa
 
     assert r.returncode == 0, r.stderr
     assert "intro TEXT" in _paths(vault, rid)[0].read_text(encoding="utf-8")
-
-
-def test_done_task_driver_run_block_still_allowed_beside_an_unattended_block(tmp_path):
-    vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
-
-    r = _update(vault, state, rid, TASK + UNATTENDED_1 + "\n" + TASK_RUN)
-
-    assert r.returncode == 0, r.stderr
 
 
 def test_ac11_one_character_changed_above_slices_is_refused(tmp_path):
