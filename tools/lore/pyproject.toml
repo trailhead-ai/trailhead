@@ -15,7 +15,9 @@ tmp_path_retention_policy = "failed"
 testpaths = ["tests"]
 # The opt-in tiers are left out of the default run, as in the repository root config.
 strict_markers = true
-addopts = "-m \"not chromium and not seam_real\""
+# tier_closing_line.py, at the repository root, prints the closing line naming the tiers left out.
+pythonpath = ["../.."]
+addopts = "-p tier_closing_line -m \"not chromium and not seam_real\""
 markers = [
     "real_home: the test genuinely means the developer's real home; opts out of the Path.home() guard",
     "benchmark: a timing/latency assertion that requires uncontended CPU — excluded from the parallel run, run serially instead",

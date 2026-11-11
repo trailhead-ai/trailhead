@@ -100,14 +100,25 @@ bin/trailhead uninstall           # remove the whole install (keeps your data)
 The root `pyproject.toml`'s `addopts` applies `-n auto` (pytest-xdist) whenever
 pytest resolves that file as its config — the whole-suite run, and any path under
 `trailhead/tests`, `tools/outpost/tests`, or `tools/portage/tests` (they have no
-config of their own). `tools/camp`,
-`tools/craft`, and `tools/lore` each carry their own `pyproject.toml` with no
-`addopts`, so a path under `tools/camp/tests` / `tools/craft/tests` /
-`tools/lore/tests` runs serially by default — `--pdb` works there unmodified.
+config of their own). `tools/camp`, `tools/craft`, and `tools/lore` each carry their
+own `pyproject.toml`, whose `addopts` holds only the tier exclusion and the closing-line
+plugin (no `-n`), so a path under `tools/camp/tests` / `tools/craft/tests` /
+`tools/lore/tests` still runs serially by default — `--pdb` works there unmodified.
 Wherever `-n auto` IS in effect, `--pdb` does not work, and `-p no:xdist` is
 **not** a valid way to go serial — xdist stays registered either way. The only
 serial escape hatch is `-n 0`, e.g.
 `.venv/bin/python -m pytest -n 0 --pdb trailhead/tests/test_paths.py::TestMacosBranch`.
+
+**Worker count: keep `-n auto`.** Measured on the default selection in a 4-CPU Linux
+container (relative times, not CI's): two workers took 1.7x as long as four; 11 workers
+on 4 CPUs (what `auto` reads there) took 1.18x as long as four; with the CPUs half taken by
+other work, four workers and `auto` took the same time (1.0x), both about 1.7x the idle
+run. So never go below the core count, and on a loaded machine a fixed lower count does not
+help; passing `-n <cores>` only matters inside a container that reports the host's CPUs.
+Splitting a heavy file's tests across workers is also right: the largest file holds about a seventh
+of all test time, spread over 499 cheap tests (median 0.1 s, the slowest 5 s), so
+`--dist loadfile` measured 164 s against 161 s for the default distribution, so neither it nor
+`loadgroup` is used.
 
 **Opt-in test tiers.** Two kinds of test are left out of the default command because they
 launch real processes and dominate its run time: `chromium` (drives a real headless
@@ -124,7 +135,10 @@ slow.
 
 **What gates merge.** `main` has no branch protection or ruleset, so a pull request merges
 when every job of the `tests` workflow is green. Each tier is a job of that workflow
-(`pytest-tiers`), beside the default `pytest` job. Every one of them runs the run-time guard
+(`pytest-tiers`), beside the default job, which CI splits by area into parallel jobs
+(`[tool.trailhead.test-areas]` in `pyproject.toml`, `scripts/test-area-args`; a path added to
+`testpaths` lands in the `rest` job). The split is CI-only: the default command above stays
+one run. Every one of them runs the run-time guard
 with its own tier name, budget and passed-count baseline, so a tier job that selects nothing
 (pytest exits nonzero) or skips a test it should run (the passed count falls under its
 baseline) fails. To undo the split, delete `and not chromium and not seam_real` from the

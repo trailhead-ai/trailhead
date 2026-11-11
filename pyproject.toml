@@ -48,6 +48,12 @@ markers = [
     "seam_real: its subject is a real lore or git process, driven end to end — an opt-in tier excluded from the default run, run as its own CI job (`-m seam_real`)",
 ]
 
+# The default selection runs as parallel CI jobs, one per area here plus `rest` (every other path in
+# `testpaths`); see scripts/test-area-args and the `pytest` job in .github/workflows/tests.yml.
+[tool.trailhead.test-areas]
+craft = ["tools/craft/tests"]
+lore-camp = ["tools/lore/tests", "tools/camp/tests"]
+
 [tool.ruff]
 # PEP 8 style enforcement. PEP 8 explicitly allows teams to relax the 79-column
 # rule; this codebase de-facto targets <=100, so we enforce 120 rather than churn

@@ -7,35 +7,20 @@ subject is what that config selects, not a function. Collection is serial (`-n 0
 
 from __future__ import annotations
 
-import re
 import subprocess
-import sys
 import textwrap
 from pathlib import Path
 
 import pytest
 
-REPO = Path(__file__).resolve().parents[2]
-TIERS = ("chromium", "seam_real")
+from ._tier_runs import REPO, TIERS, run_pytest
+
 ALL_TIERS_COMMAND = '-m "not benchmark"'
 CLOSING_PREFIX = "deselected tiers: "
-_ID = re.compile(r"^\S+\.py::\S")
 
 
-def _pytest(*args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-n", "0", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-        timeout=300,
-    )
-
-
-def _ids(*args: str) -> set[str]:
-    result = _pytest("--collect-only", "-q", *args)
-    assert result.returncode in (0, 5), result.stdout + result.stderr
-    return {line for line in result.stdout.splitlines() if _ID.match(line)}
+def _pytest(*args, cwd=REPO):
+    return run_pytest(*args, cwd=cwd)
 
 
 def _config_of(area: str) -> Path:
@@ -52,21 +37,6 @@ def _collect_scratch(config: Path, tmp_path: Path) -> subprocess.CompletedProces
         "--collect-only", "-q", "-c", str(config), "--rootdir", str(tmp_path), str(tmp_path / "test_scratch.py"),
         cwd=tmp_path,
     )
-
-
-@pytest.mark.parametrize("tier", TIERS)
-def test_default_selection_leaves_a_tier_out_and_the_tier_selection_finds_it(tier):
-    default = _ids()
-    selected = _ids("-m", tier)
-    assert selected, f"no test carries the {tier} marker"
-    assert not default & selected
-
-
-def test_every_collected_test_is_in_exactly_one_place():
-    everything = _ids("-m", "")
-    places = {"default": _ids(), "benchmark": _ids("-m", "benchmark"), **{t: _ids("-m", t) for t in TIERS}}
-    assert set().union(*places.values()) == everything
-    assert sum(len(ids) for ids in places.values()) == len(everything)
 
 
 @pytest.mark.parametrize("area", ["root", "craft", "lore", "camp"])
@@ -105,17 +75,6 @@ def test_a_path_scoped_run_registers_the_tier_markers(area):
         assert f"@pytest.mark.{tier}:" in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("area", "tier"), [("craft", "seam_real"), ("lore", "seam_real"), ("outpost", "chromium")]
-)
-def test_a_path_scoped_run_honours_the_exclusion(area, tier):
-    path = f"tools/{area}/tests"
-    default = _ids(path)
-    selected = _ids(path, "-m", tier)
-    assert selected, f"{path} holds no {tier} test"
-    assert not default & selected
-
-
 def test_a_default_run_ends_by_naming_each_deselected_tier_and_the_all_tiers_command():
     result = _pytest("--collect-only", "-q", "trailhead/tests/test_paths.py")
     last = [line for line in result.stdout.splitlines() if line.strip()][-1]
@@ -138,3 +97,22 @@ def test_the_closing_line_names_only_the_tiers_still_deselected():
 def test_a_tier_selection_that_matches_no_test_exits_nonzero():
     result = _pytest("-m", "chromium", "trailhead/tests/test_paths.py")
     assert result.returncode != 0
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "tools/craft/tests/test_found_work.py",
+        "tools/lore/tests/test_lore_cli.py",
+        "tools/camp/tests/test_activation.py",
+    ],
+)
+def test_a_path_scoped_run_ends_with_the_same_closing_line(path):
+    result = _pytest("--collect-only", "-q", path)
+    last = [line for line in result.stdout.splitlines() if line.strip()][-1]
+    assert last == f"{CLOSING_PREFIX}{', '.join(TIERS)} — run them with .venv/bin/python -m pytest {ALL_TIERS_COMMAND}"
+
+
+def test_a_run_that_loads_a_member_conftest_prints_the_closing_line_once():
+    result = _pytest("--collect-only", "-q", "trailhead/tests/test_paths.py", "tools/lore/tests/test_lore_cli.py")
+    assert result.stdout.count(CLOSING_PREFIX) == 1
