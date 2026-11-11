@@ -60,7 +60,7 @@ jobs:
             baseline: 7491
             budget: 330
           - area: rest
-            baseline: 3159
+            baseline: 3162
             budget: 200
     steps:
       - name: Check out the repository
