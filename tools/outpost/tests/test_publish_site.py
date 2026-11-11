@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import fcntl
 import importlib.util
+import json
 import shutil
 import subprocess
 import sys
@@ -520,6 +521,72 @@ def test_vault_name_must_match_the_vault_path_basename(tmp_path):
     assert result.returncode != 0
     assert "other" in result.stderr and "acme" in result.stderr
     assert not (vault / "sites" / "mysite").exists()
+
+
+def _write_lore_config(tmp_path: Path, vaults: list[dict], *, subdir: str = "home/.config") -> Path:
+    cfg = tmp_path / subdir / "lore" / "config.json"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text(json.dumps({"vaults": [{"name": "default", "scope": "default"}, *vaults]}))
+    return cfg
+
+
+def _publish_acme(tmp_path, env):
+    vault = tmp_path / "state" / "lore" / "vaults" / "acme"
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+    result = _run([str(source), "mysite", "--vault-path", str(vault), "--no-sync"], env)
+    return vault, result
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"name": "acme", "scope": "read-only"},
+        {"name": "alias", "scope": "read-only", "path": "{vault}"},
+    ],
+    ids=["by-name", "by-path"],
+)
+def test_read_only_vault_is_refused_before_anything_is_written(tmp_path, entry):
+    vault = _make_vault(tmp_path, name="acme")
+    entry = {k: v.format(vault=vault) if isinstance(v, str) else v for k, v in entry.items()}
+    _write_lore_config(tmp_path, [entry])
+    source = _write_site(tmp_path / "src", {"index.html": "<html></html>"})
+
+    result = _run([str(source), "mysite", "--vault-path", str(vault), "--no-sync"], _env(tmp_path))
+
+    assert result.returncode != 0
+    assert "read-only" in result.stderr and entry["name"] in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not (vault / "sites").exists()
+
+
+def test_writable_vault_declared_in_config_still_publishes(tmp_path):
+    _make_vault(tmp_path, name="acme")
+    _write_lore_config(
+        tmp_path, [{"name": "acme", "scope": "repo"}, {"name": "other", "scope": "read-only"}]
+    )
+    vault, result = _publish_acme(tmp_path, _env(tmp_path))
+    assert result.returncode == 0, result.stderr
+    assert (vault / "sites" / "mysite" / "index.html").exists()
+
+
+def test_read_only_declaration_is_read_from_lore_config_dir_override(tmp_path):
+    _make_vault(tmp_path, name="acme")
+    cfg = _write_lore_config(tmp_path, [{"name": "acme", "scope": "read-only"}], subdir="elsewhere")
+    env = _env(tmp_path)
+    env["LORE_CONFIG_DIR"] = str(cfg.parent)
+    vault, result = _publish_acme(tmp_path, env)
+    assert result.returncode != 0 and "read-only" in result.stderr
+    assert not (vault / "sites").exists()
+
+
+def test_unreadable_lore_config_refuses_the_publish(tmp_path):
+    _make_vault(tmp_path, name="acme")
+    cfg = _write_lore_config(tmp_path, [])
+    cfg.write_text("{ not json")
+    vault, result = _publish_acme(tmp_path, _env(tmp_path))
+    assert result.returncode != 0
+    assert "config.json" in result.stderr and "Traceback" not in result.stderr
+    assert not (vault / "sites").exists()
 
 
 def test_vault_directory_name_must_be_url_safe(tmp_path):

@@ -84,6 +84,7 @@ from __future__ import annotations
 import argparse
 import fcntl
 import http.client
+import json
 import os
 import re
 import shutil
@@ -170,6 +171,61 @@ def _assert_direct_child(vault_path: Path, vaults_root: Path) -> None:
             f"({resolved_root}) — refusing to publish outside the standard "
             "vault layout"
         )
+
+
+def _lore_config_path(env: Mapping[str, str]) -> Path:
+    """Return lore's ``config.json`` path implied by *env*.
+
+    A hand mirror of ``trailhead.paths.config_dir("lore", env=env)``: an
+    absolute ``LORE_CONFIG_DIR`` wins, else ``XDG_CONFIG_HOME/lore``, else
+    ``$HOME/.config/lore``; a relative override is refused.
+    """
+    for var in ("LORE_CONFIG_DIR", "XDG_CONFIG_HOME"):
+        value = env.get(var, "")
+        if not value:
+            continue
+        if not Path(value).is_absolute():
+            raise PublishError(f"{var} is a relative path ({value!r}); it must be absolute")
+        return (Path(value) if var == "LORE_CONFIG_DIR" else Path(value) / "lore") / "config.json"
+    home = env.get("HOME")
+    if not home:
+        raise PublishError("HOME is not set, so lore's config.json cannot be located")
+    return Path(home) / ".config" / "lore" / "config.json"
+
+
+def _assert_vault_writable(vault_path: Path, env: Mapping[str, str]) -> None:
+    """Refuse a vault that lore's ``config.json`` declares ``read-only``.
+
+    Lore never writes into a read-only vault, so a site written there would
+    only make the following ``lore sync`` fail. A vault matches an entry by its
+    normalized name (``/`` becomes ``_``) or by the entry's explicit ``path``.
+    A missing ``config.json`` means every vault is writable; one that cannot be
+    read fails closed.
+    """
+    config_path = _lore_config_path(env)
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+        entries = data["vaults"]
+        if not isinstance(entries, list):
+            raise TypeError("'vaults' is not a list")
+    except FileNotFoundError:
+        return
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise PublishError(
+            f"refusing to publish — lore's config.json at {config_path} cannot be read: {exc}"
+        ) from exc
+    resolved = vault_path.resolve()
+    for entry in entries:
+        if not isinstance(entry, dict) or entry.get("scope") != "read-only":
+            continue
+        name = str(entry.get("name", "")).replace("/", "_")
+        explicit = entry.get("path")
+        same_path = isinstance(explicit, str) and Path(explicit).resolve() == resolved
+        if name == resolved.name or same_path:
+            raise PublishError(
+                f"vault {name} is read-only — its content is changed by hand outside lore, "
+                "so a site cannot be published into it"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +806,7 @@ def _publish_to_vault(
     try:
         _assert_vault_dir(args.vault_path)
         _assert_direct_child(args.vault_path, _vaults_root(env))
+        _assert_vault_writable(args.vault_path, env)
         _assert_vault_name_agrees(args.vault, args.vault_path.resolve().name)
         _validate_vault_name(args.vault_path.resolve().name)
     except PublishError as exc:
