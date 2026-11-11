@@ -152,11 +152,12 @@ jobs:
           # seam_real about 39 s) at roughly four times the measured wall; tighten it to
           # median + 2 sd once this job has CI history.
           # `workers` is the xdist worker count. The chromium tier runs nothing but browser
-          # launches, so four at once on a 4-vCPU runner starves the two-copy storage-event test
-          # past its cross-copy barrier timeout; two workers leave it room at little wall cost.
+          # launches, and any second browser starting alongside the two-copy storage-event test
+          # can starve it past its cross-copy barrier timeout, so the tier runs one test at a
+          # time; it still finishes well inside its budget.
           - tier: chromium
             paths: tools/outpost/tests
-            workers: 2
+            workers: 0
             baseline: 343
             budget: 600
           - tier: seam_real
