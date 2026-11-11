@@ -441,6 +441,18 @@ def extract_relative_links(readme_text: str) -> set[str]:
     return {m.group(2) for m in _REL_LINK_RE.finditer(readme_text)}
 
 
+def broken_relative_links(repo_root: Path, markdown_files: list[Path]) -> list[str]:
+    """Every `<file>: <link>` whose relative target does not exist on disk."""
+    broken = []
+    for md in markdown_files:
+        text = md.read_text(encoding="utf-8")
+        for link in sorted(extract_relative_links(text)):
+            target = md.parent / link.split("#", 1)[0]
+            if not target.exists():
+                broken.append(f"{md.relative_to(repo_root).as_posix()}: {link}")
+    return broken
+
+
 def _is_command_registered(tool: str, subcommand: str, claims: list[dict]) -> bool:
     """Return True if (tool, subcommand) is registered in the claims manifest.
 
@@ -534,17 +546,22 @@ def check_inverse(
 class TestExtractFencedCommands:
     """extract_fenced_commands() grammar-boundedness tests."""
 
-    def test_extracts_command_from_sh_block(self):
-        """A trailhead command in a ```sh block is extracted."""
-        text = "```sh\ntrailhead doctor\n```"
+    @pytest.mark.parametrize(
+        ("text", "tool", "subcommand"),
+        [
+            pytest.param("```sh\ntrailhead doctor\n```", "trailhead", "doctor", id="extracts_command_from_sh_block"),
+            pytest.param(
+                "```bash\ntrailhead install\n```",
+                "trailhead",
+                "install",
+                id="extracts_command_from_bash_block",
+            ),
+            pytest.param("```bash\nlore init ~/vault\n```", "lore", "init", id="lore_command_extracted"),
+        ],
+    )
+    def test_command_is_extracted_from_a_fenced_block(self, text, tool, subcommand):
         result = extract_fenced_commands(text)
-        assert ("trailhead", "doctor") in result
-
-    def test_extracts_command_from_bash_block(self):
-        """A trailhead command in a ```bash block is extracted."""
-        text = "```bash\ntrailhead install\n```"
-        result = extract_fenced_commands(text)
-        assert ("trailhead", "install") in result
+        assert (tool, subcommand) in result
 
     def test_bare_prose_mention_not_extracted(self):
         """A bare inline mention 'you can run install' is NOT extracted."""
@@ -557,12 +574,6 @@ class TestExtractFencedCommands:
         text = "```\ntrailhead doctor\n```"
         result = extract_fenced_commands(text)
         assert result == set()
-
-    def test_lore_command_extracted(self):
-        """A lore command in a ```bash block is extracted."""
-        text = "```bash\nlore init ~/vault\n```"
-        result = extract_fenced_commands(text)
-        assert ("lore", "init") in result
 
     def test_multiple_commands_extracted(self):
         """Multiple commands across multiple fenced blocks are all extracted."""
@@ -632,26 +643,26 @@ class TestCheckInverseFixtures:
         # must not raise
         check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
-    def test_unregistered_fenced_command_fails_named_assertion(self, tmp_path):
-        """An unregistered fenced command raises with 'not registered' in the message."""
+    @pytest.mark.parametrize(
+        ("content", "match"),
+        [
+            pytest.param(
+                "```sh\ntrailhead frobnicate\n```\n",
+                "not registered in landing_claims.toml",
+                id="unregistered_fenced_command_fails_named_assertion",
+            ),
+            pytest.param("[ghost](./docs/ghost.md)\n", "does not resolve to", id="unregistered_relative_link_fails"),
+            pytest.param(
+                "[evil](../../../etc/passwd)\n",
+                "escapes repo root",
+                id="traversal_link_fails_escapes_repo_root",
+            ),
+        ],
+    )
+    def test_unresolvable_claim_fails_named_assertion(self, tmp_path, content, match):
         readme = tmp_path / "README.md"
-        readme.write_text("```sh\ntrailhead frobnicate\n```\n")
-        with pytest.raises(AssertionError, match="not registered in landing_claims.toml"):
-            check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
-
-    def test_unregistered_relative_link_fails(self, tmp_path):
-        """A relative link to a nonexistent, unregistered path raises."""
-        readme = tmp_path / "README.md"
-        readme.write_text("[ghost](./docs/ghost.md)\n")
-        with pytest.raises(AssertionError, match="does not resolve to"):
-            check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
-
-    def test_traversal_link_fails_escapes_repo_root(self, tmp_path):
-        """A path-traversal link escaping repo root fails with 'escapes repo root'."""
-        readme = tmp_path / "README.md"
-        # ../../../etc/passwd escapes tmp_path — this must fail even if /etc/passwd exists
-        readme.write_text("[evil](../../../etc/passwd)\n")
-        with pytest.raises(AssertionError, match="escapes repo root"):
+        readme.write_text(content)
+        with pytest.raises(AssertionError, match=match):
             check_inverse(readme, self._FIXTURE_CLAIMS, tmp_path)
 
     def test_allowlisted_example_does_not_fail(self, tmp_path):
@@ -779,6 +790,37 @@ class TestRealReadmeInverseScan:
         assert not failures, f"{len(failures)} README(s) failed the inverse check:\n" + "\n".join(
             f"  - {f}" for f in failures
         )
+
+
+class TestEveryRelativeLinkResolves:
+    """Doc-agnostic: a relative link in tracked markdown points at something that exists."""
+
+    def test_a_link_to_a_missing_file_is_reported(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        doc = tmp_path / "docs" / "a.md"
+        doc.write_text("See [gone](./missing.md) and [up](../README.md).\n")
+        (tmp_path / "README.md").write_text("# readme\n")
+        assert broken_relative_links(tmp_path, [doc]) == ["docs/a.md: ./missing.md"]
+
+    def test_resolving_fragment_and_external_links_are_not_reported(self, tmp_path):
+        (tmp_path / "docs").mkdir()
+        doc = tmp_path / "docs" / "a.md"
+        (tmp_path / "docs" / "b.md").write_text("# b\n")
+        doc.write_text(
+            "[b](./b.md) [frag](./b.md#section) [ext](https://example.com/x) [anchor](#here)\n"
+        )
+        assert broken_relative_links(tmp_path, [doc]) == []
+
+    def test_every_relative_link_in_the_repos_tracked_markdown_resolves(self):
+        listing = subprocess.run(
+            ["git", "-C", str(_REPO_ROOT), "ls-files", "-z", "--", "*.md"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        files = [_REPO_ROOT / name for name in listing.split("\0") if name]
+        assert files
+        assert broken_relative_links(_REPO_ROOT, files) == []
 
 
 # ---------------------------------------------------------------------------
@@ -1015,52 +1057,23 @@ class TestLandingSurfaceLeakGate:
             f"Gate output:\n{result.stdout}\n{result.stderr}"
         )
 
-    def test_negative_twin_seeded_token_exits_1(self, tmp_path: Path) -> None:
-        """Non-vacuous: a file seeded with a denylist token exits 1.
-
-        This proves the denylist is actually enforced and the positive exit-0 above
-        is not vacuous (the gate truly scanned the files, not nothing).
-        """
-        dirty_dir = tmp_path / "dirty"
+    @pytest.mark.parametrize(
+        ("dirname", "text", "label"),
+        [
+            pytest.param("dirty", "This doc was part of the zenith project.\n", "a denylist token", id="seeded_token"),
+            pytest.param("dirty-brain", "See brain/areas/my-area.md for context.\n", "'brain/' path", id="brain_path"),
+            pytest.param("dirty-ws", "This feature was tracked as WS-8 internally.\n", "'WS-8'", id="ws_id"),
+        ],
+    )
+    def test_negative_twin_exits_1(self, tmp_path: Path, dirname, text, label) -> None:
+        """Non-vacuous: a file seeded with something the denylist forbids exits 1."""
+        dirty_dir = tmp_path / dirname
         dirty_dir.mkdir()
-        (dirty_dir / "leak.md").write_text(
-            "This doc was part of the zenith project.\n",
-            encoding="utf-8",
-        )
+        (dirty_dir / "leak.md").write_text(text, encoding="utf-8")
         denylist = _build_denylist(tmp_path)
         result = _run_gate([dirty_dir], denylist)
         assert result.returncode == 1, (
-            f"Expected exit 1 (leak found) for seeded token 'zenith', got {result.returncode}. "
-            f"Output: {result.stdout}{result.stderr}"
-        )
-
-    def test_negative_twin_brain_path_exits_1(self, tmp_path: Path) -> None:
-        """Non-vacuous: a brain/ path reference in a file exits 1."""
-        dirty_dir = tmp_path / "dirty-brain"
-        dirty_dir.mkdir()
-        (dirty_dir / "leak.md").write_text(
-            "See brain/areas/my-area.md for context.\n",
-            encoding="utf-8",
-        )
-        denylist = _build_denylist(tmp_path)
-        result = _run_gate([dirty_dir], denylist)
-        assert result.returncode == 1, (
-            f"Expected exit 1 (leak found) for 'brain/' path, got {result.returncode}. "
-            f"Output: {result.stdout}{result.stderr}"
-        )
-
-    def test_negative_twin_ws_id_exits_1(self, tmp_path: Path) -> None:
-        """Non-vacuous: a WS-N internal workstream ID in a file exits 1."""
-        dirty_dir = tmp_path / "dirty-ws"
-        dirty_dir.mkdir()
-        (dirty_dir / "leak.md").write_text(
-            "This feature was tracked as WS-8 internally.\n",
-            encoding="utf-8",
-        )
-        denylist = _build_denylist(tmp_path)
-        result = _run_gate([dirty_dir], denylist)
-        assert result.returncode == 1, (
-            f"Expected exit 1 (leak found) for 'WS-8', got {result.returncode}. "
+            f"Expected exit 1 (leak found) for {label}, got {result.returncode}. "
             f"Output: {result.stdout}{result.stderr}"
         )
 

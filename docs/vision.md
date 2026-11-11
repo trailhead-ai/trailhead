@@ -72,7 +72,7 @@ deliberate departure from the macOS-native `~/Library/Application Support` layou
 - macOS resolves to the XDG layout unconditionally — never `~/Library`. An earlier
   release carried a one-time read-only fallback to the legacy `~/Library` location
   so pre-XDG installs weren't orphaned; it has since been removed. See
-  [`docs/paths.md`](./paths.md) for the full contract.
+  [`trailhead/docs/paths.md`](../trailhead/docs/paths.md) for the full contract.
 
 ## 5. Agents are the primary developers of trailhead
 
