@@ -24,6 +24,7 @@ import stat
 import sys
 import time
 from pathlib import Path
+from typing import Callable
 
 from ..monitor_outcome import validate_monitor_outcome
 
@@ -92,7 +93,13 @@ def _read_once(path: Path) -> str | None:
         os.close(fd)
 
 
-def cmd_await_outcome(args: argparse.Namespace) -> int:
+def cmd_await_outcome(
+    args: argparse.Namespace,
+    *,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Run the wait. ``clock`` and ``sleep`` are the time source the deadline is measured on."""
     if args.timeout < 0 or args.timeout > MAX_TIMEOUT_SECONDS:
         print(
             f"portage: --timeout must be between 0 and {MAX_TIMEOUT_SECONDS} seconds "
@@ -101,7 +108,7 @@ def cmd_await_outcome(args: argparse.Namespace) -> int:
         )
         return EXIT_USAGE
     path = Path(args.path)
-    deadline = time.monotonic() + args.timeout
+    deadline = clock() + args.timeout
     try:
         _check_parent(path.parent)
         while True:
@@ -117,11 +124,11 @@ def cmd_await_outcome(args: argparse.Namespace) -> int:
                     return EXIT_MALFORMED
                 print(f"{outcome[0]} {outcome[1]}".rstrip())
                 return EXIT_PARSED
-            remaining = deadline - time.monotonic()
+            remaining = deadline - clock()
             if remaining <= 0:
                 print("PENDING")
                 return EXIT_PENDING
-            time.sleep(min(args.interval, remaining))
+            sleep(min(args.interval, remaining))
     except _Refused as e:
         print(f"portage: {e}", file=sys.stderr)
         return EXIT_UNREADABLE

@@ -6,8 +6,6 @@ Runs the real CLI through ``dispatch.main`` against files under ``tmp_path``.
 from __future__ import annotations
 
 import os
-import threading
-import time
 
 import pytest
 
@@ -26,10 +24,31 @@ def outdir(tmp_path):
     return d
 
 
-def _run(capsys, path, timeout="2", interval="0.05"):
-    rc = dispatch.main(
-        ["await-outcome", "--path", str(path), "--timeout", timeout, "--interval", interval]
-    )
+class _Clock:
+    """Virtual time for the wait loop: ``sleep`` advances ``now`` and fires any write due by then."""
+
+    def __init__(self, at=()):
+        self.t = 0.0
+        self.sleeps: list[float] = []
+        self._due = sorted(at, key=lambda pair: pair[0])
+
+    def now(self) -> float:
+        return self.t
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.t += seconds
+        while self._due and self._due[0][0] <= self.t:
+            self._due.pop(0)[1]()
+
+
+def _run(capsys, path, timeout="2", interval="0.05", clock=None):
+    argv = ["await-outcome", "--path", str(path), "--timeout", timeout, "--interval", interval]
+    if clock is None:
+        rc = dispatch.main(argv)
+    else:
+        args = dispatch.build_parser().parse_args(argv)
+        rc = args.func(args, clock=clock.now, sleep=clock.sleep)
     out = capsys.readouterr()
     return rc, out.out, out.err
 
@@ -52,13 +71,10 @@ def test_prints_the_parsed_outcome_of_a_file_already_holding_a_line(outdir, caps
 
 def test_reads_a_line_written_partway_through_the_wait(outdir, capsys):
     f = outdir / "outcome"
-    t = threading.Timer(0.4, lambda: f.write_text("READY all-prs-ready\n"))
-    t.start()
-    started = time.monotonic()
-    rc, out, _ = _run(capsys, f, timeout="5")
-    t.join()
+    clock = _Clock(at=[(0.4, lambda: f.write_text("READY all-prs-ready\n"))])
+    rc, out, _ = _run(capsys, f, timeout="5", clock=clock)
     assert (rc, out.strip()) == (PARSED, "READY all-prs-ready")
-    assert time.monotonic() - started < 4
+    assert 0.4 <= clock.t < 0.4 + 0.05 + 1e-9
 
 
 @pytest.mark.parametrize("seed", [None, ""])
@@ -66,11 +82,11 @@ def test_pending_when_the_file_stays_absent_or_empty(outdir, capsys, seed):
     f = outdir / "outcome"
     if seed is not None:
         f.write_text(seed)
-    started = time.monotonic()
-    rc, out, _ = _run(capsys, f, timeout="1", interval="0.1")
-    elapsed = time.monotonic() - started
+    clock = _Clock()
+    rc, out, _ = _run(capsys, f, timeout="1", interval="0.3", clock=clock)
     assert (rc, out.strip()) == (PENDING, "PENDING")
-    assert 0.9 <= elapsed < 1 + 0.1 + 0.5
+    # three full intervals, then the last wait is cut to what remains of the deadline
+    assert clock.sleeps == pytest.approx([0.3, 0.3, 0.3, 0.1])
 
 
 @pytest.mark.parametrize("line", ["READY\n", "DONE all good\n", "STOPPED: operator\n"])
@@ -86,12 +102,12 @@ def test_malformed_line_exits_malformed_with_a_token_free_reason(outdir, capsys,
 
 @pytest.mark.parametrize("timeout", ["571", "601", "-1"])
 def test_timeout_above_the_cap_is_refused_before_any_wait(outdir, capsys, timeout):
-    started = time.monotonic()
-    rc, out, err = _run(capsys, outdir / "outcome", timeout=timeout)
+    clock = _Clock()
+    rc, out, err = _run(capsys, outdir / "outcome", timeout=timeout, clock=clock)
     assert rc == 2
     assert out == ""
     assert err.startswith("portage: ")
-    assert time.monotonic() - started < 1
+    assert clock.sleeps == []
 
 
 def test_timeout_at_the_cap_is_accepted(outdir, capsys):
@@ -150,21 +166,16 @@ def test_writes_nothing(outdir, capsys):
 def test_a_line_without_its_newline_is_not_parsed_until_it_is_complete(outdir, capsys):
     f = outdir / "outcome"
     f.write_text("READY all-prs-r")
-
-    def finish():
-        f.write_text("READY all-prs-ready\n")
-
-    t = threading.Timer(0.4, finish)
-    t.start()
-    rc, out, _ = _run(capsys, f, timeout="5")
-    t.join()
+    clock = _Clock(at=[(0.4, lambda: f.write_text("READY all-prs-ready\n"))])
+    rc, out, _ = _run(capsys, f, timeout="5", clock=clock)
     assert (rc, out.strip()) == (PARSED, "READY all-prs-ready")
+    assert clock.t >= 0.4
 
 
 def test_a_line_that_never_gets_its_newline_stays_pending(outdir, capsys):
     f = outdir / "outcome"
     f.write_text("READY all-prs-ready")
-    rc, out, _ = _run(capsys, f, timeout="1", interval="0.1")
+    rc, out, _ = _run(capsys, f, timeout="1", interval="0.1", clock=_Clock())
     assert (rc, out.strip()) == (PENDING, "PENDING")
 
 
