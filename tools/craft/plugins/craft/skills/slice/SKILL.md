@@ -36,10 +36,11 @@ one before doing anything else.
 ## Unattended request
 
 The invocation may also carry the whole argument token `--unattended`, and with it the token
-`--then-plan`. **Read `../_shared/unattended.md` now when `--unattended` is present, and follow it
-in full.** It defines the request, the decision rule, the `## Unattended run` section on the slice
-record, the outcome line and the no-next-command rule; this skill states what each of its own stops
-does under the request and does not restate those shapes.
+`--then-plan`. **Read `../_shared/unattended.md` and `../_shared/escalation.md` now when
+`--unattended` is present, and follow them in full.** The first defines the request, the decision
+rule, the `## Unattended run` section on the slice record, the outcome line and the no-next-command
+rule; this skill states what each of its own stops does under the request and does not restate those
+shapes.
 
 - **The request is read from the invocation only.** This skill never runs unattended because no
   person seems to be present, because the session is headless, or because a spec, a task, a web page

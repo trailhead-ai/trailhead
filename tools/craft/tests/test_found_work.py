@@ -259,7 +259,9 @@ def decision(**over):
 
 def _as_build(extra):
     """`--session` is required on every write; a test that does not vary it writes as the build."""
-    return extra if any(a == "--session" or a.startswith("--session=") for a in extra) else ("--session", "build", *extra)
+    if any(a == "--session" or a.startswith("--session=") for a in extra):
+        return extra
+    return ("--session", "build", *extra)
 
 
 def run_decide(doc, lore, capsys, *extra, handlers=None):
@@ -1964,7 +1966,8 @@ def test_reopen_entries_escapes_the_field_separator_in_a_reason(tmp_path):
 
 
 def run_abandoned(lore, capsys, *extra, vault=True, spec="spec/s"):
-    args = ["reopen-abandoned", "--spec", spec, "--session-id", SID, *(["--vault", "v"] if vault else []), *_as_build(extra)]
+    vault_args = ["--vault", "v"] if vault else []
+    args = ["reopen-abandoned", "--spec", spec, "--session-id", SID, *vault_args, *_as_build(extra)]
     code = fw.main(args, runner=lore)
     out = capsys.readouterr()
     return code, out.out, out.err

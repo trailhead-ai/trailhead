@@ -40,13 +40,20 @@ SESSION_ID = "c3a8e5f1-6d42-4b97-9a0e-2f1d7b8c4e65"
 SHOW = "./lore record show spec/invoice-summary"
 
 QUESTION = """\
-One call here is yours to make before I go on. spec/invoice-summary#F1 is an open follow-up: a security finding at `billing-service/export.py:88`, outside this spec's code (`summary/`), so it fits no slice of this spec.
+One call here is yours to make before I go on. spec/invoice-summary#F1 is an open follow-up: a \
+security finding at `billing-service/export.py:88`, outside this spec's code (`summary/`), so it \
+fits no slice of this spec.
 
-What is at stake: if F1 stays open, the spec cannot be reported complete; if it moves to a task, the work stays tracked there but is no longer part of this spec's loop.
+What is at stake: if F1 stays open, the spec cannot be reported complete; if it moves to a task, the\
+ work stays tracked there but is no longer part of this spec's loop.
 
-1. Move it to task/billing-export-hardening (recommended). F1 is dropped with a reason naming that task, and the work stays tracked there. Cost: the spec no longer shows it, so it is only as visible as that task.
-2. Move it to task/billing-service-audit. F1 is dropped with a reason naming that task. Cost: that task is broader, so the finding may wait behind other audit work.
-3. Keep it open and stop. F1 stays open and I stop here. Cost: the spec cannot be reported complete until someone builds or drops F1.
+1. Move it to task/billing-export-hardening (recommended). F1 is dropped with a reason naming that \
+task, and the work stays tracked there. Cost: the spec no longer shows it, so it is only as visible \
+as that task.
+2. Move it to task/billing-service-audit. F1 is dropped with a reason naming that task. Cost: that \
+task is broader, so the finding may wait behind other audit work.
+3. Keep it open and stop. F1 stays open and I stop here. Cost: the spec cannot be reported complete \
+until someone builds or drops F1.
 
 Reply with a number, or tell me in your own words what to do."""
 
@@ -121,7 +128,10 @@ class Writer:
     def result(self, tool_id: str, output: str) -> None:
         self._base(
             "user",
-            {"role": "user", "content": [{"tool_use_id": tool_id, "type": "tool_result", "content": output, "is_error": False}]},
+            {
+                "role": "user",
+                "content": [{"tool_use_id": tool_id, "type": "tool_result", "content": output, "is_error": False}],
+            },
             {"toolUseResult": {"stdout": output, "stderr": "", "interrupted": False, "isImage": False}},
         )
 

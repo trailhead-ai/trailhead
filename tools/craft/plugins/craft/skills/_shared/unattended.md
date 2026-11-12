@@ -61,8 +61,8 @@ Every stop in an unattended ritual is one of three kinds, and the ritual's own t
 - **Parkable.** A stop whose answer would change the spec, or that the ritual names as one it may
   never decide unattended. It is parked as a question in the run section (a `Q<n>` entry), and the
   session ends there as `needs-a-decision`. The exception is plan's spec-changing folded entry,
-  which is handed back with `reopen` and a trigger-named reason, as "No one to answer" in
-  `escalation.md` sets. What the run had finished stays on the record, in that entry's progress
+  which is handed back with `reopen` and a trigger-named reason, as "No one to answer" in the
+  escalation rule sets. What the run had finished stays on the record, in that entry's progress
   line.
 - **Refusal.** A stop where the ritual cannot run at all, such as a missing or unsafe argument, a
   spec that is not `ready`, a gate that cannot read its input, or a slice already open. It ends the

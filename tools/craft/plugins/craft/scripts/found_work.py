@@ -138,8 +138,8 @@ before printing it. `--parent` is required for `--session build` (refused `malfo
 and it reports every parent's decisions of that phase. A log line captured before phases varied carries
 `phase=Build` and so reports under `--session build`. A reverted script that filters by parent alone would
 list the Build, Slice and Plan lines of one parent together under the build's wording; that is harmless,
-because the extra lines are real decisions of the same stream about that parent, each worded as its own kind. Output: first,
-under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
+because the extra lines are real decisions of the same stream about that parent, each worded as its
+own kind. Output: first, under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
 written (what happened, what to do; flush files it as a task) and each brainstorm task with its
 `/craft:brainstorm task/<id>` command; then each decision as a plain sentence;
 or exactly `NO_DECISIONS_LINE`. A session that does not exist yet reads as no
