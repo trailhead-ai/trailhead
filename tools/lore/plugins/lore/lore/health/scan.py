@@ -158,7 +158,7 @@ def iter_vault_records(result: VaultScan):
                 continue
             try:
                 sidecar = json.loads(sidecar_text)
-            except ValueError:
+            except (ValueError, RecursionError):
                 sidecar = None
             if not isinstance(sidecar, dict):
                 result.unreadable.append(

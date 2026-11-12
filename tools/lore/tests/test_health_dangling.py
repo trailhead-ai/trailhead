@@ -6,6 +6,7 @@ real ``scan_vault`` over an on-disk vault and feeds its result to the check.
 
 import dataclasses
 import json
+import time
 
 import pytest
 
@@ -127,6 +128,28 @@ CODE_FORMS = {
 def test_wikilink_in_code_is_not_reported(text):
     res = run([vault("a", rec("a", "lesson", "src", {}, text))])
     assert res.findings == []
+
+
+def test_a_long_run_of_unmatched_backticks_is_scanned_in_linear_time():
+    body = "`a" * 200000 + " [[missing]]"
+    start = time.monotonic()
+    links = dangling.extract_wikilinks(body)
+    assert time.monotonic() - start < 2
+    assert links == ["missing"]
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("`a ``b`` c` [[x]]", ["x"]),
+        ("`` ` `` [[x]]", ["x"]),
+        ("`a ``[[y]]`` b [[x]]", ["x"]),
+        ("```[[y]]`` [[x]]", ["y", "x"]),
+        ("`[[y]]`` `[[z]]` [[x]]", ["z", "x"]),
+    ],
+)
+def test_backtick_spans_close_only_on_a_run_of_equal_width(text, expected):
+    assert dangling.extract_wikilinks(text) == expected
 
 
 def test_same_wikilink_in_prose_is_reported():

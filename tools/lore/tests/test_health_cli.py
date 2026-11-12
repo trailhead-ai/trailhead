@@ -300,6 +300,27 @@ def test_malformed_sidecar_is_reported_and_drops_the_judged_count(world):
     assert rows(world.run().stdout)["default"][0] == "2"
 
 
+def test_deeply_nested_sidecar_is_one_unreadable_record_and_the_report_still_runs(world):
+    _put(world.roots["default"], "lesson", "ok")
+    _put(world.roots["trailhead"], "lesson", "other", related={"lesson": ["gone"]})
+    nested = '{"a":' * 100000 + "1" + "}" * 100000
+    (world.roots["default"] / "lesson" / "deep.json").write_text(nested)
+    (world.roots["default"] / "lesson" / "deep.md").write_text("x")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "default: 1 record could not be read and was not checked." in r.stdout
+    assert rows(r.stdout)["default"][0] == "1"
+    assert rows(r.stdout)["trailhead"][0] == "1"
+
+
+def test_deeply_nested_accepted_sidecar_value_does_not_abort_the_report(world):
+    _put(world.roots["default"], "lesson", "ok")
+    _put(world.roots["default"], "lesson", "deep", extra=json.loads("[" * 900 + "]" * 900))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout)["default"][0] == "2"
+
+
 # --- refusals and failures ----------------------------------------------------
 
 

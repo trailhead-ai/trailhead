@@ -113,14 +113,23 @@ def _strip_inline_code(text: str) -> str:
     out: list[str] = []
     pos = 0
     runs = list(_BACKTICK_RUN_RE.finditer(text))
+    by_width: dict[int, list[int]] = {}
+    for index, run in enumerate(runs):
+        by_width.setdefault(len(run.group()), []).append(index)
+    next_of_width = dict.fromkeys(by_width, 0)
     i = 0
     while i < len(runs):
         run = runs[i]
         width = len(run.group())
-        close = next((r for r in runs[i + 1:] if len(r.group()) == width), None)
-        if close is None:
+        peers = by_width[width]
+        cursor = next_of_width[width]
+        while cursor < len(peers) and peers[cursor] <= i:
+            cursor += 1
+        next_of_width[width] = cursor
+        if cursor == len(peers):
             i += 1
             continue
+        close = runs[peers[cursor]]
         out.append(text[pos:run.start()])
         out.append(" ")
         pos = close.end()
