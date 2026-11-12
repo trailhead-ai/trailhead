@@ -40,7 +40,15 @@ MONITOR_OUTCOME_REASONS: dict[str, frozenset[str]] = {
     "MERGED": frozenset(),
     "READY": frozenset({"all-prs-ready"}),
     "BLOCKED": frozenset(
-        {"ci-failed", "review-open", "merge-conflict", "fix-cycles-exhausted", "other"}
+        {
+            "ci-failed",
+            "review-open",
+            "merge-conflict",
+            "fix-cycles-exhausted",
+            "eval-gate-failed",
+            "eval-gate-not-run",
+            "other",
+        }
     ),
     "STOPPED": frozenset({"operator-stop", "deadline", "other"}),
 }
