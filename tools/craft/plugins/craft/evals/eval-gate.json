@@ -28,7 +28,8 @@
       "Bash(git switch *)",
       "Bash(git log origin/*)",
       "Bash(git log HEAD --not --remotes=origin -p)",
-      "Bash(git push --set-upstream origin HEAD)"
+      "Bash(git push --set-upstream origin HEAD)",
+      "Bash(./git *)"
     ],
     "max_cost_usd": 10
   },

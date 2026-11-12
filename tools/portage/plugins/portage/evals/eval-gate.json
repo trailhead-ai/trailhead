@@ -5,9 +5,14 @@
     "allow_tools": [
       "Bash(git *)",
       "Bash(./gh *)",
-      "Bash(./portage *)"
+      "Bash(./portage *)",
+      "Bash(./lore *)",
+      "Bash(./git *)",
+      "Bash(mktemp)",
+      "Bash(mktemp *)",
+      "Write"
     ],
-    "max_cost_usd": 1.5
+    "max_cost_usd": 12
   },
   "cases": {
     "a-failing-eval-gate-stops-the-push": {
