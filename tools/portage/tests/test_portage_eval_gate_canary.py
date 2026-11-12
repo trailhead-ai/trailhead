@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -28,7 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def env(tmp_path, monkeypatch):
     e = Env(tmp_path, monkeypatch)
     e.plan()
-    return e
+    yield e
+    shutil.rmtree(e.root, ignore_errors=True)
 
 
 def _canary_calls(env):

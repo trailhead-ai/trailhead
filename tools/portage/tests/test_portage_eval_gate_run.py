@@ -997,3 +997,17 @@ class TestResultsBindToThePlannedHead:
         doc["repo"] = str(env.tmp / "elsewhere")
         (env.state / "plan.json").write_text(json.dumps(doc))
         self._refused(env)
+
+
+class TestEnvIsolation:
+    def test_an_operator_cache_override_in_the_shell_does_not_reach_the_runs(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("PORTAGE_CACHE_DIR", str(tmp_path / "operators-real-cache"))
+        e = Env(tmp_path, monkeypatch)
+        try:
+            e.plan()
+            e.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+            assert e.run() == 0
+            assert e.result()["verdict"] == "pass"
+            assert not (tmp_path / "operators-real-cache").exists()
+        finally:
+            shutil.rmtree(e.root, ignore_errors=True)

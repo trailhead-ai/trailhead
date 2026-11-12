@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -634,7 +635,7 @@ class TestEndToEndSeam:
     next reads: the only stub is the runner binary (the fake ``claude`` the run tests use) and ``gh``."""
 
     def test_a_state_built_by_the_real_steps_merges_pinned_to_its_head(
-        self, tmp_path, monkeypatch, capsys, mo
+        self, tmp_path, monkeypatch, capsys, mo, request
     ):
         repo, head = mo
         capsys.readouterr()
@@ -647,6 +648,7 @@ class TestEndToEndSeam:
         real_path = os.environ["PATH"]
         (tmp_path / "runner").mkdir()
         runner = Env(tmp_path / "runner", monkeypatch)
+        request.addfinalizer(lambda: shutil.rmtree(runner.root, ignore_errors=True))
         runner.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
         for case in planned:
             assert run_case(state, case)["verdict"] == "pass"
