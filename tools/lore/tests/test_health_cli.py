@@ -94,6 +94,23 @@ def _twenty_five(root):
 # --- findings and the cap ----------------------------------------------------
 
 
+def test_report_survives_an_in_place_reload_of_the_dangling_check(world):
+    """``load_script`` reloads a module in place, which replaces its classes.
+
+    After the dangling check's module is reloaded, the already-imported command
+    must still classify the check's result: one finding is reported, exit 0.
+    """
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    assert world.run().returncode == 0  # the command module is now imported
+    load_script("lore.health.dangling")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+    assert len(finding_lines(r.stdout)) == 1
+
+
+
+
 def test_no_findings_every_row_clean_and_group_says_so(world):
     _put(world.roots["default"], "lesson", "a", related={"decision": ["b"]})
     _put(world.roots["default"], "decision", "b")

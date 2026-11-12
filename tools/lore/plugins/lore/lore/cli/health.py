@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 
 from ..health import dangling as dangling_mod
 from ..health import scan as scan_mod
-from ..health.dangling import DanglingResult, DanglingSkipped, Finding
+from ..health.dangling import Finding
 from ..health.model import VaultScan
 from .record import _printable
 
@@ -157,12 +157,15 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
 
     rows: list[VaultRow] = []
     findings: list[Finding] | None
-    if isinstance(result, DanglingSkipped):
+    # Classify through the module that produced the result: an in-place reload
+    # of that module replaces its classes, and a name bound at import would then
+    # name a stale class.
+    if isinstance(result, dangling_mod.DanglingSkipped):
         findings = None
         for v in selected:
             rows.append(VaultRow(v, None, None, _skip_reason(v, by_name, result.vaults)))
     else:
-        assert isinstance(result, DanglingResult)
+        assert isinstance(result, dangling_mod.DanglingResult)
         findings = sorted(result.findings, key=_sort_key)
         for v in selected:
             n = sum(1 for f in findings if f.vault == v)
