@@ -255,6 +255,23 @@ def _extras(plan, rows, ignored, invalid) -> list[str]:
     return out
 
 
+def _is_count(v) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def _pending_line(plan: dict) -> list[str]:
+    pending = plan.get("merge_only_pending")
+    if plan.get("tier") == "push" and _is_count(pending) and pending > 0:
+        return [f"{pending} merge-only case(s) touched by this change will run before merge."]
+    return []
+
+
+def _tier_lines(plan: dict) -> list[str]:
+    if plan.get("tier") not in ("push", "merge"):
+        return []
+    return [f"Tier: {plan['tier']}.", *_pending_line(plan)]
+
+
 def _pass_item(row: dict) -> str:
     return f"`{row['case']}` — pass (cached)" if row["result"]["cached"] else f"`{row['case']}`"
 
@@ -311,7 +328,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
              "so it selected no cases."])
     if status == "no-cases-mapped" or not plan["cases"]:
         return 0, ["eval-gate: no-cases-mapped", "persistent: none"], _wrap(
-            ["No eval cases are mapped to this change."])
+            ["No eval cases are mapped to this change.", *(["", *_pending_line(plan)] if _pending_line(plan) else [])])
 
     rows, ignored, invalid = _collect(state, plan)
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
@@ -344,6 +361,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))
+    tier = _tier_lines(plan)
+    if tier:
+        body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
     return (1 if failed else 0), report, _wrap(body)
 

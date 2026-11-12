@@ -15,15 +15,21 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                          "revision": "base" | "head"} | null,
                           # revision: which side's mapping is faulty; "base" faults also say so in the text
      "new_runner_grants": bool,          # any selected case runs under a branch-authored runner block
+     "tier": "push" | "merge",
+     "head": "<sha of HEAD at plan time>",
+     "merge_only_pending": int,          # touched merge_only cases this tier leaves out (push) or 0 (merge)
      "total_max_cost_usd": number,       # sum of the runner.max_cost_usd of the selected cases that will run
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
                 "runs": int, "pass_at": int,
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
                 "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged
+                "merge_only": bool,
                 "new_runner_grants": bool,
                 "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
 
-Base takes precedence over the branch: cases are selected from the base and head
+The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched
+case. ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters
+by tier. Base takes precedence over the branch: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. A corpus new on the branch uses its own and
 is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
@@ -119,7 +125,8 @@ def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, change
     return False
 
 
-def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
+def select_touched(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
+    """Every case the ``changed`` files touch, whatever its tier, as plan entries."""
     tracked = set(_git(repo, "ls-files", "-z").split("\0")) - {""}
     at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
     selected: list[dict] = []
@@ -150,6 +157,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
                 "pass_at": case.pass_at,
                 "runner": runner,
                 "measures": list(measures),
+                "merge_only": case.merge_only,
                 "new_runner_grants": base_map is None,
                 "case_removed": not (evals / name / "case.yaml").is_file(),
             })
@@ -160,15 +168,22 @@ def _runs(case: dict) -> bool:
     return not case["case_removed"] and not case["new_runner_grants"]
 
 
-def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
+TIERS = ("push", "merge")
+
+
+def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
+
+    ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case).
 
     Raises ``GitError`` when ``repo`` is not a git work tree."""
     repo = Path(repo).resolve()
     _git(repo, "rev-parse", "--is-inside-work-tree")
     result: dict = {
         "schema_version": SCHEMA_VERSION, "status": "no-cases-mapped", "repo": str(repo),
-        "base": base, "merge_base": None, "changed_files": [], "mapping_invalid": None,
+        "base": base, "merge_base": None, "tier": tier,
+        "head": _git(repo, "rev-parse", "HEAD").strip(), "merge_only_pending": 0,
+        "changed_files": [], "mapping_invalid": None,
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
     }
     resolved = _resolve_base(repo, base)
@@ -182,11 +197,14 @@ def plan(repo: Path, base: str | None) -> tuple[Path, dict]:
         changed = [c for c in diff_out.split("\0") if c]
         result["changed_files"] = changed
         try:
-            cases = _select(repo, resolved[1], changed)
+            touched = select_touched(repo, resolved[1], changed)
         except MappingError as e:
             result["status"] = "mapping-invalid"
             result["mapping_invalid"] = {"file": e.file, "fault": e.fault, "revision": e.revision}
         else:
+            cases = [c for c in touched if tier == "merge" or not c["merge_only"]]
+            if tier == "push":
+                result["merge_only_pending"] = len(touched) - len(cases)
             if cases:
                 result["status"] = "cases-selected"
                 result["cases"] = cases

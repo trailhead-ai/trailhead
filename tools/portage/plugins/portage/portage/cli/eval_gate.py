@@ -3,7 +3,8 @@
 A command group: each subcommand is registered by its own ``_add_*`` function on
 the group's subparser, so a new one never reshapes the others.
 
-``plan --repo <path> [--base <ref>]`` selects the cases the branch touches and
+``plan --repo <path> [--base <ref>] [--tier push|merge]`` selects the cases the branch touches (the
+push tier, the default, leaves out ``merge_only`` cases; the merge tier keeps them) and
 writes ``<state>/plan.json`` into a fresh 0700 state directory (shape documented in
 ``portage.eval_gate.select``). Output: ``state: <dir>``, ``status: <status>``,
 ``cases: <n>``, ``max_cost_usd: <sum>``, then one ``<plugin_root>:<case>`` line per
@@ -35,7 +36,7 @@ from pathlib import Path
 
 from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, atomic_write, record_crash, run_case
 from ..eval_gate import verdict as gate_verdict
-from ..eval_gate.select import GitError, plan
+from ..eval_gate.select import TIERS, GitError, plan
 
 
 def add_eval_gate_subparser(sub) -> None:
@@ -59,12 +60,14 @@ def _add_plan(group) -> None:
     )
     p.add_argument("--repo", required=True, help="Path to the git repository")
     p.add_argument("--base", default=None, help="Base ref (default: origin/HEAD's target)")
+    p.add_argument("--tier", choices=TIERS, default="push",
+                   help="push (default) leaves out merge_only cases; merge selects every touched case")
     p.set_defaults(func=cmd_plan)
 
 
 def cmd_plan(args: argparse.Namespace) -> int:
     try:
-        state, result = plan(Path(args.repo), args.base)
+        state, result = plan(Path(args.repo), args.base, args.tier)
     except (GitError, OSError) as e:
         print(f"eval-gate plan: {e}", file=sys.stderr)
         return 2

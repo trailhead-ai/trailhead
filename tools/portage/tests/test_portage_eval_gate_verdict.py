@@ -664,3 +664,51 @@ class TestCachedPass:
         assert code == 0
         assert "`odd` — `no-result-recorded`" in section_of(out)
         assert "(cached)" not in out
+
+
+def _tiered_plan(st, tier, pending):
+    st.plan([_entry("core")])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": tier, "head": "abc123", "merge_only_pending": pending})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    st.result("core")
+
+
+def test_push_tier_section_names_the_tier_and_counts_pending_merge_only_cases(st, capsys):
+    _tiered_plan(st, "push", 1)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: push" in section
+    assert "1 merge-only case(s) touched by this change will run before merge" in section
+
+
+def test_push_tier_pending_line_carries_the_count(st, capsys):
+    _tiered_plan(st, "push", 3)
+    _, out, _ = verdict(capsys, st)
+    assert "3 merge-only case(s) touched by this change will run before merge" in section_of(out)
+
+
+def test_push_tier_with_no_pending_merge_only_cases_has_no_pending_line(st, capsys):
+    _tiered_plan(st, "push", 0)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: push" in section
+    assert "merge-only" not in section
+
+
+def test_merge_tier_section_names_the_tier_and_has_no_pending_line(st, capsys):
+    _tiered_plan(st, "merge", 1)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: merge" in section
+    assert "merge-only" not in section
+
+
+def test_push_that_touches_only_merge_only_cases_still_says_they_run_before_merge(st, capsys):
+    st.plan([], status="no-cases-mapped")
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": "push", "head": "abc123", "merge_only_pending": 2})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert "2 merge-only case(s) touched by this change will run before merge" in section_of(out)

@@ -9,6 +9,7 @@ the mapping under test.
 
 from __future__ import annotations
 
+import json
 import re
 import shutil
 from pathlib import Path
@@ -112,9 +113,15 @@ def throwaway(request, tmp_path_factory):
     return repo, rel, corpus
 
 
-def _selected(repo: Path, capsys) -> tuple[str, list[str]]:
+def _merge_only(corpus: Path) -> set[str]:
+    mapping_file = corpus / "eval-gate.json"
+    mapping = load_mapping(mapping_file.read_text(), str(mapping_file))
+    return {n for n, c in mapping.cases.items() if c.merge_only}
+
+
+def _selected(repo: Path, capsys, *tier: str) -> tuple[str, list[str]]:
     capsys.readouterr()
-    dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "main"])
+    dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "main", *tier])
     out = capsys.readouterr().out
     status = next(ln for ln in out.splitlines() if ln.startswith("status: "))[len("status: "):]
     cases = sorted(
@@ -137,11 +144,37 @@ class TestRealEdit:
         repo, rel, corpus = throwaway
         measured = _measured_by_expected(corpus)
         assert measured, "no case's expected.md names a prose file under test"
+        merge_only = _merge_only(corpus)
         for prose, cases in sorted(measured.items()):
             _edit(repo, f"{rel.as_posix()}/{prose}")
             status, got = _selected(repo, capsys)
-            want = sorted(f"{rel.as_posix()}:{c}" for c in cases)
-            assert (status, got) == ("cases-selected", want), prose
+            want = sorted(f"{rel.as_posix()}:{c}" for c in cases - merge_only)
+            assert (status, got) == (("cases-selected" if want else "no-cases-mapped"), want), prose
+            status, got = _selected(repo, capsys, "--tier", "merge")
+            every = sorted(f"{rel.as_posix()}:{c}" for c in cases)
+            assert (status, got) == ("cases-selected", every), prose
+
+    def test_marking_a_named_case_merge_only_leaves_it_out_of_the_push_tier_only(self, throwaway, tmp_path, capsys):
+        _, rel, corpus = throwaway
+        measured = _measured_by_expected(corpus)
+        prose, cases = next((f, c) for f, c in sorted(measured.items()) if len(c) >= 1)
+        marked = sorted(cases)[0]
+        repo = tmp_path / "marked"
+        shutil.copytree(_plugin_root(corpus), repo / rel,
+                        ignore=shutil.ignore_patterns("__pycache__", "results"))
+        mapping_file = repo / rel / "evals" / "eval-gate.json"
+        doc = json.loads(mapping_file.read_text())
+        doc["cases"][marked]["merge_only"] = True
+        mapping_file.write_text(json.dumps(doc))
+        _git(repo, "init", "-b", "main")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "base")
+        _edit(repo, f"{rel.as_posix()}/{prose}")
+        want_push = sorted(f"{rel.as_posix()}:{c}" for c in cases - {marked})
+        status, got = _selected(repo, capsys)
+        assert got == want_push
+        _, merged = _selected(repo, capsys, "--tier", "merge")
+        assert merged == sorted(f"{rel.as_posix()}:{c}" for c in cases)
 
     def test_editing_prose_no_case_names_selects_nothing(self, throwaway, capsys):
         repo, rel, corpus = throwaway

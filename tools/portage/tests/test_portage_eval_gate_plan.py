@@ -603,3 +603,99 @@ class TestPlanEntryMeasures:
         _commit(repo)
         _, plan, _ = _plan(repo, capsys, "--base", "base")
         assert plan["cases"][0]["measures"] == ["skills/a.md", "skills/b.md"]
+
+
+MO = {"core": {"measures": ["skills/a.md"]},
+      "slow": {"measures": ["skills/a.md"], "merge_only": True}}
+
+
+def _touch_a(repo: Path, cases: dict = MO) -> None:
+    _corpus(repo, "p", cases)
+    _commit(repo)
+    _branch(repo)
+    _write(repo, "p/skills/a.md", "changed\n")
+    _commit(repo)
+
+
+class TestTier:
+    def test_push_tier_selects_only_the_core_case(self, repo, capsys):
+        _touch_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        assert _names(plan) == ["core"]
+        assert plan["tier"] == "push"
+
+    def test_merge_tier_selects_every_touched_case(self, repo, capsys):
+        _touch_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert _names(plan) == ["core", "slow"]
+        assert plan["tier"] == "merge"
+
+    def test_no_flag_behaves_as_push(self, repo, capsys):
+        _touch_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert _names(plan) == ["core"]
+        assert plan["tier"] == "push"
+
+    def test_an_unknown_tier_is_a_usage_error(self, repo, capsys):
+        _touch_a(repo)
+        with pytest.raises(SystemExit) as e:
+            _plan(repo, capsys, "--base", "base", "--tier", "nightly")
+        assert e.value.code == 2
+        assert "invalid choice" in capsys.readouterr().err
+
+    def test_total_cost_counts_only_the_cases_this_tier_runs(self, repo, capsys):
+        _touch_a(repo)
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        _, merge, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert push["total_max_cost_usd"] == 2.0
+        assert merge["total_max_cost_usd"] == 4.0
+
+    def test_push_plan_counts_the_touched_merge_only_cases_it_left_out(self, repo, capsys):
+        _touch_a(repo)
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        _, merge, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert push["merge_only_pending"] == 1
+        assert merge["merge_only_pending"] == 0
+
+    def test_an_untouched_merge_only_case_is_not_pending(self, repo, capsys):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]},
+                        "slow": {"measures": ["skills/b.md"], "merge_only": True}})
+        _, push, _ = _plan(repo, capsys, "--base", "base")
+        assert push["merge_only_pending"] == 0
+
+    def test_a_push_touching_only_merge_only_cases_runs_nothing_but_counts_them(self, repo, capsys):
+        _touch_a(repo, {"slow": {"measures": ["skills/a.md"], "merge_only": True}})
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert (plan["status"], plan["cases"], plan["merge_only_pending"]) == ("no-cases-mapped", [], 1)
+
+    def test_plan_head_is_the_repos_head_commit(self, repo, capsys):
+        _touch_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["head"] == _git(repo, "rev-parse", "HEAD")
+
+    def test_a_non_boolean_merge_only_is_mapping_invalid_naming_the_case(self, repo, capsys):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"], "merge_only": "yes"}})
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert "core" in plan["mapping_invalid"]["fault"]
+        assert "merge_only must be a boolean" in plan["mapping_invalid"]["fault"]
+
+    def test_the_base_value_wins_when_the_branch_unmarks_a_case(self, repo, capsys):
+        _corpus(repo, "p", MO)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": MO["core"], "slow": {"measures": ["skills/a.md"], "merge_only": False}}))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, push, _ = _plan(repo, capsys, "--base", "base")
+        assert _names(push) == ["core"]
+        assert push["merge_only_pending"] == 1
+
+    def test_select_touched_returns_entries_carrying_merge_only(self, repo):
+        from portage.eval_gate.select import select_touched
+
+        _touch_a(repo)
+        base = _git(repo, "merge-base", "base", "HEAD")
+        entries = select_touched(repo, base, ["p/skills/a.md"])
+        assert {e["case"]: e["merge_only"] for e in entries} == {"core": False, "slow": True}

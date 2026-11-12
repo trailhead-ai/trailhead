@@ -18,20 +18,27 @@ not isolation. A corpus that is new on the branch is not run until its grants ar
 
 ## What it runs
 
-`portage eval-gate plan --repo <path> [--base <ref>]` diffs the branch against its base (default: the target
-of `origin/HEAD`) and selects every case that either measures a changed file or lives in a changed case
-directory. It writes the selection to a fresh state directory and prints it.
+`portage eval-gate plan --repo <path> [--base <ref>] [--tier push|merge]` diffs the branch against its base
+(default: the target of `origin/HEAD`) and selects every case that either measures a changed file or lives in
+a changed case directory. It writes the selection to a fresh state directory and prints it. The tier decides
+which of those cases run: `push` (the default, and what the updater calls) leaves out cases marked
+`merge_only`; `merge` selects every touched case. `plan.json` records the `tier`, the `head` commit at plan
+time, and how many touched `merge_only` cases a push left out (`merge_only_pending`); `total_max_cost_usd`
+counts only the cases the tier runs.
 
 Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 
 ```json
 {"schema_version": 1,
  "runner": {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
- "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2}}}
+ "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false}}}
 ```
 
 - `measures` are plugin-relative paths of the prose the case's `expected.md` names as under test.
 - `runs` defaults to 3 and `pass_at` to 2; any other `runs` must declare its own `pass_at`.
+- `merge_only` is optional and defaults to false; it must be a boolean. A `merge_only` case is left out of the
+  push tier and runs at the merge tier. For a corpus that already has a mapping on the base, the base's value
+  is used, as for `runs` and `pass_at`.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.
@@ -110,7 +117,8 @@ PORTAGE_EVAL_RUNNER=/absolute/path/to/a/claude/build portage eval-gate run --sta
 `portage eval-gate verdict --state <dir>` exits 0 (push) or 1 (stop), and 2 on a fault. Its stdout opens
 with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR section between
 `<!-- portage:eval-gate:start -->` and `<!-- portage:eval-gate:end -->`. The section is also saved to
-`<state>/eval-gate-section.md`.
+`<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
+the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
 
 - Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
   (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
