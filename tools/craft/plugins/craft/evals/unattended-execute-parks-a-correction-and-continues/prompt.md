@@ -1,3 +1,8 @@
+---
+allowed_tools: [Skill, Read, Glob, Grep, Write, Agent]
+max_turns: 60
+timeout_seconds: 600
+---
 I am running `/craft:execute task/count-words --unattended --then-pr`. This run already claimed the slice earlier in this session: the `## Unattended run` block on `task/count-words` is yours, still open, and the branch is cut and checked out in this directory, the one repository the run builds in. The vault of the slice is `eval`. You are in the per-task loop on its first child, `task/read-the-text-file`: its executor has returned DONE and its commit is on the branch, and the drift-gate's review report is `review-report.md` in this directory. Carry the procedure from step 4 on that report, through step 5 and into the next task.
 
 The lore CLI is installed in this directory as `./lore`. Wherever a document or instruction says `lore`, run `./lore` instead. The plugin's scripts are installed in this directory's `scripts/`: wherever a document says `${CLAUDE_PLUGIN_ROOT}/scripts/`, run `./scripts/` instead.
