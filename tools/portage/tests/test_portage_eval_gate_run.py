@@ -743,7 +743,7 @@ class TestStopAtAgreement:
             "pass", None, 2, 1, 0)
         assert [env.asked(c, "--runs") for c in env.case_calls] == ["2", "1"]
         assert [x["passed"] for x in r["runs"]] == [True, False, True]
-        assert set(r) == {"case", "verdict", "passed", "failed", "errored", "reason", "runs"}
+        assert set(r) == {"case", "verdict", "passed", "failed", "errored", "reason", "runs", "cached"}
 
     def test_a_split_asks_one_more_run_and_its_fail_gives_fail(self, env):
         env.fake(seq=[_batch(env, [FAIL, PASS]), _batch(env, [FAIL])])

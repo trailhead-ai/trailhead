@@ -133,4 +133,22 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 lore case at 3 runs measured about 0.61 USD on 2026-10-21 (`MANUAL-EVAL.md`, "Live gate check").
 
 Cases that measure user rulesets or `CLAUDE.md` cannot be gated, because the runner loads only the plugin
-under test. Every update push re-runs the touched cases; nothing is cached between pushes.
+under test.
+
+A pass is reused. Before the canary and the runner, `run` looks the case up in a per-machine cache at
+`<cache dir>/portage/eval-gate/<fingerprint>.json` (`$XDG_CACHE_HOME`, else `~/.cache`). A hit records
+`pass` with `cached: true`, starts nothing and costs nothing, and the section lists the case as
+`pass (cached)`. Only a fresh pass is stored; a fail or a not-run never is, so the next push runs the case
+again. The fingerprint is a SHA-256 over:
+
+- every file in the case directory;
+- every file of the case's `measures`;
+- every file directly under the corpus `evals/` directory except `eval-gate.json` (the shared scaffolds);
+- the case's runner block, `runs`, `pass_at`, plugin root and name.
+
+The key is content alone, so a pass carries over between branches and worktrees. It has known limits, and a
+change to any of them does not change it: a script a scaffold calls from outside `evals/`, other plugin
+prose the case does not list in `measures`, the `claude` CLI version, and a model alias the runner
+re-targets. Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
+that is a symlink, owned by another user or group- or world-writable is not used, and an unreadable or
+corrupt entry is a miss, so the case just runs.

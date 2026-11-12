@@ -19,6 +19,7 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
                 "runs": int, "pass_at": int,
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
+                "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged
                 "new_runner_grants": bool,
                 "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
 
@@ -148,6 +149,7 @@ def _select(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
                 "runs": case.runs,
                 "pass_at": case.pass_at,
                 "runner": runner,
+                "measures": list(measures),
                 "new_runner_grants": base_map is None,
                 "case_removed": not (evals / name / "case.yaml").is_file(),
             })

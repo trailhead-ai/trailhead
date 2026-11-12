@@ -9,7 +9,9 @@ directory goes through ``run._check_state`` (not a symlink, caller-owned, 0700);
 The section is built only from shape-validated case names, corpus paths and
 grader names, and from the closed reason set (``run``'s plus ``no-result-recorded``
 for a planned case with no usable result). Result fields outside that vocabulary
-make the result unusable, i.e. ``no-result-recorded``; they are never echoed.
+make the result unusable, i.e. ``no-result-recorded``; they are never echoed. ``cached`` is optional
+(absent reads as false) and must be a boolean; a pass with ``cached`` true is listed as
+``<case> — pass (cached)``.
 
 Handoffs the updater (child 7) depends on
 -----------------------------------------
@@ -159,7 +161,10 @@ def _usable(doc: object, case: str) -> dict | None:
                 if isinstance(g["name"], str)
             ]
             runs.append(graders)
-        return {"verdict": doc["verdict"], "reason": reason, "runs": runs,
+        cached = doc.get("cached", False)
+        if not isinstance(cached, bool):
+            return None
+        return {"verdict": doc["verdict"], "reason": reason, "runs": runs, "cached": cached,
                 "passed": _count(doc, "passed"), "failed": _count(doc, "failed"),
                 "errored": _count(doc, "errored")}
     except (KeyError, TypeError, ValueError):
@@ -250,6 +255,10 @@ def _extras(plan, rows, ignored, invalid) -> list[str]:
     return out
 
 
+def _pass_item(row: dict) -> str:
+    return f"`{row['case']}` — pass (cached)" if row["result"]["cached"] else f"`{row['case']}`"
+
+
 def _not_run_items(rows: list[dict]) -> list[str]:
     return [f"`{r['case']}` — `{r['result']['reason']}`: {REASONS[r['result']['reason']]}"
             for r in rows if r["result"]["verdict"] == "not-run"]
@@ -324,11 +333,14 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
                           f"{r['result']['failed']}, errored {r['result']['errored']}" for r in failed])
     passed = [r for r in rows if r["result"]["verdict"] == "pass"]
     if not failed and not notrun:
-        body += [f"Passed — {len(passed)} eval case(s) ran and passed.", ""]
-        body += _bullets([f"`{r['case']}`" for r in passed])
+        reused = sum(1 for r in passed if r["result"]["cached"])
+        ran = f"{len(passed)} eval case(s) ran and passed" if not reused else (
+            f"{len(passed)} eval case(s) passed, {reused} reused from the cache")
+        body += [f"Passed — {ran}.", ""]
+        body += _bullets([_pass_item(r) for r in passed])
     elif passed:
         body += ["", "Passed:", ""] if failed else ["Some cases passed:", ""]
-        body += _bullets([f"`{r['case']}`" for r in passed])
+        body += _bullets([_pass_item(r) for r in passed])
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))

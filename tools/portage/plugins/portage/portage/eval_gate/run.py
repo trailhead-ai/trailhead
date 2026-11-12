@@ -28,6 +28,11 @@ fail when scored failing > n - k; otherwise nothing is decidable and the reason 
 ``runner-error`` (``auth_failed`` partial, or a non-zero exit with no usable JSON),
 else ``runs-errored``.
 
+Before the canary and the runner, ``run`` looks the case up in the pass cache (``cache.py``, which
+holds the key and the store). A hit records ``verdict`` ``pass`` with ``cached`` true and the stored
+counts and runs, and starts no runner and no canary. A fresh ``pass`` is stored after the case ran;
+a fail and a not-run never are. ``cached`` is false on every result of a case that ran.
+
 A case is decided in batches, not one ``--runs n`` call. The first call asks for
 ``min(k, n - k + 1)`` runs (2 for 3 of 2), the fewest that could decide it. After each call
 the rule above is applied to every run so far (only the runs asked for are counted). While
@@ -114,7 +119,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
+from . import cache as pass_cache
 from . import canary
+from .cache import ensure_private_dir
 from .mapping import CASE_NAME
 
 DEFAULT_TIMEOUT_SECONDS = 540
@@ -174,17 +181,9 @@ def _tmp_base(env: dict[str, str]) -> Path:
         cache = Path(home) / ".cache"
     base = cache / "pegt"
     try:
-        base.mkdir(mode=0o700, parents=True, exist_ok=True)
-        st = os.lstat(base)
-    except OSError as e:
-        raise TmpBaseRefused(f"runner temp base {base} unusable: {e}") from e
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-        raise TmpBaseRefused(f"runner temp base {base} is a symlink or not a directory")
-    if st.st_uid != os.geteuid():
-        raise TmpBaseRefused(f"runner temp base {base} is owned by another user")
-    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise TmpBaseRefused(f"runner temp base {base} is group- or world-writable")
-    return base
+        return ensure_private_dir(base, "runner temp base")
+    except ValueError as e:
+        raise TmpBaseRefused(str(e)) from e
 
 
 @contextmanager
@@ -365,6 +364,13 @@ def run_case(
 
     if env is None:
         env = dict(os.environ)
+    try:
+        key = pass_cache.fingerprint(plugin_dir, entry)
+    except (OSError, KeyError, TypeError):
+        key = None
+    hit = pass_cache.lookup(key, env) if key else None
+    if hit is not None:
+        return _record(state, case, {"case": case, **hit, "reason": None, "cached": True})
     if harnesses is None:
         from trailhead.harness import detect_harnesses
 
@@ -386,8 +392,11 @@ def run_case(
 
     try:
         with _call_tmpdir(env) as case_tmp:
-            return _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
-                                json_path, timeout_seconds, request, override, env, case_tmp, clock)
+            result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
+                                  json_path, timeout_seconds, request, override, env, case_tmp, clock)
+        if key:
+            pass_cache.store(key, result, env)
+        return result
     except TmpPathTooLong as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return _record(state, case, _not_run(case, n, SANDBOX_UNWRITABLE))
@@ -504,7 +513,7 @@ def _ordered(result: dict) -> dict:
 
 
 def _record(state: Path, case: str, result: dict) -> dict:
-    ordered = _ordered(result)
+    ordered = {**_ordered(result), "cached": result.get("cached", False)}
     _write_result(state, case, ordered)
     return ordered
 

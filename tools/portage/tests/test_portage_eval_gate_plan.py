@@ -581,3 +581,25 @@ class TestRunnerBlockValidation:
         text = json.dumps({"schema_version": 1, "runner": json.loads(_runner_doc())["runner"],
                            "cases": {"a": {"measures": ["x"], "runs": runs, "pass_at": 1}}})
         assert load_mapping(text, "f").cases["a"].runs == runs
+
+
+class TestPlanEntryMeasures:
+    def test_the_entry_carries_the_cases_measures(self, repo, capsys):
+        _corpus(repo, "p", {"alpha": {"measures": ["skills/a.md", "skills/b.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["cases"][0]["measures"] == ["skills/a.md", "skills/b.md"]
+
+    def test_the_entry_merges_base_and_head_measures_without_repeats(self, repo, capsys):
+        _corpus(repo, "p", {"alpha": {"measures": ["skills/a.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json",
+               _mapping({"alpha": {"measures": ["skills/a.md", "skills/b.md"]}}))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["cases"][0]["measures"] == ["skills/a.md", "skills/b.md"]

@@ -635,3 +635,32 @@ def test_splice_out_replaces_the_file_instead_of_writing_through_its_inode(tmp_p
     assert code == 0
     assert outp.read_text().startswith("body\n")
     assert peer.read_text() == "old\n"
+
+
+class TestCachedPass:
+    def test_a_cached_pass_reads_pass_cached_in_the_section_and_exits_0(self, st, capsys):
+        st.plan([_entry("reused"), _entry("fresh")])
+        st.result("reused", doc={**_result("reused"), "cached": True})
+        st.result("fresh", doc={**_result("fresh"), "cached": False})
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert out.splitlines()[0] == "eval-gate: passed"
+        lines = section_of(out).splitlines()
+        assert [ln for ln in lines if "`reused`" in ln] == ["- `reused` — pass (cached)"]
+        assert [ln for ln in lines if "`fresh`" in ln] == ["- `fresh`"]
+
+    def test_a_result_without_cached_is_a_plain_pass(self, st, capsys):
+        st.plan([_entry("old")])
+        st.result("old")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "(cached)" not in out
+
+    @pytest.mark.parametrize("bad", ["true", 1, 0, None, [], {"x": 1}])
+    def test_a_non_boolean_cached_is_no_result_recorded(self, st, capsys, bad):
+        st.plan([_entry("odd")])
+        st.result("odd", doc={**_result("odd"), "cached": bad})
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "`odd` — `no-result-recorded`" in section_of(out)
+        assert "(cached)" not in out
