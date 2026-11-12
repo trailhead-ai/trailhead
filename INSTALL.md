@@ -113,6 +113,22 @@ Install also runs `lore init`, which creates the user's personal **default**
 vault. A non-zero exit means something wasn't installed. Read the message: a
 missing harness is the common case, and `--harness` fixes it.
 
+After `lore init`, install registers the bundled **core vault**: it copies the
+checkout's `core-vault/` folder into `~/.local/state/trailhead/core-vault` and
+registers that copy with lore as the read-only, trusted vault `core`. Install
+prints one core-vault line (registered, up to date, refreshed, skipped,
+declined, or failed) and `--json` adds `core_vault: {outcome, reason}`. It never
+changes the exit code. It is skipped when lore is off or its CLI is unavailable.
+If a vault named `core` (or any vault whose path is or contains the copy) already
+exists and is not trailhead's copy, install leaves it alone, says why, and
+finishes its other steps: rename or remove that vault and re-run install.
+
+**Rollback.** An older lore refuses a config that carries a read-only entry. Before
+downgrading, run `lore vault delete core` with the current lore, then remove
+`~/.local/state/trailhead/core-vault` and
+`~/.local/state/trailhead/core-vault.reindex-pending`. On a machine an older lore
+already refuses, delete the `core` entry from lore's `config.json` by hand.
+
 **Put the CLIs on PATH.** Install places `camp`, `lore`, and `portage` in a
 shim directory. Add one line to the user's shell profile. **Ask first** and
 show them the line:

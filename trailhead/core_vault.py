@@ -1,4 +1,5 @@
-"""Sync the bundled core-vault source folder into trailhead's own copy.
+"""Sync the bundled core-vault source folder into trailhead's own copy and
+register that copy with lore as the read-only, trusted vault ``core``.
 
 Contract:
 
@@ -20,6 +21,39 @@ Contract:
   symlink or not a directory all raise ``CoreVaultSyncError`` before anything
   is written.
 
+``install_core_vault`` is the install step built on that sync. It asks lore
+(``lore vault ls --json``, never lore's config file) what is registered, then:
+
+* no ``core`` vault: sync the copy, then ``lore vault add core --scope read-only
+  --trusted --path <copy>`` (``vault add`` indexes the copy itself);
+* ``core`` owned by trailhead: sync the copy and, when it changed, ``lore
+  reindex``. Ownership means ``core``'s path equals the copy's path (both
+  ``Path.resolve()``d), its scope is ``read-only`` and it is not shared;
+* any other ``core``, or any vault under another name whose resolved path equals
+  or contains the copy (a writable alias could write into the trusted copy):
+  decline, naming the clashing path, the reason and the remedy.
+
+No-write guarantees: a decline, an unparseable or failed ``vault ls``, and a
+vault entry whose path cannot be compared all happen before anything is written
+(no copy directory, no ``vault add``, no ``reindex``, no marker). Install never
+deletes or edits a registration.
+
+Reindex marker: ``core-vault.reindex-pending`` sits beside the copy in
+trailhead's state dir (outside the vault). It is written before a changed copy
+is swapped in and removed only after ``lore reindex`` succeeds, so a failed or
+interrupted refresh is retried by the next run even when the copy is unchanged.
+
+Failures (a non-zero lore call, bad JSON, a sync error) print a ``trailhead:``
+warning naming the step, saying install otherwise succeeded and what to run; lore's
+stderr is never echoed. The caller's exit code and later steps are unaffected.
+
+Rollback: an older lore refuses a config carrying a read-only entry. Before
+downgrading, run ``lore vault delete core`` with the current lore, then remove
+the copy and the marker. On a machine an older lore already refuses, delete the
+``core`` entry from lore's ``config.json`` by hand.
+
+Update, uninstall and doctor do not handle the core vault here.
+
 Standard library only; every path comes from ``trailhead.paths``.
 """
 
@@ -27,9 +61,13 @@ from __future__ import annotations
 
 import os
 import shutil
+import json
 import stat
+import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 from trailhead.paths import state_dir
@@ -139,3 +177,150 @@ def sync_core_copy(
         if old is not None and old.exists():
             shutil.rmtree(old, ignore_errors=True)
     return True
+
+
+MARKER_NAME = "core-vault.reindex-pending"
+_RETRY_HINT = "run `lore vault ls`, then re-run `trailhead install`"
+
+
+@dataclass(frozen=True)
+class CoreVaultOutcome:
+    """What the core-vault step did: registered, up_to_date, refreshed, skipped, declined or failed."""
+
+    outcome: str
+    reason: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {"outcome": self.outcome, "reason": self.reason}
+
+
+def _say(text: str, *, file) -> None:
+    print(text, file=file if file is not None else sys.stdout)
+
+
+def skipped_core_vault(*, lore_enabled: bool, file=None) -> CoreVaultOutcome:
+    """Print and return the skip outcome; writes nothing. ``lore_enabled`` names the cause."""
+    if lore_enabled:
+        reason = "the lore CLI is unavailable"
+    else:
+        reason = "lore is turned off (--no-lore or deselected)"
+    _say(f"trailhead: skipped the core vault: {reason}", file=file)
+    return CoreVaultOutcome("skipped", reason)
+
+
+def _fail(step: str, detail: str, *, lore_bin: Path) -> CoreVaultOutcome:
+    reason = f"{step} {detail}"
+    print(
+        f"trailhead: core vault: {reason}; install otherwise succeeded. "
+        f"The core vault is not up to date: {_RETRY_HINT} (lore: {lore_bin}).",
+        file=sys.stderr,
+    )
+    return CoreVaultOutcome("failed", reason)
+
+
+def _decline(path: str, reason: str) -> CoreVaultOutcome:
+    print(
+        f"trailhead: core vault not registered: {reason} (path: {path}); nothing was changed. "
+        "Rename or remove that vault, then re-run `trailhead install`.",
+        file=sys.stderr,
+    )
+    return CoreVaultOutcome("declined", f"{reason} (path: {path})")
+
+
+def _parse_vaults(text: str) -> list[tuple[dict, Path]] | None:
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, list):
+        return None
+    vaults: list[tuple[dict, Path]] = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            return None
+        path = entry.get("path")
+        if not isinstance(entry.get("name"), str) or not isinstance(path, str) or not Path(path).is_absolute():
+            return None
+        vaults.append((entry, Path(path).resolve()))
+    return vaults
+
+
+def install_core_vault(
+    *,
+    source: Path,
+    env: dict[str, str],
+    lore_bin: Path,
+    runner=None,
+    file=None,
+) -> CoreVaultOutcome:
+    """Sync the core-vault copy and register or refresh it with lore; print one line.
+
+    ``runner(args, **kw)`` returns a CompletedProcess-like object (default
+    ``subprocess.run``). ``file`` receives the non-warning line (default stdout);
+    warnings and declines always go to stderr. Never raises for a lore or sync problem.
+    """
+    run = runner if runner is not None else subprocess.run
+
+    def lore(*args: str):
+        return run([str(lore_bin), *args], env=env, capture_output=True, text=True)
+
+    copy = core_copy_dir(env)
+    marker = copy.parent / MARKER_NAME
+    resolved_copy = copy.resolve()
+
+    ls = lore("vault", "ls", "--json")
+    if ls.returncode != 0:
+        return _fail("vault ls", f"failed (exit {ls.returncode})", lore_bin=lore_bin)
+    vaults = _parse_vaults(ls.stdout or "")
+    if vaults is None:
+        return _fail("vault ls", "did not print the expected JSON", lore_bin=lore_bin)
+
+    owned = False
+    elsewhere: tuple[dict, Path] | None = None
+    for entry, path in vaults:
+        at_copy = path == resolved_copy
+        if entry["name"] == "core":
+            if at_copy and entry.get("scope") == "read-only" and entry.get("shared") is False:
+                owned = True
+                continue
+            if at_copy:
+                return _decline(str(path), "a vault named core is at the copy but is not read-only and unshared")
+            elsewhere = elsewhere or (entry, path)
+        elif at_copy or path in resolved_copy.parents:
+            return _decline(str(path), f"another vault ({entry['name']}) is or contains trailhead's copy")
+    if elsewhere is not None:
+        return _decline(str(elsewhere[1]), "a vault named core already exists and is not trailhead's copy")
+
+    def write_marker() -> None:
+        if owned:
+            marker.write_text("reindex pending\n")
+
+    try:
+        changed = sync_core_copy(source, copy, before_swap=write_marker)
+    except (CoreVaultSyncError, OSError) as exc:
+        return _fail("copy", f"could not sync the core-vault copy ({type(exc).__name__})", lore_bin=lore_bin)
+
+    if not owned:
+        added = lore("vault", "add", "core", "--scope", "read-only", "--trusted", "--path", str(resolved_copy))
+        if added.returncode != 0:
+            return _fail("vault add", f"failed (exit {added.returncode})", lore_bin=lore_bin)
+        marker.unlink(missing_ok=True)
+        _say(f"trailhead: core vault registered as 'core' (read-only) at {copy}", file=file)
+        for line in (added.stdout or "").splitlines():
+            if line.startswith("Note:"):
+                _say(f"trailhead: core vault: {line}", file=file)
+        return CoreVaultOutcome("registered", f"registered at {copy}")
+
+    pending = marker.exists()
+    if not (changed or pending):
+        _say(f"trailhead: core vault up to date ({copy})", file=file)
+        return CoreVaultOutcome("up_to_date", "copy matches the source")
+    reindexed = lore("reindex")
+    if reindexed.returncode != 0:
+        return _fail(
+            "reindex", f"failed (exit {reindexed.returncode}); it is retried on the next install", lore_bin=lore_bin
+        )
+    marker.unlink(missing_ok=True)
+    reason = "copy refreshed and reindexed" if changed else "retried a pending reindex"
+    _say(f"trailhead: core vault refreshed: {reason} ({copy})", file=file)
+    return CoreVaultOutcome("refreshed", reason)
