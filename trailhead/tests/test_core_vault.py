@@ -2,13 +2,21 @@
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from trailhead.core_vault import MARKER_NAME, CoreVaultSyncError, core_copy_dir, install_core_vault, sync_core_copy
+from trailhead.core_vault import (
+    MARKER_NAME,
+    CoreVaultSyncError,
+    core_copy_dir,
+    install_core_vault,
+    lock_held_core_vault,
+    sync_core_copy,
+)
 
 
 def _write(root: Path, files: dict[str, bytes]) -> Path:
@@ -764,3 +772,88 @@ def test_source_with_symlink_does_not_register(source, cenv, capsys):
     out, _ = _run(source, cenv, lore, capsys)
     assert out.outcome == "failed"
     assert lore.writes == []
+
+
+# ---------------------------------------------------------------------------
+# install_core_vault decision table — every input state, ordering included
+# ---------------------------------------------------------------------------
+
+_CORE_ELSEWHERE = "a vault named core already exists and is not trailhead's copy"
+_CORE_NOT_RO = "a vault named core is at the copy but is not read-only and unshared"
+_INSIDE = "is inside trailhead's copy"
+_ALIAS = "is or contains trailhead's copy"
+
+
+def _states(copy: Path, tmp_path: Path) -> dict[str, tuple[list[dict], str, str | None, Path | None]]:
+    c, o, o2 = copy.resolve(), tmp_path / "o", tmp_path / "o2"
+    p, i = c.parent, c / "inner"
+    return {
+        "empty": ([], "registered", None, None),
+        "core-owned": ([_entry("core", str(c))], "refreshed", None, None),
+        "core-owned-plus-unrelated": ([_entry("core", str(c)), _entry("x", str(o2))], "refreshed", None, None),
+        "core-elsewhere": ([_entry("core", str(o))], "declined", _CORE_ELSEWHERE, o),
+        "core-writable": ([_entry("core", str(c), scope="team")], "declined", _CORE_NOT_RO, c),
+        "core-shared": ([_entry("core", str(c), shared=True)], "declined", _CORE_NOT_RO, c),
+        "alias-at-copy": ([_entry("mine", str(c))], "declined", _ALIAS, c),
+        "alias-parent": ([_entry("mine", str(p))], "declined", _ALIAS, p),
+        "core-parent": ([_entry("core", str(p))], "declined", _CORE_ELSEWHERE, p),
+        "alias-inside": ([_entry("mine", str(i))], "declined", _INSIDE, i),
+        "core-inside": ([_entry("core", str(i))], "declined", _INSIDE, i),
+        "core-elsewhere-then-inside": ([_entry("core", str(o)), _entry("mine", str(i))], "declined", _INSIDE, i),
+        "core-elsewhere-then-alias": ([_entry("core", str(o)), _entry("mine", str(c))], "declined", _ALIAS, c),
+        "owned-then-core-elsewhere": ([_entry("core", str(c)), _entry("core", str(o))], "declined", _CORE_ELSEWHERE, o),
+        "core-elsewhere-then-owned": ([_entry("core", str(o)), _entry("core", str(c))], "declined", _CORE_ELSEWHERE, o),
+        "inside-then-alias": ([_entry("mine", str(i)), _entry("mine", str(c))], "declined", _INSIDE, i),
+        "alias-then-inside": ([_entry("mine", str(c)), _entry("mine", str(i))], "declined", _ALIAS, c),
+        "owned-then-alias": ([_entry("core", str(c)), _entry("mine", str(c))], "declined", _ALIAS, c),
+        "alias-then-writable-core": (
+            [_entry("mine", str(c)), _entry("core", str(c), scope="team")],
+            "declined",
+            _ALIAS,
+            c,
+        ),
+        "two-elsewhere-first-named": (
+            [_entry("core", str(o)), _entry("core", str(o2))],
+            "declined",
+            _CORE_ELSEWHERE,
+            o,
+        ),
+    }
+
+
+@pytest.mark.parametrize("state", list(_states(Path("/x/core-vault"), Path("/y"))))
+def test_install_decision_table(state, source, cenv, copy, tmp_path, capsys):
+    vaults, outcome, reason, path = _states(copy, tmp_path)[state]
+    lore = FakeLore(vaults)
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == outcome
+    if reason is None:
+        return
+    assert reason in out.reason and f"(path: {path})" in out.reason
+    assert reason in text and f"(path: {path})" in text and "Rename or remove that vault" in text
+    assert lore.writes == []
+
+
+def test_two_vaults_named_core_both_at_the_copy_are_declined(source, cenv, copy, capsys):
+    real = str(copy.resolve())
+    lore = FakeLore([_entry("core", real), _entry("core", real)])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "declined"
+    assert "more than one vault named core" in out.reason
+    assert lore.writes == [] and not copy.exists()
+
+
+def test_duplicate_core_decline_remedy_names_the_extra_registration_not_a_rename(source, cenv, copy, capsys):
+    real = str(copy.resolve())
+    lore = FakeLore([_entry("core", real), _entry("core", real)])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "declined"
+    assert "lore vault delete core" in text and "re-run `trailhead install`" in text
+    assert "rename or remove" not in text.lower()
+
+
+def test_lock_held_hint_quotes_a_lock_path_with_a_space(tmp_path, capsys):
+    lock = tmp_path / "state dir" / "trailhead.lock"
+    lock_held_core_vault(lock)
+    hint = capsys.readouterr().err.split("`rm ", 1)[1].split("`", 1)[0]
+    assert shlex.split("rm " + hint) == ["rm", str(lock)]

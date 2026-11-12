@@ -13,7 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from trailhead.core_vault import MARKER_NAME, core_copy_dir, install_core_vault
+from trailhead.core_vault import MARKER_NAME, core_copy_dir, core_show, install_core_vault
+from trailhead.tests.test_cli_shims import _minimal_path
 
 pytestmark = pytest.mark.seam_real
 
@@ -99,13 +100,13 @@ def lore(env, *args):
     return r.stdout
 
 
-def write_record(root: Path, name: str, title: str, body: str) -> None:
-    (root / "blob").mkdir(parents=True, exist_ok=True)
-    (root / "blob" / f"{name}.json").write_text(
+def write_record(root: Path, name: str, title: str, body: str, kind: str = "blob") -> None:
+    (root / kind).mkdir(parents=True, exist_ok=True)
+    (root / kind / f"{name}.json").write_text(
         json.dumps(
             {
                 "version": "v1",
-                "kind": "blob",
+                "kind": kind,
                 "title": title,
                 "status": "active",
                 "created-at": "2026-06-17T10:00:00Z",
@@ -113,7 +114,7 @@ def write_record(root: Path, name: str, title: str, body: str) -> None:
             }
         )
     )
-    (root / "blob" / f"{name}.md").write_text(body + "\n")
+    (root / kind / f"{name}.md").write_text(body + "\n")
 
 
 def snapshot(root: Path) -> dict[str, bytes | None]:
@@ -185,3 +186,75 @@ def test_preexisting_core_elsewhere_is_left_registered_and_untouched(source, env
     assert Path(vault_ls(env)["core"]["path"]) == other.resolve()
     assert snapshot(other) == before
     assert not core_copy_dir(env).exists()
+
+
+# -- trailhead core show, against real lore ---------------------------------
+
+
+def _show(env, record_id="adr/x"):
+    return core_show(record_id, env=env, runner=real_lore, lore_bin=LORE_CLI)
+
+
+def _adr(root: Path, body: str) -> None:
+    write_record(root, "x", "X", body, kind="adr")
+
+
+def test_core_show_reads_core_never_another_vault(source, env, lore_ready, tmp_path):
+    _adr(source, "CORE-BODY-MARK")
+    other = tmp_path / "mine"
+    _adr(other, "OTHER-BODY-MARK")
+    lore(env, "vault", "add", "mine", "--scope", "team", "--path", str(other))
+    assert step(source, env).outcome == "registered"
+    assert "OTHER-BODY-MARK" in lore(env, "record", "show", "adr/x")
+    r = _show(env)
+    assert r.code == 0 and "CORE-BODY-MARK" in r.stdout
+    assert "OTHER-BODY-MARK" not in r.stdout + r.stderr
+
+
+def test_core_show_without_a_core_vault_is_unavailable(env, lore_ready, tmp_path):
+    other = tmp_path / "mine"
+    _adr(other, "OTHER-BODY-MARK")
+    lore(env, "vault", "add", "mine", "--scope", "team", "--path", str(other))
+    r = _show(env)
+    assert r.code == 3 and r.stdout == ""
+    assert "trailhead install" in r.stderr and "OTHER-BODY-MARK" not in r.stderr
+
+
+def test_core_show_with_core_at_another_path_is_unavailable(env, lore_ready, tmp_path):
+    other = tmp_path / "other-core"
+    _adr(other, "OTHER-BODY-MARK")
+    lore(env, "vault", "add", "core", "--scope", "read-only", "--trusted", "--path", str(other))
+    r = _show(env)
+    assert r.code == 3 and r.stdout == ""
+    assert str(other.resolve()) in r.stderr and "OTHER-BODY-MARK" not in r.stderr
+
+
+def test_core_show_of_a_record_absent_from_core_exits_1(source, env, lore_ready):
+    step(source, env)
+    r = _show(env, "adr/nope")
+    assert r.code == 1 and r.stdout == "" and r.stderr
+
+
+# -- trailhead core show, through the installed `trailhead` shim ------------
+
+
+def test_trailhead_shim_shows_a_core_record_from_an_unrelated_cwd(source, env, lore_ready, tmp_path):
+    from trailhead import install
+
+    _adr(source, "CORE-BODY-MARK")
+    assert step(source, env).outcome == "registered"
+    shim_dir = install.build_cli_shims({"camp": LORE_CLI}, env=env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shim_env = {**env, "PATH": _minimal_path(tmp_path, shim_dir)}
+
+    shown = subprocess.run(
+        ["trailhead", "core", "show", "adr/x"], env=shim_env, cwd=elsewhere, capture_output=True, text=True, timeout=60
+    )
+    refused = subprocess.run(
+        ["trailhead", "core", "show", "../x"], env=shim_env, cwd=elsewhere, capture_output=True, text=True, timeout=60
+    )
+
+    assert shown.returncode == 0, shown.stderr
+    assert "CORE-BODY-MARK" in shown.stdout
+    assert refused.returncode == 2

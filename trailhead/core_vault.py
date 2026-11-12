@@ -75,6 +75,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -84,7 +86,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from trailhead.capabilities import ManifestError, load_manifest
 from trailhead.paths import PathResolutionError, state_dir
+from trailhead.wire import default_manifest_paths
 
 
 class CoreVaultSyncError(Exception):
@@ -272,10 +276,41 @@ def _fail(step: str, detail: str, *, lore_bin: Path) -> CoreVaultOutcome:
     return CoreVaultOutcome("failed", reason)
 
 
+def lock_held_core_vault(lock_path: Path) -> CoreVaultOutcome:
+    """Print and return the failed outcome for a held wire lock; writes nothing else."""
+    reason = f"the wire lock {lock_path} is held (another trailhead install or update may be running)"
+    print(
+        f"trailhead: core vault: {reason}; install otherwise succeeded. "
+        f"The core vault was not touched. If no other install or update is running, "
+        f"remove the lock with `rm {shlex.quote(str(lock_path))}`, then re-run `trailhead install`.",
+        file=sys.stderr,
+    )
+    return CoreVaultOutcome("failed", reason)
+
+
+def lock_unavailable_core_vault(exc: Exception, *, lore_bin: Path) -> CoreVaultOutcome:
+    """Print and return the failed outcome for a wire lock that could not be taken, held aside."""
+    return _fail("could not take the wire lock", f"({type(exc).__name__}: {_plain(str(exc))})", lore_bin=lore_bin)
+
+
+_DUPLICATE_CORE = "more than one vault named core is registered"
+
+
+def _remedy(reason: str) -> str:
+    """What the operator does about a declined ownership, ending before the re-run step."""
+    if reason == _DUPLICATE_CORE:
+        return (
+            "remove the extra `core` registration with `lore vault delete core` "
+            "(without --remove-from-disk), check `lore vault ls`"
+        )
+    return "rename or remove that vault"
+
+
 def _decline(path: str, reason: str) -> CoreVaultOutcome:
+    remedy = _remedy(reason)
     print(
         f"trailhead: core vault not registered: {reason} (path: {path}); nothing was changed. "
-        "Rename or remove that vault, then re-run `trailhead install`.",
+        f"{remedy[0].upper()}{remedy[1:]}, then re-run `trailhead install`.",
         file=sys.stderr,
     )
     return CoreVaultOutcome("declined", f"{reason} (path: {path})")
@@ -326,6 +361,56 @@ def _parse_vaults(text: str) -> list[tuple[dict, Path]] | None:
     return vaults
 
 
+@dataclass(frozen=True)
+class CoreOwnership:
+    """The answer of ``core_ownership``.
+
+    ``state`` is ``owned``, ``missing`` (no vault named core, nothing in the way) or
+    ``declined``. A declined answer carries ``reason`` and the clashing vault's
+    resolved ``path``; the reason names the clash, the path and remedy are the
+    caller's to add.
+    """
+
+    state: str
+    reason: str = ""
+    path: Path | None = None
+
+
+def core_ownership(vaults: list[tuple[dict, Path]], resolved_copy: Path) -> CoreOwnership:
+    """Decide whether the vault named ``core`` is trailhead's own copy.
+
+    ``vaults`` is ``_parse_vaults`` output. Owned means exactly one vault named
+    ``core``, at the copy, read-only and unshared, with no other vault at, containing
+    or inside the copy. Entries are judged in listing order and the first clash
+    decides; a clash found after the whole listing is read (a ``core`` elsewhere, or
+    a second ``core`` at the copy) is judged last.
+    """
+    owned = 0
+    elsewhere: Path | None = None
+    for entry, path in vaults:
+        at_copy = path == resolved_copy
+        if resolved_copy in path.parents:
+            return CoreOwnership("declined", f"a vault ({entry['name']}) is inside trailhead's copy", path)
+        if entry["name"] == "core":
+            if at_copy and entry.get("scope") == "read-only" and entry.get("shared") is False:
+                owned += 1
+                continue
+            if at_copy:
+                return CoreOwnership(
+                    "declined", "a vault named core is at the copy but is not read-only and unshared", path
+                )
+            elsewhere = elsewhere or path
+        elif at_copy or path in resolved_copy.parents:
+            return CoreOwnership(
+                "declined", f"another vault ({entry['name']}) is or contains trailhead's copy", path
+            )
+    if elsewhere is not None:
+        return CoreOwnership("declined", "a vault named core already exists and is not trailhead's copy", elsewhere)
+    if owned > 1:
+        return CoreOwnership("declined", _DUPLICATE_CORE, resolved_copy)
+    return CoreOwnership("owned" if owned else "missing")
+
+
 def install_core_vault(
     *,
     source: Path,
@@ -371,23 +456,10 @@ def install_core_vault(
     if vaults is None:
         return _fail("vault ls", "did not print the expected JSON", lore_bin=lore_bin)
 
-    owned = False
-    elsewhere: Path | None = None
-    for entry, path in vaults:
-        at_copy = path == resolved_copy
-        if resolved_copy in path.parents:
-            return _decline(str(path), f"a vault ({entry['name']}) is inside trailhead's copy")
-        if entry["name"] == "core":
-            if at_copy and entry.get("scope") == "read-only" and entry.get("shared") is False:
-                owned = True
-                continue
-            if at_copy:
-                return _decline(str(path), "a vault named core is at the copy but is not read-only and unshared")
-            elsewhere = elsewhere or path
-        elif at_copy or path in resolved_copy.parents:
-            return _decline(str(path), f"another vault ({entry['name']}) is or contains trailhead's copy")
-    if elsewhere is not None:
-        return _decline(str(elsewhere), "a vault named core already exists and is not trailhead's copy")
+    ownership = core_ownership(vaults, resolved_copy)
+    if ownership.state == "declined":
+        return _decline(str(ownership.path), ownership.reason)
+    owned = ownership.state == "owned"
 
     def write_marker() -> None:
         if owned:
@@ -434,3 +506,107 @@ def install_core_vault(
     reason = "copy refreshed and reindexed" if changed else "retried a pending reindex"
     print(f"trailhead: core vault refreshed: {reason} ({copy})", file=file)
     return CoreVaultOutcome("refreshed", reason)
+
+
+LORE_TIMEOUT_SECONDS = 30
+_RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
+
+
+def resolve_lore_bin(manifest_paths: dict[str, Path] | None = None) -> Path | None:
+    """The lore binary named by lore's manifest ``cli_bin``, or None.
+
+    None when there is no lore manifest, it cannot be loaded, it declares no
+    ``cli_bin`` (lore is disabled), or the binary is not on disk (``load_manifest`` refuses a
+    ``cli_bin`` that does not exist). Independent of install's resolved config.
+    """
+    paths = default_manifest_paths() if manifest_paths is None else manifest_paths
+    manifest_path = paths.get("lore")
+    if manifest_path is None:
+        return None
+    try:
+        manifest = load_manifest(manifest_path)
+    except (ManifestError, OSError):
+        return None
+    if manifest.cli_bin is None:
+        return None
+    return manifest.plugin_root / manifest.cli_bin
+
+
+@dataclass(frozen=True)
+class ShowResult:
+    """Exit code and the two streams ``trailhead core show`` prints."""
+
+    code: int
+    stdout: str = ""
+    stderr: str = ""
+
+
+def _plain(text: str) -> str:
+    return "".join(c if c.isprintable() else "?" for c in text)
+
+
+def _plain_lines(text: str | None) -> str:
+    return "\n".join(_plain(line) for line in (text or "").split("\n"))
+
+
+def _unavailable(reason: str) -> ShowResult:
+    return ShowResult(3, stderr=f"trailhead: core vault unavailable: {_plain(reason)}\n")
+
+
+def core_show(
+    record_id: str,
+    *,
+    env: dict[str, str],
+    lore_bin: Path | None,
+    runner=None,
+) -> ShowResult:
+    """Read ``record_id`` from the vault named core, only when that is trailhead's own copy.
+
+    Exit codes: 0 the record (lore's stdout); 1 owned but lore failed (lore's stderr);
+    2 the id was refused before any lore call; 3 the core vault is unavailable (one
+    stderr line, empty stdout). Both lore calls run under ``LORE_TIMEOUT_SECONDS``.
+    """
+    if _RECORD_ID.fullmatch(record_id) is None:
+        return ShowResult(2, stderr=f"trailhead: invalid record id {_plain(record_id)!r}: expected <kind>/<name>\n")
+    if lore_bin is None:
+        return _unavailable("the lore CLI is not available; run `trailhead install`")
+    run = runner if runner is not None else subprocess.run
+
+    def lore(*args: str):
+        return run([str(lore_bin), *args], env=env, capture_output=True, text=True, timeout=LORE_TIMEOUT_SECONDS)
+
+    try:
+        resolved_copy = _resolve(core_copy_dir(env))
+    except (PathResolutionError, _UnresolvablePath) as exc:
+        return _unavailable(f"trailhead's copy location could not be resolved ({type(exc).__name__})")
+    try:
+        ls = lore("vault", "ls", "--json")
+    except subprocess.TimeoutExpired:
+        return _unavailable(f"`lore vault ls` timed out after {LORE_TIMEOUT_SECONDS}s")
+    except (OSError, ValueError) as exc:
+        return _unavailable(f"could not run lore ({type(exc).__name__})")
+    if ls.returncode != 0:
+        return _unavailable(f"`lore vault ls` failed (exit {ls.returncode})")
+    try:
+        vaults = _parse_vaults(ls.stdout or "")
+    except _UnresolvablePath as exc:
+        return _unavailable(f"`lore vault ls` listed a vault whose path could not be resolved ({exc})")
+    if vaults is None:
+        return _unavailable("`lore vault ls` did not print the expected JSON")
+    ownership = core_ownership(vaults, resolved_copy)
+    if ownership.state == "missing":
+        return _unavailable("no vault named core is registered; run `trailhead install`")
+    if ownership.state == "declined":
+        return _unavailable(
+            f"{ownership.reason} (path: {ownership.path}); {_remedy(ownership.reason)}, then re-run `trailhead install`"
+        )
+    try:
+        shown = lore("record", "show", record_id, "--vault", "core")
+    except subprocess.TimeoutExpired:
+        return ShowResult(1, stderr=f"trailhead: `lore record show` timed out after {LORE_TIMEOUT_SECONDS}s\n")
+    except (OSError, ValueError) as exc:
+        return ShowResult(1, stderr=f"trailhead: could not run lore ({type(exc).__name__})\n")
+    if shown.returncode != 0:
+        failure = f"trailhead: lore record show failed (exit {shown.returncode})\n"
+        return ShowResult(1, stderr=_plain_lines(shown.stderr) or failure)
+    return ShowResult(0, stdout=shown.stdout or "")
