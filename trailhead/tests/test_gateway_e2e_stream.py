@@ -16,8 +16,6 @@ from ._gateway_e2e_support import (
     check_proxied_curl_to_another_loopback_port_is_refused,
     check_registering_without_the_authority_is_refused,
     check_run_list_prints_the_empty_list,
-    dotfiles_checkout,
-    render_sandbox_settings,
     sandbox_steps,
     tool_results,
 )
@@ -223,23 +221,3 @@ def test_the_probe_commands_reach_the_proxy_even_though_loopback_is_in_no_proxy(
     for name in ("command_route", "other_loopback_port", "register_without_authority"):
         out = subprocess.run(["sh", "-c", steps[name]], env=env, capture_output=True, text=True).stdout
         assert out.strip() == "proxy", name
-
-
-def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_form(tmp_path):
-    state = tmp_path / "outpost-state"
-    settings = render_sandbox_settings(dotfiles_checkout(), state, 7000)
-    deny = settings["permissions"]["deny"]
-    assert f"Read(/{state}/sessions/**)" in deny
-    assert f"Read(/{state}/registration/**)" in deny
-    assert render_sandbox_settings(dotfiles_checkout(), state, 7000, deny_read=False)["permissions"]["deny"] == []
-
-
-def test_the_rendered_settings_exclude_and_allow_only_the_path_the_session_types(tmp_path):
-    wrapper = tmp_path / "shims" / "outpost-gateway"
-    settings = render_sandbox_settings(dotfiles_checkout(), tmp_path / "state", 7000, gateway=wrapper)
-    command = sandbox_steps(tmp_path, 7000, 7001, wrapper)["run_list"]
-
-    assert command == f"{wrapper} run list"
-    assert f"{wrapper} *" in settings["sandbox"]["excludedCommands"]
-    assert f"Bash({wrapper}:*)" in settings["permissions"]["allow"]
-    assert "outpost-gateway" not in settings["sandbox"]["excludedCommands"]

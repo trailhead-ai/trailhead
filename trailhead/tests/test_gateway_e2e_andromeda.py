@@ -215,3 +215,26 @@ def test_a_session_started_in_w2_registers_w2_and_the_w1_checks_fail(tmp_path_fa
         check_hook_registered_the_session_for_w1(facts, session)
     with pytest.raises(AssertionError, match="ws-two"):
         check_run_list_prints_the_empty_list(facts, session)
+
+
+# --- the dotfiles' rendered settings (need the operator's dotfiles checkout and chezmoi) -------------
+
+
+def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_form(tmp_path):
+    state = tmp_path / "outpost-state"
+    settings = render_sandbox_settings(dotfiles_checkout(), state, 7000)
+    deny = settings["permissions"]["deny"]
+    assert f"Read(/{state}/sessions/**)" in deny
+    assert f"Read(/{state}/registration/**)" in deny
+    assert render_sandbox_settings(dotfiles_checkout(), state, 7000, deny_read=False)["permissions"]["deny"] == []
+
+
+def test_the_rendered_settings_exclude_and_allow_only_the_path_the_session_types(tmp_path):
+    wrapper = tmp_path / "shims" / "outpost-gateway"
+    settings = render_sandbox_settings(dotfiles_checkout(), tmp_path / "state", 7000, gateway=wrapper)
+    command = sandbox_steps(tmp_path, 7000, 7001, wrapper)["run_list"]
+
+    assert command == f"{wrapper} run list"
+    assert f"{wrapper} *" in settings["sandbox"]["excludedCommands"]
+    assert f"Bash({wrapper}:*)" in settings["permissions"]["allow"]
+    assert "outpost-gateway" not in settings["sandbox"]["excludedCommands"]
