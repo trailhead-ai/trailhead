@@ -81,7 +81,7 @@ cat > "$W/portage" <<PG
 #!/usr/bin/env bash
 W="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
 echo "portage \$*" >> "\$W/portage.log"
-export TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp"
+export PATH="\$W:\$PATH" TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp"
 export PORTAGE_EVAL_RUNNER="\$W/fake-runner"
 if [ "\${1:-}" = "eval-gate" ]; then
   exec python3 "$plugin_root/cli/portage" "\$@"
@@ -114,4 +114,10 @@ for i in $(seq "$runs"); do
 done
 printf '%s]}}]}\n' "$out" > "$json"
 RUNNER
-chmod +x "$W/gh" "$W/portage" "$W/fake-runner"
+# The runner's sandbox on macOS cannot run the platform git shim; ./git execs a real git by absolute path.
+real_git=""
+for c in /Library/Developer/CommandLineTools/usr/bin/git /opt/homebrew/bin/git /usr/local/bin/git /usr/bin/git; do
+  [ -x "$c" ] && { real_git="$c"; break; }
+done
+printf '#!/bin/sh\nexec %s "$@"\n' "$real_git" > "$W/git"
+chmod +x "$W/gh" "$W/portage" "$W/fake-runner" "$W/git"

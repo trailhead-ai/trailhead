@@ -1,0 +1,6 @@
+PR_STATE=none
+MONITOR_MODE=ready
+AUTO_MERGE=true
+PR_COMMENT=merge-now
+RECORD_STATE=closed
+LORE_WRITE=ok

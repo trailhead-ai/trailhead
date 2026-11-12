@@ -4979,3 +4979,187 @@ Prose fingerprints (`git hash-object`): before the fix `skills/_shared/execute.m
 | `close-asks-nothing-when-no-one-is-there` | `2244ad18...` | 3 of 3 at 1.0 | 2.79 |
 
 Not run again after the fix: the other 30 cases. The scaffold change touches the stuck-slice scaffold they share, but only in arms `credential` and `norepo`. The grader judge for case 2 could not be reproduced: a re-run of the judge on the saved final messages passed two of the three runs the gate failed, so the cause given for that case is the stand-in's visible edit (the replies narrate tampering), not an established judge fault. Case 4 stays flaky: on main's prose one run of three failed the same grader, and on this branch two of three failed it, one judge reading the reply's note that a token-shaped string in the spec was left for the operator to decide as an open choice.
+
+## Case: execute under an explicit unattended request (five cases)
+
+Five runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs per arm, grants exactly the `runner` block of `eval-gate.json` (no grant added), each pre-registered in its `expected.md` and committed before any scored run. The baseline arm ran on the unedited prose, fingerprinted by `git hash-object`: `_shared/execute.md` `6967612a5e610d22a0bbc9122172eb5df2fdea11`, `_shared/unattended.md` `e9d5ce9a1df747a1c7d0d5f9cf6be22014329aca`, `_shared/refine.md` `7df1fcb540a2ade91472849ca6872181c5451932`, `execute/SKILL.md` `bffe525c2e0d7718ed356e4bc96282a85cd09c9f`. Real lore state was snapshotted around each batch; the only differences were other sessions' vault syncs and session notes, none carrying a fixture title.
+
+| Case | Baseline (unedited prose) | Treatment |
+|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | 0 of 3 (0.75 each; `final-line-is-refused`, `remedy-names-planning` fail) | 3 of 3 |
+| `unattended-execute-refuses-a-held-slice` | 0 of 3 (0.75, 0.5, 0.62; refusal line, reason and `no-git-command-issued` fail) | batch 1: 2 of 3 (one run issued a denied `git status --short`); permitted rerun: 3 of 3 |
+| `unattended-execute-refuses-without-then-pr` | 0 of 3 (0.62 each) | 3 of 3 |
+| `execute-without-request-is-not-unattended` | 3 of 3 (green by design: a guard) | 3 of 3 |
+| `unattended-execute-refines-a-standalone-task-unattended` | 0 of 3 (0.33, 0.33, 0.44) | **not at bar**: see below |
+| `build-triages-found-work` (regression) | not rerun | 3 of 3 |
+
+**The refine case did not reach 3 of 3.** After two authoring fixes (below), the treatment scored 2 of 3 (one `asked-nothing` judge vote of PASS FAIL FAIL, the closing message inviting the operator to say where the cleanup command lives) and the permitted rerun scored 2 of 3 (one run wrote its diff with wrong hunk counts twice, so the contract's one retry was spent and the run ended `stuck ... run-section write failed`, leaving the block outcome-less; the run's report was honest and that end is the one the shared contract prescribes). Every other grader passed in every treatment run: the last line `outcome: needs-a-decision task/<name> parked=0 — refine left a question; read ## Refine — unresolved on the record`, the section on the task, the block opened and closed `needs-a-decision`, the task still `open`, no executor, no cut. No third batch was run.
+
+**Authoring fixes before the verdict.** The first baseline batch of the refine case scored nothing: two graders matched across a newline in a single-quoted YAML scalar and the runner refused to load the case; rewritten with an escape, baseline re-run. After the first treatment batch, `no-git-command-issued` was narrowed from any git command to a branch-cutting or writing one, because refine reads the repository with `git ls-files`; the treatment was re-run in full. Both are recorded in that case's `expected.md`.
+
+**Red baselines, failing graders.** Refusal cases: the unedited prose prints no `outcome:` line (`final-line-is-refused`, the reason or remedy grader), and on the held and no-`--then-pr` fixtures also reaches for `git` (`no-git-command-issued`). Refine case: no block, no outcome line (`run-block-opened-on-the-task`, `block-outcome-is-needs-a-decision`, `final-line-is-needs-a-decision`, `reason-names-the-section-to-read`); the unedited prose already wrote `## Refine — unresolved` headless.
+
+**Mutation checks (one run each, restored with an empty diff against a scratch baseline).**
+- Held-block refusal bullet deleted: `unattended-execute-refuses-a-held-slice` 0.88, `reason-names-another-run-holding-it` failed. Binds.
+- Step 3 (`--then-pr` missing) deleted alone: `unattended-execute-refuses-without-then-pr` stayed 1.0. Third explanation: the contract's own sentence in `_shared/unattended.md` and execute's intro bullet carry the refusal. Removing step 3, execute's bullet clause and the shared sentence together: 0.12, `final-line-is-refused` and `reason-names-then-pr` failed. So the three statements are redundant with one another and together bind.
+- Guard: the request bullet replaced by "a headless session is unattended" (execute alone, then in both files with the never-inferred bullets removed): `execute-without-request-is-not-unattended` stayed 1.0 both times. The guard is not shown able to fail from prose mutation (the run follows the invocation, which carries no flag), as with the slice and plan guards.
+
+**Attended regression arms on the treatment prose (3 runs each).** `execute-cuts-a-task-branch-off-base`, graded from disk by `fixtures/grade.sh`: `fresh`, `dirty`, `collision`, `design-doc` PASS 3 of 3 each. `execute-preflight-refuses-stale-base`, read from reports: `design-doc-untracked` stops at the design-doc check 3 of 3. The `behind`, `upstream-gone`, `fetch-failed` and `design-doc-tracked` variants no longer match their pre-registered verdicts, and do not on the unedited prose either: the branch cut that landed after that case was written cuts from the fetched base first, so `behind` and `upstream-gone` proceed, `fetch-failed` stops at the cut's fetch, and `design-doc-tracked` hits the sandbox's missing signing key at the cherry-pick. Baseline (unedited prose) and treatment behaved the same on all four, 3 runs each. That case's expected verdicts are stale; this change did not move them.
+
+**Limits.** One fixture per site, one model tier. Cases other than the five refusal and refine sites are not run (the loop and end-phase branches are later work). "No branch cut" is graded from issued commands since the run directory has no repository. Eval spend about 38 USD for the runner batches plus the clean-room runs (not metered).
+
+### Refine case, fresh batch after the closing-message fix
+
+Execute's unattended branch gained one sentence: a ritual's final message under the request states what happened and what to run next in words and poses no question, asks for no answer, no confirmation and no reply; a question refine left on the record is reported as the record's content. `execute-rule-only.md` was rebuilt. A first fresh batch ran by mistake on the unchanged prose (the edit had not applied): 2 of 3, the third run again a diff with wrong hunk counts ending `stuck — run-section write failed`; it is not a measurement of the fix and is not counted. The batch on the edited prose, 3 runs, `claude-opus-5-5`, same grants: **3 of 3, every grader 1.0** (final line, section on the task, block opened and closed `needs-a-decision`, task still `open`, no executor, no cut, `asked-nothing` 3 of 3). Cost about 3.5 USD. The earlier 2 of 3 results stand as recorded above; the diff-hunk failure is the shared contract's known fragility and was not iterated on.
+
+## Case: execute's loop stops under the unattended request (two cases)
+
+Two runner cases, `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, each pre-registered in its `expected.md` before any scored run. Baseline prose fingerprints (`git hash-object`): `_shared/execute.md` `8b624539946ea8caa9a0e806d1d7ef1c3a668073`, `_shared/unattended.md` `3ab326d3381936bc8b34de9ed0f22cba7d20d225`, `execute/SKILL.md` `654b9976493d76660857b4fb86546bcb260f5cea`; only `_shared/execute.md` differs in the treatment. Every capture ran under `timeout 2400`.
+
+**An earlier set of measurements on a Linux host is void.** That runner (2.1.319) gave the sandboxed Bash a read-only working directory, so every record-state grader failed whatever the prose said, and its baseline red could not be told from the sandbox red. These numbers are from the macOS host. A one-run debug batch of the park case on the treatment prose first confirmed that `./lore record update --diff` and `mktemp` succeed in the sandbox (the Q1 and block-outcome graders passed).
+
+**Leak check (before any run).** The seeded parent carries `## Unattended run` with an empty `**Decisions:**` and no `Q`, no `Outcome`; the seeded child holds none of the adjusts case's tripwire words; the prover report and spec sit outside the graded files. Clean.
+
+| Case | Arm | Runs | Result | Cost |
+|---|---|---|---|---|
+| `unattended-execute-parks-a-design-change` | baseline | 3 | 0 of 3, 0.77 each: `final-line-is-needs-a-decision-parked-1`, `exactly-one-outcome-line`, `asked-nothing` fail (the unedited prose parks Q1 and the block outcome but prints no outcome line) | 2.34 USD |
+| `unattended-execute-adjusts-for-an-invalidated-assumption` | baseline, original fixture | 3 | 1 of 3 (1.0, 0.4, 0.4) | 2.99 USD |
+| same | baseline, corrected fixture | 3 | **3 of 3 at 1.0** | 2.64 USD |
+| `unattended-execute-parks-a-design-change` | treatment 1 (outcome line carried a reason) | 3 | 1 of 3 (0.92, 0.92, 1.0) | 2.08 USD |
+| same | treatment 2 (final-message sentence added) | 3 | 2 of 3 (0.92 `asked-nothing` FAIL PASS FAIL, 1.0, 1.0) | 2.13 USD |
+| same | treatment 2, permitted rerun | 3 | 2 of 3 (0.92 `no-git-command-issued`, 1.0, 1.0) | 2.13 USD |
+| same | treatment 2, amended `no-git-command-issued` grader (rerun on the current prose, 2026-11-09) | 3 | **3 of 3 at 1.0** (the `asked-nothing` judge voted PASS FAIL PASS on one run and still passed) | 2.25 USD |
+| `unattended-execute-adjusts-for-an-invalidated-assumption` | treatment, original fixture | 3 | 0 of 3 (0.9, 0.5, 0.5) | 2.52 USD |
+| same | treatment, corrected fixture | 3 | 2 of 3 (1.0, 1.0, 0.9 `no-git-command-issued`) | 2.34 USD |
+| same | treatment, corrected fixture, permitted rerun | 3 | **3 of 3 at 1.0** | 2.59 USD |
+| `build-triages-found-work` | regression, treatment | 3 | 3 of 3 | 3.49 USD |
+| `unattended-execute-refuses-a-held-slice` | regression, treatment | 3 | 3 of 3 | 1.54 USD |
+
+**Findings.**
+- Treatment 1 failed on the outcome line: the first prose ended the parked line with ` — <reason>`, but the shared contract gives a park (`needs-a-decision` from the loop) the plain `outcome: <kind> <kind/name> parked=<n>` shape, and the pre-registered grader follows the contract. The prose was corrected, not the grader.
+- The park case's `asked-nothing` judge voted FAIL on final messages that said "needs a decision from you" or "write an answer under Q1"; a sentence now says a park's final message reports what was parked and asks for nothing. One later run still drew FAIL PASS FAIL on a message that asks nothing (judge noise on the operator-accepted headless judge).
+- **Grader defect (fixed after the scored runs; see the amendment note below):** `no-git-command-issued` matches `\bgit\b`, which also matches a run's `find ... -not -path "*/.git/*"` over the vault (read from the kept traces). It failed 1 run in 3 in each of three batches although no git command ran. The park case therefore did **not** reach 3 of 3 at 1.0 on any batch; its record graders and outcome-line graders passed in all 9 treatment-2 and rerun runs, and the only misses were that grader once and the judge once.
+- **Fixture defect (fixed, both arms rerun):** the adjusts case's spec said both counters read through `io_utils.read_text`, so the prover's local fix contradicted the spec and 2 of 3 treatment runs rightly parked it. The adjusts scaffold's spec now says the loader is the default and a counter it cannot serve may open the file itself.
+- **The adjusts case does not discriminate.** On the corrected fixture the baseline passes 3 of 3: the attended step 2 options and the shared contract already make a run decide and log a local fix. The baseline-expected-red clause is not met for this case; the case is a guard that the new prose does not over-park.
+
+**Mutation checks (one run each; `_shared/execute.md` restored from a scratch copy, empty diff).**
+| Contract line | Mutation | Result |
+|---|---|---|
+| park: Q1, block outcome, last line, no `blocked` write | the two `INVALIDATED` design-change and plan-is-wrong bullets deleted from `### Loop stops` | stayed 0.92 (only `asked-nothing`): the step 2 pointer, the Handling sections and the shared contract still carried the park. Third explanation |
+| same | the whole `### Loop stops` subsection deleted | 0.77: `final-line-is-needs-a-decision-parked-1`, `exactly-one-outcome-line`, `asked-nothing` fail. Binds, as a whole |
+| adjusts: child updated with the reason, decision logged, no park | the in-slice `INVALIDATED` bullet deleted | stayed green (0.9, the `.git` grader false positive only): redundant with attended step 2 and the shared contract, matching the green baseline |
+
+**Not observed by any case:** the executor `BLOCKED` "plan is wrong" park, the `stuck` end, the NEEDS_CONTEXT and DONE_WITH_CONCERNS handling, the logged-not-applied correction and the temp-file bodies for metrics, unknowns and design notes. They rest on the prose and review.
+
+**Real lore state.** After the batches all four vaults were clean and a search for the fixture titles finds nothing (no before-snapshot was taken ahead of the debug batch).
+
+**Grader amendment (2026-11-09).** In the park and adjusts cases, `no-git-command-issued` changed from `\bgit\b` to `\bgit\b[^"]*\b(switch|checkout|branch|cherry-pick|fetch|worktree|commit|push)\b`, the pattern the refine case uses, after the scored runs above. Evidence: the kept traces carry the tool input as JSON, and the failing runs' `find vault trailhead -maxdepth 4 -not -path "*/.git/*"` matched the old pattern with no git command issued. Checked offline on that serialized input: the new pattern does not match it and does match `git switch -c x origin/main` and `git checkout -b x`. The change only narrows what fails, so the earlier rows are not restated, and the adjusts case was not rerun. Each case's `expected.md` carries the same note. The park case then ran on the current prose: 3 of 3 at 1.0, a rerun under the amended grader.
+
+Total eval spend about 32.0 USD.
+
+## Case: execute's end phases under the unattended request (five cases), baselines only
+
+Five runner cases, pre-registered in their `expected.md` and committed before any run: `unattended-execute-decides-surviving-findings`, `unattended-execute-never-drops-a-security-finding`, `unattended-execute-parks-a-spec-gap-finding`, `unattended-execute-close-records-a-manual-check-pending` and `unattended-execute-close-hands-off-to-the-pr-step` (a declared guard). `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs each, `-j 1`, grants the `runner` block of `eval-gate.json` plus one added grant, `Bash(./git *)`, for the push case (anchored to a path only that scaffold creates; paired control registered in that case's `expected.md`, not yet run). Baseline prose fingerprints (`git hash-object`): `_shared/execute.md` `b23ab548aed10e21d97008c83daf2f156be02f94`, `_shared/unattended.md` `6a97ad1ca3f7ee3a8b6fdd0d97b9e4a776befa84`, `execute/SKILL.md` `654b9976493d76660857b4fb86546bcb260f5cea`. No prose has been edited.
+
+| Case | Baseline runs | Failing graders |
+|---|---|---|
+| `unattended-execute-decides-surviving-findings` | 2 of 3 at 1.0 (0.82, 1.0, 1.0) | the two `block-decision-*` graders, in the one red run |
+| `unattended-execute-never-drops-a-security-finding` | 3 of 3 at 1.0 | none |
+| `unattended-execute-parks-a-spec-gap-finding` | 2 of 3 (1.0, 0.93, 1.0) | `q1-has-two-options-each-with-a-cost-and-a-progress-line`, in one run |
+| `unattended-execute-close-records-a-manual-check-pending` | 2 of 3 (0.93, 1.0, 1.0) | `writer-ran-once`, in one run (the writer called twice) |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard) | 3 of 3 at 1.0 | none; the push landed through `./git` in the sandbox |
+
+**Finding.** The baselines are not red. The unedited prose, with the shared unattended contract, already decides and logs surviving findings, parks the spec gap as `Q1` with the outcome line, keeps a security finding folded or parked with its location only, and takes the pending path for a manual check without being asked. The only red runs fail for reasons other than the ones the cases were registered to detect, or are single-run variation. Spend about 11.7 USD.
+
+**Reclassification (2026-11-09).** After the baselines above came back green, the first four cases were reclassified as guards on the same grounds as the adjusts case: the shared unattended contract already carries the behaviours, so they pin that the end-phase edits do not break them. Their graders were not changed and each `expected.md` carries a dated note. Three discriminating cases were then pre-registered for the Delivers behaviours no case measured, with the rule that a baseline that comes back green drops the case and records it as a guard: `unattended-execute-close-ends-stuck-on-a-failed-push`, `unattended-execute-close-ends-stuck-on-the-default-branch` and `unattended-execute-close-names-a-brainstorm-task-by-id`. The pre-push secret-scan stop and the writer-failure branch are not measured.
+
+### Results of the end-phase cases (treatment, mutation, control)
+
+Treatment prose fingerprint: `_shared/execute.md` `f5e2fd563fec5f195bd03f62235d03261e98c9ae` (new subsection `### End-phase stops` plus a pointer at Phase 3, Phase 4, Found work, the push rule, the manual-check discharge and the completion report); `_shared/unattended.md` and `execute/SKILL.md` unchanged. The `execute-rule-only.md` live arm was rebuilt. Same runner settings and grants as above, 3 runs per batch.
+
+| Case | Baseline (unedited prose) | Treatment |
+|---|---|---|
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (new, detector) | first fixture: 0.88 x3 (`names-the-brainstorm-task-by-id` fails; `no-brainstorm-command` passed). After the fixture amendment below: 0.62 x3 (`names-the-brainstorm-task-by-id` fails every run, plus `no-outcome-line` or `asked-nothing`, and `parent-is-done`) | first batch 2 of 3 (0.88: id missing, on the first fixture, void); amended fixture: 2 of 3 (1.0, 0.88 id missing, 1.0), permitted rerun **3 of 3 at 1.0** (a rerun-green) |
+| `unattended-execute-close-ends-stuck-on-a-failed-push` (new) | 3 of 3 at 1.0: **green, so dropped and recorded as a guard, not retried** | 3 of 3 (guard stays green) |
+| `unattended-execute-close-ends-stuck-on-the-default-branch` (new) | 3 of 3 at 1.0: **green, dropped, guard, not retried** | 3 of 3 |
+| `unattended-execute-decides-surviving-findings` (guard) | 2 of 3 | 3 of 3 |
+| `unattended-execute-never-drops-a-security-finding` (guard) | 3 of 3 | 3 of 3 |
+| `unattended-execute-parks-a-spec-gap-finding` (guard) | 2 of 3 (one Q1 shape miss) | 2 of 3 twice (the `asked-nothing` judge voted FAIL on one run in each batch, 0.93; every record and outcome-line grader passed in all six runs): judge noise on the operator-accepted headless judge, as the sibling park case recorded; not at the 3 of 3 bar |
+| `unattended-execute-close-records-a-manual-check-pending` (guard) | 2 of 3 (the writer called twice in one run) | 3 of 3 |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard) | 3 of 3 | 3 of 3 |
+| `unattended-execute-refuses-a-held-slice` (paired control for the added `Bash(./git *)` grant) | not rerun | 3 of 3 at 1.0 |
+
+**Fixture amendment (2026-11-09).** The brainstorm case's first baseline and first treatment both failed the id clause in every run. A kept trace showed the run called `found_work.py report` without `--session-id`, which the script refuses, so the brainstorm task never reached the report. The scaffold's script wrapper now exports the session id through the environment, as a live session does. No grader changed; both arms were re-run on the amended fixture, the baseline on the unedited prose (restored from the committed file and re-fingerprinted `b23ab548...`), and the earlier runs are not counted.
+
+**Mutation checks.** The brainstorm case is the only detector, so its contract line is the only one mutated: both carriers of the behaviour were removed together (the completion-report bullet in `### End-phase stops` and the `Completion report` paragraph's added clause). Result, 2 runs: 0.88 each, `no-brainstorm-command` failed (the script's report carried `/craft:brainstorm` through). Restored from a scratch copy, empty diff. The guard cases' contract lines are not separately mutated: their baselines on the prose without any of the new text are the all-carriers-removed mutation, and it stayed green (third explanation: the shared unattended contract and the Found work section carry them).
+
+**Grant.** `Bash(./git *)` was added to the craft runner block for the push cases. Paired control `unattended-execute-refuses-a-held-slice`: 3 of 3 at 1.0 with the grant. The push cases ran a real `git push` to a local bare origin inside the runner sandbox; the sandbox blocks writing `.git/config`, so `--set-upstream` reports an error after the push lands, and runs report that.
+
+**Not measured:** the pre-push secret-scan stop, the writer and `verify` failure branch of the unattended manual-check discharge, a spec-gap park followed by Phases 4 and 5 (the prompt tells the run they are done), the fold's fix pass, a parent with no spec link. Spend about 46 USD.
+
+## Final-prose re-measure (execute's shared docs one hop apart)
+
+The unattended contract's load instruction moved out of `_shared/execute.md` into `execute/SKILL.md`, and the two shared documents now refer to each other and to the security rules in words, so a full-suite contract (`_shared` documents stay one hop apart) holds. Moving the instruction changes what an agent reads, so the execute cases were re-run on the final prose. `claude plugin eval` with `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants the `runner` block of `eval-gate.json` unchanged, case directories and graders unchanged. The `execute-rule-only.md` live arm was rebuilt.
+
+Final prose fingerprints (`git hash-object`): `_shared/execute.md` `323a7f4da8c7e849c262fcc9827a0eb566deecf6`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`.
+
+| Case | Batch 1 | Permitted rerun | Verdict |
+|---|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | not needed | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | not needed | at bar |
+| `unattended-execute-refines-a-standalone-task-unattended` | 2 of 3 (0.89, 1, 1; `asked-nothing` judge PASS FAIL FAIL) | 3 of 3 at 1.0 | at bar on the rerun (earlier prose never reached it) |
+| `unattended-execute-parks-a-design-change` | 2 of 3 (1, 0.92, 1; `asked-nothing` judge FAIL FAIL PASS) | 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (end-phase detector) | 2 of 3 (1, 1, 0.88; `names-the-brainstorm-task-by-id` fails in one run) | 2 of 3 (0.88, 1, 1; same grader, one run) | **not at bar** |
+
+**Reading.** The three refusal cases and the guard are green on the first batch, so the load instruction landed where execute decides the mode. The refine and park cases show the same `asked-nothing` judge noise the earlier logs record and clear on the permitted rerun. The brainstorm detector misses the id in one run in three in both batches; on the earlier prose it read 2 of 3 and then 3 of 3 on its rerun, so this is the same one-in-three variation and no case went from green to red because of the move. It is reported as not at the 3 of 3 bar, not retried further. No prose was changed for it.
+
+Spend (runner list price plus judge votes): refusal cases and guard 5.8 USD, the refine case 6.8, the park case 4.8, the brainstorm case 5.0; about 22.4 USD in total.
+
+
+## Review fix-pass re-measure (2026-11-10)
+
+Runner `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, macOS, runner 2.1.322. Final prose fingerprints (`git hash-object`): `_shared/execute.md` `2e2f1dd3f5965d2d38ebeefaddbb3a9648030a0b`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`. The `execute-rule-only.md` live arm was rebuilt.
+
+What changed in the prose: the build-close settle step has an unattended branch (each settle decision logged; a failure ends `stuck` with a fixed reason and no `retry:` line); a security finding is never captured as a session candidate on a parent with no spec link; `craft/push=failed` and `blocked` are checked before the generic claimed refusal; `lore task graph` names the elected vault at the entry check.
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-parks-a-design-change` | batch 1: 1, 0.92, 1; permitted rerun 0.92 x3 (`asked-nothing` judge FAIL in each) | **not at bar** |
+| `unattended-execute-close-names-a-brainstorm-task-by-id` (detector) | batch 1: 0.62, 0.62, 0.75 (`names-the-brainstorm-task-by-id`, `parent-is-done`, in two runs `no-outcome-line`); a 1-run diagnostic with `--keep-temp` scored 1.0; permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-decides-surviving-findings` (guard A) | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-close-hands-off-to-the-pr-step` (guard E) | 3 of 3 at 1.0 | at bar |
+| `build-close-marks-folded-entries` (main's settle case) | 3 of 3 at 1.0 | at bar |
+
+Readings:
+- **parks-a-design-change**: only the `asked-nothing` judge fails and every record, outcome and command grader passes. A control with the previous `execute.md` swapped in (fingerprint `a1d1eb5456def291baecbd748af9b0ea012dac2e`) scored 0.92, 1, 1, so the judge also fails on the prose before this pass. The earlier log already recorded this case as judge noise. Four of six treatment runs failing it against one of three on the control is more than I would call noise at these sizes and was not resolved; it is reported as not at bar.
+- **brainstorm detector**: the first batch's failures (parent not closed, an outcome line printed) did not reproduce in the diagnostic run or the rerun, and the diagnostic's trace shows the run reading the new settle text and carrying on to close. The cause of the first batch is not isolated.
+- The new settle branch's failure path (an entry call exiting 2 or 3) and the entry-refusal reorder are not exercised by any case.
+
+Spend, runner list price plus judge votes: about 23.8 USD for the craft batches, controls and diagnostics (park control 2.32, brainstorm diagnostic 0.86). Total for both tools about 45.9 USD.
+
+
+## Re-review fold pass (2026-11-10)
+
+Same runner settings as the section above (`--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants exactly the `runner` block, runner 2.1.322, macOS). Final prose fingerprints (`git hash-object`): `_shared/execute.md` `c09546e44fa4cbc748f371e3debbe85a11c47190`, `_shared/unattended.md` `2d4a02d6c0bf74516c20a4b993acf0a34983e31a`, `execute/SKILL.md` `585fbc43a6e5bcf256279aba315e3859e23e95d2`. The `execute-rule-only.md` live arm was rebuilt.
+
+What changed: the "already closed" entry refusal now comes before the generic "already claimed" one; a settle failure under the unattended request records the failing call, its exit code and the scrubbed finding in the run block before ending `stuck`; the sentence about leaving `lore task graph` unpinned applies to the later calls only.
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-execute-refuses-an-unplanned-slice` | batch 1: 0.88, 1, 1 (`no-git-command-issued` in one run); permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-execute-refuses-a-held-slice` | 3 of 3 at 1.0 | at bar |
+| `unattended-execute-refuses-without-then-pr` | 3 of 3 at 1.0 | at bar |
+| `execute-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+| `build-close-marks-folded-entries` | 3 of 3 at 1.0 | at bar |
+
+Readings:
+- No entry case sits on a `done` record that also carries `craft/branch`, so the reordered refusal itself is not observed by any case; the cases show only that the edit did not disturb the refusals that were already measured. The settle failure logging is likewise unobserved (no case makes a settle call fail).
+- `unattended-execute-parks-a-design-change` and `unattended-execute-close-names-a-brainstorm-task-by-id` were not rerun: this pass touches neither the park nor the close text they measure, and the previous section's reading of them stands.
+
+Spend about 8.8 USD for these craft batches (4.51 for the three refusal cases, 1.53 for the rerun, 1.24 for the guard, 1.55 for the settle case); with the portage side the whole pass is about 21.8 USD.

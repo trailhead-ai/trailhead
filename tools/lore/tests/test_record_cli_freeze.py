@@ -190,7 +190,7 @@ def test_ac9_non_task_refusal_does_not_offer_a_reopen_route(tmp_path):
 
 @pytest.mark.parametrize("kind,status,passes,not_passes", [
     ("spec", "ready", ["## Slices", "## Follow-ups", "## Waiting"], ["## Driver run"]),
-    ("task", "done", ["## Driver run"], ["## Slices", "## Follow-ups", "## Waiting"]),
+    ("task", "done", ["## Driver run", "## Unattended run"], ["## Slices", "## Follow-ups", "## Waiting"]),
     ("decision", "active", [], ["## Slices", "## Follow-ups", "## Waiting", "## Driver run"]),
 ])
 def test_ac9_refusal_names_only_the_kinds_own_plain_update_section(
@@ -361,6 +361,71 @@ def test_ac11_done_task_diff_that_only_appends_a_driver_run_block_is_allowed(tmp
 
     assert r.returncode == 0, r.stderr
     assert "## Driver run" in _paths(vault, rid)[0].read_text(encoding="utf-8")
+
+
+UNATTENDED_1 = "\n## Unattended run\n\n- **Session:** one\n- **Outcome:** pending\n"
+UNATTENDED_2 = "\n## Unattended run\n\n- **Session:** two\n- **Outcome:** pending\n"
+
+
+def _done_task(tmp_path, body):
+    vault, state = _make_vault(tmp_path)
+    return vault, state, _create(vault, state, "task", "done", body=body)
+
+
+@pytest.mark.parametrize("before, after", [
+    pytest.param(TASK, TASK + UNATTENDED_1, id="first-block-appended"),
+    pytest.param(TASK + UNATTENDED_1, TASK + UNATTENDED_1 + UNATTENDED_2, id="second-block-appended"),
+    pytest.param(TASK + UNATTENDED_1, (TASK + UNATTENDED_1).replace("pending", "pr-ready"),
+                 id="outcome-line-edited"),
+    pytest.param(TASK + UNATTENDED_1, TASK + UNATTENDED_1 + "\n" + TASK_RUN,
+                 id="driver-run-beside-an-unattended-block"),
+])
+def test_done_task_unattended_run_change_alone_is_allowed(tmp_path, before, after):
+    vault, state, rid = _done_task(tmp_path, before)
+
+    r = _update(vault, state, rid, after)
+
+    assert r.returncode == 0, r.stderr
+    assert _paths(vault, rid)[0].read_text(encoding="utf-8").endswith(after)
+
+
+@pytest.mark.parametrize("after", [
+    pytest.param((TASK + UNATTENDED_1 + UNATTENDED_2).replace("intro text", "intro TEXT"),
+                 id="alongside-a-block-change"),
+    pytest.param((TASK + UNATTENDED_1).replace("intro text", "intro TEXT"), id="alone"),
+])
+def test_done_task_change_outside_unattended_run_is_refused(tmp_path, after):
+    vault, state, rid = _done_task(tmp_path, TASK + UNATTENDED_1)
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, after)
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _snapshot(vault) == before
+
+
+@pytest.mark.parametrize("wrap", ["```\n{h}\n- **Outcome:** x\n```\n", "<!--\n{h}\n- **Outcome:** x\n-->\n"])
+def test_done_task_masked_unattended_run_heading_does_not_open_an_exempt_region(tmp_path, wrap):
+    body = TASK + "\n" + wrap.format(h="## Unattended run")
+    vault, state, rid = _done_task(tmp_path, body)
+    before = _snapshot(vault)
+
+    r = _update(vault, state, rid, body.replace("Outcome:** x", "Outcome:** y"))
+
+    assert r.returncode != 0
+    assert "[frozen-body]" in r.stderr
+    assert _snapshot(vault) == before
+
+
+def test_in_progress_task_takes_an_unattended_run_block_as_a_plain_update(tmp_path):
+    vault, state = _make_vault(tmp_path)
+    rid = _create(vault, state, "task", "in-progress", body=TASK)
+
+    r = _update(vault, state, rid, TASK.replace("intro text", "intro TEXT") + UNATTENDED_1)
+
+    assert r.returncode == 0, r.stderr
+    assert "intro TEXT" in _paths(vault, rid)[0].read_text(encoding="utf-8")
 
 
 def test_ac11_one_character_changed_above_slices_is_refused(tmp_path):

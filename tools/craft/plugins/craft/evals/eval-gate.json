@@ -374,6 +374,102 @@
       "measures": [
         "skills/_shared/execute.md"
       ]
+    },
+    "unattended-execute-refuses-without-then-pr": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refuses-a-held-slice": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refuses-an-unplanned-slice": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "execute-without-request-is-not-unattended": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-refines-a-standalone-task-unattended": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "skills/_shared/refine.md"
+      ]
+    },
+    "unattended-execute-adjusts-for-an-invalidated-assumption": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-parks-a-design-change": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-parks-a-spec-gap-finding": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-never-drops-a-security-finding": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-decides-surviving-findings": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-hands-off-to-the-pr-step": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-records-a-manual-check-pending": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-names-a-brainstorm-task-by-id": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-ends-stuck-on-the-default-branch": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
+    },
+    "unattended-execute-close-ends-stuck-on-a-failed-push": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/_shared/unattended.md"
+      ]
     }
   }
 }

@@ -44,13 +44,18 @@ class Section(NamedTuple):
 #     ``waiting.py``; every write is certified by ``waiting_gate.py``.
 #   - ``## Driver run`` (task): the drive checkpoint, one block appended at
 #     each phase boundary by ``craft:drive``.
+#   - ``## Unattended run`` (task): the unattended-run record, one block per
+#     session, written by craft's execute and portage's pull_request.
 PIPELINE_SECTIONS: dict[str, tuple[Section, ...]] = {
     "spec": (
         Section("## Slices", repeatable=False),
         Section("## Follow-ups", repeatable=False),
         Section("## Waiting", repeatable=False),
     ),
-    "task": (Section("## Driver run", repeatable=True),),
+    "task": (
+        Section("## Driver run", repeatable=True),
+        Section("## Unattended run", repeatable=True),
+    ),
 }
 
 

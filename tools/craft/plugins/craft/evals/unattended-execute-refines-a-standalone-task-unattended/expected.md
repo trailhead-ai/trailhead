@@ -1,0 +1,31 @@
+# unattended-execute-refines-a-standalone-task-unattended
+
+## Under test
+
+Under `--unattended --then-pr`, `/craft:execute task/<name>` on an `open` standalone task whose payload cannot be derived runs refine's unattended mode inline (never interactive, never inferred), opens the `## Unattended run` block on the task, and ends `outcome: needs-a-decision task/<name> parked=0 — <why>; <what to run instead>` with the reason naming `## Refine — unresolved`. Refine writes that section on the task, the task stays `open`, no executor is dispatched and the session asks nothing. The prose under test is `skills/_shared/execute.md`, `skills/execute/SKILL.md`, `skills/_shared/refine.md` and `skills/_shared/unattended.md`.
+
+## Fixture
+
+`fixtures/scaffold.sh` seeds one `open` standalone task `delete-old-exports-after-a-retention-window`: add a retention window to the export cleanup, where the length of the window is the operator's undecided product choice and nothing in the workspace or vault records a preference. The prompt runs `/craft:execute task/delete-old-exports-after-a-retention-window --unattended --then-pr`.
+
+## Conditions, sample and bar
+
+- Runner: `claude plugin eval`, target `tools/craft/plugins/craft`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, with the `runner` block grants of `eval-gate.json`. Every `claude` capture is wrapped in a process-level `timeout`.
+- Limits: `allowed_tools: [Skill, Read, Glob, Grep, Agent]`, `max_turns: 90`, `timeout_seconds: 900`. The prompt asks for single-command Bash calls.
+- Arms: a **baseline** arm on the unedited prose, fingerprinted `skills/_shared/execute.md` `6967612a5e610d22a0bbc9122172eb5df2fdea11`, `skills/_shared/unattended.md` `e9d5ce9a1df747a1c7d0d5f9cf6be22014329aca`, `skills/_shared/refine.md` `7df1fcb540a2ade91472849ca6872181c5451932`, `skills/execute/SKILL.md` `bffe525c2e0d7718ed356e4bc96282a85cd09c9f` (each a `git hash-object` of the file as it stood at `9913a2fb` and in the working tree before any edit), and a **treatment** arm on the edited prose. 3 runs each. A run scores the fraction of graders that pass and passes only at 1.0. The treatment passes at 3 of 3 runs; one rerun of a failed batch is permitted, stated here before any run, and a rerun-green is reported as such. A scaffold failure or timeout is an error, logged apart from graded fails.
+- Expected **red**: the unedited prose runs refine inline and may well write `## Refine — unresolved` (a headless run with no operator channel falls to refine's unattended mode), but it opens no block and prints no `outcome:` line (`final-line-is-needs-a-decision`, `reason-names-the-section-to-read`, `run-block-opened-on-the-task`, `block-outcome-is-needs-a-decision` fail).
+- A headless eval session never offers `AskUserQuestion`, so a `tool_used AskUserQuestion` grader would pass whether or not the ritual wanted to ask. "Asked nothing" is graded by behaviour: the typed outcome line, the record state, the issued commands, and an `llm` trace grader confirming the last message poses no question and waits on no answer (operator-accepted headless limitation: that judge is not shown able to fail headless).
+- Fixture vocabulary leak check, run before any scored run: no word of the fixture satisfies a grader on its own. The graders read the final message, the task record's body and sidecar, and the issued commands; the fixture's records carry none of `refused`, `parked=`, `needs-a-decision`, `Refine — unresolved` or `--then-pr`, and the one record that carries the `## Unattended run` heading by design (the held slice) is graded by a count of two headings and by the absence of an `**Outcome:**` line, never by presence. No fixture file sits beside `expected.md` where the run can read it: the run directory holds only the scaffolded vault and the lore wrapper, and the sandbox denies reads of the plugin's `evals/` directory.
+- Regression arms (run once for the whole change, on the treatment, 3 runs each, 3 of 3): `build-triages-found-work` (runner case), `execute-cuts-a-task-branch-off-base` and `execute-preflight-refuses-stale-base` (clean-room hand-shaped cases, every variant). Attended execute must stay unchanged (spec AC5).
+
+## Pass condition
+
+Every clause holds: [`final-line-is-needs-a-decision`] `outcome: needs-a-decision task/<name> parked=0 — <why>`; [`reason-names-the-section-to-read`] the reason names `Refine — unresolved`; [`refine-section-written-on-the-task`] the task body has the `## Refine — unresolved` heading (`source: file`); [`run-block-opened-on-the-task`] the body has a `## Unattended run` block with `**Rituals:** execute`; [`block-outcome-is-needs-a-decision`] the block's `**Outcome:**` is `needs-a-decision`; [`task-still-open`] the sidecar status is `open`; [`no-executor-dispatched`] no `Agent` call; [`no-git-command-issued`] no git command that cuts, switches, fetches or writes was run (refine may read the repository with `git ls-files`); [`asked-nothing`].
+
+## Limitations
+
+- One non-promoting refine; the route outcomes (plan, brainstorm) share the outcome shape and are not run; whether refine escalates or routes is the model's call on this fixture, and both end on the same line. One fixture, one model tier.
+
+## Revisions before the treatment verdict
+
+- Authoring fixes made after the baseline batch and before any treatment run counted: the two graders that matched across a newline (`refine-section-written-on-the-task`, `run-block-opened-on-the-task`) were written with a real newline in a single-quoted YAML scalar, which the runner refused to load, so the first baseline batch scored nothing; they are rewritten with a `\n` escape and the baseline was re-run. After the first treatment batch, `no-git-command-issued` was narrowed from any `git` command to a branch-cutting or writing one, because refine itself reads the repository with `git ls-files` (all three treatment runs, and the baseline runs, tripped it on that read alone); the treatment was then re-run in full.

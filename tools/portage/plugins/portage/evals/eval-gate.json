@@ -49,6 +49,72 @@
       "measures": [
         "agents/monitor.md"
       ]
+    },
+    "monitor-stop-at-ready-never-merges": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "monitor-without-stop-at-ready-is-unchanged": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "pull-request-without-request-is-not-unattended": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-ends-stuck-on-a-blocked-monitor": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-ends-stuck-on-a-failed-block-write": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-never-merges": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-refuses-a-default-branch-label": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-refuses-without-a-record": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-reruns-after-a-stuck-run": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-stops-at-ready": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
     }
   }
 }
