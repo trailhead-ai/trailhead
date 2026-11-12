@@ -2,5 +2,17 @@
   "credential_path": "operator/credential",
   "tmux_socket": "outpost-hubs",
   "hub_session_pattern": "hub-<account>",
-  "start_route": "POST /operator/hubs/:account/start"
+  "start_route": "POST /operator/hubs/:account/start",
+  "broker_token_path": "/broker/token",
+  "broker_mcp_path": "/broker/mcp",
+  "broker_scope": "ranger",
+  "broker_tool": "timeline_since",
+  "broker_server": "outpost",
+  "broker_session_arg": "--broker-session",
+  "broker_output_keys": ["server", "scope", "credential_path"],
+  "broker_credential_path": "sessions/<session-id>/broker-client.json",
+  "broker_credential_dir_mode": "0700",
+  "broker_credential_file_mode": "0600",
+  "broker_credential_fields": ["client_id", "client_secret"],
+  "broker_session_id_pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 }

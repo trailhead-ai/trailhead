@@ -300,14 +300,29 @@ def test_401_says_restart_outpost(tmp_path, stub, capsys):
     assert "trailhead outpost restart" in capsys.readouterr().err
 
 
-def test_other_refusal_prints_its_message(tmp_path, stub, capsys):
+#: Outpost's fixed 422 bodies for a refused session start (server/operator/hubs.ts REFUSAL_MESSAGES).
+OUTPOST_REFUSAL_BODIES = [
+    {"error": "trailhead_refused", "message": "trailhead refused the session start"},
+    {"error": "trailhead_refused", "message": "trailhead output has no valid broker section"},
+    {"error": "trailhead_refused", "message": "trailhead output has no valid files list"},
+]
+DIAGNOSTIC = (
+    "run `trailhead session-start --role hub --account acme --json "
+    "--broker-session diagnostic` to see why"
+)
+
+
+@pytest.mark.parametrize("body", OUTPOST_REFUSAL_BODIES, ids=lambda b: b["message"])
+def test_outposts_refusal_prints_its_message_and_the_diagnostic_command(tmp_path, stub, capsys, body):
     env = _env(tmp_path)
     _configure(env, "acme")
     _write_credential(env)
-    s = stub(status=422, body={"error": "trailhead_refused", "message": "no such launch account"})
+    s = stub(status=422, body=body)
     rc, ex = _start(env, port=s.port)
+    err = capsys.readouterr().err
     assert rc != 0 and ex.calls == []
-    assert "no such launch account" in capsys.readouterr().err
+    assert body["message"] in err
+    assert DIAGNOSTIC in err
 
 
 @pytest.mark.parametrize(
@@ -317,7 +332,7 @@ def test_other_refusal_prints_its_message(tmp_path, stub, capsys):
             "trailhead_bad_output",
             502,
             "the hub launch was refused; run `trailhead session-start --role hub "
-            "--account acme --json` to see why",
+            "--account acme --json --broker-session diagnostic` to see why",
         ),
         ("tmux_failed", 502, "tmux failed; run `trailhead doctor`"),
         ("invalid_account", 400, "the account name 'acme' is invalid"),
@@ -347,6 +362,7 @@ def test_a_message_in_the_reply_still_wins_over_the_canned_fix(tmp_path, stub, c
     rc, ex = _start(env, port=s.port)
     err = capsys.readouterr().err
     assert "no server running" in err and "trailhead doctor" not in err
+    assert "session-start" not in err
 
 
 def test_unresponsive_start_times_out_without_exec(tmp_path, stub, capsys):
@@ -494,3 +510,33 @@ def test_real_tmux_attach_then_detach_leaves_session(tmp_path):
             except (OSError, ChildProcessError):
                 pass
         subprocess.run(base + ["kill-server"], env=env, capture_output=True, timeout=15)
+
+
+def test_the_default_start_budget_outlasts_two_worst_case_outpost_starts(monkeypatch):
+    # Outpost's bounds (server/operator/hubs.ts): tmux calls 10s, trailhead session-start 30s,
+    # settle 1.5s. Worst single start: reconcile (has-session, list-panes, kill) 30s, then
+    # has-session, list-panes, kill 30s, session-start 30s, new-session 10s, settle 1.5s,
+    # list-panes 10s, capture-pane 10s, rollback kill 10s. A start queued behind another
+    # on the per-account lock waits for a whole one before its own.
+    from trailhead.ranger import outpost_client
+
+    tmux, session_start, settle = 10.0, 30.0, 1.5
+    one_start = 3 * tmux + 3 * tmux + session_start + tmux + settle + 3 * tmux
+    seen = {}
+
+    class _Opener:
+        def open(self, request, timeout):
+            seen["timeout"] = timeout
+
+            class _Ok:
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *a):
+                    return False
+
+            return _Ok()
+
+    monkeypatch.setattr(outpost_client, "_opener", lambda: _Opener())
+    outpost_client.start_hub("acme", "cred")
+    assert seen["timeout"] >= 2 * one_start

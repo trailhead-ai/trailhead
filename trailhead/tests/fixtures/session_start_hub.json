@@ -2,13 +2,18 @@
   "argv": [
     "claude",
     "--settings",
-    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"deny\":[\"Read(/<ROOT>/fence/outpost-state/operator/**)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state/operator\"],\"denyWrite\":[\"<ROOT>/fence/ranger-state/hubs/a/.claude\",\"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\"<ROOT>/fence/scratch\",\"<ROOT>/fence/lore-state/vaults/default/.git/config\",\"<ROOT>/fence/lore-state/vaults/default/.git/hooks\",\"<ROOT>/fence/lore-state/vaults/default/.git/info\",\"<ROOT>/fence/lore-state/*/*/.git/config\",\"<ROOT>/fence/lore-state/*/*/.git/hooks\",\"<ROOT>/fence/lore-state/*/*/.git/info\"]}}}",
+    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"allow\":[\"mcp__outpost__timeline_since\"],\"deny\":[\"Read(/<ROOT>/fence/outpost-state/**)\",\"Edit(/<TRAILHEAD>/bin/**)\",\"Edit(/<TRAILHEAD>/trailhead/**)\",\"Edit(/<ROOT>/fence/outpost-state/**)\",\"Edit(/<ROOT>/fence/outpost-state/sessions/sess-1/**)\",\"Edit(/<TRAILHEAD>/bin/trailhead)\",\"Edit(/<TRAILHEAD>/pyproject.toml)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/ranger-state/hubs/a\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state\"],\"denyWrite\":[\"<ROOT>/fence/ranger-state/hubs/a/.claude\",\"<ROOT>/fence/ranger-state/hubs/a/.mcp.json\",\"<ROOT>/fence/outpost-state/sessions/sess-1\",\"<ROOT>/fence/scratch\",\"<ROOT>/fence/lore-state/vaults/default/.git/config\",\"<ROOT>/fence/lore-state/vaults/default/.git/hooks\",\"<ROOT>/fence/lore-state/vaults/default/.git/info\",\"<ROOT>/fence/lore-state/*/*/.git/config\",\"<ROOT>/fence/lore-state/*/*/.git/hooks\",\"<ROOT>/fence/lore-state/*/*/.git/info\"]},\"network\":{\"deniedDomains\":[\"api.anthropic.com\"]}}}",
     "--permission-mode",
     "dontAsk",
+    "--mcp-config",
+    "<ROOT>/fence/outpost-state/sessions/sess-1/mcp-config.json",
+    "--strict-mcp-config",
     "--effort",
     "medium"
   ],
-  "env_set": {},
+  "env_set": {
+    "PATH": "<PATH>"
+  },
   "env_unset": [
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDECODE",
@@ -18,5 +23,17 @@
     "CLAUDE_CODE_MESSAGING_TOKEN",
     "CLAUDE_CONFIG_DIR"
   ],
-  "directory": "<ROOT>/fence/ranger-state/hubs/a"
+  "directory": "<ROOT>/fence/ranger-state/hubs/a",
+  "broker": {
+    "server": "outpost",
+    "scope": "ranger",
+    "credential_path": "<ROOT>/fence/outpost-state/sessions/sess-1/broker-client.json"
+  },
+  "files": [
+    {
+      "path": "<ROOT>/fence/outpost-state/sessions/sess-1/mcp-config.json",
+      "content": "{\n  \"mcpServers\": {\n    \"outpost\": {\n      \"headersHelper\": \"<TRAILHEAD>/bin/trailhead broker-header --credential-file <ROOT>/fence/outpost-state/sessions/sess-1/broker-client.json\",\n      \"type\": \"http\",\n      \"url\": \"http://127.0.0.1:7313/broker/mcp\"\n    }\n  }\n}\n",
+      "mode": "0600"
+    }
+  ]
 }

@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-from trailhead import __version__
+from trailhead import __version__, broker_header
 from trailhead.capabilities import ConfineError, ManifestError
 from trailhead.compose import (
     CollisionError,
@@ -30,7 +30,15 @@ from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError, detect_harnesses, get_harness
 from trailhead.install import run_install
 from trailhead.install_config import ConfigResolveError
-from trailhead.launch_profile import HUB_PROFILE, LaunchProfileError, hub_home, resolve_profile
+from trailhead.launch_profile import (
+    BROKER_SCOPE,
+    BROKER_SERVER,
+    HUB_PROFILE,
+    LaunchProfileError,
+    broker_launch,
+    hub_home,
+    resolve_profile,
+)
 from trailhead.outpost_lifecycle import (
     OutpostLifecycleError,
     open_ui,
@@ -217,11 +225,18 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
     return handler()
 
 
+def _cmd_broker_header(args: argparse.Namespace) -> int:
+    code, text = broker_header.run(args.credential_file)
+    print(text, file=sys.stderr if code else sys.stdout)
+    return code
+
+
 def _cmd_session_start(args: argparse.Namespace) -> int:
     if not args.json:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
     env = dict(os.environ)
+    launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
     config = read_hub_config(args.account, env=env)
     profile = resolve_profile(HUB_PROFILE, args.account, env=env)
     directory = hub_home(args.account, env=env)
@@ -238,7 +253,7 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         return 1
     launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
     start = harnesses[0].session_start(
-        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env
+        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env, broker=launch
     )
     if start is None:
         print(
@@ -246,16 +261,22 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
-    print(
-        json.dumps(
-            {
-                "argv": start.argv,
-                "env_set": start.env_set,
-                "env_unset": start.env_unset,
-                "directory": str(directory),
-            }
-        )
-    )
+    output = {
+        "argv": start.argv,
+        "env_set": start.env_set,
+        "env_unset": start.env_unset,
+        "directory": str(directory),
+    }
+    if launch is not None:
+        output["broker"] = {
+            "server": BROKER_SERVER,
+            "scope": BROKER_SCOPE,
+            "credential_path": launch.credential_path,
+        }
+        output["files"] = [
+            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
+        ]
+    print(json.dumps(output))
     return 0
 
 
@@ -458,7 +479,21 @@ def _build_parser() -> argparse.ArgumentParser:
         "--headless", action="store_true", default=False, help="Start a non-interactive session."
     )
     session_p.add_argument("--harness", metavar="NAME", default=None, help="Default: first detected.")
+    session_p.add_argument(
+        "--broker-session",
+        metavar="ID",
+        default=None,
+        help="Outpost's session id; adds a broker section naming where its credentials live.",
+    )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
+    broker_p = subparsers.add_parser(
+        "broker-header",
+        help="Print the Authorization header for a session's broker credentials (JSON, for a header helper).",
+    )
+    broker_p.add_argument(
+        "--credential-file", required=True, metavar="PATH", help="The session's broker-client.json."
+    )
 
     return parser
 
@@ -480,6 +515,7 @@ def main() -> int:
         "shellenv": _cmd_shellenv,
         "outpost": _cmd_outpost,
         "session-start": _cmd_session_start,
+        "broker-header": _cmd_broker_header,
     }
     handler = dispatch.get(args.command)
     if handler is None:

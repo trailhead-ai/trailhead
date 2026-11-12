@@ -11,11 +11,17 @@ from trailhead.launch_profile import operator_token_store, validate_account
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
 HUB_SOCKET = "outpost-hubs"
-# Outpost's worst case for one start request, from its server bounds (server/operator/hubs.ts):
-# has-session 10s + trailhead session-start 30s + new-session 10s + settle 1.5s +
-# list/capture/kill up to 30s = 81.5s, and the per-account lock can make the request wait
-# behind one more such request. 180s covers both with margin.
-START_TIMEOUT_SECONDS = 180.0
+# Outpost's worst case for one start request, from its server bounds (server/operator/hubs.ts,
+# server/timeline/reconciler.ts): the pre-start reconcile's has-session, list-panes and kill
+# 30s, then has-session, list-panes and kill 30s, trailhead session-start 30s, new-session 10s,
+# settle 1.5s, list-panes, capture-pane and rollback kill 30s = 131.5s. The per-account lock
+# can make the request wait behind one more such request: 263s. 300s covers both with margin.
+START_TIMEOUT_SECONDS = 300.0
+
+
+# Hub start refuses a launch with no broker session; this id passes the shape check so the
+# diagnostic reaches the real refusal. session-start only prints a launch, so it has no effect.
+DIAGNOSTIC_BROKER_SESSION = "diagnostic"
 
 
 class OutpostRefusal(Exception):
@@ -73,13 +79,22 @@ def _body(exc: urllib.error.HTTPError) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def _diagnostic(account: str) -> str:
+    return (
+        f"run `trailhead session-start --role hub --account {account} --json "
+        f"--broker-session {DIAGNOSTIC_BROKER_SESSION}` to see why"
+    )
+
+
+#: Outpost answers these when trailhead's own launch was refused or its output was unusable.
+_DIAGNOSABLE = ("trailhead_refused", "trailhead_bad_output")
+
+
 def _canned_detail(error: object, account: str) -> str | None:
     """The fix to print for an Outpost error code whose reply carried no message."""
     return {
-        "trailhead_bad_output": (
-            "the hub launch was refused; run "
-            f"`trailhead session-start --role hub --account {account} --json` to see why"
-        ),
+        "trailhead_refused": f"the hub launch was refused; {_diagnostic(account)}",
+        "trailhead_bad_output": f"the hub launch was refused; {_diagnostic(account)}",
         "tmux_failed": "tmux failed; run `trailhead doctor`",
         "invalid_account": f"the account name {account!r} is invalid",
         "internal": "Outpost failed; check its log with `trailhead outpost status`",
@@ -115,8 +130,11 @@ def start_hub(
             raise OutpostRefusal(f"hub exited at launch:\n{body.get('output', '')}")
         if exc.code == 504:
             raise OutpostRefusal("Outpost timed out starting the hub")
+        message = body.get("message")
+        if message and body.get("error") in _DIAGNOSABLE:
+            message = f"{message}; {_diagnostic(account)}"
         detail = (
-            body.get("message")
+            message
             or _canned_detail(body.get("error"), account)
             or body.get("error")
             or f"HTTP {exc.code}"

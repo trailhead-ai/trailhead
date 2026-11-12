@@ -38,7 +38,7 @@ def test_hub_profile_resolves_every_role_under_the_injected_roots(tmp_path):
     assert r.paths["hub-home"] == tmp_path / "xdg/state/ranger/hubs/a"
     assert r.paths["lore-state"] == tmp_path / "xdg/state/lore"
     assert r.paths["cache"] == tmp_path / "xdg/cache"
-    assert r.paths["token-store"] == tmp_path / "xdg/state/outpost/operator"
+    assert r.paths["token-store"] == tmp_path / "xdg/state/outpost"
     assert all(p.is_absolute() for p in r.paths.values())
 
 
@@ -74,7 +74,7 @@ def test_changing_one_override_moves_exactly_the_roles_it_governs(tmp_path):
 
     tok_env = _env(tmp_path, OUTPOST_STATE_DIR=str(tmp_path / "op"))
     tok = resolve_profile(HUB_PROFILE, "a", env=tok_env, platform="linux").paths
-    assert tok["token-store"] == tmp_path / "op/operator"
+    assert tok["token-store"] == tmp_path / "op"
     for role in ("hub-home", "lore-state", "cache"):
         assert tok[role] == base[role]
 

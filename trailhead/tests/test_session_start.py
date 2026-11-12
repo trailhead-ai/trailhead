@@ -8,6 +8,8 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import re
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -19,18 +21,24 @@ import pytest
 
 from trailhead import cli
 from trailhead.harness.base import Harness, HarnessError, SessionStart
+from trailhead.harness import claude_code
 from trailhead.harness.claude_code import ClaudeCodeHarness
 from trailhead.launch_profile import (
+    BROKER_SERVER,
     HUB_PROFILE,
     LaunchProfile,
+    broker_launch,
     hub_home,
     resolve_profile,
 )
+from trailhead.ranger import outpost_client
 from trailhead.ranger.config import HubConfig, write_hub_config
+from trailhead.tests.test_ranger_start import OUTPOST_REFUSAL_BODIES, _Stub
 
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).parent / "fixtures" / "session_start_hub.json"
 ROOT_TOKEN = "<ROOT>"
+_HUB_ARGV = ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1"]
 
 
 def _fence(tmp_path: Path) -> dict[str, str]:
@@ -47,6 +55,28 @@ def _fence(tmp_path: Path) -> dict[str, str]:
         "OUTPOST_STATE_DIR": str(root / "outpost-state"),
         "PATH": os.environ.get("PATH", ""),
     }
+
+
+@pytest.fixture(autouse=True)
+def _fenced_managed_settings(tmp_path, monkeypatch):
+    """Point the managed-settings location at a fenced, initially absent directory."""
+    monkeypatch.setattr(
+        claude_code,
+        "_MANAGED_SETTINGS_DIRS",
+        {"linux": tmp_path / "managed-fence", "darwin": tmp_path / "managed-fence-darwin"},
+    )
+
+
+def _write_managed(
+    tmp_path: Path, data, *, drop_in: str | None = None, fence: str = "managed-fence"
+) -> Path:
+    base = tmp_path / fence
+    if drop_in:
+        base = base / "managed-settings.d"
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / (drop_in or "managed-settings.json")
+    path.write_text(data if isinstance(data, str) else json.dumps(data))
+    return path
 
 
 def _write_user_settings(env: dict[str, str], data, *, account_dir: Path | None = None) -> Path:
@@ -72,7 +102,29 @@ def _resolved(env: dict[str, str], profile: LaunchProfile = HUB_PROFILE):
     return resolve_profile(profile, "a", env=env, platform="linux")
 
 
-def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=None, **extra):
+def _give_user_a_write_list(env, account=None) -> None:
+    """A user with no settings file yet gets the write list a real account carries (the
+    working directory, cache and lore roots), since a profile may only write where its user
+    allows. A declared account whose directory is absent is left absent."""
+    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    if account:
+        settings_dir = Path(account.replace("~", env["HOME"], 1) if account.startswith("~") else account)
+        if not settings_dir.is_dir():
+            return
+    else:
+        settings_dir = Path(env["HOME"]) / ".claude"
+        settings_dir.mkdir(parents=True, exist_ok=True)
+    if not (settings_dir / "settings.json").exists():
+        _write_user_settings(env, _user_allowing_hub(env), account_dir=settings_dir)
+
+
+def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=None, bare=False, **extra):
+    """Start the hub. Unless *bare*, the user is first given a write list (see above)."""
+    if not bare:
+        _give_user_a_write_list(env, account)
+    extra.setdefault("platform", "linux")
+    if BROKER_SERVER in profile.mcp_servers and "broker" not in extra:
+        extra["broker"] = broker_launch("s1", env=env)
     resolved = _resolved(env, profile)
     home = hub_home("a", env=env, platform="linux")
     home.mkdir(parents=True, exist_ok=True)
@@ -94,7 +146,8 @@ def _hub_roots(env) -> tuple[str, str, str]:
 def _protected(env) -> list[str]:
     """The hub's own future-settings paths, which the hub may never write."""
     home = _hub_roots(env)[0]
-    return [f"{home}/.claude", f"{home}/.mcp.json"]
+    session_dir = Path(broker_launch("s1", env=env).config_path).parent
+    return [f"{home}/.claude", f"{home}/.mcp.json", str(session_dir)]
 
 
 def _user_allowing_hub(env) -> dict:
@@ -225,7 +278,8 @@ def test_the_hubs_own_future_settings_are_denied_wherever_the_hub_home_is(tmp_pa
     for env in (first, second):
         deny = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
         home = _hub_roots(env)[0]
-        assert deny == [f"{home}/.claude", f"{home}/.mcp.json", *_later_vault_globs(env)]
+        assert deny == [*_protected(env), *_later_vault_globs(env)]
+        assert deny[:2] == [f"{home}/.claude", f"{home}/.mcp.json"]
     assert _protected(first) != _protected(second)
 
 
@@ -363,10 +417,12 @@ def test_user_read_denial_elsewhere_does_not_block_the_launch(tmp_path):
 
 
 @pytest.mark.parametrize("content", [None, {}, {"model": "opus"}, {"sandbox": {"enabled": True}}])
-def test_with_no_user_sandbox_block_the_profiles_own_narrowing_still_applies(tmp_path, content):
+def test_with_no_other_user_sandbox_keys_the_profiles_own_narrowing_still_applies(tmp_path, content):
     env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
     if content is not None:
-        _write_user_settings(env, content)
+        sandbox = {**content.get("sandbox", {}), "filesystem": {"allowWrite": [".", cache, lore]}}
+        _write_user_settings(env, {**content, "sandbox": sandbox})
     fs = _settings_of(_start(env))["sandbox"]["filesystem"]
     assert fs["allowWrite"] == list(_hub_roots(env))
     assert fs["denyWrite"] == [*_protected(env), *_later_vault_globs(env)]
@@ -418,9 +474,10 @@ def test_a_refused_launch_does_not_touch_the_trust_file(tmp_path):
 
 
 def _start_in(env, directory):
-    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    _give_user_a_write_list(env)
     return ClaudeCodeHarness().session_start(
-        _resolved(env), directory, None, interactive=True, account=None, env=env
+        _resolved(env), directory, None, interactive=True, account=None, env=env,
+        broker=broker_launch("s1", env=env),
     )
 
 
@@ -454,7 +511,7 @@ def test_cli_refuses_a_missing_hub_home_with_a_clean_message(tmp_path, monkeypat
     _configure_hub(env)
     shutil.rmtree(hub_home("a", env=env), ignore_errors=True)
     _write_user_settings(env, _user_allowing_hub(env))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     captured = capsys.readouterr()
     assert rc != 0 and captured.out == ""
     assert captured.err.startswith("trailhead: ") and "ranger setup --account <A>" in captured.err
@@ -502,8 +559,23 @@ def test_effort_comes_from_the_profile(tmp_path):
 def test_default_account_unsets_the_config_dir_variable(tmp_path):
     env = _fence(tmp_path)
     start = _start(env, account=None)
-    assert start.env_set == {}
+    assert start.env_set == {"PATH": env["PATH"]}
     assert "CLAUDE_CONFIG_DIR" in start.env_unset
+
+
+@pytest.mark.parametrize("entries", [["/usr/bin", "/bin"], ["/opt/tools/bin"]])
+def test_a_broker_launch_runs_with_exactly_the_path_it_guarded(tmp_path, entries):
+    env = _fence(tmp_path)
+    env["PATH"] = os.pathsep.join(entries)
+    start = _start(env, account=None)
+    assert start.env_set == {"PATH": os.pathsep.join(entries)}
+
+
+def test_a_launch_with_no_broker_leaves_path_alone(tmp_path):
+    env = _fence(tmp_path)
+    env["PATH"] = "/usr/bin:/bin"
+    profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
+    assert "PATH" not in _start(env, profile=profile).env_set
 
 
 def test_declared_account_sets_the_config_dir_to_the_expanded_path(tmp_path):
@@ -511,7 +583,7 @@ def test_declared_account_sets_the_config_dir_to_the_expanded_path(tmp_path):
     acct = Path(env["HOME"]) / ".claude-x"
     acct.mkdir(parents=True)
     start = _start(env, account="~/.claude-x")
-    assert start.env_set == {"CLAUDE_CONFIG_DIR": str(acct)}
+    assert start.env_set == {"CLAUDE_CONFIG_DIR": str(acct), "PATH": env["PATH"]}
 
 
 # -- settings shape ---------------------------------------------------------
@@ -527,7 +599,9 @@ def test_settings_place_resolved_paths_under_the_keys_claude_reads(tmp_path):
     assert sandbox["allowUnsandboxedCommands"] is False
     assert sandbox["filesystem"]["allowWrite"] == [str(p) for p in resolved.writable]
     assert sandbox["filesystem"]["denyRead"] == [token]
-    assert settings["permissions"]["deny"] == [f"Read(/{token}/**)"]
+    deny = settings["permissions"]["deny"]
+    assert [r for r in deny if r.startswith("Read(")] == [f"Read(/{token}/**)"]
+    assert f"Edit(/{token}/**)" in deny
     assert "model" not in settings
     assert settings["enabledMcpjsonServers"] == []
 
@@ -538,9 +612,12 @@ def _bash_denies(start: SessionStart) -> list[str]:
 
 def test_no_user_exclusions_adds_no_bash_deny_rules(tmp_path):
     env = _fence(tmp_path)
-    _write_user_settings(env, {"sandbox": {"enabled": True, "excludedCommands": []}})
+    allow = _user_allowing_hub(env)["sandbox"]["filesystem"]
+    _write_user_settings(
+        env, {"sandbox": {"enabled": True, "excludedCommands": [], "filesystem": allow}}
+    )
     assert _bash_denies(_start(env)) == []
-    _write_user_settings(env, {})
+    _write_user_settings(env, _user_allowing_hub(env))
     assert _bash_denies(_start(env)) == []
 
 
@@ -552,7 +629,6 @@ def test_each_user_unsandboxed_command_exemption_is_denied_in_the_session(tmp_pa
     _write_user_settings(env, settings)
     start = _start(env)
     assert _bash_denies(start) == [f"Bash({e})" for e in exclusions]
-    assert len(_settings_of(start)["permissions"]["deny"]) == 1 + len(exclusions)
 
 
 @pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
@@ -577,6 +653,7 @@ def test_model_and_mcp_servers_in_the_profile_reach_the_settings(tmp_path):
 
 def test_settings_are_inline_json_so_no_file_exists_for_the_hub_to_edit(tmp_path):
     env = _fence(tmp_path)
+    _give_user_a_write_list(env)
     before = {p for p in Path(env["HOME"]).rglob("*")}
     _start(env)
     new = {p for p in Path(env["HOME"]).rglob("*")} - before
@@ -609,8 +686,10 @@ def test_trust_is_seeded_for_the_realpath_of_the_directory_preserving_other_keys
     hub.mkdir(parents=True)
     link = tmp_path.resolve() / "hub-link"
     link.symlink_to(hub)
+    _give_user_a_write_list(env)
     ClaudeCodeHarness().session_start(
-        _resolved(env), link, None, interactive=True, account=None, env=env
+        _resolved(env), link, None, interactive=True, account=None, env=env,
+        broker=broker_launch("s1", env=env),
     )
     data = json.loads(config.read_text())
     assert data["numStartups"] == 7
@@ -741,9 +820,31 @@ def test_cli_refuses_a_never_widen_violation_with_a_clean_message(tmp_path, monk
     _configure_hub(env)
     home, lore, cache = _hub_roots(env)
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache]))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     err = capsys.readouterr().err
     assert rc != 0 and err.startswith("trailhead: ") and lore in err
+
+
+def test_the_diagnostic_ranger_prints_for_a_refused_hub_launch_reproduces_the_never_widen_refusal(
+    tmp_path, monkeypatch, capsys
+):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    home, lore, cache = _hub_roots(env)
+    user = _write_user_settings(env, {"model": "opus"})
+    stub = _Stub(status=422, body=OUTPOST_REFUSAL_BODIES[0])
+    try:
+        with pytest.raises(outpost_client.OutpostRefusal) as raised:
+            outpost_client.start_hub("a", "credential", port=stub.port, timeout=5.0)
+    finally:
+        stub.close()
+    command = re.search(r"`([^`]+)`", str(raised.value)).group(1)
+    argv = shlex.split(command)
+    assert argv[0] == "trailhead"
+    rc = _run_cli(monkeypatch, env, argv[1:])
+    err = capsys.readouterr().err
+    assert rc != 0 and "no broker session was given" not in err
+    assert f"Add {lore} to 'sandbox.filesystem.allowWrite' in {user}" in err
 
 
 @pytest.mark.parametrize("kind", ["missing", "directory", "not-utf8"])
@@ -761,7 +862,7 @@ def test_cli_refuses_an_unreadable_prompt_file_with_a_clean_message(
     rc = _run_cli(
         monkeypatch,
         env,
-        ["session-start", "--role", "hub", "--account", "a", "--json", "--headless",
+        ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1", "--headless",
          "--prompt-file", str(path)],
     )
     captured = capsys.readouterr()
@@ -781,15 +882,15 @@ def test_cli_prints_argv_env_and_directory_and_headless_reads_the_prompt_file(
     rc = _run_cli(
         monkeypatch,
         env,
-        ["session-start", "--role", "hub", "--account", "a", "--json", "--headless",
+        ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1", "--headless",
          "--prompt-file", str(prompt)],
     )
     out = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert set(out) == {"argv", "env_set", "env_unset", "directory"}
+    assert set(out) == {"argv", "env_set", "env_unset", "directory", "broker", "files"}
     assert "-p" in out["argv"] and out["argv"][-1] == "do the thing\n"
     assert out["directory"] == str(hub_home("a", env=env))
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     out = json.loads(capsys.readouterr().out)
     assert "-p" not in out["argv"]
 
@@ -803,9 +904,9 @@ def test_cli_maps_launch_account_default_and_declared_to_the_env_binding(
     (Path(env["HOME"]) / ".claude").mkdir()
     _configure_hub(env, launch="~/.claude-x")
     _write_user_settings(env, _user_allowing_hub(env), account_dir=acct)
-    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    rc = _run_cli(monkeypatch, env, _HUB_ARGV)
     out = json.loads(capsys.readouterr().out)
-    assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct)}
+    assert rc == 0 and out["env_set"] == {"CLAUDE_CONFIG_DIR": str(acct), "PATH": env["PATH"]}
 
 
 # -- git administrative files under the lore state root ----------------------
@@ -962,6 +1063,13 @@ def _golden_scenario(tmp_path: Path):
     return env
 
 
+def _normalised(text: str, tmp_path: Path) -> str:
+    return text.replace(str(tmp_path.resolve()), ROOT_TOKEN).replace(str(REPO), "<TRAILHEAD>")
+
+
+PATH_TOKEN = "<PATH>"
+
+
 def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # inert-gate: allow wiring seam smoke
     tmp_path,
 ):
@@ -970,12 +1078,13 @@ def test_session_start_subprocess_from_a_foreign_cwd_matches_the_golden(  # iner
     foreign.mkdir()
     result = subprocess.run(
         [str(REPO / "bin" / "trailhead"), "session-start", "--role", "hub", "--account", "a",
-         "--json"],
+         "--json", "--broker-session", "sess-1"],
         cwd=foreign, env=env, capture_output=True, text=True, timeout=120,
     )
     assert result.returncode == 0, result.stderr
-    actual = json.loads(result.stdout.replace(str(tmp_path.resolve()), ROOT_TOKEN))
-    assert set(actual) == {"argv", "env_set", "env_unset", "directory"}
+    assert json.loads(result.stdout)["env_set"]["PATH"] == env["PATH"]
+    actual = json.loads(_normalised(result.stdout.replace(env["PATH"], PATH_TOKEN), tmp_path))
+    assert set(actual) == {"argv", "env_set", "env_unset", "directory", "broker", "files"}
     assert actual == json.loads(GOLDEN.read_text())
 
 
@@ -1184,3 +1293,810 @@ def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_recor
     assert _refused(info_w) and not (v / ".git" / "info" / "attributes").exists()
     assert _refused(move_w) and (v / ".git").is_dir()
     assert _refused(late_w) and not (paths["lore"] / "vaults" / "late" / ".git" / "config").exists()
+
+
+# -- the broker section ------------------------------------------------------
+
+CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ranger-contract.json").read_text())
+
+
+def _broker_argv(session_id):
+    return ["session-start", "--role", "hub", "--account", "a", "--json",
+            f"{CONTRACT['broker_session_arg']}={session_id}"]
+
+
+def _broker_ready(tmp_path):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    _write_user_settings(env, _user_allowing_hub(env))
+    return env
+
+
+def test_broker_session_adds_a_broker_section_shaped_by_the_contract(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv("sess-1"))
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert list(out["broker"]) == CONTRACT["broker_output_keys"]
+    assert out["broker"]["server"] == CONTRACT["broker_server"]
+    assert out["broker"]["scope"] == CONTRACT["broker_scope"]
+    expected = CONTRACT["broker_credential_path"].replace("<session-id>", "sess-1")
+    assert out["broker"]["credential_path"] == str(Path(env["OUTPOST_STATE_DIR"]) / expected)
+
+
+def test_broker_credential_path_follows_the_outpost_state_dir(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    moved = str(tmp_path.resolve() / "elsewhere")
+    _run_cli(monkeypatch, {**env, "OUTPOST_STATE_DIR": moved}, _broker_argv("sess-1"))
+    out = json.loads(capsys.readouterr().out)
+    assert out["broker"]["credential_path"].startswith(moved + "/")
+
+
+@pytest.mark.parametrize(
+    "bad", ["a/b", "..", "a..b", "../x", "a\x00b", "a\nb", "a\tb", "a\x7fb", "", "-lead", "x" * 65, "a b"]
+)
+def test_a_session_id_outside_the_shape_is_refused_with_nothing_printed(
+    tmp_path, monkeypatch, capsys, bad
+):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv(bad))
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "unexpected" not in captured.err
+
+
+@pytest.mark.parametrize("good", ["s", "Sess_1-x", "0" * 64])
+def test_a_session_id_inside_the_shape_is_accepted(tmp_path, monkeypatch, capsys, good):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, _broker_argv(good))
+    assert rc == 0 and json.loads(capsys.readouterr().out)["broker"]["credential_path"].endswith(
+        f"sessions/{good}/broker-client.json"
+    )
+
+
+def test_the_code_constants_match_the_contract_fixture():  # inert-gate: allow cross-repo contract seam
+    from trailhead import launch_profile
+
+    assert launch_profile.BROKER_SESSION_ID_PATTERN == CONTRACT["broker_session_id_pattern"]
+    assert launch_profile.BROKER_SERVER == CONTRACT["broker_server"]
+    assert launch_profile.BROKER_SCOPE == CONTRACT["broker_scope"]
+
+
+# -- the broker MCP server ---------------------------------------------------
+
+SECRET = "s3cret-client-secret-value"
+
+
+
+def _flag_value(argv, flag):
+    return argv[argv.index(flag) + 1]
+
+
+def _covered_by(denied: list[str], path: Path) -> bool:
+    return any(path == Path(d) or Path(d) in path.parents for d in denied)
+
+
+def _run_subprocess(env, cwd, *extra):
+    return subprocess.run(
+        [str(REPO / "bin" / "trailhead"), "session-start", "--role", "hub", "--account", "a", "--json", *extra],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
+    )
+
+
+def test_hub_start_from_a_foreign_cwd_carries_the_broker_server_helper_and_allow_rules(tmp_path):
+    env = _broker_ready(tmp_path)
+    cred = Path(env["OUTPOST_STATE_DIR"]) / "sessions" / "sess-1" / "broker-client.json"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(json.dumps({"client_id": "cid", "client_secret": SECRET}))
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    result = _run_subprocess(env, foreign, "--broker-session", "sess-1")
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+    (file,) = out["files"]
+    config = json.loads(file["content"])
+    server = config["mcpServers"][CONTRACT["broker_server"]]
+    assert server["type"] == "http"
+    assert server["url"].endswith(CONTRACT["broker_mcp_path"])
+    assert server["url"].startswith("http://127.0.0.1:")
+    helper = server["headersHelper"]
+    assert helper.startswith(str(REPO / "bin" / "trailhead") + " broker-header --credential-file ")
+    assert helper.endswith(out["broker"]["credential_path"])
+    assert _flag_value(out["argv"], "--mcp-config") == file["path"]
+    assert "--strict-mcp-config" in out["argv"]
+    settings = json.loads(_flag_value(out["argv"], "--settings"))
+    assert settings["permissions"]["allow"] == [
+        f"mcp__{CONTRACT['broker_server']}__{CONTRACT['broker_tool']}"
+    ]
+    assert file["mode"] == "0600"
+    assert SECRET not in result.stdout
+    assert "headersHelper" not in " ".join(out["argv"]) and server["url"] not in " ".join(out["argv"])
+    assert SECRET not in json.dumps(out["env_set"])
+
+
+def test_the_mcp_config_file_sits_in_the_session_directory_the_hub_can_neither_read_nor_write(tmp_path):
+    env = _fence(tmp_path)
+    start = _start(env)
+    (file,) = start.files
+    settings = _settings_of(start)
+    fs = settings["sandbox"]["filesystem"]
+    path = Path(file.path)
+    assert path.parent == Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "s1"
+    assert _covered_by(fs["denyRead"], path)
+    assert _covered_by(fs["denyWrite"], path)
+
+
+def test_a_profile_naming_no_mcp_server_renders_none(tmp_path):
+    env = _fence(tmp_path)
+    profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
+    start = _start(env, profile=profile, broker=broker_launch("s1", env=env))
+    assert start.files == ()
+    assert "--mcp-config" not in start.argv and "--strict-mcp-config" not in start.argv
+    assert "allow" not in _settings_of(start)["permissions"]
+
+
+def test_a_profile_naming_the_broker_server_is_refused_without_a_broker_session(tmp_path):
+    env = _fence(tmp_path)
+    resolved = _resolved(env)
+    home = hub_home("a", env=env, platform="linux")
+    home.mkdir(parents=True)
+    Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+    with pytest.raises(HarnessError, match="broker"):
+        ClaudeCodeHarness().session_start(
+            resolved, home, None, interactive=True, account=None, env=env
+        )
+
+
+def test_cli_refuses_a_hub_start_without_a_broker_session_cleanly(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, ["session-start", "--role", "hub", "--account", "a", "--json"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "broker" in captured.err
+
+
+def test_the_helper_command_runs_by_absolute_path_from_a_foreign_cwd(tmp_path):
+    env = _broker_ready(tmp_path)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    out = json.loads(_run_subprocess(env, foreign, "--broker-session", "sess-1").stdout)
+    helper = json.loads(out["files"][0]["content"])["mcpServers"]["outpost"]["headersHelper"]
+    ran = subprocess.run(
+        ["sh", "-c", helper], cwd=foreign, env={**env, "PATH": "/usr/bin:/bin"},
+        capture_output=True, text=True, timeout=60,
+    )
+    assert ran.returncode == 1 and ran.stdout == ""
+    assert "credential-missing" in ran.stderr
+
+
+def test_a_helper_path_with_a_space_survives_the_shell(tmp_path):
+    env = _fence(tmp_path)
+    launch = broker_launch("s1", env=env, trailhead_bin="/opt/my tools/trailhead")
+    start = _start(env, broker=launch)
+    helper = json.loads(start.files[0].content)["mcpServers"]["outpost"]["headersHelper"]
+    import shlex
+
+    assert shlex.split(helper)[0] == "/opt/my tools/trailhead"
+    assert shlex.split(helper)[-1] == launch.credential_path
+
+
+def test_the_denied_reads_cover_the_database_and_session_credentials_and_follow_the_state_dir(tmp_path):
+    for name in ("one", "two"):
+        env = {**_fence(tmp_path), "OUTPOST_STATE_DIR": str(tmp_path.resolve() / name)}
+        settings = _settings_of(_start(env))
+        denied = settings["sandbox"]["filesystem"]["denyRead"]
+        base = Path(env["OUTPOST_STATE_DIR"])
+        assert _covered_by(denied, base / "state.db")
+        assert _covered_by(denied, base / "sessions" / "s1" / "broker-client.json")
+        assert _covered_by(denied, base / "operator" / "credential")
+        assert all(Path(d) == base for d in denied)
+
+
+def test_user_allowed_domains_the_profile_does_not_name_are_denied_in_the_session(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["a.example", "b.example"])
+    )
+    profile = LaunchProfile(
+        writable_roles=HUB_PROFILE.writable_roles, network_allowed_hosts=("a.example",)
+    )
+    assert _settings_of(_start(env, profile=profile))["sandbox"]["network"]["deniedDomains"] == ["b.example"]
+    bare = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles)
+    assert _settings_of(_start(env, profile=bare))["sandbox"]["network"]["deniedDomains"] == [
+        "a.example",
+        "b.example",
+    ]
+
+
+def test_a_wildcard_user_domain_covering_a_named_host_is_not_denied(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["*.a.example", "b.example"])
+    )
+    profile = LaunchProfile(
+        writable_roles=HUB_PROFILE.writable_roles, network_allowed_hosts=("x.a.example",)
+    )
+    assert _settings_of(_start(env, profile=profile))["sandbox"]["network"]["deniedDomains"] == ["b.example"]
+
+
+def test_no_user_allow_list_renders_no_denied_domains(tmp_path):
+    env = _fence(tmp_path)
+    assert "deniedDomains" not in _settings_of(_start(env))["sandbox"].get("network", {})
+
+
+# -- never-widen: every widening settings source (F4-F8) ------------------------
+
+
+def _permissive_user(env, **extra) -> Path:
+    home, lore, cache = _hub_roots(env)
+    return _write_user_settings(env, {**_user_allowing_hub(env), **extra})
+
+
+def test_a_managed_write_denial_over_a_hub_root_is_refused_naming_the_source(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [lore]}}})
+    with pytest.raises(HarnessError, match="managed") as raised:
+        _start(env)
+    assert lore in str(raised.value) and str(managed) in str(raised.value)
+    assert f"Remove or narrow it in {managed} so it no longer covers {lore}" in str(raised.value)
+
+
+@pytest.mark.parametrize("drop_in", [None, "20-sec.json"])
+def test_macos_managed_settings_are_read_from_the_application_support_directory(tmp_path, drop_in):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    managed = _write_managed(
+        tmp_path, {"sandbox": {"filesystem": {"denyWrite": [lore]}}}, drop_in=drop_in, fence="managed-fence-darwin"
+    )
+    with pytest.raises(HarnessError, match="managed") as raised:
+        _start(env, platform="darwin")
+    assert lore in str(raised.value) and str(managed) in str(raised.value)
+
+
+def test_linux_managed_settings_do_not_apply_on_macos_and_macos_ones_do_not_apply_on_linux(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [lore]}}})
+    assert _start(env, platform="darwin") is not None
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [cache]}}}, fence="managed-fence-darwin")
+    with pytest.raises(HarnessError, match="managed"):
+        _start(env, platform="linux")
+
+
+def test_a_managed_drop_in_read_denial_over_a_hub_root_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    managed = _write_managed(
+        tmp_path, {"sandbox": {"filesystem": {"denyRead": [cache]}}}, drop_in="20-sec.json"
+    )
+    with pytest.raises(HarnessError, match=cache) as raised:
+        _start(env)
+    assert f"Remove or narrow it in {managed} so it no longer covers {cache}" in str(raised.value)
+
+
+def test_a_managed_read_permission_rule_over_a_hub_root_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, {"permissions": {"deny": [f"Read(/{lore}/**)"]}})
+    with pytest.raises(HarnessError, match=lore) as raised:
+        _start(env)
+    assert f"Remove or narrow it in {managed} so it no longer covers {lore}" in str(raised.value)
+
+
+def test_a_managed_denial_elsewhere_does_not_block_the_launch(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    other = str(tmp_path.resolve() / "elsewhere")
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyWrite": [other], "denyRead": [other]}}})
+    assert _start(env) is not None
+
+
+def test_a_managed_excluded_command_is_denied_in_the_session(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"sandbox": {"excludedCommands": ["docker"]}})
+    assert "Bash(docker)" in _settings_of(_start(env))["permissions"]["deny"]
+
+
+def test_a_managed_write_allowance_counts_toward_what_the_profile_may_write(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(env, _user_sandbox(allowWrite=[".", cache]))
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"allowWrite": [lore]}}})
+    assert _start(env) is not None
+
+
+@pytest.mark.parametrize("content", ["{not json", "[]"])
+def test_malformed_managed_settings_refuse_the_launch_naming_the_file(tmp_path, content):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, content)
+    with pytest.raises(HarnessError, match="managed-settings.json") as raised:
+        _start(env)
+    assert str(managed) in str(raised.value)
+
+
+def test_a_managed_single_slash_read_rule_has_no_provable_anchor_and_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"permissions": {"deny": ["Read(/secrets/**)"]}})
+    with pytest.raises(HarnessError, match=r"Read\(/secrets/\*\*\)"):
+        _start(env)
+
+
+def test_a_single_slash_user_read_rule_is_relative_to_the_settings_dir_not_the_filesystem_root(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env, permissions={"deny": [f"Read({cache}/**)"]})
+    assert _start(env) is not None
+
+
+def test_a_single_slash_read_rule_covers_the_hub_root_it_resolves_to_under_the_account_dir(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    acct = tmp_path.resolve()
+    rule = "Read(/" + str(Path(cache).relative_to(acct)) + "/**)"
+    _write_user_settings(
+        env,
+        {**_user_allowing_hub(env), "permissions": {"deny": [rule]}},
+        account_dir=acct,
+    )
+    with pytest.raises(HarnessError, match=re.escape(rule)):
+        _start(env, account=str(acct))
+
+
+def test_a_double_slash_read_rule_is_an_absolute_path(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env, permissions={"deny": [f"Read(/{cache}/**)"]})
+    with pytest.raises(HarnessError, match=cache):
+        _start(env)
+
+
+def test_a_wildcard_read_rule_that_matches_a_hub_root_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    parent = str(Path(cache).parent.parent)
+    rule = f"Read(/{parent}/*/{Path(cache).name}/**)"
+    _permissive_user(env, permissions={"deny": [rule]})
+    with pytest.raises(HarnessError, match=re.escape(rule)) as raised:
+        _start(env)
+    assert f"so it no longer covers {cache}" in str(raised.value)
+
+
+def test_a_wildcard_read_rule_that_matches_no_hub_root_passes(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    parent = str(Path(cache).parent.parent)
+    _permissive_user(env, permissions={"deny": [f"Read(/{parent}/*/no-such-dir/**)"]})
+    assert _start(env) is not None
+
+
+@pytest.mark.parametrize("glob", ["{{cache_name},x}", "[a-z]ache"])
+def test_a_read_glob_the_check_cannot_evaluate_is_refused_naming_the_rule_and_the_remedy(tmp_path, glob):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    parent = str(Path(cache).parent)
+    rule = f"Read(/{parent}/{glob.replace('{cache_name}', Path(cache).name)}/**)"
+    _permissive_user(env, permissions={"deny": [rule]})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    assert rule in str(raised.value)
+    assert "rewrite it as Read(//absolute/path/**)" in str(raised.value)
+    assert "refusing the launch" in str(raised.value)
+
+
+def test_a_bare_read_everything_rule_covers_the_hub_home_and_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"deny": ["Read(**)"]})
+    with pytest.raises(HarnessError, match=r"Read\(\*\*\)"):
+        _start(env)
+
+
+def test_a_floating_filename_read_rule_does_not_block_the_hub(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"deny": ["Read(**/.env)", "Read(.env.*)"]})
+    assert _start(env) is not None
+
+
+def test_no_user_write_list_and_a_profile_root_outside_the_working_directory_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    user = _write_user_settings(env, {"model": "opus"})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert lore in text and str(user) in text
+    assert f"Add {lore} to 'sandbox.filesystem.allowWrite' in {user}" in text
+
+
+def test_an_absent_user_settings_file_is_refused_for_a_profile_root_outside_the_working_directory(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    with pytest.raises(HarnessError, match="sandbox.filesystem.allowWrite"):
+        _start(env, bare=True)
+
+
+def test_a_profile_with_only_working_directory_roots_needs_no_user_write_list(tmp_path):
+    env = _fence(tmp_path)
+    only_home = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles[:1])
+    assert _start(env, profile=only_home) is not None
+
+
+def test_the_default_account_with_an_ambient_config_dir_reads_and_trusts_where_the_session_will(tmp_path):
+    env = _fence(tmp_path)
+    ambient = tmp_path.resolve() / "ambient-account"
+    ambient.mkdir()
+    env["CLAUDE_CONFIG_DIR"] = str(ambient)
+    _permissive_user(env)
+    _write_user_settings(env, _user_sandbox(allowWrite=["."]), account_dir=ambient)
+    start = _start(env)
+    hub = hub_home("a", env=env, platform="linux").resolve()
+    seeded = json.loads((Path(env["HOME"]) / ".claude.json").read_text())
+    assert seeded["projects"][str(hub)]["hasTrustDialogAccepted"] is True
+    assert not (ambient / ".claude.json").exists()
+    assert "CLAUDE_CONFIG_DIR" in start.env_unset and start.env_set == {"PATH": env["PATH"]}
+
+
+# -- the headers helper's code must not be writable by the session -----------------
+
+
+def _launch_with_bin(env, binary: str):
+    return _start(env, broker=broker_launch("s1", env=env, trailhead_bin=binary))
+
+
+@pytest.mark.parametrize("root_index", [0, 1, 2])
+def test_a_helper_checkout_under_a_hub_write_root_is_refused_naming_path_and_remedy(off_temp, root_index):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    root = _hub_roots(env)[root_index]
+    binary = f"{root}/checkout/bin/trailhead"
+    with pytest.raises(HarnessError) as raised:
+        _launch_with_bin(env, binary)
+    assert binary in str(raised.value) and root in str(raised.value)
+    assert "Run trailhead from a checkout outside" in str(raised.value)
+    assert "refusing the launch" in str(raised.value)
+
+
+def test_a_helper_checkout_under_system_temp_is_refused(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    binary = f"{tempfile.gettempdir()}/some-checkout/bin/trailhead"
+    with pytest.raises(HarnessError, match="some-checkout"):
+        _launch_with_bin(env, binary)
+
+
+def test_a_helper_symlinked_into_a_hub_write_root_is_refused(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    cache = Path(_hub_roots(env)[2])
+    real = cache / "real" / "bin"
+    real.mkdir(parents=True)
+    (real / "trailhead").write_text("#!/bin/sh\n")
+    link_dir = tmp_path.resolve() / "elsewhere" / "bin"
+    link_dir.mkdir(parents=True)
+    (link_dir / "trailhead").symlink_to(real / "trailhead")
+    with pytest.raises(HarnessError, match="real/bin/trailhead"):
+        _launch_with_bin(env, str(link_dir / "trailhead"))
+
+
+def test_a_hub_write_root_inside_the_helper_package_is_refused(off_temp):
+    tmp_path = off_temp
+    base = tmp_path.resolve() / "checkout"
+    env = {**_fence(tmp_path), "XDG_CACHE_HOME": str(base / "trailhead" / "cache-home")}
+    _permissive_user(env)
+    with pytest.raises(HarnessError, match="checkout"):
+        _launch_with_bin(env, str(base / "bin" / "trailhead"))
+
+
+def test_a_python3_on_path_under_a_hub_write_root_is_refused(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    pybin = Path(_hub_roots(env)[2]) / "pybin"
+    pybin.mkdir(parents=True)
+    python = pybin / "python3"
+    python.write_text("#!/bin/sh\n")
+    python.chmod(0o755)
+    env["PATH"] = f"{pybin}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="python3") as raised:
+        _start(env)
+    assert str(pybin) in str(raised.value)
+
+
+@pytest.mark.parametrize("entry", ["bin", "./bin", ""])
+def test_a_relative_or_empty_path_entry_is_refused_naming_the_entry_and_the_remedy(off_temp, entry):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    env["PATH"] = f"/usr/bin:{entry}:/bin"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert "PATH" in text and (repr(entry) in text or entry == "")
+    assert "Remove it from the PATH Outpost runs with" in text
+    assert "refusing the launch" in text
+
+
+def test_a_path_entry_under_a_hub_write_root_is_refused_even_when_it_holds_no_python3(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    entry = f"{_hub_roots(env)[2]}/tools"
+    env["PATH"] = f"{entry}:{env['PATH']}"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert entry in text and "PATH" in text and "refusing the launch" in text
+    assert f"Put a PATH outside {_hub_roots(env)[2]}" in text
+
+
+def test_a_path_entry_that_contains_a_hub_write_root_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    entry = str(Path(_hub_roots(env)[2]).parent)
+    env["PATH"] = f"{entry}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="PATH"):
+        _start(env)
+
+
+def test_a_path_entry_symlinked_into_a_hub_write_root_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    cache = Path(_hub_roots(env)[2])
+    real = cache / "real-bin"
+    real.mkdir(parents=True)
+    link = off_temp.resolve() / "elsewhere-bin"
+    link.symlink_to(real)
+    env["PATH"] = f"{link}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="real-bin"):
+        _start(env)
+
+
+def test_a_path_entry_inside_a_hub_write_root_that_links_out_is_refused(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    cache = Path(_hub_roots(env)[2])
+    cache.mkdir(parents=True)
+    outside = off_temp.resolve() / "outside-bin"
+    outside.mkdir()
+    link = cache / "link-bin"
+    link.symlink_to(outside)
+    env["PATH"] = f"{link}:{env['PATH']}"
+    with pytest.raises(HarnessError, match="link-bin"):
+        _start(env)
+
+
+def test_a_path_entry_that_only_shares_a_name_prefix_with_a_write_root_passes(off_temp):
+    env = _fence(off_temp)
+    _permissive_user(env)
+    env["PATH"] = f"{_hub_roots(env)[2]}-tools:{env['PATH']}"
+    assert _start(env) is not None
+
+
+def test_the_same_launch_with_the_helper_code_outside_every_write_root_passes(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    assert _launch_with_bin(env, "/opt/trailhead-checkout/bin/trailhead") is not None
+
+
+# -- settings that let the hub write the helper's code through a tool, or leave the sandbox ---------
+
+
+def _edit_denies(start: SessionStart) -> list[str]:
+    return [r for r in _settings_of(start)["permissions"]["deny"] if r.startswith("Edit(")]
+
+
+def test_a_user_edit_allow_over_the_checkout_leaves_the_helper_code_denied_to_every_edit_tool(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    checkout = Path(env["HOME"]) / "code" / "trailhead"
+    _permissive_user(env, permissions={"allow": ["Edit(~/code/**)"]})
+    start = _launch_with_bin(env, f"{checkout}/bin/trailhead")
+    denies = _edit_denies(start)
+    for guarded in (
+        f"Edit(/{checkout}/bin/**)",
+        f"Edit(/{checkout}/trailhead/**)",
+        f"Edit(/{checkout}/pyproject.toml)",
+        f"Edit(/{checkout}/bin/trailhead)",
+    ):
+        assert guarded in denies
+
+
+def test_the_denied_helper_code_follows_where_the_checkout_is(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"allow": ["Edit(~/code/**)"]})
+    start = _launch_with_bin(env, "/opt/trailhead-checkout/bin/trailhead")
+    denies = _edit_denies(start)
+    assert "Edit(//opt/trailhead-checkout/bin/**)" in denies
+    assert not any(str(Path(env["HOME"]) / "code") in r for r in denies)
+
+
+def test_a_symlinked_helper_has_its_real_location_denied_too(off_temp):
+    tmp_path = off_temp
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    real = tmp_path.resolve() / "real-checkout" / "bin"
+    real.mkdir(parents=True)
+    (real / "trailhead").write_text("#!/bin/sh\n")
+    link_dir = tmp_path.resolve() / "link-checkout" / "bin"
+    link_dir.mkdir(parents=True)
+    (link_dir / "trailhead").symlink_to(real / "trailhead")
+    denies = _edit_denies(_launch_with_bin(env, str(link_dir / "trailhead")))
+    assert f"Edit(/{link_dir}/**)" in denies and f"Edit(/{real}/**)" in denies
+
+
+def test_outpost_state_is_denied_to_every_edit_tool_wherever_it_is(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    state = tmp_path.resolve() / "elsewhere-state"
+    env["OUTPOST_STATE_DIR"] = str(state)
+    denies = _edit_denies(_start(env))
+    assert f"Edit(/{state}/**)" in denies
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"permissions": {"allow": ["Edit"]}},
+        {"permissions": {"allow": ["Write"]}},
+        {"permissions": {"allow": ["Edit(//opt/**)"]}},
+        {"permissions": {"additionalDirectories": ["/opt"]}},
+    ],
+)
+def test_path_directories_are_denied_to_edit_tools_when_user_settings_grant_file_access(tmp_path, extra):
+    env = _fence(tmp_path)
+    _permissive_user(env, **extra)
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" in _edit_denies(_start(env))
+
+
+def test_path_directories_are_left_alone_when_nothing_grants_file_access(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env, permissions={"allow": ["Bash(ls)"]})
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" not in _edit_denies(_start(env))
+
+
+def test_a_managed_edit_allow_also_denies_path_directories(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"permissions": {"allow": ["Write"]}})
+    env["PATH"] = f"/opt/tools/bin:{env['PATH']}"
+    assert "Edit(//opt/tools/bin/**)" in _edit_denies(_start(env))
+
+
+@pytest.mark.parametrize(
+    "setting, key",
+    [
+        ({"enabled": False}, "sandbox.enabled"),
+        ({"allowUnsandboxedCommands": True}, "sandbox.allowUnsandboxedCommands"),
+    ],
+)
+def test_managed_settings_that_turn_the_sandbox_off_refuse_naming_file_key_and_remedy(tmp_path, setting, key):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, {"sandbox": setting})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(managed) in text and key in text
+    assert f"Remove {key} from {managed}" in text and "refusing the launch" in text
+
+
+def test_a_managed_drop_in_that_turns_the_sandbox_back_on_wins_over_the_base_file(tmp_path):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"sandbox": {"enabled": False}})
+    _write_managed(tmp_path, {"sandbox": {"enabled": True}}, drop_in="50-on.json")
+    assert _settings_of(_start(env))["sandbox"]["enabled"] is True
+
+
+def test_a_user_level_sandbox_off_is_overridden_by_the_hubs_own_settings(tmp_path):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"].update({"enabled": False, "allowUnsandboxedCommands": True})
+    _write_user_settings(env, user)
+    sandbox = _settings_of(_start(env))["sandbox"]
+    assert sandbox["enabled"] is True and sandbox["allowUnsandboxedCommands"] is False
+
+
+_WIDENERS = [
+    (("network",), "allowLocalBinding"),
+    (("network",), "allowAllUnixSockets"),
+    (("filesystem",), "disabled"),
+]
+
+
+def _sandbox_with(section: tuple[str, ...], key: str, value) -> dict:
+    return {"sandbox": {"enabled": True, section[0]: {key: value}}}
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_user_level_widening_flag_is_rendered_false_for_the_hub(tmp_path, section, key):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"].setdefault(section[0], {})[key] = True
+    _write_user_settings(env, user)
+    assert _settings_of(_start(env))["sandbox"][section[0]][key] is False
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_flag_the_user_leaves_unset_or_false_renders_nothing(tmp_path, section, key):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    _write_user_settings(env, user)
+    assert key not in _settings_of(_start(env))["sandbox"].get(section[0], {})
+
+
+@pytest.mark.parametrize("section, key", _WIDENERS)
+def test_a_managed_widening_flag_refuses_naming_file_key_and_remedy(tmp_path, section, key):
+    env = _fence(tmp_path)
+    _permissive_user(env)
+    managed = _write_managed(tmp_path, _sandbox_with(section, key, True))
+    label = f"sandbox.{section[0]}.{key}"
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(managed) in text and label in text
+    assert f"Remove {label} from {managed}" in text and "refusing the launch" in text
+
+
+@pytest.mark.parametrize("where", ["user", "managed"])
+def test_a_non_empty_unix_socket_allow_list_refuses_because_lists_cannot_be_narrowed(tmp_path, where):
+    env = _fence(tmp_path)
+    sockets = {"network": {"allowUnixSockets": ["/var/run/docker.sock"]}}
+    if where == "user":
+        user = _user_allowing_hub(env)
+        user["sandbox"].update(sockets)
+        source = _write_user_settings(env, user)
+    else:
+        _permissive_user(env)
+        source = _write_managed(tmp_path, {"sandbox": sockets})
+    with pytest.raises(HarnessError) as raised:
+        _start(env)
+    text = str(raised.value)
+    assert str(source) in text and "sandbox.network.allowUnixSockets" in text
+    assert f"Remove sandbox.network.allowUnixSockets from {source}" in text
+
+
+def test_an_empty_unix_socket_allow_list_launches(tmp_path):
+    env = _fence(tmp_path)
+    user = _user_allowing_hub(env)
+    user["sandbox"]["network"] = {"allowUnixSockets": []}
+    _write_user_settings(env, user)
+    assert _start(env) is not None
+
+
+def test_a_bare_read_rule_matches_at_any_depth_under_the_launch_directory_but_a_dot_slash_rule_does_not(tmp_path):
+    env = _fence(tmp_path)
+    Path(env["HOME"]).mkdir(parents=True)
+    fence = Path(env["HOME"]).parent
+    writable = {"sandbox": {"filesystem": {"allowWrite": list(_hub_roots(env))}}}
+    _write_user_settings(env, {**writable, "permissions": {"deny": ["Read(./hubs/**)"]}})
+    assert _start_in(env, fence) is not None
+    _write_user_settings(env, {**writable, "permissions": {"deny": ["Read(hubs/**)"]}})
+    with pytest.raises(HarnessError, match=re.escape("Read(hubs/**)")):
+        _start_in(env, fence)
+
+
+def test_a_helper_checkout_under_the_session_directory_is_refused(off_temp):
+    env = _fence(off_temp)
+    elsewhere = off_temp.resolve() / "elsewhere"
+    elsewhere.mkdir()
+    _write_user_settings(env, {"sandbox": {"filesystem": {"allowWrite": list(_hub_roots(env))}}})
+    binary = str(elsewhere / "bin" / "trailhead")
+    with pytest.raises(HarnessError, match=re.escape(binary)):
+        ClaudeCodeHarness().session_start(
+            _resolved(env), elsewhere, None, interactive=True, account=None, env=env,
+            broker=broker_launch("s1", env=env, trailhead_bin=binary),
+        )
