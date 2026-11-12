@@ -1581,6 +1581,15 @@ class ClaudeCodeHarness(Harness):
     def cli_binary_name(self) -> str | None:
         return "claude"
 
+    def recognizes_process(self, comm: str, exe: str | None) -> bool:
+        """The process is named ``claude`` AND runs a version-named file under a
+        ``claude/versions`` directory (the installed layout; ``claude`` on PATH is a
+        symlink to it, and ``/proc/<pid>/exe`` resolves that symlink)."""
+        if comm != "claude" or not exe:
+            return False
+        versions = Path(exe).parent
+        return versions.name == "versions" and versions.parent.name == "claude"
+
     # -- manifest -------------------------------------------------------------
 
     def generate_manifest(self, tools: list[str], composed_root: Path) -> None:

@@ -9,3 +9,4 @@
 [tool]
 name = "outpost"
 ruleset = "rules.md"
+hooks_json = "hooks/hooks.json"

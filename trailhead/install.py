@@ -75,6 +75,8 @@ from trailhead.wire import LockError, WireError, default_manifest_paths, wire, w
 _REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
+_GATEWAY_BIN = _REPO_ROOT / "bin" / "outpost-gateway"
+_GATEWAY_SCRIPT = _REPO_ROOT / "bin" / "_outpost_gateway.py"
 
 
 def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
@@ -97,6 +99,11 @@ def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
     return tools
 
 
+def outpost_enabled(cfg) -> bool:
+    """Whether the resolved config installs the Outpost plugin into any harness."""
+    return any(p.name == "outpost" for h in cfg.harnesses for p in h.plugins)
+
+
 def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[str, Path]:
     """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` when it is
     executable and ``bin/ranger`` when present — of *root* when given, else of this checkout."""
@@ -110,8 +117,16 @@ def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[st
     return tools
 
 
-def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str], root: Path | None = None) -> Path | None:
-    """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``; the one shim
+def build_cli_shims(
+    cli_tools: dict[str, Path],
+    *,
+    env: dict[str, str],
+    root: Path | None = None,
+    outpost_enabled: bool = False,
+) -> Path | None:
+    """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``
+    (plus an ``outpost-gateway`` shim pinned to this interpreter when *outpost_enabled*,
+    because the harness runs that command outside its sandbox); the one shim
     build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
@@ -122,7 +137,13 @@ def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str], root: Pa
     if not cli_tools:
         return None
     shim_root = _REPO_ROOT if root is None else root
-    return create_shims(_with_own_binaries(cli_tools, root), str(shim_root), env=env).shim_dir
+    pinned = {}
+    gateway_script = _GATEWAY_SCRIPT if root is None else root / "bin" / "_outpost_gateway.py"
+    if outpost_enabled and gateway_script.exists():
+        pinned["outpost-gateway"] = gateway_script
+    return create_shims(
+        _with_own_binaries(cli_tools, root), str(shim_root), env=env, pinned_scripts=pinned
+    ).shim_dir
 
 
 def install_user_rulesets(
@@ -388,7 +409,7 @@ def run_install(
     shim_build_failed = False
     if cli_tools:
         try:
-            shim_dir = build_cli_shims(cli_tools, env=_env)
+            shim_dir = build_cli_shims(cli_tools, env=_env, outpost_enabled=outpost_enabled(cfg))
         except Exception as exc:
             # M1: a shim-dir failure is a warning — wiring succeeded.
             shim_build_failed = True
@@ -525,6 +546,8 @@ def _print_human_summary(
     path_clis = clis if shim_dir is not None else []
     if shim_dir is not None and _RANGER_BIN.exists():
         path_clis = [*path_clis, "ranger"]
+    if shim_dir is not None and outpost_enabled(cfg) and _GATEWAY_BIN.exists():
+        path_clis = [*path_clis, "outpost-gateway"]
     commands = list(path_clis)
     if trailhead_available:
         commands.append("trailhead")

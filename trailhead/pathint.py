@@ -11,7 +11,9 @@ PATH) for your shell — exactly like ``brew shellenv``.  For the plugin CLIs
 (camp/lore), the shim dir's *contents* encode which were selected
 (``--no-camp`` etc.), so a single PATH entry is all the profile needs for
 them, and re-running install updates it in place. The management CLI itself
-(``trailhead``) is handled separately — see below — never via a shim.
+(``trailhead``) is reached from a shell by the function described below; install
+also writes a ``trailhead`` shim when the Outpost tool is enabled, for the Outpost
+SessionStart hook, which runs under a plain ``sh`` where that function is not defined.
 
 camp is the forcing case: it's the front door, run outside any Claude Code
 session.  Each shim hardcodes TRAILHEAD_ROOT so the monorepo is reachable
@@ -24,7 +26,7 @@ every shell startup, never from install-time state. Emitted unconditionally of
 which CLIs were selected, and only when ``<repo-root>/bin/trailhead`` exists
 and is executable — a non-editable pip install has no checkout alongside it,
 so nothing is emitted and the rest of the output stays eval-valid. The
-function never enters the shim dir or the CLI selection machinery.
+function itself never enters the shim dir or the CLI selection machinery.
 
 Shell detection: ``$SHELL`` basename, with a ``--shell`` override (fish|zsh|bash).
   fish → ``set -gx`` / ``fish_add_path``;  zsh/bash → ``export``.
@@ -40,6 +42,7 @@ match raises ``PathIntegrationError`` instead of emitting unsafe output.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -167,6 +170,7 @@ def create_shims(
     trailhead_root: str,
     *,
     env: dict[str, str] | None = None,
+    pinned_scripts: dict[str, Path] | None = None,
 ) -> ShimDirResult:
     """Create the trailhead-managed shim directory, one wrapper per tool.
 
@@ -175,12 +179,21 @@ def create_shims(
                         wrapper (e.g. tools/camp/plugins/camp/bin/camp).
         trailhead_root: Absolute trailhead repo root, hardcoded into each shim.
         env:            Environment dict override for path resolution.
+        pinned_scripts: Mapping of CLI name → Python script, for commands that run
+                        outside the harness sandbox. Their shim runs the script on
+                        the interpreter running this install (symlinks resolved,
+                        so a venv's python becomes the base one), isolated with
+                        ``-I -S``: nothing the session controls through PATH,
+                        PYTHON* variables, cwd, user site or a venv's site-packages
+                        can put code in front of it. Such a name need not be in
+                        *wired_tools*.
 
     Raises:
         ShimDenylistError:    If any name matches the system-binary denylist.
         PathIntegrationError: If the shim dir cannot be created/written.
     """
-    for name in wired_tools:
+    pinned_scripts = pinned_scripts or {}
+    for name in [*wired_tools, *pinned_scripts]:
         if name in _SHIM_DENYLIST:
             raise ShimDenylistError(
                 f"refused to create shim named {name!r}: matches system-binary "
@@ -194,6 +207,11 @@ def create_shims(
         for name, bin_path in wired_tools.items():
             shim_path = shim_dir / name
             shim_path.write_text(_shim_content(name, bin_path, trailhead_root))
+            shim_path.chmod(0o700)
+            shims[name] = shim_path
+        for name, script in pinned_scripts.items():
+            shim_path = shim_dir / name
+            shim_path.write_text(_pinned_shim_content(name, script, trailhead_root))
             shim_path.chmod(0o700)
             shims[name] = shim_path
     except OSError as exc:
@@ -212,6 +230,39 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
         f"# trailhead-managed shim for {name}\n"
         f'export TRAILHEAD_ROOT="{trailhead_root}"\n'
         f'exec "{bin_path}" "$@"\n'
+    )
+
+
+# What the pinned gateway command reads from its environment: HOME and the state-dir
+# variables ``trailhead.paths.state_dir`` consults. Everything else is dropped, including
+# the dynamic-loader variables (LD_*, DYLD_*), and PATH is fixed so the ``ps`` it runs on
+# macOS is the system one.
+_PINNED_SHIM_ENV = ("HOME", "TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "XDG_STATE_HOME")
+_PINNED_SHIM_PATH = "/usr/bin:/bin"
+
+
+def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
+    """A ``/bin/sh`` shim running *script* on this process's interpreter, isolated.
+
+    ``/bin/sh`` rather than ``env bash``, and ``/usr/bin/env`` by absolute path: neither
+    may be looked up through PATH. The interpreter starts from an empty environment
+    carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed PATH, so a loader variable
+    the session exported cannot reach it.
+    """
+    interpreter = os.path.realpath(sys.executable)
+    for label, value in (
+        ("the shim name", name),
+        ("TRAILHEAD_ROOT", trailhead_root),
+        ("the shim's script path", str(script)),
+        ("the shim's interpreter path", interpreter),
+    ):
+        _reject_unsafe_for_eval(value, label=label)
+    passed = " ".join(f'${{{var}:+{var}="${var}"}}' for var in _PINNED_SHIM_ENV)
+    return (
+        "#!/bin/sh\n"
+        f"# trailhead-managed shim for {name}\n"
+        f'exec /usr/bin/env -i PATH="{_PINNED_SHIM_PATH}" TRAILHEAD_ROOT="{trailhead_root}" '
+        f'{passed} "{interpreter}" -I -S "{script}" "$@"\n'
     )
 
 

@@ -1,0 +1,32 @@
+#!/bin/sh
+# SessionStart hook: register this session with Outpost's gateway
+# (`trailhead gateway register --hook`), so a session started by hand in a camp
+# workspace can use the gateway.
+#
+# Composition ships only this hooks/ directory, so the trailhead CLI is the shim
+# `trailhead install` writes under state_dir("trailhead")/bin (TRAILHEAD_STATE_DIR,
+# else $XDG_STATE_HOME/trailhead, else ~/.local/state/trailhead, mirroring
+# trailhead/paths.py). The hook runs unsandboxed, so it never consults PATH: only that
+# shim is run. The hook input on stdin is not read: the step takes nothing from its
+# caller. Every path exits 0 and prints nothing to stdout; when the shim is missing or
+# not executable the hook appends `<timestamp> - cli_not_found` to
+# <state>/gateway/register.log, the log the registration step itself writes.
+
+if [ -n "${TRAILHEAD_STATE_DIR:-}" ]; then
+    state="$TRAILHEAD_STATE_DIR"
+elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    state="$XDG_STATE_HOME/trailhead"
+else
+    state="${HOME:-}/.local/state/trailhead"
+fi
+
+trailhead="$state/bin/trailhead"
+if [ ! -x "$trailhead" ]; then
+    # Leave the one-line trace `outpost-gateway` points an operator at.
+    { mkdir -p "$state/gateway" &&
+        printf '%s - cli_not_found\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$state/gateway/register.log"; } 2>/dev/null
+    exit 0
+fi
+
+"$trailhead" gateway register --hook >/dev/null
+exit 0

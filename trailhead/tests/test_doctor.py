@@ -1510,3 +1510,24 @@ class TestOutpostConfigFixIdempotence:
         for var in ("HOME", "OUTPOST_CONFIG_DIR", "XDG_CONFIG_HOME", "TMPDIR"):
             assert Path(run_env[var]).is_relative_to(tmp_path)
         assert run_env["PATH"].split(":")[0].startswith(str(tmp_path))
+
+
+class TestOutpostGatewayField:
+    """`outpost-gateway` is a trailhead-shipped shim, not a manifest CLI: doctor reports
+    it as its own field and names it in the CLIs-on-PATH block."""
+
+    def test_reports_the_resolved_path(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path),
+            which_runner=lambda n: "/shim/outpost-gateway" if n == "outpost-gateway" else None,
+            python_version_runner=_fake_py,
+        )
+        assert r.data["outpost_gateway"] == "/shim/outpost-gateway"
+        assert "    outpost-gateway: /shim/outpost-gateway" in r.human_output
+
+    def test_reports_not_on_path(self, tmp_path):
+        r = run_doctor(
+            env=_env(tmp_path), which_runner=lambda n: None, python_version_runner=_fake_py
+        )
+        assert r.data["outpost_gateway"] is None
+        assert "    outpost-gateway: not on PATH" in r.human_output
