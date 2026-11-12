@@ -19,25 +19,54 @@ pytestmark = pytest.mark.seam_real
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
-REAL_LORE_DIRS = [Path.home() / ".config" / "lore", Path.home() / ".local" / "state" / "lore"]
+REAL_LORE_CONFIG_DIR = Path.home() / ".config" / "lore"
 REAL_TRAILHEAD_STATE = [core_copy_dir(), core_copy_dir().parent / MARKER_NAME]
 
 
-def _mtimes(roots):
+def _content_snapshot(roots, read=Path.read_bytes):
+    """Existence and content of every entry under each root, symlinks not followed.
+
+    A file that vanishes between listing and reading is left out of the snapshot.
+    """
     out = {}
-    for r in roots:
-        if r.exists():
-            for p in [r, *r.rglob("*")]:
-                out[str(p)] = p.stat().st_mtime_ns
+    for root in roots:
+        if not (root.exists() or root.is_symlink()):
+            continue
+        for p in [root, *sorted(root.rglob("*"))] if root.is_dir() and not root.is_symlink() else [root]:
+            try:
+                if p.is_symlink():
+                    out[str(p)] = ("link", os.readlink(p))
+                elif p.is_dir():
+                    out[str(p)] = "dir"
+                else:
+                    out[str(p)] = read(p)
+            except FileNotFoundError:
+                continue
     return out
+
+
+def test_content_snapshot_tolerates_a_file_vanishing_mid_run(tmp_path):
+    transient = tmp_path / "state" / "transient.db-wal"
+    transient.parent.mkdir()
+    transient.write_bytes(b"x")
+    (tmp_path / "state" / "a.txt").write_bytes(b"a")
+
+    def reader(p):
+        transient.unlink(missing_ok=True)
+        return p.read_bytes()
+
+    snap = _content_snapshot([tmp_path / "state"], read=reader)
+
+    assert snap[str(tmp_path / "state" / "a.txt")] == b"a"
+    assert str(transient) not in snap
 
 
 @pytest.fixture(autouse=True)
 def _real_lore_untouched():
-    watched = [*REAL_LORE_DIRS, *REAL_TRAILHEAD_STATE]
-    before = _mtimes(watched)
+    watched = [REAL_LORE_CONFIG_DIR, *REAL_TRAILHEAD_STATE]
+    before = _content_snapshot(watched)
     yield
-    assert _mtimes(watched) == before, "the real lore config/state or trailhead core-vault state was modified"
+    assert _content_snapshot(watched) == before, "the real lore config or trailhead core-vault copy was modified"
 
 
 @pytest.fixture

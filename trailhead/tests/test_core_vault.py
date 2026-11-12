@@ -2,6 +2,7 @@
 
 import json
 import os
+import stat
 import subprocess
 from pathlib import Path
 
@@ -186,28 +187,87 @@ def test_leftover_staging_and_backup_swept_on_next_sync(source, dest):
     assert _files(dest) == _files(source)
 
 
-def test_preexisting_staging_symlink_is_refused_before_writing(source, dest, tmp_path):
+@pytest.mark.parametrize("prefix", ["staging", "old"])
+@pytest.mark.parametrize("kind", ["file", "symlink"])
+def test_non_directory_leftover_sibling_is_removed_and_sync_succeeds(prefix, kind, source, dest, tmp_path):
     sync_core_copy(source, dest)
     (source / "records/a.md").write_bytes(b"alpha v2\n")
     victim = _write(tmp_path / "victim", {"v.md": b"v"})
-    (dest.parent / f".{dest.name}.staging-evil").symlink_to(victim)
-    before = _files(dest)
+    leftover = dest.parent / f".{dest.name}.{prefix}-evil"
+    if kind == "symlink":
+        leftover.symlink_to(victim)
+    else:
+        leftover.write_bytes(b"f")
 
-    with pytest.raises(CoreVaultSyncError, match="staging"):
-        sync_core_copy(source, dest)
+    assert sync_core_copy(source, dest) is True
 
-    assert _files(dest) == before
+    assert _siblings(dest) == []
+    assert _files(dest) == _files(source)
     assert _files(victim) == {"v.md": b"v"}
 
 
-def test_preexisting_staging_file_is_refused(source, dest):
+def test_non_directory_leftover_sibling_does_not_block_first_sync(source, dest):
     dest.parent.mkdir(parents=True)
     (dest.parent / f".{dest.name}.staging-file").write_bytes(b"f")
 
-    with pytest.raises(CoreVaultSyncError, match="staging"):
-        sync_core_copy(source, dest)
+    assert sync_core_copy(source, dest) is True
 
-    assert not dest.exists()
+    assert _siblings(dest) == []
+    assert _files(dest) == _files(source)
+
+
+def _tree(root: Path) -> dict[str, object]:
+    """Every entry under root, dot-names included, symlinks reported not followed."""
+    out: dict[str, object] = {}
+    for current, dirs, names in os.walk(root, followlinks=False):
+        for name in [*dirs, *names]:
+            p = Path(current) / name
+            rel = str(p.relative_to(root))
+            if p.is_symlink():
+                out[rel] = ("link", os.readlink(p))
+            elif p.is_dir():
+                out[rel] = "dir"
+            else:
+                out[rel] = p.read_bytes()
+    return out
+
+
+def _plant_dot_kind(dest, outside):
+    _write(dest, {".kind/z.json": b"{}", ".kind/z.md": b"z\n"})
+
+
+def _plant_dot_record(dest, outside):
+    _write(dest, {"records/.h.json": b"{}", "records/.h.md": b"h\n"})
+
+
+def _plant_dot_symlink(dest, outside):
+    (dest / ".link").symlink_to(outside)
+
+
+def _plant_extra_file(dest, outside):
+    _write(dest, {"extra.md": b"extra\n"})
+
+
+def _plant_empty_dir(dest, outside):
+    (dest / "emptykind").mkdir()
+
+
+@pytest.mark.parametrize(
+    "plant",
+    [_plant_dot_kind, _plant_dot_record, _plant_dot_symlink, _plant_extra_file, _plant_empty_dir],
+    ids=lambda f: f.__name__,
+)
+def test_planted_dest_entry_makes_the_copy_differ_and_is_rebuilt(plant, source, dest, tmp_path):
+    sync_core_copy(source, dest)
+    outside = _write(tmp_path / "outside", {"o.md": b"outside\n"})
+    plant(dest, outside)
+    assert _tree(dest) != _tree(source)
+
+    assert sync_core_copy(source, dest) is True
+
+    assert _tree(dest) == _tree(source)
+    assert _tree(outside) == {"o.md": b"outside\n"}
+    assert _siblings(dest) == []
 
 
 def test_dot_files_ignored_in_compare_and_copy(source, dest):
@@ -218,6 +278,21 @@ def test_dot_files_ignored_in_compare_and_copy(source, dest):
     (source / "records/a.md").write_bytes(b"alpha v2\n")
     assert sync_core_copy(source, dest) is True
     assert _files(dest) == {k: v for k, v in _files(source).items() if ".DS_Store" not in k}
+
+
+def test_fd_level_non_regular_check_refuses_even_after_the_lstat_passed(source, dest):
+    sync_core_copy(source, dest)
+    (source / "records/a.md").write_bytes(b"alpha v2\n")
+    before = _tree(dest)
+
+    def fifo_fstat(fd):
+        return os.stat_result((stat.S_IFIFO | 0o644, 0, 0, 1, 0, 0, 0, 0, 0, 0))
+
+    with pytest.raises(CoreVaultSyncError, match="non-regular entry"):
+        sync_core_copy(source, dest, fstat=fifo_fstat)
+
+    assert _tree(dest) == before
+    assert _siblings(dest) == []
 
 
 def test_before_swap_runs_once_on_change_with_old_bytes_visible(source, dest):
@@ -655,6 +730,24 @@ def test_marker_is_written_before_the_swap(source, cenv, copy, capsys):
     assert (copy / "records" / "a.md").read_bytes() != b"alpha v3\n"
     assert (copy.parent / MARKER_NAME).exists()
     assert lore.writes == []
+
+
+def test_symlinked_marker_is_replaced_and_its_target_left_alone(source, cenv, copy, tmp_path, capsys):
+    lore = FakeLore([])
+    _run(source, cenv, lore, capsys)
+    target = tmp_path / "victim.txt"
+    target.write_bytes(b"precious\n")
+    marker = copy.parent / MARKER_NAME
+    marker.symlink_to(target)
+    (source / "records" / "a.md").write_bytes(b"alpha v4\n")
+    lore.reindex_rc = 1
+
+    out, _ = _run(source, cenv, lore, capsys)
+
+    assert out.outcome == "failed" and "reindex" in out.reason
+    assert target.read_bytes() == b"precious\n"
+    assert not marker.is_symlink()
+    assert marker.read_text() == "reindex pending\n"
 
 
 def test_sync_error_warns_and_registers_nothing(tmp_path, cenv, capsys):

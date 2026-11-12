@@ -7,19 +7,22 @@ Contract:
   source, never written by lore. Install copies it into a directory trailhead
   owns (``core_copy_dir``); nothing else writes there.
 * ``sync_core_copy`` makes ``dest`` hold exactly the source's regular files,
-  compared by relative path and bytes. Dot-files and dot-directories (such as
-  ``.DS_Store``) are ignored on both sides of the compare and in the copy.
+  compared by relative path and bytes. Dot-files and dot-directories in the source
+  (such as ``.DS_Store``) are ignored and never copied. The copy is compared strictly:
+  a dot-name, symlink, non-regular entry, empty directory or any other entry the
+  source would not produce makes it differ, so it is rebuilt.
 * When ``dest`` already matches, nothing is written and False is returned.
   Otherwise the tree is built in a uniquely named staging sibling and swapped
   in by rename, so ``dest`` is never half-written, and True is returned.
 * Leftover staging/backup siblings from a crashed run are swept before a
-  changing sync starts.
+  changing sync starts; one that is a file or symlink is unlinked (a symlink is
+  never followed).
 * ``before_swap``, when given, is called exactly once, after staging is fully
   built and before the swap, and only when ``dest`` is going to change.
-* Symlinks and other non-regular source entries, a missing source, a ``dest``
-  that is a symlink or not a directory, and a staging-named sibling that is a
-  symlink or not a directory all raise ``CoreVaultSyncError`` before anything
-  is written.
+* Symlinks and other non-regular source entries (checked on the opened file
+  descriptor, never following a symlink), a missing source, and a ``dest`` that is
+  a symlink or not a directory raise ``CoreVaultSyncError`` before anything is
+  written.
 
 ``install_core_vault`` is the install step built on that sync. It asks lore
 (``lore vault ls --json``, never lore's config file) what is registered, then:
@@ -40,7 +43,8 @@ vault entry whose path cannot be compared all happen before anything is written
 deletes or edits a registration.
 
 Reindex marker: ``core-vault.reindex-pending`` sits beside the copy in
-trailhead's state dir (outside the vault). It is written before a changed copy
+trailhead's state dir (outside the vault). It is written (as a fresh regular file; a
+symlink or file already there is replaced, never followed) before a changed copy
 is swapped in and removed only after ``lore reindex`` succeeds, or after a fresh
 ``vault add`` succeeds (it indexes the copy itself, so a stale marker needs no
 separate reindex). A failed or interrupted refresh, or a failed ``vault add``,
@@ -92,25 +96,69 @@ def core_copy_dir(env: dict[str, str] | None = None) -> Path:
     return state_dir("trailhead", env=env) / "core-vault"
 
 
-def _read_tree(root: Path, *, label: str) -> dict[str, bytes]:
+def _read_regular(path: Path, *, label: str, fstat: Callable[[int], os.stat_result]) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    fd = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(fstat(fd).st_mode):
+            raise CoreVaultSyncError(f"{label} contains a non-regular entry: {path}")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            return handle.read()
+    finally:
+        os.close(fd)
+
+
+def _read_tree(
+    root: Path,
+    *,
+    label: str,
+    fstat: Callable[[int], os.stat_result] = os.fstat,
+    strict: bool = False,
+) -> dict[str, bytes]:
+    """Read ``root``'s regular files by relative path, never following a symlink.
+
+    Non-strict (the source) skips dot-names. Strict (the copy) skips nothing and
+    refuses an empty directory, so any entry the source would not have produced
+    raises ``CoreVaultSyncError``.
+    """
     files: dict[str, bytes] = {}
 
-    def walk(directory: Path) -> None:
+    def walk(directory: Path) -> bool:
+        has_file = False
         for entry in sorted(directory.iterdir()):
-            if entry.name.startswith("."):
+            if not strict and entry.name.startswith("."):
                 continue
             mode = entry.lstat().st_mode
             if stat.S_ISLNK(mode):
                 raise CoreVaultSyncError(f"{label} contains a symlink: {entry}")
             if stat.S_ISDIR(mode):
-                walk(entry)
+                if not walk(entry) and strict:
+                    raise CoreVaultSyncError(f"{label} contains an empty directory: {entry}")
+                has_file = True
             elif stat.S_ISREG(mode):
-                files[entry.relative_to(root).as_posix()] = entry.read_bytes()
+                files[entry.relative_to(root).as_posix()] = _read_regular(entry, label=label, fstat=fstat)
+                has_file = True
             else:
                 raise CoreVaultSyncError(f"{label} contains a non-regular entry: {entry}")
+        return has_file
 
     walk(root)
     return files
+
+
+def _write_marker(marker: Path) -> None:
+    """Write the marker as a fresh regular file; a link or file already there is replaced, never followed."""
+    marker.unlink(missing_ok=True)
+    fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o666)
+    with os.fdopen(fd, "w") as handle:
+        handle.write("reindex pending\n")
+
+
+def _remove_leftover(path: Path) -> None:
+    if _is_real_dir(path):
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def _is_real_dir(path: Path) -> bool:
@@ -130,10 +178,11 @@ def sync_core_copy(
     *,
     before_swap: Callable[[], None] | None = None,
     rename: Callable[[Path, Path], None] = os.rename,
+    fstat: Callable[[int], os.stat_result] = os.fstat,
 ) -> bool:
     """Make ``dest`` mirror ``source``'s regular files; return whether it changed.
 
-    ``rename`` performs the swap renames; tests inject a failing one.
+    ``rename`` performs the swap renames and ``fstat`` checks each opened file; tests inject them.
     """
     source = Path(source)
     dest = Path(dest)
@@ -142,26 +191,21 @@ def sync_core_copy(
         raise CoreVaultSyncError(f"core-vault source is missing: {source}")
     if not _is_real_dir(source):
         raise CoreVaultSyncError(f"core-vault source is not a directory: {source}")
-    wanted = _read_tree(source, label="core-vault source")
+    wanted = _read_tree(source, label="core-vault source", fstat=fstat)
 
     dest_exists = os.path.lexists(dest)
     if dest_exists and not _is_real_dir(dest):
         raise CoreVaultSyncError(f"core-vault dest is a symlink or not a directory: {dest}")
     if dest_exists:
         try:
-            if _read_tree(dest, label="core-vault dest") == wanted:
+            if _read_tree(dest, label="core-vault dest", fstat=fstat, strict=True) == wanted:
                 return False
         except CoreVaultSyncError:
             pass
 
-    leftovers = _leftovers(dest)
-    for stale in leftovers:
-        if not _is_real_dir(stale):
-            raise CoreVaultSyncError(f"core-vault staging path is a symlink or not a directory: {stale}")
-
     dest.parent.mkdir(parents=True, exist_ok=True)
-    for stale in leftovers:
-        shutil.rmtree(stale)
+    for stale in _leftovers(dest):
+        _remove_leftover(stale)
 
     staging = Path(tempfile.mkdtemp(prefix=f".{dest.name}.staging-", dir=dest.parent))
     old: Path | None = None
@@ -347,7 +391,7 @@ def install_core_vault(
 
     def write_marker() -> None:
         if owned:
-            marker.write_text("reindex pending\n")
+            _write_marker(marker)
 
     try:
         changed = sync_core_copy(source, copy, before_swap=write_marker, rename=rename)
