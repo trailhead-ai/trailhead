@@ -207,6 +207,22 @@ def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[d
     return ("base-unresolved" if resolved is None else "ok"), [c for c in touched if c["merge_only"]]
 
 
+def repo_has_merge_only(repo: Path) -> bool:
+    """Whether any mapping in ``repo`` holds a ``merge_only`` case, touched or not. An invalid mapping
+    answers True: an unknown answer is never read as "no merge-only case"."""
+    repo = Path(repo).resolve()
+    tracked = [p for p in _git(repo, "ls-files", "-z").split("\0") if p]
+    try:
+        return any(c["merge_only"] for c in select_touched(repo, "HEAD", tracked))
+    except MappingError:
+        return True
+
+
+def local_head(repo: Path) -> str:
+    """The full commit id of ``repo``'s ``HEAD``. Raises ``GitError``."""
+    return _git(Path(repo).resolve(), "rev-parse", "HEAD").strip()
+
+
 def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
 

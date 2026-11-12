@@ -381,6 +381,96 @@ class TestNotApplicable:
         assert "eval-gate" not in err.split("`[release] auto_merge = true`")[0]
 
 
+UNTOUCHED = {"measures": ["skills/b.md"], "merge_only": True}
+
+
+class TestPinnedWhenTheCheckDoesNotApply:
+    """A merge_only case the change does not touch still pins the merge to the head it was
+    judged against: "not touched" is computed from local HEAD, which a remote-only commit
+    (a suggestion applied on GitHub) can outrun."""
+
+    @pytest.fixture
+    def untouched(self, tmp_path):
+        return make_repo(tmp_path, "untouched", {"core": CORE, "later": UNTOUCHED})
+
+    def test_a_remote_head_ahead_of_local_head_is_refused_without_merging(
+        self, tmp_path, monkeypatch, capsys, untouched
+    ):
+        repo, head = untouched
+        spy = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert spy.merges == []
+        assert spy.head_reads == 1
+        assert f"portage merge: eval-gate check failed for {repo}: local-head-stale" in err
+        assert "f" * 40 in err and head in err
+        assert "pull the PR head" in err and "retry" in err
+
+    def test_a_remote_head_equal_to_local_head_merges_pinned_to_it(
+        self, tmp_path, monkeypatch, capsys, untouched
+    ):
+        repo, head = untouched
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy) == 0
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
+
+    def test_an_unreadable_remote_head_fails_closed(self, tmp_path, monkeypatch, capsys, untouched):
+        repo, head = untouched
+        spy = Spy(head, head_fails=True)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        err = capsys.readouterr().err
+        assert rc == 2
+        assert spy.merges == []
+        assert f"eval-gate check failed for {repo}: head-unreadable" in err
+
+    def test_a_repo_without_a_merge_only_case_reads_no_head_and_pins_nothing(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "empty-map", {})
+        spy = Spy("f" * 40)
+        assert merge(tmp_path, monkeypatch, repo, spy) == 0
+        (argv,) = spy.merges
+        assert "--match-head-commit" not in argv
+        assert spy.head_reads == 0
+
+
+class TestBaseRemedy:
+    BASE_LINE = "portage eval-gate plan --repo"
+
+    def test_a_plan_whose_base_did_not_resolve_names_the_base_flag(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "nobase", {"core": CORE, "slow": SLOW}, origin=False)
+        state = make_state(repo, capsys, tier="merge")
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}")
+        err = refused(rc, spy, capsys, repo, "plan-not-selected")
+        assert f"portage eval-gate plan --repo {repo} --tier merge --base <ref>" in err
+
+    def test_a_repo_whose_base_did_not_resolve_and_has_no_state_names_the_base_flag(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "nobase", {"core": CORE, "slow": SLOW}, origin=False)
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        err = refused(rc, spy, capsys, repo, "no-state")
+        assert "--tier merge --base <ref>" in err
+
+    def test_other_refusals_do_not_mention_the_base_flag(self, tmp_path, monkeypatch, capsys, mo):
+        repo, head = mo
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        err = refused(rc, spy, capsys, repo, "no-state")
+        assert "--base" not in err
+        state = make_state(repo, capsys, tier="push")
+        rc = merge(tmp_path, monkeypatch, repo, Spy(head), "--eval-state", f"{repo}={state}")
+        err = capsys.readouterr().err
+        assert rc == 2 and "state-tier-not-merge" in err
+        assert "--base" not in err
+
+
 class TestUsage:
     @pytest.mark.parametrize("arg", ["nodelimiter", "=state", "repo=", ""])
     def test_a_malformed_eval_state_is_a_usage_error(self, tmp_path, monkeypatch, capsys, mo, arg):

@@ -19,9 +19,15 @@ check name is what the refusal prints::
     head-mismatch               the plan's ``head`` is not the PR's current remote head
     verdict-stops-the-change    ``verdict`` on the state exits non-zero, or cannot be computed
     selection-failed            git could not answer which cases the change touches
+    local-head-stale            the change touches no merge-only case, but the repo holds one and the
+                                PR's remote head is not the local ``HEAD`` the "touches" answer was
+                                computed from (a remote-only commit); pull the PR head and retry
 
 When the applicability is unknown (the base does not resolve, or a mapping is invalid) the check
-applies: an unknown answer is never read as "no merge-only case". The contents of ``plan.json`` are
+applies: an unknown answer is never read as "no merge-only case". Where the check does not apply
+but the repo's mappings hold any ``merge_only`` case, the merge is pinned to the remote head, and
+refused when that head is not local ``HEAD``; a repo with no ``merge_only`` case merges unpinned, with
+no head read. The contents of ``plan.json`` are
 untrusted; the head is shape-checked before it is compared or reaches a ``gh`` argv.
 
 The stderr form is ``portage merge: eval-gate check failed for <repo>: <check> — <detail>``
@@ -38,14 +44,18 @@ from pathlib import Path
 from trailhead.vcs.github import InvalidInputError, validate_commit_sha
 
 from .run import RunRefused, check_state
-from .select import GitError, NotAWorkTree, merge_only_touched
+from .select import GitError, NotAWorkTree, local_head, merge_only_touched, repo_has_merge_only
 from . import verdict as gate_verdict
+
+
+STALE_HEAD = "local-head-stale"
 
 
 @dataclass(frozen=True)
 class Refusal:
     check: str
     detail: str
+    base_unresolved: bool = False
 
 
 def parse_eval_states(values: list[str]) -> dict[str, Path]:
@@ -71,6 +81,25 @@ def _applies(repo: Path) -> tuple[bool, str, list[dict]]:
     return (status == "mapping-invalid" or bool(entries)), status, entries
 
 
+def _pin_untouched(repo: Path, status: str, read_head: Callable[[], str]) -> tuple[Refusal | None, str | None]:
+    if status == "not-a-work-tree":
+        return None, None
+    try:
+        if not repo_has_merge_only(repo):
+            return None, None
+        local = local_head(repo)
+    except GitError as e:
+        return Refusal("selection-failed", gate_verdict.one_line(e)), None
+    try:
+        remote = validate_commit_sha(read_head())
+    except (RuntimeError, InvalidInputError) as e:
+        return Refusal("head-unreadable", gate_verdict.one_line(e)), None
+    if remote != local:
+        return Refusal(STALE_HEAD, f"the PR's head is {remote}, this checkout is at {local}; "
+                                           "the commits that landed on the PR were not checked here"), None
+    return None, remote
+
+
 def check_pair(
     repo_path: str,
     state: Path | None,
@@ -84,65 +113,76 @@ def check_pair(
     except GitError as e:
         return Refusal("selection-failed", gate_verdict.one_line(e)), None
     if not applies:
-        return None, None
+        return _pin_untouched(repo, status, read_head)
+
+    def refuse(check: str, detail: str, unresolved: bool = False) -> Refusal:
+        return Refusal(check, detail, unresolved or status == "base-unresolved")
+
     if state is None:
-        return Refusal("no-state", "this change touches a merge-only eval case and no --eval-state "
+        return refuse("no-state", "this change touches a merge-only eval case and no --eval-state "
                                    "was given for this repo"), None
     try:
         check_state(state)
     except RunRefused as e:
-        return Refusal("state-unusable", gate_verdict.one_line(e)), None
+        return refuse("state-unusable", gate_verdict.one_line(e)), None
     try:
         plan = gate_verdict._load_plan(state)
     except gate_verdict.Fault as e:
-        return Refusal("plan-unusable", gate_verdict.one_line(e)), None
+        return refuse("plan-unusable", gate_verdict.one_line(e)), None
     if plan.get("tier") != "merge":
-        return Refusal("state-tier-not-merge", "the state was planned at the push tier; plan with "
+        return refuse("state-tier-not-merge", "the state was planned at the push tier; plan with "
                                                "--tier merge"), None
     try:
         same_repo = Path(plan["repo"]).resolve() == repo.resolve()
     except (KeyError, TypeError, ValueError, OSError):
         same_repo = False
     if not same_repo:
-        return Refusal("state-for-another-repo", "the state's plan was made for a different repo"), None
+        return refuse("state-for-another-repo", "the state's plan was made for a different repo"), None
     if plan["status"] != "cases-selected":
-        return Refusal("plan-not-selected", f"the plan's status is {gate_verdict._safe(plan['status'], 40)!r}, "
-                                            "not 'cases-selected'"), None
+        return refuse("plan-not-selected", f"the plan's status is {gate_verdict._safe(plan['status'], 40)!r}, "
+                                           "not 'cases-selected'",
+                      plan["status"] == "base-unresolved"), None
     try:
         planned_head = validate_commit_sha(plan.get("head"))
     except InvalidInputError as e:
-        return Refusal("plan-head-malformed", str(e)), None
+        return refuse("plan-head-malformed", str(e)), None
     if status == "ok":
         planned = {(c.get("plugin_root"), c["case"]) for c in plan["cases"]}
         missing = sorted(c["case"] for c in merge_only if (c["plugin_root"], c["case"]) not in planned)
         if missing:
-            return Refusal("plan-misses-merge-only-case",
+            return refuse("plan-misses-merge-only-case",
                            "the plan does not list " + ", ".join(missing)), None
     try:
         remote_head = validate_commit_sha(read_head())
     except (RuntimeError, InvalidInputError) as e:
-        return Refusal("head-unreadable", gate_verdict.one_line(e)), None
+        return refuse("head-unreadable", gate_verdict.one_line(e)), None
     if remote_head != planned_head:
-        return Refusal("head-mismatch", f"the PR's head is {remote_head}, the state was made at "
+        return refuse("head-mismatch", f"the PR's head is {remote_head}, the state was made at "
                                         f"{planned_head}; a push landed after the gate"), None
     try:
         code, report, _ = gate_verdict.verdict(state)
     except (gate_verdict.Fault, OSError) as e:
-        return Refusal("verdict-stops-the-change", f"verdict could not be computed: "
+        return refuse("verdict-stops-the-change", f"verdict could not be computed: "
                                                    f"{gate_verdict.one_line(e)}"), None
     if code != 0:
-        return Refusal("verdict-stops-the-change", "; ".join(report[:3])), None
+        return refuse("verdict-stops-the-change", "; ".join(report[:3])), None
     return None, planned_head
 
 
 def format_refusal(repo_path: str, refusal: Refusal) -> str:
     shown = gate_verdict._safe(repo_path)
     quoted = shlex.quote(repo_path)
+    base = " --base <ref>" if refusal.base_unresolved else ""
+    first = (f"portage merge: eval-gate check failed for {shown}: {refusal.check} — "
+             f"{gate_verdict._safe(refusal.detail)}")
+    if refusal.check == STALE_HEAD:
+        return "\n".join([first, f"portage merge: pull the PR head into {quoted} (the PR branch at its "
+                                  "remote head) and retry the merge."])
     return "\n".join([
-        f"portage merge: eval-gate check failed for {shown}: {refusal.check} — {gate_verdict._safe(refusal.detail)}",
+        first,
         "portage merge: a change that touches a merge-only eval case needs a current merge-tier "
         "verdict before it merges (--operator-directed does not waive this). To produce one:",
-        f"  portage eval-gate plan --repo {quoted} --tier merge     # prints `state: <dir>`",
+        f"  portage eval-gate plan --repo {quoted} --tier merge{base}     # prints `state: <dir>`",
         "  portage eval-gate run --state <dir> --case <case>      # once per planned case",
         "  portage eval-gate verdict --state <dir>                 # must exit 0",
         f"then merge with --eval-state {quoted}=<dir>",
