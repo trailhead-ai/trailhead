@@ -30,6 +30,7 @@ from trailhead.vcs.github import (
 )
 
 from .. import holds
+from ..eval_gate import merge_check
 from ..pairs import PairFormatError, split_pair
 from ..sidecar import parse_pr_token
 
@@ -136,7 +137,10 @@ def _add_merge(sub) -> None:
             "branch is held (`portage hold`) is refused before any merge, whatever "
             "--operator-directed says; a hold is local to this machine's portage state "
             "directory and the repo's real path, so it does not bind a merge made by hand "
-            "or through the host."
+            "or through the host. When the change touches a merge-only eval case, the merge "
+            "is refused (exit 2) unless --eval-state names a current merge-tier eval-gate "
+            "state for that repo whose head is the PR's current head; --operator-directed "
+            "does not waive it, and the merge is pinned to that head."
         ),
     )
     p.add_argument("--manifest", required=True, help="Path to the camp central manifest.json")
@@ -148,6 +152,16 @@ def _add_merge(sub) -> None:
             "The operator explicitly told the caller to merge these PRs. Required "
             "to merge when [release].auto_merge is unset/false; a PR approval on "
             "the host does not substitute for it. Never pass it on your own judgment."
+        ),
+    )
+    p.add_argument(
+        "--eval-state",
+        action="append",
+        default=[],
+        metavar="repo_path=state_dir",
+        help=(
+            "The eval-gate state directory (from `portage eval-gate plan --tier merge`, run, "
+            "and verified by `verdict`) for a repo. Repeatable, one per repo."
         ),
     )
     p.add_argument(
@@ -183,6 +197,27 @@ def _held_branch_refusal(pr_pairs: list[PRPair], provider) -> str | None:
     return None
 
 
+def _eval_gate_pins(pr_pairs: list[PRPair], eval_states: dict, provider) -> bool:
+    """Run the merge-tier backstop over every pair; on success pin each verified pair to its head.
+
+    Prints each refusal to stderr and returns False when any pair is refused, so nothing merges.
+    """
+    refusals = []
+    for pair in pr_pairs:
+        state = eval_states.get(str(Path(pair.repo_path).resolve()))
+        refusal, head = merge_check.check_pair(
+            pair.repo_path,
+            state,
+            lambda pair=pair: provider.pr.head_commit(pair.repo_path, pair.pr_number),
+        )
+        if refusal:
+            refusals.append(merge_check.format_refusal(pair.repo_path, refusal))
+        pair.expected_head = head
+    for text in refusals:
+        print(text, file=sys.stderr)
+    return not refusals
+
+
 def cmd_merge(args: argparse.Namespace) -> int:
     pr_pairs: list[PRPair] = []
     for pair_str in args.pairs:
@@ -202,10 +237,19 @@ def cmd_merge(args: argparse.Namespace) -> int:
         repo_path, pr_number, member_name = parts[0], parts[1], parts[2]
         pr_pairs.append(PRPair(repo_path=repo_path, pr_number=pr_number, member_name=member_name))
 
+    try:
+        eval_states = merge_check.parse_eval_states(args.eval_state)
+    except ValueError as e:
+        print(f"merge: {e}", file=sys.stderr)
+        return 2
+
     provider = get_provider()
     refusal = _held_branch_refusal(pr_pairs, provider)
     if refusal:
         print(refusal, file=sys.stderr)
+        return 2
+
+    if not _eval_gate_pins(pr_pairs, eval_states, provider):
         return 2
 
     try:

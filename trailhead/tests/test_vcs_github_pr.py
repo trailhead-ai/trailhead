@@ -3396,3 +3396,83 @@ class TestCiWait:
 
         assert evaluate_calls, "ci.wait did not route through self._pr.evaluate"
         assert result.get("timeout") is not True
+
+
+# ---------------------------------------------------------------------------
+# pr.merge with an expected head, pr.head_commit
+# ---------------------------------------------------------------------------
+
+_SHA_A = "a" * 40
+_SHA_B = "b" * 40
+
+
+def _pinned_stub(merge_argvs: list[list[str]], *, remote_head: str = _SHA_A, fail_pr: bool = False):
+    def stub(cmd, **kwargs):
+        cmd_str = " ".join(cmd)
+        if "remote" in cmd_str and "get-url" in cmd_str:
+            return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/widgets.git\n", "")
+        if cmd[:3] == ["gh", "pr", "merge"]:
+            merge_argvs.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "merged\n", "")
+        if cmd[:3] == ["gh", "pr", "view"]:
+            payload = {"state": "OPEN", "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+                       "isDraft": False, "headRefName": "feat"}
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+        if "config" in cmd and "user.email" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, "test@example.com\n", "")
+        if "api" in cmd_str and "/commits" in cmd_str:
+            c = [{"sha": remote_head, "commit": {"committer": {"date": "2026-07-01T00:00:00Z"}}}]
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(c), "")
+        if "api" in cmd_str and "/pulls/" in cmd_str:
+            if fail_pr:
+                return subprocess.CompletedProcess(cmd, 1, "", "boom")
+            return subprocess.CompletedProcess(cmd, 0, json.dumps({"head": {"sha": remote_head}}), "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    return stub
+
+
+class TestPrMergeExpectedHead:
+    def _merge(self, tmp_path: Path, expected: str | None) -> list[list[str]]:
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\nmerge_method = \"squash\"\n")
+        argvs: list[list[str]] = []
+        provider = get_provider("github", runner=_pinned_stub(argvs))
+        pair = PRPair(repo_path=str(wt), pr_number="7", member_name="alpha", expected_head=expected)
+        provider.pr.merge([pair], str(manifest), toml_path=str(toml))
+        return argvs
+
+    def test_an_expected_head_is_passed_as_match_head_commit(self, tmp_path: Path) -> None:
+        (argv,) = self._merge(tmp_path, _SHA_A)
+        i = argv.index("--match-head-commit")
+        assert argv[i + 1] == _SHA_A
+
+    def test_no_expected_head_leaves_the_flag_out(self, tmp_path: Path) -> None:
+        (argv,) = self._merge(tmp_path, None)
+        assert "--match-head-commit" not in argv
+
+    @pytest.mark.parametrize("bad", ["--admin", "abc; rm -rf /", "HEAD", "", "g" * 40, "a" * 39])
+    def test_a_malformed_expected_head_is_refused_before_any_gh_call(
+        self, tmp_path: Path, bad: str
+    ) -> None:
+        manifest, wt = _one_repo_group(tmp_path)
+        toml = _write_toml(tmp_path, "[release]\nauto_merge = true\n")
+        argvs: list[list[str]] = []
+        provider = get_provider("github", runner=_pinned_stub(argvs))
+        pair = PRPair(repo_path=str(wt), pr_number="7", member_name="alpha", expected_head=bad)
+        with pytest.raises(InvalidInputError):
+            provider.pr.merge([pair], str(manifest), toml_path=str(toml))
+        assert argvs == []
+
+
+class TestPrHeadCommit:
+    def test_returns_the_prs_current_remote_head(self, tmp_path: Path) -> None:
+        provider = get_provider("github", runner=_pinned_stub([], remote_head=_SHA_B))
+        assert provider.pr.head_commit(str(tmp_path), "7") == _SHA_B
+        provider = get_provider("github", runner=_pinned_stub([], remote_head=_SHA_A))
+        assert provider.pr.head_commit(str(tmp_path), "7") == _SHA_A
+
+    def test_an_unreadable_head_raises_rather_than_guessing(self, tmp_path: Path) -> None:
+        provider = get_provider("github", runner=_pinned_stub([], fail_pr=True))
+        with pytest.raises(RuntimeError):
+            provider.pr.head_commit(str(tmp_path), "7")

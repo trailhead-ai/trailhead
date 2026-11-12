@@ -24,7 +24,7 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
-from portage.eval_gate.run import run_case
+from portage.eval_gate.run import RunRefused, check_state, run_case
 from trailhead.harness import ClaudeCodeHarness, Harness
 from trailhead.harness.base import EvalRunner
 
@@ -589,7 +589,7 @@ class TestRunnerTempDir:
     def test_a_foreign_owned_base_is_refused_and_no_runner_starts(self, env):
         base = env.home / ".cache" / "pegt"
         base.mkdir(parents=True, mode=0o700)
-        env.mp.setattr("portage.eval_gate.run._check_state", lambda state: None)
+        env.mp.setattr("portage.eval_gate.run.check_state", lambda state: None)
         env.mp.setattr(os, "geteuid", lambda: os.stat(base).st_uid + 1)
         self._refused(env)
 
@@ -893,3 +893,44 @@ class TestBatchWallClockBudget:
     def test_one_second_less_than_the_first_calls_elapsed_time_does_not(self, env):
         result, _ = self._run(env, [271, 1])
         assert len(env.case_calls) == 1 and result["reason"] == "timeout"
+
+
+class TestCheckState:
+    """`check_state` — the shared guard every state-directory reader goes through."""
+
+    def _dir(self, tmp_path, mode):
+        d = tmp_path / "st"
+        d.mkdir()
+        os.chmod(d, mode)
+        return d
+
+    def test_a_private_caller_owned_directory_passes(self, tmp_path):
+        assert check_state(self._dir(tmp_path, 0o700)) is None
+
+    @pytest.mark.parametrize("mode", [0o777, 0o770, 0o750, 0o707, 0o755])
+    def test_a_directory_that_others_can_write_or_read_is_refused(self, tmp_path, mode):
+        with pytest.raises(RunRefused, match="0700"):
+            check_state(self._dir(tmp_path, mode))
+
+    def test_a_symlink_is_refused(self, tmp_path):
+        real = self._dir(tmp_path, 0o700)
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        with pytest.raises(RunRefused, match="symlink"):
+            check_state(link)
+
+    def test_a_file_is_refused(self, tmp_path):
+        f = tmp_path / "f"
+        f.write_text("x")
+        with pytest.raises(RunRefused, match="not a directory"):
+            check_state(f)
+
+    def test_a_missing_path_is_refused(self, tmp_path):
+        with pytest.raises(RunRefused, match="unusable"):
+            check_state(tmp_path / "nope")
+
+    def test_a_directory_owned_by_another_user_is_refused(self, tmp_path, monkeypatch):
+        d = self._dir(tmp_path, 0o700)
+        monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)
+        with pytest.raises(RunRefused, match="another user"):
+            check_state(d)

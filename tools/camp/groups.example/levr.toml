@@ -64,7 +64,9 @@ merge_order = [
 
 # No PR review bot yet, so nothing merges itself: every merge is a person
 # deciding. `portage merge` is fail-closed on this key, so leaving it false
-# keeps the refusal even if a caller asks for an automatic merge.
+# keeps the refusal even if a caller asks for an automatic merge. A repo whose
+# change touches a `merge_only` eval case is refused as well unless the call
+# passes `--eval-state <repo>=<state_dir>` from `portage eval-gate plan --tier merge`.
 auto_merge = false
 
 # Strategy `portage merge` hands `gh pr merge`: merge / squash / rebase.

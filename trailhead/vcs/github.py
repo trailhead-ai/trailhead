@@ -96,6 +96,9 @@ class PRPair:
     repo_path: str
     pr_number: str
     member_name: str
+    #: The head commit the caller verified. When set, the merge is pinned to it
+    #: (`gh pr merge --match-head-commit`), so a later push makes the host refuse.
+    expected_head: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -1330,15 +1333,33 @@ def describe_merge_refusal(strategy: str, refusal: str) -> str:
     return f"{prefix}: {strategy} refused — {refusal}"
 
 
+_COMMIT_SHA = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+
+
+def validate_commit_sha(sha: object) -> str:
+    """Return ``sha`` when it is a full lowercase hex commit id, else raise InvalidInputError.
+
+    Public so a caller can vet a value read from an untrusted file before it is
+    compared with a remote head or reaches a ``gh`` argv.
+    """
+    if not isinstance(sha, str) or not _COMMIT_SHA.fullmatch(sha):
+        raise InvalidInputError("a commit id must be 40 (or 64) lowercase hex characters")
+    return sha
+
+
 def _do_merge(
-    repo_path: str, pr_number: str, author_email: str, merge_method: str, runner: rp.Runner
+    repo_path: str,
+    pr_number: str,
+    author_email: str,
+    merge_method: str,
+    runner: rp.Runner,
+    expected_head: str | None = None,
 ) -> tuple[bool, str]:
     flag = _MERGE_METHOD_FLAGS[merge_method]
-    r = rp.run(
-        ["gh", "pr", "merge", pr_number, flag, "--author-email", author_email],
-        cwd=repo_path,
-        runner=runner,
-    )
+    argv = ["gh", "pr", "merge", pr_number, flag, "--author-email", author_email]
+    if expected_head is not None:
+        argv += ["--match-head-commit", expected_head]
+    r = rp.run(argv, cwd=repo_path, runner=runner)
     if r.returncode != 0:
         return False, r.stderr.strip() or "gh pr merge failed"
     return True, ""
@@ -1463,6 +1484,8 @@ def _merge_prs(
 ) -> dict[str, Any]:
     for pair in pr_pairs:
         validate_pr_number(pair.pr_number)
+        if pair.expected_head is not None:
+            validate_commit_sha(pair.expected_head)
 
     manifest_data = _load_manifest(manifest_path)
     member_names = {m["name"] for m in manifest_data.get("members", [])}
@@ -1620,7 +1643,9 @@ def _merge_prs(
             file=sys.stderr,
         )
 
-        ok, err = _do_merge(pair.repo_path, pair.pr_number, author_email, strategy, runner)
+        ok, err = _do_merge(
+            pair.repo_path, pair.pr_number, author_email, strategy, runner, pair.expected_head
+        )
         if not ok:
             described = describe_merge_refusal(strategy, err)
             failed[key] = described
@@ -1947,6 +1972,13 @@ class _GitHubPR(PRSurface):
 
     def approval(self, repo_path: str, pr_number: str) -> dict[str, Any]:
         return _check_approval(repo_path, pr_number, runner=self._runner)
+
+    def head_commit(self, repo_path: str, pr_number: str) -> str:
+        validate_pr_number(pr_number)
+        owner_repo = _get_owner_repo(repo_path, self._runner)
+        if not owner_repo:
+            raise RuntimeError(f"head commit: could not resolve owner/repo for {repo_path}")
+        return _head_commit(owner_repo, repo_path, pr_number, runner=self._runner)[0]
 
     def head_branch(self, repo_path: str, pr_number: str) -> str | None:
         validate_pr_number(pr_number)

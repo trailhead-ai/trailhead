@@ -3,7 +3,7 @@
 ``verdict(state)`` reads ``<state>/plan.json`` (shape in ``select``) and
 ``<state>/results/<case>.json`` (shape in ``run``) and decides push or stop.
 ``splice`` inserts or replaces the rendered section in a PR body. The state
-directory goes through ``run._check_state`` (not a symlink, caller-owned, 0700);
+directory goes through ``run.check_state`` (not a symlink, caller-owned, 0700);
 ``canary.json`` at the state root and ``runs/`` (raw runner output) are never read.
 
 The section is built only from shape-validated case names, corpus paths and
@@ -46,6 +46,10 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 ``splice --state <dir>``. ``verdict --gate-error <step>`` reads no state; with
 ``--state`` it still writes the section file there.
 
+At the merge tier (plan ``tier`` is ``merge``) a ``merge_only`` case that is not-run stops the
+change too: exit 1, the report line ``merge-only-not-run: <cases>`` and the same reason in the
+section. A not-run core case still lets the change through, as on push.
+
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
 A fault writing the section file never turns a decided stop into 2: with a stop decided the
 fault goes to stderr, the section is still printed and the exit code stays 1.
@@ -74,7 +78,7 @@ from .run import (
     CORPUS_NEW,
     SANDBOX_UNWRITABLE,
     RunRefused,
-    _check_state,
+    check_state,
     atomic_write,
 )
 
@@ -82,6 +86,7 @@ START_MARKER = "<!-- portage:eval-gate:start -->"
 END_MARKER = "<!-- portage:eval-gate:end -->"
 SECTION_FILE = "eval-gate-section.md"
 NO_RESULT = "no-result-recorded"
+MERGE_ONLY_NOT_RUN = "merge-only-not-run"
 
 PERSISTENT = (NO_RUNNER, RUNNER_MISSING, SANDBOX_UNWRITABLE)
 
@@ -222,6 +227,7 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
         res = found.get(c["case"])
         rows.append({"case": c["case"], "corpus": _corpus(c.get("plugin_root")),
                      "grants": c.get("new_runner_grants") is True,
+                     "merge_only": c.get("merge_only") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
                                        "passed": 0, "failed": 0, "errored": 0}})
     return rows, ignored, invalid
@@ -334,6 +340,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
+    unrun_merge_only = ([r for r in notrun if r["merge_only"]] if plan.get("tier") == "merge" else [])
     outcome = "failed" if failed else "not-run" if notrun else "passed"
     report = [f"eval-gate: {outcome}", f"persistent: {','.join(persistent) or 'none'}"]
     if ignored:
@@ -342,6 +349,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         report.append(f"ignored: {invalid} result with an invalid name")
     if failed:
         report += _failure_details(rows, state)
+    if unrun_merge_only:
+        report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
 
     body: list[str] = []
     if failed:
@@ -361,11 +370,14 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))
+    if unrun_merge_only:
+        body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + "."]
     tier = _tier_lines(plan)
     if tier:
         body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
-    return (1 if failed else 0), report, _wrap(body)
+    return (1 if failed or unrun_merge_only else 0), report, _wrap(body)
 
 
 def render_gate_error(step: str) -> str:
@@ -377,7 +389,7 @@ def render_gate_error(step: str) -> str:
 
 def require_state(state: Path) -> None:
     try:
-        _check_state(Path(state))
+        check_state(Path(state))
     except RunRefused as e:
         raise Fault(str(e)) from e
 

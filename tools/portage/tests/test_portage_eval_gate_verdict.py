@@ -712,3 +712,50 @@ def test_push_that_touches_only_merge_only_cases_still_says_they_run_before_merg
     code, out, _ = verdict(capsys, st)
     assert code == 0
     assert "2 merge-only case(s) touched by this change will run before merge" in section_of(out)
+
+
+def _merge_tier_plan(st, tier, *, slow_result, core_result="pass"):
+    slow = {**_entry("slow"), "merge_only": True}
+    core = {**_entry("core"), "merge_only": False}
+    st.plan([core, slow])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": tier, "head": "a" * 40, "merge_only_pending": 0})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    for case, res in (("core", core_result), ("slow", slow_result)):
+        if res == "pass":
+            st.result(case)
+        elif res == "not-run":
+            st.result(case, verdict="not-run", passed=0, errored=3, reason="timeout")
+
+
+class TestMergeTierVerdict:
+    def test_a_not_run_merge_only_case_stops_the_change(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run" in out.split("<!--", 1)[0]
+        assert "merge-only-not-run" in section_of(out)
+        assert "`slow`" in section_of(out)
+
+    def test_a_merge_only_case_with_no_result_at_all_stops_the_change(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="missing")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run" in section_of(out)
+
+    def test_a_not_run_core_case_still_lets_the_change_through(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="pass", core_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+
+    def test_a_passing_merge_only_case_lets_the_change_through(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="pass")
+        code, _, _ = verdict(capsys, st)
+        assert code == 0
+
+    def test_the_same_not_run_case_does_not_stop_a_push_tier_state(self, st, capsys):
+        _merge_tier_plan(st, "push", slow_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out

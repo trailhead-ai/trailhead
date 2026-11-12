@@ -61,6 +61,10 @@ class GitError(Exception):
     pass
 
 
+class NotAWorkTree(GitError):
+    pass
+
+
 def _git(repo: Path, *args: str) -> str:
     r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
     if r.returncode != 0:
@@ -171,6 +175,38 @@ def _runs(case: dict) -> bool:
 TIERS = ("push", "merge")
 
 
+def _changed_since(repo: Path, merge_base: str) -> list[str]:
+    diff_out = _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{merge_base}...HEAD")
+    return [c for c in diff_out.split("\0") if c]
+
+
+def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[dict]]:
+    """The ``merge_only`` cases a change to ``repo`` touches, as ``(status, entries)``.
+
+    The merge backstop asks this to decide whether it applies, using the same selection as
+    ``plan``. ``status`` is ``ok`` (``entries`` are exactly the touched ``merge_only`` cases),
+    ``base-unresolved`` (the changed files are unknown, so ``entries`` is every ``merge_only`` case
+    the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
+    and the answer is unknown). The working tree is not consulted: a dirty tree does not change
+    which files the commits touch. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
+    and ``GitError`` on any other git failure."""
+    repo = Path(repo).resolve()
+    try:
+        _git(repo, "rev-parse", "--is-inside-work-tree")
+    except GitError as e:
+        raise NotAWorkTree(str(e)) from None
+    resolved = _resolve_base(repo, base)
+    try:
+        if resolved is None:
+            tracked = [p for p in _git(repo, "ls-files", "-z").split("\0") if p]
+            touched = select_touched(repo, "HEAD", tracked)
+        else:
+            touched = select_touched(repo, resolved[1], _changed_since(repo, resolved[1]))
+    except MappingError:
+        return "mapping-invalid", []
+    return ("base-unresolved" if resolved is None else "ok"), [c for c in touched if c["merge_only"]]
+
+
 def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
 
@@ -193,8 +229,7 @@ def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
         result["status"] = "base-unresolved"
     else:
         result["base"], result["merge_base"] = resolved
-        diff_out = _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{resolved[1]}...HEAD")
-        changed = [c for c in diff_out.split("\0") if c]
+        changed = _changed_since(repo, resolved[1])
         result["changed_files"] = changed
         try:
             touched = select_touched(repo, resolved[1], changed)

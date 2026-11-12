@@ -143,7 +143,11 @@ class RunRefused(Exception):
     pass
 
 
-def _check_state(state: Path) -> None:
+def check_state(state: Path) -> None:
+    """Refuse a state directory that is not a real, caller-owned directory with mode 0700.
+
+    Every reader of a state directory (``run``, ``verdict``, the merge backstop) goes
+    through this, because a state others can write is a verdict others can forge."""
     try:
         st = os.lstat(state)
     except OSError as e:
@@ -352,7 +356,7 @@ def run_case(
     state = Path(state)
     if not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise RunRefused(f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS} seconds")
-    _check_state(state)
+    check_state(state)
     plan, entry = _load_case(state, case)
     plugin_dir = _plugin_dir(plan, entry)
     n, pass_at = entry["runs"], entry["pass_at"]
@@ -495,7 +499,7 @@ def record_crash(state: Path, case: str) -> None:
     directory or the case would have been refused."""
     try:
         state = Path(state)
-        _check_state(state)
+        check_state(state)
         _, entry = _load_case(state, case)
         _record(state, case, _not_run(case, entry["runs"], RUNNER_ERROR))
     except Exception:

@@ -16,6 +16,12 @@ environment allowlist below keeps environment-borne keys and tokens out of the r
 not isolation. A corpus that is new on the branch is not run until its grants are reviewed
 (`corpus-new-on-branch`).
 
+Merge-tier runs (see "Before merge") execute the branch's scaffolds the same way, as the operator and
+unattended, on whatever commits the PR holds when the gate runs. `portage merge` pins the merge to the head
+commit the gate ran on (`gh pr merge --match-head-commit`), so a push after the gate makes `gh` refuse
+instead of merging content nobody evaluated. That limits what the gate ran to the commits present when it
+ran; it does not make a hostile branch safe to gate.
+
 ## What it runs
 
 `portage eval-gate plan --repo <path> [--base <ref>] [--tier push|merge]` diffs the branch against its base
@@ -134,6 +140,40 @@ the touched merge-only cases that will run before merge, so a reviewer knows the
 `portage eval-gate verdict --gate-error <step>` renders the section for a gate command that crashed;
 `updater` then pushes anyway. `portage eval-gate splice --body-file <f> (--state <dir> | --section-file <f>)
 [--out <path>]` puts the section into an existing PR body, replacing an earlier one.
+
+## Before merge
+
+Cases mapped `merge_only` do not run on push; they run at the merge tier, and `portage merge` will not merge
+a change that touches one without a current verdict.
+
+1. `portage eval-gate plan --repo <repo> --tier merge` selects every touched case, `merge_only` included, and
+   records the tier, the repo and `HEAD` in `plan.json`.
+2. `portage eval-gate run --state <dir> --case <name>` once per planned case.
+3. `portage eval-gate verdict --state <dir>` exits 0 or 1. At the merge tier a not-run `merge_only` case
+   stops the change (exit 1, reason `merge-only-not-run`); a not-run core case still lets it through, as on
+   push.
+4. `portage merge --manifest <m> [--toml <t>] --eval-state <repo>=<dir> <repo>:<pr>:<member>` (repeatable,
+   one per repo).
+
+The check applies to a repo only when its change touches a `merge_only` case, decided by the selection
+`plan` uses. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
+applies; a dirty working tree does not affect it. Where it does not apply, `portage merge` behaves as
+without the flag (a given `--eval-state` is not read, and the merge is not pinned).
+
+Where it applies, the merge is refused with exit 2, before any provider merge and before the `auto_merge`
+refusal, when any of these holds: no state was given; the state directory is not a real, caller-owned 0700
+directory; `plan.json` is unusable; the plan's tier is not `merge`; its `repo` is another repo; its status is
+not `cases-selected`; its `head` is not a full lowercase hex commit id; it lacks a merge-only case the change
+touches; the PR's current remote head cannot be read or differs from the plan's `head` (a push landed after
+the gate); or `verdict` stops the change. `--operator-directed` waives none of this. On success the merge is
+pinned to the verified head.
+
+A refusal prints, on stderr, `portage merge: eval-gate check failed for <repo>: <check> — <detail>`, where
+`<check>` is one of `no-state`, `state-unusable`, `plan-unusable`, `state-tier-not-merge`,
+`state-for-another-repo`, `plan-not-selected`, `plan-head-malformed`, `plan-misses-merge-only-case`,
+`head-unreadable`, `head-mismatch`, `verdict-stops-the-change` or `selection-failed`, followed by the
+`plan` / `run` / `verdict` commands that produce a valid state. After a `head-mismatch`, plan, run and verify
+again on the new head.
 
 ## Cost and limits
 

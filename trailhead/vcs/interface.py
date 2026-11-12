@@ -86,7 +86,15 @@ class PRSurface(ABC):
         With ``[release].auto_merge`` off, the merge proceeds only when
         ``operator_directed`` is true — the caller's attestation that the
         operator told it to merge these PRs.
+
+        A pair carrying ``expected_head`` is merged only if the PR's head is still
+        that commit; the host refuses the merge otherwise.
         """
+
+    @abstractmethod
+    def head_commit(self, repo_path: str, pr_number: str) -> str:
+        """The PR's current remote head commit id. Raises ``RuntimeError`` when it cannot
+        be read — never a guess, because merge gates pin to it. Read-only."""
 
     @abstractmethod
     def head_branch(self, repo_path: str, pr_number: str) -> str | None:
