@@ -249,6 +249,17 @@
         "skills/slice/SKILL.md"
       ]
     },
+    "slice-asks-about-an-entry-a-slice-failed-to-build": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "unattended-slice-names-the-remedy-for-an-entry-a-slice-failed-to-build": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
     "slice-carries-out-a-free-text-answer-to-its-question": {
       "measures": [
         "skills/_shared/escalation.md",
