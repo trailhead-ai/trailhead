@@ -886,6 +886,16 @@ class TestCoreVaultStep:
         assert "installed plugins" in captured.out
         assert "core vault" in captured.err
 
+    def test_missing_lore_binary_in_core_step_keeps_exit_zero_and_summary(self, tmp_path, capsys):
+        def runner(args, **kw):
+            raise FileNotFoundError(2, "No such file or directory", args[0])
+
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=_env(tmp_path), runner=runner) == 0
+        captured = capsys.readouterr()
+        assert "installed plugins" in captured.out
+        assert "core vault" in captured.err
+
     def test_json_mode_sends_the_core_line_to_stderr(self, tmp_path, capsys):
         lore = FakeLore([])
         with _patched(detected=True, real_core=True):

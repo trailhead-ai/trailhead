@@ -428,6 +428,100 @@ def test_uncomparable_vault_path_fails_safe(vaults, source, cenv, copy, capsys):
     assert "vault ls" in text
 
 
+def test_symlink_loop_vault_path_fails_safe(source, cenv, copy, tmp_path, capsys):
+    (tmp_path / "loop-a").symlink_to(tmp_path / "loop-b")
+    (tmp_path / "loop-b").symlink_to(tmp_path / "loop-a")
+    lore = FakeLore([_entry("other", str(tmp_path / "loop-a"))])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert lore.writes == []
+    assert not copy.parent.exists()
+    assert "vault ls" in text and "install otherwise succeeded" in text
+
+
+def test_nul_byte_vault_path_fails_safe(source, cenv, copy, capsys):
+    lore = FakeLore([_entry("other", "/tmp/a\x00b")])
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert lore.writes == []
+    assert not copy.parent.exists()
+
+
+def test_symlink_loop_in_the_copy_location_fails_safe(source, tmp_path, capsys):
+    env = _fenced_env(tmp_path)
+    (tmp_path / "state").mkdir()
+    (tmp_path / "state" / "trailhead").symlink_to(tmp_path / "state" / "trailhead")
+    lore = FakeLore([])
+    out, text = _run(source, env, lore, capsys)
+    assert out.outcome == "failed"
+    assert lore.calls == []
+    assert out.reason.startswith("copy ")
+    assert "install otherwise succeeded" in text
+
+
+@pytest.mark.parametrize("name", ["mine", "core"])
+def test_vault_nested_inside_the_copy_is_declined(name, source, cenv, copy, capsys):
+    nested = copy.resolve() / "records"
+    lore = FakeLore([_entry(name, str(nested))])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "declined"
+    assert lore.writes == []
+    assert not copy.exists() and not copy.parent.exists()
+    assert str(nested) in text
+    assert "inside trailhead's copy" in out.reason
+    assert "rename or remove" in text.lower()
+
+
+def test_vault_beside_the_copy_with_a_shared_name_prefix_is_not_declined(source, cenv, copy, capsys):
+    beside = copy.resolve().parent / "core-vault-extra"
+    lore = FakeLore([_entry("mine", str(beside))])
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "registered"
+
+
+class _Boom(FakeLore):
+    def __init__(self, *args, fail_on, **kw):
+        super().__init__(*args, **kw)
+        self.fail_on = fail_on
+
+    def __call__(self, args, **kw):
+        if [str(a) for a in args[1:]][: len(self.fail_on)] == self.fail_on:
+            raise FileNotFoundError(2, "No such file or directory", "/fake/bin/lore")
+        return super().__call__(args, **kw)
+
+
+@pytest.mark.parametrize(
+    ("fail_on", "step", "setup"),
+    [(["vault", "ls"], "vault ls", "none"), (["vault", "add"], "vault add", "none"), (["reindex"], "reindex", "owned")],
+)
+def test_lore_binary_oserror_fails_safe(fail_on, step, setup, source, cenv, copy, capsys):
+    lore = _Boom([], fail_on=fail_on)
+    if setup == "owned":
+        _run(source, cenv, lore.__class__([], fail_on=["never"]), capsys)
+        lore.vaults = [_entry("core", str(copy.resolve()))]
+        (source / "records" / "a.md").write_bytes(b"alpha changed\n")
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert step in out.reason and "FileNotFoundError" in out.reason
+    assert "install otherwise succeeded" in text
+
+
+@pytest.mark.parametrize("path", ["registered", "refreshed"])
+def test_unlinkable_marker_fails_safe(path, source, cenv, copy, capsys):
+    marker = copy.parent / MARKER_NAME
+    if path == "registered":
+        lore = FakeLore([])
+    else:
+        lore = FakeLore([])
+        _run(source, cenv, lore, capsys)
+    marker.mkdir(parents=True, exist_ok=True)
+    (marker / "keep").write_text("x")
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert "marker" in out.reason
+    assert "install otherwise succeeded" in text
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [{"ls_rc": 2}, {"ls_out": "not json at all"}, {"ls_out": '{"a": 1}'}],
@@ -501,20 +595,21 @@ def test_reindex_failure_keeps_marker_and_next_run_retries(source, cenv, copy, c
     assert not (copy.parent / MARKER_NAME).exists()
 
 
-def test_marker_is_written_before_the_swap(source, cenv, copy, capsys):
+def test_marker_is_written_before_the_swap(source, cenv, copy, capsys, monkeypatch):
     lore = FakeLore([])
     _run(source, cenv, lore, capsys)
     (source / "records" / "a.md").write_bytes(b"alpha v3\n")
-    seen = {}
-    real_runner = lore
 
-    def runner(args, **kw):
-        if [str(a) for a in args[1:]] == ["reindex"]:
-            seen["marker"] = (copy.parent / MARKER_NAME).exists()
-        return real_runner(args, **kw)
+    def failing_rename(src, dst):
+        raise OSError("swap refused")
 
-    install_core_vault(source=source, env=cenv, lore_bin=LORE_BIN, runner=runner)
-    assert seen == {"marker": True}
+    monkeypatch.setattr("trailhead.core_vault.os.rename", failing_rename)
+    lore.calls.clear()
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert (copy / "records" / "a.md").read_bytes() != b"alpha v3\n"
+    assert (copy.parent / MARKER_NAME).exists()
+    assert lore.writes == []
 
 
 def test_sync_error_warns_and_registers_nothing(tmp_path, cenv, capsys):

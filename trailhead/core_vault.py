@@ -30,7 +30,8 @@ Contract:
   reindex``. Ownership means ``core``'s path equals the copy's path (both
   ``Path.resolve()``d), its scope is ``read-only`` and it is not shared;
 * any other ``core``, or any vault under another name whose resolved path equals
-  or contains the copy (a writable alias could write into the trusted copy):
+  or contains the copy (a writable alias could write into the trusted copy), or
+  any vault whose resolved path is inside the copy (a swap would delete its records):
   decline, naming the clashing path, the reason and the remedy.
 
 No-write guarantees: a decline, an unparseable or failed ``vault ls``, and a
@@ -239,7 +240,10 @@ def _parse_vaults(text: str) -> list[tuple[dict, Path]] | None:
         path = entry.get("path")
         if not isinstance(entry.get("name"), str) or not isinstance(path, str) or not Path(path).is_absolute():
             return None
-        vaults.append((entry, Path(path).resolve()))
+        try:
+            vaults.append((entry, Path(path).resolve()))
+        except (OSError, RuntimeError, ValueError):
+            return None
     return vaults
 
 
@@ -264,9 +268,15 @@ def install_core_vault(
 
     copy = core_copy_dir(env)
     marker = copy.parent / MARKER_NAME
-    resolved_copy = copy.resolve()
+    try:
+        resolved_copy = copy.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        return _fail("copy", f"location could not be resolved ({type(exc).__name__})", lore_bin=lore_bin)
 
-    ls = lore("vault", "ls", "--json")
+    try:
+        ls = lore("vault", "ls", "--json")
+    except OSError as exc:
+        return _fail("vault ls", f"could not run lore ({type(exc).__name__})", lore_bin=lore_bin)
     if ls.returncode != 0:
         return _fail("vault ls", f"failed (exit {ls.returncode})", lore_bin=lore_bin)
     vaults = _parse_vaults(ls.stdout or "")
@@ -277,6 +287,8 @@ def install_core_vault(
     elsewhere: Path | None = None
     for entry, path in vaults:
         at_copy = path == resolved_copy
+        if resolved_copy in path.parents:
+            return _decline(str(path), f"a vault ({entry['name']}) is inside trailhead's copy")
         if entry["name"] == "core":
             if at_copy and entry.get("scope") == "read-only" and entry.get("shared") is False:
                 owned = True
@@ -299,10 +311,16 @@ def install_core_vault(
         return _fail("copy", f"could not sync the core-vault copy ({type(exc).__name__})", lore_bin=lore_bin)
 
     if not owned:
-        added = lore("vault", "add", "core", "--scope", "read-only", "--trusted", "--path", str(resolved_copy))
+        try:
+            added = lore("vault", "add", "core", "--scope", "read-only", "--trusted", "--path", str(resolved_copy))
+        except OSError as exc:
+            return _fail("vault add", f"could not run lore ({type(exc).__name__})", lore_bin=lore_bin)
         if added.returncode != 0:
             return _fail("vault add", f"failed (exit {added.returncode})", lore_bin=lore_bin)
-        marker.unlink(missing_ok=True)
+        try:
+            marker.unlink(missing_ok=True)
+        except OSError as exc:
+            return _fail("reindex marker", f"could not be cleared ({type(exc).__name__})", lore_bin=lore_bin)
         print(f"trailhead: core vault registered as 'core' (read-only) at {copy}", file=file)
         for line in (added.stdout or "").splitlines():
             if line.startswith("Note:"):
@@ -313,12 +331,18 @@ def install_core_vault(
     if not (changed or pending):
         print(f"trailhead: core vault up to date ({copy})", file=file)
         return CoreVaultOutcome("up_to_date", "copy matches the source")
-    reindexed = lore("reindex")
+    try:
+        reindexed = lore("reindex")
+    except OSError as exc:
+        return _fail("reindex", f"could not run lore ({type(exc).__name__})", lore_bin=lore_bin)
     if reindexed.returncode != 0:
         return _fail(
             "reindex", f"failed (exit {reindexed.returncode}); it is retried on the next install", lore_bin=lore_bin
         )
-    marker.unlink(missing_ok=True)
+    try:
+        marker.unlink(missing_ok=True)
+    except OSError as exc:
+        return _fail("reindex marker", f"could not be cleared ({type(exc).__name__})", lore_bin=lore_bin)
     reason = "copy refreshed and reindexed" if changed else "retried a pending reindex"
     print(f"trailhead: core vault refreshed: {reason} ({copy})", file=file)
     return CoreVaultOutcome("refreshed", reason)

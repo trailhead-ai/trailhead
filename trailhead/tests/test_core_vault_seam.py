@@ -20,6 +20,7 @@ pytestmark = pytest.mark.seam_real
 REPO_ROOT = Path(__file__).resolve().parents[2]
 LORE_CLI = REPO_ROOT / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 REAL_LORE_DIRS = [Path.home() / ".config" / "lore", Path.home() / ".local" / "state" / "lore"]
+REAL_TRAILHEAD_STATE = [core_copy_dir(), core_copy_dir().parent / MARKER_NAME]
 
 
 def _mtimes(roots):
@@ -33,14 +34,15 @@ def _mtimes(roots):
 
 @pytest.fixture(autouse=True)
 def _real_lore_untouched():
-    before = _mtimes(REAL_LORE_DIRS)
+    watched = [*REAL_LORE_DIRS, *REAL_TRAILHEAD_STATE]
+    before = _mtimes(watched)
     yield
-    assert _mtimes(REAL_LORE_DIRS) == before, "the real lore config/state was modified"
+    assert _mtimes(watched) == before, "the real lore config/state or trailhead core-vault state was modified"
 
 
 @pytest.fixture
 def env(tmp_path):
-    e = {k: v for k, v in os.environ.items() if not k.startswith("LORE_")}
+    e = {k: v for k, v in os.environ.items() if not k.startswith(("LORE_", "TRAILHEAD_"))}
     fence = {
         "HOME": tmp_path / "home",
         "XDG_CONFIG_HOME": tmp_path / "cfg",
@@ -109,8 +111,9 @@ def vault_ls(env):
     return {v["name"]: v for v in json.loads(lore(env, "vault", "ls", "--json"))}
 
 
-def test_registered_core_is_searchable_and_listed(source, env, lore_ready):
+def test_registered_core_is_searchable_and_listed(source, env, lore_ready, capsys):
     assert step(source, env).outcome == "registered"
+    assert "trailhead: core vault: Note: older lore releases refuse" in capsys.readouterr().out
     copy = core_copy_dir(env)
     assert "zebra-notes" in lore(env, "search", "zebra")
     core = vault_ls(env)["core"]
