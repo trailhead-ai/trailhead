@@ -178,13 +178,18 @@ a change that touches one without a current verdict.
    one per repo).
 
 The check applies to a repo only when its change touches a `merge_only` case, decided by the selection
-`plan` uses. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
-applies; a dirty working tree does not affect it. Where it does not apply and the repo's mappings hold no
-`merge_only` case, `portage merge` behaves as without the flag (a given `--eval-state` is not read, no head is
-read, and the merge is not pinned). Where it does not apply but the repo's mappings hold a `merge_only` case,
-the PR's remote head is read: a head that is not this checkout's `HEAD` is refused with exit 2 as
-`local-head-stale` (pull the PR head and retry), because a commit that landed only on the remote was never
-checked for what it touches; a head that matches pins the merge to it; an unreadable head is refused.
+`plan` uses. A case counts as `merge_only` when the merge-base's mapping or HEAD's committed mapping marks it,
+so a stale `origin/HEAD` cannot hide a flag a newer base carries. Only commits are read: the mappings, the
+measured paths and the `case.yaml` files come from the merge-base and HEAD, and an uncommitted edit changes
+no answer. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
+applies. Where it does not apply and the repo holds no `eval-gate.json` mapping (at HEAD or the merge-base),
+`portage merge` behaves as without the flag (a given `--eval-state` is not read, no head is read, and the
+merge is not pinned). Where it does not apply but the repo holds any mapping, the PR's remote head is read:
+a head that is not this checkout's `HEAD` is refused with exit 2 as `local-head-stale` (pull the PR head and
+retry), because a commit that landed only on the remote was never checked for what it touches or what it
+marks `merge_only`; a head that matches pins the merge to it; an unreadable head is refused. A git or OS
+failure while answering is refused as `selection-failed`; only git's own "not a git repository" makes the
+check not apply.
 
 Where it applies, the merge is refused with exit 2, before any provider merge and before the `auto_merge`
 refusal, when any of these holds: no state was given; the state directory is not a real, caller-owned 0700

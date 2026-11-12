@@ -29,7 +29,10 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 
 The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched
 case. ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters
-by tier. Base takes precedence over the branch: cases are selected from the base and head
+by tier. Both mappings and the case files are read from commits (the merge-base and HEAD), never the
+working tree. On the push tier the base takes precedence for ``merge_only``; at the merge tier (and in
+``merge_only_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
+base cannot hide a flag. Base takes precedence over the branch for the rest: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. A corpus new on the branch uses its own and
 is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
@@ -47,6 +50,7 @@ file counts as both its old and its new path.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -97,15 +101,44 @@ def _show(repo: Path, rev: str, path: str) -> str | None:
         raise MappingError(path, "not valid UTF-8") from None
 
 
-def _load_head(repo: Path, path: str, tracked: set[str]) -> Mapping | None:
-    if path not in tracked:
+_BLOB_MODES = ("100644", "100755")
+
+
+def _head_tree(repo: Path) -> dict[str, str]:
+    """HEAD's committed tree as ``{path: mode}``. The working tree is never consulted."""
+    tree: dict[str, str] = {}
+    for entry in _git(repo, "ls-tree", "-r", "-z", "HEAD").split("\0"):
+        meta, sep, path = entry.partition("\t")
+        if sep:
+            tree[path] = meta.split(" ", 1)[0]
+    return tree
+
+
+def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str]) -> None:
+    """The on-disk checks ``load_mapping`` can make, made against HEAD's committed tree."""
+    plugin = PurePosixPath(path).parent.parent
+    for name, case in mapping.cases.items():
+        for m in case.measures:
+            target = (plugin / m).as_posix()
+            prefix = target + "/"
+            held = tree.get(target) in _BLOB_MODES or any(p.startswith(prefix) for p in tree)
+            if not held:
+                raise MappingError(path, f"case {name!r}: measures path {m!r} does not exist "
+                                         "under the plugin root")
+        if tree.get((plugin / "evals" / name / "case.yaml").as_posix()) not in _BLOB_MODES:
+            raise MappingError(path, f"case {name!r} has no case.yaml")
+
+
+def _load_head(repo: Path, path: str, tree: dict[str, str]) -> Mapping | None:
+    if path not in tree:
         return None
-    evals = (repo / path).parent
     try:
-        text = (repo / path).read_text()
+        text = _git(repo, "show", f"HEAD:{path}")
     except UnicodeDecodeError:
         raise MappingError(path, "not valid UTF-8") from None
-    return load_mapping(text, path, plugin_root=evals.parent, evals_dir=evals)
+    mapping = load_mapping(text, path)
+    _check_against_tree(path, mapping, tree)
+    return mapping
 
 
 def _load_base(path: str, text: str) -> Mapping:
@@ -129,9 +162,15 @@ def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, change
     return False
 
 
-def select_touched(repo: Path, merge_base: str, changed: list[str]) -> list[dict]:
-    """Every case the ``changed`` files touch, whatever its tier, as plan entries."""
-    tracked = set(_git(repo, "ls-files", "-z").split("\0")) - {""}
+def select_touched(repo: Path, merge_base: str, changed: list[str], *,
+                   merge_only_either: bool = False) -> list[dict]:
+    """Every case the ``changed`` files touch, whatever its tier, as plan entries.
+
+    Everything is read from commits: the merge-base's and HEAD's mappings and HEAD's tree. An entry's
+    ``merge_only`` is the base's value (the base takes precedence); with ``merge_only_either`` it is
+    true when the base's or HEAD's mapping marks the case."""
+    tree = _head_tree(repo)
+    tracked = set(tree)
     at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
     selected: list[dict] = []
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
@@ -141,8 +180,7 @@ def select_touched(repo: Path, merge_base: str, changed: list[str]) -> list[dict
             raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
         base_text = _show(repo, merge_base, path) if path in at_base else None
         base_map = _load_base(path, base_text) if base_text is not None else None
-        head_map = _load_head(repo, path, tracked)
-        evals = (repo / path).parent
+        head_map = _load_head(repo, path, tree)
         names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
         for name in names:
             base_case = base_map.cases.get(name) if base_map else None
@@ -153,6 +191,7 @@ def select_touched(repo: Path, merge_base: str, changed: list[str]) -> list[dict
             if not _touches(name, measures, plugin, changed):
                 continue
             case = base_case or head_case
+            marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
             runner = (base_map or head_map).runner
             selected.append({
                 "plugin_root": root,
@@ -161,9 +200,10 @@ def select_touched(repo: Path, merge_base: str, changed: list[str]) -> list[dict
                 "pass_at": case.pass_at,
                 "runner": runner,
                 "measures": list(measures),
-                "merge_only": case.merge_only,
+                "merge_only": marked,
                 "new_runner_grants": base_map is None,
-                "case_removed": not (evals / name / "case.yaml").is_file(),
+                "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
+                                not in _BLOB_MODES,
             })
     return selected
 
@@ -180,6 +220,20 @@ def _changed_since(repo: Path, merge_base: str) -> list[str]:
     return [c for c in diff_out.split("\0") if c]
 
 
+def _require_work_tree(repo: Path) -> None:
+    """Raise ``NotAWorkTree`` only on git's explicit "not a git repository"; any other failure
+    to answer is a ``GitError``."""
+    r = subprocess.run(["git", "-C", str(repo), "rev-parse", "--is-inside-work-tree"],
+                       capture_output=True, text=True, env={**os.environ, "LC_ALL": "C"})
+    err = r.stderr.strip()
+    if r.returncode != 0:
+        if "not a git repository" in err:
+            raise NotAWorkTree(err)
+        raise GitError(err or "git rev-parse --is-inside-work-tree failed")
+    if r.stdout.strip() != "true":
+        raise GitError("git does not report an enclosing work tree")
+
+
 def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[dict]]:
     """The ``merge_only`` cases a change to ``repo`` touches, as ``(status, entries)``.
 
@@ -187,35 +241,36 @@ def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[d
     ``plan``. ``status`` is ``ok`` (``entries`` are exactly the touched ``merge_only`` cases),
     ``base-unresolved`` (the changed files are unknown, so ``entries`` is every ``merge_only`` case
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
-    and the answer is unknown). The working tree is not consulted: a dirty tree does not change
-    which files the commits touch. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
+    and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
+    mapping marks it, so a stale base cannot hide a flag. Only commits are read: the mappings and
+    the case files come from the merge-base and HEAD, never the working tree, so an uncommitted
+    edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
     and ``GitError`` on any other git failure."""
     repo = Path(repo).resolve()
-    try:
-        _git(repo, "rev-parse", "--is-inside-work-tree")
-    except GitError as e:
-        raise NotAWorkTree(str(e)) from None
+    _require_work_tree(repo)
     resolved = _resolve_base(repo, base)
     try:
         if resolved is None:
-            tracked = [p for p in _git(repo, "ls-files", "-z").split("\0") if p]
-            touched = select_touched(repo, "HEAD", tracked)
+            touched = select_touched(repo, "HEAD", list(_head_tree(repo)), merge_only_either=True)
         else:
-            touched = select_touched(repo, resolved[1], _changed_since(repo, resolved[1]))
+            touched = select_touched(repo, resolved[1], _changed_since(repo, resolved[1]),
+                                     merge_only_either=True)
     except MappingError:
         return "mapping-invalid", []
     return ("base-unresolved" if resolved is None else "ok"), [c for c in touched if c["merge_only"]]
 
 
-def repo_has_merge_only(repo: Path) -> bool:
-    """Whether any mapping in ``repo`` holds a ``merge_only`` case, touched or not. An invalid mapping
-    answers True: an unknown answer is never read as "no merge-only case"."""
+def repo_has_mapping(repo: Path, base: str | None = None) -> bool:
+    """Whether ``repo`` holds an ``eval-gate.json`` mapping at HEAD or at the merge-base, whatever
+    it contains. Raises ``GitError``."""
     repo = Path(repo).resolve()
-    tracked = [p for p in _git(repo, "ls-files", "-z").split("\0") if p]
-    try:
-        return any(c["merge_only"] for c in select_touched(repo, "HEAD", tracked))
-    except MappingError:
+    if any(_is_mapping(p) for p in _head_tree(repo)):
         return True
+    resolved = _resolve_base(repo, base)
+    if resolved is None:
+        return False
+    at_base = _git(repo, "ls-tree", "-r", "-z", "--name-only", resolved[1]).split("\0")
+    return any(_is_mapping(p) for p in at_base)
 
 
 def local_head(repo: Path) -> str:
@@ -248,7 +303,7 @@ def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
         changed = _changed_since(repo, resolved[1])
         result["changed_files"] = changed
         try:
-            touched = select_touched(repo, resolved[1], changed)
+            touched = select_touched(repo, resolved[1], changed, merge_only_either=tier == "merge")
         except MappingError as e:
             result["status"] = "mapping-invalid"
             result["mapping_invalid"] = {"file": e.file, "fault": e.fault, "revision": e.revision}

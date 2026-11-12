@@ -699,3 +699,113 @@ class TestTier:
         base = _git(repo, "merge-base", "base", "HEAD")
         entries = select_touched(repo, base, ["p/skills/a.md"])
         assert {e["case"]: e["merge_only"] for e in entries} == {"core": False, "slow": True}
+
+
+class TestMergeOnlyReadsCommittedContent:
+    """``merge_only_touched`` answers from what is committed: the merge-base and HEAD mappings
+    (either marking a case is enough) and HEAD's tree, never the working tree."""
+
+    def _touched(self, repo, base="base"):
+        from portage.eval_gate.select import merge_only_touched
+
+        return merge_only_touched(repo, base)
+
+    def test_a_case_the_branch_marks_merge_only_is_returned_though_the_base_unmarks_it(self, repo):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]},
+                        "late": {"measures": ["skills/a.md"], "merge_only": False}})
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]},
+             "late": {"measures": ["skills/a.md"], "merge_only": True}}))
+        _commit(repo)
+        status, entries = self._touched(repo)
+        assert status == "ok"
+        assert [e["case"] for e in entries] == ["late"]
+
+    def test_a_case_the_base_marks_merge_only_is_returned_though_the_branch_unmarks_it(self, repo):
+        _corpus(repo, "p", MO)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": MO["core"], "slow": {"measures": ["skills/a.md"], "merge_only": False}}))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        assert [e["case"] for e in self._touched(repo)[1]] == ["slow"]
+
+    def test_a_case_neither_side_marks_is_not_returned(self, repo):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]}})
+        assert self._touched(repo) == ("ok", [])
+
+    def test_the_merge_tier_plan_flags_a_case_the_branch_marks_merge_only(self, repo, capsys):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]},
+                        "late": {"measures": ["skills/a.md"], "merge_only": False}})
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]},
+             "late": {"measures": ["skills/a.md"], "merge_only": True}}))
+        _commit(repo)
+        _, merge, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert {c["case"]: c["merge_only"] for c in merge["cases"]} == {"core": False, "late": True}
+
+    def test_the_push_tier_plan_keeps_the_base_value(self, repo, capsys):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]},
+                        "late": {"measures": ["skills/a.md"], "merge_only": False}})
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]},
+             "late": {"measures": ["skills/a.md"], "merge_only": True}}))
+        _commit(repo)
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        assert _names(push) == ["core", "late"]
+        assert push["merge_only_pending"] == 0
+
+    def test_an_uncommitted_unmarking_does_not_hide_a_committed_merge_only_case(self, repo):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]}})
+        _write(repo, "p/evals/new/case.yaml", "name: x\n")
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]},
+             "new": {"measures": ["skills/a.md"], "merge_only": True}}))
+        _commit(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]},
+             "new": {"measures": ["skills/a.md"], "merge_only": False}}))
+        status, entries = self._touched(repo)
+        assert (status, [e["case"] for e in entries]) == ("ok", ["new"])
+
+    def test_an_uncommitted_edit_cannot_make_a_committed_mapping_valid_or_invalid(self, repo):
+        _touch_a(repo)
+        (repo / "p/evals/eval-gate.json").write_text("{")
+        status, entries = self._touched(repo)
+        assert (status, [e["case"] for e in entries]) == ("ok", ["slow"])
+
+    def test_an_uncommitted_deletion_of_a_measured_file_does_not_invalidate_the_mapping(self, repo):
+        _touch_a(repo)
+        (repo / "p/skills/b.md").unlink()
+        status, entries = self._touched(repo)
+        assert (status, [e["case"] for e in entries]) == ("ok", ["slow"])
+
+    def test_a_committed_mapping_naming_a_missing_measured_path_is_mapping_invalid(self, repo):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]}})
+        _write(repo, "p/evals/eval-gate.json", _mapping({"core": {"measures": ["skills/gone.md"]}}))
+        _commit(repo)
+        assert self._touched(repo) == ("mapping-invalid", [])
+
+    def test_a_committed_case_without_a_case_yaml_is_mapping_invalid(self, repo):
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]}})
+        _write(repo, "p/evals/eval-gate.json", _mapping(
+            {"core": {"measures": ["skills/a.md"]}, "ghost": {"measures": ["skills/a.md"]}}))
+        _commit(repo)
+        assert self._touched(repo) == ("mapping-invalid", [])
+
+    def test_case_removal_is_decided_from_the_committed_tree(self, repo):
+        from portage.eval_gate.select import select_touched
+
+        _touch_a(repo, {"core": {"measures": ["skills/a.md"]}})
+        base = _git(repo, "merge-base", "base", "HEAD")
+        (repo / "p/evals/core/case.yaml").unlink()
+        (entry,) = select_touched(repo, base, ["p/skills/a.md"])
+        assert entry["case_removed"] is False
+        _write(repo, "p/evals/core/case.yaml", "name: x\n")
+        _git(repo, "rm", "-rq", "p/evals/core")
+        _write(repo, "p/evals/eval-gate.json", _mapping({}))
+        _commit(repo)
+        _write(repo, "p/evals/core/case.yaml", "name: x\n")
+        (entry,) = select_touched(repo, base, ["p/skills/a.md"])
+        assert entry["case_removed"] is True

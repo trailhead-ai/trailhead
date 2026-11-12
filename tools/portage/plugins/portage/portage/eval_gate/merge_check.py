@@ -19,15 +19,18 @@ check name is what the refusal prints::
     head-mismatch               the plan's ``head`` is not the PR's current remote head
     verdict-stops-the-change    ``verdict`` on the state exits non-zero, or cannot be computed
     selection-failed            git could not answer which cases the change touches
-    local-head-stale            the change touches no merge-only case, but the repo holds one and the
-                                PR's remote head is not the local ``HEAD`` the "touches" answer was
-                                computed from (a remote-only commit); pull the PR head and retry
+    local-head-stale            the change touches no merge-only case, but the repo holds an eval-gate
+                                mapping and the PR's remote head is not the local ``HEAD`` the
+                                "touches" answer was computed from (a remote-only commit); pull the
+                                PR head and retry
 
-When the applicability is unknown (the base does not resolve, or a mapping is invalid) the check
-applies: an unknown answer is never read as "no merge-only case". Where the check does not apply
-but the repo's mappings hold any ``merge_only`` case, the merge is pinned to the remote head, and
-refused when that head is not local ``HEAD``; a repo with no ``merge_only`` case merges unpinned, with
-no head read. The contents of ``plan.json`` are
+A case is merge-only when the merge-base's or HEAD's committed mapping marks it; a dirty working
+tree changes nothing. When the applicability is unknown (the base does not resolve, or a mapping is
+invalid) the check applies: an unknown answer is never read as "no merge-only case". Where the check
+does not apply but the repo holds any ``eval-gate.json`` mapping (at HEAD or the merge-base), the merge
+is pinned to the remote head, and refused when that head is not local ``HEAD``; a repo with no mapping
+merges unpinned, with no head read. A failure of git or the OS to answer is ``selection-failed``, and
+only git's explicit "not a git repository" makes the check not applicable. The contents of ``plan.json`` are
 untrusted; the head is shape-checked before it is compared or reaches a ``gh`` argv.
 
 The stderr form is ``portage merge: eval-gate check failed for <repo>: <check> — <detail>``
@@ -44,7 +47,7 @@ from pathlib import Path
 from trailhead.vcs.github import InvalidInputError, validate_commit_sha
 
 from .run import RunRefused, check_state
-from .select import GitError, NotAWorkTree, local_head, merge_only_touched, repo_has_merge_only
+from .select import GitError, NotAWorkTree, local_head, merge_only_touched, repo_has_mapping
 from . import verdict as gate_verdict
 
 
@@ -85,10 +88,10 @@ def _pin_untouched(repo: Path, status: str, read_head: Callable[[], str]) -> tup
     if status == "not-a-work-tree":
         return None, None
     try:
-        if not repo_has_merge_only(repo):
+        if not repo_has_mapping(repo):
             return None, None
         local = local_head(repo)
-    except GitError as e:
+    except (GitError, OSError) as e:
         return Refusal("selection-failed", gate_verdict.one_line(e)), None
     try:
         remote = validate_commit_sha(read_head())
@@ -110,7 +113,7 @@ def check_pair(
     repo = Path(repo_path)
     try:
         applies, status, merge_only = _applies(repo)
-    except GitError as e:
+    except (GitError, OSError) as e:
         return Refusal("selection-failed", gate_verdict.one_line(e)), None
     if not applies:
         return _pin_untouched(repo, status, read_head)

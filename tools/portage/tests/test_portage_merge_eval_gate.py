@@ -22,6 +22,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
 from portage.cli import pr as pr_cli
+from portage.eval_gate import merge_check
 from portage.eval_gate.run import run_case
 
 from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
@@ -47,20 +48,22 @@ def _git(repo: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def make_repo(root: Path, name: str, cases: dict, *, origin: bool = True) -> tuple[Path, str]:
-    """A repo whose feature branch touches ``skills/a.md``; returns ``(repo, head_sha)``."""
+def make_repo(root: Path, name: str, cases: dict | None, *, origin: bool = True) -> tuple[Path, str]:
+    """A repo whose feature branch touches ``skills/a.md``; returns ``(repo, head_sha)``.
+    ``cases=None`` writes no ``eval-gate.json`` at all."""
     repo = root / name
     repo.mkdir()
     _git(repo, "init", "-q", "-b", "main")
     for f in ("skills/a.md", "skills/b.md"):
         (repo / "p" / f).parent.mkdir(parents=True, exist_ok=True)
         (repo / "p" / f).write_text("x\n")
-    (repo / "p/evals").mkdir(parents=True, exist_ok=True)
-    for case in cases:
-        (repo / f"p/evals/{case}").mkdir(parents=True, exist_ok=True)
-        (repo / f"p/evals/{case}/case.yaml").write_text("name: x\n")
-    (repo / "p/evals/eval-gate.json").write_text(
-        json.dumps({"schema_version": 1, "runner": RUNNER, "cases": cases}))
+    if cases is not None:
+        (repo / "p/evals").mkdir(parents=True, exist_ok=True)
+        for case in cases:
+            (repo / f"p/evals/{case}").mkdir(parents=True, exist_ok=True)
+            (repo / f"p/evals/{case}/case.yaml").write_text("name: x\n")
+        (repo / "p/evals/eval-gate.json").write_text(
+            json.dumps({"schema_version": 1, "runner": RUNNER, "cases": cases}))
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "base")
     if origin:
@@ -354,7 +357,7 @@ class TestGitCannotAnswer:
 class TestNotApplicable:
     @pytest.fixture
     def core_only(self, tmp_path):
-        return make_repo(tmp_path, "core-only", {"core": CORE})
+        return make_repo(tmp_path, "core-only", None)
 
     def test_merges_without_a_state_and_without_a_pin(self, tmp_path, monkeypatch, core_only):
         repo, head = core_only
@@ -428,15 +431,167 @@ class TestPinnedWhenTheCheckDoesNotApply:
         assert spy.merges == []
         assert f"eval-gate check failed for {repo}: head-unreadable" in err
 
-    def test_a_repo_without_a_merge_only_case_reads_no_head_and_pins_nothing(
+    def test_a_repo_without_any_mapping_reads_no_head_and_pins_nothing(
         self, tmp_path, monkeypatch, capsys
     ):
-        repo, head = make_repo(tmp_path, "empty-map", {})
+        repo, head = make_repo(tmp_path, "no-map", None)
         spy = Spy("f" * 40)
         assert merge(tmp_path, monkeypatch, repo, spy) == 0
         (argv,) = spy.merges
         assert "--match-head-commit" not in argv
         assert spy.head_reads == 0
+
+
+def _remap(repo: Path, cases: dict, msg: str = "remap") -> None:
+    (repo / "p/evals/eval-gate.json").write_text(
+        json.dumps({"schema_version": 1, "runner": RUNNER, "cases": cases}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", msg)
+
+
+class TestStaleBaseDoesNotHideMergeOnly:
+    """The base mapping reads ``merge_only: false`` (a stale ``origin/HEAD``); the branch's committed
+    mapping says true. Either side marking the case is enough to require the merge-tier verdict."""
+
+    @pytest.fixture
+    def stale(self, tmp_path):
+        later = {"measures": ["skills/a.md"]}
+        repo, _ = make_repo(tmp_path, "stale", {"core": CORE, "later": later})
+        _remap(repo, {"core": CORE, "later": {**later, "merge_only": True}})
+        return repo, _git(repo, "rev-parse", "HEAD")
+
+    def test_a_case_flagged_on_the_branch_alone_refuses_a_merge_without_a_state(
+        self, tmp_path, monkeypatch, capsys, stale
+    ):
+        repo, head = stale
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        refused(rc, spy, capsys, repo, "no-state")
+
+    def test_a_current_merge_tier_state_still_merges(self, tmp_path, monkeypatch, capsys, stale):
+        repo, head = stale
+        state = make_state(repo, capsys)
+        plan = json.loads((state / "plan.json").read_text())
+        assert {c["case"]: c["merge_only"] for c in plan["cases"]} == {"core": False, "later": True}
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}") == 0
+
+
+class TestPinWhenTheRepoHoldsAnyMapping:
+    def test_a_mapping_without_a_merge_only_case_still_refuses_a_remote_head_ahead_of_local(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "plain", {"core": CORE})
+        spy = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        err = capsys.readouterr().err
+        assert rc == 2 and spy.merges == [] and spy.head_reads == 1
+        assert f"eval-gate check failed for {repo}: local-head-stale" in err
+
+    def test_a_mapping_without_a_merge_only_case_merges_pinned_when_heads_agree(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "plain", {"core": CORE})
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy) == 0
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
+
+    def test_a_mapping_the_branch_adds_pins_though_the_base_has_none(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, _ = make_repo(tmp_path, "added", None)
+        (repo / "p/evals/core").mkdir(parents=True)
+        (repo / "p/evals/core/case.yaml").write_text("name: x\n")
+        _remap(repo, {"core": CORE})
+        spy = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        assert rc == 2 and spy.merges == []
+        assert "local-head-stale" in capsys.readouterr().err
+
+    def test_a_mapping_that_exists_only_at_the_merge_base_still_pins(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "dropped", {"core": CORE})
+        _git(repo, "rm", "-rq", "p/evals")
+        _git(repo, "commit", "-q", "-m", "drop the corpus")
+        spy = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, spy)
+        assert rc == 2 and spy.merges == []
+        assert "local-head-stale" in capsys.readouterr().err
+
+
+class TestFailClosedEdges:
+    def _pair(self, repo, head):
+        spy = Spy(head)
+        return merge_check.check_pair(str(repo), None, lambda: spy.remote_head)
+
+    def test_a_directory_that_is_not_a_git_repository_is_not_applicable(self, tmp_path):
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        assert self._pair(plain, "a" * 40) == (None, None)
+
+    def test_a_repo_git_cannot_enter_is_selection_failed_not_not_applicable(self, tmp_path):
+        repo, head = make_repo(tmp_path, "locked", {"core": CORE, "slow": SLOW})
+        repo.chmod(0)
+        try:
+            refusal, pin = self._pair(repo, head)
+        finally:
+            repo.chmod(0o755)
+        assert pin is None and refusal.check == "selection-failed"
+
+    def test_an_os_error_from_selection_is_selection_failed(self, tmp_path, monkeypatch):
+        repo, head = make_repo(tmp_path, "nogit", {"core": CORE, "slow": SLOW})
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        refusal, pin = self._pair(repo, head)
+        assert pin is None and refusal.check == "selection-failed"
+
+    def test_an_os_error_while_pinning_an_untouched_repo_is_selection_failed(self, tmp_path, monkeypatch):
+        repo, head = make_repo(tmp_path, "nogit", {"core": CORE})
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        monkeypatch.setenv("PATH", str(empty))
+        refusal, pin = merge_check._pin_untouched(repo, "ok", lambda: head)
+        assert pin is None and refusal.check == "selection-failed"
+
+    def test_a_merge_with_no_git_refuses_cleanly_without_a_traceback(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_repo(tmp_path, "nogit", {"core": CORE, "slow": SLOW})
+        empty = tmp_path / "empty-bin"
+        empty.mkdir()
+        spy = Spy(head)
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(json.dumps({"schema_version": 1, "members": [
+            {"name": "api", "repo_root": str(repo), "worktree_path": str(repo)}]}))
+        group = tmp_path / "group.toml"
+        group.write_text(AUTO)
+        monkeypatch.setattr(pr_cli, "get_provider", lambda *a, **k: GitHubProvider(runner=spy))
+        monkeypatch.setenv("PATH", str(empty))
+        rc = dispatch.main(["merge", "--manifest", str(manifest), "--toml", str(group),
+                            f"{repo}:{PR}:api"])
+        err = capsys.readouterr().err
+        assert rc == 2 and spy.merges == []
+        assert "selection-failed" in err and "Traceback" not in err
+
+    @pytest.mark.parametrize("field,bad", [
+        ("plugin_root", ["p"]), ("plugin_root", 7), ("plugin_root", {"a": 1}), ("plugin_root", None),
+        ("case", ["core"]), ("case", {"a": 1}), ("case", 3),
+    ])
+    def test_a_crafted_plan_entry_of_the_wrong_type_is_plan_unusable(
+        self, tmp_path, monkeypatch, capsys, mo, field, bad
+    ):
+        repo, head = mo
+        state = make_state(repo, capsys)
+        plan = json.loads((state / "plan.json").read_text())
+        plan["cases"][0][field] = bad
+        (state / "plan.json").write_text(json.dumps(plan))
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}")
+        err = refused(rc, spy, capsys, repo, "plan-unusable")
+        assert "Traceback" not in err
 
 
 class TestBaseRemedy:

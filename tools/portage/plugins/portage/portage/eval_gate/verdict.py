@@ -201,6 +201,8 @@ def _load_plan(state: Path) -> dict:
         for c in cases:
             if not isinstance(c["case"], str) or not CASE_NAME.match(c["case"]):
                 raise ValueError(f"case name {_safe(c['case'], 60)!r} must match {CASE_NAME.pattern}")
+            if not isinstance(c["plugin_root"], str):
+                raise ValueError(f"plugin_root of case {c['case']!r} must be a string")
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise Fault(f"plan.json unusable: {_safe(e)}") from e
     return plan
