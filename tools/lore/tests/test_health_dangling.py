@@ -217,6 +217,18 @@ def test_a_malformed_finding_carries_every_malformed_line_in_order():
     assert (f.field, f.malformed, f.locations) == ("wikilink", True, (12, 40, 41))
 
 
+def test_collecting_a_huge_number_of_malformed_entries_is_linear():
+    n = 60_000
+    sidecar = {"related": {"spec": ["bad name!"] * n}}
+    scans = [vault("a", rec("a", "lesson", "src", sidecar))]
+    started = time.perf_counter()
+    res = run(scans)
+    elapsed = time.perf_counter() - started
+    (f,) = res.findings
+    assert f.locations == tuple(range(1, n + 1))
+    assert elapsed < 2.0, f"{n} malformed entries took {elapsed:.1f}s"
+
+
 def test_two_malformed_links_on_one_line_report_that_line_once():
     res = run([vault("a", rec("a", "lesson", "src", {}, "x\n[[Bad One]] [[Bad Two]]\n"))])
     (f,) = res.findings

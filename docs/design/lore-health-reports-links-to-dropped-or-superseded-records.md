@@ -72,11 +72,14 @@ parsed.
 
 A malformed reference in `dangling-links` names where it sits, never its text: a body wikilink by
 its line in the body, a sidecar entry by its field and its position in that field. One finding per
-field, listing each place:
+field, listing each place. A line names at most the first 10 places, in order, then `and N more`
+(N the count left out), so a record with thousands of bad references still prints one short line;
+the finding itself still holds every place:
 
 ```
   default/task/import-notes-from-old-wiki  2024-11-02  wikilink → malformed reference on body lines 12, 40 and 41: not shaped like a record id
   default/decision/use-a-pooled-client  2025-02-10  related spec → malformed reference at entry 3: not shaped like a record id
+  default/lesson/bulk-import  2025-03-04  related spec → malformed reference at entries 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 5 more: not shaped like a record id
 ```
 
 ## State — No findings

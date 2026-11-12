@@ -313,6 +313,32 @@ def test_malformed_related_entry_names_its_position(world, related, phrase):
     assert f"related spec → malformed reference {phrase}: not shaped like a record id" in line
 
 
+@pytest.mark.parametrize("count,phrase", [
+    (10, "on body lines 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10"),
+    (11, "on body lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 1 more"),
+    (15, "on body lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 5 more"),
+])
+def test_malformed_wikilink_evidence_names_at_most_ten_lines(world, count, phrase):
+    _put(world.roots["default"], "lesson", "a", body=_body_with_bad_links_on(*range(1, count + 1)))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    (line,) = _malformed_lines(r.stdout)
+    assert f"wikilink → malformed reference {phrase}: not shaped like a record id" in line
+
+
+@pytest.mark.parametrize("count,phrase", [
+    (10, "at entries 1, 2, 3, 4, 5, 6, 7, 8, 9 and 10"),
+    (11, "at entries 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 1 more"),
+    (15, "at entries 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 5 more"),
+])
+def test_malformed_entry_evidence_names_at_most_ten_entries(world, count, phrase):
+    _put(world.roots["default"], "lesson", "a", related={"spec": ["bad name!"] * count})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    (line,) = _malformed_lines(r.stdout)
+    assert f"related spec → malformed reference {phrase}: not shaped like a record id" in line
+
+
 def test_malformed_parent_has_no_position_so_it_names_only_the_field(world):
     _put(world.roots["default"], "task", "a", parent="bad parent!")
     r = world.run()

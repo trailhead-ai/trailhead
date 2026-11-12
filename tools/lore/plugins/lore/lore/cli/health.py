@@ -287,8 +287,14 @@ def _and_list(items: Sequence[str]) -> str:
     return ", ".join(items[:-1]) + " and " + items[-1]
 
 
+MAX_NAMED_LOCATIONS = 10
+
+
 def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
     """Where a malformed reference sits, never its text.
+
+    At most the first ``MAX_NAMED_LOCATIONS`` are named, then ``and N more``, so
+    one finding stays one short line however many places are bad.
 
     A wikilink's locations are body lines, any other field's are entry
     positions; a field with no locations (``parent``) is a single value, so the
@@ -296,11 +302,14 @@ def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
     """
     if not locations:
         return "malformed reference"
+    named = [str(n) for n in locations[:MAX_NAMED_LOCATIONS]]
+    more = len(locations) - len(named)
+    spots = _and_list(named) if not more else f"{', '.join(named)} and {more} more"
     if field == "wikilink":
         noun = "body line" if len(locations) == 1 else "body lines"
-        return f"malformed reference on {noun} {_and_list([str(n) for n in locations])}"
+        return f"malformed reference on {noun} {spots}"
     noun = "entry" if len(locations) == 1 else "entries"
-    return f"malformed reference at {noun} {_and_list([str(n) for n in locations])}"
+    return f"malformed reference at {noun} {spots}"
 
 
 def _when(f) -> str:
