@@ -759,3 +759,74 @@ class TestMergeTierVerdict:
         code, out, _ = verdict(capsys, st)
         assert code == 0
         assert "merge-only-not-run" not in out
+
+
+def _slow_not_run(st, reason, *, tier="merge"):
+    _merge_tier_plan(st, tier, slow_result="pass")
+    st.result("slow", verdict="not-run", passed=0, errored=0, reason=reason)
+
+
+class TestMergeTierUnrunnableCases:
+    @pytest.mark.parametrize("reason", ["case-removed-on-branch", "corpus-new-on-branch"])
+    def test_a_merge_only_case_that_can_never_run_does_not_stop_the_change(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+        assert "eval-gate: not-run" in out
+
+    @pytest.mark.parametrize("reason", ["case-removed-on-branch", "corpus-new-on-branch"])
+    def test_it_is_reported_as_on_push(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        _, out, _ = verdict(capsys, st)
+        assert f"`slow` — `{reason}`" in section_of(out)
+
+    @pytest.mark.parametrize("reason", ["timeout", "cost-cap", "runner-error", "runs-errored"])
+    def test_a_merge_only_case_that_could_still_run_stops_the_change(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run: slow" in out
+
+    def test_an_unrunnable_case_does_not_hide_a_runnable_one_beside_it(self, st, capsys):
+        slow = {**_entry("slow"), "merge_only": True}
+        gone = {**_entry("gone"), "merge_only": True}
+        st.plan([slow, gone])
+        doc = json.loads((st.dir / "plan.json").read_text())
+        doc.update({"tier": "merge", "head": "a" * 40, "merge_only_pending": 0})
+        (st.dir / "plan.json").write_text(json.dumps(doc))
+        st.result("slow", verdict="not-run", passed=0, errored=0, reason="timeout")
+        st.result("gone", verdict="not-run", passed=0, errored=0, reason="case-removed-on-branch")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run: slow" in out
+        assert "merge-only-not-run: slow, gone" not in out
+
+
+class TestMergeOnlyNotRunRecovery:
+    @pytest.mark.parametrize("reason,recovery", [
+        ("timeout", "the runs split and the budget ran out; re-run the merge-tier gate"),
+        ("cost-cap", "the runner hit its cost limit; re-run after the limit resets"),
+        ("runner-error", "merge by hand"),
+        ("runs-errored", "merge by hand"),
+    ])
+    def test_each_not_run_case_names_its_reason_and_the_matching_recovery(
+        self, st, capsys, reason, recovery
+    ):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        stdout_part = out.split("<!--", 1)[0]
+        for text in (stdout_part, section_of(out)):
+            line = next(ln for ln in text.splitlines() if "slow" in ln and recovery in ln)
+            assert reason in line
+
+    def test_the_recoveries_differ_by_reason(self, st, capsys):
+        _slow_not_run(st, "timeout")
+        _, timeout_out, _ = verdict(capsys, st)
+        _slow_not_run(st, "runner-error")
+        _, other_out, _ = verdict(capsys, st)
+        assert "re-run the merge-tier gate" in timeout_out
+        assert "re-run the merge-tier gate" not in other_out
+        assert "merge by hand" not in timeout_out
+        assert "after the limit resets" not in other_out

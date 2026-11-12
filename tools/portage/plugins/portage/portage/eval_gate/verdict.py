@@ -47,8 +47,11 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 ``--state`` it still writes the section file there.
 
 At the merge tier (plan ``tier`` is ``merge``) a ``merge_only`` case that is not-run stops the
-change too: exit 1, the report line ``merge-only-not-run: <cases>`` and the same reason in the
-section. A not-run core case still lets the change through, as on push.
+change too: exit 1, the report line ``merge-only-not-run: <cases>``, then one line per case naming its
+not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: re-run
+after the limit resets; any other reason: merge by hand), repeated in the section. A merge-only case that
+can never run (``case-removed-on-branch``, ``corpus-new-on-branch``) is reported as on push and does not
+stop the change. A not-run core case still lets the change through, as on push.
 
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
 A fault writing the section file never turns a decided stop into 2: with a stop decided the
@@ -88,6 +91,8 @@ END_MARKER = "<!-- portage:eval-gate:end -->"
 SECTION_FILE = "eval-gate-section.md"
 NO_RESULT = "no-result-recorded"
 MERGE_ONLY_NOT_RUN = "merge-only-not-run"
+
+UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW)
 
 PERSISTENT = (NO_RUNNER, RUNNER_MISSING, SANDBOX_UNWRITABLE)
 
@@ -285,6 +290,19 @@ def _not_run_items(rows: list[dict]) -> list[str]:
             for r in rows if r["result"]["verdict"] == "not-run"]
 
 
+def _merge_only_recovery(reason: str) -> str:
+    if reason == "timeout":
+        return "the runs split and the budget ran out; re-run the merge-tier gate"
+    if reason == "cost-cap":
+        return "the runner hit its cost limit; re-run after the limit resets"
+    return f"{REASONS[reason]}; merge by hand"
+
+
+def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
+    return [f"{r['case']}: {r['result']['reason']} — {_merge_only_recovery(r['result']['reason'])}"
+            for r in rows]
+
+
 def _failure_details(rows: list[dict], state: Path) -> list[str]:
     out = []
     for r in rows:
@@ -339,7 +357,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
-    unrun_merge_only = ([r for r in notrun if r["merge_only"]] if plan.get("tier") == "merge" else [])
+    unrun_merge_only = ([r for r in notrun if r["merge_only"] and r["result"]["reason"] not in UNRUNNABLE]
+                        if plan.get("tier") == "merge" else [])
     outcome = "failed" if failed else "not-run" if notrun else "passed"
     report = [f"eval-gate: {outcome}", f"persistent: {','.join(persistent) or 'none'}"]
     if ignored:
@@ -350,6 +369,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         report += _failure_details(rows, state)
     if unrun_merge_only:
         report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
+        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
 
     body: list[str] = []
     if failed:
@@ -371,7 +391,8 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         body += _bullets(_not_run_items(rows))
     if unrun_merge_only:
         body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
-                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + "."]
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + ".", ""]
+        body += _bullets(_merge_only_stop_lines(unrun_merge_only))
     tier = _tier_lines(plan)
     if tier:
         body += ["", *tier]
