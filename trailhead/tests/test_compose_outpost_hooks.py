@@ -16,7 +16,7 @@ from trailhead.harness import harness_process
 from trailhead.tests._gateway_support import (
     REGISTRATION_AUTHORITY,
     StubOutpost,
-    register_port_env,
+    register_port_interpreter,
     run_under_harness,
     write_authority,
 )
@@ -87,7 +87,20 @@ class TestScript:
         path.write_text(f'#!/bin/sh\necho "$@" >> "{record}"\necho noise\nexit 3\n')
         path.chmod(0o755)
 
-    def test_runs_the_shim_under_the_trailhead_state_dir_with_the_hook_flag(self, tmp_path):
+    def test_runs_the_register_shim_under_the_trailhead_state_dir_with_the_hook_flag(self, tmp_path):
+        record = tmp_path / "args.txt"
+        self._fake_cli(tmp_path / "state" / "bin" / "trailhead-gateway-register", record)
+        proc = subprocess.run(
+            [str(self._script(tmp_path))],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
+        )
+        assert record.read_text().split() == ["--hook"]
+        assert (proc.returncode, proc.stdout) == (0, "")
+
+    def test_never_runs_the_interactive_trailhead_shim(self, tmp_path):
         record = tmp_path / "args.txt"
         self._fake_cli(tmp_path / "state" / "bin" / "trailhead", record)
         proc = subprocess.run(
@@ -97,12 +110,14 @@ class TestScript:
             text=True,
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
         )
-        assert record.read_text().split() == ["gateway", "register", "--hook"]
+        assert not record.exists()
         assert (proc.returncode, proc.stdout) == (0, "")
+        (line,) = (tmp_path / "state" / "gateway" / "register.log").read_text().splitlines()
+        assert line.endswith(" - cli_not_found")
 
-    def test_never_runs_a_trailhead_found_on_path_when_the_shim_is_missing(self, tmp_path):
+    def test_never_runs_a_register_command_found_on_path_when_the_shim_is_missing(self, tmp_path):
         record = tmp_path / "args.txt"
-        self._fake_cli(tmp_path / "onpath" / "trailhead", record)
+        self._fake_cli(tmp_path / "onpath" / "trailhead-gateway-register", record)
         proc = subprocess.run(
             [str(self._script(tmp_path))],
             input="{}",
@@ -121,7 +136,7 @@ class TestScript:
 
     def test_a_shim_that_is_not_executable_is_not_run(self, tmp_path):
         record = tmp_path / "args.txt"
-        shim = tmp_path / "state" / "bin" / "trailhead"
+        shim = tmp_path / "state" / "bin" / "trailhead-gateway-register"
         self._fake_cli(shim, record)
         shim.chmod(0o644)
         proc = subprocess.run(
@@ -215,10 +230,9 @@ class TestUninstall:
 
 
 class TestRealInstallReachesOutpost:
-    def test_the_hook_registers_through_the_shim_install_wrote(self, tmp_path):
+    def test_the_hook_registers_through_the_shim_install_wrote(self, tmp_path, monkeypatch):
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
-        build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
         outpost_state = tmp_path / "outpost-state"
         write_authority(outpost_state)
         launcher = make_fake_harness(tmp_path / "fake")
@@ -226,12 +240,15 @@ class TestRealInstallReachesOutpost:
         _compose("outpost", dest)
         found = []
         with StubOutpost() as stub:
+            monkeypatch.setattr(
+                "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
+            )
+            build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
             proc = run_under_harness(
                 launcher,
                 str(dest / "hooks" / "gateway-register"),
                 env={
                     **env,
-                    **register_port_env(stub.port),
                     "OUTPOST_STATE_DIR": str(outpost_state),
                     "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
                 },

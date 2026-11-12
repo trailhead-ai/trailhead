@@ -25,6 +25,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from unittest import mock
 
 from trailhead.install import build_cli_shims, resolve_cli_tools
 
@@ -32,7 +33,7 @@ from ._gateway_support import (
     REPO_ROOT,
     free_port,
     gateway_runner_cmd,
-    register_port_env,
+    register_port_interpreter,
     register_runner_cmd,
     runner_env,
 )
@@ -245,17 +246,20 @@ def render_sandbox_settings(
     return {"sandbox": sandbox, "permissions": {"allow": allow, "deny": deny}}
 
 
-def install_shims(root: Path, outpost: RealOutpost) -> tuple[Path, dict[str, str]]:
-    """``(bin dir with outpost-gateway, extra session env)`` aimed at *outpost*.
+def install_shims(root: Path, outpost: RealOutpost) -> Path:
+    """The bin dir holding an ``outpost-gateway`` aimed at *outpost*.
 
     The trailhead state dir is what the real install writes (``build_cli_shims`` with the Outpost
-    tool enabled): the real ``hooks/gateway-register`` finds the ``trailhead`` shim there. Both it
-    and the production gateway command fix Outpost's port, so the session's env retargets the
-    registration step (``register_port_env``) and the gateway command is this test's own wrapper
+    tool enabled): the real ``hooks/gateway-register`` finds the ``trailhead-gateway-register`` shim
+    there. Both it and the production gateway command fix Outpost's port, so the registration shim
+    is pinned to ``register_port_interpreter`` and the gateway command is this test's own wrapper
     around ``main(port=...)``.
     """
     env = {"TRAILHEAD_STATE_DIR": str(root / "trailhead-state"), "HOME": str(root / "outpost-home")}
-    build_cli_shims(resolve_cli_tools({"camp": True, "lore": True, "portage": True}), env=env, outpost_enabled=True)
+    with mock.patch("trailhead.pathint.sys.executable", str(register_port_interpreter(root / "interp", outpost.port))):
+        build_cli_shims(
+            resolve_cli_tools({"camp": True, "lore": True, "portage": True}), env=env, outpost_enabled=True
+        )
     bin_dir = root / "shims"
     bin_dir.mkdir()
     gateway = bin_dir / "outpost-gateway"
@@ -266,7 +270,7 @@ def install_shims(root: Path, outpost: RealOutpost) -> tuple[Path, dict[str, str
         f'sys.exit(main(sys.argv[1:], port={outpost.port}))\' "$@"\n'
     )
     gateway.chmod(0o755)
-    return bin_dir, register_port_env(outpost.port)
+    return bin_dir
 
 
 def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dict[str, str]:

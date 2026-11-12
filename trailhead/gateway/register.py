@@ -1,6 +1,9 @@
 """``trailhead gateway register`` — register this session with Outpost's gateway.
 
-Run from the Outpost plugin's SessionStart hook (``--hook``). It finds the harness
+Run from the Outpost plugin's SessionStart hook (``--hook``) through the pinned
+``trailhead-gateway-register`` shim install writes, and by hand as ``trailhead gateway
+register``. Everything it imports is stdlib or trailhead, so it runs on the isolated
+interpreter that shim starts. It finds the harness
 process that owns it through the harness seam, reads the registration authority
 from Outpost's state directory, and posts ``{pid, start_time}`` to Outpost, which
 derives the workspace itself. Nothing is taken from the caller: no argument,
