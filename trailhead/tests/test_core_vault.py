@@ -458,6 +458,31 @@ def test_vault_add_failure_warns_then_next_run_registers(source, cenv, copy, cap
     assert any(c[:2] == ["vault", "add"] for c in lore.calls)
 
 
+def _stale_marker(copy) -> Path:
+    marker = copy.parent / MARKER_NAME
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("reindex pending\n")
+    return marker
+
+
+def test_stale_marker_is_cleared_by_a_fresh_registration(source, cenv, copy, capsys):
+    marker = _stale_marker(copy)
+    lore = FakeLore([])
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "registered"
+    assert any(c[:2] == ["vault", "add"] for c in lore.calls)
+    assert ["reindex"] not in lore.calls
+    assert not marker.exists()
+
+
+def test_stale_marker_survives_a_failed_registration(source, cenv, copy, capsys):
+    marker = _stale_marker(copy)
+    lore = FakeLore([], add_rc=1)
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert marker.read_text() == "reindex pending\n"
+
+
 def test_reindex_failure_keeps_marker_and_next_run_retries(source, cenv, copy, capsys):
     lore = FakeLore([])
     _run(source, cenv, lore, capsys)

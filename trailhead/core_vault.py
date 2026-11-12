@@ -40,8 +40,10 @@ deletes or edits a registration.
 
 Reindex marker: ``core-vault.reindex-pending`` sits beside the copy in
 trailhead's state dir (outside the vault). It is written before a changed copy
-is swapped in and removed only after ``lore reindex`` succeeds, so a failed or
-interrupted refresh is retried by the next run even when the copy is unchanged.
+is swapped in and removed only after ``lore reindex`` succeeds, or after a fresh
+``vault add`` succeeds (it indexes the copy itself, so a stale marker needs no
+separate reindex). A failed or interrupted refresh, or a failed ``vault add``,
+leaves the marker, so the next run retries even when the copy is unchanged.
 
 Failures (a non-zero lore call, bad JSON, a sync error) print a ``trailhead:``
 warning naming the step, saying install otherwise succeeded and what to run; lore's
