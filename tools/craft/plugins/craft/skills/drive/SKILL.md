@@ -421,13 +421,17 @@ drift apart. The driver never invokes `/craft:execute` either — a skill-to-ski
 by the same rule, so the shared procedure is read directly rather than reached through the skill
 that wraps it.
 
-The build phase has no one to answer. The driver runs to the slice boundary and stops there, so a
-found-work call that the escalation rule would put to the operator is handled as
-[`../_shared/escalation.md`](../_shared/escalation.md#no-one-to-answer) says: no question is shown,
-the guarded action is not taken, and the finding is deferred to the spec's follow-ups as an open
-entry that the completion report lists first among what needs the operator. The procedure still
-dispatches `assumption-prover`, `executor`, and `drift-gate` as its own controller loop prescribes;
-those are its dispatches, not the driver's, and each stays synchronous.
+The build phase has no one to answer a found-work question. The driver runs to the slice boundary
+and stops there, so a found-work call that the escalation rule would put to the operator is handled
+as [`../_shared/escalation.md`](../_shared/escalation.md#no-one-to-answer) says: no question is
+shown, the guarded action is not taken, and the finding is deferred to the spec's follow-ups as an
+open entry that the completion report lists first among what needs the operator. A decision that is
+not about found work keeps the route the shared procedure gives it: an executor's `BLOCKED` or
+`NEEDS_CONTEXT` and a finding showing that the spec itself is missing something are handled as that
+procedure says, and one that resolves to a stop ends the build phase under the `build-failed`
+escalation below. The procedure still dispatches `assumption-prover`, `executor`, and `drift-gate`
+as its own controller loop prescribes; those are its dispatches, not the driver's, and each stays
+synchronous.
 
 The signal the shared procedure reads is this skill's own wording: the driver runs Phase 6 as the
 caller that says **run Phase 6 as a no-ask close**, per [execute's no-ask

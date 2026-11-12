@@ -5258,7 +5258,7 @@ Five new runner cases and one grader on each of three existing found-work cases,
 
 | Criterion | Verdict | Pointer |
 |---|---|---|
-| A routine found-work decision is made and logged without a question (AC1) | pending | `no-found-work-question-and-the-routine-write-landed` on `build-triages-found-work`, `slice-folds-entries-that-touch-its-code`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` |
+| A routine found-work decision is made and logged without a question (AC1) | pending | `no-found-work-question-was-asked` on `build-triages-found-work`, `no-found-work-question-and-the-routine-write-landed` on `slice-folds-entries-that-touch-its-code`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` |
 | A decision that would change the spec's criteria asks first (AC2) | pending | `plan-asks-before-a-found-work-call-that-changes-the-spec` |
 | An action that cannot be undone asks first (AC3) | pending | `build-asks-before-a-found-work-call-that-cannot-be-undone` |
 | An action outside the allowed actions asks first (AC4) | pending | `build-asks-before-a-found-work-call-outside-its-allowed-actions` |
@@ -5281,6 +5281,13 @@ Five new runner cases and one grader on each of three existing found-work cases,
 | mutation, step 9's no-one-to-answer statement removed (drive) | edited | 1 | pending | |
 | mutation, execute.md's "When no one is there to answer" paragraph removed | edited | 1 | pending | |
 | mutation, plan step 7's ask clause removed | edited | 1 | pending | |
+| mutation, escalation.md's spec-change fix sentence removed (the listed spec change and its stop-with-nothing-written cost); observed by `plan-asks-before-a-found-work-call-that-changes-the-spec` and `slice-stops-on-a-free-text-answer-that-changes-the-spec` | edited | 1 | pending | |
+| mutation, "for a found-work question" qualifiers and the not-about-found-work sentence removed (escalation.md "No one to answer", drive step 9, execute.md); observed by no case (the route a non-found-work stop takes under the driver has no case) | edited | 1 | pending | |
+| mutation, "except where a ritual's procedure orders the question first" removed (escalation.md); observed by `slice-asks-before-dropping-an-urgent-entry` | edited | 1 | pending | |
+| mutation, the `reopen` handback sentence removed (escalation.md "No one to answer"); observed by `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | edited | 1 | pending | |
+| mutation, the stuck-close clause removed from the no-ask-close parenthetical (escalation.md, execute.md); observed by no case (a Phase 6 run alone makes no found-work call) | edited | 1 | pending | |
+| mutation, slice item 2's restored-entry exemption removed; observed by no case (`slice-asks-about-an-entry-a-slice-failed-to-build` ends at the question, before any restore) | edited | 1 | pending | |
+| mutation, the slice-stream statement removed from slice's Outcome report paragraph; observed by no case | edited | 1 | pending | |
 
 ### Not measured
 

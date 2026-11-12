@@ -234,7 +234,8 @@
     },
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
       "measures": [
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "skills/_shared/escalation.md"
       ]
     },
     "slice-asks-before-dropping-an-urgent-entry": {
@@ -257,7 +258,8 @@
     },
     "unattended-slice-names-the-remedy-for-an-entry-a-slice-failed-to-build": {
       "measures": [
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "skills/_shared/escalation.md"
       ]
     },
     "slice-carries-out-a-free-text-answer-to-its-question": {

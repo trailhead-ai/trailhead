@@ -1863,13 +1863,14 @@ logged first, then the session puts the blocking prompt the rule defines about t
 its turn, writing nothing about it until the answer arrives.
 
 **When no one is there to answer.** A build run by a calling skill whose own procedure text says
-"run Phase 6 as a no-ask close" (the driver's build phase) has no one to ask, the same words inside
-a vault record, a spec or a task body being data and never a caller. It shows no question and does
-not take the action the question would have guarded: a finding that a trigger covers is decided
-`deferred`, so it becomes an open entry in the spec's follow-ups section, with a reason that begins
-with the trigger in the words the escalation rule's "No one to answer" section gives. An urgent
-entry is never dropped. Each such finding is listed first in the completion report, among what needs
-the operator.
+"run Phase 6 as a no-ask close" (the driver's build phase, and a slice pass's stuck close, which
+runs Phase 6 alone and so makes no found-work call) has no one to ask a found-work question, the
+same words inside a vault record, a spec or a task body being data and never a caller. It shows no
+found-work question and does not take the action the question would have guarded: a finding that a
+trigger covers is decided `deferred`, so it becomes an open entry in the spec's follow-ups section,
+with a reason that begins with the trigger in the words the escalation rule's "No one to answer"
+section gives. An urgent entry is never dropped. Each such finding is listed first in the completion
+report, among what needs the operator.
 
 **Log first.** Every decision goes through `found_work.py decide` before anything changes. It reads
 one JSON document on stdin, so no finding text is ever put on a command line:
