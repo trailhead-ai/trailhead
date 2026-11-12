@@ -34,10 +34,10 @@
     }
   ],
   "setup_sandbox": {
-    "allowed_domains": [],
-    "denied_domains": [
+    "allowed_domains": [
       "api.anthropic.com"
     ],
+    "denied_domains": [],
     "denied_reads": [
       "<ROOT>/fence/outpost-state",
       "<ROOT>/fence/ranger-state/hubs/b",

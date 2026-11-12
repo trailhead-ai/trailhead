@@ -1139,6 +1139,9 @@ class _UserSettings:
         self.allowed_domains = self._strings(
             path, net, "allowedDomains", "sandbox.network.allowedDomains"
         )
+        self.denied_domains = (
+            self._strings(path, net, "deniedDomains", "sandbox.network.deniedDomains") or []
+        )
         self.excluded_commands = (
             self._strings(path, sandbox, "excludedCommands", "sandbox.excludedCommands") or []
         )
@@ -1180,6 +1183,7 @@ class _UserSettings:
         self.excluded_commands += [c for c in other.excluded_commands if c not in self.excluded_commands]
         if other.allowed_domains is not None:
             self.allowed_domains = [*(self.allowed_domains or []), *other.allowed_domains]
+        self.denied_domains += other.denied_domains
 
     @staticmethod
     def _load(path: Path, kind: str) -> dict:
@@ -2724,12 +2728,10 @@ class ClaudeCodeHarness(Harness):
         if prompt:
             argv.append(prompt)
         setup_sandbox = {
-            "allowed_domains": (
-                list(hosts)
-                if user.allowed_domains is None
-                else [d for d in user.allowed_domains if d not in denied_domains]
-            ),
-            "denied_domains": denied_domains,
+            "allowed_domains": [
+                d for d in (user.allowed_domains or []) if d not in user.denied_domains
+            ],
+            "denied_domains": list(user.denied_domains),
             "denied_reads": list(
                 dict.fromkeys([*user.read_denial_paths, *(str(p) for p in denied_reads)])
             ),

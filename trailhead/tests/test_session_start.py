@@ -2539,29 +2539,47 @@ def test_setup_sandbox_carries_every_user_level_read_denial_and_the_profiles_own
     assert len(reads) == len(set(reads))
 
 
-def test_setup_sandbox_destinations_follow_the_users_list_and_the_profiles_hosts(tmp_path):
-    env, ws = _ritual_ready(tmp_path)
+def _user_network(env, ws, **network):
     _ritual_user(env, ws, sandbox={
         "enabled": True,
         "filesystem": {"allowWrite": [".", *_ritual_roots(env, ws)[1:]]},
-        "network": {"allowedDomains": ["api.anthropic.com", "github.com"]},
+        "network": network,
     })
-    none = _sandbox_of(env, ws)
-    assert none["allowed_domains"] == []
-    assert none["denied_domains"] == ["api.anthropic.com", "github.com"]
-    import dataclasses
-    some = _sandbox_of(env, ws, dataclasses.replace(RITUAL_PROFILE, network_allowed_hosts=("github.com",)))
-    assert some["allowed_domains"] == ["github.com"]
-    assert some["denied_domains"] == ["api.anthropic.com"]
 
 
-def test_with_no_user_network_list_the_profiles_hosts_are_the_allowed_destinations(tmp_path):
+def test_setup_sandbox_destinations_are_the_users_own_network_rules(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _user_network(env, ws, allowedDomains=["a.example", "b.example"], deniedDomains=["c.example"])
+    start = _ritual_start(env, ws)
+    assert start.setup_sandbox["allowed_domains"] == ["a.example", "b.example"]
+    assert start.setup_sandbox["denied_domains"] == ["c.example"]
+    network = _settings_of(start)["sandbox"].get("network", {})
+    assert "allowedDomains" not in network
+
+
+def test_setup_sandbox_allowed_domains_exclude_what_the_user_also_denies(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _user_network(env, ws, allowedDomains=["a.example", "b.example"], deniedDomains=["b.example"])
+    sandbox = _sandbox_of(env, ws)
+    assert sandbox["allowed_domains"] == ["a.example"]
+    assert sandbox["denied_domains"] == ["b.example"]
+
+
+def test_setup_sandbox_allowed_domains_are_empty_with_no_user_allow_list(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _user_network(env, ws, deniedDomains=["c.example"])
+    sandbox = _sandbox_of(env, ws)
+    assert sandbox["allowed_domains"] == []
+    assert sandbox["denied_domains"] == ["c.example"]
+
+
+def test_with_no_user_network_list_a_profiles_hosts_are_not_setup_destinations(tmp_path):
     env, ws = _ritual_ready(tmp_path)
     _, lore, cache = _ritual_roots(env, ws)
     _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore]))
     import dataclasses
     sandbox = _sandbox_of(env, ws, dataclasses.replace(RITUAL_PROFILE, network_allowed_hosts=("github.com",)))
-    assert sandbox["allowed_domains"] == ["github.com"] and sandbox["denied_domains"] == []
+    assert sandbox["allowed_domains"] == [] and sandbox["denied_domains"] == []
 
 
 # the plugin tree
