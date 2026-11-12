@@ -43,6 +43,11 @@ class VaultScan:
     unreadable_reason: str | None = None
     skipped_escaping: int = 0
 
+    @property
+    def fully_read(self) -> bool:
+        """Whether every record of the vault was reached: no directory error, no escaping skip."""
+        return self.unreadable_reason is None and self.skipped_escaping == 0
+
 
 @dataclass(frozen=True)
 class IndexCount:

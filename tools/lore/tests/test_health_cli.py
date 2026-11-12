@@ -109,8 +109,6 @@ def test_report_survives_an_in_place_reload_of_the_dangling_check(world):
     assert len(finding_lines(r.stdout)) == 1
 
 
-
-
 def test_no_findings_every_row_clean_and_group_says_so(world):
     _put(world.roots["default"], "lesson", "a", related={"decision": ["b"]})
     _put(world.roots["default"], "decision", "b")

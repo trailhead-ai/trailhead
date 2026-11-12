@@ -183,9 +183,7 @@ def check_dangling(
     scans: Sequence[VaultScan], selected: Collection[str]
 ) -> DanglingResult | DanglingSkipped:
     """Check every selected vault's records against the records of all *scans*."""
-    at_fault = tuple(
-        s.vault for s in scans if s.unreadable_reason is not None or s.skipped_escaping > 0
-    )
+    at_fault = tuple(s.vault for s in scans if not s.fully_read)
     if at_fault:
         return DanglingSkipped(at_fault)
 

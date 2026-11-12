@@ -35,12 +35,8 @@ INDEX_MATCH = "match"
 INDEX_MISMATCH = "mismatch"
 INDEX_UNCONFIRMED = "unconfirmed"
 
-_SCAN_FAULT_UNREADABLE = "unreadable"
-_SCAN_FAULT_ESCAPING = "escaping"
-
-# Seams: the report build reads vaults and the index only through these.
+# Seam: the report build reads vaults only through this.
 _scan_vault = scan_mod.scan_vault
-_count_index_rows = scan_mod.count_index_rows
 
 
 @dataclass
@@ -95,37 +91,28 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return f"{_num(n)} {singular if n == 1 else plural}"
 
 
-def _vault_fault(scan: VaultScan) -> str | None:
+def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...]) -> str:
     if scan.unreadable_reason is not None:
-        return _SCAN_FAULT_UNREADABLE
-    if scan.skipped_escaping > 0:
-        return _SCAN_FAULT_ESCAPING
-    return None
-
-
-def _skip_reason(vault: str, scans: dict[str, VaultScan], at_fault: tuple[str, ...]) -> str:
-    own = _vault_fault(scans[vault]) if vault in scans else None
-    if own == _SCAN_FAULT_UNREADABLE:
         return "its directory could not be read"
-    if own == _SCAN_FAULT_ESCAPING:
+    if scan.skipped_escaping:
         return "records lie outside its vault root and were not read"
     names = ", ".join(at_fault)
     noun = "vault" if len(at_fault) == 1 else "vaults"
-    unreadable = all(name in scans and _vault_fault(scans[name]) == _SCAN_FAULT_UNREADABLE for name in at_fault)
+    unreadable = all(scans[name].unreadable_reason is not None for name in at_fault)
     state = "could not be read" if unreadable else "could not be fully read"
     return f"{noun} {names} {state}, so no target can be confirmed missing"
 
 
 def _sort_key(f: Finding):
-    return (f.updated_at if isinstance(f.updated_at, str) else "", f.vault, f.kind, f.name)
+    return (f.updated_at or "", f.vault, f.kind, f.name)
 
 
 def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
     read = sum(len(s.records) for s in selected_scans)
-    unfit = [s.vault for s in selected_scans if _vault_fault(s) is not None]
+    unfit = [s.vault for s in selected_scans if not s.fully_read]
     if unfit:
         return IndexLine(INDEX_UNCONFIRMED, read, reason=f"vault {', '.join(unfit)} was not fully read")
-    counts = _count_index_rows([s.root for s in selected_scans], env=env)
+    counts = scan_mod.count_index_rows([s.root for s in selected_scans], env=env)
     bad = next((c for c in counts.values() if c.status != scan_mod.INDEX_OK), None)
     if bad is not None:
         reason = "no index found" if bad.status == scan_mod.INDEX_ABSENT else "the index could not be read"
@@ -163,7 +150,7 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
     if isinstance(result, dangling_mod.DanglingSkipped):
         findings = None
         for v in selected:
-            rows.append(VaultRow(v, None, None, _skip_reason(v, by_name, result.vaults)))
+            rows.append(VaultRow(v, None, None, _skip_reason(by_name[v], by_name, result.vaults)))
     else:
         assert isinstance(result, dangling_mod.DanglingResult)
         findings = sorted(result.findings, key=_sort_key)
@@ -200,7 +187,7 @@ def _table(rows: list[VaultRow]) -> list[str]:
 
 
 def _finding_line(f: Finding) -> str:
-    date = _safe(f.updated_at[:10]) if isinstance(f.updated_at, str) and f.updated_at else "undated"
+    date = _safe(f.updated_at[:10]) if f.updated_at else "undated"
     ident = f"{_safe(f.vault)}/{_safe(f.kind)}/{_safe(f.name)}"
     if f.malformed:
         what = f"{_safe(f.field)} → malformed reference: not shaped like a record id"
