@@ -9,23 +9,13 @@ missing.
 
 from __future__ import annotations
 
-import re
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
-from ..record.model import _KEBAB_SEGMENT, KINDS
+from . import references
 from .model import ScannedRecord, VaultScan
 
 SESSION_KIND = "session"
-
-#: Longest record name accepted as a reference target: a name becomes a
-#: ``<name>.json`` file, and filesystems cap a file name at 255 bytes.
-MAX_NAME_LENGTH = 255 - len(".json")
-
-_NAME_RE = re.compile(_KEBAB_SEGMENT)
-_WIKILINK_RE = re.compile(r"\[\[([^\[\]]*)\]\]")
-_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
-_BACKTICK_RUN_RE = re.compile(r"`+")
 
 
 @dataclass(frozen=True)
@@ -35,7 +25,9 @@ class Finding:
     ``field`` is ``related <kind>``, ``supersedes``, ``depends-on``, ``parent``
     or ``wikilink``. ``target`` is ``<kind>/<name>`` (a bare name for a bare
     reference) and is ``None`` when ``malformed``: the offending text is never
-    carried.
+    carried, only ``locations`` -- every malformed spot in the field, in order and
+    without repeats: body lines for ``wikilink``, 1-based entry positions for a
+    list field, empty for ``parent``.
     """
 
     vault: str
@@ -45,6 +37,7 @@ class Finding:
     field: str
     target: str | None
     malformed: bool = False
+    locations: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,132 +55,6 @@ class DanglingSkipped:
     vaults: tuple[str, ...]
 
 
-def extract_wikilinks(body: str) -> list[str]:
-    """Return the target text of every ``[[...]]`` in *body* outside code.
-
-    Skips fenced code (backtick or tilde, any length; an unclosed fence runs to
-    the end), inline code spans of any backtick count, and indented code
-    blocks. ``|alias`` and ``#heading`` are removed from each target.
-    """
-    prose = _strip_inline_code(_strip_block_code(body))
-    return [re.split(r"[|#]", m.group(1), maxsplit=1)[0] for m in _WIKILINK_RE.finditer(prose)]
-
-
-def _strip_block_code(body: str) -> str:
-    out: list[str] = []
-    fence: tuple[str, int] | None = None
-    prev_blank = True
-    prev_indented = False
-    for line in body.split("\n"):
-        if fence is not None:
-            out.append("")
-            stripped = line.strip()
-            if (
-                stripped
-                and stripped[0] == fence[0]
-                and len(stripped) >= fence[1]
-                and set(stripped) == {fence[0]}
-                and len(line) - len(line.lstrip(" ")) <= 3
-            ):
-                fence = None
-            continue
-        opener = _FENCE_OPEN_RE.match(line)
-        if opener and not (opener.group(1)[0] == "`" and "`" in opener.group(2)):
-            fence = (opener.group(1)[0], len(opener.group(1)))
-            out.append("")
-            prev_blank, prev_indented = False, False
-            continue
-        blank = not line.strip()
-        indented = line.startswith(("    ", "\t")) and not blank
-        if indented and (prev_blank or prev_indented):
-            out.append("")
-            prev_blank, prev_indented = False, True
-            continue
-        out.append(line)
-        prev_blank = blank
-        prev_indented = prev_indented and blank
-    return "\n".join(out)
-
-
-def _strip_inline_code(text: str) -> str:
-    out: list[str] = []
-    pos = 0
-    runs = list(_BACKTICK_RUN_RE.finditer(text))
-    by_width: dict[int, list[int]] = {}
-    for index, run in enumerate(runs):
-        by_width.setdefault(len(run.group()), []).append(index)
-    next_of_width = dict.fromkeys(by_width, 0)
-    i = 0
-    while i < len(runs):
-        run = runs[i]
-        width = len(run.group())
-        peers = by_width[width]
-        cursor = next_of_width[width]
-        while cursor < len(peers) and peers[cursor] <= i:
-            cursor += 1
-        next_of_width[width] = cursor
-        if cursor == len(peers):
-            i += 1
-            continue
-        close = runs[peers[cursor]]
-        out.append(text[pos:run.start()])
-        out.append(" ")
-        pos = close.end()
-        while i < len(runs) and runs[i].start() < pos:
-            i += 1
-    out.append(text[pos:])
-    return "".join(out)
-
-
-def _resolve(raw: str, default_kind: str | None) -> tuple[str | None, str] | None:
-    """Parse *raw* as ``[kind/]name``; ``None`` when it is not record-id shaped."""
-    kind, sep, name = raw.rpartition("/")
-    if sep:
-        if kind not in KINDS:
-            return None
-    else:
-        kind = default_kind
-    if len(name) > MAX_NAME_LENGTH or not _NAME_RE.fullmatch(name):
-        return None
-    return kind, name
-
-
-def _references(record: ScannedRecord) -> Iterable[tuple[str, str, str | None]]:
-    """Yield ``(field, raw target, default kind)`` for every reference in *record*."""
-    sidecar = record.sidecar if isinstance(record.sidecar, dict) else {}
-
-    related = sidecar.get("related")
-    if isinstance(related, dict):
-        for rel_kind, entries in related.items():
-            if rel_kind in KINDS and isinstance(entries, list):
-                for entry in entries:
-                    if isinstance(entry, str):
-                        yield f"related {rel_kind}", entry, rel_kind
-
-    supersedes = sidecar.get("supersedes")
-    if isinstance(supersedes, list):
-        for entry in supersedes:
-            if isinstance(entry, str):
-                yield "supersedes", entry, None
-
-    depends_on = sidecar.get("depends-on")
-    if record.kind in ("task", "spec", "adr") and isinstance(depends_on, list):
-        for entry in depends_on:
-            if isinstance(entry, str):
-                if record.kind == "task":
-                    yield "depends-on", entry, "task"
-                else:
-                    yield "depends-on", entry.partition("@")[0], None
-
-    parent = sidecar.get("parent")
-    if record.kind == "task" and isinstance(parent, str):
-        yield "parent", parent, "task"
-
-    if isinstance(record.body, str):
-        for target in extract_wikilinks(record.body):
-            yield "wikilink", target, None
-
-
 def check_dangling(
     scans: Sequence[VaultScan], selected: Collection[str]
 ) -> DanglingResult | DanglingSkipped:
@@ -196,11 +63,7 @@ def check_dangling(
     if at_fault:
         return DanglingSkipped(at_fault)
 
-    exists: set[tuple[str, str]] = set()
-    for s in scans:
-        exists.update((r.kind, r.name) for r in s.records)
-        exists.update((u.kind, u.name) for u in s.unreadable)
-    names = {name for _, name in exists}
+    candidates = references.build_candidates(scans)
 
     result = DanglingResult()
     for s in scans:
@@ -212,27 +75,32 @@ def check_dangling(
                 continue
             judged += 1
             seen: set[tuple[str, str]] = set()
-            malformed_fields: set[str] = set()
-            for field_label, raw, default_kind in _references(record):
-                parsed = _resolve(raw, default_kind)
+            malformed: dict[str, list[int]] = {}
+            for ref in references.iter_references(record):
+                parsed = references.resolve(ref.target, ref.default_kind)
                 if parsed is None:
-                    if field_label not in malformed_fields:
-                        malformed_fields.add(field_label)
-                        result.findings.append(_finding(record, field_label, None))
+                    locations = malformed.setdefault(ref.field, [])
+                    if ref.location is not None and ref.location not in locations:
+                        locations.append(ref.location)
                     continue
                 kind, name = parsed
                 target = f"{kind}/{name}" if kind else name
-                if (field_label, target) in seen:
+                if (ref.field, target) in seen:
                     continue
-                seen.add((field_label, target))
-                if (kind, name) not in exists if kind else name not in names:
-                    result.findings.append(_finding(record, field_label, target))
+                seen.add((ref.field, target))
+                found, unreadable = candidates.lookup(kind, name)
+                if not found and not unreadable:
+                    result.findings.append(_finding(record, ref.field, target))
+            for field_label, locations in malformed.items():
+                result.findings.append(_finding(record, field_label, None, tuple(locations)))
         result.judged[s.vault] = judged
     return result
 
 
-def _finding(record: ScannedRecord, field_label: str, target: str | None) -> Finding:
+def _finding(
+    record: ScannedRecord, field_label: str, target: str | None, locations: tuple[int, ...] = ()
+) -> Finding:
     return Finding(
         record.vault, record.kind, record.name, record.updated_at, field_label, target,
-        malformed=target is None,
+        malformed=target is None, locations=locations,
     )
