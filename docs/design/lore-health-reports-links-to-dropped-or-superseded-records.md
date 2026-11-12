@@ -17,18 +17,31 @@ Every other record is not judged, because its links record history: a done, drop
 task, a superseded or dropped decision or ADR, a draft ADR, a lesson, a spec, a session. "Records
 checked" in the summary counts the linking records judged.
 
-A linking record's references are the same ones `dangling-links` reads: `related` entries,
-`supersedes`, `depends-on`, a task's `parent`, and body `[[wikilinks]]` outside code. A reference
-is reported when every record it can resolve to, in any configured vault, is `dropped` or
-`superseded`. A bare `[[name]]` resolves to every record with that name; a kinded reference to every
-record with that kind and name. A reference that resolves to nothing is `dangling-links`' finding,
-not this one, and a malformed one is not judged here.
+A linking record's references are the ones `dangling-links` reads except `supersedes`: `related`
+entries, `depends-on`, a task's `parent`, and body `[[wikilinks]]` outside code. A `supersedes`
+entry is how a successor records what it replaced, so it always points at a superseded record and
+is history, never a finding. A reference is reported when every record it can resolve to, in any
+configured vault, is `dropped` or `superseded`. A bare `[[name]]` resolves to every record with that
+name; a kinded reference to every record with that kind and name. When a reference resolves to more
+than one retired record, the finding names each, with its own status. A reference that resolves to
+nothing is `dangling-links`' finding, not this one, and a malformed one is not judged here. A target
+whose status is missing or not a string is neither live nor retired, and is not reported.
 
 A task's link to a spec is never reported by this check: a task tied to a retired spec is a
 stale-task concern, which the spec requires be reported once, as stale, not as a retired link.
 
 A superseded record's **successor** is the record whose `supersedes` names it. Lore stores that
-edge only on the successor, so the check finds it by reading every record of every vault.
+edge only on the successor, so the check finds it by reading every record of every vault. The
+successor list is unverified: any record in any vault can claim to supersede a target. So a
+successor is named only when its kind and name have the shape of a record id; any other successor
+is counted under the fixed phrase `a successor whose name is not a valid record id`, never echoed.
+At most three successors are named, sorted, then `and N more`. A successor that is itself dropped
+or superseded is marked `(itself dropped)` or `(itself superseded)`, so the finding never presents
+a dead record as the replacement without saying so.
+
+A check that raises unexpectedly does not take the report down: its rows read
+`errored: <error type>` and its group says so in one line, every other check still renders, and
+the report still exits successfully.
 
 The check is skipped for every vault when any vault was not fully read, on the same rule and with
 the same reason as `dangling-links`: a target's status cannot be confirmed in a vault that was not
@@ -85,7 +98,7 @@ the retired target, and what became of it:
 ```
 retired-links — 1 finding, oldest first
   trailhead/decision/use-a-pooled-client  2026-03-14  related decision → decision/pool-size-limits: dropped
-Act on these with /lore:correct: point the link at the record that replaced its target, or remove it if it no longer applies.
+Act on these with /lore:correct: point a superseded link at a named live successor; remove a link to a dropped record, or to one with no live successor, unless it still applies.
 ```
 
 ## State — Findings beyond the cap
@@ -98,17 +111,19 @@ retired-links — 63 findings, oldest first
   default/task/migrate-the-billing-cron  2025-01-08  related decision → decision/run-billing-nightly: superseded by decision/run-billing-hourly
   …  (20 lines)
   43 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
-Act on these with /lore:correct: point the link at the record that replaced its target, or remove it if it no longer applies.
+Act on these with /lore:correct: point a superseded link at a named live successor; remove a link to a dropped record, or to one with no live successor, unless it still applies.
 ```
 
 ## State — Superseded target with its successor named
 
 A link to a superseded record names the record that superseded it, so the fix is visible in the
-finding. When more than one record supersedes it, each is named:
+finding. When more than one record supersedes it, up to three are named, sorted, then a count of
+the rest:
 
 ```
   trailhead/adr/session-notes-are-markdown  2026-05-02  wikilink → decision/store-sessions-as-json: superseded by adr/sessions-are-json-records
   trailhead/area/lore-search  2026-06-11  related decision → decision/rank-by-recency: superseded by decision/rank-by-relevance and decision/rank-by-relevance-v2
+  trailhead/adr/search-ranking  2026-06-12  related decision → decision/rank-by-recency: superseded by decision/a, decision/b, decision/c and 2 more
 ```
 
 ## State — Superseded target whose successor cannot be found
@@ -118,7 +133,21 @@ removed, or the status was set by hand. The finding says so rather than leaving 
 blank:
 
 ```
-  trailhead/decision/cache-search-results  2026-04-20  related decision → decision/use-an-lru-cache: superseded; no record names it as superseded
+  trailhead/decision/cache-search-results  2026-04-20  related decision → decision/use-an-lru-cache: superseded, and no record supersedes it
+```
+
+A successor the check cannot name safely, or one that is itself retired, is reported as such rather
+than offered as the replacement:
+
+```
+  trailhead/task/tune-the-cache  2026-05-01  related decision → decision/cache-ttl: superseded by a successor whose name is not a valid record id
+  trailhead/area/lore-search  2026-06-11  wikilink → decision/rank-by-recency: superseded by decision/rank-by-bm25 (itself superseded)
+```
+
+A link that resolves to two retired records names each:
+
+```
+  trailhead/task/clean-old-notes  2026-02-09  wikilink → notes-policy: decision/notes-policy dropped; adr/notes-policy superseded by adr/notes-are-records
 ```
 
 ## State — Check skipped because a vault could not be read
