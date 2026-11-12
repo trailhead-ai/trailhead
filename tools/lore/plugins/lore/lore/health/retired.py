@@ -113,14 +113,14 @@ def check_retired(
                 if parsed is None:
                     continue
                 kind, name = parsed
-                if record.kind == "task" and kind in (None, "spec"):
-                    continue
                 target = f"{kind}/{name}" if kind else name
                 if (ref.field, target) in seen:
                     continue
                 seen.add((ref.field, target))
                 found, unreadable = candidates.lookup(kind, name)
                 if unreadable or not found:
+                    continue
+                if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
                 if not all(_status(c) in RETIRED_STATUSES for c in found):
                     continue

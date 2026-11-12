@@ -106,12 +106,33 @@ def test_task_to_dropped_spec_not_reported_decision_to_it_is():
     assert single(dec).target == "spec/s"
 
 
-def test_task_bare_wikilink_that_can_be_a_spec_not_judged():
-    res = run([vault("a", rec("a", "task", "t", "open", body="see [[old]]"),
+def test_task_bare_wikilink_to_dropped_non_spec_reported():
+    res = run([vault("a", rec("a", "task", "t", "in-progress", body="see [[old]]"),
+                     rec("a", "decision", "old", "dropped"))])
+    f = single(res)
+    assert (f.kind, f.name, f.field, f.target) == ("task", "t", "wikilink", "old")
+    assert [(r.kind, r.name) for r in f.retired] == [("decision", "old")]
+
+
+def test_task_bare_wikilink_to_dropped_spec_not_reported():
+    res = run([vault("a", rec("a", "task", "t", "in-progress", body="see [[old]]"),
+                     rec("a", "spec", "old", "dropped"))])
+    assert res.findings == []
+    assert res.judged == {"a": 1}
+
+
+def test_task_bare_wikilink_matching_spec_and_decision_not_reported():
+    res = run([vault("a", rec("a", "task", "t", "in-progress", body="see [[old]]"),
+                     rec("a", "spec", "old", "dropped"),
                      rec("a", "decision", "old", "dropped"))])
     assert res.findings == []
+    assert res.judged == {"a": 1}
+
+
+def test_non_task_bare_wikilink_to_dropped_reported():
     dec = run([vault("a", rec("a", "decision", "d", "active", body="see [[old]]"),
-                    rec("a", "decision", "old", "dropped"))])
+                     rec("a", "spec", "old", "dropped"),
+                     rec("a", "decision", "old", "dropped"))])
     assert single(dec).field == "wikilink"
 
 
