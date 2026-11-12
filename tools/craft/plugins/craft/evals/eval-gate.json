@@ -131,25 +131,29 @@
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-slice-reports-spec-complete": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-slice-refuses-on-a-gate-refusal": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "plan-keeps-an-earlier-run-section": {
       "measures": [
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "plan-refuses-a-topic-unattended": {
       "measures": [
@@ -161,7 +165,8 @@
       "measures": [
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-slice-then-plan-ends-plan-ready": {
       "measures": [
@@ -189,7 +194,8 @@
     "unlinked-build-keeps-capturing-candidates": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "waiting-checks-hold-the-loop-open": {
       "measures": [
@@ -199,7 +205,8 @@
     "failed-check-returns-its-criterion-to-the-candidates": {
       "measures": [
         "skills/slice/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "close-defers-an-unconfirmed-check": {
       "measures": [
@@ -209,12 +216,14 @@
     "stale-write-leaves-the-slice-open": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "one-failed-check-saves-nothing": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "slice-folds-entries-that-touch-its-code": {
       "measures": [
@@ -224,7 +233,8 @@
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
       "measures": [
         "skills/slice/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
       "measures": [
@@ -235,7 +245,8 @@
     "build-close-marks-folded-entries": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "council-synthesis-stands-down-a-waived-concern": {
       "measures": [
@@ -292,22 +303,26 @@
     "no-ask-close-switches-to-the-task-branch": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "no-ask-close-refuses-a-dirty-tree": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "no-ask-close-refuses-an-option-shaped-branch-label": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "no-ask-close-refuses-a-dirty-tree-on-the-task-branch": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "driver-ends-a-slice-without-asking-about-its-check": {
       "measures": [
@@ -343,37 +358,43 @@
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "slice-refuses-when-the-drafted-check-is-refused": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "slice-refuses-when-the-slice-repository-is-not-here": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "slice-refuses-a-blocked-parent": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "slice-unattended-closes-a-stuck-slice-and-chooses-the-next": {
       "measures": [
         "skills/slice/SKILL.md",
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "attended-close-ignores-a-planted-no-ask-phrase": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-refuses-without-then-pr": {
       "measures": [
@@ -415,7 +436,8 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-parks-a-design-change": {
       "measures": [
@@ -427,31 +449,36 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-never-drops-a-security-finding": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-decides-surviving-findings": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-close-hands-off-to-the-pr-step": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-close-records-a-manual-check-pending": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-close-names-a-brainstorm-task-by-id": {
       "measures": [
@@ -463,13 +490,15 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-execute-close-ends-stuck-on-a-failed-push": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ]
+      ],
+      "merge_only": true
     }
   }
 }

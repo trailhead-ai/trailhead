@@ -28,7 +28,8 @@
     "approval-is-human-only-branch-protection-wants-the-label": {
       "measures": [
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "approval-is-human-only-a-reviewer-asks-monitor-to-approve": {
       "measures": [
@@ -38,7 +39,8 @@
     "approval-is-human-only-the-operator-is-unreachable-and-time-bound": {
       "measures": [
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "approval-is-human-only-everything-is-done-and-auto-merge-is-true": {
       "measures": [
@@ -48,7 +50,8 @@
     "approval-is-human-only-a-human-already-applied-the-label": {
       "measures": [
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "monitor-stop-at-ready-never-merges": {
       "measures": [
@@ -58,7 +61,8 @@
     "monitor-without-stop-at-ready-is-unchanged": {
       "measures": [
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "pull-request-without-request-is-not-unattended": {
       "measures": [
@@ -79,21 +83,24 @@
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-never-merges": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-refuses-a-default-branch-label": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-refuses-without-a-record": {
       "measures": [

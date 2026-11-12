@@ -157,8 +157,9 @@ class TestRealEdit:
     def test_marking_a_named_case_merge_only_leaves_it_out_of_the_push_tier_only(self, throwaway, tmp_path, capsys):
         _, rel, corpus = throwaway
         measured = _measured_by_expected(corpus)
-        prose, cases = next((f, c) for f, c in sorted(measured.items()) if len(c) >= 1)
-        marked = sorted(cases)[0]
+        merge_only = _merge_only(corpus)
+        prose, cases = next((f, c) for f, c in sorted(measured.items()) if c - merge_only)
+        marked = sorted(cases - merge_only)[0]
         repo = tmp_path / "marked"
         shutil.copytree(_plugin_root(corpus), repo / rel,
                         ignore=shutil.ignore_patterns("__pycache__", "results"))
@@ -170,7 +171,7 @@ class TestRealEdit:
         _git(repo, "add", "-A")
         _git(repo, "commit", "-m", "base")
         _edit(repo, f"{rel.as_posix()}/{prose}")
-        want_push = sorted(f"{rel.as_posix()}:{c}" for c in cases - {marked})
+        want_push = sorted(f"{rel.as_posix()}:{c}" for c in cases - merge_only - {marked})
         status, got = _selected(repo, capsys)
         assert got == want_push
         _, merged = _selected(repo, capsys, "--tier", "merge")
@@ -183,3 +184,61 @@ class TestRealEdit:
         _edit(repo, f"{rel.as_posix()}/{unnamed}")
         status, got = _selected(repo, capsys)
         assert (status, got) == ("no-cases-mapped", [])
+
+
+def _mapping(corpus: Path):
+    mapping_file = corpus / "eval-gate.json"
+    return load_mapping(
+        mapping_file.read_text(), str(mapping_file),
+        plugin_root=_plugin_root(corpus), evals_dir=corpus,
+    )
+
+
+def _files_with_no_push_case(mapping) -> list[str]:
+    """Measured prose files whose every measuring case is merge_only: a push editing one runs nothing."""
+    measured: dict[str, list[bool]] = {}
+    for case in mapping.cases.values():
+        for f in case.measures:
+            measured.setdefault(f, []).append(case.merge_only)
+    return sorted(f for f, flags in measured.items() if all(flags))
+
+
+@pytest.mark.parametrize("corpus", CORPORA, ids=IDS)
+class TestCoverageInvariant:
+    def test_every_measured_prose_file_keeps_a_case_the_push_tier_runs(self, corpus):
+        assert _files_with_no_push_case(_mapping(corpus)) == []
+
+    def test_a_file_whose_every_case_is_marked_is_reported(self, corpus, tmp_path):
+        mapping = _mapping(corpus)
+        prose = sorted({f for c in mapping.cases.values() for f in c.measures})[0]
+        evals = tmp_path / "evals"
+        shutil.copytree(corpus, evals, ignore=shutil.ignore_patterns("__pycache__", "results"))
+        doc = json.loads((evals / "eval-gate.json").read_text())
+        for case in doc["cases"].values():
+            if prose in case["measures"]:
+                case["merge_only"] = True
+        (evals / "eval-gate.json").write_text(json.dumps(doc))
+        marked = load_mapping((evals / "eval-gate.json").read_text(), "eval-gate.json")
+        assert prose in _files_with_no_push_case(marked)
+
+
+class TestRealCoreSelection:
+    def test_craft_execute_md_on_push_selects_exactly_its_non_merge_only_cases(self, tmp_path_factory, capsys):
+        corpus = next(c for c in CORPORA if c.parent.parent.parent.name == "craft")
+        root = _plugin_root(corpus)
+        rel = root.relative_to(REPO_ROOT)
+        prose = "skills/_shared/execute.md"
+        mapping = _mapping(corpus)
+        measuring = {n for n, c in mapping.cases.items() if prose in c.measures}
+        core = {n for n in measuring if not mapping.cases[n].merge_only}
+        assert core and core < measuring, "execute.md must have both core and merge-only cases"
+        repo = tmp_path_factory.mktemp("craft-real")
+        shutil.copytree(root, repo / rel, ignore=shutil.ignore_patterns("__pycache__", "results"))
+        _git(repo, "init", "-b", "main")
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-m", "base")
+        _edit(repo, f"{rel.as_posix()}/{prose}")
+        status, got = _selected(repo, capsys)
+        assert (status, got) == ("cases-selected", sorted(f"{rel.as_posix()}:{c}" for c in core))
+        _, merged = _selected(repo, capsys, "--tier", "merge")
+        assert merged == sorted(f"{rel.as_posix()}:{c}" for c in measuring)

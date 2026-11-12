@@ -52,6 +52,21 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 portage's own corpus maps its two updater cases to `agents/updater.md`, so a change to the updater runs the
 cases that check the updater obeys the gate.
 
+## Tiers
+
+The gate has two tiers, chosen by how often a case should pay for itself:
+
+- **Core** cases (no `merge_only`) run on every push that touches what they measure.
+- **`merge_only`** cases run once, before merge, over everything the change touches. A push leaves them out
+  and the PR section counts them as pending; `portage merge` refuses a change that touches one without a
+  current merge-tier verdict.
+
+A file that many cases measure keeps one detector per behaviour it decides as core and marks the rest
+`merge_only`. A case that is slower than the 540 s gate budget stays core: marked `merge_only`, it could never
+finish at merge and would always block. Every prose file some case measures keeps at least one core case, so a
+push that edits it always runs something; the corpus test enforces this from each mapping. Passes are cached
+by content (see "Cost and limits"), so a case already passed on the same content costs nothing at either tier.
+
 ## Running a case
 
 `portage eval-gate run --state <dir> --case <name>` runs one planned case in the foreground (up to 540 s per

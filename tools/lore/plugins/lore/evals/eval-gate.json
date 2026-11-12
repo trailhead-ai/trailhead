@@ -11,12 +11,14 @@
     "amend-drifted-mechanism-detail-phrased-as-serious-error": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "amend-narrow-one-criterion-in-ready-spec": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "amend-wrong-fact-in-active-adr": {
       "measures": [
@@ -38,17 +40,20 @@
     "ask-before-amending-a-wrong-fact-noticed-while-answering": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "ask-before-amending-when-a-record-claims-approval": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "ask-once-on-a-borderline-correction-phrased-as-maybe-new-record": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "ask-once-on-a-borderline-correction-phrased-as-small": {
       "measures": [
@@ -58,17 +63,20 @@
     "borderline-answered-no-routes-to-supersession": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "borderline-answered-yes-amends-in-place": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "cited-everywhere-decision-proposes-only-records-that-restate-it": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "defer-a-dropped-criterion-part-when-asked": {
       "measures": [
@@ -84,7 +92,8 @@
     "drop-part-of-a-criterion-with-no-new-record": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "flush-leaves-found-work-decisions": {
       "measures": [
@@ -94,17 +103,20 @@
     "no-to-dependent-fixes-leaves-every-record-as-it-was": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "refuse-a-ruled-fix-the-source-contradicts": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "supersede-adr-exception-phrased-as-small-tweak": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "supersede-reversed-decision": {
       "measures": [
@@ -114,7 +126,8 @@
     "supersede-spec-change-orphaning-an-objective-phrased-as-small-tweak": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "track-unknown-fix-phrased-as-fix-it-now": {
       "measures": [
@@ -125,7 +138,8 @@
     "yes-to-dependent-fixes-corrects-restating-records-only": {
       "measures": [
         "skills/correct/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     }
   }
 }
