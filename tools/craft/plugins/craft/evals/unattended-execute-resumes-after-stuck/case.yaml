@@ -3,8 +3,3 @@ name: unattended-execute-resumes-after-stuck
 runs: 3
 context:
   scaffold_script: fixtures/scaffold.sh
----
-allowed_tools: [Skill, Read, Glob, Grep, Write, Agent]
-max_turns: 60
-timeout_seconds: 600
----
