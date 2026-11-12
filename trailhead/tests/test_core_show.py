@@ -307,3 +307,16 @@ def test_duplicate_core_remedy_names_the_extra_registration_not_a_rename(cenv, c
     assert "more than one vault named core" in r.stderr
     assert "lore vault delete core" in r.stderr
     assert "rename or remove" not in r.stderr.lower()
+
+
+def test_record_show_stderr_control_and_bidi_characters_are_replaced(cenv, copy):
+    err = "lore: \x1b[31mred\x1b[0m \x1b]0;pwned\x07 ‮evil\n"
+    r = _show(_SilentFailLore([_entry("core", str(copy))], err), cenv)
+    assert r.code == 1 and r.stdout == ""
+    assert not any(c in r.stderr for c in ("\x1b", "\x07", "‮"))
+    assert r.stderr == "lore: ?[31mred?[0m ?]0;pwned? ?evil\n"
+
+
+def test_record_show_multiline_stderr_keeps_its_newlines(cenv, copy):
+    r = _show(_SilentFailLore([_entry("core", str(copy))], "lore: first\nlore: second\n"), cenv)
+    assert r.stderr == "lore: first\nlore: second\n"

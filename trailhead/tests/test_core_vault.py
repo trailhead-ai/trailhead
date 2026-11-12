@@ -2,13 +2,21 @@
 
 import json
 import os
+import shlex
 import stat
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from trailhead.core_vault import MARKER_NAME, CoreVaultSyncError, core_copy_dir, install_core_vault, sync_core_copy
+from trailhead.core_vault import (
+    MARKER_NAME,
+    CoreVaultSyncError,
+    core_copy_dir,
+    install_core_vault,
+    lock_held_core_vault,
+    sync_core_copy,
+)
 
 
 def _write(root: Path, files: dict[str, bytes]) -> Path:
@@ -842,3 +850,10 @@ def test_duplicate_core_decline_remedy_names_the_extra_registration_not_a_rename
     assert out.outcome == "declined"
     assert "lore vault delete core" in text and "re-run `trailhead install`" in text
     assert "rename or remove" not in text.lower()
+
+
+def test_lock_held_hint_quotes_a_lock_path_with_a_space(tmp_path, capsys):
+    lock = tmp_path / "state dir" / "trailhead.lock"
+    lock_held_core_vault(lock)
+    hint = capsys.readouterr().err.split("`rm ", 1)[1].split("`", 1)[0]
+    assert shlex.split("rm " + hint) == ["rm", str(lock)]

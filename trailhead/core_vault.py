@@ -76,6 +76,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -281,7 +282,7 @@ def lock_held_core_vault(lock_path: Path) -> CoreVaultOutcome:
     print(
         f"trailhead: core vault: {reason}; install otherwise succeeded. "
         f"The core vault was not touched. If no other install or update is running, "
-        f"remove the lock with `rm {lock_path}`, then re-run `trailhead install`.",
+        f"remove the lock with `rm {shlex.quote(str(lock_path))}`, then re-run `trailhead install`.",
         file=sys.stderr,
     )
     return CoreVaultOutcome("failed", reason)
@@ -544,6 +545,10 @@ def _plain(text: str) -> str:
     return "".join(c if c.isprintable() else "?" for c in text)
 
 
+def _plain_lines(text: str | None) -> str:
+    return "\n".join(_plain(line) for line in (text or "").split("\n"))
+
+
 def _unavailable(reason: str) -> ShowResult:
     return ShowResult(3, stderr=f"trailhead: core vault unavailable: {_plain(reason)}\n")
 
@@ -602,5 +607,6 @@ def core_show(
     except (OSError, ValueError) as exc:
         return ShowResult(1, stderr=f"trailhead: could not run lore ({type(exc).__name__})\n")
     if shown.returncode != 0:
-        return ShowResult(1, stderr=shown.stderr or f"trailhead: lore record show failed (exit {shown.returncode})\n")
+        failure = f"trailhead: lore record show failed (exit {shown.returncode})\n"
+        return ShowResult(1, stderr=_plain_lines(shown.stderr) or failure)
     return ShowResult(0, stdout=shown.stdout or "")
