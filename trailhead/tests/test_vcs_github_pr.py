@@ -3476,3 +3476,39 @@ class TestPrHeadCommit:
         provider = get_provider("github", runner=_pinned_stub([], fail_pr=True))
         with pytest.raises(RuntimeError):
             provider.pr.head_commit(str(tmp_path), "7")
+
+    def test_the_head_is_read_from_the_pr_object_without_paging_its_commits(
+        self, tmp_path: Path
+    ) -> None:
+        # A PR whose commit list is past the endpoint's cap never lists its head there; the
+        # head read must not depend on that list.
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "remote" in cmd_str and "get-url" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/widgets.git\n", "")
+            if "/commits" in cmd_str:
+                c = [{"sha": f"{i:040x}", "commit": {"committer": {"date": "2026-07-01T00:00:00Z"}}}
+                     for i in range(1, 251)]
+                return subprocess.CompletedProcess(cmd, 0, json.dumps(c), "")
+            if "/pulls/" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, json.dumps({"head": {"sha": _SHA_B}}), "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        provider = get_provider("github", runner=stub)
+        assert provider.pr.head_commit(str(tmp_path), "7") == _SHA_B
+
+    @pytest.mark.parametrize("body", ["", "{}", '{"head": {}}', "[]"])
+    def test_an_unreadable_head_error_is_not_worded_as_an_approval(
+        self, tmp_path: Path, body: str
+    ) -> None:
+        def stub(cmd, **kwargs):
+            cmd_str = " ".join(cmd)
+            if "remote" in cmd_str and "get-url" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "git@github.com:acme/widgets.git\n", "")
+            return subprocess.CompletedProcess(cmd, 0, body, "")
+
+        provider = get_provider("github", runner=stub)
+        with pytest.raises(RuntimeError) as exc:
+            provider.pr.head_commit(str(tmp_path), "7")
+        assert "approval" not in str(exc.value).lower()
+        assert "PR #7" in str(exc.value)

@@ -1978,7 +1978,11 @@ class _GitHubPR(PRSurface):
         owner_repo = _get_owner_repo(repo_path, self._runner)
         if not owner_repo:
             raise RuntimeError(f"head commit: could not resolve owner/repo for {repo_path}")
-        return _head_commit(owner_repo, repo_path, pr_number, runner=self._runner)[0]
+        pr = _gh(["api", f"repos/{owner_repo}/pulls/{pr_number}"], cwd=repo_path, runner=self._runner)
+        head_sha = ((pr or {}).get("head") or {}).get("sha") if isinstance(pr, dict) else None
+        if not head_sha:
+            raise RuntimeError(f"head commit: could not read the head SHA of PR #{pr_number} in {repo_path}")
+        return head_sha
 
     def head_branch(self, repo_path: str, pr_number: str) -> str | None:
         validate_pr_number(pr_number)
