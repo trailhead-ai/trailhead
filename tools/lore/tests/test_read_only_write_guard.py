@@ -350,6 +350,10 @@ def _git(path, *args):
 def _behind_origin(tmp_path):
     """A git vault one commit behind its origin, fetched."""
     vault = make_git_vault(tmp_path / "pulled")
+    # The fetch below would otherwise leave a detached `git maintenance` running,
+    # whose lock file appears and vanishes under the caller's before/after snapshots.
+    assert _git(vault, "config", "maintenance.auto", "false").returncode == 0
+    assert _git(vault, "config", "gc.auto", "0").returncode == 0
     remote = make_bare_remote(tmp_path / "remote.git")
     _git(vault, "remote", "add", "origin", str(remote))
     branch = _git(vault, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip()

@@ -117,7 +117,15 @@ class TestDetectionDrivenInstall:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
         pinned = m["pathint"].call_args.kwargs["pinned_scripts"]
-        assert set(cli_tools) | set(pinned) == {"camp", "lore", "portage", "ranger", "trailhead", "outpost-gateway"}
+        assert set(cli_tools) | set(pinned) == {
+            "camp",
+            "lore",
+            "portage",
+            "ranger",
+            "trailhead",
+            "outpost-gateway",
+            "trailhead-gateway-register",
+        }
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):

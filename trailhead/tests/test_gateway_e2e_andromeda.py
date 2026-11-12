@@ -146,8 +146,8 @@ def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, wi
     root = tmp_path_factory.mktemp(label)
     camp = make_camp(root)
     with real_outpost(root, camp) as outpost:
-        shim_bin, register_env = install_shims(root, outpost)
-        env = {**step_env(root, outpost), **register_env}
+        shim_bin = install_shims(root, outpost)
+        env = step_env(root, outpost)
         settings = render_sandbox_settings(
             dotfiles_checkout(), outpost.state, outpost.port, deny_read=deny_read, gateway=shim_bin / "outpost-gateway"
         )
