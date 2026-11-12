@@ -15,9 +15,9 @@ The executable bit is the one mode bit a commit records, so the other permission
 checkout's umask sets) are not part of the key. A symlink anywhere among those inputs (a measure
 path, the case directory, ``evals`` or any entry in them) makes the case uncacheable: ``fingerprint``
 returns ``None``, and the caller neither looks the case up nor stores it. Other non-regular files
-are skipped. A plan entry with no ``measures`` key has none. The key leaves out the ``claude`` CLI version, scripts outside ``evals/`` that a scaffold
-calls, and a model alias the runner re-targets: none of them change it. Delete the cache
-directory to force a re-run.
+are skipped. A plan entry with no ``measures`` key has none. The key leaves out the ``claude`` CLI
+version, scripts outside ``evals/`` that a scaffold calls, and a model alias the runner re-targets:
+none of them change it. Delete the cache directory to force a re-run.
 
 The cache is also skipped, neither read nor written, whenever ``PORTAGE_EVAL_RUNNER`` is set (the
 key does not cover which runner produced a pass), and ``run`` stores a fresh pass only when the
