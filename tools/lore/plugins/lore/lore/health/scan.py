@@ -211,7 +211,8 @@ def count_index_rows(roots, env: dict[str, str] | None = None) -> dict[str, Inde
     Opens the index with SQLite's ``immutable=1``, which creates and modifies
     nothing in any state (``mode=ro`` would still create ``-shm``/``-wal`` files
     and fail in a read-only directory). The price is that rows a live writer has
-    not yet checkpointed are invisible, so a count can lag the index. A missing index and an unreadable one come back as values.
+    not yet checkpointed are invisible, so a count can lag the index. A missing index and an unreadable one come back
+    as values.
     """
     roots = [str(r) for r in roots]
     path = index_mod._resolve_index_path(env=env)

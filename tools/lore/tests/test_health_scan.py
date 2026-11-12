@@ -7,7 +7,6 @@ tests build the index with the real ``open_index`` + ``rebuild``.
 import hashlib
 import json
 import os
-import sqlite3
 
 import pytest
 
