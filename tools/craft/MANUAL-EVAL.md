@@ -5184,3 +5184,39 @@ Prose fingerprint (`git hash-object`) of the unedited `slice/SKILL.md` the basel
 | mutation, slice step 7 unattended sentence | edited, sentence removed | 1 | pending | |
 | mutation, escalation.md urgent-entry trigger | edited, trigger section removed | 1 | pending | |
 | mutation, escalation.md three-fix cap | edited, "At most three fixes are listed" paragraph removed | 1 | pending | |
+
+## Case: the decide-or-ask rule for found-work calls
+
+Five new runner cases and one grader on each of three existing found-work cases, measuring `skills/_shared/escalation.md` (the rule), the Found work section of `skills/_shared/execute.md`, `skills/plan/SKILL.md` step 7, `skills/slice/SKILL.md` and step 9 of `skills/drive/SKILL.md`. Each new case's `expected.md` was committed alone before its fixtures, and the baseline commit holds the cases and graders with no prose change. The runner could not be started from the session that built the cases (its agent's Bash never starts there), so every run below is pending an operator run from a plain terminal; no number here was observed.
+
+### Results
+
+| Criterion | Verdict | Pointer |
+|---|---|---|
+| A routine found-work decision is made and logged without a question (AC1) | pending | `no-found-work-question-and-the-routine-write-landed` on `build-triages-found-work`, `slice-folds-entries-that-touch-its-code`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` |
+| A decision that would change the spec's criteria asks first (AC2) | pending | `plan-asks-before-a-found-work-call-that-changes-the-spec` |
+| An action that cannot be undone asks first (AC3) | pending | `build-asks-before-a-found-work-call-that-cannot-be-undone` |
+| An action outside the allowed actions asks first (AC4) | pending | `build-asks-before-a-found-work-call-outside-its-allowed-actions` |
+| The close's manual-check question still asks (AC9) | pending | `close-defers-an-unconfirmed-check` |
+| No one to answer: nothing asked, the guarded action not taken, the finding an open entry naming the trigger | pending | `driver-build-defers-a-found-work-call-that-cannot-be-undone`, `driver-build-defers-a-found-work-call-outside-its-allowed-actions` |
+
+### Runs
+
+| Run | Prose | Runs | Result | Bar |
+|---|---|---|---|---|
+| baseline, each of the five new cases | unedited | 1 each | pending | expected red on the question-shape and deferral graders |
+| treatment, each of the five new cases | edited | 3 each | pending | pass at 2 of 3 |
+| the three AC1 graders on the three existing cases | edited | 3 each | pending | pass at 2 of 3 |
+| `close-defers-an-unconfirmed-check` | edited | 3 | pending | pass at 2 of 3 |
+| `driver-ends-a-slice-without-asking-about-its-check` and every other `driver-*` case that measures step 9 | edited | 1 each | pending | must stay green |
+| mutation, spec-change trigger removed (escalation.md) | edited | 1 | pending | |
+| mutation, cannot-be-undone trigger removed (escalation.md) | edited | 1 | pending | |
+| mutation, outside-the-allowed-actions trigger removed, and the list made to include another record's body | edited | 1 each | pending | |
+| mutation, no-one-to-answer section removed (escalation.md) | edited | 1 | pending | |
+| mutation, step 9's no-one-to-answer statement removed (drive) | edited | 1 | pending | |
+| mutation, execute.md's "When no one is there to answer" paragraph removed | edited | 1 | pending | |
+| mutation, plan step 7's ask clause removed | edited | 1 | pending | |
+
+### Not measured
+
+The harness's choice prompt (headless runs offer none). The unattended-slice arm of the no-one-to-answer rule has no case here. Whether each new fixture reaches its decision is unconfirmed until the smoke run.

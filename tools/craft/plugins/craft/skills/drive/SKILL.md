@@ -420,20 +420,22 @@ drift apart. The driver never invokes `/craft:execute` either — a skill-to-ski
 by the same rule, so the shared procedure is read directly rather than reached through the skill
 that wraps it.
 
-Running it inline in this session selects the shared procedure's **attended** mode, per
-`../_shared/execute.md`'s own two-mode table — and that is deliberate, not incidental: a human is
-present in this session, so every escalation point asks them rather than re-routing through
-escalate-via-park, which writes a question onto a record nobody is waiting on. The procedure still
+The build phase has no one to answer. The driver runs to the slice boundary and stops there, so a
+found-work call that the escalation rule would put to the operator is handled as
+[`../_shared/escalation.md`](../_shared/escalation.md#no-one-to-answer) says: no question is shown,
+the guarded action is not taken, and the finding is deferred to the spec's follow-ups as an open
+entry that the completion report lists first among what needs the operator. The procedure still
 dispatches `assumption-prover`, `executor`, and `drift-gate` as its own controller loop prescribes;
 those are its dispatches, not the driver's, and each stays synchronous.
 
-The one exception is the check discharge in Phase 6. The driver never stops for a check (AC14), so
-this phase runs its Phase 6 as the caller that says **run Phase 6 as a no-ask close**, per
-[execute's no-ask close](../_shared/execute.md#no-ask-close): a slice covering a manual check
-closes, every check not yet carried out goes on the check list, and the build phase ends with the
-slice completed. After a normal build the run still goes on to step 10, the PR tail; stopping with a
-pull request owed is the step-4 stuck close's rule alone. Its completion report carries the wording
-for a driver caller, and this skill never restates it.
+The signal the shared procedure reads is this skill's own wording: the driver runs Phase 6 as the
+caller that says **run Phase 6 as a no-ask close**, per [execute's no-ask
+close](../_shared/execute.md#no-ask-close). The driver never stops for a check (AC14) or for a
+found-work question: a slice covering a manual check closes, every check not yet carried out goes on
+the check list, and the build phase ends with the slice completed. After a normal build the run
+still goes on to step 10, the PR tail; stopping with a pull request owed is the step-4 stuck close's
+rule alone. Its completion report carries the wording for a driver caller, and this skill never
+restates it.
 
 **The checkpoint at this boundary is written before and after the build phase**: the `## Driver run`
 block recording `**Phase:** plan` already written at step 8 is the before-checkpoint, and writing

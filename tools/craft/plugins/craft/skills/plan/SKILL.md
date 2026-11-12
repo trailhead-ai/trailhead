@@ -555,7 +555,12 @@ the plan needs is: what the task delivers, what files it touches, what unknown (
 on, and what test behaviors prove the task works.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
-either part of a child task or given back, and none is left unplaced.
+either part of a child task or given back, and none is left unplaced. Placing an entry is a
+found-work decision, decided as `../_shared/escalation.md` says (read it now): the two placements
+below are routine and are made and logged without asking, unless the only fix for the entry would
+change the spec's objectives, non-goals or acceptance criteria, cannot be undone, or lies outside
+that rule's allowed actions. Then neither placement is made: put the blocking prompt that file
+defines about the entry and end the turn, writing nothing about it until the answer arrives.
 
 - **Make it part of a task.** Name it in that child's **Delivers** on a line of its own that begins
   `Resolves spec/<spec-name>#F<n>: <title>`, with the title as `entries` printed it, flattened to
@@ -580,10 +585,14 @@ either part of a child task or given back, and none is left unplaced.
   ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session plan --vault <vault> < <transition-path>
   ```
 
-The entry goes back to `open` for a later slice, and no child names it. **Under `--unattended` this
-is not asked:** decide it by this test and log it as a decision in the run block, naming the entry
-and the balloon reason. A failed call is reported in the closing message with its `reason-code:`
-token (and the `retry:` line on exit 3); the entry stays folded, so a child must name it.
+The entry goes back to `open` for a later slice, and no child names it. This reopen is a routine
+decision under the rule, so it is not asked, and **under `--unattended` nothing here is asked:**
+decide it by this test and log it as a decision in the run block, naming the entry and the balloon
+reason. An entry that the rule says to ask about is, under `--unattended`, given back the same way
+with `reopen`, its reason beginning with the trigger in the words the rule's "No one to answer"
+section gives, and the closing message lists it first among what needs the operator. A failed call
+is reported in the closing message with its `reason-code:` token (and the `retry:` line on exit 3);
+the entry stays folded, so a child must name it.
 
 Step 8 then removes each reopened entry from the parent's `**Folds:**` line.
 

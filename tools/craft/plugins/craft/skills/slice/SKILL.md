@@ -741,6 +741,11 @@ like any other and is judged the same way. When none overlap, or the script prin
 `reason-code:` token) folds none and is reported in the outcome with that token; the slice is chosen
 all the same.
 
+Each fold, reopen and drop this pass makes is a found-work decision, decided as
+`../_shared/escalation.md` says: it is routine, made and logged without asking, unless a trigger
+there covers it. The urgent-entry trigger below is the one this ritual meets, and a call that would
+change the spec, cannot be undone or lies outside that rule's allowed actions is not made here.
+
 **The entries path, when step 6 sent the pass here with `candidates:` `none` and `entries-open:`
 naming entries.** No criterion is left to choose, so the slice is made of entries and of nothing
 else, and the criteria's phase, the enabler path and the fold-in above do not apply. Read the open
