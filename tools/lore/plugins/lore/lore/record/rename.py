@@ -325,7 +325,7 @@ def _find_vault(vaults, kind: str, stem: str) -> SweepVault | None:
     return None
 
 
-def _confined_kind_dirs(root: Path):
+def _confined_kind_dirs(root: Path, on_skip=None):
     """Yield each kind directory directly under *root* that is safe to descend.
 
     A *root* that does not exist yields nothing rather than raising: a vault can
@@ -353,11 +353,13 @@ def _confined_kind_dirs(root: Path):
         if not kind_dir.is_dir() or kind_dir.name not in record_model.KINDS:
             continue
         if not store._realpath_is_descendant(kind_dir, root_real):
+            if on_skip is not None:
+                on_skip()
             continue
         yield kind_dir, root_real
 
 
-def _iter_records(root: Path):
+def iter_records(root: Path, on_skip=None, *, flat_only: bool = False, on_unlistable=None):
     """Yield ``(record_id, kind, body_path)`` for every confined record under *root*.
 
     Discovery walks only the kind directories :func:`_confined_kind_dirs`
@@ -368,14 +370,34 @@ def _iter_records(root: Path):
     would echo the attacker's chosen path (and the OS error text for it) back to
     the operator as an existence oracle. A record that is skipped is simply not
     swept, so nothing about it is read, written, or named.
+
+    A caller that must account for the skips passes *on_skip*, a zero-argument
+    callable invoked once per skipped record or kind directory. It is handed no
+    path, so the confinement contract above holds for it too.
+
+    With *flat_only*, only ``<kind>/<name>.md`` directly inside a kind directory
+    is considered; a nested record is neither yielded nor counted as skipped.
+
+    ``Path.rglob`` swallows a permission error, so a kind directory that cannot
+    be listed would look empty. A caller passing *on_unlistable*, a
+    zero-argument callable, has each kind directory probed first: one that
+    cannot be listed is reported through it and not descended.
     """
-    for kind_dir, root_real in _confined_kind_dirs(root):
-        for body_path in sorted(kind_dir.rglob("*.md")):
-            if not store._realpath_is_descendant(body_path, root_real):
+    for kind_dir, root_real in _confined_kind_dirs(root, on_skip):
+        if on_unlistable is not None:
+            try:
+                with os.scandir(kind_dir):
+                    pass
+            except OSError:
+                on_unlistable()
                 continue
+        pattern = "*.md" if flat_only else "**/*.md"
+        for body_path in sorted(kind_dir.glob(pattern)):
             if not store._realpath_is_descendant(
-                body_path.with_suffix(".json"), root_real
-            ):
+                body_path, root_real
+            ) or not store._realpath_is_descendant(body_path.with_suffix(".json"), root_real):
+                if on_skip is not None:
+                    on_skip()
                 continue
             name = body_path.relative_to(kind_dir).with_suffix("").as_posix()
             yield f"{kind_dir.name}/{name}", kind_dir.name, body_path
@@ -449,7 +471,7 @@ def find_inbound_references(
     found: list[InboundRef] = []
     for vault in vaults:
         own_vault = os.path.realpath(vault.root) == source
-        for record_id, _rec_kind, body_path in _iter_records(vault.root):
+        for record_id, _rec_kind, body_path in iter_records(vault.root):
             if own_vault and record_id == target_id:
                 continue
             try:
@@ -556,7 +578,7 @@ def sweep_references(
             print(f"{locking.read_only_message(vault.name)} — skipped", file=sys.stderr)
             continue
         skip = vault.shared and not include_shared
-        for record_id, rec_kind, body_path in _iter_records(vault.root):
+        for record_id, rec_kind, body_path in iter_records(vault.root):
             try:
                 body = body_path.read_text(encoding="utf-8")
             except (OSError, ValueError, UnicodeDecodeError) as exc:
@@ -665,7 +687,7 @@ def _title_matches(vaults, kind: str, new_title: str) -> list[tuple[SweepVault, 
 
     Confined exactly like the sweep's own discovery: a symlinked kind directory
     is not descended, and a sidecar resolving outside the vault root is skipped
-    rather than read (see :func:`_iter_records`).
+    rather than read (see :func:`iter_records`).
     """
     matches = []
     for vault in vaults:
