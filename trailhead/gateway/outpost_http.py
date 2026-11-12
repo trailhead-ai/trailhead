@@ -54,15 +54,20 @@ def request(
     *,
     headers: dict[str, str] | None = None,
     form: dict[str, str] | None = None,
+    json_body: object | None = None,
     port: int = DAEMON_PORT,
     timeout: float = CONNECT_TIMEOUT_SECONDS,
 ) -> Reply:
-    """One loopback call. *form* is sent urlencoded; the reply body is parsed as JSON."""
+    """One loopback call. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as JSON."""
     data = urllib.parse.urlencode(form).encode() if form is not None else None
+    if json_body is not None:
+        data = json.dumps(json_body).encode()
     req = urllib.request.Request(f"http://{DAEMON_HOST}:{port}{path}", data=data, method=method)
     for name, value in (headers or {}).items():
         req.add_header(name, value)
-    if data is not None:
+    if json_body is not None:
+        req.add_header("Content-Type", "application/json")
+    elif data is not None:
         req.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
         with _opener().open(req, timeout=timeout) as resp:

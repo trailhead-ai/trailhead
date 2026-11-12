@@ -231,6 +231,12 @@ def _cmd_broker_header(args: argparse.Namespace) -> int:
     return code
 
 
+def _cmd_gateway(args: argparse.Namespace) -> int:
+    from trailhead.gateway.register import run as register_run
+
+    return register_run(["--hook"] if args.hook else [])
+
+
 def _cmd_session_start(args: argparse.Namespace) -> int:
     if not args.json:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
@@ -468,6 +474,18 @@ def _build_parser() -> argparse.ArgumentParser:
     # Carry the parser so the handler can print help when no verb is given.
     outpost_p.set_defaults(outpost_parser=outpost_p)
 
+    gateway_p = subparsers.add_parser(
+        "gateway",
+        help="Outpost gateway helpers (register).",
+    )
+    gateway_sub = gateway_p.add_subparsers(dest="gateway_command", metavar="<verb>", required=True)
+    register_p = gateway_sub.add_parser(
+        "register", help="Register this session with Outpost's gateway (used by the SessionStart hook)."
+    )
+    register_p.add_argument(
+        "--hook", action="store_true", help="Run as a hook: silent on success, always exit 0."
+    )
+
     session_p = subparsers.add_parser(
         "session-start",
         help="Print the argv and env to start a confined session for a role (never execs).",
@@ -501,7 +519,11 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     """Entry point. Returns an int exit code."""
     parser = _build_parser()
-    args = parser.parse_args()
+    args, unrecognised = parser.parse_known_args()
+    # The registration step ignores whatever its caller passes (it takes nothing from it);
+    # every other command rejects stray arguments as argparse would.
+    if unrecognised and args.command != "gateway":
+        parser.error(f"unrecognized arguments: {' '.join(unrecognised)}")
 
     if args.command is None:
         _print_curated_help()
@@ -516,6 +538,7 @@ def main() -> int:
         "outpost": _cmd_outpost,
         "session-start": _cmd_session_start,
         "broker-header": _cmd_broker_header,
+        "gateway": _cmd_gateway,
     }
     handler = dispatch.get(args.command)
     if handler is None:

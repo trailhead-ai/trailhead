@@ -27,6 +27,7 @@ RUNNER = Path(__file__).with_name("_gateway_runner.py")
 CLIENT_ID = "client-id-SEEDED-1f3a"
 CLIENT_SECRET = "client-secret-SEEDED-9c7e"
 TOKEN = "access-token-SEEDED-5b2d"
+REGISTRATION_AUTHORITY = "registration-authority-SEEDED-7d4e"
 
 
 @dataclass
@@ -54,6 +55,8 @@ class StubOutpost:
     runs_reply: tuple[int, object] | None = None
     token_redirect: str | None = None
     runs_redirect: str | None = None
+    authority: str = REGISTRATION_AUTHORITY
+    register_reply: tuple[int, object] | None = None
     requests: list[Seen] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -87,6 +90,17 @@ class StubOutpost:
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode()
                 self._record(body)
+                if self.path == "/gateway/sessions":
+                    if stub.register_reply is not None:
+                        return self._send(*stub.register_reply)
+                    if self.headers.get("Authorization") != f"Bearer {stub.authority}":
+                        return self._send(
+                            401, {"reason": "registration_authority_required", "message": "No authority."}
+                        )
+                    sent = json.loads(body)
+                    return self._send(
+                        200, {"session_key": f"ws-{sent['pid']}-{sent['start_time']}", "workspace": stub.workspace}
+                    )
                 if stub.token_redirect is not None and self.path == "/broker/token":
                     return self._redirect(stub.token_redirect)
                 if self.path != "/broker/token":
@@ -131,6 +145,13 @@ def write_credential(state_dir: Path, key: str, *, client_id: str = CLIENT_ID, c
     path = state_dir / "sessions" / key / "gateway-client.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}))
+    return path
+
+
+def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) -> Path:
+    path = state_dir / "registration" / "credential"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(authority + "\n")
     return path
 
 
