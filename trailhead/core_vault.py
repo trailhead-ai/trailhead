@@ -28,7 +28,7 @@ Contract:
   --trusted --path <copy>`` (``vault add`` indexes the copy itself);
 * ``core`` owned by trailhead: sync the copy and, when it changed, ``lore
   reindex``. Ownership means ``core``'s path equals the copy's path (both
-  ``Path.resolve()``d), its scope is ``read-only`` and it is not shared;
+  resolved), its scope is ``read-only`` and it is not shared;
 * any other ``core``, or any vault under another name whose resolved path equals
   or contains the copy (a writable alias could write into the trusted copy), or
   any vault whose resolved path is inside the copy (a swap would delete its records):
@@ -45,6 +45,13 @@ is swapped in and removed only after ``lore reindex`` succeeds, or after a fresh
 ``vault add`` succeeds (it indexes the copy itself, so a stale marker needs no
 separate reindex). A failed or interrupted refresh, or a failed ``vault add``,
 leaves the marker, so the next run retries even when the copy is unchanged.
+
+Symlink loops are detected explicitly (strict resolution), so Python 3.11, 3.12
+and 3.13 agree: a loop in the copy's location fails the ``copy`` step before any
+lore call, and a loop (or NUL byte) in a registered vault's path fails the ``vault
+ls`` step with its own reason, before anything is written. A path that merely does
+not exist yet is still comparable. A copy location that cannot be computed (a
+relative ``TRAILHEAD_STATE_DIR``) fails the ``copy`` step the same way.
 
 Failures (a non-zero lore call, bad JSON, a sync error) print a ``trailhead:``
 warning naming the step, saying install otherwise succeeded and what to run; lore's
@@ -73,7 +80,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from trailhead.paths import state_dir
+from trailhead.paths import PathResolutionError, state_dir
 
 
 class CoreVaultSyncError(Exception):
@@ -122,8 +129,12 @@ def sync_core_copy(
     dest: Path,
     *,
     before_swap: Callable[[], None] | None = None,
+    rename: Callable[[Path, Path], None] = os.rename,
 ) -> bool:
-    """Make ``dest`` mirror ``source``'s regular files; return whether it changed."""
+    """Make ``dest`` mirror ``source``'s regular files; return whether it changed.
+
+    ``rename`` performs the swap renames; tests inject a failing one.
+    """
     source = Path(source)
     dest = Path(dest)
 
@@ -166,12 +177,12 @@ def sync_core_copy(
         if dest_exists:
             old = Path(tempfile.mkdtemp(prefix=f".{dest.name}.old-", dir=dest.parent))
             old.rmdir()
-            os.rename(dest, old)
+            rename(dest, old)
         try:
-            os.rename(staging, dest)
+            rename(staging, dest)
         except BaseException:
             if old is not None:
-                os.rename(old, dest)
+                rename(old, dest)
                 old = None
             raise
     finally:
@@ -226,7 +237,34 @@ def _decline(path: str, reason: str) -> CoreVaultOutcome:
     return CoreVaultOutcome("declined", f"{reason} (path: {path})")
 
 
+class _UnresolvablePath(Exception):
+    """A path could not be resolved (symlink loop, NUL byte, OS error)."""
+
+
+def _resolve(path: Path) -> Path:
+    """Resolve ``path`` the same way on every Python version.
+
+    Strict resolution detects a symlink loop explicitly (3.13's non-strict
+    ``resolve`` returns a looping path unchanged instead of raising). A path that
+    does not exist yet, or sits under a file, resolves non-strictly as before.
+    """
+    try:
+        return path.resolve(strict=True)
+    except (FileNotFoundError, NotADirectoryError):
+        pass
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _UnresolvablePath(type(exc).__name__) from exc
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise _UnresolvablePath(type(exc).__name__) from exc
+
+
 def _parse_vaults(text: str) -> list[tuple[dict, Path]] | None:
+    """Return the ``(entry, resolved path)`` pairs, None for malformed JSON.
+
+    Raises ``_UnresolvablePath`` for an entry whose path cannot be resolved.
+    """
     try:
         data = json.loads(text)
     except ValueError:
@@ -240,10 +278,7 @@ def _parse_vaults(text: str) -> list[tuple[dict, Path]] | None:
         path = entry.get("path")
         if not isinstance(entry.get("name"), str) or not isinstance(path, str) or not Path(path).is_absolute():
             return None
-        try:
-            vaults.append((entry, Path(path).resolve()))
-        except (OSError, RuntimeError, ValueError):
-            return None
+        vaults.append((entry, _resolve(Path(path))))
     return vaults
 
 
@@ -254,24 +289,28 @@ def install_core_vault(
     lore_bin: Path,
     runner=None,
     file=None,
+    rename: Callable[[Path, Path], None] = os.rename,
 ) -> CoreVaultOutcome:
     """Sync the core-vault copy and register or refresh it with lore; print one line.
 
     ``runner(args, **kw)`` returns a CompletedProcess-like object (default
     ``subprocess.run``). ``file`` receives the non-warning line (default stdout);
-    warnings and declines always go to stderr. Never raises for a lore or sync problem.
+    warnings and declines always go to stderr. ``rename`` is passed to the copy sync
+    (tests inject a failing swap). Never raises for a lore or sync problem.
     """
     run = runner if runner is not None else subprocess.run
 
     def lore(*args: str):
         return run([str(lore_bin), *args], env=env, capture_output=True, text=True)
 
-    copy = core_copy_dir(env)
-    marker = copy.parent / MARKER_NAME
     try:
-        resolved_copy = copy.resolve()
-    except (OSError, RuntimeError, ValueError) as exc:
+        copy = core_copy_dir(env)
+        resolved_copy = _resolve(copy)
+    except PathResolutionError as exc:
         return _fail("copy", f"location could not be resolved ({type(exc).__name__})", lore_bin=lore_bin)
+    except _UnresolvablePath as exc:
+        return _fail("copy", f"location could not be resolved ({exc})", lore_bin=lore_bin)
+    marker = copy.parent / MARKER_NAME
 
     try:
         ls = lore("vault", "ls", "--json")
@@ -279,7 +318,12 @@ def install_core_vault(
         return _fail("vault ls", f"could not run lore ({type(exc).__name__})", lore_bin=lore_bin)
     if ls.returncode != 0:
         return _fail("vault ls", f"failed (exit {ls.returncode})", lore_bin=lore_bin)
-    vaults = _parse_vaults(ls.stdout or "")
+    try:
+        vaults = _parse_vaults(ls.stdout or "")
+    except _UnresolvablePath as exc:
+        return _fail(
+            "vault ls", f"listed a registered vault whose path could not be resolved ({exc})", lore_bin=lore_bin
+        )
     if vaults is None:
         return _fail("vault ls", "did not print the expected JSON", lore_bin=lore_bin)
 
@@ -306,7 +350,7 @@ def install_core_vault(
             marker.write_text("reindex pending\n")
 
     try:
-        changed = sync_core_copy(source, copy, before_swap=write_marker)
+        changed = sync_core_copy(source, copy, before_swap=write_marker, rename=rename)
     except (CoreVaultSyncError, OSError) as exc:
         return _fail("copy", f"could not sync the core-vault copy ({type(exc).__name__})", lore_bin=lore_bin)
 

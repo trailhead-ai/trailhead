@@ -437,14 +437,59 @@ def test_symlink_loop_vault_path_fails_safe(source, cenv, copy, tmp_path, capsys
     assert lore.writes == []
     assert not copy.parent.exists()
     assert "vault ls" in text and "install otherwise succeeded" in text
+    assert "path could not be resolved" in out.reason
+    assert "expected JSON" not in out.reason
+    assert "SECRET-LS-STDERR" not in text
+
+
+def test_symlink_loop_below_a_vault_path_fails_safe(source, cenv, copy, tmp_path, capsys):
+    (tmp_path / "loop-a").symlink_to(tmp_path / "loop-b")
+    (tmp_path / "loop-b").symlink_to(tmp_path / "loop-a")
+    lore = FakeLore([_entry("other", str(tmp_path / "loop-a" / "deeper"))])
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert "path could not be resolved" in out.reason
+    assert lore.writes == []
+    assert not copy.parent.exists()
 
 
 def test_nul_byte_vault_path_fails_safe(source, cenv, copy, capsys):
     lore = FakeLore([_entry("other", "/tmp/a\x00b")])
     out, _ = _run(source, cenv, lore, capsys)
     assert out.outcome == "failed"
+    assert "path could not be resolved" in out.reason
     assert lore.writes == []
     assert not copy.parent.exists()
+
+
+def test_malformed_vault_ls_json_keeps_its_own_reason(source, cenv, copy, capsys):
+    lore = FakeLore(ls_out="{not json")
+    out, _ = _run(source, cenv, lore, capsys)
+    assert out.outcome == "failed"
+    assert "did not print the expected JSON" in out.reason
+    assert "could not be resolved" not in out.reason
+
+
+@pytest.mark.parametrize("rel", ["not-yet/core", "not-yet/deeper/still/core"])
+def test_core_vault_at_a_missing_valid_path_still_declines(rel, source, cenv, copy, tmp_path, capsys):
+    missing = tmp_path / rel
+    lore = FakeLore([_entry("core", str(missing))])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "declined"
+    assert "already exists and is not trailhead's copy" in out.reason
+    assert str(missing) in text
+    assert lore.writes == []
+    assert not copy.parent.exists()
+
+
+def test_unresolvable_state_dir_fails_safe_naming_the_copy(source, tmp_path, capsys):
+    env = {**_fenced_env(tmp_path), "TRAILHEAD_STATE_DIR": "relative/state"}
+    lore = FakeLore([])
+    out, text = _run(source, env, lore, capsys)
+    assert out.outcome == "failed"
+    assert out.reason.startswith("copy ")
+    assert lore.calls == []
+    assert "install otherwise succeeded" in text
 
 
 def test_symlink_loop_in_the_copy_location_fails_safe(source, tmp_path, capsys):
@@ -595,7 +640,7 @@ def test_reindex_failure_keeps_marker_and_next_run_retries(source, cenv, copy, c
     assert not (copy.parent / MARKER_NAME).exists()
 
 
-def test_marker_is_written_before_the_swap(source, cenv, copy, capsys, monkeypatch):
+def test_marker_is_written_before_the_swap(source, cenv, copy, capsys):
     lore = FakeLore([])
     _run(source, cenv, lore, capsys)
     (source / "records" / "a.md").write_bytes(b"alpha v3\n")
@@ -603,9 +648,9 @@ def test_marker_is_written_before_the_swap(source, cenv, copy, capsys, monkeypat
     def failing_rename(src, dst):
         raise OSError("swap refused")
 
-    monkeypatch.setattr("trailhead.core_vault.os.rename", failing_rename)
     lore.calls.clear()
-    out, _ = _run(source, cenv, lore, capsys)
+    out = install_core_vault(source=source, env=cenv, lore_bin=LORE_BIN, runner=lore, rename=failing_rename)
+    capsys.readouterr()
     assert out.outcome == "failed"
     assert (copy / "records" / "a.md").read_bytes() != b"alpha v3\n"
     assert (copy.parent / MARKER_NAME).exists()
