@@ -542,7 +542,8 @@ block as a decision carrying the written `check` and `how` lines: the block does
 hold each close's decision and write them as the first decisions when step 9 opens the block, ahead
 of the selection. The prose report above the outcome line opens with the closed slice and the count
 of checks added, in the shape "Closed 1 slice that was waiting only on its check; 1 check added to
-your list". A refused close ends the session with the refusal's outcome line below, whose reason
+your list". That sentence is the report's first line: no summary, headline or mention of the chosen
+slice comes before it. A refused close ends the session with the refusal's outcome line below, whose reason
 names the `reason-code`; the outcome line of a pass that closed a slice and goes on to choose one is
 the selection outcome, unchanged.
 
