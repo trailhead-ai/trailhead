@@ -1,8 +1,17 @@
-"""``lore health`` — a read-only report of references that point at no record.
+"""``lore health`` — a read-only report of vault health, one check at a time.
 
-The command builds a plain-data :class:`HealthReport` from the scan of every
-configured vault and the dangling-reference check, then renders it. Nothing is
+The checks, in the order they print, are ``dangling-links`` (references that
+point at no record) and ``retired-links`` (live records that link to dropped or
+superseded records). The command builds a plain-data :class:`HealthReport` from
+the scan of every configured vault and the registry of checks (:data:`CHECKS`),
+then renders it: one summary row per vault per check, then one findings group
+per check, each with its own ``--limit`` cap and action line. Nothing is
 written: no record, no lock, no index.
+
+Each check runs inside its own exception boundary: one that raises is reported
+as ``errored: <error type>`` on its rows and in its group, every other check
+still renders, and the exit status stays 0. A later check is one more entry in
+:data:`CHECKS`.
 
 A malformed reference is reported with where it sits, never its text: the body
 lines of a bad wikilink, or the entry positions of a bad sidecar entry
@@ -25,16 +34,16 @@ from __future__ import annotations
 import argparse
 import shlex
 import sys
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 
 from ..health import dangling as dangling_mod
+from ..health import retired as retired_mod
 from ..health import scan as scan_mod
-from ..health.dangling import Finding
 from ..health.model import VaultScan
 from .record import _printable
 
 DEFAULT_LIMIT = 20
-CHECK_NAME = "dangling-links"
 
 INDEX_MATCH = "match"
 INDEX_MISMATCH = "mismatch"
@@ -46,12 +55,18 @@ _scan_vault = scan_mod.scan_vault
 
 @dataclass
 class VaultRow:
-    """One summary row. ``records`` and ``findings`` are ``None`` when skipped."""
+    """One summary row of one check on one vault.
+
+    ``records`` and ``findings`` are ``None`` when the check was skipped
+    (``skipped_reason``) or errored (``error``, the error type name).
+    """
 
     vault: str
+    check: str
     records: int | None
     findings: int | None
     skipped_reason: str | None
+    error: str | None = None
 
 
 @dataclass
@@ -71,8 +86,23 @@ class IndexLine:
 
 
 @dataclass
+class Section:
+    """One check's outcome.
+
+    ``findings`` is ``None`` when the check was skipped or errored. ``run`` is
+    what the check returned, ``None`` when it raised and ``error`` holds the
+    error type name.
+    """
+
+    check: Check
+    run: CheckRun | None
+    findings: list | None = None
+    error: str | None = None
+
+
+@dataclass
 class HealthReport:
-    """Everything the rendering needs, as plain data. ``findings`` is ``None`` when skipped."""
+    """Everything the rendering needs, as plain data: one section per check, in registry order."""
 
     selected: list[str]
     configured: int
@@ -81,7 +111,33 @@ class HealthReport:
     unreadable: dict[str, int]
     outside_root: dict[str, int]
     index: IndexLine
-    findings: list[Finding] | None
+    sections: list[Section]
+
+
+@dataclass(frozen=True)
+class CheckRun:
+    """What a check run produced: findings and per-vault judged counts, or the vaults at fault."""
+
+    findings: list | None
+    judged: dict[str, int]
+    at_fault: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class Check:
+    """One registry entry.
+
+    ``run(scans, selected)`` runs the check and classifies its result through the
+    check's own module at call time. ``render(finding)`` is one finding's line.
+    ``skip_reason`` ends the sentence saying why a skipped check could not judge
+    a target. ``action`` is the line that names what acts on the findings.
+    """
+
+    name: str
+    run: Callable[[Sequence[VaultScan], Collection[str]], CheckRun]
+    render: Callable[[object], str]
+    skip_reason: str
+    action: str
 
 
 def _safe(value: object) -> str:
@@ -96,7 +152,7 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return f"{_num(n)} {singular if n == 1 else plural}"
 
 
-def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...]) -> str:
+def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...], tail: str) -> str:
     if scan.unreadable_reason == scan_mod.REASON_VAULT_MISSING:
         return "its directory does not exist"
     if scan.unreadable_reason is not None:
@@ -107,10 +163,10 @@ def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[s
     noun = "vault" if len(at_fault) == 1 else "vaults"
     unreadable = all(scans[name].unreadable_reason is not None for name in at_fault)
     state = "could not be read" if unreadable else "could not be fully read"
-    return f"{noun} {names} {state}, so no target can be confirmed missing"
+    return f"{noun} {names} {state}, {tail}"
 
 
-def _sort_key(f: Finding):
+def _sort_key(f):
     return (f.updated_at or "", f.vault, f.kind, f.name)
 
 
@@ -134,11 +190,31 @@ def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
     return IndexLine(status, held, indexed, mismatches)
 
 
+def _run_dangling(scans, selected) -> CheckRun:
+    # Classify through the module that produced the result: an in-place reload
+    # of that module replaces its classes, and a name bound at import would then
+    # name a stale class.
+    result = dangling_mod.check_dangling(scans, selected)
+    if isinstance(result, dangling_mod.DanglingSkipped):
+        return CheckRun(None, {}, result.vaults)
+    assert isinstance(result, dangling_mod.DanglingResult)
+    return CheckRun(list(result.findings), dict(result.judged))
+
+
+def _run_retired(scans, selected) -> CheckRun:
+    result = retired_mod.check_retired(scans, selected)
+    if isinstance(result, retired_mod.RetiredSkipped):
+        return CheckRun(None, {}, result.vaults)
+    assert isinstance(result, retired_mod.RetiredResult)
+    return CheckRun(list(result.findings), dict(result.judged))
+
+
 def build_report(only: str | None = None, *, env=None) -> HealthReport:
-    """Scan every configured vault, run the check, and gather the result as data.
+    """Scan every configured vault, run every check, and gather the result as data.
 
     Every vault is scanned even when *only* narrows the report, so a target in
-    another vault still resolves.
+    another vault still resolves. A check that raises is recorded as errored and
+    does not stop the others.
     """
     every = scan_mod.resolve_vaults()
     if only is not None:
@@ -146,23 +222,29 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
     scans = [_scan_vault(name, root) for name, root in every]
     by_name = {s.vault: s for s in scans}
     selected = [s.vault for s in scans if only is None or s.vault == only]
-    result = dangling_mod.check_dangling(scans, selected)
+
+    sections: list[Section] = []
+    for check in CHECKS:
+        try:
+            run = check.run(scans, selected)
+        except Exception as exc:  # noqa: BLE001 - one check's failure must not take the report down
+            sections.append(Section(check, None, error=type(exc).__name__))
+            continue
+        findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
+        sections.append(Section(check, run, findings))
 
     rows: list[VaultRow] = []
-    findings: list[Finding] | None
-    # Classify through the module that produced the result: an in-place reload
-    # of that module replaces its classes, and a name bound at import would then
-    # name a stale class.
-    if isinstance(result, dangling_mod.DanglingSkipped):
-        findings = None
-        for v in selected:
-            rows.append(VaultRow(v, None, None, _skip_reason(by_name[v], by_name, result.vaults)))
-    else:
-        assert isinstance(result, dangling_mod.DanglingResult)
-        findings = sorted(result.findings, key=_sort_key)
-        for v in selected:
-            n = sum(1 for f in findings if f.vault == v)
-            rows.append(VaultRow(v, result.judged.get(v, 0), n, None))
+    for v in selected:
+        for sec in sections:
+            name = sec.check.name
+            if sec.error is not None:
+                rows.append(VaultRow(v, name, None, None, None, sec.error))
+            elif sec.findings is None:
+                reason = _skip_reason(by_name[v], by_name, sec.run.at_fault, sec.check.skip_reason)
+                rows.append(VaultRow(v, name, None, None, reason))
+            else:
+                n = sum(1 for f in sec.findings if f.vault == v)
+                rows.append(VaultRow(v, name, sec.run.judged.get(v, 0), n, None))
 
     chosen = [by_name[v] for v in selected]
     return HealthReport(
@@ -173,17 +255,20 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
         unreadable={s.vault: len(s.unreadable) for s in chosen if s.unreadable},
         outside_root={s.vault: s.skipped_escaping for s in chosen if s.skipped_escaping},
         index=_index_line(chosen, env=env),
-        findings=findings,
+        sections=sections,
     )
 
 
 def _table(rows: list[VaultRow]) -> list[str]:
     cells = [("vault", "check", "records", "findings", "skipped")]
     for r in rows:
-        skipped = f"yes: {_safe(r.skipped_reason)}" if r.skipped_reason else "no"
+        if r.error is not None:
+            skipped = f"errored: {_safe(r.error)}"
+        else:
+            skipped = f"yes: {_safe(r.skipped_reason)}" if r.skipped_reason else "no"
         cells.append((
             _safe(r.vault),
-            CHECK_NAME,
+            _safe(r.check),
             "—" if r.records is None else _num(r.records),
             "—" if r.findings is None else _num(r.findings),
             skipped,
@@ -213,14 +298,81 @@ def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
     return f"malformed reference at {noun} {_number_list(locations)}"
 
 
-def _finding_line(f: Finding) -> str:
-    date = _safe(f.updated_at[:10]) if f.updated_at else "undated"
-    ident = f"{_safe(f.vault)}/{_safe(f.kind)}/{_safe(f.name)}"
+def _when(f) -> str:
+    return _safe(f.updated_at[:10]) if f.updated_at else "undated"
+
+
+def _ident(f) -> str:
+    return f"{_safe(f.vault)}/{_safe(f.kind)}/{_safe(f.name)}"
+
+
+def _dangling_line(f: dangling_mod.Finding) -> str:
     if f.malformed:
         what = f"{_safe(f.field)} → {_malformed_evidence(f.field, f.locations)}: not shaped like a record id"
     else:
         what = f"{_safe(f.field)} → {_safe(f.target)}: not found in any vault"
-    return f"  {ident}  {date}  {what}"
+    return f"  {_ident(f)}  {_when(f)}  {what}"
+
+
+MAX_NAMED_SUCCESSORS = 3
+NONCONFORMING_SUCCESSOR = "a successor whose name is not a valid record id"
+
+
+def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
+    """What became of a superseded record; never carries a non-conforming name."""
+    if not c.successors and not c.nonconforming_successors:
+        return "superseded, and no record supersedes it"
+    named = []
+    for s in c.successors[:MAX_NAMED_SUCCESSORS]:
+        mark = f" (itself {s.status})" if s.status in retired_mod.RETIRED_STATUSES else ""
+        named.append(f"{_safe(s.kind)}/{_safe(s.name)}{mark}")
+    rest = len(c.successors) - len(named)
+    if rest:
+        listed = ", ".join(named) + f" and {_num(rest)} more"
+    elif len(named) > 1:
+        listed = ", ".join(named[:-1]) + " and " + named[-1]
+    else:
+        listed = "".join(named)
+    if not c.nonconforming_successors:
+        return f"superseded by {listed}"
+    if not named:
+        return f"superseded by {NONCONFORMING_SUCCESSOR}"
+    return f"superseded by {listed}, plus {NONCONFORMING_SUCCESSOR}"
+
+
+def _candidate_status(c: retired_mod.RetiredCandidate) -> str:
+    return "dropped" if c.status == "dropped" else _successor_phrase(c)
+
+
+def _retired_line(f: retired_mod.Finding) -> str:
+    if len(f.retired) == 1:
+        what = _candidate_status(f.retired[0])
+    else:
+        what = "; ".join(
+            f"{_safe(c.kind)}/{_safe(c.name)} {_candidate_status(c)}" for c in f.retired)
+    return f"  {_ident(f)}  {_when(f)}  {_safe(f.field)} → {_safe(f.target)}: {what}"
+
+
+# The checks, in the order they print. A new check is one more entry.
+CHECKS: tuple[Check, ...] = (
+    Check(
+        name="dangling-links",
+        run=_run_dangling,
+        render=_dangling_line,
+        skip_reason="so no target can be confirmed missing",
+        action="Act on these with /lore:correct: point the reference at the record "
+               "that replaced its target, or remove it.",
+    ),
+    Check(
+        name="retired-links",
+        run=_run_retired,
+        render=_retired_line,
+        skip_reason="so no target's status can be confirmed",
+        action="Act on these with /lore:correct: point a superseded link at a named live "
+               "successor; remove a link to a dropped record, or to one with no live "
+               "successor, unless it still applies.",
+    ),
+)
 
 
 def _index_lines(ix: IndexLine) -> list[str]:
@@ -264,24 +416,31 @@ def render(report: HealthReport, limit: int | None, vault_arg: str | None) -> li
     lines += _index_lines(report.index)
     lines.append("")
 
-    findings = report.findings
-    if findings is None:
-        lines.append(f"{CHECK_NAME} — skipped.")
-    elif not findings:
-        lines.append(f"{CHECK_NAME} — no findings.")
-    else:
-        total = len(findings)
-        lines.append(f"{CHECK_NAME} — {_plural(total, 'finding', 'findings')}, oldest first")
-        shown = findings if limit is None else findings[:limit]
-        lines += [_finding_line(f) for f in shown]
-        rest = total - len(shown)
-        if rest:
-            scope = f" --vault {_safe(shlex.quote(vault_arg))}" if vault_arg is not None else ""
-            lines.append(f"  {_num(rest)} more. Run `lore health{scope} --all` to see every "
-                         "finding, or `--limit <n>` for more.")
-        lines.append("Act on these with /lore:correct: point the reference at the record "
-                     "that replaced its target, or remove it.")
+    for sec in report.sections:
+        lines += _group(sec, limit, vault_arg)
     return lines
+
+
+def _group(sec: Section, limit: int | None, vault_arg: str | None) -> list[str]:
+    name = sec.check.name
+    if sec.error is not None:
+        return [f"{name} — errored: {_safe(sec.error)}."]
+    findings = sec.findings
+    if findings is None:
+        return [f"{name} — skipped."]
+    if not findings:
+        return [f"{name} — no findings."]
+    total = len(findings)
+    out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"]
+    shown = findings if limit is None else findings[:limit]
+    out += [sec.check.render(f) for f in shown]
+    rest = total - len(shown)
+    if rest:
+        scope = f" --vault {_safe(shlex.quote(vault_arg))}" if vault_arg is not None else ""
+        out.append(f"  {_num(rest)} more. Run `lore health{scope} --all` to see every "
+                   "finding, or `--limit <n>` for more.")
+    out.append(sec.check.action)
+    return out
 
 
 def _emit(lines: list[str], stream) -> None:
@@ -329,11 +488,13 @@ def add_health_subparser(sub) -> None:
     """Register the ``health`` command parser."""
     p = sub.add_parser(
         "health",
-        help="Report references that point at no record, across every vault (read-only)",
+        help="Report dangling and retired links, across every vault (read-only)",
         description=(
-            "Read every record in every configured vault and report references "
-            "(related, supersedes, depends-on, parent, [[wikilinks]]) that point at "
-            "no record in any vault. Read-only. Exit status: 0 whenever the report "
+            "Read every record in every configured vault and run two checks. "
+            "dangling-links reports references (related, supersedes, depends-on, parent, "
+            "[[wikilinks]]) that point at no record in any vault. retired-links reports "
+            "live records that link to a dropped or superseded record. Read-only. "
+            "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
             "unknown --vault) or fails unexpectedly."
         ),
