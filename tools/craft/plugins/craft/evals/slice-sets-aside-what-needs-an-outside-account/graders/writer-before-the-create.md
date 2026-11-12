@@ -1,6 +1,6 @@
 ---
 type: regex
-pattern: 'set_aside\.py.*record create --kind task'
+pattern: 'set_aside\.py.*record create [^\n]*--kind task'
 flags: s
 target:
   source: file

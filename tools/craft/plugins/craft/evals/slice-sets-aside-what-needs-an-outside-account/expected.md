@@ -54,3 +54,11 @@ Only the edited prose done right satisfies every clause. The mechanical clauses 
 - The case shows the pass sets aside what is plainly outside; it cannot show the judgement on a borderline criterion. The sibling `slice-builds-against-a-stand-in-instead-of-setting-aside` is the other side of the rule.
 - The all-candidates-set-aside branch of the prose (the pass says nothing was buildable and does not reuse the built-and-waiting wording) is not exercised by either case; one fixture seeds a buildable AC2 and AC3.
 - The `llm` clauses judge the first and last 12 events of a run; the clauses that decide what was written are mechanical. The `mktemp` entries file's removal is not pinned: the runner grants no `rm`.
+
+## Amendments after the first pass batch
+
+Made after the baseline and the first post-change batch, before any rerun, and reported with the results:
+
+- The prompt now tells the agent the operator has already approved whichever slice the pass chooses, so it writes the slice without waiting for a reply. In one of three baseline runs and one of three first post-change runs of the stand-in case, the pass stated the claim and stopped to wait for an operator who is absent in an eval. That waiting comes from the slice procedure's existing step 8 ("stated while it is still cheap to reject"), not from the set-aside rule, and it failed the slice-created clause for a reason unrelated to what the cases measure.
+- The create-matching regex (`writer-before-the-create` here and `a-slice-was-created` in the sibling) now allows other options between `record create` and `--kind task` on the same call line. One first-batch run wrote the set-aside before the create with `--vault eval` placed first, and the old pattern missed it.
+- Both cases' baselines are rerun under the amended prompt and graders before the pass bar is judged.

@@ -40,3 +40,11 @@ Every clause holds.
 
 - One spec, one phrasing, one model tier, three runs, one Linux host. It pins only that a fakeable service is not set aside; it does not show the judgement on a criterion that is partly fakeable.
 - The `llm` clause judges the first and last 12 events; the other clauses read the call log and the vault.
+
+## Amendments after the first pass batch
+
+Made after the baseline and the first post-change batch, before any rerun, and reported with the results:
+
+- The prompt now tells the agent the operator has already approved whichever slice the pass chooses, so it writes the slice without waiting for a reply. In one of three baseline runs and one of three first post-change runs of the stand-in case, the pass stated the claim and stopped to wait for an operator who is absent in an eval. That waiting comes from the slice procedure's existing step 8 ("stated while it is still cheap to reject"), not from the set-aside rule, and it failed the slice-created clause for a reason unrelated to what the cases measure.
+- The create-matching regex (`writer-before-the-create` here and `a-slice-was-created` in the sibling) now allows other options between `record create` and `--kind task` on the same call line. One first-batch run wrote the set-aside before the create with `--vault eval` placed first, and the old pattern missed it.
+- Both cases' baselines are rerun under the amended prompt and graders before the pass bar is judged.
