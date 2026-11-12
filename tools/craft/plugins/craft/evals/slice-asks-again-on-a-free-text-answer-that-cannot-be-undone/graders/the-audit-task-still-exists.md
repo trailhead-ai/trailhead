@@ -1,5 +1,7 @@
 ---
-type: file_exists
-path: vault/task/billing-service-audit.md
-exists: true
+type: regex
+pattern: 'Audit the billing service for unauthenticated endpoints'
+target:
+  source: file
+  path: vault/task/billing-service-audit.md
 ---

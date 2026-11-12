@@ -5245,6 +5245,8 @@ After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` 
 | mutation, ask-again bullet | edited | 1 | pending | |
 | mutation, stop-for-a-spec-change bullet | edited | 1 | pending | |
 | mutation, slice pointer | edited | 1 | pending | |
+| mutation, the sentence that holds an answer's undoable parts until the operator replies to the part asked again, deleted from `escalation.md` "An answer in the operator's own words" (arm 2; expected red on `no-entry-drop-ran`, `no-operator-confirmed-was-written` in a run that drops F1 and asks about the delete) | edited | 1 | pending | |
+| grader revision: arm 2 `the-audit-task-still-exists` is a `regex` on the seeded record's value claim, because `file_exists` sees only files the run created and the record is seeded (the first run reported it missing in 3 of 3 runs) | edited | 3 | pending | pass at 2 of 3 |
 | mutation, the repeat-at-the-head-of-the-closing-message sentence deleted from `escalation.md` "An answer in the operator's own words" (arm 1; expected red: `the-reading-is-repeated-in-the-closing-message`) | edited | 1 | pending | |
 | grader revision: arm 1 `the-reading-is-repeated-in-the-closing-message` is a `regex` on the final message (the first run's trace judge saw 18 to 23 of 28 to 35 turns, so the read-back and the drop fell outside it and the grader failed 3 of 3 runs that carried the answer out correctly) | edited | 3 | pending | pass at 2 of 3 |
 

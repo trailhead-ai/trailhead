@@ -189,7 +189,10 @@ again where the pass ends. The reading then passes the same triggers as any deci
 - **The reading would take an action the listed fixes never offered, and that action cannot be
   undone or lies outside the allowed actions.** It is not carried out on the strength of free text.
   The session asks about it again through the blocking prompt, with that action as the fix the
-  question guards, and waits for the answer. Nothing is written before it arrives.
+  question guards, and waits for the answer. Nothing is written before it arrives. When the answer
+  has other parts that could be carried out alone, they wait too: nothing in an answer is carried
+  out until the operator replies to the question about its part that must be asked again, the parts
+  that can be undone included.
 - **The reading would amend the spec, or needs new thinking.** A change to the spec's objectives,
   non-goals or acceptance criteria, or a fix nobody has worked out, is not made in this session. The
   session says so plainly, in a sentence or two, and stops there with nothing written: no record,
