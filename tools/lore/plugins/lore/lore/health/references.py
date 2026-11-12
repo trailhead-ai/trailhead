@@ -150,6 +150,29 @@ def iter_references(record: ScannedRecord) -> Iterable[Reference]:
             yield Reference("wikilink", target, None, line)
 
 
+def resolved_references(
+    record: ScannedRecord,
+) -> Iterable[tuple[Reference, tuple[str | None, str] | None, str | None]]:
+    """Yield every reference in *record* with its parsed ``(kind, name)`` and target.
+
+    The target is ``<kind>/<name>`` (a bare name for a bare reference); both are
+    ``None`` when the reference is not record-id shaped. A target repeated within
+    one field is yielded once; a malformed reference is yielded every time.
+    """
+    seen: set[tuple[str, str]] = set()
+    for ref in iter_references(record):
+        parsed = resolve(ref.target, ref.default_kind)
+        if parsed is None:
+            yield ref, None, None
+            continue
+        kind, name = parsed
+        target = f"{kind}/{name}" if kind else name
+        if (ref.field, target) in seen:
+            continue
+        seen.add((ref.field, target))
+        yield ref, parsed, target
+
+
 def _sidecar_references(record: ScannedRecord) -> Iterable[Reference]:
     sidecar = record.sidecar if isinstance(record.sidecar, dict) else {}
 

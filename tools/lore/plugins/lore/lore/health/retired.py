@@ -105,19 +105,10 @@ def check_retired(
             if not _is_live(record):
                 continue
             judged += 1
-            seen: set[tuple[str, str]] = set()
-            for ref in references.iter_references(record):
-                if ref.field == "supersedes":
+            for ref, parsed, target in references.resolved_references(record):
+                if ref.field == "supersedes" or parsed is None:
                     continue
-                parsed = references.resolve(ref.target, ref.default_kind)
-                if parsed is None:
-                    continue
-                kind, name = parsed
-                target = f"{kind}/{name}" if kind else name
-                if (ref.field, target) in seen:
-                    continue
-                seen.add((ref.field, target))
-                found, unreadable = candidates.lookup(kind, name)
+                found, unreadable = candidates.lookup(*parsed)
                 if unreadable or not found:
                     continue
                 if record.kind == "task" and any(c.kind == "spec" for c in found):

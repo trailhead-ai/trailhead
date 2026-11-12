@@ -190,23 +190,24 @@ def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
     return IndexLine(status, held, indexed, mismatches)
 
 
-def _run_dangling(scans, selected) -> CheckRun:
-    # Classify through the module that produced the result: an in-place reload
-    # of that module replaces its classes, and a name bound at import would then
-    # name a stale class.
-    result = dangling_mod.check_dangling(scans, selected)
-    if isinstance(result, dangling_mod.DanglingSkipped):
+def _check_run(result, skipped: type, completed: type) -> CheckRun:
+    if isinstance(result, skipped):
         return CheckRun(None, {}, result.vaults)
-    assert isinstance(result, dangling_mod.DanglingResult)
+    assert isinstance(result, completed)
     return CheckRun(list(result.findings), dict(result.judged))
+
+
+# Each runner classifies through the module that produced the result, looked up
+# at call time: an in-place reload of that module replaces its classes, and a
+# name bound at import would then name a stale class.
+def _run_dangling(scans, selected) -> CheckRun:
+    return _check_run(dangling_mod.check_dangling(scans, selected),
+                      dangling_mod.DanglingSkipped, dangling_mod.DanglingResult)
 
 
 def _run_retired(scans, selected) -> CheckRun:
-    result = retired_mod.check_retired(scans, selected)
-    if isinstance(result, retired_mod.RetiredSkipped):
-        return CheckRun(None, {}, result.vaults)
-    assert isinstance(result, retired_mod.RetiredResult)
-    return CheckRun(list(result.findings), dict(result.judged))
+    return _check_run(retired_mod.check_retired(scans, selected),
+                      retired_mod.RetiredSkipped, retired_mod.RetiredResult)
 
 
 def build_report(only: str | None = None, *, env=None) -> HealthReport:
@@ -277,9 +278,11 @@ def _table(rows: list[VaultRow]) -> list[str]:
     return ["  ".join(c[i].ljust(widths[i]) for i in range(4)) + "  " + c[4] for c in cells]
 
 
-def _number_list(numbers: tuple[int, ...]) -> str:
-    shown = [str(n) for n in numbers]
-    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+def _and_list(items: Sequence[str]) -> str:
+    """*items* as prose: ``a``, ``a and b``, ``a, b and c``."""
+    if len(items) < 2:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
 
 
 def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
@@ -293,9 +296,9 @@ def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
         return "malformed reference"
     if field == "wikilink":
         noun = "body line" if len(locations) == 1 else "body lines"
-        return f"malformed reference on {noun} {_number_list(locations)}"
+        return f"malformed reference on {noun} {_and_list([str(n) for n in locations])}"
     noun = "entry" if len(locations) == 1 else "entries"
-    return f"malformed reference at {noun} {_number_list(locations)}"
+    return f"malformed reference at {noun} {_and_list([str(n) for n in locations])}"
 
 
 def _when(f) -> str:
@@ -327,12 +330,7 @@ def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
         mark = f" (itself {s.status})" if s.status in retired_mod.RETIRED_STATUSES else ""
         named.append(f"{_safe(s.kind)}/{_safe(s.name)}{mark}")
     rest = len(c.successors) - len(named)
-    if rest:
-        listed = ", ".join(named) + f" and {_num(rest)} more"
-    elif len(named) > 1:
-        listed = ", ".join(named[:-1]) + " and " + named[-1]
-    else:
-        listed = "".join(named)
+    listed = ", ".join(named) + f" and {_num(rest)} more" if rest else _and_list(named)
     if not c.nonconforming_successors:
         return f"superseded by {listed}"
     if not named:

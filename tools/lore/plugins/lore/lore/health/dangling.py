@@ -74,21 +74,14 @@ def check_dangling(
             if record.kind == SESSION_KIND:
                 continue
             judged += 1
-            seen: set[tuple[str, str]] = set()
             malformed: dict[str, list[int]] = {}
-            for ref in references.iter_references(record):
-                parsed = references.resolve(ref.target, ref.default_kind)
+            for ref, parsed, target in references.resolved_references(record):
                 if parsed is None:
                     locations = malformed.setdefault(ref.field, [])
                     if ref.location is not None and ref.location not in locations:
                         locations.append(ref.location)
                     continue
-                kind, name = parsed
-                target = f"{kind}/{name}" if kind else name
-                if (ref.field, target) in seen:
-                    continue
-                seen.add((ref.field, target))
-                found, unreadable = candidates.lookup(kind, name)
+                found, unreadable = candidates.lookup(*parsed)
                 if not found and not unreadable:
                     result.findings.append(_finding(record, ref.field, target))
             for field_label, locations in malformed.items():
