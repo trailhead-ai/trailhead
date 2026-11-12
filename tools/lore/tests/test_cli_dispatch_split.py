@@ -77,6 +77,7 @@ _HELP_LEVELS = [
     (["session", "candidate"], "lore session candidate"),
     (["session", "referenced"], "lore session referenced"),
     (["session", "show"], "lore session show"),
+    (["health"], "lore health"),
 ]
 
 
@@ -93,13 +94,13 @@ class TestHelpAtEveryLevel:
         assert f"usage: {prog}" in result.stdout, result.stdout
 
     def test_top_level_help_lists_every_command_group(self, tmp_path):
-        """The single top-level parser lists all fourteen command groups, in order."""
+        """The single top-level parser lists every command group, in order."""
         result = _run(["--help"], tmp_path)
         assert result.returncode == 0
         # Registration order is load-bearing for the help listing; assert the
         # exact choices string argparse renders.
         assert (
-            "{init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session,signing}"
+            "{init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session,signing,health}"
             in result.stdout
         )
 

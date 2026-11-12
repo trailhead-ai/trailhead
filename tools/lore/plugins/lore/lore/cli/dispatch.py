@@ -12,7 +12,7 @@ import difflib
 import sys
 
 from .. import locking
-from . import areas, flush, init, pipeline, publish, record, resolve, search, session, signing, sync, task, vault
+from . import areas, flush, health, init, pipeline, publish, record, resolve, search, session, signing, sync, task, vault
 from ..argparse_util import find_subparsers_action
 
 # Importing the journal module registers its crash-recovery hook with ``locking``.
@@ -105,6 +105,7 @@ def build_parser() -> argparse.ArgumentParser:
     vault.add_vault_subparser(sub)
     session.add_session_subparser(sub)
     signing.add_signing_subparser(sub)
+    health.add_health_subparser(sub)
 
     return parser
 
