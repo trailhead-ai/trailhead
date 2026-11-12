@@ -22,8 +22,8 @@ blocking prompt, before any of these:**
 - **An action that cannot be undone.** Deleting a record is one; so is any write that no later write
   restores.
 - **An action outside the session's allowed actions**, listed below.
-- **Dropping an urgent follow-up entry, or moving it out of the spec's loop**, covered in the next
-  section.
+- **Dropping an urgent follow-up entry, or moving it out of the spec's loop**, covered under "An
+  urgent follow-up entry would be dropped or moved out" below.
 
 The question is put before the action is taken. A finding is not a trigger because it is large or
 awkward: a fix that balloons the slice is decided as the build or plan says, by deferring it to the
