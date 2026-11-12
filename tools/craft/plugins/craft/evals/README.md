@@ -71,6 +71,16 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   are for the plan ritual's migration-suppression step, which pipes the spec body into
   `migration_bar.py` and reads the printed directive. One covers the bare call and one the call with
   arguments, as `Bash(mktemp)` and `Bash(mktemp *)` do.
+- The two grants `Bash(*/scripts/run_block.py)` and `Bash(*/scripts/run_block.py *)` are for the
+  resumed unattended rituals, which pipe a record body into the run-block reader and read the
+  printed report: `<path>/scripts/run_block.py < <file>`. One covers the bare call and one the
+  call with arguments or a redirection, as the `migration_bar.py` pair does; the runner does not
+  split a command at a redirection, so `run_block.py < <file>` is allowed by the `*` form. Their
+  leading `*` has the same shape as the script grants above, so they admit any single command whose
+  text contains `<anything>/scripts/run_block.py` (or that text followed by anything), whatever
+  program runs it. The reader only reads stdin and prints; it writes nothing. The cases that
+  measure it install a wrapper at `./scripts/run_block.py` that logs the call and runs the real
+  copy.
 - The `pending_check.py *` and `observation_gate.py` grants are for the close's manual-check
   discharge in `skills/_shared/execute.md`, run by the cases `close-defers-an-unconfirmed-check`,
   `stale-write-leaves-the-slice-open` and `one-failed-check-saves-nothing`. `pending_check.py *`
@@ -95,7 +105,7 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   (`--discard-changes`, `--detach`), and `git log origin/*` admits `--output=<path>`, which writes a
   file the sandbox allows.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
-  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `pending_check.py`) matches any single command that ends in
+  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `run_block.py`, `pending_check.py`) matches any single command that ends in
   or contains that script path, whatever program runs it. So the set of commands a case can run is
   bounded by the runner's sandbox, not by these patterns. The grants shape only the eval runner;
   they are never installed and change nothing for a real install. Anchoring them is a runner change,

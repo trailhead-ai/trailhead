@@ -663,6 +663,78 @@
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
       ]
+    },
+    "unattended-execute-binds-the-unbound-default-vault": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-parks-a-correction-and-continues": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-refuses-an-outcome-less-block": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-reparks-an-unanswered-question": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-after-stuck": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-an-interrupted-run-on-request": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-with-an-answered-assumption": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-stops-when-taken-over": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-takes-over-an-interrupted-block-and-reaches-dispatch": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
     }
   }
 }
