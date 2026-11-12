@@ -197,7 +197,9 @@ def _cmd_group_cli(args: list[str]) -> None:
 
 
 def _cmd_groups_cli(args: list[str]) -> None:
-    """camp groups [--json] — list every configured group: name + member names.
+    """camp groups [--json] — list every configured group: name, member names,
+    its `[launch] account` (null when it declares none) and the vault names
+    its `lore_scopes` and `shared_vaults` bind.
 
     Read-only and fully groupless: reads directly from the group config
     directory, the same source `load_group` reads, and never resolves a group
@@ -264,6 +266,11 @@ def _cmd_groups_cli(args: list[str]) -> None:
                 {
                     "name": config["group"]["name"],
                     "members": [m["name"] for m in config["members"]],
+                    "account": config.get("launch", {}).get("account"),
+                    "vaults": sorted(
+                        {v["name"] for v in config["shared_vaults"]}
+                        | {s["name"] for s in config["lore_scopes"]}
+                    ),
                 }
             )
     entries.sort(key=lambda entry: entry["name"])

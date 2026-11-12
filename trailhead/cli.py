@@ -34,6 +34,7 @@ from trailhead.install_config import ConfigResolveError
 from trailhead.launch_profile import (
     BROKER_SCOPE,
     BROKER_SERVER,
+    DRIVE_GROUPS_OUTPUT_KEYS,
     HUB_PROFILE,
     RITUAL_PROFILE,
     RITUAL_ROLE,
@@ -56,6 +57,7 @@ from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
 from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfigError, read_hub_config
+from trailhead.ranger.drive_groups import DriveGroupsError, drive_groups
 from trailhead.uninstall import run_uninstall
 from trailhead.update import (
     FRESHNESS_WINDOW_SECONDS,
@@ -84,6 +86,7 @@ _TRAILHEAD_ERRORS = (
     OutpostLifecycleError,
     HubConfigError,
     LaunchProfileError,
+    DriveGroupsError,
 )
 
 _CURATED_HELP = """\
@@ -326,6 +329,15 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_drive_groups(args: argparse.Namespace) -> int:
+    if not args.json:
+        print("trailhead: drive-groups prints JSON; pass --json", file=sys.stderr)
+        return 1
+    groups = drive_groups(args.account, args.vault, env=dict(os.environ))
+    print(json.dumps({DRIVE_GROUPS_OUTPUT_KEYS[0]: groups}))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
@@ -560,6 +572,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
+    drive_p = subparsers.add_parser(
+        "drive-groups",
+        help="Print the camp groups on an account's launch account that bind a vault (JSON).",
+    )
+    drive_p.add_argument("--account", required=True, help="Account short name.")
+    drive_p.add_argument("--vault", required=True, help="Vault name the group must bind.")
+    drive_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
     broker_p = subparsers.add_parser(
         "broker-header",
         help="Print the Authorization header for a session's broker credentials (JSON, for a header helper).",
@@ -593,6 +613,7 @@ def main() -> int:
         "outpost": _cmd_outpost,
         "core": _cmd_core,
         "session-start": _cmd_session_start,
+        "drive-groups": _cmd_drive_groups,
         "broker-header": _cmd_broker_header,
         "gateway": _cmd_gateway,
     }
