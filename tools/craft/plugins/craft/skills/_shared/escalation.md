@@ -82,8 +82,8 @@ would have guarded**. A decision that is not about found work keeps the route it
 
 - A finding whose fix would change the spec, cannot be undone, or lies outside the allowed actions
   is deferred to the spec's follow-ups section as an open entry (`found_work.py decide`, decision
-  `deferred`, an allowed and reversible write). An entry that already exists and would be
-  spec-changing to fold is instead handed back to `open` with `found_work.py entry` and its `reopen`
+  `deferred`, an allowed and reversible write). An entry that already exists and that one of these
+  triggers covers is instead handed back to `open` with `found_work.py entry` and its `reopen`
   transition. Either reason begins with the trigger in these words, `would change the spec`,
   `cannot be undone` or `outside the allowed actions`, and then says in one line what the fix would
   have been.
@@ -96,8 +96,8 @@ would have guarded**. A decision that is not about found work keeps the route it
 A follow-up entry is **urgent** when it is a security finding, shows that an earlier slice shipped
 something broken, or blocks a remaining criterion from being built properly. **Before dropping an
 urgent entry, or moving it out of the spec's loop (a drop whose reason names a `task/<id>`), the
-session asks.** The question is put before any drop of that pass is written, and no drop is written
-until the operator's answer arrives.
+session asks.** The question is put before any further drop of that pass is written, and no drop is
+written until the operator's answer arrives.
 
 The fixes this trigger offers, in the order the session judges them, are whichever of these apply:
 
