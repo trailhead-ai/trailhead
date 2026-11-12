@@ -135,11 +135,11 @@ well-formed lines, from entries of the right kind, captured under the phase `--s
 (`build` by default), whose parent equals `--parent` exactly when one is given, and shape-checks every id
 before printing it. `--parent` is required for `--session build` (refused `malformed-input` without it); a
 `slice` or `plan` report needs none, because a pass that ended without a new parent still made decisions,
-and it reports every parent's decisions of that phase. A log line captured before phases varied carries
-`phase=Build` and so reports under `--session build`. A reverted script that filters by parent alone would
-list the Build, Slice and Plan lines of one parent together under the build's wording; that is harmless,
-because the extra lines are real decisions of the same stream about that parent, each worded as its
-own kind. Output: first, under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
+and it reports every parent's decisions of that phase. Every line names the phase of the session that wrote
+it; a `phase=Build` line reports under `--session build` whatever wrote it. A reader that filters by parent
+alone sees a parent's Build, Slice and Plan lines together, each still rendered by its own kind, so none is
+misreported. Without `--parent`, two decisions of one kind on one finding under different parents stay two
+lines. Output: first, under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
 written (what happened, what to do; flush files it as a task) and each brainstorm task with its
 `/craft:brainstorm task/<id>` command; then each decision as a plain sentence;
 or exactly `NO_DECISIONS_LINE`. A session that does not exist yet reads as no
@@ -949,11 +949,11 @@ def report(parent: str | None, runner, session_id: str | None, session: str = "b
     operator: list[str] = []
     plain: list[str] = []
     recovered: set[int] = set()
-    latest: dict[tuple[str, str, str, str], Logged] = {}
-    failed_before: set[tuple[str, str, str, str]] = set()
+    latest: dict[tuple[str, str, str, str, str], Logged] = {}
+    failed_before: set[tuple[str, str, str, str, str]] = set()
 
-    def key_of(e: Logged) -> tuple[str, str, str, str]:
-        return (e.kind, e.title, e.where, e.record if e.kind in ENTRY_KINDS else "")
+    def key_of(e: Logged) -> tuple[str, str, str, str, str]:
+        return (e.kind, e.title, e.where, e.record if e.kind in ENTRY_KINDS else "", e.parent if parent is None else "")
 
     for e in entries:
         key = key_of(e)

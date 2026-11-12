@@ -1703,6 +1703,21 @@ def test_the_printed_retry_command_runs_as_pasted_and_completes_the_transition(c
     assert statuses(spec_now(lore))["F1"] == ("folded", "task/p")
 
 
+def test_the_retry_of_a_slice_write_runs_in_the_slice_session_so_the_slice_report_lists_the_decision(capsys, tmp_path):
+    import shlex
+    lore = spec_lore(tmp_path, two_open(), update_mode="stale")
+    code, out, _ = run_entry(transition("fold", ("F1",)), lore, capsys, "--session", "slice")
+    assert code == 3
+    (retry,) = [ln for ln in out.splitlines() if ln.startswith("retry: ")]
+    argv = shlex.split(retry[len("retry: "):])
+    assert fw.main(argv[argv.index("entry"):], stdin=argv[2], runner=lore) == 0
+    capsys.readouterr()
+    code, report_out, _ = run_report_raw(lore, capsys, "--session", "slice", "--session-id", SID)
+    assert code == 0
+    assert "Folded spec/s#F1" in report_out
+    assert "Not written" not in report_out
+
+
 @pytest.mark.parametrize("reason", ["a | b", "a || b | c", "tab\there"])
 def test_the_retry_logs_the_same_why_as_the_original_run(capsys, reason, tmp_path):
     import shlex
@@ -3134,6 +3149,17 @@ def test_a_slice_report_with_no_parent_lists_the_decisions_under_every_parent(ca
     code, out, err = run_report_raw(lore, capsys, "--session", "slice")
     assert code == 0, err
     assert "Alpha thing" in out and "Beta thing" in out
+
+
+@pytest.mark.parametrize("kind", ["entry-folded", "dropped"])
+def test_a_no_parent_report_keeps_same_kind_decisions_on_one_record_under_different_parents(capsys, tmp_path, kind):
+    lore = session_lore(tmp_path)
+    for parent in ("task/A", "task/B"):
+        line = f"found-work: {kind} | parent: {parent} | record: spec/s#F1 | finding: Same | where: a.py | why: r"
+        _setup(lore, ["session", "candidate", "--kind", "found-work", "--phase", "Slice"], line)
+    code, out, err = run_report_raw(lore, capsys, "--session", "slice")
+    assert code == 0, err
+    assert len([ln for ln in out.splitlines() if "Same" in ln]) == 2
 
 
 def test_a_slice_report_still_filters_by_parent_when_one_is_given(capsys, tmp_path):
