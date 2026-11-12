@@ -122,7 +122,6 @@ import markdown_section  # noqa: E402
 import observation_gate as obs  # noqa: E402
 import parent_coverage  # noqa: E402
 import spec_write as sw  # noqa: E402
-import waiting  # noqa: E402
 import waiting_gate  # noqa: E402
 from gate_plumbing import Refusal, emit_refusal  # noqa: E402
 
@@ -212,16 +211,6 @@ def _pending_line(criterion: str, spec: str, evidence: str) -> str:
 class _Parent(parent_coverage.ParentCoverage):
     """A parent body read through observation_gate's own parsers."""
 
-    def __init__(self, body: str):
-        try:
-            super().__init__(body)
-        except ValueError:
-            raise Refusal(
-                "the parent's covers fields or observations cannot be read unambiguously",
-                "unreadable-parent",
-                2,
-            )
-
     def classify(self, criteria: list[str], spec_body: str) -> list[str]:
         """The criteria still to move; the rest are already pending. Refuses any
         criterion that is neither. Eligibility is `unconfirmed_manual_checks`'s."""
@@ -263,15 +252,6 @@ class _Parent(parent_coverage.ParentCoverage):
         return body, covers, partial
 
 
-def _check_parent(sidecar: dict, spec: str) -> None:
-    if not parent_coverage.is_slice_parent(sidecar, spec, ("in-progress",)):
-        raise Refusal(
-            "the parent is not an in-progress slice parent related to this spec",
-            "not-a-slice-parent",
-            1,
-        )
-
-
 def _entry_lines(item: dict, parent: str, today: str) -> list[str]:
     return [
         f"- **{item['criterion']}.** pending check — task/{parent}",
@@ -284,12 +264,7 @@ def _entry_lines(item: dict, parent: str, today: str) -> list[str]:
 
 def _with_entries(body: str, items: list[dict], parent: str) -> str:
     today = waiting_gate._today().isoformat()
-    block: list[str] = []
-    for item in items:
-        if block:
-            block.append("")
-        block += _entry_lines(item, parent, today)
-    return sw.append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
+    return sw.append_waiting_entries(body, [_entry_lines(item, parent, today) for item in items])
 
 
 def _precertify_covers(state: _Parent, moving: list[str], spec: str, spec_body: str) -> None:
@@ -302,20 +277,15 @@ def _precertify_covers(state: _Parent, moving: list[str], spec: str, spec_body: 
 
 def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
     sidecar, body, revision, _ = sw.read_record(runner, vault, f"task/{parent}", "parent-not-found")
-    _check_parent(sidecar, spec)
+    parent_coverage.require_slice_parent(sidecar, spec)
     state = _Parent(body)
     todo = state.classify(criteria, spec_body)
     if not todo:
         return "already-updated"
     new_body, covers, partial = state.moved(todo, spec)
     parent_coverage.certify_covers(spec_body, covers, partial)
-    done = sw.write_record(runner, sw.update_argv(f"task/{parent}", vault, revision), new_body)
-    if done is not None and done.returncode == 0:
-        return "updated"
-    sw.refuse_if_base_rejected(done)
-    if sw.revision_changed(runner, vault, f"task/{parent}", revision, "parent-not-found"):
-        raise Refusal(f"task/{parent} changed after it was read", "stale-parent", 2)
-    raise Refusal(f"lore could not write task/{parent}", "parent-write-failed", 2)
+    parent_coverage.write_parent(runner, vault, f"task/{parent}", revision, new_body)
+    return "updated"
 
 
 def write_mode(args, runner) -> int:
@@ -327,7 +297,7 @@ def write_mode(args, runner) -> int:
 
     spec_id = f"spec/{args.spec}"
     parent_sidecar, parent_body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
-    _check_parent(parent_sidecar, args.spec)
+    parent_coverage.require_slice_parent(parent_sidecar, args.spec)
     _, spec_body, spec_rev, _ = sw.read_record(runner, vault, spec_id, "spec-not-found")
     state = _Parent(parent_body)
     moving = state.classify(criteria, spec_body)

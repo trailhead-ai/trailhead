@@ -7,14 +7,21 @@ has no CLI.
     ParentCoverage(body)             the parent's `lines`, `masked`, `covers`, `partial`,
                                      `observations`, `attestations` and `obs_lines`
                                      ({identifier: line index} of its observation lines);
-                                     `ValueError` when the lists or observations cannot be
-                                     read unambiguously
+                                     refused `unreadable-parent` when the lists or
+                                     observations cannot be read unambiguously
     ParentCoverage.rewrite_lists(lines, covers, partial)
                                      `lines` with the two coverage lines set to `covers` and
                                      `partial`; an emptied list's line is dropped
     is_slice_parent(sidecar, spec, statuses)
                                      a task in one of `statuses`, labelled a slice parent,
                                      related to `spec`
+    require_slice_parent(sidecar, spec)
+                                     refuses (`not-a-slice-parent`) a parent that is not an
+                                     in-progress slice parent related to `spec`
+    write_parent(runner, vault, record_id, revision, body, note="")
+                                     the parent written with `--base revision`; a write that
+                                     does not take is `stale-parent` when the revision moved,
+                                     else `parent-write-failed`, each message ending in `note`
     certify_covers(spec_body, covers, partial)
                                      the lists certified by `covers_gate` in-process against
                                      the spec body (a `Refusal` carrying the gate's own code)
@@ -35,16 +42,24 @@ if str(_SCRIPT_DIR) not in sys.path:
 import covers_gate  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import observation_gate as obs  # noqa: E402
+import spec_write as sw  # noqa: E402
 from gate_plumbing import Refusal  # noqa: E402
 
 
 class ParentCoverage:
     def __init__(self, body: str):
         self.body = body
-        self.lines, self.masked, self.covers, self.partial = obs.read_covers_fields(body)
-        self.observations = obs.parse_observations(self.lines, self.masked)
-        self.attestations = obs.parse_attestations(self.lines, self.masked)
-        self.obs_lines = self._observation_lines()
+        try:
+            self.lines, self.masked, self.covers, self.partial = obs.read_covers_fields(body)
+            self.observations = obs.parse_observations(self.lines, self.masked)
+            self.attestations = obs.parse_attestations(self.lines, self.masked)
+            self.obs_lines = self._observation_lines()
+        except ValueError:
+            raise Refusal(
+                "the parent's covers fields or observations cannot be read unambiguously",
+                "unreadable-parent",
+                2,
+            )
 
     def _observation_lines(self) -> dict[str, int]:
         start = covers_gate._find_unique_heading(
@@ -105,6 +120,23 @@ def is_slice_parent(sidecar: dict, spec: str, statuses: tuple[str, ...]) -> bool
         and gather.SLICE_LABEL in gather._labels(sidecar)
         and spec in linked
     )
+
+
+def require_slice_parent(sidecar: dict, spec: str) -> None:
+    if not is_slice_parent(sidecar, spec, ("in-progress",)):
+        raise Refusal(
+            "the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent", 1
+        )
+
+
+def write_parent(runner, vault: str, record_id: str, revision: str, body: str, *, note: str = "") -> None:
+    done = sw.write_record(runner, sw.update_argv(record_id, vault, revision), body)
+    if done is not None and done.returncode == 0:
+        return
+    sw.refuse_if_base_rejected(done)
+    if sw.revision_changed(runner, vault, record_id, revision, "parent-not-found"):
+        raise Refusal(f"{record_id} changed after it was read{note}", "stale-parent", 2)
+    raise Refusal(f"lore could not write {record_id}{note}", "parent-write-failed", 2)
 
 
 def certify_covers(spec_body: str, covers: list[str], partial: list[str]) -> None:

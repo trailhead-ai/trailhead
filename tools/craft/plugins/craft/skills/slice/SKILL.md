@@ -1156,16 +1156,16 @@ The spec name is bare, with no `spec/` prefix: the writer refuses a prefixed nam
 `set_aside.py` adds a `set aside` entry for each criterion to the spec's `## Waiting` section, with
 a history line of its own fixed wording; the text you pass in is never echoed back and never copied
 into that line. Exit `0` is done. A refusal exits `1` or `2` with a `reason-code:` line on stderr;
-copy only that token into the report, never any `reason:` text. When the writer refuses, nothing is
-set aside: report the refusal in plain words, not the bare token, and leave the criterion in the
-candidate set, where this pass does not choose it and a later pass judges it again. The codes this
-step names: `not-a-candidate` (the criterion is no longer open: covered, removed or closed),
-`entry-exists` (it already has a waiting entry under another status; a criterion already set aside
-is not a refusal, the writer finishes with exit `0` and writes nothing), `stale-spec` (the spec
-changed while writing; read it fresh and run the writer once more), `spec-write-failed` (the write
-did not land), and `waits-on-too-long`, `multiline-entry-text` and `invalid-entries` (the line you
-wrote for what it waits on or the entries file was unusable). If that leaves nothing to choose, take
-step 6's early-stop path.
+the report translates that token into plain words, never reports it bare, and never copies any
+`reason:` text. When the writer refuses, nothing is set aside: leave the criterion in the candidate
+set, where this pass does not choose it and a later pass judges it again. The codes this step names:
+`not-a-candidate` (the criterion is no longer open: covered, removed or closed), `entry-exists` (it
+already has a waiting entry under another status; a criterion already set aside is not a refusal,
+the writer finishes with exit `0` and writes nothing), `stale-spec` (the spec changed while writing;
+read it fresh and run the writer once more), `spec-write-failed` (the write did not land), and
+`waits-on-too-long`, `multiline-entry-text` and `invalid-entries` (the line you wrote for what it
+waits on or the entries file was unusable). If that leaves nothing to choose, take step 6's
+early-stop path.
 
 **If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
 pass, clear it now** — after the shape checks and the covers gate above have passed, and immediately

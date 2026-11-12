@@ -72,7 +72,6 @@ import candidate_set  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import parent_coverage  # noqa: E402
 import spec_write as sw  # noqa: E402
-import waiting  # noqa: E402
 import waiting_gate  # noqa: E402
 from gate_plumbing import Refusal, emit_refusal  # noqa: E402
 
@@ -176,12 +175,7 @@ def _entry_lines(entry: dict, today: str, words: str) -> list[str]:
 
 def _with_entries(body: str, entries: list[dict], words: str) -> str:
     today = waiting_gate._today().isoformat()
-    block: list[str] = []
-    for entry in entries:
-        if block:
-            block.append("")
-        block += _entry_lines(entry, today, words)
-    return sw.append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
+    return sw.append_waiting_entries(body, [_entry_lines(entry, today, words) for entry in entries])
 
 
 def _candidates(runner, vault: str, spec_id: str, spec_body: str) -> set[str]:
@@ -220,8 +214,9 @@ def _candidates(runner, vault: str, spec_id: str, spec_body: str) -> set[str]:
 
 
 def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict], words: str) -> tuple[str, str]:
-    """Land `entries` on `spec`'s `## Waiting` section, their history line reading `words`; returns (the spec body now on the vault,
-    `written` or `already-present`). Refusals are `Refusal`s and leave the spec untouched."""
+    """Land `entries` on `spec`'s `## Waiting` section, their history line reading `words`;
+    returns (the spec body now on the vault, `written` or `already-present`). Refusals are
+    `Refusal`s and leave the spec untouched."""
     spec_id = f"spec/{spec}"
     _, spec_body, spec_rev, _ = sw.read_record(runner, vault, spec_id, "spec-not-found")
     present = sw.spec_entries(spec_body)
@@ -269,16 +264,8 @@ def write_mode(args, runner) -> int:
 
 
 def _read_parent(sidecar: dict, body: str, spec: str) -> parent_coverage.ParentCoverage:
-    if not parent_coverage.is_slice_parent(sidecar, spec, ("in-progress",)):
-        raise Refusal(
-            "the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent", 1
-        )
-    try:
-        return parent_coverage.ParentCoverage(body)
-    except ValueError:
-        raise Refusal(
-            "the parent's covers fields or observations cannot be read unambiguously", "unreadable-parent", 2
-        )
+    parent_coverage.require_slice_parent(sidecar, spec)
+    return parent_coverage.ParentCoverage(body)
 
 
 def _lists_without(state: parent_coverage.ParentCoverage, criteria: list[str]) -> tuple[list[str], list[str]]:
@@ -329,13 +316,8 @@ def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[st
     lines = state.rewrite_lists(lines, covers, partial)
     parent_coverage.certify_covers(spec_body, covers, partial)
     new_body = "\n".join(line for line in lines if line is not None)
-    done = sw.write_record(runner, sw.update_argv(record, vault, revision), new_body)
-    if done is not None and done.returncode == 0:
-        return "updated"
-    sw.refuse_if_base_rejected(done)
-    if sw.revision_changed(runner, vault, record, revision, "parent-not-found"):
-        raise Refusal(f"{record} changed after it was read; {landed}", "stale-parent", 2)
-    raise Refusal(f"lore could not write {record}; {landed}", "parent-write-failed", 2)
+    parent_coverage.write_parent(runner, vault, record, revision, new_body, note=f"; {landed}")
+    return "updated"
 
 
 def build_mode(args, runner) -> int:

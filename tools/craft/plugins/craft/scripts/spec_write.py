@@ -16,13 +16,17 @@
     append_to_section(body, heading, duplicate_code, new_lines, separated=False)
                                       `new_lines` at the end of a section, creating it at the end
                                       of the body when absent
+    append_waiting_entries(body, blocks)
+                                      each block of entry lines at the end of the `## Waiting`
+                                      section, a blank line before each
     certify_and_write(...)            certify the proposed body with the waiting gate, write it with
                                       `--base <revision read>`, and decide a failed or timed-out write
                                       by re-reading: every proposed entry present under its key with
                                       status `waiting` is treated as landed; otherwise a changed
                                       revision is `stale-spec` and an unchanged one `spec-write-failed`
     write_record, update_argv, refuse_if_base_rejected, revision_changed
-                                      the write primitives a writer uses for its own second record
+                                      the write primitives `parent_coverage.write_parent` uses for
+                                      a writer's second record
 
 A lore that rejects `--base` as an unrecognised argument is `lore-too-old` (exit 2), not a failed
 write. Every refusal is a `gate_plumbing.Refusal`.
@@ -131,6 +135,15 @@ def append_to_section(
             last = i
     lines[last + 1 : last + 1] = ([""] if separated else []) + new_lines
     return "\n".join(lines)
+
+
+def append_waiting_entries(body: str, blocks: list[list[str]]) -> str:
+    lines: list[str] = []
+    for block in blocks:
+        if lines:
+            lines.append("")
+        lines += block
+    return append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, lines, separated=True)
 
 
 def write_record(runner, argv: list[str], stdin: str):
