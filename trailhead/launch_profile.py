@@ -357,6 +357,7 @@ class LaunchProfile:
     writable_roles: tuple[str, ...] = ()
     git_guarded_roles: tuple[str, ...] = ()
     read_denied_roles: tuple[str, ...] = ()
+    write_denied_roles: tuple[str, ...] = ()
     readable_roles: tuple[str, ...] = ()
     network_allowed_hosts: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] = ()
@@ -370,6 +371,7 @@ class LaunchProfile:
             *self.writable_roles,
             *self.git_guarded_roles,
             *self.read_denied_roles,
+            *self.write_denied_roles,
             *self.readable_roles,
         ):
             if role not in known:
@@ -391,12 +393,19 @@ class ResolvedProfile:
     def readable(self) -> tuple[Path, ...]:
         return tuple(self.paths[r] for r in self.profile.readable_roles)
 
+    def _paths_of(self, roles: tuple[str, ...]) -> tuple[Path, ...]:
+        found: list[Path] = []
+        for role in roles:
+            found.extend(self.path_sets[role] if role in self.path_sets else (self.paths[role],))
+        return tuple(found)
+
     @property
     def read_denied(self) -> tuple[Path, ...]:
-        denied: list[Path] = []
-        for role in self.profile.read_denied_roles:
-            denied.extend(self.path_sets[role] if role in self.path_sets else (self.paths[role],))
-        return tuple(denied)
+        return self._paths_of(self.profile.read_denied_roles)
+
+    @property
+    def write_denied(self) -> tuple[Path, ...]:
+        return self._paths_of(self.profile.write_denied_roles)
 
 
 HUB_PROFILE = LaunchProfile(
@@ -421,6 +430,7 @@ RITUAL_PROFILE = LaunchProfile(
         ROLE_OTHER_VAULTS,
         ROLE_OTHER_ACCOUNT_CONFIGS,
     ),
+    write_denied_roles=(ROLE_OTHER_MIRRORS, ROLE_OTHER_VAULTS),
     readable_roles=(ROLE_PLUGIN_TREE,),
     network_allowed_hosts=(),
     mcp_servers=(),
@@ -444,6 +454,7 @@ def resolve_profile(
             *profile.writable_roles,
             *profile.git_guarded_roles,
             *profile.read_denied_roles,
+            *profile.write_denied_roles,
             *profile.readable_roles,
         )
     )

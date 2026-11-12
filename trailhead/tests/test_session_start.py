@@ -2309,6 +2309,87 @@ def test_another_hub_sharing_the_accounts_own_launch_account_does_not_deny_it(tm
     assert str(home / "acct-c") in denied and str(home / "acct-a") not in denied
 
 
+def _ritual_on_named_account(tmp_path):
+    """A ritual whose own launch account is a named directory (not the default ~/.claude)."""
+    env = _fence(tmp_path)
+    home = Path(env["HOME"]).resolve()
+    own = home / "acct-a"
+    _configure_hub(env, str(own))
+    ws = _make_workspace(env)
+    _, lore, cache = _ritual_roots(env, ws)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["api.anthropic.com"]),
+        account_dir=own,
+    )
+    return env, ws, own
+
+
+def _named_start(env, ws, own):
+    return ClaudeCodeHarness().session_start(
+        _ritual_resolved(env, ws), ws, None,
+        interactive=False, account=str(own), env=env, platform="linux",
+    )
+
+
+def test_ritual_writes_deny_another_accounts_vaults_and_mirror_but_not_its_own(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _other_account(env)
+    _group_toml(env, "mine", vaults=["avault", "common"], shared=[("ashared", "/srv/ashared")])
+    _group_toml(
+        env, "theirs", account="~/acct-g", vaults=["bvault", "common"], shared=[("bshared", "/srv/bshared")]
+    )
+    settings = _settings_of(_ritual_start(env, ws))
+    deny_write = settings["sandbox"]["filesystem"]["denyWrite"]
+    rules = settings["permissions"]["deny"]
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    mirror = Path(env["RANGER_CACHE_DIR"]).resolve() / "mirrors" / "b"
+    for denied in (lore / "vaults" / "bvault", Path("/srv/bshared"), mirror):
+        assert str(denied) in deny_write
+        assert f"Edit(/{denied}/**)" in rules
+    for own in (lore / "vaults" / "avault", lore / "vaults" / "common", Path("/srv/ashared")):
+        assert str(own) not in deny_write
+        assert f"Edit(/{own}/**)" not in rules
+
+
+def test_a_ritual_on_a_named_account_denies_reading_the_default_accounts_config_dir(tmp_path):
+    env, ws, own = _ritual_on_named_account(tmp_path)
+    start = _named_start(env, ws, own)
+    default = Path(env["HOME"]).resolve() / ".claude"
+    settings = _settings_of(start)
+    assert str(default) in settings["sandbox"]["filesystem"]["denyRead"]
+    assert f"Read(/{default}/**)" in settings["permissions"]["deny"]
+    assert str(default) in start.setup_sandbox["denied_reads"]
+    assert str(own) not in settings["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_a_ritual_on_the_default_account_does_not_deny_its_own_config_dir(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    start = _ritual_start(env, ws)
+    default = Path(env["HOME"]).resolve() / ".claude"
+    settings = _settings_of(start)
+    assert str(default) not in settings["sandbox"]["filesystem"]["denyRead"]
+    assert f"Read(/{default}/**)" not in settings["permissions"]["deny"]
+    assert str(default) not in start.setup_sandbox["denied_reads"]
+
+
+def test_a_ritual_whose_launch_account_is_the_default_config_dir_named_explicitly_keeps_it_readable(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    default = Path(env["HOME"]).resolve() / ".claude"
+    start = _named_start(env, ws, default)
+    assert str(default) not in _settings_of(start)["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_a_hub_on_a_named_account_does_not_deny_the_default_config_dir(tmp_path):
+    env = _fence(tmp_path)
+    own = Path(env["HOME"]).resolve() / "acct-a"
+    _give_user_a_write_list(env, str(own))
+    own.mkdir(parents=True, exist_ok=True)
+    _give_user_a_write_list(env, str(own))
+    start = _start(env, account=str(own))
+    default = Path(env["HOME"]).resolve() / ".claude"
+    assert str(default) not in _settings_of(start)["sandbox"]["filesystem"]["denyRead"]
+
+
 # workspace validation
 
 

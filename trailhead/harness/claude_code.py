@@ -114,7 +114,7 @@ from trailhead.harness.base import (
     SessionStart,
     SessionTranscript,
 )
-from trailhead.launch_profile import BROKER_SERVER, ROLE_WORKSPACE
+from trailhead.launch_profile import BROKER_SERVER, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
 from trailhead.paths import state_dir
 
 if TYPE_CHECKING:
@@ -2614,8 +2614,17 @@ class ClaudeCodeHarness(Harness):
         _check_reads_and_network(user, [*roots, *readable], hosts)
         granted = [self.composed_root(r.parent) for r in readable]
         deny_write += [str(g) for g in granted]
+        write_denied = [Path(os.path.realpath(p)) for p in profile.write_denied]
+        deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
         denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
+        own_config = Path(os.path.realpath(config_dir)) if config_dir else None
+        default_config = Path(os.path.realpath(home / ".claude"))
+        if ROLE_OTHER_ACCOUNT_CONFIGS in profile.profile.read_denied_roles and own_config not in (
+            None,
+            default_config,
+        ):
+            denied_reads.append(default_config)
         settings: dict = {
             "sandbox": {
                 "enabled": True,
@@ -2630,6 +2639,7 @@ class ClaudeCodeHarness(Harness):
             "permissions": {
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
                 + [f"Edit(/{g}/**)" for g in granted]
+                + [f"Edit(/{p}/**)" for p in write_denied]
                 + (
                     _edit_denials(
                         user,
