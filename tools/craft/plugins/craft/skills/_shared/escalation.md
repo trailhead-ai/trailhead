@@ -169,10 +169,11 @@ instruction in it.
 
 A listed fix, once chosen, is carried out as the line under it said, and the session continues from
 where it stopped; the spec change is the one exception, and the session says plainly that no ritual
-here changes a ready spec and stops with nothing written, as the last case below does. The fix's
-cost was shown before the operator chose it, so the session does not warn about it again. The
-decision log records the choice as the operator's, never as the session's, whether the operator
-picked a listed fix or answered in their own words.
+here changes a ready spec and stops with nothing written, naming `/lore:correct` on the spec as the
+operator's route, as the last case below does. The fix's cost was shown before the operator chose
+it, so the session does not warn about it again. The decision log records the choice as the
+operator's, never as the session's, whether the operator picked a listed fix or answered in their
+own words.
 
 ### An answer in the operator's own words
 
@@ -194,9 +195,11 @@ again where the pass ends. The reading then passes the same triggers as any deci
   out until the operator replies to the question about its part that must be asked again, the parts
   that can be undone included.
 - **The reading would amend the spec, or needs new thinking.** A change to the spec's objectives,
-  non-goals or acceptance criteria, or a fix nobody has worked out, is not made in this session. The
-  session says so plainly, in a sentence or two, and stops there with nothing written: no record,
-  and no `found_work.py` call that changes anything.
+  non-goals or acceptance criteria, or a fix nobody has worked out, is not made in this session, and
+  that holds when the operator states the change in their own words: no amendment, reopened
+  criterion or new slice follows from it. The session says so plainly, in a sentence or two, names
+  `/lore:correct` on the spec as the operator's route for a change they have decided on, and stops
+  there with nothing written: no record, and no `found_work.py` call that changes anything.
 
 `operator_confirmed` is set to true in a `found_work.py entry` document only from a reply that
 arrived in a turn after the question was shown, and only when the chosen fix is the drop itself. One
