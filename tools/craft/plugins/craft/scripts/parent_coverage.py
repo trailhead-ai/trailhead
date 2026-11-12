@@ -18,10 +18,10 @@ has no CLI.
     require_slice_parent(sidecar, spec)
                                      refuses (`not-a-slice-parent`) a parent that is not an
                                      in-progress slice parent related to `spec`
-    write_parent(runner, vault, record_id, revision, body, note="")
+    write_parent(runner, vault, record_id, revision, body)
                                      the parent written with `--base revision`; a write that
                                      does not take is `stale-parent` when the revision moved,
-                                     else `parent-write-failed`, each message ending in `note`
+                                     else `parent-write-failed`
     certify_covers(spec_body, covers, partial)
                                      the lists certified by `covers_gate` in-process against
                                      the spec body (a `Refusal` carrying the gate's own code)
@@ -129,14 +129,14 @@ def require_slice_parent(sidecar: dict, spec: str) -> None:
         )
 
 
-def write_parent(runner, vault: str, record_id: str, revision: str, body: str, *, note: str = "") -> None:
+def write_parent(runner, vault: str, record_id: str, revision: str, body: str) -> None:
     done = sw.write_record(runner, sw.update_argv(record_id, vault, revision), body)
     if done is not None and done.returncode == 0:
         return
     sw.refuse_if_base_rejected(done)
     if sw.revision_changed(runner, vault, record_id, revision, "parent-not-found"):
-        raise Refusal(f"{record_id} changed after it was read{note}", "stale-parent", 2)
-    raise Refusal(f"lore could not write {record_id}{note}", "parent-write-failed", 2)
+        raise Refusal(f"{record_id} changed after it was read", "stale-parent", 2)
+    raise Refusal(f"lore could not write {record_id}", "parent-write-failed", 2)
 
 
 def certify_covers(spec_body: str, covers: list[str], partial: list[str]) -> None:

@@ -33,14 +33,17 @@ With `--parent` (a build session): the parent must be an `in-progress` slice par
 the spec (`not-a-slice-parent`; a parent that is not found is `parent-not-found`), every
 criterion must be on its `**Covers:**` or `**Partially covers:**` (`not-on-this-slice`), and the
 set-aside must leave it covering something (`would-empty-slice`); all three are refused before
-anything is written. Then the spec entry lands first, exactly as above. Then the parent is read
+anything is written, and so is the covers gate's verdict on the lists the parent would carry
+(`covers-refused`, certified against the drafted spec before the spec write). Then the spec entry
+lands first, exactly as above. Then the parent is read
 again (never the first read): each criterion is taken off whichever coverage list holds it (an
 emptied line is dropped) and its `## Criterion observations` line is removed (a leftover one
 makes the observation gate refuse the close), the remaining lists are certified by
 `covers_gate` in-process against the spec now on the vault, and the parent is written with
-`--base` of that re-read. A parent write that does not take is `stale-parent` or
-`parent-write-failed` (exit 2) and says the spec entry already landed: a re-run finds the entry
-present and finishes the parent. A criterion already off the parent at the re-read leaves it
+`--base` of that re-read. Any parent refusal from this re-read on
+(`not-a-slice-parent`, `unreadable-parent`, `would-empty-slice`, the covers gate's own code, and a
+write that does not take, `stale-parent` or `parent-write-failed`) says in its `reason:` that the
+spec entry already landed: a re-run finds the entry present and finishes the parent. A criterion already off the parent at the re-read leaves it
 unwritten (`parent: already-updated`).
 
 Stdout on success: one `set aside: ACn` per entry, then `spec: written|already-present`, and
@@ -213,10 +216,13 @@ def _candidates(runner, vault: str, spec_id: str, spec_body: str) -> set[str]:
     raise Refusal("the candidate set printed no candidates line", "candidates-unreadable", 2)
 
 
-def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict], words: str) -> tuple[str, str]:
+def set_aside_in_spec(
+    runner, vault: str, spec: str, entries: list[dict], words: str, *, before_write=None
+) -> tuple[str, str]:
     """Land `entries` on `spec`'s `## Waiting` section, their history line reading `words`;
     returns (the spec body now on the vault, `written` or `already-present`). Refusals are
-    `Refusal`s and leave the spec untouched."""
+    `Refusal`s and leave the spec untouched. `before_write(drafted_body)` is the caller's own
+    certification, run after the waiting gate and before the write."""
     spec_id = f"spec/{spec}"
     _, spec_body, spec_rev, _ = sw.read_record(runner, vault, spec_id, "spec-not-found")
     present = sw.spec_entries(spec_body)
@@ -246,7 +252,8 @@ def set_aside_in_spec(runner, vault: str, spec: str, entries: list[dict], words:
             )
     drafted = _with_entries(spec_body, missing, words)
     body = sw.certify_and_write(
-        runner, vault, spec_id, spec_body, spec_rev, drafted, [(e["criterion"], None) for e in missing]
+        runner, vault, spec_id, spec_body, spec_rev, drafted, [(e["criterion"], None) for e in missing],
+        before_write=(lambda: before_write(drafted)) if before_write else None,
     )
     return body, "written"
 
@@ -292,8 +299,18 @@ def _refuse_unfit_claim(
         )
 
 
+_LANDED = "the spec entry already landed; re-run to finish the parent"
+
+
+def _precertify_covers(state: parent_coverage.ParentCoverage, criteria: list[str], spec_body: str) -> None:
+    """The lists the parent will carry, certified before the spec entry is written so a
+    narrowing the covers gate refuses leaves nothing behind."""
+    todo = [c for c in criteria if c in set(state.covers) | set(state.partial)]
+    if todo:
+        parent_coverage.certify_covers(spec_body, *_lists_without(state, todo))
+
+
 def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[str], spec_body: str) -> str:
-    landed = "the spec entry already landed; re-run to finish the parent"
     record = f"task/{parent}"
     sidecar, body, revision, _ = sw.read_record(runner, vault, record, "parent-not-found")
     state = _read_parent(sidecar, body, spec)
@@ -304,8 +321,7 @@ def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[st
     covers, partial = _lists_without(state, todo)
     if not covers and not partial:
         raise Refusal(
-            f"the parent changed since it was read and setting these aside would now leave it covering "
-            f"nothing; {landed}",
+            "the parent changed since it was read and setting these aside would now leave it covering nothing",
             "would-empty-slice",
             1,
         )
@@ -316,7 +332,7 @@ def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[st
     lines = state.rewrite_lists(lines, covers, partial)
     parent_coverage.certify_covers(spec_body, covers, partial)
     new_body = "\n".join(line for line in lines if line is not None)
-    parent_coverage.write_parent(runner, vault, record, revision, new_body, note=f"; {landed}")
+    parent_coverage.write_parent(runner, vault, record, revision, new_body)
     return "updated"
 
 
@@ -329,9 +345,16 @@ def build_mode(args, runner) -> int:
     sidecar, body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
     _, spec_body, _, _ = sw.read_record(runner, vault, f"spec/{args.spec}", "spec-not-found")
     set_aside_on_spec = {key[0] for key, e in sw.spec_entries(spec_body).items() if e.kind == _SET_ASIDE}
-    _refuse_unfit_claim(_read_parent(sidecar, body, args.spec), criteria, set_aside_on_spec)
-    spec_body, spec_status = set_aside_in_spec(runner, vault, args.spec, entries, _BUILD_WORDS)
-    parent_status = _narrow_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
+    state = _read_parent(sidecar, body, args.spec)
+    _refuse_unfit_claim(state, criteria, set_aside_on_spec)
+    spec_body, spec_status = set_aside_in_spec(
+        runner, vault, args.spec, entries, _BUILD_WORDS,
+        before_write=lambda drafted: _precertify_covers(state, criteria, drafted),
+    )
+    try:
+        parent_status = _narrow_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
+    except Refusal as r:
+        raise Refusal(f"{r} — {_LANDED}", r.reason_code, r.exit_code)
     for criterion in criteria:
         print(f"set aside: {criterion}")
     print(f"spec: {spec_status}")

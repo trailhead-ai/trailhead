@@ -745,6 +745,69 @@ def test_a_remaining_identifier_the_covers_gate_refuses_leaves_the_parent_unwrit
     assert rc in (1, 2) and out == ""
     assert code_of(err) not in sa.REASON_CODES
     assert fake.parent_updates() == []
+    assert fake.updates() == []
+    assert waiting.parse_waiting(fake.body()) == []
+
+
+def after_spec_write(fake, action):
+    real_runner = fake.runner
+    fired = []
+
+    class Wrapped:
+        def __getattr__(self, name):
+            return getattr(real_runner, name)
+
+        def __call__(self, argv, stdin=None):
+            result = real_runner(argv, stdin)
+            if argv[:3] == ["record", "update", SPEC_ID] and result.returncode == 0 and not fired:
+                fired.append(True)
+                action()
+            return result
+
+    return Wrapped()
+
+
+def run_build_with(runner, entries_path, capsys):
+    rc = sa.main([f"--spec={SPEC}", f"--parent={PARENT}", "--entries", str(entries_path), f"--vault={VAULT}"],
+                 runner=runner)
+    out = capsys.readouterr()
+    return rc, out.out, out.err
+
+
+def test_a_parent_narrowed_to_nothing_after_the_spec_write_says_the_spec_entry_landed(build, entries_file, capsys):
+    fake = build()
+    runner = after_spec_write(
+        fake, lambda: fake.edit_parent(lambda b: b.replace("AC2, AC4, AC5", "AC4").replace("**Partially covers:** AC3\n", ""))
+    )
+    rc, out, err = run_build_with(runner, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "would-empty-slice")
+    assert "spec entry already landed" in err
+    assert [e.criterion_id for e in waiting.parse_waiting(fake.body())] == ["AC4"]
+
+
+def test_a_parent_left_in_progress_after_the_spec_write_says_the_spec_entry_landed(build, entries_file, capsys):
+    fake = build()
+
+    def leave():
+        r = fake.runner(["record", "update", PARENT_ID, "--vault", VAULT, "--status", "done"])
+        fake.runner.calls.pop()
+        assert r.returncode == 0, r.stderr
+
+    rc, out, err = run_build_with(after_spec_write(fake, leave), entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "not-a-slice-parent")
+    assert "spec entry already landed" in err
+    assert [e.criterion_id for e in waiting.parse_waiting(fake.body())] == ["AC4"]
+
+
+def test_a_remaining_identifier_the_covers_gate_refuses_on_the_reread_says_the_spec_entry_landed(
+    build, entries_file, capsys
+):
+    fake = build()
+    runner = after_spec_write(fake, lambda: fake.edit_parent(lambda b: b.replace("AC2, AC4, AC5", "AC2, AC9, AC4")))
+    rc, out, err = run_build_with(runner, entries_file([item("AC4")]), capsys)
+    assert (rc, out, code_of(err)) == (1, "", "covers-refused")
+    assert "spec entry already landed" in err
+    assert fake.parent_updates() == []
 
 
 def test_a_partial_build_rerun_with_the_entry_present_narrows_the_parent_and_writes_nothing_to_the_spec(
