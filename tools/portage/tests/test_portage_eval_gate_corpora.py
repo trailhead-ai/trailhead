@@ -226,19 +226,38 @@ class TestCoverageInvariant:
 DEFAULT_TIMEOUT_SECONDS = 300
 
 
+def _declaration(path: Path, text: str, strict: str) -> int | None:
+    """The value of the one ``timeout_seconds`` line in ``text`` that matches ``strict``, ``None`` when
+    the text mentions none. A line that mentions the key without matching ``strict`` is a fault, never
+    "undeclared": the parser would read the case as the 300 s default and pass an over-budget case."""
+    found = None
+    for line in text.splitlines():
+        if "timeout_seconds" not in line:
+            continue
+        m = re.fullmatch(strict, line)
+        if not m:
+            raise ValueError(f"{path}: unrecognised timeout_seconds declaration {line!r}")
+        found = int(m.group(1)) if found is None else found
+    return found
+
+
 def _declared_timeout(case_dir: Path) -> int:
     """A case's declared ``timeout_seconds``: the ``prompt.md`` frontmatter wins over ``case.yaml``
-    ``execution:``, and 300 applies when neither declares one (docs/eval-protocol.md)."""
-    prompt = (case_dir / "prompt.md").read_text()
+    ``execution:``, and 300 applies when neither declares one (docs/eval-protocol.md). A declaration in
+    any shape this parser does not read (quoted, commented, top level in ``case.yaml``, frontmatter not
+    at the first byte) raises ``ValueError`` naming the file."""
+    prompt_path, yaml_path = case_dir / "prompt.md", case_dir / "case.yaml"
+    prompt = prompt_path.read_text()
     front = re.match(r"---\n(.*?)\n---\n", prompt, re.S)
-    for text, rx in (
-        (front.group(1) if front else "", r"^timeout_seconds:\s*(\d+)\s*$"),
-        ((case_dir / "case.yaml").read_text(), r"^\s+timeout_seconds:\s*(\d+)\s*$"),
-    ):
-        m = re.search(rx, text, re.M)
-        if m:
-            return int(m.group(1))
-    return DEFAULT_TIMEOUT_SECONDS
+    if not front:
+        stray = re.match(r"[\ufeff\s]*---\n(.*?)\n---", prompt, re.S)
+        if stray and "timeout_seconds" in stray.group(1):
+            raise ValueError(f"{prompt_path}: frontmatter declaring timeout_seconds must start at the "
+                             "first byte")
+    declared = _declaration(prompt_path, front.group(1) if front else "", r"timeout_seconds:\s*(\d+)\s*")
+    if declared is None:
+        declared = _declaration(yaml_path, yaml_path.read_text(), r"\s+timeout_seconds:\s*(\d+)\s*")
+    return DEFAULT_TIMEOUT_SECONDS if declared is None else declared
 
 
 def _over_budget_merge_only(corpus: Path) -> list[str]:
@@ -261,6 +280,34 @@ class TestDeclaredTimeout:
 
     def test_an_undeclared_timeout_is_the_documented_default(self, tmp_path):
         assert _declared_timeout(self._case(tmp_path)) == 300
+
+    @pytest.mark.parametrize("shape,files", [
+        ("quoted-in-frontmatter", {"prompt.md": '---\ntimeout_seconds: "900"\n---\nbody\n'}),
+        ("commented-in-frontmatter", {"prompt.md": "---\n# timeout_seconds: 900\n---\nbody\n"}),
+        ("trailing-comment-in-frontmatter", {"prompt.md": "---\ntimeout_seconds: 900 # slow\n---\nbody\n"}),
+        ("frontmatter-after-a-blank-line", {"prompt.md": "\n---\ntimeout_seconds: 900\n---\nbody\n"}),
+        ("frontmatter-after-a-bom", {"prompt.md": "\ufeff---\ntimeout_seconds: 900\n---\nbody\n"}),
+        ("top-level-in-case-yaml", {"case.yaml": 'schema_version: "1.1"\nname: x\ntimeout_seconds: 900\n'}),
+        ("quoted-in-case-yaml",
+         {"case.yaml": 'schema_version: "1.1"\nname: x\nexecution:\n  timeout_seconds: "900"\n'}),
+        ("commented-in-case-yaml",
+         {"case.yaml": 'schema_version: "1.1"\nname: x\nexecution:\n  # timeout_seconds: 900\n'}),
+    ])
+    def test_a_declaration_the_parser_does_not_recognise_fails_naming_the_file(
+        self, tmp_path, shape, files
+    ):
+        (tmp_path / "case.yaml").write_text('schema_version: "1.1"\nname: x\n')
+        (tmp_path / "prompt.md").write_text("body\n")
+        for name, text in files.items():
+            (tmp_path / name).write_text(text)
+        broken = next(iter(files))
+        with pytest.raises(ValueError, match=re.escape(str(tmp_path / broken))):
+            _declared_timeout(tmp_path)
+
+    def test_a_horizontal_rule_in_a_prompt_body_is_not_a_declaration(self, tmp_path):
+        (tmp_path / "case.yaml").write_text('schema_version: "1.1"\nname: x\n')
+        (tmp_path / "prompt.md").write_text("\n---\nnot frontmatter\n---\nbody\n")
+        assert _declared_timeout(tmp_path) == 300
 
 
 @pytest.mark.parametrize("corpus", CORPORA, ids=IDS)
