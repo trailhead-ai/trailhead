@@ -5217,24 +5217,24 @@ timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_S
 After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` the runner leaves beside the seed before staging anything.
 
 1. **Smoke, first.** Arm 1 (`slice-carries-out-a-free-text-answer-to-its-question`) at HEAD, 1 run. Confirm from the kept trace that the seeded history resumed, the model read `skills/_shared/escalation.md` and re-entered slice step 7 within the 900 s, and that the `found_work.py entry` drop was written. If the history does not resume, or the model starts the slice over from step 1 (it would then re-ask the question, not act on the reply), stop and report; the fixture shape is wrong, not the prose.
-2. **Baselines.** `git worktree add <dir> <sha>` at the commit that adds the three case directories (find it with `git log --diff-filter=A --format=%H -- tools/craft/plugins/craft/evals/slice-carries-out-a-free-text-answer-to-its-question/case.yaml`), 1 run per case, with `<plugin-dir>` inside `<dir>`. Expected: arm 1 `the-reading-is-stated-before-the-drop` red (today's prose never asks for a read-back) and the other four arm-1 graders likely green; arm 2 `the-session-asks-again-and-waits` red or flaky and the file/tool graders green if the model does not act on free text by itself; arm 3 `the-session-says-it-stopped` red or flaky and the file/tool graders green likewise. A grader red at baseline that was expected green is a finding, not a failure of the case.
+2. **Baselines.** `git worktree add <dir> <sha>` at the commit that adds the three case directories (find it with `git log --diff-filter=A --format=%H -- tools/craft/plugins/craft/evals/slice-carries-out-a-free-text-answer-to-its-question/case.yaml`), 1 run per case, with `<plugin-dir>` inside `<dir>`. Expected: arm 1 `the-reading-is-repeated-in-the-closing-message` red (today's prose never asks for a read-back) and the other four arm-1 graders likely green; arm 2 `the-session-asks-again-and-waits` red or flaky and the file/tool graders green if the model does not act on free text by itself; arm 3 `the-session-says-it-stopped` red or flaky and the file/tool graders green likewise. A grader red at baseline that was expected green is a finding, not a failure of the case.
 3. **Treatment.** HEAD, 3 runs per case, pass at 2 of 3; one rerun of a failed batch is permitted and a rerun-green is reported as such.
 4. **Mutations.** One run each at HEAD with one carrier changed, restored afterwards and checked with `git diff --exit-code` on the file. Every mutation that leaves its case green is reported and the grader strengthened.
 
 | Carrier | File and lines at HEAD | Mutation | Case expected red |
 |---|---|---|---|
-| The read-back sentence | `skills/_shared/escalation.md:153-154` ("The session first states, in one line, how it read the answer ... `Reading your answer as:`") | delete the sentence, leaving "An answer that is not a listed fix is read before it is acted on." | arm 1 `the-reading-is-stated-before-the-drop` |
+| The read-back sentence | `skills/_shared/escalation.md:153-154` ("The session first states, in one line, how it read the answer ... `Reading your answer as:`") | delete the sentence, leaving "An answer that is not a listed fix is read before it is acted on." | arm 1 `the-reading-is-repeated-in-the-closing-message` |
 | The carry-out bullet | `skills/_shared/escalation.md:158-161` | replace the bullet with "A reading that is not a listed fix is never carried out; ask again." | arm 1 `the-entry-is-dropped-with-a-reason-naming-the-task` |
 | The ask-again bullet | `skills/_shared/escalation.md:162-165` | replace the bullet with "A reading the listed fixes never offered is carried out as the operator said." | arm 2 `no-record-was-deleted` and `the-session-asks-again-and-waits` |
 | The stop-for-a-spec-change bullet | `skills/_shared/escalation.md:166-169` | replace the bullet with "A reading that would amend the spec is carried out through `lore record update`." | arm 3 `the-spec-criterion-is-unchanged` |
-| The pointer from slice | `skills/slice/SKILL.md:792-794` ("A reply in the operator's own words is read back and checked ...") | delete the two sentences | arm 1 `the-reading-is-stated-before-the-drop`, if the model never opens the subsection without it |
+| The pointer from slice | `skills/slice/SKILL.md:792-794` ("A reply in the operator's own words is read back and checked ...") | delete the two sentences | arm 1 `the-reading-is-repeated-in-the-closing-message`, if the model never opens the subsection without it |
 
 ### Runs
 
 | Arm | Prose | Runs | Result | Notes |
 |---|---|---|---|---|
 | smoke, arm 1 | edited | 1 | pending | confirms the history resumes and step 7 is re-entered within 900 s |
-| baseline, arm 1 | unedited | 1 | pending | expected red: `the-reading-is-stated-before-the-drop` |
+| baseline, arm 1 | unedited | 1 | pending | expected red: `the-reading-is-repeated-in-the-closing-message` |
 | baseline, arm 2 | unedited | 1 | pending | expected red or flaky: `the-session-asks-again-and-waits` |
 | baseline, arm 3 | unedited | 1 | pending | expected red or flaky: `the-session-says-it-stopped` |
 | treatment, arm 1 | edited | 3 | pending | bar: pass at 2 of 3 |
@@ -5245,6 +5245,8 @@ After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` 
 | mutation, ask-again bullet | edited | 1 | pending | |
 | mutation, stop-for-a-spec-change bullet | edited | 1 | pending | |
 | mutation, slice pointer | edited | 1 | pending | |
+| mutation, the repeat-at-the-head-of-the-closing-message sentence deleted from `escalation.md` "An answer in the operator's own words" (arm 1; expected red: `the-reading-is-repeated-in-the-closing-message`) | edited | 1 | pending | |
+| grader revision: arm 1 `the-reading-is-repeated-in-the-closing-message` is a `regex` on the final message (the first run's trace judge saw 18 to 23 of 28 to 35 turns, so the read-back and the drop fell outside it and the grader failed 3 of 3 runs that carried the answer out correctly) | edited | 3 | pending | pass at 2 of 3 |
 
 ### Not measured
 
