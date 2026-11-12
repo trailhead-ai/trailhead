@@ -14,8 +14,9 @@ import subprocess
 
 from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, expand_home, read_hub_config
 
-VAULT_NAME_PATTERN = r"[a-z0-9][a-z0-9-]*"
-_VAULT_NAME = re.compile(VAULT_NAME_PATTERN)
+# lore's layer-name rule (separators, '..', NUL, empty) plus what a value reaching a
+# subprocess argv needs: no leading '-', no whitespace or control characters.
+_UNSAFE_VAULT_NAME = re.compile(r"[/\\\x00-\x20\x7f]|\.\.|^-|^$")
 _CAMP_TIMEOUT_SECONDS = 60
 
 
@@ -61,10 +62,17 @@ def _well_formed(group: object) -> bool:
     )
 
 
+def check_vault_name(vault: str) -> None:
+    if _UNSAFE_VAULT_NAME.search(vault):
+        raise DriveGroupsError(
+            f"vault name {vault!r} must be a single safe path segment: non-empty, no '/' or '\\', "
+            "no '..', no leading '-', no whitespace or control characters"
+        )
+
+
 def drive_groups(account: str, vault: str, *, env: dict[str, str]) -> list[dict]:
     """The groups on *account*'s launch account that bind *vault*."""
-    if not _VAULT_NAME.fullmatch(vault):
-        raise DriveGroupsError(f"vault name {vault!r} must match {VAULT_NAME_PATTERN}")
+    check_vault_name(vault)
     launch = read_hub_config(account, env=env).launch_account
     groups = _camp_groups(env)
     home = env.get("HOME", "")

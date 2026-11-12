@@ -186,13 +186,50 @@ def test_a_missing_camp_is_refused(tmp_path, monkeypatch, capsys):
     assert err == "trailhead: camp is not on PATH; cannot list groups\n"
 
 
-@pytest.mark.parametrize("vault", ["Has Space", "UPPER", "a/b", "-lead", "", "semi;colon"])
-def test_a_vault_name_failing_the_vault_name_shape_is_refused(tmp_path, monkeypatch, capsys, vault):
+_LORE_ACCEPTED = ["v", "trailhead-ai_trailhead", "UPPER", "a.b", "a_b-c", "a-", "x.y.z", "9lives", ".hidden"]
+_UNSAFE = ["", "..", "a..b", "a/b", "a\\b", "a\x00b", "-lead", "-", "Has Space", " lead", "trail "]
+_UNSAFE += ["a\tb", "a\nb", "a\x1bb", "a\x7fb"]
+
+
+@pytest.mark.parametrize("vault", _LORE_ACCEPTED)
+def test_a_vault_name_lore_accepts_is_matched(tmp_path, monkeypatch, capsys, vault):
+    env = _real_camp(tmp_path)
+    _hub(env, launch="/acct/work")
+    _group(env, "one", account="/acct/work", vaults=(vault,))
+    _group(env, "other", account="/acct/work", vaults=("zzz",))
+    code, out, err = _drive(monkeypatch, capsys, env, vault=vault)
+    assert (code, err) == (0, "")
+    assert _names(out) == ["one"]
+
+
+@pytest.mark.parametrize("vault", _UNSAFE)
+def test_an_unsafe_vault_name_is_refused(tmp_path, monkeypatch, capsys, vault):
     env = _real_camp(tmp_path)
     _hub(env)
     code, out, err = _drive(monkeypatch, capsys, env, vault=vault)
     assert (code, out) == (1, "")
-    assert err.startswith(f"trailhead: vault name {vault!r} must match ")
+    assert err.startswith(f"trailhead: vault name {vault!r} must be a single safe path segment")
+
+
+def test_the_vault_rule_never_accepts_what_lore_refuses_and_never_refuses_a_lore_name_it_should_take(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2] / "tools" / "lore" / "plugins" / "lore"))
+    from lore.vault.layers import LayerConfinementError, validate_layer_name
+
+    from trailhead.ranger.drive_groups import DriveGroupsError, check_vault_name
+
+    def accepted(check, name):
+        try:
+            check(name)
+        except (LayerConfinementError, DriveGroupsError):
+            return False
+        return True
+
+    for name in _LORE_ACCEPTED + _UNSAFE:
+        lore_ok = accepted(validate_layer_name, name)
+        ours_ok = accepted(check_vault_name, name)
+        assert not (ours_ok and not lore_ok), f"{name!r}: lore refuses, drive-groups accepts"
+        if name in _LORE_ACCEPTED:
+            assert ours_ok, f"{name!r}: lore accepts, drive-groups refuses"
 
 
 def test_drive_groups_without_json_is_refused(tmp_path, monkeypatch, capsys):
