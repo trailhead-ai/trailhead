@@ -39,7 +39,8 @@ from pathlib import Path
 
 from trailhead import paths
 
-MAPPING_NAME = "eval-gate.json"
+from .select import MAPPING_NAME
+
 APP = "portage"
 SUBDIR = "eval-gate"
 

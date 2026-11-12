@@ -71,6 +71,7 @@ import stat
 from pathlib import Path
 
 from .mapping import CASE_NAME, valid_corpus_path
+from .select import TIERS
 from .run import (
     NO_RUNNER,
     RUNNER_MISSING,
@@ -261,19 +262,16 @@ def _extras(plan, rows, ignored, invalid) -> list[str]:
     return out
 
 
-def _is_count(v) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool)
-
-
 def _pending_line(plan: dict) -> list[str]:
     pending = plan.get("merge_only_pending")
-    if plan.get("tier") == "push" and _is_count(pending) and pending > 0:
+    if (plan.get("tier") == "push" and isinstance(pending, int) and not isinstance(pending, bool)
+            and pending > 0):
         return [f"{pending} merge-only case(s) touched by this change will run before merge."]
     return []
 
 
 def _tier_lines(plan: dict) -> list[str]:
-    if plan.get("tier") not in ("push", "merge"):
+    if plan.get("tier") not in TIERS:
         return []
     return [f"Tier: {plan['tier']}.", *_pending_line(plan)]
 
@@ -333,8 +331,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
             ["The eval gate could not determine the changed files (the base ref did not resolve), "
              "so it selected no cases."])
     if status == "no-cases-mapped" or not plan["cases"]:
+        pending = _pending_line(plan)
         return 0, ["eval-gate: no-cases-mapped", "persistent: none"], _wrap(
-            ["No eval cases are mapped to this change.", *(["", *_pending_line(plan)] if _pending_line(plan) else [])])
+            ["No eval cases are mapped to this change.", *([""] + pending if pending else [])])
 
     rows, ignored, invalid = _collect(state, plan)
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
