@@ -1298,8 +1298,9 @@ The termination and early-stop paths end on their outcome lines from step 6, not
 
 **Report every criterion this pass set aside**, in every mode: its own words with its number after
 them, what it waits on, and how to undo it by hand until a check-list walk-through can release it.
-The undo is a direct `lore record update` of the spec that adds a dated `released` line to that
-criterion's entry under `## Waiting`. A refused write is reported in plain words, as step 9 says,
+Give the undo as the command it is, not a paraphrase: a direct `lore record update` of the spec
+(`lore record update spec/<spec-name> --vault <vault> --diff`) that adds a dated `released` line to
+that criterion's entry under `## Waiting`. A refused write is reported in plain words, as step 9 says,
 and the criterion is not described as set aside. A pass that set nothing aside reports nothing about
 it.
 
