@@ -2742,6 +2742,30 @@ def test_a_security_finding_is_dropped_with_operator_confirmation_and_the_decisi
     assert line.endswith(f"why: {generic} (operator confirmed)")
 
 
+def test_a_confirmed_drop_naming_several_entries_is_refused_and_writes_nothing(capsys, tmp_path):
+    lore = spec_lore(tmp_path, spec_body(security_md(1), security_md(2)), statuses=TARGETS)
+    code, out, err = run_entry(
+        transition("drop", ("F1", "F2"), reason=DROP_REASON, operator_confirmed=True), lore, capsys
+    )
+    assert code == 1
+    assert reason_of(err) == "confirmed-drop-names-several-entries"
+    assert out == ""
+    assert entries(lore) == [] and update_calls(lore) == []
+
+
+def test_a_confirmed_fold_of_several_entries_is_not_a_drop_and_is_written(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
+    code, _, err = run_entry(transition("fold", ("F1", "F2"), operator_confirmed=True), lore, capsys)
+    assert code == 0, err
+
+
+def test_an_unconfirmed_drop_of_several_ordinary_entries_is_still_written(capsys, tmp_path):
+    lore = drop_lore(tmp_path)
+    code, _, err = run_entry(transition("drop", ("F1", "F2"), reason=DROP_REASON), lore, capsys)
+    assert code == 0, err
+    assert statuses(spec_now(lore))["F2"][0] == "dropped"
+
+
 def test_an_ordinary_entry_needs_no_operator_confirmation_to_drop_and_logs_none(capsys, tmp_path):
     lore = drop_lore(tmp_path)
     run_entry(transition("drop", reason=DROP_REASON), lore, capsys)

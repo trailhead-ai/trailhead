@@ -789,13 +789,14 @@ decides anything. Then, in this order:
      `found_work.py entry --session slice`, run exactly as item 2 below runs a drop, with `parent`
      the slice that did not build the entry. Set `"operator_confirmed": true` only when the entry is
      marked as a security finding and only from the operator's reply in a later turn, as the
-     urgent-entry paragraph below does; the restore's `nowhere:` drop is a drop for this purpose. A
-     restore is two writes, the drop and then the `restore`. A failed drop or a failed restore ends
-     the pass at this entry: report the script's `reason-code:` token and the `retry:` command it
-     prints, leave the entry as the failed write left it, and go on to neither item 2, item 3 nor
-     step 4's completion gate. The `retry:` command converges, so running it again appends nothing
-     twice. A drop or a restore that succeeded lets the pass go on to item 2 over the entries still
-     open, and when none is open, to item 3's rule for an empty remainder.
+     urgent-entry paragraph below does, and then in a document of its own that names that one entry:
+     the script refuses a confirmed drop that names more than one. The restore's `nowhere:` drop is
+     a drop for this purpose. A restore is two writes, the drop and then the `restore`. A failed
+     drop or a failed restore ends the pass at this entry: report the script's `reason-code:` token
+     and the `retry:` command it prints, leave the entry as the failed write left it, and go on to
+     neither item 2, item 3 nor step 4's completion gate. The `retry:` command converges, so running
+     it again appends nothing twice. A drop or a restore that succeeded lets the pass go on to item
+     2 over the entries still open, and when none is open, to item 3's rule for an empty remainder.
    - **Under `--unattended`, or when `/craft:drive` is running this pass,** nobody is there to
      answer: take step 6's recorded early stop with its fixed reason
      `completion is not certified (complete-eligible: no)`, naming each such entry by id and the
@@ -836,11 +837,11 @@ this pass would drop, or would move out with a reason that names a task, is urge
 prompt that file defines and end the turn waiting for the answer. A reply in the operator's own
 words is read back and checked as its "An answer in the operator's own words" says before anything
 is carried out. On the reply, carry out the fix the operator chose: a drop is written with
-`"operator_confirmed": true` in the document, and the pass then goes on to item 3; keeping the entry
-open takes step 6's early stop with its fixed reason, naming the entry by id. **Under
-`--unattended`, or when `/craft:drive` is running this pass, never drop an urgent entry:** nobody is
-there to ask, so take step 6's early stop with its fixed reason, naming the entry by id, before any
-further drop of this pass is written.
+`"operator_confirmed": true` in a document that names only that entry (one document per confirmed
+entry), and the pass then goes on to item 3; keeping the entry open takes step 6's early stop with
+its fixed reason, naming the entry by id. **Under `--unattended`, or when `/craft:drive` is running
+this pass, never drop an urgent entry:** nobody is there to ask, so take step 6's early stop with
+its fixed reason, naming the entry by id, before any further drop of this pass is written.
 3. **Group the rest and choose one group.** When the drops left no open entry there is nothing to
    choose: run step 4's candidate-set gate again on the fresh spec and take step 6 from its answer.
    Otherwise group the remaining open entries by overlapping `where` paths: two entries are in one

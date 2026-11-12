@@ -166,11 +166,13 @@ read back from, in `entries`, `entry` and `reopen-abandoned` alike. `reason` is 
 `drop` needs `open` or `folded into` this parent (else `entry-not-open`) and sets `dropped: <reason>`. The reason
 must begin `nowhere:` or name a `task/<id>` that `lore record show` can read (else `drop-target-missing`); an entry
 whose `found:` or title marks a security finding is refused `drop-needs-operator` unless `operator_confirmed` is true,
-and its decision line's `why` then ends " (operator confirmed)". An entry already `dropped` with the same reason is a
-no-op. `restore` needs a `dropped` entry (else `entry-not-dropped`) and appends a new `open` entry under the next
-unused id (dropped ids included) carrying its title, `what` and `where`, with `found: restored from F<n>`; the
-dropped entry is left as it is. Its decision and result lines name the new entry's id, and a re-run while that new
-entry is still `open` appends nothing more. Both need a reason.
+and its decision line's `why` then ends " (operator confirmed)". A drop document with `operator_confirmed` true names
+one entry: more than one is refused `confirmed-drop-names-several-entries` with nothing written.
+An entry already `dropped` with the same reason is a no-op. `restore` needs a `dropped` entry (else
+`entry-not-dropped`) and appends a new `open` entry under the next unused id (dropped ids included) carrying its
+title, `what` and `where`, with `found: restored from F<n>`; the dropped entry is left as it is. Its decision and
+result lines name the new entry's id, and a re-run while that new entry is still `open` appends nothing more.
+Both need a reason.
 Allowed moves: `fold` needs `open`; `done` and `reopen` need `folded into` this parent; `done` also needs a
 child of this parent at `done` whose `**Delivers:**` names the entry (`names_entry`), else `entry-not-built`.
 An entry already in the target state (`folded into` this parent for `fold`, `done by` this parent for
@@ -292,6 +294,7 @@ REASON_CODES = frozenset(
         "entry-not-dropped",
         "drop-target-missing",
         "drop-needs-operator",
+        "confirmed-drop-names-several-entries",
     }
     | GATE_CODES
 )
@@ -1525,6 +1528,11 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     confirmed = doc.get("operator_confirmed", False)
     if not isinstance(confirmed, bool):
         raise Refusal("operator_confirmed must be a boolean", "malformed-input")
+    if kind == "drop" and confirmed and len(ids) > 1:
+        raise Refusal(
+            "a confirmed drop names one entry: the operator confirmed one, so write one document per entry",
+            "confirmed-drop-names-several-entries",
+        )
     moves = [Move(kind, parent, i, _clean(reason), confirmed) for i in ids]
     for m in moves:
         _check_move(m)
