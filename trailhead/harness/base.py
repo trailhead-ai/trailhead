@@ -240,6 +240,15 @@ class Harness(ABC):
     #: Canonical harness key, e.g. ``"claude_code"``.  Set on each subclass.
     name: str = ""
 
+    def recognizes_process(self, comm: str, exe: str | None) -> bool:
+        """Whether a running process, by command name *comm* and resolved executable
+        path *exe* (``None`` when unreadable), is this harness itself.
+
+        Recognition is from the process alone; the base default recognises nothing,
+        so a harness that cannot be found by its process is simply never matched.
+        """
+        return False
+
     # -- detection ------------------------------------------------------------
 
     @classmethod
