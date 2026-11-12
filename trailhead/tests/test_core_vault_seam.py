@@ -7,6 +7,7 @@ LORE_* environment and asserts the real ``~/.config/lore`` and
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -247,3 +248,39 @@ def test_core_show_of_a_record_absent_from_core_exits_1(source, env, lore_ready)
     step(source, env)
     r = _show(env, "adr/nope")
     assert r.code == 1 and r.stdout == "" and r.stderr
+
+
+# -- trailhead core show, through the installed `trailhead` shim ------------
+
+
+def _minimal_path(tmp_path: Path, shim_dir: Path) -> str:
+    """PATH holding only the shim dir, the few tools the shim and launcher need,
+    and one python3 that meets the floor."""
+    tools = tmp_path / "_tools"
+    tools.mkdir()
+    for name in ("bash", "env", "dirname", "readlink", "grep", "head"):
+        (tools / name).symlink_to(shutil.which(name))
+    (tools / "python3").symlink_to(Path(sys.executable).resolve())
+    return f"{shim_dir}:{tools}"
+
+
+def test_trailhead_shim_shows_a_core_record_from_an_unrelated_cwd(source, env, lore_ready, tmp_path):
+    from trailhead import install
+
+    _adr(source, "CORE-BODY-MARK")
+    assert step(source, env).outcome == "registered"
+    shim_dir = install.build_cli_shims({"camp": LORE_CLI}, env=env)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    shim_env = {**env, "PATH": _minimal_path(tmp_path, shim_dir)}
+
+    shown = subprocess.run(
+        ["trailhead", "core", "show", "adr/x"], env=shim_env, cwd=elsewhere, capture_output=True, text=True, timeout=60
+    )
+    refused = subprocess.run(
+        ["trailhead", "core", "show", "../x"], env=shim_env, cwd=elsewhere, capture_output=True, text=True, timeout=60
+    )
+
+    assert shown.returncode == 0, shown.stderr
+    assert "CORE-BODY-MARK" in shown.stdout
+    assert refused.returncode == 2

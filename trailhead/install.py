@@ -89,25 +89,27 @@ def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
     return tools
 
 
-def _with_ranger(cli_tools: dict[str, Path]) -> dict[str, Path]:
-    """The shim set: the plugin CLIs plus the repo's own ``bin/ranger`` when present."""
-    if not _RANGER_BIN.exists():
-        return cli_tools
-    return {**cli_tools, "ranger": _RANGER_BIN}
+def _with_own_binaries(cli_tools: dict[str, Path]) -> dict[str, Path]:
+    """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` and,
+    when present, ``bin/ranger``."""
+    tools = {**cli_tools, "trailhead": _TRAILHEAD_BIN}
+    if _RANGER_BIN.exists():
+        tools["ranger"] = _RANGER_BIN
+    return tools
 
 
 def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str]) -> Path | None:
-    """Build the CLI shim dir for *cli_tools* plus ``bin/ranger``; the one shim
+    """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``; the one shim
     build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
-    disables every CLI builds no shims, and ranger alone does not change that.
+    disables every CLI builds no shims, and the repo's own binaries alone do not change that.
     Additive: shims already in the dir are left alone. Raises whatever
     ``create_shims`` raises; the caller decides how loudly to fail.
     """
     if not cli_tools:
         return None
-    return create_shims(_with_ranger(cli_tools), str(_REPO_ROOT), env=env).shim_dir
+    return create_shims(_with_own_binaries(cli_tools), str(_REPO_ROOT), env=env).shim_dir
 
 
 def install_user_rulesets(

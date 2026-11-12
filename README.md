@@ -15,7 +15,7 @@ exactly the pieces you want, into exactly the harness you use.
 
 Clone the repo and run the installer. It auto-detects your harness (e.g. a
 `~/.claude` directory → Claude Code), installs every agent-plugin, and puts the
-`camp`, `lore`, and `portage` CLIs on your PATH — no prompts:
+`camp`, `lore`, `portage`, and `trailhead` CLIs on your PATH — no prompts:
 
 ```sh
 git clone <this-repo> trailhead

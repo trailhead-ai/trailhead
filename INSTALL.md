@@ -129,14 +129,20 @@ downgrading, run `lore vault delete core` with the current lore, then remove
 `~/.local/state/trailhead/core-vault.reindex-pending`. On a machine an older lore
 already refuses, delete the `core` entry from lore's `config.json` by hand.
 
-**Put the CLIs on PATH.** Install places `camp`, `lore`, and `portage` in a
-shim directory. Add one line to the user's shell profile. **Ask first** and
+**Put the CLIs on PATH.** Install places `camp`, `lore`, `portage`, `ranger`,
+and `trailhead` in a shim directory. Add one line to the user's shell profile. **Ask first** and
 show them the line:
 
 - zsh (`~/.zshrc`) or bash (`~/.bashrc`):
   `eval "$(~/code/trailhead/bin/trailhead shellenv --shell zsh)"` (or `--shell bash`)
 - fish (`~/.config/fish/config.fish`):
   `~/code/trailhead/bin/trailhead shellenv --shell fish | source`
+
+The `trailhead` shim follows the checkout that last ran `trailhead install` or
+`trailhead update`: it execs that checkout's `bin/trailhead`. It can shadow, or be
+shadowed by, another `trailhead` on PATH, whichever directory comes first wins.
+To roll back, delete `~/.local/state/trailhead/bin/trailhead`; install does not
+prune shims, so deleting the file is the only way to remove it.
 
 Use the real checkout path. Naming the shell explicitly matters: without
 `--shell`, shellenv guesses from `$SHELL`, which may not be the shell the

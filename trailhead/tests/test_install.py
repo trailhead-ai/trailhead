@@ -116,7 +116,7 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert set(cli_tools) == {"camp", "lore", "portage", "ranger"}
+        assert set(cli_tools) == {"camp", "lore", "portage", "ranger", "trailhead"}
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):
@@ -364,6 +364,35 @@ class TestLoreInitIntegration:
 # ---------------------------------------------------------------------------
 # shellenv PATH-guidance block — prints whenever path integration applies
 # ---------------------------------------------------------------------------
+
+
+class TestTrailheadJoinsTheShimSet:
+    def test_build_cli_shims_writes_a_trailhead_shim_that_execs_bin_trailhead(self, tmp_path):
+        from trailhead import install
+
+        env = _env(tmp_path)
+        fake = tmp_path / "camp-bin"
+        fake.write_text("#!/bin/sh\n")
+
+        shim_dir = install.build_cli_shims({"camp": fake}, env=env)
+
+        assert shim_dir is not None
+        content = (shim_dir / "trailhead").read_text()
+        assert str(install._TRAILHEAD_BIN) in content
+        assert str(install._REPO_ROOT) in content
+
+    def test_build_cli_shims_builds_no_shim_dir_when_every_cli_is_disabled(self, tmp_path):
+        from trailhead import install
+
+        env = _env(tmp_path)
+
+        assert install.build_cli_shims({}, env=env) is None
+        assert not (Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / "trailhead").exists()
+
+    def test_install_hands_trailhead_to_the_shim_builder(self, tmp_path):
+        with _patched(detected=True) as m:
+            run_install(env=_env(tmp_path), quiet=True)
+        assert "trailhead" in m["pathint"].call_args[0][0]
 
 
 class TestShellenvGuidance:

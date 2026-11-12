@@ -1538,6 +1538,20 @@ class TestUpdateRebuildsTheCliShims:
         assert str(ranger) in (shim_dir / "ranger").read_text()
         assert (shim_dir / "lore").exists() and (shim_dir / "portage").exists()
 
+    def test_upgrade_over_an_install_lacking_trailhead_adds_the_trailhead_shim(self, tmp_path, monkeypatch):
+        from trailhead import install
+
+        env, runner, _, _, shim_dir = self._setup(
+            tmp_path, monkeypatch, flags=self._ALL_ON, head_sha=_OLD_SHA, remote_sha=_NEW_SHA
+        )
+        shim_dir.mkdir(parents=True)
+        (shim_dir / "camp").write_text("old")
+
+        rc = update.run_update_apply(env=env, runner=runner, assume_yes=True)
+
+        assert rc == 0
+        assert str(install._TRAILHEAD_BIN) in (shim_dir / "trailhead").read_text()
+
     def test_already_current_checkout_still_gets_the_ranger_shim(self, tmp_path, monkeypatch):
         env, runner, calls, ranger, shim_dir = self._setup(
             tmp_path, monkeypatch, flags=self._ALL_ON, head_sha=_OLD_SHA, remote_sha=_OLD_SHA
