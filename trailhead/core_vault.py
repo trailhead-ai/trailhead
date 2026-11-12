@@ -61,9 +61,9 @@ Standard library only; every path comes from ``trailhead.paths``.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
-import json
 import stat
 import subprocess
 import sys
@@ -196,17 +196,13 @@ class CoreVaultOutcome:
         return {"outcome": self.outcome, "reason": self.reason}
 
 
-def _say(text: str, *, file) -> None:
-    print(text, file=file if file is not None else sys.stdout)
-
-
 def skipped_core_vault(*, lore_enabled: bool, file=None) -> CoreVaultOutcome:
     """Print and return the skip outcome; writes nothing. ``lore_enabled`` names the cause."""
     if lore_enabled:
         reason = "the lore CLI is unavailable"
     else:
         reason = "lore is turned off (--no-lore or deselected)"
-    _say(f"trailhead: skipped the core vault: {reason}", file=file)
+    print(f"trailhead: skipped the core vault: {reason}", file=file)
     return CoreVaultOutcome("skipped", reason)
 
 
@@ -278,7 +274,7 @@ def install_core_vault(
         return _fail("vault ls", "did not print the expected JSON", lore_bin=lore_bin)
 
     owned = False
-    elsewhere: tuple[dict, Path] | None = None
+    elsewhere: Path | None = None
     for entry, path in vaults:
         at_copy = path == resolved_copy
         if entry["name"] == "core":
@@ -287,11 +283,11 @@ def install_core_vault(
                 continue
             if at_copy:
                 return _decline(str(path), "a vault named core is at the copy but is not read-only and unshared")
-            elsewhere = elsewhere or (entry, path)
+            elsewhere = elsewhere or path
         elif at_copy or path in resolved_copy.parents:
             return _decline(str(path), f"another vault ({entry['name']}) is or contains trailhead's copy")
     if elsewhere is not None:
-        return _decline(str(elsewhere[1]), "a vault named core already exists and is not trailhead's copy")
+        return _decline(str(elsewhere), "a vault named core already exists and is not trailhead's copy")
 
     def write_marker() -> None:
         if owned:
@@ -307,15 +303,15 @@ def install_core_vault(
         if added.returncode != 0:
             return _fail("vault add", f"failed (exit {added.returncode})", lore_bin=lore_bin)
         marker.unlink(missing_ok=True)
-        _say(f"trailhead: core vault registered as 'core' (read-only) at {copy}", file=file)
+        print(f"trailhead: core vault registered as 'core' (read-only) at {copy}", file=file)
         for line in (added.stdout or "").splitlines():
             if line.startswith("Note:"):
-                _say(f"trailhead: core vault: {line}", file=file)
+                print(f"trailhead: core vault: {line}", file=file)
         return CoreVaultOutcome("registered", f"registered at {copy}")
 
     pending = marker.exists()
     if not (changed or pending):
-        _say(f"trailhead: core vault up to date ({copy})", file=file)
+        print(f"trailhead: core vault up to date ({copy})", file=file)
         return CoreVaultOutcome("up_to_date", "copy matches the source")
     reindexed = lore("reindex")
     if reindexed.returncode != 0:
@@ -324,5 +320,5 @@ def install_core_vault(
         )
     marker.unlink(missing_ok=True)
     reason = "copy refreshed and reindexed" if changed else "retried a pending reindex"
-    _say(f"trailhead: core vault refreshed: {reason} ({copy})", file=file)
+    print(f"trailhead: core vault refreshed: {reason} ({copy})", file=file)
     return CoreVaultOutcome("refreshed", reason)

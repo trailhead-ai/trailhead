@@ -22,10 +22,8 @@ Config-driven, non-interactive, multi-harness:
      a directory trailhead owns and add it to lore as the read-only, trusted vault
      ``core`` (``trailhead/core_vault.py``). Runs only after ``lore init`` succeeds;
      it never changes the exit code, always prints one core-vault line, and without
-     lore prints that it skipped the step. Rollback: run ``lore vault delete core``
-     with the current lore before downgrading, then remove the copy and the
-     ``core-vault.reindex-pending`` marker; on a machine an older lore already
-     refuses, delete the ``core`` entry from lore's ``config.json`` by hand.
+     lore prints that it skipped the step. Rollback before a lore downgrade is
+     described in ``trailhead/core_vault.py`` and INSTALL.md.
   8. Print the summary.
 
 No presets, no interactive prompts, no remote fetch, no install manifest — the

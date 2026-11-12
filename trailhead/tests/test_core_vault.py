@@ -1,11 +1,13 @@
 """Tests for trailhead/core_vault.py — the bundled core-vault copy sync."""
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from trailhead.core_vault import CoreVaultSyncError, core_copy_dir, sync_core_copy
+from trailhead.core_vault import MARKER_NAME, CoreVaultSyncError, core_copy_dir, install_core_vault, sync_core_copy
 
 
 def _write(root: Path, files: dict[str, bytes]) -> Path:
@@ -44,6 +46,10 @@ def dest(tmp_path: Path) -> Path:
     return tmp_path / "state" / "core-vault"
 
 
+def _stamps(paths: list[Path]) -> dict[Path, tuple[int, int]]:
+    return {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in paths}
+
+
 def _siblings(dest: Path) -> list[str]:
     return sorted(p.name for p in dest.parent.iterdir() if p.name != dest.name)
 
@@ -56,13 +62,12 @@ def test_first_sync_creates_tree_and_reports_changed(source, dest):
 def test_unchanged_sync_reports_unchanged_and_touches_nothing(source, dest):
     sync_core_copy(source, dest)
     paths = [dest, *sorted(dest.rglob("*"))]
-    before = {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in paths}
+    before = _stamps(paths)
     parent_before = sorted(os.listdir(dest.parent))
 
     assert sync_core_copy(source, dest) is False
 
-    after = {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in paths}
-    assert after == before
+    assert _stamps(paths) == before
     assert sorted(os.listdir(dest.parent)) == parent_before
 
 
@@ -248,11 +253,6 @@ def test_before_swap_not_called_when_refused(source, dest):
 # install_core_vault — driven through an injected lore runner, real disk
 # ---------------------------------------------------------------------------
 
-import json  # noqa: E402
-import subprocess  # noqa: E402
-
-from trailhead.core_vault import MARKER_NAME, install_core_vault  # noqa: E402
-
 NOTE = (
     "Note: older lore releases refuse a config carrying this read-only entry; "
     "remove it with 'lore vault delete core' (or delete the entry from config.json by hand) to undo."
@@ -328,12 +328,12 @@ def test_unchanged_rerun_is_up_to_date_and_touches_nothing(source, cenv, copy, c
     lore = FakeLore([])
     _run(source, cenv, lore, capsys)
     paths = [copy, *sorted(copy.rglob("*"))]
-    before = {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in paths}
+    before = _stamps(paths)
     lore.calls.clear()
     out, text = _run(source, cenv, lore, capsys)
     assert out.outcome == "up_to_date"
     assert lore.writes == []
-    assert {p: (p.stat().st_ino, p.stat().st_mtime_ns) for p in paths} == before
+    assert _stamps(paths) == before
     assert "up to date" in text
 
 

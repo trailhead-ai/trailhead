@@ -59,9 +59,7 @@ def env(tmp_path):
 
 
 def real_lore(args, **kw):
-    return subprocess.run(
-        [sys.executable, str(LORE_CLI), *args[1:]], cwd=kw["env"]["HOME"], **{k: v for k, v in kw.items()}
-    )
+    return subprocess.run([sys.executable, str(LORE_CLI), *args[1:]], cwd=kw["env"]["HOME"], **kw)
 
 
 def lore(env, *args):

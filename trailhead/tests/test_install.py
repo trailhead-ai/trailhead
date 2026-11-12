@@ -13,12 +13,12 @@ from unittest.mock import patch
 
 import pytest
 
-
 from trailhead.capabilities import load_manifest
-from trailhead.harness import ClaudeCodeHarness
 from trailhead.core_vault import CoreVaultOutcome, install_core_vault
+from trailhead.harness import ClaudeCodeHarness
 from trailhead.install import run_install
 from trailhead.pathint import ShimDirResult
+from trailhead.tests.test_core_vault import FakeLore, _entry
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 
@@ -828,28 +828,6 @@ class TestProvenanceStampIntegration:
 # ---------------------------------------------------------------------------
 
 
-class _ScriptedLore:
-    def __init__(self, vaults=None, *, ls_rc=0):
-        self.vaults = vaults or []
-        self.ls_rc = ls_rc
-        self.calls: list[list[str]] = []
-
-    def __call__(self, args, **kw):
-        import subprocess
-
-        sub = [str(a) for a in args[1:]]
-        self.calls.append(sub)
-        if sub == ["vault", "ls", "--json"]:
-            import json as _j
-
-            return subprocess.CompletedProcess(args, self.ls_rc, _j.dumps(self.vaults), "boom")
-        return subprocess.CompletedProcess(args, 0, "Added vault 'core'\n", "")
-
-
-def _decoy(tmp_path: Path) -> dict:
-    return {"name": "core", "scope": "team", "shared": False, "path": str(tmp_path / "x"), "records": 0}
-
-
 class TestCoreVaultStep:
     def test_runs_after_lore_init_and_with_the_checkout_source(self, tmp_path):
         order = []
@@ -870,7 +848,7 @@ class TestCoreVaultStep:
         m["core_vault"].assert_not_called()
 
     def test_no_lore_prints_turned_off_skip_and_calls_nothing(self, tmp_path, capsys):
-        lore = _ScriptedLore()
+        lore = FakeLore()
         with _patched(detected=True, real_core=True):
             assert run_install(env=_env(tmp_path), no_lore=True, quiet=True, runner=lore) == 0
         out = capsys.readouterr().out
@@ -891,7 +869,7 @@ class TestCoreVaultStep:
     def test_json_summary_carries_core_vault_outcome(self, tmp_path, capsys, vaults, ls_rc, outcome):
         import json as _json
 
-        lore = _ScriptedLore([_decoy(tmp_path) for _ in vaults], ls_rc=ls_rc)
+        lore = FakeLore([_entry("core", str(tmp_path / "x"), scope="team") for _ in vaults], ls_rc=ls_rc)
         with _patched(detected=True, real_core=True):
             assert run_install(env=_env(tmp_path), as_json=True, runner=lore) == 0
         captured = capsys.readouterr()
@@ -901,7 +879,7 @@ class TestCoreVaultStep:
         assert data["no_harness"] is False
 
     def test_failed_core_step_keeps_exit_zero_and_summary(self, tmp_path, capsys):
-        lore = _ScriptedLore(ls_rc=1)
+        lore = FakeLore(ls_rc=1)
         with _patched(detected=True, real_core=True):
             assert run_install(env=_env(tmp_path), runner=lore) == 0
         captured = capsys.readouterr()
@@ -909,7 +887,7 @@ class TestCoreVaultStep:
         assert "core vault" in captured.err
 
     def test_json_mode_sends_the_core_line_to_stderr(self, tmp_path, capsys):
-        lore = _ScriptedLore([])
+        lore = FakeLore([])
         with _patched(detected=True, real_core=True):
             run_install(env=_env(tmp_path), as_json=True, runner=lore)
         captured = capsys.readouterr()
