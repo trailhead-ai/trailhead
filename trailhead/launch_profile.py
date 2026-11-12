@@ -42,6 +42,14 @@ BROKER_SERVER = "outpost"
 BROKER_SCOPE = "ranger"
 BROKER_TOOLS = ("timeline_since",)
 BROKER_MCP_PATH = "/broker/mcp"
+DRIVE_TOOL = "drive_spec"
+RITUAL_ROLE = "ritual"
+SESSIONS_SOCKET = "outpost-sessions"
+RITUAL_SESSION_PATTERN = "ritual-<hex>"
+TASK_WRAPPER_ENV = "CAMP_TASK_WRAPPER"
+TASK_WRAPPER_PLACEHOLDERS = ("{worktree}", "{member}")
+SETUP_SANDBOX_KEYS = ("allowed_domains", "denied_domains", "denied_reads")
+DRIVE_GROUPS_OUTPUT_KEYS = ("groups",)
 _BROKER_SESSION_ID_RE = re.compile(BROKER_SESSION_ID_PATTERN)
 
 

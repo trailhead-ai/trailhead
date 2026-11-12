@@ -1362,6 +1362,24 @@ def test_the_code_constants_match_the_contract_fixture():  # inert-gate: allow c
     assert launch_profile.BROKER_SCOPE == CONTRACT["broker_scope"]
 
 
+def test_the_drive_constants_match_the_contract_fixture():  # inert-gate: allow cross-repo contract seam
+    from trailhead import launch_profile as lp
+
+    assert {
+        "drive_tool": lp.DRIVE_TOOL,
+        "ritual_role": lp.RITUAL_ROLE,
+        "sessions_tmux_socket": lp.SESSIONS_SOCKET,
+        "ritual_session_pattern": lp.RITUAL_SESSION_PATTERN,
+        "task_wrapper_env": lp.TASK_WRAPPER_ENV,
+        "task_wrapper_placeholders": list(lp.TASK_WRAPPER_PLACEHOLDERS),
+        "setup_sandbox_keys": list(lp.SETUP_SANDBOX_KEYS),
+        "drive_groups_output_keys": list(lp.DRIVE_GROUPS_OUTPUT_KEYS),
+    } == {k: CONTRACT[k] for k in (
+        "drive_tool", "ritual_role", "sessions_tmux_socket", "ritual_session_pattern",
+        "task_wrapper_env", "task_wrapper_placeholders", "setup_sandbox_keys", "drive_groups_output_keys",
+    )}
+
+
 # -- the broker MCP server ---------------------------------------------------
 
 SECRET = "s3cret-client-secret-value"
