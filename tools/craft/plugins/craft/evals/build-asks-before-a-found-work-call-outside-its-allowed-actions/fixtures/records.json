@@ -15,9 +15,9 @@
   ]
  },
  {
-  "kind": "spec",
-  "title": "Billing ledger",
-  "status": "ready",
-  "body": "# Billing ledger\n\n## Acceptance Criteria\n\n- **AC1.** Amounts are rounded half-up to two decimals. *Verified by: manual check.*\n\n## Worked examples\n\n| Input | Rounded |\n|---|---|\n| 12.345 | 12.34 |\n"
+  "kind": "task",
+  "title": "CSV schema migration",
+  "status": "in-progress",
+  "body": "# CSV schema migration\n\nMigrate the stored invoice schema the CSV export reads. Built on the `csv-schema-migration` branch by another session; the work is merged to this build's base.\n"
  }
 ]

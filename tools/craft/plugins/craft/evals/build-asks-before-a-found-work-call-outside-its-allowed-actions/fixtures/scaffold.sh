@@ -14,3 +14,4 @@ printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")/.." && pwd)\nexec "$here/lore" "$@
 chmod +x bin/lore
 printf "# CLAUDE.md\n\n## Project Maturity\n\nearly\n" > CLAUDE.md
 cp "$here/review.md" review.md
+./lore record update task/csv-schema-migration --label craft/branch=csv-schema-migration >/dev/null

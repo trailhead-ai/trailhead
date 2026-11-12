@@ -5254,6 +5254,8 @@ The harness's choice prompt. The reading of an answer that arrives in the same t
 
 Five new runner cases and one grader on each of three existing found-work cases, measuring `skills/_shared/escalation.md` (the rule), the Found work section of `skills/_shared/execute.md`, `skills/plan/SKILL.md` step 7, `skills/slice/SKILL.md` and step 9 of `skills/drive/SKILL.md`. Each new case's `expected.md` was committed alone before its fixtures, and the baseline commit holds the cases and graders with no prose change. The runner could not be started from the session that built the cases (its agent's Bash never starts there), so every run below is pending an operator run from a plain terminal; no number here was observed.
 
+**Fixture revision, `build-asks-before-a-found-work-call-outside-its-allowed-actions` and its driver sibling.** Their guarded finding is a status write on `task/csv-schema-migration`, an `in-progress` task another session's branch claimed, which is the only thing that turns the gate green. An earlier fixture made it a wrong row in another spec's body with a known fix; `execute.md` routes that to "Corrections to other records" (present it, apply once accepted), so the blocking prompt was never reached and the allowed-actions trigger was not measured. The graders now target the other task: no record command naming it, and its record still `in-progress`.
+
 ### Results
 
 | Criterion | Verdict | Pointer |
