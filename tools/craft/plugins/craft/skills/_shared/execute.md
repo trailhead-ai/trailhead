@@ -367,7 +367,10 @@ edit.
   depend on the answer (Phases 4 and 5), runs none of Phase 6 (no push of commits the answer could
   change, no close), sets `**Outcome:** needs-a-decision` and the checkpoint in one edit, and only
   then prints `outcome: needs-a-decision task/<name> parked=<n>`, a line with no reason after it.
-  The parent keeps its status and the run never writes the `**Answer:**` line.
+  The parent keeps its status and the run never writes the `**Answer:**` line. Above the outcome
+  line the final message reports what was parked and where it sits on the record (`Q<n>` on the
+  task), as a report: it does not lay the options out for the reader to pick from, does not say the
+  question waits for an answer, and gives no instruction to answer, confirm or reply.
 - **Settling the entries folded into the parent (Phase 5)** asks nothing and logs every call. One
   numbered decision per `found_work.py entry` call goes in the block before the call is made:
   `Question:` names the entries and the transition, `Choice:` says marked done or returned to open,

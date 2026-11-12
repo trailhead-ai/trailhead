@@ -213,6 +213,9 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
   "read the record the line names", not "answer a question". The line's reason names the section to
   read: the spec for an early stop, `## Refine — unresolved` for a refine that did not promote a
   task, or the run block.
+- It is the only line of the final message that contains the text `outcome:`. Anywhere else in the
+  message, name the block's line in other words (its result, its `**Outcome:**` field), never as a
+  label such as "Block outcome:".
 - **Only the session's last ritual prints it.** Slice under `--then-plan` and execute under
   `--then-pr` are not the last ritual when they succeed, and print no outcome line; plan, or the PR
   step, prints it. **An early end ends the session even when a later ritual was requested:** a
