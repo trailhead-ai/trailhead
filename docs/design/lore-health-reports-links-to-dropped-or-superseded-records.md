@@ -20,7 +20,10 @@ checked" in the summary counts the linking records judged.
 A linking record's references are the ones `dangling-links` reads except `supersedes`: `related`
 entries, `depends-on`, a task's `parent`, and body `[[wikilinks]]` outside code. A `supersedes`
 entry is how a successor records what it replaced, so it always points at a superseded record and
-is history, never a finding. A reference is reported when every record it can resolve to, in any
+is history, never a finding. So is a `related` entry or body wikilink from a record to a target that
+the same record supersedes: the link restates the supersession, and the record is the successor the
+finding would name. When a bare `[[name]]` resolves to several retired records, superseding any one
+of them makes the link history. A reference is reported when every record it can resolve to, in any
 configured vault, is `dropped` or `superseded`. A bare `[[name]]` resolves to every record with that
 name; a kinded reference to every record with that kind and name. When a reference resolves to more
 than one retired record, the finding names each, with its own status. A reference that resolves to
@@ -37,11 +40,18 @@ successor is named only when its kind and name have the shape of a record id; an
 is counted under the fixed phrase `a successor whose name is not a valid record id`, never echoed.
 At most three successors are named, sorted, then `and N more`. A successor that is itself dropped
 or superseded is marked `(itself dropped)` or `(itself superseded)`, so the finding never presents
-a dead record as the replacement without saying so.
+a dead record as the replacement without saying so. When two successors share a kind and name and
+differ only by vault, each such entry is printed as `<vault>/<kind>/<name>`; unambiguous entries
+stay `<kind>/<name>`. A finding naming several retired records qualifies its entries the same way.
+
+A bare `supersedes` entry (a name with no kind) is treated as claiming that name for every kind.
+That is deliberately broader than the search index, which derives `superseded-by` only from
+`kind/name` entries, so the report can name a successor that search does not show.
 
 A check that raises unexpectedly does not take the report down: its rows read
 `errored: <error type>` and its group says so in one line, every other check still renders, and
-the report still exits successfully.
+the report still exits successfully. The same holds when the raise is in that check's sorting or
+in rendering any of its findings.
 
 The check is skipped for every vault when any vault was not fully read, on the same rule and with
 the same reason as `dangling-links`: a target's status cannot be confirmed in a vault that was not
@@ -147,7 +157,7 @@ than offered as the replacement:
 A link that resolves to two retired records names each:
 
 ```
-  trailhead/task/clean-old-notes  2026-02-09  wikilink → notes-policy: decision/notes-policy dropped; adr/notes-policy superseded by adr/notes-are-records
+  trailhead/task/clean-old-notes  2026-02-09  wikilink → notes-policy: adr/notes-policy superseded by adr/notes-are-records; decision/notes-policy dropped
 ```
 
 ## State — Check skipped because a vault could not be read

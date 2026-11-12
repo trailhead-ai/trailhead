@@ -950,3 +950,52 @@ def test_retired_findings_neutralize_vault_and_record_names(evil):
     assert "\x1b" not in r.stdout
     (line,) = retired_lines(r.stdout)
     assert line.startswith("  ev\\nil\\x1b[31mv/decision/rec\\nforged\\x1b[2Jname  ")
+
+
+def test_same_name_successors_in_two_vaults_print_their_vault_but_a_lone_one_does_not(world):
+    d, t = world.roots["default"], world.roots["trailhead"]
+    _put(d, "decision", "old", status="superseded")
+    _put(d, "decision", "plain", supersedes=["decision/old"])
+    _put(d, "decision", "twin", supersedes=["decision/old"])
+    _put(t, "decision", "twin", supersedes=["decision/old"])
+    _live_task(d, "t", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(
+        "superseded by decision/plain, default/decision/twin and trailhead/decision/twin")
+    (d / "decision" / "twin.json").unlink()
+    (d / "decision" / "twin.md").unlink()
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith("superseded by decision/plain and decision/twin")
+
+
+def test_same_name_retired_candidates_in_two_vaults_print_their_vault(world):
+    d, t = world.roots["default"], world.roots["trailhead"]
+    _put(d, "decision", "notes", status="dropped")
+    _put(t, "decision", "notes", status="dropped")
+    _put(d, "adr", "notes", status="dropped")
+    _live_task(d, "t", body="see [[notes]]\n")
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(
+        "wikilink → notes: adr/notes dropped; default/decision/notes dropped; "
+        "trailhead/decision/notes dropped")
+
+
+def test_a_render_that_raises_errors_only_its_check(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    health = importlib.import_module("lore.cli.health")
+
+    def boom(finding):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, render=boom) if c.name == "retired-links" else c for c in health.CHECKS))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, "retired-links") == ["retired-links — errored: RuntimeError."]
+    assert rows(r.stdout, "retired-links")["default"] == ("—", "—", "errored: RuntimeError")
+    assert group(r.stdout, "dangling-links")[0] == "dangling-links — 1 finding, oldest first"
+    monkeypatch.undo()
+    r = world.run()
+    assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"

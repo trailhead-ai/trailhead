@@ -4,7 +4,9 @@ Pure: takes the scan of every configured vault and returns data. A live record
 (an active decision, ADR or area; an open, ready, in-progress or blocked task)
 is reported for a reference whose every readable candidate is ``dropped`` or
 ``superseded``. The ``supersedes`` field records history and is not judged, and
-a task's reference that can resolve to a spec is not judged. When any vault was
+neither is a link to a record the linker itself supersedes (with a bare name
+matching several retired records, superseding any one of them is enough). A
+task's reference that can resolve to a spec is not judged. When any vault was
 not fully read the check is skipped, because a candidate's status cannot then
 be trusted.
 """
@@ -114,6 +116,9 @@ def check_retired(
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
                 if not all(_status(c) in RETIRED_STATUSES for c in found):
+                    continue
+                if any(_key(record) in {_key(r) for r in candidates.superseded_by(c.kind, c.name)}
+                       for c in found if _status(c) == "superseded"):
                     continue
                 retired = tuple(_candidate(c, candidates) for c in sorted(found, key=_key))
                 result.findings.append(

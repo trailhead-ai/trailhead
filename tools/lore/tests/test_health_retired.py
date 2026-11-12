@@ -271,3 +271,38 @@ def test_malformed_candidate_supersedes_never_raises_and_judged_still_counted(su
                                 {"status": "superseded", "supersedes": supersedes}, "")
     res = run([vault("a", linking("decision", "src", "active", rel("decision", "old")), weird)])
     assert single(res).retired[0].successors == ()
+
+
+def _adr_superseding(body="", **extra):
+    return rec("a", "adr", "new", "active", {"supersedes": ["decision/old"], **extra}, body)
+
+
+def test_self_successor_related_link_is_history_not_a_finding():
+    adr = _adr_superseding(related={"decision": ["old"]})
+    res = run([vault("a", adr, rec("a", "decision", "old", "superseded"))])
+    assert res.findings == []
+
+
+def test_self_successor_body_wikilink_is_history_not_a_finding():
+    adr = _adr_superseding("replaces [[decision/old]]")
+    res = run([vault("a", adr, rec("a", "decision", "old", "superseded"))])
+    assert res.findings == []
+
+
+def test_same_link_from_a_record_that_does_not_supersede_is_reported_naming_the_successor():
+    other = rec("a", "adr", "other", "active", {"related": {"decision": ["old"]}})
+    f = single(run([vault("a", _adr_superseding(), other,
+                          rec("a", "decision", "old", "superseded"))]))
+    assert f.name == "other"
+    assert [(s.kind, s.name) for s in f.retired[0].successors] == [("adr", "new")]
+
+
+def test_bare_link_with_two_retired_candidates_is_history_when_linker_supersedes_one():
+    adr = _adr_superseding("see [[old]]")
+    scan = vault("a", adr, rec("a", "decision", "old", "superseded"),
+                 rec("a", "lesson", "old", "dropped"))
+    assert run([scan]).findings == []
+    other = rec("a", "adr", "other", "active", body="see [[old]]")
+    scan = vault("a", adr, other, rec("a", "decision", "old", "superseded"),
+                 rec("a", "lesson", "old", "dropped"))
+    assert single(run([scan])).name == "other"

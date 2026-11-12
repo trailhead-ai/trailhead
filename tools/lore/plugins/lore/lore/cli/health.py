@@ -89,8 +89,8 @@ class IndexLine:
 class Section:
     """One check's outcome.
 
-    ``findings`` is ``None`` when the check was skipped or errored. ``run`` is
-    what the check returned, ``None`` when it raised and ``error`` holds the
+    ``findings`` is ``None`` when the check was skipped or errored; ``lines`` is
+    each finding rendered, in order. ``run`` is what the check returned, ``None`` when it raised and ``error`` holds the
     error type name.
     """
 
@@ -98,6 +98,7 @@ class Section:
     run: CheckRun | None
     findings: list | None = None
     error: str | None = None
+    lines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -228,11 +229,12 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
     for check in CHECKS:
         try:
             run = check.run(scans, selected)
+            findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
+            lines = [] if findings is None else [check.render(f) for f in findings]
         except Exception as exc:  # noqa: BLE001 - one check's failure must not take the report down
             sections.append(Section(check, None, error=type(exc).__name__))
             continue
-        findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
-        sections.append(Section(check, run, findings))
+        sections.append(Section(check, run, findings, lines=lines))
 
     rows: list[VaultRow] = []
     for v in selected:
@@ -321,14 +323,28 @@ MAX_NAMED_SUCCESSORS = 3
 NONCONFORMING_SUCCESSOR = "a successor whose name is not a valid record id"
 
 
+def _qualified(items, *, kind_name) -> list[str]:
+    """``kind/name`` for each item, ``vault/kind/name`` where another item shares kind and name."""
+    counts: dict[tuple[str, str], int] = {}
+    for i in items:
+        counts[kind_name(i)] = counts.get(kind_name(i), 0) + 1
+    out = []
+    for i in items:
+        k, n = kind_name(i)
+        prefix = f"{_safe(i.vault)}/" if counts[(k, n)] > 1 else ""
+        out.append(f"{prefix}{_safe(k)}/{_safe(n)}")
+    return out
+
+
 def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
     """What became of a superseded record; never carries a non-conforming name."""
     if not c.successors and not c.nonconforming_successors:
         return "superseded, and no record supersedes it"
     named = []
-    for s in c.successors[:MAX_NAMED_SUCCESSORS]:
+    ids = _qualified(c.successors, kind_name=lambda s: (s.kind, s.name))
+    for s, ident in list(zip(c.successors, ids))[:MAX_NAMED_SUCCESSORS]:
         mark = f" (itself {s.status})" if s.status in retired_mod.RETIRED_STATUSES else ""
-        named.append(f"{_safe(s.kind)}/{_safe(s.name)}{mark}")
+        named.append(f"{ident}{mark}")
     rest = len(c.successors) - len(named)
     listed = ", ".join(named) + f" and {_num(rest)} more" if rest else _and_list(named)
     if not c.nonconforming_successors:
@@ -346,8 +362,8 @@ def _retired_line(f: retired_mod.Finding) -> str:
     if len(f.retired) == 1:
         what = _candidate_status(f.retired[0])
     else:
-        what = "; ".join(
-            f"{_safe(c.kind)}/{_safe(c.name)} {_candidate_status(c)}" for c in f.retired)
+        ids = _qualified(f.retired, kind_name=lambda c: (c.kind, c.name))
+        what = "; ".join(f"{i} {_candidate_status(c)}" for i, c in zip(ids, f.retired))
     return f"  {_ident(f)}  {_when(f)}  {_safe(f.field)} → {_safe(f.target)}: {what}"
 
 
@@ -431,7 +447,7 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None) -> list[str]:
     total = len(findings)
     out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"]
     shown = findings if limit is None else findings[:limit]
-    out += [sec.check.render(f) for f in shown]
+    out += sec.lines[:len(shown)]
     rest = total - len(shown)
     if rest:
         scope = f" --vault {_safe(shlex.quote(vault_arg))}" if vault_arg is not None else ""

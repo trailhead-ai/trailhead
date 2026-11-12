@@ -238,7 +238,11 @@ class CandidateIndex:
 
     def superseded_by(self, kind: str, name: str) -> tuple[ScannedRecord, ...]:
         """Return every record, in any vault, whose ``supersedes`` names *kind*/*name*
-        (a bare ``supersedes`` entry names every kind)."""
+        (a bare ``supersedes`` entry names every kind).
+
+        A bare entry is deliberately broader than the index, which derives
+        ``superseded-by`` only from ``kind/name`` entries, so the report can name
+        a successor that search does not show."""
         return tuple(self._claims.get((kind, name), ())) + tuple(self._claims.get((None, name), ()))
 
 

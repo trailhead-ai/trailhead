@@ -355,3 +355,12 @@ def test_real_scan_output_feeds_the_check(tmp_path):
         ("one", "src", "2026-03-05", "lesson/gone")
     ]
     assert res.judged == {"one": 1}
+
+
+def test_a_target_linked_twice_in_one_field_is_one_finding_and_in_two_fields_two():
+    twice = rec("a", "task", "src", {"related": {"lesson": ["gone", "gone"]}})
+    assert found(run([vault("a", twice)])) == [("src", "related lesson", "lesson/gone")]
+    fields = rec("a", "task", "src", {"related": {"lesson": ["gone"], "decision": ["gone"]}})
+    assert len(run([vault("a", fields)]).findings) == 2
+    body = rec("a", "lesson", "src", {"related": {"lesson": ["gone"]}}, "[[lesson/gone]] [[lesson/gone]]")
+    assert sorted(f.field for f in run([vault("a", body)]).findings) == ["related lesson", "wikilink"]
