@@ -178,10 +178,11 @@ session's, whether the operator picked a listed fix or answered in their own wor
 ### An answer in the operator's own words
 
 An answer that is not a listed fix is read before it is acted on. **The session first states, in one
-line, how it read the answer**, beginning `Reading your answer as:` and saying what it would do. It
-repeats that line at the head of its closing message for the pass, so the operator reads the reading
-again where the pass ends. The reading then passes the same triggers as any decision, under
-"Deciding a found-work call" above, and exactly one of these follows:
+line, how it read the answer**, beginning `Reading your answer as:` and saying what it would do. Its
+closing message for the pass carries that same line again, right after any lines its ritual prints
+first (such as slice's found-work report sentences), so the operator reads the reading again where
+the pass ends. The reading then passes the same triggers as any decision, under "Deciding a
+found-work call" above, and exactly one of these follows:
 
 - **The reading is a listed fix said another way, or another action inside the allowed actions that
   can be undone.** It is carried out as a chosen fix is, and the session continues from where it
