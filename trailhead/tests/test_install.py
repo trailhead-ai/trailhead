@@ -11,11 +11,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 
 from trailhead.capabilities import load_manifest
+from trailhead.core_vault import CoreVaultOutcome, install_core_vault
 from trailhead.harness import ClaudeCodeHarness
 from trailhead.install import run_install
 from trailhead.pathint import ShimDirResult
+from trailhead.tests.test_core_vault import FakeLore, _entry
 
 _REPO_ROOT = Path(__file__).parent.parent.parent
 
@@ -34,7 +37,7 @@ def _env(tmp_path: Path) -> dict[str, str]:
 
 
 @contextmanager
-def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr="", stamp_warning=None):
+def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr="", stamp_warning=None, real_core=False):
     """Patch wire, create_shims, detect_harnesses, run_lore_init, write_stamp.
 
     ``run_lore_init`` is ALWAYS patched (Axiom 6): these tests must never
@@ -46,6 +49,9 @@ def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr="", stamp_warnin
     real git checkout this test suite lives in. The default stub reports
     success (no warning); pass ``stamp_warning`` to exercise the unresolved-
     HEAD path.
+
+    ``install_core_vault`` is patched too (it would shell out to lore) unless
+    ``real_core`` is set, in which case the test supplies a scripted ``runner=``.
     """
     sdr = ShimDirResult(shim_dir=Path("/shim/bin"), shims={})
     lore_result = (lore_init_rc, lore_init_stderr)
@@ -58,8 +64,15 @@ def _patched(*, detected=None, lore_init_rc=0, lore_init_stderr="", stamp_warnin
         ) as detect_mock,
         patch("trailhead.install.run_lore_init", return_value=lore_result) as lore_mock,
         patch("trailhead.install.write_stamp", return_value=stamp_warning) as stamp_mock,
+        patch(
+            "trailhead.install.install_core_vault",
+            **(
+                {"wraps": install_core_vault} if real_core else {"return_value": CoreVaultOutcome("up_to_date", "stub")}
+            ),
+        ) as core_mock,
     ):
         yield {
+            "core_vault": core_mock,
             "wire": wire_mock,
             "pathint": pathint_mock,
             "detect": detect_mock,
@@ -808,3 +821,85 @@ class TestProvenanceStampIntegration:
         with _patched(detected=False) as m:
             run_install(env=_env(tmp_path), quiet=True)
         m["write_stamp"].assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# core vault step
+# ---------------------------------------------------------------------------
+
+
+class TestCoreVaultStep:
+    def test_runs_after_lore_init_and_with_the_checkout_source(self, tmp_path):
+        order = []
+        runner = object()
+        with _patched(detected=True) as m:
+            m["lore_init"].side_effect = lambda *a, **k: order.append("init") or (0, "")
+            m["core_vault"].side_effect = lambda **k: order.append("core") or CoreVaultOutcome("up_to_date", "x")
+            assert run_install(env=_env(tmp_path), quiet=True, runner=runner) == 0
+        assert order == ["init", "core"]
+        kw = m["core_vault"].call_args.kwargs
+        assert kw["runner"] is runner
+        assert kw["source"] == _REPO_ROOT / "core-vault"
+        assert kw["lore_bin"].name == "lore"
+
+    def test_lore_init_failure_skips_core_step_and_returns_one(self, tmp_path):
+        with _patched(detected=True, lore_init_rc=1, lore_init_stderr="lore: boom") as m:
+            assert run_install(env=_env(tmp_path), quiet=True) == 1
+        m["core_vault"].assert_not_called()
+
+    def test_no_lore_prints_turned_off_skip_and_calls_nothing(self, tmp_path, capsys):
+        lore = FakeLore()
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=_env(tmp_path), no_lore=True, quiet=True, runner=lore) == 0
+        out = capsys.readouterr().out
+        assert "skipped the core vault" in out and "turned off" in out
+        assert lore.calls == []
+        assert not (tmp_path / "core-vault").exists()
+
+    def test_unavailable_cli_prints_a_different_skip_cause(self, tmp_path, capsys):
+        with _patched(detected=True), patch("trailhead.install.resolve_cli_tools", return_value={}):
+            assert run_install(env=_env(tmp_path), quiet=True) == 0
+        out = capsys.readouterr().out
+        assert "skipped the core vault" in out and "unavailable" in out and "turned off" not in out
+
+    @pytest.mark.parametrize(
+        ("vaults", "ls_rc", "outcome"),
+        [([], 0, "registered"), (["decoy"], 0, "declined"), ([], 3, "failed")],
+    )
+    def test_json_summary_carries_core_vault_outcome(self, tmp_path, capsys, vaults, ls_rc, outcome):
+        import json as _json
+
+        lore = FakeLore([_entry("core", str(tmp_path / "x"), scope="team") for _ in vaults], ls_rc=ls_rc)
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=_env(tmp_path), as_json=True, runner=lore) == 0
+        captured = capsys.readouterr()
+        data = _json.loads(captured.out)
+        assert data["core_vault"]["outcome"] == outcome
+        assert data["core_vault"]["reason"]
+        assert data["no_harness"] is False
+
+    def test_failed_core_step_keeps_exit_zero_and_summary(self, tmp_path, capsys):
+        lore = FakeLore(ls_rc=1)
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=_env(tmp_path), runner=lore) == 0
+        captured = capsys.readouterr()
+        assert "installed plugins" in captured.out
+        assert "core vault" in captured.err
+
+    def test_missing_lore_binary_in_core_step_keeps_exit_zero_and_summary(self, tmp_path, capsys):
+        def runner(args, **kw):
+            raise FileNotFoundError(2, "No such file or directory", args[0])
+
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=_env(tmp_path), runner=runner) == 0
+        captured = capsys.readouterr()
+        assert "installed plugins" in captured.out
+        assert "core vault" in captured.err
+
+    def test_json_mode_sends_the_core_line_to_stderr(self, tmp_path, capsys):
+        lore = FakeLore([])
+        with _patched(detected=True, real_core=True):
+            run_install(env=_env(tmp_path), as_json=True, runner=lore)
+        captured = capsys.readouterr()
+        assert "core vault registered" in captured.err
+        assert "core vault" not in captured.out.replace('"core_vault"', "")

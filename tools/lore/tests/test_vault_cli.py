@@ -648,3 +648,112 @@ def test_ls_omits_auto_publish_token_for_default_true_vault(tmp_path):
     assert team_line == "team-vault\tteam\t" + str(_vaults_root(state) / "team-vault") + "\t[(all kinds)]"
 
 
+
+
+# ---------------------------------------------------------------------------
+# vault ls --json
+# ---------------------------------------------------------------------------
+
+
+def _write_config(config, vaults):
+    cfg_path = _config_path(config)
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps({"vaults": [{"name": "default", "scope": "default"}, *vaults]}))
+
+
+def test_ls_json_reports_each_vault_with_its_own_fields(tmp_path):
+    state, config = _dirs(tmp_path)
+    ro_dir = tmp_path / "elsewhere" / "core"
+    ro_dir.mkdir(parents=True)
+    _write_config(
+        config,
+        [
+            {"name": "product", "scope": "product"},
+            {"name": "core", "scope": "read-only", "path": str(ro_dir), "shared": False},
+        ],
+    )
+
+    res = _run(["vault", "ls", "--json"], state=state, config=config)
+
+    assert res.returncode == 0, res.stderr
+    listed = json.loads(res.stdout)
+    assert listed[0]["name"] == "default"
+    assert listed[1:] == [
+        {
+            "name": "product",
+            "scope": "product",
+            "shared": False,
+            "path": str(_vaults_root(state) / "product"),
+            "records": [],
+        },
+        {
+            "name": "core",
+            "scope": "read-only",
+            "shared": False,
+            "path": str(ro_dir),
+            "records": [],
+        },
+    ]
+
+
+def test_ls_json_shared_reflects_declared_trust(tmp_path):
+    state, config = _dirs(tmp_path)
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    _write_config(
+        config,
+        [
+            {"name": "untrusted", "scope": "read-only", "path": str(a), "shared": True},
+            {"name": "trusted", "scope": "read-only", "path": str(b), "shared": False},
+        ],
+    )
+
+    res = _run(["vault", "ls", "--json"], state=state, config=config)
+
+    assert res.returncode == 0, res.stderr
+    by_name = {v["name"]: v for v in json.loads(res.stdout)}
+    assert by_name["untrusted"]["shared"] is True
+    assert by_name["trusted"]["shared"] is False
+
+
+def test_ls_json_with_no_config_prints_empty_array(tmp_path):
+    state, config = _dirs(tmp_path)
+
+    res = _run(["vault", "ls", "--json"], state=state, config=config)
+
+    assert res.returncode == 0, res.stderr
+    assert json.loads(res.stdout) == []
+
+
+def test_ls_json_invalid_config_fails_with_empty_stdout(tmp_path):
+    state, config = _dirs(tmp_path)
+    _write_config(config, [{"name": "bad", "scope": "not-a-scope"}])
+
+    res = _run(["vault", "ls", "--json"], state=state, config=config)
+
+    assert res.returncode != 0
+    assert res.stdout == ""
+    assert "not-a-scope" in res.stderr
+
+
+def test_ls_without_json_keeps_tab_separated_listing(tmp_path):
+    state, config = _dirs(tmp_path)
+    ro_dir = tmp_path / "core"
+    ro_dir.mkdir()
+    _write_config(
+        config,
+        [
+            {"name": "product", "scope": "product"},
+            {"name": "core", "scope": "read-only", "path": str(ro_dir), "shared": True},
+        ],
+    )
+
+    res = _run(["vault", "ls"], state=state, config=config)
+
+    assert res.returncode == 0, res.stderr
+    assert res.stdout.splitlines()[1:] == [
+        "product\tproduct\t" + str(_vaults_root(state) / "product") + "\t[(all kinds)]",
+        "core\tread-only shared\t" + str(ro_dir) + "\t[(all kinds)]",
+    ]

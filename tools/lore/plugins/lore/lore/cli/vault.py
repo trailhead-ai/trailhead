@@ -355,14 +355,17 @@ def _cmd_vault_delete(args) -> int:
 def _cmd_vault_ls(args) -> int:
     """``lore vault ls`` — list name/scope/path/records for each configured vault.
 
+    ``--json`` prints the same fields as one JSON array instead.
+
     Tolerates a not-yet-created config (pre-``init``): prints a hint and exits 0,
     never a traceback.
     """
     from ..vault import config as vault_config_mod
 
+    as_json = getattr(args, "json", False)
     config_path = _resolve_config_path()
     if not config_path.exists():
-        print("No vault config found; run 'lore init' to seed one.")
+        print("[]" if as_json else "No vault config found; run 'lore init' to seed one.")
         return 0
 
     try:
@@ -373,6 +376,23 @@ def _cmd_vault_ls(args) -> int:
     except vault_config_mod.VaultConfigError as exc:
         print(str(exc), file=sys.stderr)
         return 1
+
+    if as_json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": v.name,
+                        "scope": v.scope,
+                        "shared": v.shared,
+                        "path": str(v.path),
+                        "records": list(v.records),
+                    }
+                    for v in vaults
+                ]
+            )
+        )
+        return 0
 
     for v in vaults:
         allowlist = ", ".join(v.records) if v.records else "(all kinds)"
@@ -715,6 +735,10 @@ def add_vault_subparser(sub) -> None:
     p_vault_delete.set_defaults(func=cmd_vault)
 
     p_vault_ls = p_vault_sub.add_parser("ls", help="List configured vaults")
+    p_vault_ls.add_argument(
+        "--json", action="store_true",
+        help="Print a JSON array of {name, scope, shared, path, records} objects",
+    )
     p_vault_ls.set_defaults(func=cmd_vault)
 
     p_vault_config = p_vault_sub.add_parser(

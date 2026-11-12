@@ -18,7 +18,13 @@ Config-driven, non-interactive, multi-harness:
      vault + global index + write-protection guardrail + agent rules. A failed
      bootstrap propagates as a non-zero install exit with the lore stderr — it is
      never swallowed. Harness-agnostic (Axiom 1): no harness-specific branching.
-  7. Print the summary.
+  7. Register the bundled core vault: copy the checkout's ``core-vault/`` folder into
+     a directory trailhead owns and add it to lore as the read-only, trusted vault
+     ``core`` (``trailhead/core_vault.py``). Runs only after ``lore init`` succeeds;
+     it never changes the exit code, always prints one core-vault line, and without
+     lore prints that it skipped the step. Rollback before a lore downgrade is
+     described in ``trailhead/core_vault.py`` and INSTALL.md.
+  8. Print the summary.
 
 No presets, no interactive prompts, no remote fetch, no install manifest — the
 repo checkout IS the source ("install = clone the repo").
@@ -47,6 +53,7 @@ from trailhead.capabilities import (
     ruleset_bearing_manifests,
 )
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
+from trailhead.core_vault import CoreVaultOutcome, install_core_vault, skipped_core_vault
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
     ConfigResolveError,
@@ -392,11 +399,32 @@ def run_install(
             )
             return 1
 
+    # The core vault needs lore's config to exist, so it runs right after `lore init`.
+    # Its human line goes to stderr under --json so stdout stays one JSON document.
+    core_out = sys.stderr if as_json else None
+    if "lore" in cli_tools:
+        core_vault = install_core_vault(
+            source=_REPO_ROOT / "core-vault",
+            env=_env,
+            lore_bin=cli_tools["lore"],
+            runner=runner,
+            file=core_out,
+        )
+    else:
+        core_vault = skipped_core_vault(
+            lore_enabled=bool(cfg.cli_flags.get("lore")), file=core_out
+        )
+
     no_harness = not cfg.harnesses
 
     if as_json:
         _print_json_summary(
-            cfg, wired, shim_dir, no_harness=no_harness, shim_build_failed=shim_build_failed
+            cfg,
+            wired,
+            shim_dir,
+            no_harness=no_harness,
+            shim_build_failed=shim_build_failed,
+            core_vault=core_vault,
         )
     else:
         _print_human_summary(
@@ -503,7 +531,13 @@ def _print_human_summary(
 
 
 def _print_json_summary(
-    cfg, wired, shim_dir, *, no_harness: bool, shim_build_failed: bool
+    cfg,
+    wired,
+    shim_dir,
+    *,
+    no_harness: bool,
+    shim_build_failed: bool,
+    core_vault: CoreVaultOutcome,
 ) -> None:
     data = {
         "harnesses": wired,
@@ -512,6 +546,7 @@ def _print_json_summary(
         "shim_build_failed": shim_build_failed,
         "shellenv": f'eval "$({_TRAILHEAD_BIN} shellenv)"',
         "no_harness": no_harness,
+        "core_vault": core_vault.as_dict(),
     }
     overrides = _collect_overrides(cfg)
     if overrides:
