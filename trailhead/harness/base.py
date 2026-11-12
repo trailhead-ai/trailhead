@@ -227,6 +227,7 @@ class SessionStart:
     env_set: dict[str, str]
     env_unset: list[str]
     files: tuple[SessionFile, ...] = ()
+    setup_sandbox: dict[str, list[str]] | None = None
 
 
 class Harness(ABC):

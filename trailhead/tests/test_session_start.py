@@ -26,7 +26,11 @@ from trailhead.harness.claude_code import ClaudeCodeHarness
 from trailhead.launch_profile import (
     BROKER_SERVER,
     HUB_PROFILE,
+    RITUAL_PROFILE,
+    RITUAL_ROLE,
+    SETUP_SANDBOX_KEYS,
     LaunchProfile,
+    WorkspaceError,
     broker_launch,
     hub_home,
     resolve_profile,
@@ -37,6 +41,7 @@ from trailhead.tests.test_ranger_start import OUTPOST_REFUSAL_BODIES, _Stub
 
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).parent / "fixtures" / "session_start_hub.json"
+RITUAL_GOLDEN = Path(__file__).parent / "fixtures" / "session_start_ritual.json"
 ROOT_TOKEN = "<ROOT>"
 _HUB_ARGV = ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1"]
 
@@ -53,6 +58,11 @@ def _fence(tmp_path: Path) -> dict[str, str]:
         "RANGER_CACHE_DIR": str(root / "ranger-cache"),
         "LORE_STATE_DIR": str(root / "lore-state"),
         "OUTPOST_STATE_DIR": str(root / "outpost-state"),
+        "CAMP_STATE_DIR": str(root / "camp-state"),
+        "CAMP_CONFIG_DIR": str(root / "camp-config"),
+        "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
+        "TRAILHEAD_CONFIG_DIR": str(root / "trailhead-config"),
+        "TRAILHEAD_CACHE_DIR": str(root / "trailhead-cache"),
         "PATH": os.environ.get("PATH", ""),
     }
 
@@ -1458,12 +1468,14 @@ def test_the_mcp_config_file_sits_in_the_session_directory_the_hub_can_neither_r
     assert _covered_by(fs["denyWrite"], path)
 
 
-def test_a_profile_naming_no_mcp_server_renders_none(tmp_path):
+def test_a_profile_naming_no_mcp_server_gets_an_empty_strict_mcp_config(tmp_path):
     env = _fence(tmp_path)
     profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
     start = _start(env, profile=profile, broker=broker_launch("s1", env=env))
-    assert start.files == ()
-    assert "--mcp-config" not in start.argv and "--strict-mcp-config" not in start.argv
+    (file,) = start.files
+    assert json.loads(file.content) == {"mcpServers": {}}
+    assert _flag_value(start.argv, "--mcp-config") == file.path
+    assert "--strict-mcp-config" in start.argv
     assert "allow" not in _settings_of(start)["permissions"]
 
 
@@ -2132,3 +2144,534 @@ def test_a_helper_checkout_under_the_session_directory_is_refused(off_temp):
             _resolved(env), elsewhere, None, interactive=True, account=None, env=env,
             broker=broker_launch("s1", env=env, trailhead_bin=binary),
         )
+
+
+# -- the ritual session ------------------------------------------------------
+
+
+def _camp_root(env) -> Path:
+    return Path(env["CAMP_STATE_DIR"])
+
+
+def _make_workspace(env, group="grp", slug="ws1", *, manifest=True) -> Path:
+    ws = _camp_root(env) / group / "worktrees" / slug
+    ws.mkdir(parents=True, exist_ok=True)
+    if manifest:
+        (ws / "manifest.json").write_text("{}")
+    return ws.resolve()
+
+
+def _ritual_roots(env, ws) -> tuple[str, str, str]:
+    r = _ritual_resolved(env, ws)
+    return tuple(str(p) for p in r.writable)  # workspace, lore-state, cache
+
+
+def _ritual_resolved(env, ws, profile=RITUAL_PROFILE, platform="linux"):
+    return resolve_profile(profile, "a", env=env, platform=platform, workspace=str(ws))
+
+
+def _ritual_user(env, ws, **extra) -> None:
+    """The user's settings a ritual may run under: cache and lore are writable, the workspace
+    is the working directory."""
+    _, lore, cache = _ritual_roots(env, ws)
+    data = _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["api.anthropic.com"])
+    data.update(extra)
+    _write_user_settings(env, data)
+
+
+def _ritual_ready(tmp_path, *, launch="default"):
+    env = _fence(tmp_path)
+    _configure_hub(env, launch)
+    Path(env["HOME"], ".claude").mkdir(parents=True, exist_ok=True)
+    ws = _make_workspace(env)
+    _ritual_user(env, ws)
+    return env, ws
+
+
+def _ritual_start(env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, **extra):
+    return ClaudeCodeHarness().session_start(
+        _ritual_resolved(env, ws, profile, platform), ws, prompt,
+        interactive=False, account=None, env=env, platform=platform, **extra,
+    )
+
+
+def _group_toml(env, name, *, account=None, vaults=(), shared=()):
+    groups = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    groups.mkdir(parents=True, exist_ok=True)
+    text = f'name = "{name}"\n'
+    if account:
+        text += f'[launch]\naccount = "{account}"\n'
+    for v in vaults:
+        text += f'[[lore_scopes]]\nscope = "team"\nname = "{v}"\n'
+    for v, root in shared:
+        text += f'[[shared_vaults]]\nname = "{v}"\nroot = "{root}"\n'
+    (groups / f"{name}.toml").write_text(text)
+
+
+def _other_account(env, name="b", launch="~/acct-b"):
+    write_hub_config(HubConfig(name=f"Hub {name}", account=name, launch_account=launch), env=env, platform="linux")
+
+
+def _ritual_cli(monkeypatch, env, ws, *extra):
+    return _run_cli(
+        monkeypatch, env,
+        ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json", *extra],
+    )
+
+
+def test_ritual_launch_writes_only_the_workspace_the_lore_state_and_the_cache(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    start = _ritual_start(env, ws)
+    fs = _settings_of(start)["sandbox"]["filesystem"]
+    assert fs["allowWrite"] == [str(ws), str(Path(env["LORE_STATE_DIR"]).resolve()),
+                                str(Path(env["XDG_CACHE_HOME"]).resolve())]
+    other = _make_workspace(env, slug="ws2")
+    other_fs = _settings_of(_ritual_start(env, other))["sandbox"]["filesystem"]
+    assert other_fs["allowWrite"][0] == str(other)
+
+
+def test_ritual_launch_has_no_broker_allow_rules_and_an_empty_strict_mcp_config(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    start = _ritual_start(env, ws)
+    assert "allow" not in _settings_of(start)["permissions"]
+    assert "--strict-mcp-config" in start.argv
+    (file,) = start.files
+    assert _flag_value(start.argv, "--mcp-config") == file.path
+    assert json.loads(file.content) == {"mcpServers": {}}
+    assert Path(file.path).parent == Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "launch"
+
+
+def test_ritual_launch_never_prompts(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    argv = _ritual_start(env, ws).argv
+    assert _flag_value(argv, "--permission-mode") == "dontAsk"
+    assert _flag_value(argv, "--permission-prompts") == "none" and "-p" in argv
+
+
+def test_ritual_launch_guards_the_git_admin_files_of_lore_vaults(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    vault = _make_vault(env["LORE_STATE_DIR"], "default")
+    deny = _settings_of(_ritual_start(env, ws))["sandbox"]["filesystem"]["denyWrite"]
+    assert str(vault.resolve() / ".git" / "config") in deny
+
+
+def test_ritual_reads_deny_the_token_store_the_operator_credential_and_every_other_account(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _other_account(env)
+    _group_toml(env, "mine", vaults=["avault"], shared=[("ashared", "/srv/ashared")])
+    _group_toml(env, "theirs", account="~/acct-g", vaults=["bvault"], shared=[("bshared", "/srv/bshared")])
+    start = _ritual_start(env, ws)
+    denied = _settings_of(start)["sandbox"]["filesystem"]["denyRead"]
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    credential = Path(env["OUTPOST_STATE_DIR"]).resolve() / "operator" / "credential"
+    assert _covered_by(denied, credential)
+    state = Path(env["RANGER_STATE_DIR"]).resolve()
+    cache = Path(env["RANGER_CACHE_DIR"]).resolve()
+    assert str(state / "hubs" / "b") in denied
+    assert str(cache / "mirrors" / "b") in denied
+    assert str(lore / "vaults" / "bvault") in denied and "/srv/bshared" in denied
+    assert str(Path(env["HOME"]).resolve() / "acct-b") in denied
+    assert str(Path(env["HOME"]).resolve() / "acct-g") in denied
+    assert str(state / "hubs" / "a") not in denied
+    assert str(lore / "vaults" / "avault") not in denied and "/srv/ashared" not in denied
+    rules = _settings_of(start)["permissions"]["deny"]
+    assert f"Read(/{lore}/vaults/bvault/**)" in rules
+
+
+def test_a_vault_one_of_the_accounts_own_groups_binds_is_not_denied_even_when_another_group_binds_it(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _other_account(env)
+    _group_toml(env, "mine", vaults=["common"])
+    _group_toml(env, "theirs", account="~/acct-b", vaults=["common", "bonly"])
+    denied = _settings_of(_ritual_start(env, ws))["sandbox"]["filesystem"]["denyRead"]
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    assert str(lore / "vaults" / "bonly") in denied
+    assert str(lore / "vaults" / "common") not in denied
+
+
+def test_the_accounts_own_launch_account_is_not_denied_but_the_default_groups_vaults_are(tmp_path):
+    env, ws = _ritual_ready(tmp_path, launch="~/acct-a")
+    _group_toml(env, "mine", account="~/acct-a", vaults=["avault"])
+    _group_toml(env, "plain", vaults=["pvault"])
+    denied = _settings_of(_ritual_start(env, ws))["sandbox"]["filesystem"]["denyRead"]
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    assert str(lore / "vaults" / "pvault") in denied
+    assert str(lore / "vaults" / "avault") not in denied
+    assert str(Path(env["HOME"]).resolve() / "acct-a") not in denied
+
+
+def test_another_hub_sharing_the_accounts_own_launch_account_does_not_deny_it(tmp_path):
+    env, ws = _ritual_ready(tmp_path, launch="~/acct-a")
+    _other_account(env, "b", launch="~/acct-a")
+    _other_account(env, "c", launch="~/acct-c")
+    denied = _settings_of(_ritual_start(env, ws))["sandbox"]["filesystem"]["denyRead"]
+    home = Path(env["HOME"]).resolve()
+    assert str(home / "acct-c") in denied and str(home / "acct-a") not in denied
+
+
+# workspace validation
+
+
+def test_a_workspace_outside_camps_worktrees_root_is_refused(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    outside = tmp_path / "elsewhere" / "grp" / "worktrees" / "ws"
+    outside.mkdir(parents=True)
+    (outside / "manifest.json").write_text("{}")
+    with pytest.raises(WorkspaceError, match=r"outside camp's worktrees root"):
+        _ritual_resolved(env, outside)
+
+
+def test_a_workspace_reached_through_a_symlink_pointing_outside_is_refused(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    real = tmp_path / "escape"
+    real.mkdir()
+    (real / "manifest.json").write_text("{}")
+    link = _camp_root(env) / "grp" / "worktrees" / "sneaky"
+    link.symlink_to(real)
+    with pytest.raises(WorkspaceError, match=r"outside camp's worktrees root"):
+        _ritual_resolved(env, link)
+
+
+def test_a_symlink_inside_the_root_resolves_to_the_workspace_it_points_at(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    link = _camp_root(env) / "grp" / "worktrees" / "alias"
+    link.symlink_to(ws)
+    assert _ritual_resolved(env, link).paths["workspace"] == ws
+
+
+def test_a_workspace_with_no_manifest_is_refused(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    bare = _make_workspace(env, slug="bare", manifest=False)
+    with pytest.raises(WorkspaceError, match=r"no camp manifest"):
+        _ritual_resolved(env, bare)
+
+
+@pytest.mark.parametrize("sub", ["", "ws1/trailhead", "../worktrees"])
+def test_a_path_that_is_not_a_workspace_directory_under_the_root_is_refused(tmp_path, sub):
+    env, ws = _ritual_ready(tmp_path)
+    (ws / "trailhead").mkdir()
+    target = (ws.parent / sub) if sub else _camp_root(env)
+    with pytest.raises(WorkspaceError, match=r"is not a camp workspace"):
+        _ritual_resolved(env, target)
+
+
+def test_a_directory_with_a_manifest_that_is_not_under_a_worktrees_directory_is_refused(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    stray = _camp_root(env) / "grp" / "elsewhere" / "ws1"
+    stray.mkdir(parents=True)
+    (stray / "manifest.json").write_text("{}")
+    with pytest.raises(WorkspaceError, match=r"is not a camp workspace"):
+        _ritual_resolved(env, stray)
+
+
+def test_a_missing_workspace_is_refused_naming_the_workspace(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    missing = _camp_root(env) / "grp" / "worktrees" / "gone"
+    with pytest.raises(WorkspaceError, match=r"workspace .*gone is not an existing directory"):
+        _ritual_resolved(env, missing)
+
+
+def test_a_symlink_loop_is_refused_cleanly_rather_than_raising(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    loop = _camp_root(env) / "grp" / "worktrees" / "loop"
+    loop.symlink_to(loop)
+    with pytest.raises(WorkspaceError):
+        _ritual_resolved(env, loop)
+
+
+def test_a_ritual_profile_resolved_without_a_workspace_is_refused(tmp_path):
+    env, _ = _ritual_ready(tmp_path)
+    with pytest.raises(WorkspaceError, match=r"needs a workspace"):
+        resolve_profile(RITUAL_PROFILE, "a", env=env, platform="linux")
+
+
+def test_a_hub_profile_given_a_workspace_is_refused(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    with pytest.raises(WorkspaceError, match=r"takes no workspace"):
+        resolve_profile(HUB_PROFILE, "a", env=env, platform="linux", workspace=str(ws))
+
+
+def test_the_harness_names_the_workspace_when_its_directory_has_gone(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    resolved = _ritual_resolved(env, ws)
+    gone = _camp_root(env) / "grp" / "worktrees" / "vanished"
+    with pytest.raises(HarnessError, match=r"workspace .*vanished is not an existing directory") as info:
+        ClaudeCodeHarness().session_start(
+            resolved, gone, None, interactive=False, account=None, env=env, platform="linux"
+        )
+    assert "ranger setup" not in str(info.value)
+
+
+# never-widen
+
+
+def test_a_user_write_list_that_omits_the_cache_refuses_the_ritual_naming_it(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _, lore, cache = _ritual_roots(env, ws)
+    _write_user_settings(env, _user_sandbox(allowWrite=[".", lore]))
+    with pytest.raises(HarnessError, match=re.escape(cache)):
+        _ritual_start(env, ws)
+
+
+def test_a_user_read_denial_over_the_workspace_refuses_the_ritual(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _ritual_user(env, ws, permissions={"deny": [f"Read(/{ws}/**)"]})
+    with pytest.raises(HarnessError, match=r"read denial"):
+        _ritual_start(env, ws)
+
+
+def test_a_user_read_denial_over_the_plugin_tree_refuses_the_ritual(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    composed = Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "composed"
+    _ritual_user(env, ws, permissions={"deny": [f"Read(/{composed}/**)"]})
+    with pytest.raises(HarnessError, match=r"read denial"):
+        _ritual_start(env, ws)
+
+
+# setup_sandbox
+
+
+def _sandbox_of(env, ws, profile=RITUAL_PROFILE, **kw):
+    return _ritual_start(env, ws, profile=profile, **kw).setup_sandbox
+
+
+def test_setup_sandbox_carries_every_user_level_read_denial_and_the_profiles_own(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    home = Path(env["HOME"]).resolve()
+    _ritual_user(
+        env, ws,
+        permissions={
+            "deny": ["Read(~/.aws/**)", "Read(~/.ssh/**)", "Read(//etc/secret/**)", "Edit(//ignored/**)"]
+        },
+    )
+    data = json.loads((home / ".claude" / "settings.json").read_text())
+    data["sandbox"]["filesystem"]["denyRead"] = ["~/.ssh"]
+    (home / ".claude" / "settings.json").write_text(json.dumps(data))
+    _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyRead": ["/managed/creds"]}}})
+    sandbox = _sandbox_of(env, ws)
+    assert tuple(sandbox) == SETUP_SANDBOX_KEYS
+    reads = sandbox["denied_reads"]
+    for expected in (home / ".ssh", home / ".aws", Path("/etc/secret"), Path("/managed/creds"),
+                     Path(env["OUTPOST_STATE_DIR"]).resolve()):
+        assert str(expected) in reads
+    assert "/ignored" not in reads
+    assert len(reads) == len(set(reads))
+
+
+def test_setup_sandbox_destinations_follow_the_users_list_and_the_profiles_hosts(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _ritual_user(env, ws, sandbox={
+        "enabled": True,
+        "filesystem": {"allowWrite": [".", *_ritual_roots(env, ws)[1:]]},
+        "network": {"allowedDomains": ["api.anthropic.com", "github.com"]},
+    })
+    none = _sandbox_of(env, ws)
+    assert none["allowed_domains"] == []
+    assert none["denied_domains"] == ["api.anthropic.com", "github.com"]
+    import dataclasses
+    some = _sandbox_of(env, ws, dataclasses.replace(RITUAL_PROFILE, network_allowed_hosts=("github.com",)))
+    assert some["allowed_domains"] == ["github.com"]
+    assert some["denied_domains"] == ["api.anthropic.com"]
+
+
+def test_with_no_user_network_list_the_profiles_hosts_are_the_allowed_destinations(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _, lore, cache = _ritual_roots(env, ws)
+    _write_user_settings(env, _user_sandbox(allowWrite=[".", cache, lore]))
+    import dataclasses
+    sandbox = _sandbox_of(env, ws, dataclasses.replace(RITUAL_PROFILE, network_allowed_hosts=("github.com",)))
+    assert sandbox["allowed_domains"] == ["github.com"] and sandbox["denied_domains"] == []
+
+
+# the plugin tree
+
+
+def test_the_ritual_can_read_the_composed_plugin_tree_and_never_write_it(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    start = _ritual_start(env, ws)
+    composed = Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "composed" / "claude_code"
+    argv = start.argv
+    granted = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
+    assert granted == [str(composed)]
+    settings = _settings_of(start)
+    assert str(composed) not in settings["sandbox"]["filesystem"]["allowWrite"]
+    assert str(composed) in settings["sandbox"]["filesystem"]["denyWrite"]
+    assert f"Edit(/{composed}/**)" in settings["permissions"]["deny"]
+    assert str(composed) not in settings["sandbox"]["filesystem"]["denyRead"]
+
+
+def test_the_plugin_tree_grant_follows_the_trailhead_state_dir(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    moved = {**env, "TRAILHEAD_STATE_DIR": str(tmp_path.resolve() / "elsewhere")}
+    argv = _ritual_start(moved, ws).argv
+    assert argv[argv.index("--add-dir") + 1] == str(tmp_path.resolve() / "elsewhere" / "composed" / "claude_code")
+
+
+# the command
+
+
+def test_cli_prints_the_ritual_launch_shape(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("/craft:slice spec/x --unattended")
+    rc = _ritual_cli(monkeypatch, env, ws, "--headless", "--prompt-file", str(prompt))
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert set(out) == {"argv", "env_set", "env_unset", "directory", "files", "setup_sandbox"}
+    assert out["directory"] == str(ws)
+    assert out["argv"][-1] == "/craft:slice spec/x --unattended"
+    assert tuple(out["setup_sandbox"]) == SETUP_SANDBOX_KEYS
+    assert all(isinstance(v, list) for v in out["setup_sandbox"].values())
+
+
+def test_cli_starts_the_ritual_in_the_real_path_of_a_workspace_named_through_a_symlink(
+    tmp_path, monkeypatch, capsys
+):
+    env, ws = _ritual_ready(tmp_path)
+    alias = _camp_root(env) / "grp" / "worktrees" / "alias"
+    alias.symlink_to(ws)
+    rc = _ritual_cli(monkeypatch, env, alias)
+    assert rc == 0 and json.loads(capsys.readouterr().out)["directory"] == str(ws)
+
+
+def test_cli_binds_the_ritual_to_the_accounts_launch_account(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path, launch="~/acct-a")
+    _, lore, cache = _ritual_roots(env, ws)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore]), account_dir=Path(env["HOME"]) / "acct-a"
+    )
+    rc = _ritual_cli(monkeypatch, env, ws, "--headless")
+    out = json.loads(capsys.readouterr().out)
+    assert rc == 0 and out["env_set"]["CLAUDE_CONFIG_DIR"] == str(Path(env["HOME"]) / "acct-a")
+
+
+def test_cli_refuses_a_broker_session_for_the_ritual(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    rc = _ritual_cli(monkeypatch, env, ws, "--broker-session", "s1")
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "ritual" in captured.err and "--broker-session" in captured.err
+
+
+def test_cli_refuses_a_ritual_without_a_workspace(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--json"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == "" and "--workspace" in captured.err
+
+
+def test_cli_refuses_a_workspace_for_the_hub(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, [*_HUB_ARGV, "--workspace", str(ws)])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == "" and "--workspace" in captured.err
+
+
+def test_cli_refuses_a_workspace_outside_the_root_cleanly(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    rc = _ritual_cli(monkeypatch, env, tmp_path)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "outside camp's worktrees root" in captured.err
+
+
+def test_cli_refuses_a_missing_workspace_with_the_workspace_wording(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    missing = _camp_root(env) / "grp" / "worktrees" / "gone"
+    rc = _ritual_cli(monkeypatch, env, missing)
+    err = capsys.readouterr().err
+    assert rc != 0 and "gone is not an existing directory" in err and "ranger setup" not in err
+
+
+def test_cli_refuses_a_widening_ritual_with_a_clean_message(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    _, lore, _ = _ritual_roots(env, ws)
+    _write_user_settings(env, _user_sandbox(allowWrite=[".", lore]))
+    rc = _ritual_cli(monkeypatch, env, ws)
+    err = capsys.readouterr().err
+    assert rc != 0 and err.startswith("trailhead: ") and "never widen" in err
+
+
+def test_the_ritual_launch_needs_a_configured_hub_for_its_account(tmp_path, monkeypatch, capsys):
+    env = _fence(tmp_path)
+    ws = _make_workspace(env)
+    Path(env["HOME"], ".claude").mkdir(parents=True)
+    rc = _ritual_cli(monkeypatch, env, ws)
+    assert rc != 0 and "a.json" in capsys.readouterr().err
+
+
+# the platform's case rules for read denials (the Read-rule matcher)
+
+
+def _upper_rule(path: str) -> str:
+    return f"Read(/{path.upper()}/**)"
+
+
+def test_a_mixed_case_read_rule_covering_a_root_refuses_on_darwin(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env, permissions={"deny": [_upper_rule(cache)]})
+    with pytest.raises(HarnessError, match="read"):
+        _start(env, platform="darwin")
+
+
+def test_a_mixed_case_read_rule_is_case_exact_on_linux(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env, permissions={"deny": [_upper_rule(cache)]})
+    assert _start(env, platform="linux") is not None
+
+
+def test_a_differently_normalized_read_rule_refuses_on_darwin_only(tmp_path):
+    env = _fence(tmp_path)
+    env["XDG_CACHE_HOME"] = str(tmp_path.resolve() / "caf\u00e9")
+    home, lore, cache = _hub_roots(env)
+    decomposed = cache.replace("caf\u00e9", "cafe\u0301")
+    assert decomposed != cache
+    _permissive_user(env, permissions={"deny": [f"Read(/{decomposed}/**)"]})
+    with pytest.raises(HarnessError, match="read"):
+        _start(env, platform="darwin")
+    assert _start(env, platform="linux") is not None
+
+
+def test_a_mixed_case_read_rule_in_a_managed_file_refuses_on_darwin(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _permissive_user(env)
+    _write_managed(tmp_path, {"permissions": {"deny": [_upper_rule(cache)]}}, fence="managed-fence-darwin")
+    with pytest.raises(HarnessError, match="read"):
+        _start(env, platform="darwin")
+
+
+def test_a_mixed_case_read_denial_entry_covering_a_root_refuses_on_darwin_only(tmp_path):
+    env = _fence(tmp_path)
+    home, lore, cache = _hub_roots(env)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], denyRead=[cache.upper()])
+    )
+    with pytest.raises(HarnessError, match="read denial"):
+        _start(env, platform="darwin")
+    assert _start(env, platform="linux") is not None
+
+
+# the seam smoke
+
+
+def test_ritual_session_start_subprocess_matches_the_golden(  # inert-gate: allow wiring seam smoke
+    tmp_path,
+):
+    env, ws = _ritual_ready(tmp_path)
+    _other_account(env)
+    _group_toml(env, "theirs", account="~/acct-b", vaults=["bvault"])
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("/craft:slice spec/x --unattended --then-plan")
+    result = subprocess.run(
+        [str(REPO / "bin" / "trailhead"), "session-start", "--role", RITUAL_ROLE, "--account", "a",
+         "--workspace", str(ws), "--headless", "--prompt-file", str(prompt), "--json"],
+        cwd=foreign, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    actual = json.loads(_normalised(result.stdout.replace(env["PATH"], PATH_TOKEN), tmp_path))
+    assert actual == json.loads(RITUAL_GOLDEN.read_text())

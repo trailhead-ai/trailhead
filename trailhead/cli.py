@@ -35,6 +35,9 @@ from trailhead.launch_profile import (
     BROKER_SCOPE,
     BROKER_SERVER,
     HUB_PROFILE,
+    RITUAL_PROFILE,
+    RITUAL_ROLE,
+    ROLE_WORKSPACE,
     LaunchProfileError,
     broker_launch,
     hub_home,
@@ -253,11 +256,31 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
     if not args.json:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
+    ritual = args.role == RITUAL_ROLE
+    if ritual and args.broker_session is not None:
+        print(
+            "trailhead: --broker-session is not accepted for the ritual role; "
+            "a ritual session has no broker",
+            file=sys.stderr,
+        )
+        return 1
+    if ritual != (args.workspace is not None):
+        print(
+            "trailhead: --workspace is required for the ritual role and refused for the hub"
+            if ritual
+            else "trailhead: --workspace belongs to the ritual role; a hub starts in its own home",
+            file=sys.stderr,
+        )
+        return 1
     env = dict(os.environ)
     launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
     config = read_hub_config(args.account, env=env)
-    profile = resolve_profile(HUB_PROFILE, args.account, env=env)
-    directory = hub_home(args.account, env=env)
+    if ritual:
+        profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, workspace=args.workspace)
+        directory = profile.paths[ROLE_WORKSPACE]
+    else:
+        profile = resolve_profile(HUB_PROFILE, args.account, env=env)
+        directory = hub_home(args.account, env=env)
     prompt = None
     if args.prompt_file:
         try:
@@ -285,6 +308,11 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         "env_unset": start.env_unset,
         "directory": str(directory),
     }
+    if ritual:
+        output["files"] = [
+            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
+        ]
+        output["setup_sandbox"] = start.setup_sandbox
     if launch is not None:
         output["broker"] = {
             "server": BROKER_SERVER,
@@ -514,7 +542,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "session-start",
         help="Print the argv and env to start a confined session for a role (never execs).",
     )
-    session_p.add_argument("--role", required=True, choices=["hub"], help="Role to start.")
+    session_p.add_argument("--role", required=True, choices=["hub", RITUAL_ROLE], help="Role to start.")
+    session_p.add_argument(
+        "--workspace", metavar="W", default=None, help="Camp workspace directory (ritual role only)."
+    )
     session_p.add_argument("--account", required=True, help="Account short name.")
     session_p.add_argument("--prompt-file", metavar="P", default=None, help="File holding the first prompt.")
     session_p.add_argument(

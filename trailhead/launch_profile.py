@@ -18,14 +18,28 @@ lore state root, where every vault lives as a git working tree. A guarded role
 that is not writable adds nothing, since a harness only denies what it would
 otherwise allow.
 
+``workspace`` is the one caller-supplied role: ``resolve_profile`` validates the path the
+caller names (see :func:`validate_workspace`) instead of deriving it from the account.
+
+``read_denied_roles`` may name *set* roles, which resolve to every path of a kind that
+belongs to some other account: their hub homes, mirrors, group vaults and harness
+configuration directories. The other accounts are the other configured hubs and the camp
+groups whose launch account differs from this account's own; a vault that one of this
+account's own groups also binds is never denied.
+
+``readable_roles`` names directories the session may read although they lie outside its
+write roots; the harness grants read access and no write there.
+
 All resolution goes through ``trailhead.paths`` and creates nothing.
 """
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
-from dataclasses import dataclass
+import tomllib
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from trailhead.paths import cache_dir, cache_home, config_dir, state_dir
@@ -34,6 +48,12 @@ ROLE_HUB_HOME = "hub-home"
 ROLE_LORE_STATE = "lore-state"
 ROLE_CACHE = "cache"
 ROLE_TOKEN_STORE = "token-store"
+ROLE_WORKSPACE = "workspace"
+ROLE_PLUGIN_TREE = "plugin-tree"
+ROLE_OTHER_HUB_HOMES = "other-hub-homes"
+ROLE_OTHER_MIRRORS = "other-mirrors"
+ROLE_OTHER_VAULTS = "other-vaults"
+ROLE_OTHER_ACCOUNT_CONFIGS = "other-account-configs"
 
 _ACCOUNT_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -63,6 +83,10 @@ class InvalidAccountError(LaunchProfileError):
 
 class UnknownRoleError(LaunchProfileError):
     """A profile names a directory role the resolver does not know."""
+
+
+class WorkspaceError(LaunchProfileError):
+    """The workspace path is missing, outside camp's worktrees root, or not a camp workspace."""
 
 
 class InvalidBrokerSessionError(LaunchProfileError):
@@ -187,7 +211,140 @@ def broker_launch(
     )
 
 
+def plugin_tree(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
+    """The parent of every harness's composed plugin tree (``<root>/<harness name>``)."""
+    return state_dir("trailhead", env=env, platform=platform) / "composed"
+
+
+def validate_workspace(
+    workspace: str | os.PathLike[str],
+    *,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+) -> Path:
+    """The real path of a camp workspace, or :class:`WorkspaceError`.
+
+    Camp keeps a workspace at ``<camp state>/<group>/worktrees/<slug>`` with a
+    ``manifest.json`` in it. Symlinks are resolved before the check, so a link under the
+    root that points elsewhere is refused and a link that points at another workspace is
+    that workspace. A symlink loop resolves to a path that is not a directory.
+    """
+    root = Path(os.path.realpath(state_dir("camp", env=env, platform=platform)))
+    real = Path(os.path.realpath(workspace))
+    if root != real and root not in real.parents:
+        raise WorkspaceError(
+            f"workspace {workspace} resolves to {real}, which is outside camp's worktrees root {root}"
+        )
+    parts = real.relative_to(root).parts
+    if len(parts) != 3 or parts[1] != "worktrees":
+        raise WorkspaceError(
+            f"workspace {workspace} is not a camp workspace (expected {root}/<group>/worktrees/<slug>)"
+        )
+    if not real.is_dir():
+        raise WorkspaceError(
+            f"workspace {workspace} is not an existing directory; create it with `camp new` first"
+        )
+    if not (real / "manifest.json").is_file():
+        raise WorkspaceError(
+            f"workspace {workspace} has no camp manifest ({real / 'manifest.json'}); refusing"
+        )
+    return real
+
+
+def _expand_home(value: str, env: dict[str, str] | None) -> str:
+    home = (env if env is not None else os.environ).get("HOME", "")
+    return home + value[1:] if value == "~" or value.startswith("~/") else value
+
+
+def _other_hub_accounts(account: str, env, platform) -> list[str]:
+    hubs = hub_config_path(account, env=env, platform=platform).parent
+    if not hubs.is_dir():
+        return []
+    found = (re.fullmatch(r"([a-z0-9][a-z0-9-]*)\.json", p.name) for p in hubs.iterdir())
+    return sorted(m.group(1) for m in found if m and m.group(1) != account)
+
+
+def _groups(env, platform) -> list[dict]:
+    """Every camp group file that parses; one that does not declares nothing."""
+    groups = config_dir("camp", env=env, platform=platform) / "groups"
+    parsed: list[dict] = []
+    if groups.is_dir():
+        for toml_file in sorted(groups.glob("*.toml")):
+            try:
+                parsed.append(tomllib.loads(toml_file.read_text()))
+            except (OSError, tomllib.TOMLDecodeError):
+                continue
+    return parsed
+
+
+def _group_launch_account(group: dict, env) -> str | None:
+    launch = group.get("launch")
+    value = launch.get("account") if isinstance(launch, dict) else None
+    return _expand_home(value, env) if isinstance(value, str) else None
+
+
+def _group_vaults(group: dict, env, platform) -> list[Path]:
+    paths: list[Path] = []
+    lore = state_dir("lore", env=env, platform=platform)
+    for key in ("lore_scopes", "shared_vaults"):
+        entries = group.get(key)
+        for entry in entries if isinstance(entries, list) else []:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                paths.append(lore / "vaults" / entry["name"])
+                if isinstance(entry.get("root"), str):
+                    paths.append(Path(_expand_home(entry["root"], env)))
+    return paths
+
+
+def _own_launch_account(account: str, env, platform) -> str | None:
+    from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, read_hub_config
+
+    launch = read_hub_config(account, env=env, platform=platform).launch_account
+    return None if launch == DEFAULT_LAUNCH_ACCOUNT else _expand_home(launch, env)
+
+
+def _other_groups(account: str, env, platform) -> tuple[list[dict], list[dict]]:
+    """``(own groups, other groups)``: those on this account's launch account and the rest."""
+    own_launch = _own_launch_account(account, env, platform)
+    groups = _groups(env, platform)
+    own = [g for g in groups if _group_launch_account(g, env) == own_launch]
+    return own, [g for g in groups if g not in own]
+
+
+def _other_vaults(account: str, env, platform) -> tuple[Path, ...]:
+    own, other = _other_groups(account, env, platform)
+    kept = {p for g in own for p in _group_vaults(g, env, platform)}
+    denied = dict.fromkeys(p for g in other for p in _group_vaults(g, env, platform) if p not in kept)
+    return tuple(denied)
+
+
+def _other_account_configs(account: str, env, platform) -> tuple[Path, ...]:
+    """Launch-account directories other than this account's own. The default account has no
+    path a harness-neutral resolver can name, so it is never listed."""
+    own = _own_launch_account(account, env, platform)
+    _, other = _other_groups(account, env, platform)
+    from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, read_hub_config
+
+    declared = [_group_launch_account(g, env) for g in other]
+    for hub in _other_hub_accounts(account, env, platform):
+        launch = read_hub_config(hub, env=env, platform=platform).launch_account
+        declared.append(None if launch == DEFAULT_LAUNCH_ACCOUNT else _expand_home(launch, env))
+    return tuple(dict.fromkeys(Path(a) for a in declared if a and a != own))
+
+
+_ROLE_SET_RESOLVERS = {
+    ROLE_OTHER_HUB_HOMES: lambda a, e, p: tuple(
+        hub_home(b, env=e, platform=p) for b in _other_hub_accounts(a, e, p)
+    ),
+    ROLE_OTHER_MIRRORS: lambda a, e, p: tuple(
+        mirrors_path(b, env=e, platform=p) for b in _other_hub_accounts(a, e, p)
+    ),
+    ROLE_OTHER_VAULTS: _other_vaults,
+    ROLE_OTHER_ACCOUNT_CONFIGS: _other_account_configs,
+}
+
 _ROLE_RESOLVERS = {
+    ROLE_PLUGIN_TREE: lambda a, e, p: plugin_tree(env=e, platform=p),
     ROLE_HUB_HOME: lambda a, e, p: hub_home(a, env=e, platform=p),
     ROLE_LORE_STATE: lambda a, e, p: state_dir("lore", env=e, platform=p),
     ROLE_CACHE: lambda a, e, p: cache_home(env=e, platform=p),
@@ -200,6 +357,7 @@ class LaunchProfile:
     writable_roles: tuple[str, ...] = ()
     git_guarded_roles: tuple[str, ...] = ()
     read_denied_roles: tuple[str, ...] = ()
+    readable_roles: tuple[str, ...] = ()
     network_allowed_hosts: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] = ()
     never_prompt: bool = True
@@ -207,8 +365,14 @@ class LaunchProfile:
     effort: str | None = None
 
     def __post_init__(self) -> None:
-        for role in (*self.writable_roles, *self.git_guarded_roles, *self.read_denied_roles):
-            if role not in _ROLE_RESOLVERS:
+        known = (*_ROLE_RESOLVERS, *_ROLE_SET_RESOLVERS, ROLE_WORKSPACE)
+        for role in (
+            *self.writable_roles,
+            *self.git_guarded_roles,
+            *self.read_denied_roles,
+            *self.readable_roles,
+        ):
+            if role not in known:
                 raise UnknownRoleError(f"unknown directory role {role!r} in launch profile")
 
 
@@ -217,14 +381,22 @@ class ResolvedProfile:
     profile: LaunchProfile
     account: str
     paths: dict[str, Path]
+    path_sets: dict[str, tuple[Path, ...]] = field(default_factory=dict)
 
     @property
     def writable(self) -> tuple[Path, ...]:
         return tuple(self.paths[r] for r in self.profile.writable_roles)
 
     @property
+    def readable(self) -> tuple[Path, ...]:
+        return tuple(self.paths[r] for r in self.profile.readable_roles)
+
+    @property
     def read_denied(self) -> tuple[Path, ...]:
-        return tuple(self.paths[r] for r in self.profile.read_denied_roles)
+        denied: list[Path] = []
+        for role in self.profile.read_denied_roles:
+            denied.extend(self.path_sets[role] if role in self.path_sets else (self.paths[role],))
+        return tuple(denied)
 
 
 HUB_PROFILE = LaunchProfile(
@@ -239,16 +411,54 @@ HUB_PROFILE = LaunchProfile(
 )
 
 
+RITUAL_PROFILE = LaunchProfile(
+    writable_roles=(ROLE_WORKSPACE, ROLE_LORE_STATE, ROLE_CACHE),
+    git_guarded_roles=(ROLE_LORE_STATE,),
+    read_denied_roles=(
+        ROLE_TOKEN_STORE,
+        ROLE_OTHER_HUB_HOMES,
+        ROLE_OTHER_MIRRORS,
+        ROLE_OTHER_VAULTS,
+        ROLE_OTHER_ACCOUNT_CONFIGS,
+    ),
+    readable_roles=(ROLE_PLUGIN_TREE,),
+    network_allowed_hosts=(),
+    mcp_servers=(),
+    never_prompt=True,
+    model=None,
+    effort=None,
+)
+
+
 def resolve_profile(
     profile: LaunchProfile,
     account: str,
     *,
     env: dict[str, str] | None = None,
     platform: str | None = None,
+    workspace: str | os.PathLike[str] | None = None,
 ) -> ResolvedProfile:
     validate_account(account)
     roles = dict.fromkeys(
-        (*profile.writable_roles, *profile.git_guarded_roles, *profile.read_denied_roles)
+        (
+            *profile.writable_roles,
+            *profile.git_guarded_roles,
+            *profile.read_denied_roles,
+            *profile.readable_roles,
+        )
     )
-    paths = {role: _ROLE_RESOLVERS[role](account, env, platform) for role in roles}
-    return ResolvedProfile(profile=profile, account=account, paths=paths)
+    wants_workspace = ROLE_WORKSPACE in roles
+    if wants_workspace and workspace is None:
+        raise WorkspaceError("a ritual session needs a workspace; none was given")
+    if workspace is not None and not wants_workspace:
+        raise WorkspaceError("this profile takes no workspace")
+    paths: dict[str, Path] = {}
+    path_sets: dict[str, tuple[Path, ...]] = {}
+    for role in roles:
+        if role == ROLE_WORKSPACE:
+            paths[role] = validate_workspace(workspace, env=env, platform=platform)
+        elif role in _ROLE_SET_RESOLVERS:
+            path_sets[role] = _ROLE_SET_RESOLVERS[role](account, env, platform)
+        else:
+            paths[role] = _ROLE_RESOLVERS[role](account, env, platform)
+    return ResolvedProfile(profile=profile, account=account, paths=paths, path_sets=path_sets)

@@ -97,6 +97,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from collections.abc import Callable, Iterator, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
@@ -113,7 +114,8 @@ from trailhead.harness.base import (
     SessionStart,
     SessionTranscript,
 )
-from trailhead.launch_profile import BROKER_SERVER
+from trailhead.launch_profile import BROKER_SERVER, ROLE_WORKSPACE
+from trailhead.paths import state_dir
 
 if TYPE_CHECKING:
     from trailhead.launch_profile import BrokerLaunch, ResolvedProfile
@@ -879,6 +881,7 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 # is ``$CLAUDE_CONFIG_DIR/settings.json`` for a bound account, else ``~/.claude/settings.json``.
 
 _SETTINGS_FILENAME = "settings.json"
+_EMPTY_MCP_CONFIG = "empty-mcp-config.json"
 _READ_RULE_RE = re.compile(r"^Read\((?P<spec>[^)]*)\)$")
 
 #: Where Claude Code reads managed settings files (``managed-settings.json`` then every
@@ -911,6 +914,10 @@ def _resolve_settings_path(entry: str, home: Path, launch_dir: Path) -> Path:
         if not path.is_absolute():
             path = launch_dir / path
     return Path(os.path.realpath(path))
+
+
+def _folded(path: Path) -> Path:
+    return Path(*(_fold(part) for part in path.parts))
 
 
 def _covers(parent: Path, child: Path) -> bool:
@@ -950,6 +957,11 @@ _PINNED_OFF = tuple(
 _FILE_WRITE_TOOLS = ("Edit", "Write", "NotebookEdit", "MultiEdit")
 
 
+def _fold(text: str) -> str:
+    """Case- and normalization-insensitive form of a path segment (macOS volumes are both)."""
+    return unicodedata.normalize("NFC", text).casefold()
+
+
 class _ReadRule:
     """A ``Read()`` deny path, as a pattern over path segments that can say whether it covers a root.
 
@@ -958,11 +970,20 @@ class _ReadRule:
     ancestor of it, since a denial of a directory denies everything under it.
     """
 
-    def __init__(self, segments: list[tuple[str, str]]) -> None:
+    def __init__(self, segments: list[tuple[str, str]], *, fold: bool = False) -> None:
         self.segments = segments
+        self.fold = fold
 
     def covers(self, root: Path) -> bool:
-        return any(self._match(self.segments, root.parts[:k]) for k in range(1, len(root.parts) + 1))
+        parts = tuple(_fold(p) for p in root.parts) if self.fold else root.parts
+        return any(self._match(self._segments(), parts[:k]) for k in range(1, len(parts) + 1))
+
+    def _segments(self) -> list[tuple[str, str]]:
+        return [(k, _fold(t)) for k, t in self.segments] if self.fold else self.segments
+
+    def display(self) -> str:
+        """The rule as an absolute path, globs left in place, for a consumer that applies it."""
+        return str(Path("/", *(text for _, text in self.segments)))
 
     @classmethod
     def _match(cls, pattern: list[tuple[str, str]], parts: tuple[str, ...]) -> bool:
@@ -978,7 +999,14 @@ class _ReadRule:
 
 
 def _read_rule_pattern(
-    rule: str, spec: str, source: _Source, anchor: Path | None, home: Path, launch_dir: Path
+    rule: str,
+    spec: str,
+    source: _Source,
+    anchor: Path | None,
+    home: Path,
+    launch_dir: Path,
+    *,
+    fold: bool = False,
 ) -> _ReadRule:
     """Resolve a ``Read(<spec>)`` deny rule the way Claude Code does, or raise.
 
@@ -989,6 +1017,10 @@ def _read_rule_pattern(
     gitignore's. A source with no documented anchor (managed settings) cannot be resolved for
     a single-slash rule, and a glob this check cannot evaluate cannot be proven not to cover
     a profile root: both refuse the launch.
+
+    With *fold* (macOS, whose volumes are case-insensitive) segments are compared
+    case-insensitively, so a rule spelled in another case still covers the root it names;
+    elsewhere they are compared exactly.
     """
     path, kind = source
     if _UNSUPPORTED_GLOB_RE.search(spec):
@@ -1026,7 +1058,8 @@ def _read_rule_pattern(
         return _ReadRule(
             [("lit", part) for part in launch_dir.parts]
             + [("glob", "**")]
-            + [("glob", n) for n in names]
+            + [("glob", n) for n in names],
+            fold=fold,
         )
     literal: list[str] = []
     while names and not _GLOB_RE.search(names[0]):
@@ -1034,7 +1067,7 @@ def _read_rule_pattern(
     anchor_dir = Path(os.path.realpath(base.joinpath(*literal)))
     segments = [("lit", part) for part in anchor_dir.parts]
     segments += [("glob", n) for n in names]
-    return _ReadRule(segments)
+    return _ReadRule(segments, fold=fold)
 
 
 class _UserSettings:
@@ -1046,10 +1079,17 @@ class _UserSettings:
     """
 
     def __init__(
-        self, path: Path, home: Path, launch_dir: Path, *, kind: str = "user-level"
+        self,
+        path: Path,
+        home: Path,
+        launch_dir: Path,
+        *,
+        kind: str = "user-level",
+        platform: str | None = None,
     ) -> None:
         self.path = path
         self.kind = kind
+        fold = (platform if platform is not None else sys.platform) == "darwin"
         data = self._load(path, kind)
         source: _Source = (path, kind)
         sandbox = data.get("sandbox", {})
@@ -1105,16 +1145,25 @@ class _UserSettings:
         deny_read = self._strings(path, fs, "denyRead", "sandbox.filesystem.denyRead") or []
         rules = self._strings(path, permissions, "deny", "permissions.deny") or []
         self.deny_read: list[tuple[str, Callable[[Path], bool], _Source]] = []
+        self.read_denial_paths: list[str] = []
         for entry in deny_read:
             denied = _resolve_settings_path(entry, home, launch_dir)
-            self.deny_read.append((entry, lambda root, d=denied: _covers(d, root), source))
+            self.read_denial_paths.append(str(denied))
+            if fold:
+                self.deny_read.append(
+                    (entry, lambda root, d=denied: _covers(_folded(d), _folded(root)), source)
+                )
+            else:
+                self.deny_read.append((entry, lambda root, d=denied: _covers(d, root), source))
         for rule in rules:
             match = _READ_RULE_RE.match(rule)
             if match:
                 pattern = _read_rule_pattern(
                     rule, match.group("spec"), source,
                     path.parent if kind == "user-level" else None, home, launch_dir,
+                    fold=fold,
                 )
+                self.read_denial_paths.append(pattern.display())
                 self.deny_read.append((rule, pattern.covers, source))
         self.home, self.launch_dir = home, launch_dir
 
@@ -1127,6 +1176,7 @@ class _UserSettings:
         self.unix_sockets += other.unix_sockets
         self.file_grants += other.file_grants
         self.deny_read += other.deny_read
+        self.read_denial_paths += other.read_denial_paths
         self.excluded_commands += [c for c in other.excluded_commands if c not in self.excluded_commands]
         if other.allowed_domains is not None:
             self.allowed_domains = [*(self.allowed_domains or []), *other.allowed_domains]
@@ -1183,7 +1233,7 @@ def _managed_settings(home: Path, launch_dir: Path, platform: str | None = None)
             "refusing the launch"
         ) from exc
     paths += [base / _MANAGED_DROP_IN_DIR / n for n in names if n.endswith(".json") and not n.startswith(".")]
-    return [_UserSettings(p, home, launch_dir, kind="managed") for p in paths]
+    return [_UserSettings(p, home, launch_dir, kind="managed", platform=plat) for p in paths]
 
 
 def _scratch_dirs() -> set[Path]:
@@ -2510,6 +2560,11 @@ class ClaudeCodeHarness(Harness):
         if prompt and prompt.startswith("-"):
             raise HarnessError("the prompt starts with '-', so it would be read as a flag")
         if not Path(directory).is_dir():
+            if ROLE_WORKSPACE in profile.paths:
+                raise HarnessError(
+                    f"the workspace {directory} is not an existing directory; "
+                    "create it with `camp new` before starting a session in it"
+                )
             raise HarnessError(
                 f"the hub home {directory} is not an existing directory; "
                 "run `ranger setup --account <A>` for this hub's account to create it"
@@ -2530,6 +2585,7 @@ class ClaudeCodeHarness(Harness):
             (Path(config_dir) if config_dir else home / ".claude") / _SETTINGS_FILENAME,
             home,
             launch_dir,
+            platform=platform,
         )
         for managed in _managed_settings(home, launch_dir, platform):
             user.absorb(managed)
@@ -2554,7 +2610,10 @@ class ClaudeCodeHarness(Harness):
             ),
         ]
         hosts = profile.profile.network_allowed_hosts
-        _check_reads_and_network(user, roots, hosts)
+        readable = [Path(os.path.realpath(p)) for p in profile.readable]
+        _check_reads_and_network(user, [*roots, *readable], hosts)
+        granted = [self.composed_root(r.parent) for r in readable]
+        deny_write += [str(g) for g in granted]
 
         denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
         settings: dict = {
@@ -2570,6 +2629,7 @@ class ClaudeCodeHarness(Harness):
             },
             "permissions": {
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
+                + [f"Edit(/{g}/**)" for g in granted]
                 + (
                     _edit_denials(
                         user,
@@ -2602,6 +2662,14 @@ class ClaudeCodeHarness(Harness):
                     holder = holder.setdefault(parent, {})
                 holder[key] = False
         files: tuple[SessionFile, ...] = ()
+        if not profile.profile.mcp_servers:
+            files = (
+                SessionFile(
+                    path=str(state_dir("trailhead", env=source) / "launch" / _EMPTY_MCP_CONFIG),
+                    content=json.dumps({"mcpServers": {}}) + "\n",
+                    mode="0600",
+                ),
+            )
         if wants_broker:
             config = {
                 "mcpServers": {
@@ -2635,6 +2703,8 @@ class ClaudeCodeHarness(Harness):
             argv.append("-p")
         argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
         argv += ["--permission-mode", "dontAsk"]
+        for g in granted:
+            argv += ["--add-dir", str(g)]
         if files:
             argv += ["--mcp-config", files[0].path, "--strict-mcp-config"]
         if not interactive:
@@ -2643,7 +2713,20 @@ class ClaudeCodeHarness(Harness):
             argv += ["--effort", profile.profile.effort]
         if prompt:
             argv.append(prompt)
-        return SessionStart(argv=argv, env_set=env_set, env_unset=env_unset, files=files)
+        setup_sandbox = {
+            "allowed_domains": (
+                list(hosts)
+                if user.allowed_domains is None
+                else [d for d in user.allowed_domains if d not in denied_domains]
+            ),
+            "denied_domains": denied_domains,
+            "denied_reads": list(
+                dict.fromkeys([*user.read_denial_paths, *(str(p) for p in denied_reads)])
+            ),
+        }
+        return SessionStart(
+            argv=argv, env_set=env_set, env_unset=env_unset, files=files, setup_sandbox=setup_sandbox
+        )
 
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None

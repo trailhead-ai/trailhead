@@ -1,0 +1,49 @@
+{
+  "argv": [
+    "claude",
+    "-p",
+    "--settings",
+    "{\"enabledMcpjsonServers\":[],\"permissions\":{\"deny\":[\"Read(/<ROOT>/fence/outpost-state/**)\",\"Read(/<ROOT>/fence/ranger-state/hubs/b/**)\",\"Read(/<ROOT>/fence/ranger-cache/mirrors/b/**)\",\"Read(/<ROOT>/fence/lore-state/vaults/bvault/**)\",\"Read(/<ROOT>/fence/home/acct-b/**)\",\"Edit(/<ROOT>/fence/trailhead-state/composed/claude_code/**)\"]},\"sandbox\":{\"allowUnsandboxedCommands\":false,\"enabled\":true,\"failIfUnavailable\":true,\"filesystem\":{\"allowWrite\":[\"<ROOT>/fence/camp-state/grp/worktrees/ws1\",\"<ROOT>/fence/lore-state\",\"<ROOT>/fence/cache\"],\"denyRead\":[\"<ROOT>/fence/outpost-state\",\"<ROOT>/fence/ranger-state/hubs/b\",\"<ROOT>/fence/ranger-cache/mirrors/b\",\"<ROOT>/fence/lore-state/vaults/bvault\",\"<ROOT>/fence/home/acct-b\"],\"denyWrite\":[\"<ROOT>/fence/camp-state/grp/worktrees/ws1/.claude\",\"<ROOT>/fence/camp-state/grp/worktrees/ws1/.mcp.json\",\"<ROOT>/fence/lore-state/*/*/.git/config\",\"<ROOT>/fence/lore-state/*/*/.git/hooks\",\"<ROOT>/fence/lore-state/*/*/.git/info\",\"<ROOT>/fence/trailhead-state/composed/claude_code\"]},\"network\":{\"deniedDomains\":[\"api.anthropic.com\"]}}}",
+    "--permission-mode",
+    "dontAsk",
+    "--add-dir",
+    "<ROOT>/fence/trailhead-state/composed/claude_code",
+    "--mcp-config",
+    "<ROOT>/fence/trailhead-state/launch/empty-mcp-config.json",
+    "--strict-mcp-config",
+    "--permission-prompts",
+    "none",
+    "/craft:slice spec/x --unattended --then-plan"
+  ],
+  "env_set": {},
+  "env_unset": [
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDECODE",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CONFIG_DIR"
+  ],
+  "directory": "<ROOT>/fence/camp-state/grp/worktrees/ws1",
+  "files": [
+    {
+      "path": "<ROOT>/fence/trailhead-state/launch/empty-mcp-config.json",
+      "content": "{\"mcpServers\": {}}\n",
+      "mode": "0600"
+    }
+  ],
+  "setup_sandbox": {
+    "allowed_domains": [],
+    "denied_domains": [
+      "api.anthropic.com"
+    ],
+    "denied_reads": [
+      "<ROOT>/fence/outpost-state",
+      "<ROOT>/fence/ranger-state/hubs/b",
+      "<ROOT>/fence/ranger-cache/mirrors/b",
+      "<ROOT>/fence/lore-state/vaults/bvault",
+      "<ROOT>/fence/home/acct-b"
+    ]
+  }
+}
