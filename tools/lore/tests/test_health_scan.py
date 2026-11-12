@@ -360,16 +360,17 @@ def test_scan_and_count_modify_nothing(scan, inst, writer_open):
     try:
         if writer is not None:
             writer.execute("PRAGMA wal_autocheckpoint=0")
-        db = inst.index_path()
+        # With a writer held open the db, -wal and -shm all exist; every file in
+        # the index directory is compared by bytes and mtime, not only by name.
+        index_before = _snap(idx_dir)
         files_before = sorted(p.name for p in idx_dir.iterdir())
-        db_bytes = db.read_bytes()
         before = _snap(*vault_dirs)
         before_names = {str(p) for d in vault_dirs for p in d.rglob("*")}
         res = _full_run(scan, inst)
         assert all(c.status == scan.INDEX_OK for c in res.values())
         assert _snap(*vault_dirs) == before
         assert {str(p) for d in vault_dirs for p in d.rglob("*")} == before_names
-        assert db.read_bytes() == db_bytes
+        assert _snap(idx_dir) == index_before
         assert sorted(p.name for p in idx_dir.iterdir()) == files_before
     finally:
         if writer is not None:
