@@ -48,9 +48,10 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 
 At the merge tier (plan ``tier`` is ``merge``) a ``merge_only`` case that is not-run stops the
 change too: exit 1, the report line ``merge-only-not-run: <cases>``, then one line per case naming its
-not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: re-run
-after the limit resets; any other reason: merge by hand), repeated in the section. A merge-only case that
-can never run (``case-removed-on-branch``, ``corpus-new-on-branch``) is reported as on push and does not
+not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: raise the
+case's ``max_cost_usd`` or merge by hand; ``runner-error`` and ``runs-errored``: re-run after the usage limit
+resets, or merge by hand; ``head-moved``: re-plan at the current head; any other reason: merge by hand),
+repeated in the section. A merge-only case that can never run (``case-removed-on-branch``, ``corpus-new-on-branch``) is reported as on push and does not
 stop the change. A not-run core case still lets the change through, as on push.
 
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
@@ -80,6 +81,7 @@ from .run import (
     RUNNER_MISSING,
     CASE_REMOVED,
     CORPUS_NEW,
+    HEAD_MOVED,
     SANDBOX_UNWRITABLE,
     RunRefused,
     check_state,
@@ -111,6 +113,8 @@ REASONS = {
     CASE_REMOVED: "the branch removes this case; it was not run — review the removal",
     CORPUS_NEW: ("this corpus is new on the branch, so its runner grants are unreviewed and its "
                  "cases were not run — review the grants"),
+    HEAD_MOVED: ("the repo's head or a tracked file changed after the plan was made, so the case "
+                 "was not run"),
     NO_RESULT: "no usable result was recorded for this case",
 }
 
@@ -296,7 +300,11 @@ def _merge_only_recovery(reason: str) -> str:
     if reason == "timeout":
         return "the runs split and the budget ran out; re-run the merge-tier gate"
     if reason == "cost-cap":
-        return "the runner hit its cost limit; re-run after the limit resets"
+        return "the case hit its own cost ceiling; raise its `max_cost_usd` or merge by hand"
+    if reason in ("runner-error", "runs-errored"):
+        return "re-run after the usage limit resets, or merge by hand"
+    if reason == HEAD_MOVED:
+        return "re-plan at the current head"
     return f"{REASONS[reason]}; merge by hand"
 
 

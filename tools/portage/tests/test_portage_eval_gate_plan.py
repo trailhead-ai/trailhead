@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import stat
 import subprocess
 from pathlib import Path
@@ -401,6 +402,7 @@ class TestBranchHistoryShapes:
         state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
         empty = tmp_path / "empty-bin"
         empty.mkdir()
+        (empty / "git").symlink_to(shutil.which("git"))
         monkeypatch.setenv("PATH", str(empty))
         assert dispatch.main(["eval-gate", "run", "--state", str(state), "--case", "alpha"]) == 0
         assert "reason: case-removed-on-branch" in capsys.readouterr().out

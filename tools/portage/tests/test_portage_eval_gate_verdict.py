@@ -781,7 +781,8 @@ class TestMergeTierUnrunnableCases:
         _, out, _ = verdict(capsys, st)
         assert f"`slow` — `{reason}`" in section_of(out)
 
-    @pytest.mark.parametrize("reason", ["timeout", "cost-cap", "runner-error", "runs-errored"])
+    @pytest.mark.parametrize("reason", ["timeout", "cost-cap", "runner-error", "runs-errored",
+                                        "head-moved"])
     def test_a_merge_only_case_that_could_still_run_stops_the_change(self, st, capsys, reason):
         _slow_not_run(st, reason)
         code, out, _ = verdict(capsys, st)
@@ -806,9 +807,11 @@ class TestMergeTierUnrunnableCases:
 class TestMergeOnlyNotRunRecovery:
     @pytest.mark.parametrize("reason,recovery", [
         ("timeout", "the runs split and the budget ran out; re-run the merge-tier gate"),
-        ("cost-cap", "the runner hit its cost limit; re-run after the limit resets"),
-        ("runner-error", "merge by hand"),
-        ("runs-errored", "merge by hand"),
+        ("cost-cap", "the case hit its own cost ceiling; raise its `max_cost_usd` or merge by hand"),
+        ("runner-error", "re-run after the usage limit resets, or merge by hand"),
+        ("runs-errored", "re-run after the usage limit resets, or merge by hand"),
+        ("head-moved", "re-plan at the current head"),
+        ("runner-missing", "the eval runner binary was not found on this machine; merge by hand"),
     ])
     def test_each_not_run_case_names_its_reason_and_the_matching_recovery(
         self, st, capsys, reason, recovery
@@ -829,4 +832,5 @@ class TestMergeOnlyNotRunRecovery:
         assert "re-run the merge-tier gate" in timeout_out
         assert "re-run the merge-tier gate" not in other_out
         assert "merge by hand" not in timeout_out
-        assert "after the limit resets" not in other_out
+        assert "usage limit resets" not in timeout_out
+        assert "usage limit resets" in other_out

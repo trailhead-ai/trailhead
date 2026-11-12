@@ -13,6 +13,7 @@ import copy
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -107,8 +108,11 @@ class Env:
         self.state.mkdir()
         self.state.chmod(0o700)
         self.mp = monkeypatch
+        self.git_exe = shutil.which("git")
+        (self.bin / "git").symlink_to(self.git_exe)
         monkeypatch.setenv("HOME", str(self.home))
         monkeypatch.setenv("PATH", str(self.bin))
+        monkeypatch.delenv("PORTAGE_CACHE_DIR", raising=False)
         monkeypatch.setenv("USER", "tester")
         monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
@@ -116,9 +120,26 @@ class Env:
         self.cases = [{"plugin_root": "plugins/p", "case": "c1", "runs": 3, "pass_at": 2,
                        "runner": RUNNER, "new_runner_grants": False}]
 
+    def git(self, *args: str) -> str:
+        return subprocess.run(
+            [self.git_exe, "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t",
+             "-c", "commit.gpgsign=false", *args],
+            check=True, capture_output=True, text=True).stdout.strip()
+
+    def commit(self) -> str:
+        """Commit whatever the repo holds (initialising it first) and return the new HEAD."""
+        if not (self.repo / ".git").exists():
+            self.git("init", "-q", "-b", "main")
+        self.git("add", "-A")
+        self.git("commit", "-q", "--allow-empty", "-m", "c")
+        return self.git("rev-parse", "HEAD")
+
     def plan(self, **over) -> None:
+        """Write plan.json for the repo as committed now (committing any pending change first)."""
+        dirty = not (self.repo / ".git").exists() or self.git("status", "--porcelain")
+        head = self.commit() if dirty else self.git("rev-parse", "HEAD")
         doc = {"schema_version": 1, "status": "cases-selected", "repo": str(self.repo),
-               "cases": self.cases}
+               "head": head, "cases": self.cases}
         doc.update(over)
         (self.state / "plan.json").write_text(json.dumps(doc))
 
@@ -686,7 +707,7 @@ class TestChildIsReaped:
         calls = []
 
         def interrupted(self, timeout=None):
-            if calls:
+            if calls or self.args[0] == "git":
                 return real_wait(self, timeout)
             calls.append(1)
             for _ in range(100):
@@ -934,3 +955,45 @@ class TestCheckState:
         monkeypatch.setattr(os, "geteuid", lambda: os.stat(d).st_uid + 1)
         with pytest.raises(RunRefused, match="another user"):
             check_state(d)
+
+
+class TestResultsBindToThePlannedHead:
+    def _refused(self, env):
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["cached"]) == ("not-run", "head-moved", False)
+        assert not env.started
+
+    def test_a_commit_after_the_plan_is_refused_before_any_runner_starts(self, env):
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        (env.repo / "later.txt").write_text("more\n")
+        env.commit()
+        self._refused(env)
+
+    def test_an_uncommitted_edit_to_a_tracked_file_is_refused(self, env):
+        (env.repo / "tracked.txt").write_text("one\n")
+        env.plan()
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        (env.repo / "tracked.txt").write_text("two\n")
+        self._refused(env)
+
+    def test_an_untracked_file_does_not_move_the_head(self, env):
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        (env.repo / "scratch.txt").write_text("untracked\n")
+        assert env.run() == 0
+        assert env.result()["verdict"] == "pass"
+        assert env.started
+
+    def test_a_plan_without_a_head_is_refused(self, env):
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        doc = json.loads((env.state / "plan.json").read_text())
+        del doc["head"]
+        (env.state / "plan.json").write_text(json.dumps(doc))
+        self._refused(env)
+
+    def test_a_repo_that_is_not_a_git_work_tree_is_refused(self, env):
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        doc = json.loads((env.state / "plan.json").read_text())
+        doc["repo"] = str(env.tmp / "elsewhere")
+        (env.state / "plan.json").write_text(json.dumps(doc))
+        self._refused(env)

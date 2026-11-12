@@ -81,7 +81,9 @@ call, counting every batch, so give the tool call a 600000 ms timeout) and recor
   (below), or the branch removes the case (`case-removed-on-branch`: the case was selected but its
   `case.yaml` is gone, so nothing ran), or its corpus is new on the branch (`corpus-new-on-branch`: this
   corpus is new on the branch, so its runner grants are unreviewed and its cases were not run — review the
-  grants). A not-run case is never a pass and never a fail.
+  grants), or the repo's `HEAD` is no longer the plan's `head`, or a tracked file differs from it
+  (`head-moved`: a result describes the head the plan was made at, so `run` checks before it looks anything
+  up or starts anything; plan again at the current head). A not-run case is never a pass and never a fail.
 
 A case is decided in batches, not in one call for all its `runs`. The first call asks for the fewest runs
 that could decide it, `min(pass_at, runs - pass_at + 1)`: two for the default three runs, two to pass. When
@@ -170,7 +172,9 @@ a change that touches one without a current verdict.
 3. `portage eval-gate verdict --state <dir>` exits 0 or 1. At the merge tier a not-run `merge_only` case
    stops the change (exit 1, reason `merge-only-not-run`), and the verdict names each case's not-run reason
    and its recovery: `timeout` (the runs split and the budget ran out) means re-run the merge-tier gate,
-   `cost-cap` means re-run after the limit resets, any other reason means merge by hand. A `merge_only` case
+   `cost-cap` (the case hit its own cost ceiling) means raise its `max_cost_usd` or merge by hand,
+   `runner-error` and `runs-errored` mean re-run after the usage limit resets, or merge by hand, `head-moved`
+   means re-plan at the current head, any other reason means merge by hand. A `merge_only` case
    that can never run, because the branch removes it (`case-removed-on-branch`) or its corpus is new on the
    branch (`corpus-new-on-branch`), is reported as on push and does not stop the change. A not-run core case
    still lets the change through, as on push.

@@ -10,7 +10,7 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
-                    | "case-removed-on-branch" | "corpus-new-on-branch",
+                    | "case-removed-on-branch" | "corpus-new-on-branch" | "head-moved",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
@@ -87,6 +87,11 @@ that is a symlink, owned by another user or group- or world-writable makes the c
 ``runner-error`` (a stderr line names the problem) and no runner starts. The directory is placed
 through the harness's ``eval_runner`` hook (``tmpdir``).
 
+A result describes the head the plan was made at. Before it looks anything up or starts anything, ``run``
+asks git in the plan's ``repo``: unless ``HEAD`` is the plan's ``head`` and no tracked file differs
+from it (untracked files do not count), the case is recorded as not-run ``head-moved`` (a plan with
+no ``head``, or a repo git cannot answer for, is the same). Plan again at the current head.
+
 A plan entry with ``new_runner_grants`` true (its corpus has no mapping at the base, so its
 runner grants are unreviewed) is recorded as not-run ``corpus-new-on-branch`` the same way: no
 harness lookup, no canary, no runner.
@@ -136,6 +141,7 @@ RUNS_ERRORED = "runs-errored"
 SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
 CASE_REMOVED = "case-removed-on-branch"
 CORPUS_NEW = "corpus-new-on-branch"
+HEAD_MOVED = "head-moved"
 RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
@@ -224,6 +230,22 @@ def _plugin_dir(plan: dict, entry: dict) -> Path:
     if root.is_absolute() or ".." in root.parts:
         raise RunRefused(f"plugin root {entry['plugin_root']!r} leaves the repo")
     return Path(plan["repo"]) / root
+
+
+def _at_planned_head(plan: dict) -> bool:
+    """Whether ``plan["repo"]`` is at ``plan["head"]`` with no tracked file modified. Any failure
+    to ask git is a no."""
+    head, repo = plan.get("head"), plan.get("repo")
+    if not isinstance(head, str) or not isinstance(repo, str):
+        return False
+    try:
+        now = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True)
+        dirty = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True)
+    except OSError:
+        return False
+    return (now.returncode == 0 and dirty.returncode == 0
+            and now.stdout.strip() == head and not dirty.stdout.strip())
 
 
 def _runs_of(doc: object) -> list[dict] | None:
@@ -360,6 +382,8 @@ def run_case(
     plan, entry = _load_case(state, case)
     plugin_dir = _plugin_dir(plan, entry)
     n, pass_at = entry["runs"], entry["pass_at"]
+    if not _at_planned_head(plan):
+        return _record(state, case, _not_run(case, n, HEAD_MOVED))
     if entry.get("case_removed") is True:
         return _record(state, case, _not_run(case, n, CASE_REMOVED))
     if entry.get("new_runner_grants") is True:

@@ -60,6 +60,7 @@ def _run_twice(env, between=None):
     before = len(env.case_calls)
     if between:
         between()
+        env.plan()
     assert env.run() == 0
     return first, env.result(), len(env.case_calls) - before
 
@@ -235,3 +236,15 @@ class TestFingerprint:
         a = self._fp(env)
         outside.write_text("two\n")
         assert self._fp(env) == a
+
+
+class TestACachedPassIsNotReusedAcrossAMovedHead:
+    def test_a_moved_head_is_refused_before_the_cache_is_read(self, env):
+        assert env.run() == 0
+        assert len(_cache_files(env)) == 1
+        calls = len(env.calls)
+        env.git("commit", "-q", "--allow-empty", "-m", "later")
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["cached"]) == ("not-run", "head-moved", False)
+        assert len(env.calls) == calls
