@@ -43,8 +43,8 @@ makes the observation gate refuse the close), the remaining lists are certified 
 `--base` of that re-read. Any parent refusal from this re-read on
 (`not-a-slice-parent`, `unreadable-parent`, `would-empty-slice`, the covers gate's own code, and a
 write that does not take, `stale-parent` or `parent-write-failed`) says in its `reason:` that the
-spec entry already landed: a re-run finds the entry present and finishes the parent. A criterion already off the parent at the re-read leaves it
-unwritten (`parent: already-updated`).
+spec entry already landed: a re-run finds the entry present and finishes the parent. A criterion
+already off the parent at the re-read leaves it unwritten (`parent: already-updated`).
 
 Stdout on success: one `set aside: ACn` per entry, then `spec: written|already-present`, and
 with `--parent` `parent: updated|already-updated`. Entry text is never echoed in a `reason:`
