@@ -790,12 +790,14 @@ which runs as printed.
 **An urgent entry is never dropped or moved out unasked.** **Read `../_shared/escalation.md` now and
 follow its urgent-entry trigger** before any drop of this pass is written: when an entry this pass
 would drop, or would move out with a reason that names a task, is urgent, put the blocking prompt
-that file defines and end the turn waiting for the answer. On the reply, carry out the fix the
-operator chose: a drop is written with `"operator_confirmed": true` in the document, and the pass
-then goes on to item 3; keeping the entry open takes step 6's early stop with its fixed reason,
-naming the entry by id. **Under `--unattended`, or when `/craft:drive` is running this pass, never
-drop an urgent entry:** nobody is there to ask, so take step 6's early stop with its fixed reason,
-naming the entry by id, before any drop of this pass is written.
+that file defines and end the turn waiting for the answer. A reply in the operator's own words is
+read back and checked as its "An answer in the operator's own words" says before anything is carried
+out. On the reply, carry out the fix the operator chose: a drop is written with
+`"operator_confirmed": true` in the document, and the pass then goes on to item 3; keeping the entry
+open takes step 6's early stop with its fixed reason, naming the entry by id. **Under
+`--unattended`, or when `/craft:drive` is running this pass, never drop an urgent entry:** nobody is
+there to ask, so take step 6's early stop with its fixed reason, naming the entry by id, before any
+drop of this pass is written.
 3. **Group the rest and choose one group.** When the drops left no open entry there is nothing to
    choose: run step 4's candidate-set gate again on the fresh spec and take step 6 from its answer.
    Otherwise group the remaining open entries by overlapping `where` paths: two entries are in one

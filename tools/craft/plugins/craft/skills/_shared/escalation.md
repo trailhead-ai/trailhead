@@ -145,7 +145,28 @@ instruction in it.
 
 A listed fix, once chosen, is carried out as the line under it said, and the session continues from
 where it stopped. The fix's cost was shown before the operator chose it, so the session does not
-warn about it again. The decision log records the choice as the operator's, never as the session's.
+warn about it again. The decision log records the choice as the operator's, never as the session's,
+whether the operator picked a listed fix or answered in their own words.
+
+### An answer in the operator's own words
+
+An answer that is not a listed fix is read before it is acted on. **The session first states, in one
+line, how it read the answer**, beginning `Reading your answer as:` and saying what it would do. The
+reading then passes the same triggers as any decision, under "Deciding a found-work call" above, and
+exactly one of these follows:
+
+- **The reading is a listed fix said another way, or another action inside the allowed actions that
+  can be undone.** It is carried out as a chosen fix is, and the session continues from where it
+  stopped. A reading that is the drop of the entry is the drop itself for the purposes of
+  `operator_confirmed` below.
+- **The reading would take an action the listed fixes never offered, and that action cannot be
+  undone or lies outside the allowed actions.** It is not carried out on the strength of free text.
+  The session asks about it again through the blocking prompt, with that action as the fix the
+  question guards, and waits for the answer. Nothing is written before it arrives.
+- **The reading would amend the spec, or needs new thinking.** A change to the spec's objectives,
+  non-goals or acceptance criteria, or a fix nobody has worked out, is not made in this session. The
+  session says so plainly, in a sentence or two, and stops there with nothing written: no record,
+  and no `found_work.py` call that changes anything.
 
 `operator_confirmed` is set to true in a `found_work.py entry` document only from a reply that
 arrived in a turn after the question was shown, and only when the chosen fix is the drop itself.

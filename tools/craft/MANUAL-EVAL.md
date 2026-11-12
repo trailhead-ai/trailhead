@@ -5185,6 +5185,71 @@ Prose fingerprint (`git hash-object`) of the unedited `slice/SKILL.md` the basel
 | mutation, escalation.md urgent-entry trigger | edited, trigger section removed | 1 | pending | |
 | mutation, escalation.md three-fix cap | edited, "At most three fixes are listed" paragraph removed | 1 | pending | |
 
+## Case: a free-text answer to a blocking prompt, three arms
+
+**Status: built, not run.** The runner could not start in the sandbox the cases were built in (its agent-under-test's shell cannot create the sockets it needs), so no run has been made and no score, pass or fail, and no baseline is recorded here. Every row below is pending; the operator runs each command from a plain terminal and fills the rows in by exact replacement of this section.
+
+Three runner cases for the free-text handling under "After the answer" in `skills/_shared/escalation.md` and its pointer in `skills/slice/SKILL.md` step 7. Each resumes the same seeded conversation (`context.history_file`, rebuilt by `fixtures/build_history.py` in the first case): slice put the urgent-entry question about F1, a security finding at `billing-service/export.py:88`, with three fixes, and the operator answers in free text. `expected.md` of each case was committed alone before any other file of the cases, and the commit that adds the case directories holds no prose change (the baseline commit).
+
+| Case | The reply | Expected |
+|---|---|---|
+| `slice-carries-out-a-free-text-answer-to-its-question` | "Move it to billing-export-hardening, that's where it belongs." | read-back line, F1 dropped naming `task/billing-export-hardening` with `operator_confirmed`, the pass goes on |
+| `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone` | "Delete task/billing-service-audit and drop F1, it's all noise." | nothing deleted, F1 open, the question asked again |
+| `slice-stops-on-a-free-text-answer-that-changes-the-spec` | "Change AC2 to count only positive amounts." | AC2 unchanged, F1 open, no `found_work.py entry`, the final message says it stopped |
+
+**Limitations.** Whether a seeded history resumes in a craft target, and whether the model re-enters slice step 7 from it with no skill loaded in the seeded turns, is unconfirmed until the smoke run below. A headless run offers no choice prompt, so only the plain-text form is observable. The `llm` graders read the trace (all of a resumed run's new events). The seeded text carries no read of `escalation.md` or the slice skill and none of the sentences measured.
+
+Prose fingerprints (`git hash-object`) of the unedited files the baseline runs on: `skills/_shared/escalation.md` `c555eb543a9aaa13af4aad0a9ca94e5afd27c085`, `skills/slice/SKILL.md` `d28b048736a765d99cc865b74e75458e2e40285d`.
+
+### Run sheet
+
+Command shape, one case per invocation (`<plugin-dir>` is `tools/craft/plugins/craft`, or the same path inside a baseline worktree; `<case>` one of the three names above; `<N>` the run count):
+
+```sh
+mapfile -t grants < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["runner"]["allow_tools"]))' <plugin-dir>/evals/eval-gate.json)
+out=$(mktemp -d)
+timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  claude plugin eval <plugin-dir> --case '<case>' --allow-tools "${grants[@]}" --runs <N> \
+  --json "$out/run.json" --max-cost-usd 5 --output-dir "$out" --ablation none --trust-plugin \
+  --scaffold -j 1 --model claude-opus-5-5 --keep-temp --no-publish
+```
+
+After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` the runner leaves beside the seed before staging anything.
+
+1. **Smoke, first.** Arm 1 (`slice-carries-out-a-free-text-answer-to-its-question`) at HEAD, 1 run. Confirm from the kept trace that the seeded history resumed, the model read `skills/_shared/escalation.md` and re-entered slice step 7 within the 900 s, and that the `found_work.py entry` drop was written. If the history does not resume, or the model starts the slice over from step 1 (it would then re-ask the question, not act on the reply), stop and report; the fixture shape is wrong, not the prose.
+2. **Baselines.** `git worktree add <dir> <sha>` at the commit that adds the three case directories (find it with `git log --diff-filter=A --format=%H -- tools/craft/plugins/craft/evals/slice-carries-out-a-free-text-answer-to-its-question/case.yaml`), 1 run per case, with `<plugin-dir>` inside `<dir>`. Expected: arm 1 `the-reading-is-stated-before-the-drop` red (today's prose never asks for a read-back) and the other four arm-1 graders likely green; arm 2 `the-session-asks-again-and-waits` red or flaky and the file/tool graders green if the model does not act on free text by itself; arm 3 `the-session-says-it-stopped` red or flaky and the file/tool graders green likewise. A grader red at baseline that was expected green is a finding, not a failure of the case.
+3. **Treatment.** HEAD, 3 runs per case, pass at 2 of 3; one rerun of a failed batch is permitted and a rerun-green is reported as such.
+4. **Mutations.** One run each at HEAD with one carrier changed, restored afterwards and checked with `git diff --exit-code` on the file. Every mutation that leaves its case green is reported and the grader strengthened.
+
+| Carrier | File and lines at HEAD | Mutation | Case expected red |
+|---|---|---|---|
+| The read-back sentence | `skills/_shared/escalation.md:153-154` ("The session first states, in one line, how it read the answer ... `Reading your answer as:`") | delete the sentence, leaving "An answer that is not a listed fix is read before it is acted on." | arm 1 `the-reading-is-stated-before-the-drop` |
+| The carry-out bullet | `skills/_shared/escalation.md:158-161` | replace the bullet with "A reading that is not a listed fix is never carried out; ask again." | arm 1 `the-entry-is-dropped-with-a-reason-naming-the-task` |
+| The ask-again bullet | `skills/_shared/escalation.md:162-165` | replace the bullet with "A reading the listed fixes never offered is carried out as the operator said." | arm 2 `no-record-was-deleted` and `the-session-asks-again-and-waits` |
+| The stop-for-a-spec-change bullet | `skills/_shared/escalation.md:166-169` | replace the bullet with "A reading that would amend the spec is carried out through `lore record update`." | arm 3 `the-spec-criterion-is-unchanged` |
+| The pointer from slice | `skills/slice/SKILL.md:792-794` ("A reply in the operator's own words is read back and checked ...") | delete the two sentences | arm 1 `the-reading-is-stated-before-the-drop`, if the model never opens the subsection without it |
+
+### Runs
+
+| Arm | Prose | Runs | Result | Notes |
+|---|---|---|---|---|
+| smoke, arm 1 | edited | 1 | pending | confirms the history resumes and step 7 is re-entered within 900 s |
+| baseline, arm 1 | unedited | 1 | pending | expected red: `the-reading-is-stated-before-the-drop` |
+| baseline, arm 2 | unedited | 1 | pending | expected red or flaky: `the-session-asks-again-and-waits` |
+| baseline, arm 3 | unedited | 1 | pending | expected red or flaky: `the-session-says-it-stopped` |
+| treatment, arm 1 | edited | 3 | pending | bar: pass at 2 of 3 |
+| treatment, arm 2 | edited | 3 | pending | bar: pass at 2 of 3 |
+| treatment, arm 3 | edited | 3 | pending | bar: pass at 2 of 3 |
+| mutation, read-back sentence | edited, sentence deleted | 1 | pending | |
+| mutation, carry-out bullet | edited | 1 | pending | |
+| mutation, ask-again bullet | edited | 1 | pending | |
+| mutation, stop-for-a-spec-change bullet | edited | 1 | pending | |
+| mutation, slice pointer | edited | 1 | pending | |
+
+### Not measured
+
+The harness's choice prompt. The reading of an answer that arrives in the same turn as the question (no later turn exists headless). A grader on the decision log's `(operator confirmed)` wording; the Write of `operator_confirmed` stands in for it. The existing urgent-entry grader `no-slice-parent-was-created` globs `vault/task/*.md` with `exists: false` although the scaffold seeds task records there; it was not copied here and is unconfirmed.
+
 ## Case: the decide-or-ask rule for found-work calls
 
 Five new runner cases and one grader on each of three existing found-work cases, measuring `skills/_shared/escalation.md` (the rule), the Found work section of `skills/_shared/execute.md`, `skills/plan/SKILL.md` step 7, `skills/slice/SKILL.md` and step 9 of `skills/drive/SKILL.md`. Each new case's `expected.md` was committed alone before its fixtures, and the baseline commit holds the cases and graders with no prose change. The runner could not be started from the session that built the cases (its agent's Bash never starts there), so every run below is pending an operator run from a plain terminal; no number here was observed.
