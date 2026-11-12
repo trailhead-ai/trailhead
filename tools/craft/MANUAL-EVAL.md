@@ -5285,3 +5285,48 @@ Five new runner cases and one grader on each of three existing found-work cases,
 ### Not measured
 
 The harness's choice prompt (headless runs offer none). The unattended-slice arm of the no-one-to-answer rule has no case here. Whether each new fixture reaches its decision is unconfirmed until the smoke run.
+
+## Case: an entry a slice failed to build, attended and unattended
+
+**Status: built, not run.** The runner could not start in the sandbox the cases were built in (its agent-under-test's shell cannot create the sockets it needs), so no run has been made and no score, pass or fail, and no baseline is recorded here. Every row below is pending; the operator runs each command from a plain terminal and fills the rows in by exact replacement of this section.
+
+Two runner cases for `skills/slice/SKILL.md` step 7 rule 1 (an open entry that an earlier entries-only slice closed without building). `slice-asks-about-an-entry-a-slice-failed-to-build` runs `/craft:slice spec/parcel-labels`; the expected behaviour is the blocking prompt of `skills/_shared/escalation.md` offering a drop that names `task/label-tool-releases-the-files-it-opens` (recommended), a restore as a new entry, and stopping the loop, with nothing written and no re-run of slice named. `unattended-slice-names-the-remedy-for-an-entry-a-slice-failed-to-build` runs the same fixture under `--unattended`; the expected behaviour is the early stop stays (`craft/slice-loop=stopped`, `outcome: needs-a-decision`) with its report and outcome line naming the drop and restore in words and no command that runs slice. `expected.md` of each case was committed alone before any other file of the cases; the commit that adds the case directories holds no prose change (the baseline commit).
+
+**Limitations.** A headless run offers no choice prompt, so only the plain-text form is observable. The case stops at the question: carrying out the chosen drop or restore, and the pass that continues, are not observed. The driver path (`/craft:drive` running the pass) has no case; it follows the unattended arm's text.
+
+Prose fingerprints (`git hash-object`) of the unedited files the baseline runs on: `skills/slice/SKILL.md` `c2712ff6ad94a41edcc6e733e606d05f4eb3dafe`, `skills/_shared/escalation.md` `2d43e80a2136b2cf122007537f3bf081c3ea7a07`. Baseline worktree: `git worktree add <dir> <the baseline commit, the one that adds the case directories>`; its `<plugin-dir>` is `<dir>/tools/craft/plugins/craft`.
+
+### Run sheet
+
+Command shape, one case per invocation (`<plugin-dir>` is `tools/craft/plugins/craft`, or the same path inside a baseline worktree; `<N>` the run count):
+
+```sh
+mapfile -t grants < <(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["runner"]["allow_tools"]))' <plugin-dir>/evals/eval-gate.json)
+out=$(mktemp -d)
+timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_STATE_HOME \
+  claude plugin eval <plugin-dir> --case '<case>' --allow-tools "${grants[@]}" --runs <N> \
+  --json "$out/run.json" --max-cost-usd 5 --output-dir "$out" --ablation none --trust-plugin \
+  --scaffold -j 1 --model claude-opus-5-5 --keep-temp --no-publish
+```
+
+### Runs
+
+| Arm | Prose | Runs | Result | Expected |
+|---|---|---|---|---|
+| baseline, attended case | unedited | 1 | pending | red: `no-early-stop-label-was-written`, `the-turn-ends-waiting-for-the-reply`, `the-question-offers-drop-restore-and-stop-with-their-costs`, `the-first-listed-fix-is-the-drop-naming-the-task-that-holds-the-work`, `the-question-says-what-is-at-stake`, `the-message-does-not-tell-the-operator-to-re-run-slice`; green: the entry-still-open, no-drop, no-slice-parent and the two naming graders |
+| baseline, unattended case | unedited | 1 | pending | red: `the-outcome-line-names-dropping-and-restoring`, `the-report-names-dropping-and-restoring`; green: the rest |
+| treatment, attended case | edited | 3 | pending | bar: pass at 2 of 3; one rerun permitted and reported |
+| treatment, unattended case | edited | 3 | pending | bar: pass at 2 of 3 |
+| `slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered` | edited | 3 | pending | must stay green (pass at 2 of 3) |
+
+### Carrier mutations
+
+One run each on the edited prose, a single carrier changed, case named in the last column; a mutation that leaves its case green is reported and the grader strengthened.
+
+| Carrier | Where | Mutation | Case |
+|---|---|---|---|
+| step 7 rule 1, attended branch | `skills/slice/SKILL.md` item 1, the `**Attended.**` bullet | replace the bullet with "Take step 6's recorded early stop, naming the entry by id and the slice that did not build it, and tell the operator to re-run this skill" | attended |
+| step 7 rule 1, unattended bullet | `skills/slice/SKILL.md` item 1, the `**Under --unattended, or when /craft:drive is running this pass**` bullet | delete the sentence "Its report and its outcome line name the two ways out in words, as step 6 says, and print no command that runs this skill." | unattended |
+| step 6, the early-stop paragraph for an entry a slice failed to build | `skills/slice/SKILL.md`, the paragraph beginning "An early stop for an entry an earlier slice failed to build names its way out" | delete the paragraph | unattended |
+| Outcome early-stop handoff | `skills/slice/SKILL.md`, the paragraph beginning "The exception is an early stop for an entry" | delete the paragraph | attended (choosing stop is not observed; expected green, reported as unobserved) and unattended |
+| prompt shape | `skills/_shared/escalation.md`, section "The question", the four-part list | remove part 3 (the fixes) | attended |

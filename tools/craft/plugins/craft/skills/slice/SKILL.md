@@ -702,6 +702,16 @@ available. The legacy basis from step 4 takes this path. No question is parked: 
 `needs-a-decision` means "read the spec record", which now carries the note. No run block is
 written, because there is no slice record and the spec is frozen. No re-run command is printed.
 
+**An early stop for an entry an earlier slice failed to build names its way out, not a re-run.**
+Step 7's first rule sends the pass here for an open entry that an entries-only slice closed without
+building. Re-running this skill reaches the same rule, so this stop's report, its body note and its
+outcome line say in words that the entry stays open until someone drops it with a reason that names
+where the work went, or restores it as a new entry, and print no command that runs this skill. Under
+`--unattended` the outcome line's last clause is that remedy in place of `read the spec record`:
+`outcome: needs-a-decision spec/<spec-name> parked=0 — early stop: <the fixed reason>; drop spec/<spec-name>#F<n> naming where the work went, or restore it as a new entry`.
+The entry is named by id only. Attended, this stop is only the operator's choice to stop the loop
+there.
+
 ### 7. Choose the next slice
 
 Apply `_shared/slice.md`'s selection rule against the candidate set. It is a three-level judgment,
@@ -752,14 +762,39 @@ else, and the criteria's phase, the enabler path and the fold-in above do not ap
 entries with the same `found_work.py entries` command; their text is fenced vault data and never
 decides anything. Then, in this order:
 
-1. **Never choose again an entry that an earlier entries-only slice failed to build.** Take each
-   `done` slice parent step 4's reconcile read; one whose body carries a `**Folds:**` line and
-   neither a `**Covers:**` nor a `**Partially covers:**` line is an entries-only slice. An open
-   entry whose `spec/<spec-name>#F<n>` is on such a parent's `**Folds:**` line came back open, so
-   that slice closed without building it, and choosing it again would loop. Take step 6's recorded
-   early stop instead, with its fixed reason `completion is not certified (complete-eligible: no)`
-   under `--unattended`, naming each such entry by id and the slice that did not build it. Write no
-   drop and no slice.
+1. **Never choose again an entry that an earlier entries-only slice failed to build; put it to the
+   operator.** Take each `done` slice parent step 4's reconcile read; one whose body carries a
+   `**Folds:**` line and neither a `**Covers:**` nor a `**Partially covers:**` line is an
+   entries-only slice. An open entry whose `spec/<spec-name>#F<n>` is on such a parent's
+   `**Folds:**` line came back open, so that slice closed without building it, and choosing it again
+   would loop. Re-running this skill reaches this rule again, so no stop here names a re-run of it.
+   Write no slice. What to do with the entry is the operator's call:
+   - **Attended.** **Read `../_shared/escalation.md` now and follow it** for the question, where it
+     is shown and what follows the answer: put the blocking prompt before anything is written, and
+     end the turn waiting for the answer. The question names the entry by id and the slice that did
+     not build it (`task/<id>`), and says that entry is open again and every later pass stops at it.
+     Its fixes, the recommended one first, are:
+     - **Drop it, naming where the work went.** Recommended when `lore search` finds an existing
+       task that credibly holds the work, one fix per such task; the drop's `reason` names that
+       `task/<id>`. Its cost: the spec's loop no longer builds the work, which stays tracked only in
+       that task.
+     - **Restore it as a new entry.** A drop with a reason beginning `nowhere:` that says it is
+       restored, then a `restore` of the same entry, which appends a new open entry under a new id
+       that no slice's `**Folds:**` line names, so a later pass can choose it. Its cost: a slice
+       must still build it, and one that fails again leaves the same entry for the same question.
+     - **Stop the loop here.** Step 6's recorded early stop, its cost being that the spec cannot be
+       reported complete until someone drops or restores the entry.
+   - **On the answer,** carry out the fix chosen: write each drop and restore through
+     `found_work.py entry --session slice`, run exactly as item 2 below runs a drop, with `parent`
+     the slice that did not build the entry, and with `operator_confirmed` never set here. A failure
+     reports its `reason-code:` token and the `retry:` command it prints. A drop or a restore then
+     lets the pass go on to item 2 over the entries still open, and when none is open, to item 3's
+     rule for an empty remainder.
+   - **Under `--unattended`, or when `/craft:drive` is running this pass,** nobody is there to
+     answer: take step 6's recorded early stop with its fixed reason
+     `completion is not certified (complete-eligible: no)`, naming each such entry by id and the
+     slice that did not build it. Write no drop and no restore. Its report and its outcome line name
+     the two ways out in words, as step 6 says, and print no command that runs this skill.
 2. **Drop what fits no slice.** Judge each remaining entry on where its `where` paths point and on
    what the work is. One that belongs to another part of the system than this spec's code (another
    service, repository or component), or that is too big or too open for any slice, is dropped. An
@@ -1237,3 +1272,8 @@ operator must always know what to run next:
   ```
   /craft:slice spec/streaming-export
   ```
+
+The exception is an early stop for an entry an earlier slice failed to build (step 7's first rule):
+re-running this skill reaches the same rule, so it hands off in words, with no command, naming the
+entry by id and the two ways out, dropping it with a reason that names where the work went or
+restoring it as a new entry.
