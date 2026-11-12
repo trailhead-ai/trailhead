@@ -80,8 +80,8 @@ def test_read_only_ok_in_the_plain_report(tmp_path, no_probe, capsys):
     _setup(tmp_path, _folder(tmp_path))
     init.cmd_status(argparse.Namespace(json=False))
     out = capsys.readouterr()
-    ro_lines = [l for l in (out.out + out.err).splitlines() if "vault ro" in l]
-    assert ro_lines and not any("not a git repo" in l or "no remote" in l for l in ro_lines)
+    ro_lines = [ln for ln in (out.out + out.err).splitlines() if "vault ro" in ln]
+    assert ro_lines and not any("not a git repo" in ln or "no remote" in ln for ln in ro_lines)
 
 
 def test_read_only_emits_no_forge_item_and_runs_no_probe(tmp_path, no_probe, capsys):

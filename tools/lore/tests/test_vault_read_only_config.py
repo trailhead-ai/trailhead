@@ -214,12 +214,12 @@ def test_vault_ls_shows_read_only_scope(tmp_path):
     ro = _foreign_vault(tmp_path)
     _run(["vault", "add", "ro", "--scope", "read-only", "--path", str(ro), "--trusted"], tmp_path=tmp_path)
     out = _run(["vault", "ls"], tmp_path=tmp_path).stdout
-    line = next(l for l in out.splitlines() if l.startswith("ro\t"))
+    line = next(ln for ln in out.splitlines() if ln.startswith("ro\t"))
     assert line.split("\t")[1] == "read-only"
     _run(["vault", "delete", "ro"], tmp_path=tmp_path)
     _run(["vault", "add", "ro", "--scope", "read-only", "--path", str(ro), "--shared"], tmp_path=tmp_path)
     out = _run(["vault", "ls"], tmp_path=tmp_path).stdout
-    line = next(l for l in out.splitlines() if l.startswith("ro\t"))
+    line = next(ln for ln in out.splitlines() if ln.startswith("ro\t"))
     assert line.split("\t")[1] == "read-only shared"
 
 
@@ -229,7 +229,8 @@ def test_vault_ls_shows_read_only_scope(tmp_path):
 def test_create_and_update_route_to_product_beside_read_only(tmp_path):
     _seed_default(tmp_path)
     ro = _foreign_vault(tmp_path)
-    assert _run(["vault", "add", "ro", "--scope", "read-only", "--path", str(ro), "--shared"], tmp_path=tmp_path).returncode == 0
+    added = _run(["vault", "add", "ro", "--scope", "read-only", "--path", str(ro), "--shared"], tmp_path=tmp_path)
+    assert added.returncode == 0
     assert _run(["vault", "add", "prod", "--scope", "product"], tmp_path=tmp_path).returncode == 0
     r = _run(
         ["record", "create", "--kind", "blob", "--title", "Apple", "--keyword", "foo", "--product", "prod"],
