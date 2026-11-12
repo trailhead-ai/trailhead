@@ -1151,6 +1151,8 @@ credential-pattern scrub, and run, with no `--parent`:
 ${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries-path> --vault <vault>
 ```
 
+The spec name is bare, with no `spec/` prefix: the writer refuses a prefixed name.
+
 `set_aside.py` adds a `set aside` entry for each criterion to the spec's `## Waiting` section, with a
 history line of its own fixed wording; the text you pass in is never echoed back and never copied
 into that line. Exit `0` is done. A refusal exits `1` or `2` with a `reason-code:` line on stderr;

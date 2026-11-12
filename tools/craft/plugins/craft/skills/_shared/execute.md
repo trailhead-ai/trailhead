@@ -2109,8 +2109,11 @@ what unblocks it, in your own words>"}`, to a temporary file made with `mktemp` 
 tool, never through a shell command, after the credential-pattern scrub, and run:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries-path> --vault <vault> --parent task/<parent-name>
+${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries-path> --vault <vault> --parent <parent-name>
 ```
+
+The spec and parent names are bare, with no `spec/` or `task/` prefix: the writer refuses a
+prefixed name.
 
 `set_aside.py` adds a `set aside` entry for the criterion to the spec's `## Waiting` section and
 takes it off the parent's `**Covers:**` or `**Partially covers:**` line, so the slice's claim
