@@ -1,8 +1,8 @@
 """``outpost-gateway`` — the sandbox's way to reach Outpost's gateway routes.
 
 ``run list`` finds the harness this process runs under, reads that session's
-gateway credential, exchanges it for a short-lived bearer token (kept in memory
-only), and lists the workspace's runs. The session key comes only from the parent
+gateway credential, exchanges it for a broker bearer token (kept in memory only;
+the broker does not expire its tokens), and lists the workspace's runs. The session key comes only from the parent
 process chain: there is no argument or environment variable that names one.
 
 The secret and token are never printed, logged, written, exported or passed to a
@@ -117,7 +117,8 @@ def _parser() -> argparse.ArgumentParser:
         prog="outpost-gateway",
         description="Reach Outpost's gateway from inside a sandboxed session. "
         "Run it on its own, not piped or chained.",
-        epilog="commands:\n  run list [--json]   list the workspace's runs",
+        epilog="commands:\n  run list [--json]   list the workspace's runs\n\n"
+        f"run it as: {state_dir('trailhead') / 'bin' / 'outpost-gateway'} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="group", required=True)

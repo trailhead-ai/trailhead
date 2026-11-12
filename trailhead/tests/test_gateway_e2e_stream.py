@@ -219,7 +219,7 @@ def test_the_probe_commands_reach_the_proxy_even_though_loopback_is_in_no_proxy(
         "HTTP_PROXY": "http://127.0.0.1:9",
         "NO_PROXY": "127.0.0.1",
     }
-    steps = sandbox_steps(tmp_path, 7000, 7001)
+    steps = sandbox_steps(tmp_path, 7000, 7001, tmp_path / "shims" / "outpost-gateway")
     for name in ("command_route", "other_loopback_port", "register_without_authority"):
         out = subprocess.run(["sh", "-c", steps[name]], env=env, capture_output=True, text=True).stdout
         assert out.strip() == "proxy", name
@@ -232,3 +232,14 @@ def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_
     assert f"Read(/{state}/sessions/**)" in deny
     assert f"Read(/{state}/registration/**)" in deny
     assert render_sandbox_settings(dotfiles_checkout(), state, 7000, deny_read=False)["permissions"]["deny"] == []
+
+
+def test_the_rendered_settings_exclude_and_allow_only_the_path_the_session_types(tmp_path):
+    wrapper = tmp_path / "shims" / "outpost-gateway"
+    settings = render_sandbox_settings(dotfiles_checkout(), tmp_path / "state", 7000, gateway=wrapper)
+    command = sandbox_steps(tmp_path, 7000, 7001, wrapper)["run_list"]
+
+    assert command == f"{wrapper} run list"
+    assert f"{wrapper} *" in settings["sandbox"]["excludedCommands"]
+    assert f"Bash({wrapper}:*)" in settings["permissions"]["allow"]
+    assert "outpost-gateway" not in settings["sandbox"]["excludedCommands"]

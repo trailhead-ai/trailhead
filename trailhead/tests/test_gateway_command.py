@@ -295,3 +295,17 @@ class TestIgnoresCallerInput:
             assert stub.requests == []
         assert r.proc.returncode != 0
         assert r.proc.stdout == ""
+
+
+class TestHelpNamesTheInvocation:
+    """A session has to type the shim's absolute path, so --help says where it is."""
+
+    @pytest.mark.parametrize("name", ["state-a", "state b"])
+    def test_help_shows_the_shim_path_under_the_state_dir_in_use(self, tmp_path, monkeypatch, capsys, name):
+        from trailhead.gateway.command import main
+
+        monkeypatch.setenv("TRAILHEAD_STATE_DIR", str(tmp_path / name))
+        with pytest.raises(SystemExit) as stop:
+            main(["--help"])
+        assert stop.value.code == 0
+        assert f"run it as: {tmp_path / name / 'bin' / 'outpost-gateway'} run list" in capsys.readouterr().out

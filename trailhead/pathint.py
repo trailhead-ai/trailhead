@@ -233,10 +233,21 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
     )
 
 
+# What the pinned gateway command reads from its environment: HOME and the state-dir
+# variables ``trailhead.paths.state_dir`` consults. Everything else is dropped, including
+# the dynamic-loader variables (LD_*, DYLD_*), and PATH is fixed so the ``ps`` it runs on
+# macOS is the system one.
+_PINNED_SHIM_ENV = ("HOME", "TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "XDG_STATE_HOME")
+_PINNED_SHIM_PATH = "/usr/bin:/bin"
+
+
 def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
     """A ``/bin/sh`` shim running *script* on this process's interpreter, isolated.
 
-    ``/bin/sh`` rather than ``env bash``: ``env`` would search PATH for the shell.
+    ``/bin/sh`` rather than ``env bash``, and ``/usr/bin/env`` by absolute path: neither
+    may be looked up through PATH. The interpreter starts from an empty environment
+    carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed PATH, so a loader variable
+    the session exported cannot reach it.
     """
     interpreter = os.path.realpath(sys.executable)
     for label, value in (
@@ -246,12 +257,12 @@ def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
         ("the shim's interpreter path", interpreter),
     ):
         _reject_unsafe_for_eval(value, label=label)
+    passed = " ".join(f'${{{var}:+{var}="${var}"}}' for var in _PINNED_SHIM_ENV)
     return (
         "#!/bin/sh\n"
         f"# trailhead-managed shim for {name}\n"
-        f'TRAILHEAD_ROOT="{trailhead_root}"\n'
-        "export TRAILHEAD_ROOT\n"
-        f'exec "{interpreter}" -I -S "{script}" "$@"\n'
+        f'exec /usr/bin/env -i PATH="{_PINNED_SHIM_PATH}" TRAILHEAD_ROOT="{trailhead_root}" '
+        f'{passed} "{interpreter}" -I -S "{script}" "$@"\n'
     )
 
 

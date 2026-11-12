@@ -84,6 +84,68 @@ class TestShimBuild:
         assert "run list" in proc.stdout
         assert not marker.exists()
 
+    def _env_seen_by_interpreter(self, tmp_path, monkeypatch, session_env):
+        """Run the real shim against an interpreter that records the environment it is started with."""
+        dump = tmp_path / "interpreter-env"
+        fake = tmp_path / "fake-python"
+        fake.write_text(f'#!/bin/sh\n/usr/bin/env > "{dump}"\n')
+        fake.chmod(0o755)
+        monkeypatch.setattr("trailhead.pathint.sys.executable", str(fake))
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "outpost-gateway"), "run", "list"],
+            capture_output=True,
+            text=True,
+            env=session_env,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        return dict(line.split("=", 1) for line in dump.read_text().splitlines() if "=" in line)
+
+    def test_the_interpreter_is_started_without_the_dynamic_loader_variables(self, tmp_path, monkeypatch):
+        seen = self._env_seen_by_interpreter(
+            tmp_path,
+            monkeypatch,
+            {
+                "HOME": str(tmp_path / "home"),
+                "PATH": "/usr/bin:/bin",
+                "LD_PRELOAD": "/nonexistent/evil.so",
+                "LD_LIBRARY_PATH": "/nonexistent",
+                "LD_AUDIT": "/nonexistent/audit.so",
+                "DYLD_INSERT_LIBRARIES": "/nonexistent/evil.dylib",
+                "DYLD_LIBRARY_PATH": "/nonexistent",
+            },
+        )
+        assert not [name for name in seen if name.startswith(("LD_", "DYLD_"))], seen
+
+    def test_the_interpreter_gets_only_what_the_command_reads_and_a_fixed_path(self, tmp_path, monkeypatch):
+        spaced = tmp_path / "state dir"
+        seen = self._env_seen_by_interpreter(
+            tmp_path,
+            monkeypatch,
+            {
+                "HOME": str(tmp_path / "home dir"),
+                "PATH": f"{tmp_path}/hostile-bin:/usr/bin:/bin",
+                "TRAILHEAD_STATE_DIR": str(spaced),
+                "OUTPOST_STATE_DIR": str(spaced / "outpost"),
+                "XDG_STATE_HOME": str(spaced / "xdg"),
+                "SOME_SESSION_VARIABLE": "x",
+            },
+        )
+        assert seen["HOME"] == str(tmp_path / "home dir")
+        assert seen["TRAILHEAD_STATE_DIR"] == str(spaced)
+        assert seen["OUTPOST_STATE_DIR"] == str(spaced / "outpost")
+        assert seen["XDG_STATE_HOME"] == str(spaced / "xdg")
+        assert seen["PATH"] == "/usr/bin:/bin"
+        assert "SOME_SESSION_VARIABLE" not in seen
+
+    def test_a_state_variable_the_session_did_not_set_is_not_passed_empty(self, tmp_path, monkeypatch):
+        seen = self._env_seen_by_interpreter(
+            tmp_path, monkeypatch, {"HOME": str(tmp_path / "home"), "PATH": "/usr/bin:/bin"}
+        )
+        assert "TRAILHEAD_STATE_DIR" not in seen and "XDG_STATE_HOME" not in seen
+
     def test_outpost_disabled_writes_no_shim(self, tmp_path):
         env = _env(tmp_path)
         build_cli_shims(_tools(), env=env, outpost_enabled=False)

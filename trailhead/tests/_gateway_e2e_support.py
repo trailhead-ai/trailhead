@@ -202,7 +202,9 @@ def list_cmd(port: int, scratch: Path) -> str:
 # --- a real sandboxed claude session ----------------------------------------------------------------
 
 
-def render_sandbox_settings(dotfiles: Path, outpost_state: Path, port: int, *, deny_read: bool = True) -> dict:
+def render_sandbox_settings(
+    dotfiles: Path, outpost_state: Path, port: int, *, deny_read: bool = True, gateway: Path | None = None
+) -> dict:
     """The dotfiles' real settings, rendered, cut down to the sandbox and the Read denials.
 
     The real template names ``~/.local/state/outpost`` and ``127.0.0.1:7313``; here those name this
@@ -210,6 +212,8 @@ def render_sandbox_settings(dotfiles: Path, outpost_state: Path, port: int, *, d
     Outpost. The ``Read`` rules are rewritten to the ``//<absolute path>`` form Claude Code requires for an
     absolute path (a single slash is relative to the settings file). ``deny_read=False`` removes both
     ways the template hides the credential folders: the sandbox ``denyRead`` and the ``Read`` denials.
+    The template excludes and allows the gateway by the absolute path of the shim ``trailhead install``
+    writes; ``gateway`` is the path this test's own wrapper stands at instead.
     """
     template = dotfiles / "dot_claude" / "private_settings.json.tmpl"
     done = subprocess.run(
@@ -232,8 +236,12 @@ def render_sandbox_settings(dotfiles: Path, outpost_state: Path, port: int, *, d
         del sandbox["filesystem"]["denyRead"]
         deny = []
     allow = rendered["permissions"]["allow"]
-    if not any(rule.startswith("Bash(outpost-gateway") for rule in allow):
-        raise AssertionError("the rendered settings carry no outpost-gateway allow rule: the template changed shape")
+    shim = f"{os.environ['HOME']}/.local/state/trailhead/bin/outpost-gateway"
+    if f"Bash({shim}:*)" not in allow or shim not in sandbox["excludedCommands"]:
+        raise AssertionError("the rendered settings do not allow and exclude the gateway shim: template changed")
+    if gateway is not None:
+        sandbox = json.loads(json.dumps(sandbox).replace(shim, str(gateway)))
+        allow = json.loads(json.dumps(allow).replace(shim, str(gateway)))
     return {"sandbox": sandbox, "permissions": {"allow": allow, "deny": deny}}
 
 
@@ -261,7 +269,7 @@ def install_shims(root: Path, outpost: RealOutpost) -> tuple[Path, dict[str, str
     return bin_dir, register_port_env(outpost.port)
 
 
-def sandbox_steps(state: Path, port: int, other_port: int) -> dict[str, str]:
+def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dict[str, str]:
     """The Bash commands the sandboxed session runs, one tool call each, exactly as written.
 
     None prints a credential: the credential read is redirected to /dev/null, so only its exit status
@@ -272,7 +280,7 @@ def sandbox_steps(state: Path, port: int, other_port: int) -> dict[str, str]:
     post = "-X POST -H 'content-type: application/json' -d '{\"pid\":1,\"start_time\":1}'"
     return {
         "credential_read": f'cat "{state}"/sessions/*/gateway-client.json > /dev/null',
-        "run_list": "outpost-gateway run list",
+        "run_list": f"{gateway} run list",
         "command_route": f"{probe} http://127.0.0.1:{port}/gateway/runs",
         "other_loopback_port": f"{probe} http://127.0.0.1:{other_port}/",
         "register_without_authority": f"{probe} {post} http://127.0.0.1:{port}/gateway/sessions",
