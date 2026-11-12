@@ -207,7 +207,9 @@ def test_unreadable_vault_skips_every_row_and_names_it(world):
     for vault, (records, findings, skipped) in got.items():
         assert (records, findings) == ("—", "—"), vault
         assert skipped.startswith("yes:"), vault
-    assert all("levr" in rows(r.stdout)[v][2] for v in ("default", "trailhead"))
+    for v in ("default", "trailhead"):
+        assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing", v
+    assert rows(r.stdout)["levr"][2] == "yes: its directory could not be read"
     assert finding_lines(r.stdout) == []
     assert "no findings" not in r.stdout
     assert "dangling-links — skipped." in r.stdout
@@ -225,6 +227,9 @@ def test_records_outside_the_vault_root_skip_the_check_and_are_counted_nameless(
     assert "trailhead: 1 record lies outside the vault root and was not read." in r.stdout
     assert "secret-name" not in r.stdout and "elsewhere" not in r.stdout
     assert all(v[2].startswith("yes:") for v in rows(r.stdout).values())
+    assert rows(r.stdout)["default"][2] == (
+        "yes: vault trailhead could not be fully read, so no target can be confirmed missing")
+    assert rows(r.stdout)["trailhead"][2] == "yes: records lie outside its vault root and were not read"
 
 
 # --- the index line and unreadable records ------------------------------------

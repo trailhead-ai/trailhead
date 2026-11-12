@@ -111,7 +111,9 @@ def _skip_reason(vault: str, scans: dict[str, VaultScan], at_fault: tuple[str, .
         return "records lie outside its vault root and were not read"
     names = ", ".join(at_fault)
     noun = "vault" if len(at_fault) == 1 else "vaults"
-    return f"{noun} {names} could not be fully read, so no target can be confirmed missing"
+    unreadable = all(name in scans and _vault_fault(scans[name]) == _SCAN_FAULT_UNREADABLE for name in at_fault)
+    state = "could not be read" if unreadable else "could not be fully read"
+    return f"{noun} {names} {state}, so no target can be confirmed missing"
 
 
 def _sort_key(f: Finding):
