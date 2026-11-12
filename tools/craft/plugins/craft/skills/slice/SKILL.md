@@ -782,14 +782,15 @@ and prints one `found-work-result:` line per entry. On a non-zero exit the entry
 stays out of this pass's group: report the `reason-code:` token and the `retry:` command it prints,
 which runs as printed.
 
-**An urgent entry is never dropped unasked.** An entry is urgent when it is a security finding,
-shows that an earlier slice shipped something broken, or blocks a remaining criterion from being
-built properly. Before dropping one, ask the operator one self-contained plain-text question that
-says what the entry is, why it fits no slice, the choice you recommend first, and what the other
-choice costs, and add `"operator_confirmed": true` to the document only on the operator's answer
-confirming the drop. **Under `--unattended`, or when `/craft:drive` is running this pass, never drop
-an urgent entry:** nobody is there to ask, so take step 6's early stop with its fixed reason, naming
-the entry by id, before any drop of this pass is written.
+**An urgent entry is never dropped or moved out unasked.** **Read `../_shared/escalation.md` now and
+follow its urgent-entry trigger** before any drop of this pass is written: when an entry this pass
+would drop, or would move out with a reason that names a task, is urgent, put the blocking prompt
+that file defines and end the turn waiting for the answer. On the reply, carry out the fix the
+operator chose: a drop is written with `"operator_confirmed": true` in the document, and the pass
+then goes on to item 3; keeping the entry open takes step 6's early stop with its fixed reason,
+naming the entry by id. **Under `--unattended`, or when `/craft:drive` is running this pass, never
+drop an urgent entry:** nobody is there to ask, so take step 6's early stop with its fixed reason,
+naming the entry by id, before any drop of this pass is written.
 3. **Group the rest and choose one group.** When the drops left no open entry there is nothing to
    choose: run step 4's candidate-set gate again on the fresh spec and take step 6 from its answer.
    Otherwise group the remaining open entries by overlapping `where` paths: two entries are in one

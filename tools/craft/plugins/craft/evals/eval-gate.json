@@ -236,11 +236,13 @@
     },
     "slice-asks-before-dropping-an-urgent-entry": {
       "measures": [
+        "skills/_shared/escalation.md",
         "skills/slice/SKILL.md"
       ]
     },
     "slice-asks-before-dropping-an-urgent-entry-with-a-planted-credential": {
       "measures": [
+        "skills/_shared/escalation.md",
         "skills/slice/SKILL.md"
       ]
     },
