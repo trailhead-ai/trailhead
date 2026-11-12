@@ -30,8 +30,11 @@ else ``runs-errored``.
 
 Before the canary and the runner, ``run`` looks the case up in the pass cache (``cache.py``, which
 holds the key and the store). A hit records ``verdict`` ``pass`` with ``cached`` true and the stored
-counts and runs, and starts no runner and no canary. A fresh ``pass`` is stored after the case ran;
-a fail and a not-run never are. ``cached`` is false on every result of a case that ran.
+counts and runs, and starts no runner and no canary. A fresh ``pass`` is stored after the case ran,
+only when the fingerprint recomputed after the run equals the one looked up before it; a fail and a
+not-run never are. A case whose inputs hold a symlink has no key (never looked up, never stored), and
+with ``PORTAGE_EVAL_RUNNER`` set the cache is neither read nor written. ``cached`` is false on every
+result of a case that ran.
 
 A case is decided in batches, not one ``--runs n`` call. The first call asks for
 ``min(k, n - k + 1)`` runs (2 for 3 of 2), the fewest that could decide it. After each call
@@ -392,10 +395,7 @@ def run_case(
 
     if env is None:
         env = dict(os.environ)
-    try:
-        key = pass_cache.fingerprint(plugin_dir, entry)
-    except (OSError, KeyError, TypeError):
-        key = None
+    key = None if RUNNER_OVERRIDE_ENV in env else _cache_key(plugin_dir, entry)
     hit = pass_cache.lookup(key, env) if key else None
     if hit is not None:
         return _record(state, case, {"case": case, **hit, "reason": None, "cached": True})
@@ -422,7 +422,7 @@ def run_case(
         with _call_tmpdir(env) as case_tmp:
             result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
                                   json_path, timeout_seconds, request, override, env, case_tmp, clock)
-        if key:
+        if key and _cache_key(plugin_dir, entry) == key:
             pass_cache.store(key, result, env)
         return result
     except TmpPathTooLong as e:
@@ -431,6 +431,13 @@ def run_case(
     except TmpBaseRefused as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return _record(state, case, _not_run(case, n, RUNNER_ERROR))
+
+
+def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
+    try:
+        return pass_cache.fingerprint(plugin_dir, entry)
+    except (OSError, KeyError, TypeError):
+        return None
 
 
 def _first_batch(n: int, pass_at: int) -> int:

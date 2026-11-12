@@ -22,6 +22,12 @@ commit the gate ran on (`gh pr merge --match-head-commit`), so a push after the 
 instead of merging content nobody evaluated. That limits what the gate ran to the commits present when it
 ran; it does not make a hostile branch safe to gate.
 
+The pass cache and the state directory are not integrity boundaries against the code under test. Scaffolds
+run as the operator, so they can write the cache entries and the state directory's results, plan and canary
+files just as the operator can. The cache lives outside any one repo and persists across branches. A cache hit
+is reused only for identical committed content: the key covers the case's own files, its measured files, the
+corpus scaffolds and the runner block, and `run` refuses a plan whose repo is no longer at the planned head.
+
 ## What it runs
 
 `portage eval-gate plan --repo <path> [--base <ref>] [--tier push|merge]` diffs the branch against its base
@@ -226,10 +232,16 @@ A pass is reused. Before the canary and the runner, `run` looks the case up in a
 `pass (cached)`. Only a fresh pass is stored; a fail or a not-run never is, so the next push runs the case
 again. The fingerprint is a SHA-256 over:
 
-- every file in the case directory;
-- every file of the case's `measures`;
-- every file directly under the corpus `evals/` directory except `eval-gate.json` (the shared scaffolds);
+- every file in the case directory, with its executable bit;
+- every file of the case's `measures`, with its executable bit;
+- every file directly under the corpus `evals/` directory except `eval-gate.json` (the shared scaffolds),
+  with its executable bit;
 - the case's runner block, `runs`, `pass_at`, plugin root and name.
+
+A symlink anywhere among those inputs makes the case uncacheable: it is never looked up and never stored.
+With `PORTAGE_EVAL_RUNNER` set the cache is neither read nor written, because the key does not cover which
+runner produced a pass. A fresh pass is stored only when the fingerprint, recomputed after the run, equals
+the one looked up before it, so inputs that changed while the case ran are never stored.
 
 The key is content alone, so a pass carries over between branches and worktrees. It has known limits, and a
 change to any of them does not change it: a script a scaffold calls from outside `evals/`, other plugin

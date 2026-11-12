@@ -115,6 +115,12 @@ def _edit(path_of):
     return go
 
 
+def _chmod_x(path_of):
+    def go(env):
+        os.chmod(path_of(env), 0o755)
+    return go
+
+
 def _runner_model(env):
     env.cases[0]["runner"] = {**RUNNER, "model": "opus"}
     env.plan()
@@ -132,6 +138,9 @@ class TestMisses:
         pytest.param(_edit(lambda e: e.plugin / "evals/c1/fixtures/seed.txt"), id="case-subdirectory-file"),
         pytest.param(_edit(lambda e: e.plugin / "evals/scaffold.sh"), id="corpus-scaffold"),
         pytest.param(_edit(lambda e: e.plugin / "evals/c1/added.md"), id="file-added-to-the-case"),
+        pytest.param(_chmod_x(lambda e: e.plugin / "skills/s/SKILL.md"), id="measured-file-exec-bit"),
+        pytest.param(_chmod_x(lambda e: e.plugin / "evals/c1/fixtures/seed.txt"), id="case-file-exec-bit"),
+        pytest.param(_chmod_x(lambda e: e.plugin / "evals/scaffold.sh"), id="scaffold-exec-bit"),
         pytest.param(_runner_model, id="runner-model"),
         pytest.param(_pass_at, id="pass-at"),
     ])
@@ -229,22 +238,72 @@ class TestFingerprint:
         (env.plugin / "skills/s/SKILL.md").write_text("different\n")
         assert self._fp(env) != a
 
-    def test_a_symlink_in_the_case_directory_is_not_followed(self, env):
+    def test_a_symlink_among_the_inputs_makes_the_case_uncacheable(self, env):
         outside = env.tmp / "outside.txt"
         outside.write_text("one\n")
         (env.plugin / "evals/c1/link").symlink_to(outside)
+        assert self._fp(env) is None
+
+    def test_an_exec_bit_change_changes_the_key(self, env):
         a = self._fp(env)
-        outside.write_text("two\n")
-        assert self._fp(env) == a
+        os.chmod(env.plugin / "skills/s/SKILL.md", 0o755)
+        assert self._fp(env) != a
 
 
-class TestACachedPassIsNotReusedAcrossAMovedHead:
-    def test_a_moved_head_is_refused_before_the_cache_is_read(self, env):
+class TestNeverCachedOrServed:
+    @pytest.mark.parametrize("where", [
+        pytest.param("evals/c1/link.txt", id="case-directory"),
+        pytest.param("skills/s/link.md", id="measured-directory"),
+        pytest.param("evals/link.sh", id="corpus-scaffold"),
+    ])
+    def test_a_symlink_among_the_inputs_is_never_stored_and_never_hit(self, env, where):
+        target = env.tmp / "outside.txt"
+        target.write_text("one\n")
+        (env.plugin / where).symlink_to(target)
+        env.plan()
+        first, second, runner_calls = _run_twice(env)
+        assert (first["verdict"], first["cached"]) == ("pass", False)
+        assert (second["cached"], runner_calls) == (False, 1)
+        assert _cache_files(env) == []
+
+    def test_a_measure_path_that_is_itself_a_symlink_is_never_stored(self, env):
+        (env.plugin / "skills/rootlink").symlink_to("s")
+        env.cases[0]["measures"] = ["skills/rootlink"]
+        env.plan()
+        first, second, runner_calls = _run_twice(env)
+        assert (first["verdict"], second["cached"], runner_calls) == ("pass", False, 1)
+        assert _cache_files(env) == []
+
+    def test_a_symlink_never_hits_even_over_an_entry_stored_before_it_appeared(self, env):
         assert env.run() == 0
         assert len(_cache_files(env)) == 1
-        calls = len(env.calls)
-        env.git("commit", "-q", "--allow-empty", "-m", "later")
+        target = env.tmp / "outside.txt"
+        target.write_text("one\n")
+        (env.plugin / "evals/c1/link.txt").symlink_to(target)
+        env.plan()
+        before = len(env.case_calls)
         assert env.run() == 0
-        r = env.result()
-        assert (r["verdict"], r["reason"], r["cached"]) == ("not-run", "head-moved", False)
-        assert len(env.calls) == calls
+        assert len(env.case_calls) == before + 1 and env.result()["cached"] is False
+
+    def test_a_runner_override_neither_reads_nor_writes_the_cache(self, env):
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(env.bin / "claude"))
+        first, second, runner_calls = _run_twice(env)
+        assert (first["verdict"], second["cached"], runner_calls) == ("pass", False, 1)
+        assert _cache_files(env) == []
+
+    def test_a_runner_override_does_not_serve_an_entry_stored_without_it(self, env):
+        assert env.run() == 0
+        assert len(_cache_files(env)) == 1
+        env.mp.setenv("PORTAGE_EVAL_RUNNER", str(env.bin / "claude"))
+        before = len(env.case_calls)
+        assert env.run() == 0
+        assert len(env.case_calls) == before + 1 and env.result()["cached"] is False
+
+    def test_a_pass_whose_inputs_changed_during_the_run_is_not_stored(self, env):
+        exe = env.bin / "claude"
+        touched = env.plugin / "skills/s/SKILL.md"
+        exe.write_text(exe.read_text().replace(
+            "\n", f"\nopen({str(touched)!r}, 'a').write('mid-run\\n')\n", 1))
+        assert env.run() == 0
+        assert env.result()["verdict"] == "pass"
+        assert _cache_files(env) == []

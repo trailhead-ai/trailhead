@@ -3,18 +3,25 @@
 ``fingerprint(plugin_dir, entry)`` is a SHA-256 hex digest over, in this order:
 
 - every regular file in the case directory ``<plugin_dir>/evals/<case>`` (recursive), by
-  relative path and bytes;
+  relative path, executable bit and bytes;
 - every regular file of the plan entry's ``measures`` (a path under ``plugin_dir``; a
-  directory contributes every regular file under it), by path and bytes;
+  directory contributes every regular file under it), by path, executable bit and bytes;
 - every regular file directly under ``<plugin_dir>/evals`` (the corpus's shared scaffolds)
-  except ``eval-gate.json``, by name and bytes;
+  except ``eval-gate.json``, by name, executable bit and bytes;
 - the canonical JSON of the entry's ``runner`` block, ``runs``, ``pass_at``, ``plugin_root``
   and ``case``.
 
-Symlinks and other non-regular files are skipped. A plan entry with no ``measures`` key has
-none. The key leaves out the ``claude`` CLI version, scripts outside ``evals/`` that a scaffold
+The executable bit is the one mode bit a commit records, so the other permission bits (which a
+checkout's umask sets) are not part of the key. A symlink anywhere among those inputs (a measure
+path, the case directory, ``evals`` or any entry in them) makes the case uncacheable: ``fingerprint``
+returns ``None``, and the caller neither looks the case up nor stores it. Other non-regular files
+are skipped. A plan entry with no ``measures`` key has none. The key leaves out the ``claude`` CLI version, scripts outside ``evals/`` that a scaffold
 calls, and a model alias the runner re-targets: none of them change it. Delete the cache
 directory to force a re-run.
+
+The cache is also skipped, neither read nor written, whenever ``PORTAGE_EVAL_RUNNER`` is set (the
+key does not cover which runner produced a pass), and ``run`` stores a fresh pass only when the
+fingerprint recomputed after the run equals the one it looked up before it.
 
 A pass is stored as ``<cache_dir("portage")>/eval-gate/<fingerprint>.json`` (``cache_dir``
 resolved from the injected ``env``)::
@@ -63,11 +70,18 @@ def ensure_private_dir(path: Path, label: str) -> Path:
     return path
 
 
+class _Uncacheable(Exception):
+    pass
+
+
 def _regular_files(root: Path, recursive: bool) -> list[Path]:
+    """The regular files under ``root``; raises ``_Uncacheable`` on any symlink."""
     try:
         st = os.lstat(root)
     except OSError:
         return []
+    if stat.S_ISLNK(st.st_mode):
+        raise _Uncacheable
     if stat.S_ISREG(st.st_mode):
         return [root]
     if not stat.S_ISDIR(st.st_mode):
@@ -78,6 +92,8 @@ def _regular_files(root: Path, recursive: bool) -> list[Path]:
             mode = os.lstat(child).st_mode
         except OSError:
             continue
+        if stat.S_ISLNK(mode):
+            raise _Uncacheable
         if stat.S_ISREG(mode):
             found.append(child)
         elif recursive and stat.S_ISDIR(mode):
@@ -86,26 +102,33 @@ def _regular_files(root: Path, recursive: bool) -> list[Path]:
 
 
 def _feed(h, label: str, path: Path, base: Path) -> None:
-    data = path.read_bytes()
-    h.update(f"{label}\0{path.relative_to(base).as_posix()}\0{len(data)}\0".encode())
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as f:
+        executable = int(bool(os.fstat(f.fileno()).st_mode & 0o111))
+        data = f.read()
+    h.update(f"{label}\0{path.relative_to(base).as_posix()}\0{executable}\0{len(data)}\0".encode())
     h.update(data)
 
 
-def fingerprint(plugin_dir: Path, entry: dict) -> str:
-    """The cache key of a plan entry's case under ``plugin_dir``. May raise ``OSError``."""
+def fingerprint(plugin_dir: Path, entry: dict) -> str | None:
+    """The cache key of a plan entry's case under ``plugin_dir``, or ``None`` when a symlink makes it
+    uncacheable. May raise ``OSError``."""
     plugin_dir = Path(plugin_dir)
     evals = plugin_dir / "evals"
     h = hashlib.sha256()
-    case_dir = evals / entry["case"]
-    for f in _regular_files(case_dir, True):
-        _feed(h, "case", f, case_dir)
-    for m in entry.get("measures") or []:
-        root = plugin_dir / m
-        for f in _regular_files(root, True):
-            _feed(h, "measure", f, plugin_dir)
-    for f in _regular_files(evals, False):
-        if f.name != MAPPING_NAME:
-            _feed(h, "scaffold", f, evals)
+    try:
+        case_dir = evals / entry["case"]
+        for f in _regular_files(case_dir, True):
+            _feed(h, "case", f, case_dir)
+        for m in entry.get("measures") or []:
+            root = plugin_dir / m
+            for f in _regular_files(root, True):
+                _feed(h, "measure", f, plugin_dir)
+        for f in _regular_files(evals, False):
+            if f.name != MAPPING_NAME:
+                _feed(h, "scaffold", f, evals)
+    except _Uncacheable:
+        return None
     h.update(json.dumps(
         {k: entry[k] for k in ("runner", "runs", "pass_at", "plugin_root", "case")},
         sort_keys=True, separators=(",", ":")).encode())
