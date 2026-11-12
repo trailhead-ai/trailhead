@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: unattended-pr-step-ends-needs-a-decision-on-a-parked-correction
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
