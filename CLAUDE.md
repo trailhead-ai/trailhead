@@ -141,7 +141,8 @@ when every job of the `tests` workflow is green. Each tier is a job of that work
 one run. Every one of them runs the run-time guard
 with its own tier name, budget and passed-count baseline, so a tier job that selects nothing
 (pytest exits nonzero) or skips a test it should run (the passed count falls under its
-baseline) fails. To undo the split, delete `and not chromium and not seam_real` from the
+baseline) fails. A wall time over budget, or a test over the per-test cap, is a warning
+annotated on the run, never a failure. To undo the split, delete `and not chromium and not seam_real` from the
 `addopts` in the root `pyproject.toml` and the three tool configs: the default command then
 runs everything again.
 
