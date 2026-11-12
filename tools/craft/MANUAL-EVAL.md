@@ -5334,6 +5334,8 @@ timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_S
 | treatment, attended case | edited | 3 | pending | bar: pass at 2 of 3; one rerun permitted and reported |
 | treatment, unattended case | edited | 3 | pending | bar: pass at 2 of 3 |
 | `slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered` | edited | 3 | pending | must stay green (pass at 2 of 3) |
+| fixture revision: the seeded open task's value claim now says to close the manifest file the label reader in `labels/printer.py` opens, so the search slice step 7 runs (`lore search "close manifest file"`, `lore search "kind:task manifest"`) finds it; the first run's three attended runs found no holding task and recommended the restore, failing `the-first-listed-fix-is-the-drop-naming-the-task-that-holds-the-work`; both scaffolds updated | edited | 3 each | pending | pass at 2 of 3 |
+| mutation, "and no fix offered here" removed from step 7 rule 1 (the sentence that no stop or offered fix names a re-run); expected red in a run that writes a `/craft:slice` command into a fix line: `the-message-does-not-tell-the-operator-to-re-run-slice` | edited | 1 | pending | attended case |
 
 ### Carrier mutations
 

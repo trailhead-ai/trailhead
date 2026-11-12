@@ -768,8 +768,8 @@ decides anything. Then, in this order:
    `**Folds:**` line and neither a `**Covers:**` nor a `**Partially covers:**` line is an
    entries-only slice. An open entry whose `spec/<spec-name>#F<n>` is on such a parent's
    `**Folds:**` line came back open, so that slice closed without building it, and choosing it again
-   would loop. Re-running this skill reaches this rule again, so no stop here names a re-run of it.
-   Write no slice. What to do with the entry is the operator's call:
+   would loop. Re-running this skill reaches this rule again, so no stop here and no fix offered
+   here names a re-run of it. Write no slice. What to do with the entry is the operator's call:
    - **Attended.** **Read `../_shared/escalation.md` now and follow it** for the question, where it
      is shown and what follows the answer: put the blocking prompt before anything is written, and
      end the turn waiting for the answer. The question names the entry by id and the slice that did
