@@ -1,5 +1,5 @@
 schema_version: "1.1"
-name: slice-stops-on-a-free-text-answer-that-changes-the-spec
+name: slice-amends-the-spec-on-a-free-text-answer-that-changes-it
 runs: 3
 context:
   scaffold_script: fixtures/scaffold.sh

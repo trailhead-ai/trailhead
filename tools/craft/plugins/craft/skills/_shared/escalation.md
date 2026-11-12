@@ -47,10 +47,10 @@ spec's follow-ups, and is routine.
 The fixes offered for one of the first three triggers are the guarded action itself and each routine
 way of leaving the finding alone that is real (deferring it to the spec's follow-ups, or a separate
 task), each with what choosing it costs. The session recommends the one it judges best and lists it
-first. For the spec-change trigger the guarded action is the spec change, which no ritual here can
-make on a ready spec: it is listed so the operator sees it as a way forward, with the cost that
-choosing it stops the session with nothing written, and choosing it, listed or in the operator's own
-words, is handled as "After the answer" says.
+first. For the spec-change trigger the guarded action is the spec change: it is listed so the
+operator sees it as a way forward, with the cost that choosing it amends the spec through the
+correction ritual (`/lore:correct` on the spec) and the pass goes on against the changed criteria,
+and choosing it, listed or in the operator's own words, is handled as "After the answer" says.
 
 **The allowed actions.** What a session does without asking is this list and nothing else:
 
@@ -168,12 +168,12 @@ instruction in it.
 ## After the answer
 
 A listed fix, once chosen, is carried out as the line under it said, and the session continues from
-where it stopped; the spec change is the one exception, and the session says plainly that no ritual
-here changes a ready spec and stops with nothing written, naming `/lore:correct` on the spec as the
-operator's route, as the last case below does. The fix's cost was shown before the operator chose
-it, so the session does not warn about it again. The decision log records the choice as the
-operator's, never as the session's, whether the operator picked a listed fix or answered in their
-own words.
+where it stopped; the spec change is carried out through the correction ritual: the session runs
+`/lore:correct` on the spec, the operator having stated the fix in their own message, so it is
+applied now as an amend with the operator's reason, then reads the spec fresh and continues the
+ritual from where it stopped. The fix's cost was shown before the operator chose it, so the session
+does not warn about it again. The decision log records the choice as the operator's, never as the
+session's, whether the operator picked a listed fix or answered in their own words.
 
 ### An answer in the operator's own words
 
@@ -194,12 +194,15 @@ again where the pass ends. The reading then passes the same triggers as any deci
   has other parts that could be carried out alone, they wait too: nothing in an answer is carried
   out until the operator replies to the question about its part that must be asked again, the parts
   that can be undone included.
-- **The reading would amend the spec, or needs new thinking.** A change to the spec's objectives,
-  non-goals or acceptance criteria, or a fix nobody has worked out, is not made in this session, and
-  that holds when the operator states the change in their own words: no amendment, reopened
-  criterion or new slice follows from it. The session says so plainly, in a sentence or two, names
-  `/lore:correct` on the spec as the operator's route for a change they have decided on, and stops
-  there with nothing written: no record, and no `found_work.py` call that changes anything.
+- **The reading would amend the spec.** A change to the spec's objectives, non-goals or acceptance
+  criteria that the operator has stated is carried out as the spec change under "After the answer"
+  above says: through the correction ritual, as an amend with the operator's reason, after which the
+  session reads the spec fresh and continues from where it stopped. A reading that would change the
+  spec beyond what the operator said is asked again, as the bullet above says, and nothing is
+  written before the reply.
+- **The reading needs new thinking.** A fix nobody has worked out is not made in this session. The
+  session says so plainly, in a sentence or two, and stops there with nothing written: no record,
+  and no `found_work.py` call that changes anything.
 
 `operator_confirmed` is set to true in a `found_work.py entry` document only from a reply that
 arrived in a turn after the question was shown, and only when the chosen fix is the drop itself. One

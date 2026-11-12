@@ -14,7 +14,7 @@ The case resumes a seeded conversation (`context.history_file: fixtures/history.
 
 The entry is a security finding, so a drop needs `operator_confirmed: true` in the `found_work.py entry` document; without it the script refuses with `reason-code: drop-needs-operator`.
 
-This is the case's only arm that expects an action. Its siblings are `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone` and `slice-stops-on-a-free-text-answer-that-changes-the-spec`.
+This is the case's only arm that expects an action. Its siblings are `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone` and `slice-amends-the-spec-on-a-free-text-answer-that-changes-it`.
 
 ## Conditions, sample and bar
 

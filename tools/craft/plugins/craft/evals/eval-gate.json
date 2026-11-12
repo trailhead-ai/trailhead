@@ -274,7 +274,7 @@
         "skills/slice/SKILL.md"
       ]
     },
-    "slice-stops-on-a-free-text-answer-that-changes-the-spec": {
+    "slice-amends-the-spec-on-a-free-text-answer-that-changes-it": {
       "measures": [
         "skills/_shared/escalation.md",
         "skills/slice/SKILL.md"

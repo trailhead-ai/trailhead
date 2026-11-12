@@ -1,12 +1,12 @@
-# slice-stops-on-a-free-text-answer-that-changes-the-spec
+# slice-amends-the-spec-on-a-free-text-answer-that-changes-it
 
 ## Under test
 
-When the operator's free-text answer would amend the spec or needs new thinking, the session says so plainly, stops, and writes nothing; the spec change has its own route. The prose under test is the free-text handling under "After the answer" in `skills/_shared/escalation.md` and the pointer to it in `skills/slice/SKILL.md` step 7.
+When the operator's free-text answer would amend the spec, the session states its reading, carries the change out through the correction ritual (`/lore:correct` on the spec, an amend with the operator's reason), and continues the pass with the spec read fresh. The prose under test is the free-text handling under "After the answer" in `skills/_shared/escalation.md` and the pointer to it in `skills/slice/SKILL.md` step 7.
 
 ## Arm
 
-The free-text reply: change AC2 to count only positive amounts. That rewrites an acceptance criterion, which no listed fix offered, so the spec's AC2 stays as it is, F1 stays open, and the final message says the session stopped and names `/lore:correct` on the spec as the operator's route, even though the operator stated the change themselves.
+The free-text reply: change AC2 to count only positive amounts. That rewrites an acceptance criterion, which no listed fix offered and which the operator stated themselves, so the spec's AC2 now reads the changed criterion and the amend carries a reason, F1 stays open, no entry is dropped, the read-back line opens the closing message, and the final message says the spec was changed through the correction ritual.
 
 ## Fixture
 
@@ -22,18 +22,20 @@ The entry is a security finding, so a drop needs `operator_confirmed: true` in t
 - Baseline: the prose at the commit that adds the case and no prose change, 1 run per case. Expected red and green are stated per case below.
 - Mutations: one run each on the edited prose with a single carrier changed, one per carrier of the sentence the case measures, listed in `tools/craft/MANUAL-EVAL.md`. Every mutation that leaves the case green is reported and the grader strengthened.
 - The runner writes an untracked `fixtures/<sessionId>.jsonl` beside the seed on a run. Delete it before staging (`docs/eval-protocol.md`, seeded-history cases).
-- Expected at baseline: `the-session-says-it-stopped` red or flaky; the graders on files hold only if the model leaves the spec alone, and a red one at baseline is the measurement.
+- Expected at baseline: `the-spec-criterion-reads-the-change` and `the-amend-carries-a-reason` red or flaky, because the unedited prose tells the session to stop; a red one at baseline is the measurement.
 
 ## Pass condition
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| AC2's text is unchanged | `the-spec-criterion-is-unchanged` | `regex`, `source: file`, the spec record |
+| AC2's text now reads the changed criterion | `the-spec-criterion-reads-the-change` | `regex`, `source: file`, the spec record's body (`vault/spec/invoice-summary.md`) |
+| The amend carries a reason | `the-amend-carries-a-reason` | `regex`, `source: file`, the spec record's sidecar (`vault/spec/invoice-summary.json`, its `change-history` entry's `reason`) |
 | F1 is still open in the spec | `the-entry-is-still-open` | `regex`, `source: file`, the spec record |
 | No `found_work.py entry` ran | `no-entry-drop-ran` | `tool_used` Bash, `min: 0`, `max: 0` |
-| No record was created, updated, amended or deleted | `no-record-was-written` | `tool_used` Bash, `input_match` matching `record` then create, update, amend or delete, `min: 0`, `max: 0` |
+| No record other than the spec was created, updated, amended or deleted | `no-other-record-was-written` | `tool_used` Bash, `input_match` matching `record create` or `record delete`, or `record update` or `record amend` naming a record other than `spec/invoice-summary`, `min: 0`, `max: 0` |
 | No document carries `operator_confirmed` | `no-operator-confirmed-was-written` | `tool_used` Write, `min: 0`, `max: 0` |
-| The final message says plainly that the session stopped and names `/lore:correct` as the route | `the-session-says-it-stopped` | `llm`, trace |
+| The read-back line is repeated in the closing message | `the-reading-is-repeated-in-the-closing-message` | `regex` over the final message, `Reading your answer as:` followed on its line by AC2 or positive |
+| The final message says the spec was changed through the correction ritual | `the-final-message-says-the-spec-was-changed-through-the-correction-ritual` | `llm`, trace |
 
 ## Limitations
 

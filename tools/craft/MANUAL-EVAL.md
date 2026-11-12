@@ -5195,7 +5195,7 @@ Three runner cases for the free-text handling under "After the answer" in `skill
 |---|---|---|
 | `slice-carries-out-a-free-text-answer-to-its-question` | "Move it to billing-export-hardening, that's where it belongs." | read-back line, F1 dropped naming `task/billing-export-hardening` with `operator_confirmed`, the pass goes on |
 | `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone` | "Delete task/billing-service-audit and drop F1, it's all noise." | nothing deleted, F1 open, the question asked again |
-| `slice-stops-on-a-free-text-answer-that-changes-the-spec` | "Change AC2 to count only positive amounts." | AC2 unchanged, F1 open, no `found_work.py entry`, the final message says it stopped |
+| `slice-amends-the-spec-on-a-free-text-answer-that-changes-it` | "Change AC2 to count only positive amounts." | AC2 now reads the changed criterion, the amend carries a reason, F1 open, no `found_work.py entry`, the read-back repeated, the final message says the spec was changed through the correction ritual |
 
 **Limitations.** Whether a seeded history resumes in a craft target, and whether the model re-enters slice step 7 from it with no skill loaded in the seeded turns, is unconfirmed until the smoke run below. A headless run offers no choice prompt, so only the plain-text form is observable. The `llm` graders read the trace (all of a resumed run's new events). The seeded text carries no read of `escalation.md` or the slice skill and none of the sentences measured.
 
@@ -5217,17 +5217,17 @@ timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_S
 After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` the runner leaves beside the seed before staging anything.
 
 1. **Smoke, first.** Arm 1 (`slice-carries-out-a-free-text-answer-to-its-question`) at HEAD, 1 run. Confirm from the kept trace that the seeded history resumed, the model read `skills/_shared/escalation.md` and re-entered slice step 7 within the 900 s, and that the `found_work.py entry` drop was written. If the history does not resume, or the model starts the slice over from step 1 (it would then re-ask the question, not act on the reply), stop and report; the fixture shape is wrong, not the prose.
-2. **Baselines.** `git worktree add <dir> <sha>` at the commit that adds the three case directories (find it with `git log --diff-filter=A --format=%H -- tools/craft/plugins/craft/evals/slice-carries-out-a-free-text-answer-to-its-question/case.yaml`), 1 run per case, with `<plugin-dir>` inside `<dir>`. Expected: arm 1 `the-reading-is-repeated-in-the-closing-message` red (today's prose never asks for a read-back) and the other four arm-1 graders likely green; arm 2 `the-session-asks-again-and-waits` red or flaky and the file/tool graders green if the model does not act on free text by itself; arm 3 `the-session-says-it-stopped` red or flaky and the file/tool graders green likewise. A grader red at baseline that was expected green is a finding, not a failure of the case.
+2. **Baselines.** `git worktree add <dir> <sha>` at the commit that adds the three case directories (find it with `git log --diff-filter=A --format=%H -- tools/craft/plugins/craft/evals/slice-carries-out-a-free-text-answer-to-its-question/case.yaml`), 1 run per case, with `<plugin-dir>` inside `<dir>`. Expected: arm 1 `the-reading-is-repeated-in-the-closing-message` red (today's prose never asks for a read-back) and the other four arm-1 graders likely green; arm 2 `the-session-asks-again-and-waits` red or flaky and the file/tool graders green if the model does not act on free text by itself; arm 3 `the-spec-criterion-reads-the-change` and `the-amend-carries-a-reason` red or flaky (the unedited prose tells the session to stop) and `no-entry-drop-ran` green. A grader red at baseline that was expected green is a finding, not a failure of the case.
 3. **Treatment.** HEAD, 3 runs per case, pass at 2 of 3; one rerun of a failed batch is permitted and a rerun-green is reported as such.
 4. **Mutations.** One run each at HEAD with one carrier changed, restored afterwards and checked with `git diff --exit-code` on the file. Every mutation that leaves its case green is reported and the grader strengthened.
 
 | Carrier | File and lines at HEAD | Mutation | Case expected red |
 |---|---|---|---|
-| The read-back sentence | `skills/_shared/escalation.md:153-154` ("The session first states, in one line, how it read the answer ... `Reading your answer as:`") | delete the sentence, leaving "An answer that is not a listed fix is read before it is acted on." | arm 1 `the-reading-is-repeated-in-the-closing-message` |
-| The carry-out bullet | `skills/_shared/escalation.md:158-161` | replace the bullet with "A reading that is not a listed fix is never carried out; ask again." | arm 1 `the-entry-is-dropped-with-a-reason-naming-the-task` |
-| The ask-again bullet | `skills/_shared/escalation.md:162-165` | replace the bullet with "A reading the listed fixes never offered is carried out as the operator said." | arm 2 `no-record-was-deleted` and `the-session-asks-again-and-waits` |
-| The stop-for-a-spec-change bullet | `skills/_shared/escalation.md:166-169` | replace the bullet with "A reading that would amend the spec is carried out through `lore record update`." | arm 3 `the-spec-criterion-is-unchanged` |
-| The pointer from slice | `skills/slice/SKILL.md:792-794` ("A reply in the operator's own words is read back and checked ...") | delete the two sentences | arm 1 `the-reading-is-repeated-in-the-closing-message`, if the model never opens the subsection without it |
+| The read-back sentence | `skills/_shared/escalation.md:180-182` ("The session first states, in one line, how it read the answer ... `Reading your answer as:`") | delete the sentence, leaving "An answer that is not a listed fix is read before it is acted on." | arm 1 `the-reading-is-repeated-in-the-closing-message` |
+| The carry-out bullet | `skills/_shared/escalation.md:186-189` | replace the bullet with "A reading that is not a listed fix is never carried out; ask again." | arm 1 `the-entry-is-dropped-with-a-reason-naming-the-task` |
+| The ask-again bullet | `skills/_shared/escalation.md:190-196` | replace the bullet with "A reading the listed fixes never offered is carried out as the operator said." | arm 2 `no-record-was-deleted` and `the-session-asks-again-and-waits` |
+| The spec-amendment bullet | `skills/_shared/escalation.md:197-202` | replace the bullet with "A reading that would amend the spec is never carried out; say so and stop with nothing written." | arm 3 `the-spec-criterion-reads-the-change`, `the-amend-carries-a-reason` |
+| The pointer from slice | `skills/slice/SKILL.md:836-838` ("A reply in the operator's own words is read back and checked ...") | delete the two sentences | arm 1 `the-reading-is-repeated-in-the-closing-message`, if the model never opens the subsection without it |
 
 ### Runs
 
@@ -5236,21 +5236,27 @@ After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` 
 | smoke, arm 1 | edited | 1 | pending | confirms the history resumes and step 7 is re-entered within 900 s |
 | baseline, arm 1 | unedited | 1 | pending | expected red: `the-reading-is-repeated-in-the-closing-message` |
 | baseline, arm 2 | unedited | 1 | pending | expected red or flaky: `the-session-asks-again-and-waits` |
-| baseline, arm 3 | unedited | 1 | pending | expected red or flaky: `the-session-says-it-stopped` |
+| baseline, arm 3 | unedited | 1 | pending | expected red or flaky: `the-spec-criterion-reads-the-change`, `the-amend-carries-a-reason` |
 | treatment, arm 1 | edited | 3 | pending | bar: pass at 2 of 3 |
 | treatment, arm 2 | edited | 3 | pending | bar: pass at 2 of 3 |
 | treatment, arm 3 | edited | 3 | pending | bar: pass at 2 of 3 |
 | mutation, read-back sentence | edited, sentence deleted | 1 | pending | |
 | mutation, carry-out bullet | edited | 1 | pending | |
 | mutation, ask-again bullet | edited | 1 | pending | |
-| mutation, stop-for-a-spec-change bullet | edited | 1 | pending | |
+| mutation, spec-amendment bullet | edited | 1 | pending | |
 | mutation, slice pointer | edited | 1 | pending | |
-| mutation, the "that holds when the operator states the change in their own words ... names `/lore:correct`" wording deleted from the spec-amendment bullet of `escalation.md` "An answer in the operator's own words" (arm 3; expected red: `the-session-says-it-stopped`, `no-record-was-written`, `the-spec-criterion-is-unchanged` in a run that amends the spec) | edited | 1 | pending | |
-| grader revision: arm 3 `the-session-says-it-stopped` also requires the final message to name `/lore:correct` as the operator's route (the first run's 1 of 3 passed; the two failing runs amended the spec, following the operator's global correction rule over the stop) | edited | 3 | pending | pass at 2 of 3 |
+| mutation, the spec-amendment bullet of `escalation.md` "An answer in the operator's own words" replaced with the old stop wording (the operator's stated change is not made, the session says so and stops with nothing written) (arm 3; expected red: `the-spec-criterion-reads-the-change`, `the-amend-carries-a-reason`, `the-final-message-says-the-spec-was-changed-through-the-correction-ritual`) | edited | 1 | pending | |
+| mutation, the "After the answer" spec-change clause of `escalation.md` (carried out through the correction ritual, then the spec read fresh) replaced with "stops with nothing written" (arm 3; expected red as the row above; a green result means the answer-in-own-words bullet alone carries the behaviour) | edited | 1 | pending | |
+| mutation, the spec-change fix's cost in `escalation.md` "Deciding a found-work call" (choosing it amends the spec through the correction ritual and the pass goes on) replaced with "stops with nothing written"; observed by no case (the question stops before the answer, and `plan-asks-before-a-found-work-call-that-changes-the-spec` does not read the cost) | edited | 1 | pending | |
+| grader revision: arm 3 renamed `slice-amends-the-spec-on-a-free-text-answer-that-changes-it`; `the-session-says-it-stopped`, `the-spec-criterion-is-unchanged` and `no-record-was-written` replaced by `the-spec-criterion-reads-the-change`, `the-amend-carries-a-reason`, `no-other-record-was-written`, `the-reading-is-repeated-in-the-closing-message` and `the-final-message-says-the-spec-was-changed-through-the-correction-ritual`, after the operator decided a stated spec change is carried out through the correction ritual (the earlier runs amended the spec 3 of 3 following the operator's global correction rule) | edited | 3 | pending | pass at 2 of 3 |
 | mutation, the sentence that holds an answer's undoable parts until the operator replies to the part asked again, deleted from `escalation.md` "An answer in the operator's own words" (arm 2; expected red on `no-entry-drop-ran`, `no-operator-confirmed-was-written` in a run that drops F1 and asks about the delete) | edited | 1 | pending | |
 | grader revision: arm 2 `the-audit-task-still-exists` is a `regex` on the seeded record's value claim, because `file_exists` sees only files the run created and the record is seeded (the first run reported it missing in 3 of 3 runs) | edited | 3 | pending | pass at 2 of 3 |
 | mutation, the repeat-at-the-head-of-the-closing-message sentence deleted from `escalation.md` "An answer in the operator's own words" (arm 1; expected red: `the-reading-is-repeated-in-the-closing-message`) | edited | 1 | pending | |
 | grader revision: arm 1 `the-reading-is-repeated-in-the-closing-message` is a `regex` on the final message (the first run's trace judge saw 18 to 23 of 28 to 35 turns, so the read-back and the drop fell outside it and the grader failed 3 of 3 runs that carried the answer out correctly) | edited | 3 | pending | pass at 2 of 3 |
+
+### Criterion coverage
+
+The spec criterion "An answer that amends the spec is carried out through the correction ritual within the session" (AC19) was not in the covered set of the slice that built these cases; the renamed arm 3, `slice-amends-the-spec-on-a-free-text-answer-that-changes-it`, now exercises it.
 
 ### Not measured
 
@@ -5289,7 +5295,7 @@ Five new runner cases and one grader on each of three existing found-work cases,
 | mutation, step 9's no-one-to-answer statement removed (drive) | edited | 1 | pending | |
 | mutation, execute.md's "When no one is there to answer" paragraph removed | edited | 1 | pending | |
 | mutation, plan step 7's ask clause removed | edited | 1 | pending | |
-| mutation, escalation.md's spec-change fix sentence removed (the listed spec change and its stop-with-nothing-written cost); observed by `plan-asks-before-a-found-work-call-that-changes-the-spec` and `slice-stops-on-a-free-text-answer-that-changes-the-spec` | edited | 1 | pending | |
+| mutation, escalation.md's spec-change fix sentence removed (the listed spec change and its cost); observed by `plan-asks-before-a-found-work-call-that-changes-the-spec` (the question lists the fix) and `slice-amends-the-spec-on-a-free-text-answer-that-changes-it` | edited | 1 | pending | |
 | mutation, "for a found-work question" qualifiers and the not-about-found-work sentence removed (escalation.md "No one to answer", drive step 9, execute.md); observed by no case (the route a non-found-work stop takes under the driver has no case) | edited | 1 | pending | |
 | mutation, "except where a ritual's procedure orders the question first" removed (escalation.md); observed by `slice-asks-before-dropping-an-urgent-entry` | edited | 1 | pending | |
 | mutation, the `reopen` handback sentence removed (escalation.md "No one to answer"); observed by no case (`planning-builds-each-folded-entry-into-a-task-or-reopens-it` reopens F2 for a balloon, not a trigger, and no case runs plan unattended on a triggered entry) | edited | 1 | pending | |

@@ -5,7 +5,7 @@ Usage: build_history.py            (no arguments; run from anywhere)
 
 The three cases (`slice-carries-out-a-free-text-answer-to-its-question`,
 `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone`,
-`slice-stops-on-a-free-text-answer-that-changes-the-spec`) resume the same
+`slice-amends-the-spec-on-a-free-text-answer-that-changes-it`) resume the same
 seeded conversation: the operator ran `/craft:slice spec/invoice-summary`, the
 session read the spec, and put the blocking prompt about the urgent entry F1.
 
@@ -32,7 +32,7 @@ URGENT = EVALS / "slice-asks-before-dropping-an-urgent-entry"
 CASES = [
     EVALS / "slice-carries-out-a-free-text-answer-to-its-question",
     EVALS / "slice-asks-again-on-a-free-text-answer-that-cannot-be-undone",
-    EVALS / "slice-stops-on-a-free-text-answer-that-changes-the-spec",
+    EVALS / "slice-amends-the-spec-on-a-free-text-answer-that-changes-it",
 ]
 
 FAKE_CWD = "/tmp/claude-eval-seed/home/cwd"
