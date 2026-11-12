@@ -119,9 +119,14 @@ registers that copy with lore as the read-only, trusted vault `core`. Install
 prints one core-vault line (registered, up to date, refreshed, skipped,
 declined, or failed) and `--json` adds `core_vault: {outcome, reason}`. It never
 changes the exit code. It is skipped when lore is off or its CLI is unavailable.
-If a vault named `core` (or any vault whose path is or contains the copy) already
-exists and is not trailhead's copy, install leaves it alone, says why, and
-finishes its other steps: rename or remove that vault and re-run install.
+Install declines to register, leaves lore's config alone, says why, and finishes its
+other steps when a vault named `core` already exists and is not trailhead's copy
+(or is at the copy but is writable or shared), when more than one vault named `core`
+is registered, when another vault is or contains the copy, or when a vault sits
+inside the copy. For each but the duplicate, rename or remove that vault and re-run
+install; for duplicate `core` registrations, remove the extra one with
+`lore vault delete core` (not `--remove-from-disk`), check `lore vault ls`, and
+re-run install.
 
 **Rollback.** An older lore refuses a config that carries a read-only entry. Before
 downgrading, run `lore vault delete core` with the current lore, then remove
@@ -130,7 +135,7 @@ downgrading, run `lore vault delete core` with the current lore, then remove
 already refuses, delete the `core` entry from lore's `config.json` by hand.
 
 **Put the CLIs on PATH.** Install places `camp`, `lore`, `portage`, `ranger`,
-and `trailhead` in a shim directory. Add one line to the user's shell profile. **Ask first** and
+and `trailhead` (when the checkout's `bin/trailhead` is executable) in a shim directory. Add one line to the user's shell profile. **Ask first** and
 show them the line:
 
 - zsh (`~/.zshrc`) or bash (`~/.bashrc`):
@@ -141,6 +146,10 @@ show them the line:
 The `trailhead` shim follows the checkout that last ran `trailhead install` or
 `trailhead update`: it execs that checkout's `bin/trailhead`. It can shadow, or be
 shadowed by, another `trailhead` on PATH, whichever directory comes first wins.
+shellenv also defines a `trailhead` shell function (when the profile's checkout has
+an executable `bin/trailhead`). In the user's shell the function overrides PATH and
+runs the checkout the profile points at, while an agent's PATH lookup reaches the shim,
+which runs the checkout that last ran install or update. The two can differ.
 To roll back, delete `~/.local/state/trailhead/bin/trailhead`; install does not
 prune shims, so deleting the file is the only way to remove it.
 

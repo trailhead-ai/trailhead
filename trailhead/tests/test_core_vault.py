@@ -833,3 +833,12 @@ def test_two_vaults_named_core_both_at_the_copy_are_declined(source, cenv, copy,
     assert out.outcome == "declined"
     assert "more than one vault named core" in out.reason
     assert lore.writes == [] and not copy.exists()
+
+
+def test_duplicate_core_decline_remedy_names_the_extra_registration_not_a_rename(source, cenv, copy, capsys):
+    real = str(copy.resolve())
+    lore = FakeLore([_entry("core", real), _entry("core", real)])
+    out, text = _run(source, cenv, lore, capsys)
+    assert out.outcome == "declined"
+    assert "lore vault delete core" in text and "re-run `trailhead install`" in text
+    assert "rename or remove" not in text.lower()

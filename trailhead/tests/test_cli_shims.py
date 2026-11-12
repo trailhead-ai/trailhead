@@ -26,6 +26,7 @@ def _fake_root(tmp_path: Path, name: str) -> Path:
     root = tmp_path / name
     (root / "bin").mkdir(parents=True)
     (root / "bin" / "trailhead").write_text("#!/bin/sh\n")
+    (root / "bin" / "trailhead").chmod(0o755)
     return root
 
 
@@ -76,3 +77,46 @@ def test_the_built_trailhead_shim_runs_version_by_bare_name_from_an_unrelated_cw
 
     assert r.returncode == 0, r.stderr
     assert r.stdout.strip() == f"trailhead {__version__}"
+
+
+def _shim_names(shim_dir: Path) -> set[str]:
+    return {p.name for p in shim_dir.iterdir()}
+
+
+def test_the_trailhead_shim_is_built_when_the_roots_bin_trailhead_is_executable(tmp_path):
+    env = _fenced_env(tmp_path)
+    camp = tmp_path / "camp-bin"
+    camp.write_text("#!/bin/sh\n")
+    root = _fake_root(tmp_path, "root")
+    (root / "bin" / "trailhead").chmod(0o755)
+
+    shim_dir = install.build_cli_shims({"camp": camp}, env=env, root=root)
+
+    assert {"camp", "trailhead"} <= _shim_names(shim_dir)
+    assert str(root / "bin" / "trailhead") in (shim_dir / "trailhead").read_text()
+
+
+def test_no_trailhead_shim_is_built_when_the_roots_bin_trailhead_is_not_executable(tmp_path):
+    env = _fenced_env(tmp_path)
+    camp = tmp_path / "camp-bin"
+    camp.write_text("#!/bin/sh\n")
+    ranger = _fake_root(tmp_path, "root")
+    (ranger / "bin" / "trailhead").chmod(0o644)
+    (ranger / "bin" / "ranger").write_text("#!/bin/sh\n")
+
+    shim_dir = install.build_cli_shims({"camp": camp}, env=env, root=ranger)
+
+    assert "trailhead" not in _shim_names(shim_dir)
+    assert {"camp", "ranger"} <= _shim_names(shim_dir)
+
+
+def test_no_trailhead_shim_is_built_when_the_root_has_no_bin_trailhead(tmp_path):
+    env = _fenced_env(tmp_path)
+    camp = tmp_path / "camp-bin"
+    camp.write_text("#!/bin/sh\n")
+    root = tmp_path / "bare-root"
+    root.mkdir()
+
+    shim_dir = install.build_cli_shims({"camp": camp}, env=env, root=root)
+
+    assert _shim_names(shim_dir) == {"camp"}

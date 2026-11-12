@@ -287,10 +287,29 @@ def lock_held_core_vault(lock_path: Path) -> CoreVaultOutcome:
     return CoreVaultOutcome("failed", reason)
 
 
+def lock_unavailable_core_vault(exc: Exception, *, lore_bin: Path) -> CoreVaultOutcome:
+    """Print and return the failed outcome for a wire lock that could not be taken, held aside."""
+    return _fail("could not take the wire lock", f"({type(exc).__name__}: {_plain(str(exc))})", lore_bin=lore_bin)
+
+
+_DUPLICATE_CORE = "more than one vault named core is registered"
+
+
+def _remedy(reason: str) -> str:
+    """What the operator does about a declined ownership, ending before the re-run step."""
+    if reason == _DUPLICATE_CORE:
+        return (
+            "remove the extra `core` registration with `lore vault delete core` "
+            "(without --remove-from-disk), check `lore vault ls`"
+        )
+    return "rename or remove that vault"
+
+
 def _decline(path: str, reason: str) -> CoreVaultOutcome:
+    remedy = _remedy(reason)
     print(
         f"trailhead: core vault not registered: {reason} (path: {path}); nothing was changed. "
-        "Rename or remove that vault, then re-run `trailhead install`.",
+        f"{remedy[0].upper()}{remedy[1:]}, then re-run `trailhead install`.",
         file=sys.stderr,
     )
     return CoreVaultOutcome("declined", f"{reason} (path: {path})")
@@ -387,7 +406,7 @@ def core_ownership(vaults: list[tuple[dict, Path]], resolved_copy: Path) -> Core
     if elsewhere is not None:
         return CoreOwnership("declined", "a vault named core already exists and is not trailhead's copy", elsewhere)
     if owned > 1:
-        return CoreOwnership("declined", "more than one vault named core is registered", resolved_copy)
+        return CoreOwnership("declined", _DUPLICATE_CORE, resolved_copy)
     return CoreOwnership("owned" if owned else "missing")
 
 
@@ -559,7 +578,7 @@ def core_show(
         ls = lore("vault", "ls", "--json")
     except subprocess.TimeoutExpired:
         return _unavailable(f"`lore vault ls` timed out after {LORE_TIMEOUT_SECONDS}s")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return _unavailable(f"could not run lore ({type(exc).__name__})")
     if ls.returncode != 0:
         return _unavailable(f"`lore vault ls` failed (exit {ls.returncode})")
@@ -574,14 +593,14 @@ def core_show(
         return _unavailable("no vault named core is registered; run `trailhead install`")
     if ownership.state == "declined":
         return _unavailable(
-            f"{ownership.reason} (path: {ownership.path}); rename or remove that vault, then re-run `trailhead install`"
+            f"{ownership.reason} (path: {ownership.path}); {_remedy(ownership.reason)}, then re-run `trailhead install`"
         )
     try:
         shown = lore("record", "show", record_id, "--vault", "core")
     except subprocess.TimeoutExpired:
         return ShowResult(1, stderr=f"trailhead: `lore record show` timed out after {LORE_TIMEOUT_SECONDS}s\n")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return ShowResult(1, stderr=f"trailhead: could not run lore ({type(exc).__name__})\n")
     if shown.returncode != 0:
-        return ShowResult(1, stderr=shown.stderr or "")
+        return ShowResult(1, stderr=shown.stderr or f"trailhead: lore record show failed (exit {shown.returncode})\n")
     return ShowResult(0, stdout=shown.stdout or "")

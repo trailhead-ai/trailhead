@@ -1061,3 +1061,36 @@ class TestCoreVaultStepUnderWireLock:
             )
             assert lock.exists()
         assert outcome.outcome == "registered"
+
+
+class TestCoreVaultStepWhenTheLockCannotBeTaken:
+    """A lock that cannot be acquired for a reason other than being held degrades the step, never the install."""
+
+    def test_unusable_state_dir_is_a_failed_outcome_and_install_still_summarises(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        blocker = tmp_path / "state-is-a-file"
+        blocker.write_text("not a directory\n")
+        env["TRAILHEAD_STATE_DIR"] = str(blocker)
+        lore = FakeLore([])
+        with _patched(detected=False, real_core=True):
+            run_install(env=env, as_json=True, runner=lore)
+        captured = capsys.readouterr()
+        data = _json.loads(captured.out)
+        assert data["core_vault"]["outcome"] == "failed"
+        assert data["core_vault"]["reason"]
+        assert "core vault" in captured.err
+        assert lore.calls == []
+
+    def test_unresolvable_state_dir_is_a_failed_outcome_not_a_raise(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        env["TRAILHEAD_STATE_DIR"] = "relative/state"
+        lore = FakeLore([])
+        with _patched(detected=False, real_core=True):
+            run_install(env=env, as_json=True, runner=lore)
+        data = _json.loads(capsys.readouterr().out)
+        assert data["core_vault"]["outcome"] == "failed"
+        assert lore.calls == []

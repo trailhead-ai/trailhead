@@ -32,7 +32,7 @@ repo checkout IS the source ("install = clone the repo").
 Upgrades are additive: re-running install only adds; it never removes a plugin
 or CLI shim that a previous run installed. The shim build itself is
 ``build_cli_shims``, which ``trailhead update`` calls too so both build the same
-set (the enabled plugin CLIs plus ``bin/ranger``).
+set (the enabled plugin CLIs plus ``bin/trailhead`` when executable and ``bin/ranger``).
 
 No harness found (and none named): warn, still build the CLI shims, exit non-zero.
 
@@ -42,6 +42,7 @@ imported at module level so tests can patch them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -57,6 +58,7 @@ from trailhead.core_vault import (
     CoreVaultOutcome,
     install_core_vault,
     lock_held_core_vault,
+    lock_unavailable_core_vault,
     skipped_core_vault,
 )
 from trailhead.harness import detect_harnesses, get_harness
@@ -67,8 +69,8 @@ from trailhead.install_config import (
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
 from trailhead.provenance import write_stamp
-from trailhead.paths import state_dir
-from trailhead.wire import _LOCK_FILENAME, LockError, WireError, default_manifest_paths, wire, wire_lock
+from trailhead.paths import PathResolutionError
+from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
@@ -96,11 +98,13 @@ def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
 
 
 def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[str, Path]:
-    """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` and,
-    when present, ``bin/ranger`` — of *root* when given, else of this checkout."""
+    """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` when it is
+    executable and ``bin/ranger`` when present — of *root* when given, else of this checkout."""
     trailhead_bin = _TRAILHEAD_BIN if root is None else root / "bin" / "trailhead"
     ranger_bin = _RANGER_BIN if root is None else root / "bin" / "ranger"
-    tools = {**cli_tools, "trailhead": trailhead_bin}
+    tools = dict(cli_tools)
+    if trailhead_bin_executable(trailhead_bin.parent.parent):
+        tools["trailhead"] = trailhead_bin
     if ranger_bin.exists():
         tools["ranger"] = ranger_bin
     return tools
@@ -416,8 +420,14 @@ def run_install(
     if "lore" in cli_tools:
         # Taken here, never inside install_core_vault: an updater already holding the
         # lock calls the step itself. A held lock degrades the step, not the install.
-        try:
-            with wire_lock(env=_env):
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(wire_lock(env=_env))
+            except LockError as exc:
+                core_vault = lock_held_core_vault(exc.lock_path)
+            except (PathResolutionError, OSError) as exc:
+                core_vault = lock_unavailable_core_vault(exc, lore_bin=cli_tools["lore"])
+            else:
                 core_vault = install_core_vault(
                     source=_REPO_ROOT / "core-vault",
                     env=_env,
@@ -425,8 +435,6 @@ def run_install(
                     runner=runner,
                     file=core_out,
                 )
-        except LockError:
-            core_vault = lock_held_core_vault(state_dir("trailhead", env=_env) / _LOCK_FILENAME)
     else:
         core_vault = skipped_core_vault(
             lore_enabled=bool(cfg.cli_flags.get("lore")), file=core_out

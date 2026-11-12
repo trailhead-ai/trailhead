@@ -118,8 +118,8 @@ def test_each_unavailable_case_has_its_own_actionable_reason(cenv, copy, tmp_pat
         absent = opts.pop("absent", False)
         r = _show(ShowLore(vaults, **opts), cenv, lore_bin=None if absent else LORE_BIN)
         reasons[case] = r.stderr
-    reasons["core-shared"] = reasons["core-writable"]  # install's one message covers both
-    assert len({v for k, v in reasons.items() if k != "core-shared"}) == len(reasons) - 1
+    assert reasons["core-shared"] == reasons["core-writable"]  # install's one message covers both
+    assert len(set(reasons.values())) == len(reasons) - 1
     assert "trailhead install" in reasons["no-core"]
     assert str(tmp_path / "elsewhere") in reasons["core-elsewhere"]
     assert "rename or remove" in reasons["core-elsewhere"].lower()
@@ -256,3 +256,54 @@ def test_resolve_lore_bin_is_none_without_a_lore_manifest():
 def test_resolve_lore_bin_default_points_at_the_shipped_lore():
     found = resolve_lore_bin()
     assert found is not None and found.name == "lore" and found.exists()
+
+
+def _decode_error():
+    return UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
+
+
+@pytest.mark.parametrize("raised", [_decode_error(), ValueError("bad text")])
+def test_vault_ls_decode_failure_exits_3_not_1(raised, cenv, copy):
+    lore = ShowLore([_entry("core", str(copy))], ls_raise=raised)
+    r = _show(lore, cenv)
+    assert r.code == 3 and r.stdout == ""
+    assert r.stderr.startswith("trailhead: core vault unavailable: ")
+    assert lore.shows == []
+
+
+def test_record_show_decode_failure_exits_1_since_ownership_was_confirmed(cenv, copy):
+    lore = ShowLore([_entry("core", str(copy))], show_raise=_decode_error())
+    r = _show(lore, cenv)
+    assert r.code == 1 and r.stdout == ""
+    assert r.stderr.startswith("trailhead: ") and "lore" in r.stderr and r.stderr.count("\n") == 1
+
+
+class _SilentFailLore(ShowLore):
+    def __init__(self, vaults, err):
+        super().__init__(vaults, show_rc=7)
+        self.err = err
+
+    def __call__(self, args, **kw):
+        out = super().__call__(args, **kw)
+        if list(args[1:3]) == ["record", "show"]:
+            out.stderr = self.err
+        return out
+
+
+@pytest.mark.parametrize("err", ["", None])
+def test_record_show_failure_with_empty_stderr_still_names_the_failure(err, cenv, copy):
+    r = _show(_SilentFailLore([_entry("core", str(copy))], err), cenv)
+    assert r.code == 1 and r.stdout == ""
+    assert r.stderr == "trailhead: lore record show failed (exit 7)\n"
+
+
+def test_record_show_failure_with_stderr_relays_lore_stderr_unchanged(cenv, copy):
+    r = _show(_SilentFailLore([_entry("core", str(copy))], "lore: boom\n"), cenv)
+    assert r.stderr == "lore: boom\n"
+
+
+def test_duplicate_core_remedy_names_the_extra_registration_not_a_rename(cenv, copy):
+    r = _show(ShowLore([_entry("core", str(copy)), _entry("core", str(copy))]), cenv)
+    assert "more than one vault named core" in r.stderr
+    assert "lore vault delete core" in r.stderr
+    assert "rename or remove" not in r.stderr.lower()

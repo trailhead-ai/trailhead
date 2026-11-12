@@ -16,9 +16,9 @@ rule decides whether `trailhead install` registers the copy.
 | Code | Meaning | Streams |
 |------|---------|---------|
 | 0 | Owned, and the record was read | lore's stdout is relayed |
-| 1 | Owned, but lore failed for any reason (record not in core, any other non-zero exit, a timeout) | lore's stderr is passed through; stdout empty |
+| 1 | Owned, but lore failed for any reason (record not in core, any other non-zero exit, a timeout, undecodable output) | lore's stderr is passed through, or `trailhead: lore record show failed (exit N)` when it was empty; stdout empty |
 | 2 | The id was refused before any lore call (not `<kind>/<name>` in lowercase letters, digits and `-`) | stderr names the refusal; stdout empty |
-| 3 | The core vault is unavailable: not owned, lore missing, `lore vault ls` failed, malformed or timed out | one line, `trailhead: core vault unavailable: <reason>`, on stderr; stdout empty |
+| 3 | The core vault is unavailable: not owned, lore missing, `lore vault ls` failed, malformed, undecodable or timed out | one line, `trailhead: core vault unavailable: <reason>`, on stderr; stdout empty |
 
 **Any non-zero exit means the inline one-line rule at the point of use still
 binds.** A pointer never replaces that rule; it adds the detail.
