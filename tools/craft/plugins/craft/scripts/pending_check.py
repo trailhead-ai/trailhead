@@ -291,6 +291,7 @@ def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
 def write_mode(args, runner) -> int:
     sw.check_names(args.spec, args.parent, args.vault)
     entries = _load_entries(args.entries)
+    sw.require_utf8_text(entries)
     _refuse_structural_text(entries)
     criteria = [item["criterion"] for item in entries]
     vault = sw.resolve_vault(runner, args.spec, args.vault)

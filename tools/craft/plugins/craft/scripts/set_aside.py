@@ -261,6 +261,7 @@ def set_aside_in_spec(
 def write_mode(args, runner) -> int:
     sw.check_names(args.spec, args.vault)
     entries = _load_entries(args.entries)
+    sw.require_utf8_text(entries)
     _refuse_unfit_text(entries)
     vault = sw.resolve_vault(runner, args.spec, args.vault)
     _, status = set_aside_in_spec(runner, vault, args.spec, entries, _SLICE_WORDS)
@@ -339,6 +340,7 @@ def _narrow_parent(runner, vault: str, spec: str, parent: str, criteria: list[st
 def build_mode(args, runner) -> int:
     sw.check_names(args.spec, args.parent, args.vault)
     entries = _load_entries(args.entries)
+    sw.require_utf8_text(entries)
     _refuse_unfit_text(entries)
     criteria = [entry["criterion"] for entry in entries]
     vault = sw.resolve_vault(runner, args.spec, args.vault)

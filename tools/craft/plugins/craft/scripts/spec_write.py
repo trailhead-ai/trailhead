@@ -64,6 +64,20 @@ def check_names(*names: str | None) -> None:
             )
 
 
+def require_utf8_text(entries: list[dict]) -> None:
+    for entry in entries:
+        for value in entry.values():
+            if isinstance(value, str):
+                try:
+                    value.encode("utf-8")
+                except UnicodeEncodeError:
+                    raise Refusal(
+                        f"an entry for {entry['criterion']} carries text that is not valid UTF-8",
+                        "invalid-entries",
+                        2,
+                    )
+
+
 def refusal_from(err: gather.GatherError, exit_code: int = 2) -> Refusal:
     return Refusal(f"lore could not be read: {err.reason}", err.reason, exit_code)
 

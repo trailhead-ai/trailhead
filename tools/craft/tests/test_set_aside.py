@@ -383,6 +383,15 @@ def test_malformed_entries_are_refused_before_any_lore_call(world, entries_file,
     assert fake.calls == []
 
 
+def test_waits_on_with_a_lone_surrogate_is_refused_before_any_lore_call(world, entries_file, capsys):
+    fake = world()
+    rc, out, err = run(fake, entries_file([item("AC2", "the vendor \ud800 ships")]), capsys)
+    assert (rc, out, code_of(err)) == (2, "", "invalid-entries")
+    assert fake.calls == []
+    rc, _, err = run(fake, entries_file([item("AC2", "the vendor ships \u00e9")]), capsys)
+    assert rc == 0, err
+
+
 def test_a_spec_that_is_not_in_the_vault_is_refused_spec_not_found(world, entries_file, capsys):
     fake = world()
     rc, out, err = run(fake, entries_file([item("AC2")]), capsys, spec="no-such-spec")
@@ -552,6 +561,15 @@ def test_a_set_aside_that_would_leave_the_parent_covering_nothing_is_refused_and
     assert (rc, out, code_of(err)) == (1, "", "would-empty-slice")
     assert fake.updates() == []
     assert fake.parent_body() == parent_body
+
+
+def test_a_lone_surrogate_in_waits_on_is_refused_in_the_parent_move_too_and_nothing_is_written(
+    build, entries_file, capsys
+):
+    fake = build()
+    rc, out, err = run_build(fake, entries_file([item("AC2", "the vendor \ud800 ships")]), capsys)
+    assert (rc, out, code_of(err)) == (2, "", "invalid-entries")
+    assert fake.calls == []
 
 
 def test_a_criterion_that_is_not_on_the_parent_is_refused_not_on_this_slice_and_nothing_is_written(

@@ -781,6 +781,14 @@ def test_an_unusable_entries_file_is_invalid_entries_with_no_lore_call(closing, 
     assert fake.calls == []
 
 
+@pytest.mark.parametrize("field", ["check", "how"])
+def test_a_lone_surrogate_in_check_or_how_is_invalid_entries_with_no_lore_call(closing, field, entries_file, capsys):
+    fake = closing()
+    rc, _, err = run(fake, entries_file([entry("AC2", **{field: "see \ud800 here"})]), capsys)
+    assert rc == 2 and code_of(err) == "invalid-entries"
+    assert fake.calls == []
+
+
 def test_the_entries_file_is_never_deleted(closing, entries_file, capsys):
     path = entries_file([entry("AC2")])
     run(closing(), path, capsys)
