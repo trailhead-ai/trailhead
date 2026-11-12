@@ -2,7 +2,7 @@
 
 ## Under test
 
-The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`), the one-line `create` fix in `agents/updater.md`, and the `stop_at_ready` / outcome-file behaviour of `agents/monitor.md` that the skill dispatches. The claim: when the lore write of the block is refused (the `./lore` wrapper refuses every `--diff`, as an installed lore without the frozen-task exemption would), the PR step ends `outcome: stuck task/count-words parked=0 — run-section write failed; <what to do instead>` before anything is held, dispatched or pushed.
+The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`). The updater and monitor agents are not under test: this run ends before the skill dispatches any subagent, which the `no-agent-dispatched` grader pins, so no change to either agent can move its result. The claim: when the lore write of the block is refused (the `./lore` wrapper refuses every `--diff`, as an installed lore without the frozen-task exemption would), the PR step ends `outcome: stuck task/count-words parked=0 — run-section write failed; <what to do instead>` before anything is held, dispatched or pushed.
 
 ## Fixture
 
