@@ -4,6 +4,11 @@ The command builds a plain-data :class:`HealthReport` from the scan of every
 configured vault and the dangling-reference check, then renders it. Nothing is
 written: no record, no lock, no index.
 
+A malformed reference is reported with where it sits, never its text: the body
+lines of a bad wikilink, or the entry positions of a bad sidecar entry
+(:func:`_malformed_evidence`). The index line counts the records the index would
+hold, sessions included, on every form it prints.
+
 Output safety: every vault name, record id, field, target, skip reason, config
 error and ``--vault`` echo is untrusted (a vault synced from elsewhere never had
 its names validated, and OS error text carries paths). Each is passed through
@@ -51,9 +56,10 @@ class VaultRow:
 
 @dataclass
 class IndexLine:
-    """Whether the records read match the index.
+    """Whether the records the index would hold match the index.
 
-    ``mismatches`` holds ``(vault, read, indexed)`` per differing vault;
+    ``read`` is that count on every status, sessions included. ``mismatches``
+    holds ``(vault, read, indexed)`` per differing vault;
     ``reason`` says why a count could not be confirmed.
     """
 
@@ -109,16 +115,15 @@ def _sort_key(f: Finding):
 
 
 def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
-    read = sum(len(s.records) for s in selected_scans)
+    held = sum(s.indexed for s in selected_scans)
     unfit = [s.vault for s in selected_scans if not s.fully_read]
     if unfit:
-        return IndexLine(INDEX_UNCONFIRMED, read, reason=f"vault {', '.join(unfit)} was not fully read")
+        return IndexLine(INDEX_UNCONFIRMED, held, reason=f"vault {', '.join(unfit)} was not fully read")
     counts = scan_mod.count_index_rows([s.root for s in selected_scans], env=env)
     bad = next((c for c in counts.values() if c.status != scan_mod.INDEX_OK), None)
     if bad is not None:
         reason = "no index found" if bad.status == scan_mod.INDEX_ABSENT else "the index could not be read"
-        return IndexLine(INDEX_UNCONFIRMED, read, reason=reason)
-    held = sum(s.indexed for s in selected_scans)
+        return IndexLine(INDEX_UNCONFIRMED, held, reason=reason)
     mismatches = [
         (s.vault, s.indexed, counts[s.root].count)
         for s in selected_scans
@@ -187,11 +192,32 @@ def _table(rows: list[VaultRow]) -> list[str]:
     return ["  ".join(c[i].ljust(widths[i]) for i in range(4)) + "  " + c[4] for c in cells]
 
 
+def _number_list(numbers: tuple[int, ...]) -> str:
+    shown = [str(n) for n in numbers]
+    return shown[0] if len(shown) == 1 else ", ".join(shown[:-1]) + " and " + shown[-1]
+
+
+def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
+    """Where a malformed reference sits, never its text.
+
+    A wikilink's locations are body lines, any other field's are entry
+    positions; a field with no locations (``parent``) is a single value, so the
+    field names the spot and no position is added.
+    """
+    if not locations:
+        return "malformed reference"
+    if field == "wikilink":
+        noun = "body line" if len(locations) == 1 else "body lines"
+        return f"malformed reference on {noun} {_number_list(locations)}"
+    noun = "entry" if len(locations) == 1 else "entries"
+    return f"malformed reference at {noun} {_number_list(locations)}"
+
+
 def _finding_line(f: Finding) -> str:
     date = _safe(f.updated_at[:10]) if f.updated_at else "undated"
     ident = f"{_safe(f.vault)}/{_safe(f.kind)}/{_safe(f.name)}"
     if f.malformed:
-        what = f"{_safe(f.field)} → malformed reference: not shaped like a record id"
+        what = f"{_safe(f.field)} → {_malformed_evidence(f.field, f.locations)}: not shaped like a record id"
     else:
         what = f"{_safe(f.field)} → {_safe(f.target)}: not found in any vault"
     return f"  {ident}  {date}  {what}"
@@ -208,7 +234,7 @@ def _index_lines(ix: IndexLine) -> list[str]:
                "Run `lore reindex`, then run the report again."]
     else:
         return [f"Could not confirm the count against the index: {_safe(ix.reason)}. "
-                f"{_plural(ix.read, 'record', 'records')} read."]
+                f"{_plural(ix.read, 'record', 'records')} the index would hold (sessions included)."]
     out.append(caveat)
     return out
 

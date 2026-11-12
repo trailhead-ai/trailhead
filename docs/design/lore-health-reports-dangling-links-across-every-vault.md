@@ -41,7 +41,9 @@ it as dangling.
 
 A target must look like a record id: an optional kind, then a name in lore's name characters and
 length. A wikilink whose text is anything else is reported as a malformed reference, naming the
-linking record and the field but never repeating the text.
+linking record, the field and where it sits (the body lines of a bad wikilink, the entry positions
+of a bad sidecar entry, as `on body lines 12, 40 and 41` or `at entries 2 and 3`) but never
+repeating the text. A `parent` is one value, so it names the field alone.
 
 Every record id, field name and target shown comes from a vault and is untrusted. Before display,
 each is rendered with control and invisible format characters escaped, so a finding is always one
@@ -51,8 +53,8 @@ line and can never carry a terminal escape.
 
 1. **The summary.** One row per vault and check: records checked, findings, and whether the check
    was skipped.
-2. **The index line.** Whether the number of records read matches the number the search index
-   holds for the vaults checked.
+2. **The index line.** Whether the number of records the index would hold matches the number the
+   search index holds for the vaults checked.
 3. **One group per check.** Its findings, oldest first by the linking record's last update, at most
    20 unless more were asked for, then a line counting the rest and a line naming what acts on
    them.
@@ -128,8 +130,11 @@ When the index cannot be opened, the line says the count could not be confirmed 
 claiming a match:
 
 ```
-Could not confirm the count against the index: no index found. 6,402 records read.
+Could not confirm the count against the index: no index found. 6,402 records the index would hold (sessions included).
 ```
+
+The count is the same one the match line prints (the records the index would hold, sessions included),
+and the same form reads `the index could not be read` when the index file exists but cannot be opened.
 
 A record whose sidecar or body cannot be read cannot be judged, and is not counted as read, because
 the index skips it too. The one exception is a record over the size cap: the index holds it, so it
