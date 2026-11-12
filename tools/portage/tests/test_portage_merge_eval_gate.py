@@ -22,9 +22,12 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
 from portage.cli import pr as pr_cli
+from portage.eval_gate.run import run_case
 
 from trailhead.tests._git_support import hermetic_git_env  # noqa: F401  (fixture)
 from trailhead.vcs.github import GitHubProvider
+
+from test_portage_eval_gate_run import PASS, Env, _result
 
 pytestmark = pytest.mark.usefixtures("hermetic_git_env")
 
@@ -469,6 +472,38 @@ class TestBaseRemedy:
         err = capsys.readouterr().err
         assert rc == 2 and "state-tier-not-merge" in err
         assert "--base" not in err
+
+
+class TestEndToEndSeam:
+    """plan -> run -> verdict -> merge, each the real step, so the shape one writes is the shape the
+    next reads: the only stub is the runner binary (the fake ``claude`` the run tests use) and ``gh``."""
+
+    def test_a_state_built_by_the_real_steps_merges_pinned_to_its_head(
+        self, tmp_path, monkeypatch, capsys, mo
+    ):
+        repo, head = mo
+        capsys.readouterr()
+        assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--tier", "merge"]) == 0
+        out = capsys.readouterr().out
+        state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
+        planned = [c["case"] for c in json.loads((state / "plan.json").read_text())["cases"]]
+        assert sorted(planned) == ["core", "slow"]
+
+        real_path = os.environ["PATH"]
+        (tmp_path / "runner").mkdir()
+        runner = Env(tmp_path / "runner", monkeypatch)
+        runner.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        for case in planned:
+            assert run_case(state, case)["verdict"] == "pass"
+        monkeypatch.setenv("PATH", real_path)
+
+        assert dispatch.main(["eval-gate", "verdict", "--state", str(state)]) == 0
+        capsys.readouterr()
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}")
+        assert rc == 0, capsys.readouterr().err
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
 
 
 class TestUsage:
