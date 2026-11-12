@@ -50,5 +50,5 @@ $ENTRY
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Invoice summary' --status ready >/dev/null
 printf '**Value claim:** You can total the amounts in an invoice file.\n\n**Covers:** AC1\n' | ./lore record create --kind task --title 'Count totals' --status done --related spec=invoice-summary --label craft/slice-parent >/dev/null
 printf '**Value claim:** You can count the amounts in an invoice file.\n\n**Covers:** AC2\n' | ./lore record create --kind task --title 'Count amounts' --status done --related spec=invoice-summary --label craft/slice-parent >/dev/null
-printf '**Value claim:** Harden the billing export so it rejects unsigned requests.\n' | ./lore record create --kind task --title 'Billing export hardening' --status open >/dev/null
-printf '**Value claim:** Audit the billing service for unauthenticated endpoints.\n' | ./lore record create --kind task --title 'Billing service audit' --status open >/dev/null
+printf '**Value claim:** Harden the billing export in billing-service/export.py so it rejects unsigned requests and handles its findings.\n' | ./lore record create --kind task --title 'Billing export hardening' --status open >/dev/null
+printf '**Value claim:** Audit the billing service for unauthenticated endpoints, billing-service/export.py included, and fix the security findings the audit turns up.\n' | ./lore record create --kind task --title 'Billing service audit' --status open >/dev/null
