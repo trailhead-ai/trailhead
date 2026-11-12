@@ -258,7 +258,7 @@ def install_shims(root: Path, outpost: RealOutpost) -> tuple[Path, Path]:
         "#!/bin/sh\n"
         f'PYTHONPATH="{REPO_ROOT}" exec "{sys.executable}" -c '
         "'import sys; from trailhead.gateway.command import main; "
-        f"sys.exit(main(sys.argv[1:], port={outpost.port}))' \"$@\"\n"
+        f'sys.exit(main(sys.argv[1:], port={outpost.port}))\' "$@"\n'
     )
     gateway.chmod(0o755)
     tstate = root / "trailhead-state" / "bin"
@@ -380,3 +380,64 @@ def run_claude_session(
         )
     results = tool_results(stream.read_text())
     return Session({name: results[cmd] for name, cmd in steps.items() if cmd in results}, done.returncode, stream)
+
+
+@dataclass(frozen=True)
+class Facts:
+    """What Outpost's side holds after a session, read while that session's Outpost was still up."""
+
+    credentials: list[tuple[str, int]]  # (session key, file mode)
+    registry: list[tuple[str, str | None]]  # (session key, workspace)
+
+
+NOT_RUN = "step {step!r} was not run as written"
+
+
+def _out(session: Session, step: str) -> str:
+    assert step in session.outputs, NOT_RUN.format(step=step)
+    return session.outputs[step]
+
+
+def check_hook_registered_the_session_for_w1(facts: Facts, session: Session) -> None:  # AC13
+    assert len(facts.credentials) == 1, f"no credential file, or more than one: {facts.credentials}"
+    key, mode = facts.credentials[0]
+    assert mode == 0o600, f"credential file mode is {oct(mode)}, expected 0o600"
+    assert facts.registry == [(key, f"{GROUP}/{W1}")], f"registered {facts.registry}, expected {GROUP}/{W1}"
+
+
+def check_credential_file_read_is_refused(facts: Facts, session: Session) -> None:  # AC22
+    assert facts.credentials, "no credential file exists outside the sandbox, so a refusal proves nothing"
+    out = _out(session, "credential_read")
+    assert out.startswith("Exit code") and "No such file or directory" in out, f"the read was not refused: {out!r}"
+
+
+def check_run_list_prints_the_empty_list(facts: Facts, session: Session) -> None:  # AC23, AC40
+    out = _out(session, "run_list").strip()
+    assert out == f"No runs in workspace {GROUP}/{W1}", f"run list printed {out!r}"
+
+
+def check_proxied_curl_reaches_the_command_route(facts: Facts, session: Session) -> None:  # AC100
+    out = _out(session, "command_route")
+    assert "http=401" in out and "credential_missing" in out, (
+        f"the route did not answer 401 credential_missing: {out!r}"
+    )
+
+
+def check_proxied_curl_to_another_loopback_port_is_refused(facts: Facts, session: Session) -> None:  # AC100
+    out = _out(session, "other_loopback_port")
+    assert "http=403" in out, f"the proxy did not refuse the other port: {out!r}"
+
+
+def check_registering_without_the_authority_is_refused(facts: Facts, session: Session) -> None:  # AC16, AC17, AC18
+    out = _out(session, "register_without_authority")
+    assert "http=401" in out and "registration_authority_required" in out, f"registration was not refused: {out!r}"
+
+
+CHECKS = [
+    check_hook_registered_the_session_for_w1,
+    check_credential_file_read_is_refused,
+    check_run_list_prints_the_empty_list,
+    check_proxied_curl_reaches_the_command_route,
+    check_proxied_curl_to_another_loopback_port_is_refused,
+    check_registering_without_the_authority_is_refused,
+]

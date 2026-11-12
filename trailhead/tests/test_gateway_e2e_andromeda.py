@@ -21,14 +21,19 @@ import os
 import stat
 import threading
 import urllib.request
-from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
 from ._gateway_e2e_support import (
+    CHECKS,
     GROUP,
     W1,
+    W2,
+    Facts,
+    check_credential_file_read_is_refused,
+    check_hook_registered_the_session_for_w1,
+    check_run_list_prints_the_empty_list,
     list_cmd,
     make_camp,
     real_outpost,
@@ -136,14 +141,6 @@ def bystander():
     server.server_close()
 
 
-@dataclass(frozen=True)
-class Facts:
-    """What Outpost's side holds after a session, read while that session's Outpost was still up."""
-
-    credentials: list[tuple[str, int]]  # (session key, file mode)
-    registry: list[tuple[str, str | None]]  # (session key, workspace)
-
-
 def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, with_hook=True):
     """One real sandboxed session against its own fresh Outpost: ``(Facts, Session)``."""
     root = tmp_path_factory.mktemp(label)
@@ -168,48 +165,6 @@ def _session(tmp_path_factory, bystander, label, *, cwd="w1", deny_read=True, wi
     return facts, session
 
 
-def check_hook_registered_the_session_for_w1(facts, session):  # AC13
-    assert len(facts.credentials) == 1, f"expected one credential file, found {facts.credentials}"
-    key, mode = facts.credentials[0]
-    assert mode == 0o600
-    assert facts.registry == [(key, f"{GROUP}/{W1}")]
-
-
-def check_credential_file_read_is_refused(facts, session):  # AC22
-    assert facts.credentials, "no credential file exists outside the sandbox, so a refusal proves nothing"
-    out = session.outputs.get("credential_read", "<step not run as written>")
-    assert out.startswith("Exit code 1") and "No such file or directory" in out, out
-
-
-def check_run_list_prints_the_empty_list(facts, session):  # AC23, AC40
-    assert session.outputs.get("run_list", "<step not run as written>").strip() == NO_RUNS_W1
-
-
-def check_proxied_curl_reaches_the_command_route(facts, session):  # AC100
-    out = session.outputs.get("command_route", "<step not run as written>")
-    assert "http=401" in out and "credential_missing" in out, out
-
-
-def check_proxied_curl_to_another_loopback_port_is_refused(facts, session):  # AC100
-    out = session.outputs.get("other_loopback_port", "<step not run as written>")
-    assert "http=403" in out, out
-
-
-def check_registering_without_the_authority_is_refused(facts, session):  # AC16, AC17, AC18
-    out = session.outputs.get("register_without_authority", "<step not run as written>")
-    assert "http=401" in out and "registration_authority_required" in out, out
-
-
-CHECKS = [
-    check_hook_registered_the_session_for_w1,
-    check_credential_file_read_is_refused,
-    check_run_list_prints_the_empty_list,
-    check_proxied_curl_reaches_the_command_route,
-    check_proxied_curl_to_another_loopback_port_is_refused,
-    check_registering_without_the_authority_is_refused,
-]
-
-
 @pytest.fixture(scope="module")
 def good_session(tmp_path_factory, bystander):
     return _session(tmp_path_factory, bystander, "good")
@@ -225,21 +180,36 @@ def test_the_bystander_listener_answers_outside_the_sandbox(bystander):
     assert opener.open(f"http://127.0.0.1:{bystander}/", timeout=3).read() == b"ok"
 
 
-# Each broken setup must make the checks it targets fail, or those checks prove nothing.
-BROKEN = [
-    ("no-hook", {"with_hook": False}, [check_hook_registered_the_session_for_w1, check_run_list_prints_the_empty_list]),
-    ("no-deny-read", {"deny_read": False}, [check_credential_file_read_is_refused]),
-    (
-        "wrong-workspace",
-        {"cwd": "w2"},
-        [check_hook_registered_the_session_for_w1, check_run_list_prints_the_empty_list],
-    ),
-]
+def _ran(session, step):
+    """The step's output; a session that did not start, or a step the model did not run, fails the test."""
+    assert step in session.outputs, f"step {step!r} was not run as written (session exit {session.exit_code})"
+    return session.outputs[step]
 
 
-@pytest.mark.parametrize("label,setup,failing", BROKEN, ids=[b[0] for b in BROKEN])
-def test_each_check_fails_against_a_deliberately_broken_setup(label, setup, failing, tmp_path_factory, bystander):
-    facts, session = _session(tmp_path_factory, bystander, f"broken-{label}", **setup)
-    for check in failing:
-        with pytest.raises(AssertionError):
-            check(facts, session)
+def test_without_denyread_the_credential_read_succeeds_and_the_refusal_check_fails(tmp_path_factory, bystander):
+    facts, session = _session(tmp_path_factory, bystander, "broken-no-deny-read", deny_read=False)
+    out = _ran(session, "credential_read")
+    assert not out.startswith("Exit code"), f"the read did not succeed, so denyRead is not what was removed: {out!r}"
+    assert facts.credentials, "no credential file exists, so nothing was there to read"
+    with pytest.raises(AssertionError, match="was not refused"):
+        check_credential_file_read_is_refused(facts, session)
+
+
+def test_without_the_hook_nothing_registers_and_the_list_and_registration_checks_fail(tmp_path_factory, bystander):
+    facts, session = _session(tmp_path_factory, bystander, "broken-no-hook", with_hook=False)
+    _ran(session, "run_list")
+    assert facts.credentials == [] and facts.registry == [], f"something registered without the hook: {facts}"
+    with pytest.raises(AssertionError, match="no credential file"):
+        check_hook_registered_the_session_for_w1(facts, session)
+    with pytest.raises(AssertionError, match="no gateway credential"):
+        check_run_list_prints_the_empty_list(facts, session)
+
+
+def test_a_session_started_in_w2_registers_w2_and_the_w1_checks_fail(tmp_path_factory, bystander):
+    facts, session = _session(tmp_path_factory, bystander, "broken-wrong-workspace", cwd="w2")
+    _ran(session, "run_list")
+    assert [ws for _, ws in facts.registry] == [f"{GROUP}/{W2}"], f"the hook did not register W2: {facts}"
+    with pytest.raises(AssertionError, match="ws-two"):
+        check_hook_registered_the_session_for_w1(facts, session)
+    with pytest.raises(AssertionError, match="ws-two"):
+        check_run_list_prints_the_empty_list(facts, session)
