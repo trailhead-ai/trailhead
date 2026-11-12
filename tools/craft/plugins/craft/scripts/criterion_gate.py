@@ -158,14 +158,21 @@ def _offending_spans(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 _CREDENTIAL_PATTERNS = [
-    re.compile(r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+"),
+    re.compile(
+        r"(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*['\"]?\s*[=:]\s*"
+        r"(?:\"[^\"]*\"|'[^']*'|\S+)"
+    ),
     re.compile(
         r"(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|"
         r"glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|"
         r"AIza[0-9A-Za-z_-]{35})\b"
     ),
-    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-]+"),
+    re.compile(r"[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@"),
+    re.compile(r"(?i)bearer\s+[A-Za-z0-9._\-+/=~]+"),
     re.compile(r"(?i)api[_-]?key['\"]?\s*[:=]\s*['\"]?[A-Za-z0-9._\-]{16,}"),
+    re.compile(r"(?i)authorization['\"]?\s*[:=]\s*basic\s+\S+"),
+    re.compile(r"(?i)--[A-Za-z0-9_-]*(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s+\S+"),
+    re.compile(r"(?i)\b(password|passwd|passphrase)\s+(is|was)\s+\S+"),
     re.compile(r"\b[A-Za-z0-9+/]{32,}={0,2}\b"),
     re.compile(r"\b[A-Fa-f0-9]{40,}\b"),
     re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),

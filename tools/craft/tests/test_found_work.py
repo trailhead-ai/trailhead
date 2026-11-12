@@ -3225,6 +3225,25 @@ def test_scrub_redacts_a_credential_shaped_run(capsys):
     assert out.count("\n") == 1
 
 
+SCRUB_SHAPES = [
+    ("url-userinfo", "db is postgres://app:S3cr3tPw@db.internal/prod ok", "S3cr3tPw"),
+    ("json-quoted-key", 'config {"password": "hunter2"} here', "hunter2"),
+    ("cli-flag", "ran tool --password hunter2 again", "hunter2"),
+    ("prose-password-is", "the password is hunter2 apparently", "hunter2"),
+    ("quoted-value-with-spaces", 'password = "S3cr3t Pw x" seen', "Pw x"),
+    ("basic-auth", "Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+    ("bearer-with-base64-punctuation", "Authorization: Bearer ab12.cd+ef/gh==", "ef/gh"),
+]
+
+
+@pytest.mark.parametrize("shape,text,secret", SCRUB_SHAPES, ids=[s[0] for s in SCRUB_SHAPES])
+def test_scrub_redacts_each_documented_credential_shape(shape, text, secret, capsys):
+    code, out, err = run_scrub(text, capsys)
+    assert code == 0, err
+    assert secret not in out
+    assert "[redacted]" in out
+
+
 def test_scrub_passes_a_clean_line_unchanged(capsys):
     code, out, _ = run_scrub("Handle the empty export case", capsys)
     assert code == 0
