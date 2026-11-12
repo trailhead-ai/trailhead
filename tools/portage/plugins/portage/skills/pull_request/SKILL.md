@@ -318,7 +318,9 @@ anything yourself to turn a `stuck` into `pr-ready`.
 
 ### Step H — end the session
 
-Read the record fresh. In one more confined edit set `**Outcome:** <kind>`, bring `**Checkpoint:**`
+Read the record fresh. In one more confined edit set `**Outcome:** <kind>` (the line is exactly
+`**Outcome:** pr-ready` or `**Outcome:** stuck`, with nothing after the word: the reason goes in
+the outcome line below, never in the block), bring `**Checkpoint:**`
 up to date (`pr-ready` or `stuck`), update the `pull_request (<n> calls decided unattended)` count
 and add one numbered decision (question, choice, reasoning, each on its own labelled line) for every
 judgment call made. Only after that edit has landed, print the session's last line, with nothing after it:
