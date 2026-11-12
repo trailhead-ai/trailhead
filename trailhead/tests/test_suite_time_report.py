@@ -6,9 +6,12 @@ and runs the real script as a subprocess, asserting on exit code and output.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _REPO_ROOT / "scripts" / "suite-time-report"
@@ -45,13 +48,17 @@ def _run(tmp_path, cases, wall, *args, area=("trailhead/tests", "tools/lore/test
     return _run_file(xml, *args, area=area)
 
 
-def _run_file(xml, *args, area=("trailhead/tests", "tools/lore/tests")):
+def _run_file(xml, *args, area=("trailhead/tests", "tools/lore/tests"), github_actions=False):
     area_args = [x for a in area for x in ("--area", a)]
+    env = {k: v for k, v in os.environ.items() if k != "GITHUB_ACTIONS"}
+    if github_actions:
+        env["GITHUB_ACTIONS"] = "true"
     return subprocess.run(
         [sys.executable, str(_SCRIPT), str(xml), *area_args, *args],
         capture_output=True,
         text=True,
         timeout=60,
+        env=env,
     )
 
 
@@ -65,11 +72,35 @@ def test_under_budget_exits_zero(tmp_path):
     assert "OK" in r.stdout
 
 
-def test_one_second_over_budget_exits_nonzero_and_names_the_budget(tmp_path):
+def test_one_second_over_budget_warns_names_the_budget_and_exits_zero(tmp_path):
     r = _run(tmp_path, [_case("t1", 1.0)], 101.0, "--budget", "100")
+    assert r.returncode == 0, _out(r)
+    first = r.stdout.splitlines()[0]
+    assert "WARN" in first and "budget of 100.0s" in first and "101.0s" in first
+
+
+def test_a_count_breach_fails_even_beside_a_budget_overrun_and_both_are_reported(tmp_path):
+    r = _run(tmp_path, [_case("t1", 1.0)], 101.0, "--budget", "100", "--baseline-passed", "2")
     assert r.returncode == 1
     first = r.stderr.splitlines()[0]
-    assert "FAIL" in first and "budget of 100.0s" in first and "101.0s" in first
+    assert "FAIL" in first and "below the recorded baseline of 2" in first
+    assert "budget of 100.0s" in r.stderr
+
+
+@pytest.mark.parametrize("github_actions, annotated", [(True, True), (False, False)])
+def test_a_timing_warning_is_annotated_only_under_github_actions(tmp_path, github_actions, annotated):
+    xml = tmp_path / "junit.xml"
+    xml.write_text(_xml([_case("slowpoke", 31.0)], 101.0), encoding="utf-8")
+    r = _run_file(xml, "--budget", "100", "--per-test-cap", "30", "--tier", "slow",
+                  github_actions=github_actions)
+    assert r.returncode == 0, _out(r)
+    notes = [ln for ln in r.stdout.splitlines() if ln.startswith("::warning")]
+    if annotated:
+        assert len(notes) == 2
+        assert "budget of 100.0s" in notes[0] and "tier slow" in notes[0]
+        assert "mod::slowpoke" in notes[1]
+    else:
+        assert notes == []
 
 
 def test_exactly_at_budget_passes(tmp_path):
@@ -84,12 +115,13 @@ def test_wall_time_is_the_testsuite_time_not_the_sum_of_tests(tmp_path):
     assert "12.0s" in r.stdout
 
 
-def test_a_test_one_second_over_the_cap_exits_nonzero_and_names_that_test(tmp_path):
+def test_a_test_one_second_over_the_cap_warns_names_that_test_and_exits_zero(tmp_path):
     cases = [_case("fast", 1.0), _case("slowpoke", 31.0)]
     r = _run(tmp_path, cases, 40.0, "--per-test-cap", "30")
-    assert r.returncode == 1
-    assert "mod::slowpoke" in r.stderr and "per-test cap of 30.0s" in r.stderr
-    assert "mod::fast took" not in r.stderr
+    assert r.returncode == 0, _out(r)
+    assert "WARN" in r.stdout.splitlines()[0]
+    assert "mod::slowpoke" in r.stdout and "per-test cap of 30.0s" in r.stdout
+    assert "mod::fast took" not in r.stdout
 
 
 def test_a_test_exactly_at_the_cap_passes(tmp_path):
@@ -100,7 +132,7 @@ def test_a_test_exactly_at_the_cap_passes(tmp_path):
 def test_failure_text_names_owner_cap_semantics_and_repro(tmp_path):
     r = _run(tmp_path, [_case("t", 1.0)], 101.0, "--budget", "100", "--tier", "slow",
              "--repro-pytest-args", "-m slow")
-    err = r.stderr
+    err = _out(r)
     assert ".github/workflows/tests.yml" in err
     assert "hung test still costs the job's timeout" in err
     assert "python -m pytest -m slow --junitxml=junit.xml" in err
@@ -111,8 +143,8 @@ def test_failure_text_shows_change_against_baseline_and_the_area_that_grew(tmp_p
     cases = [_case("a", 10.0, "trailhead/tests/x.py"), _case("b", 50.0, "tools/lore/tests/y.py")]
     r = _run(tmp_path, cases, 70.0, "--budget", "60", "--baseline-seconds", "40",
              "--baseline-area", "trailhead/tests=9", "--baseline-area", "tools/lore/tests=20")
-    assert "+30.0s" in r.stderr
-    assert "Area that grew most: tools/lore/tests (+30.0s)" in r.stderr
+    assert "+30.0s" in _out(r)
+    assert "Area that grew most: tools/lore/tests (+30.0s)" in _out(r)
 
 
 def test_skipped_tests_are_counted_never_added_to_times(tmp_path):
@@ -230,7 +262,7 @@ def test_summary_is_written_and_never_contains_captured_output(tmp_path):
     cases = [_case("t", 1.0, out=MARKER), _case("u", 2.0, outcome="failed", out=MARKER)]
     summary = tmp_path / "summary.md"
     r = _run(tmp_path, cases, 5.0, "--summary", str(summary), "--budget", "1")
-    assert r.returncode == 1
+    assert r.returncode == 0, _out(r)
     text = summary.read_text(encoding="utf-8")
     assert "mod::u" in text and "| trailhead/tests | 3.0 |" in text
     assert MARKER not in text

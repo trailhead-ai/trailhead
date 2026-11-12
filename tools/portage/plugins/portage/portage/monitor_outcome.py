@@ -34,6 +34,17 @@ MONITOR_OUTCOME_TOKENS = frozenset({"MERGED", "READY", "BLOCKED", "STOPPED"})
 #: three are always followed by a reason.
 _TOKENS_REQUIRING_ARGUMENT = frozenset({"READY", "BLOCKED", "STOPPED"})
 
+#: The closed reason vocabulary of each token, as the unattended PR step hands it to monitor
+#: (`skills/pull_request/SKILL.md`, Step D). `MERGED` takes no reason.
+MONITOR_OUTCOME_REASONS: dict[str, frozenset[str]] = {
+    "MERGED": frozenset(),
+    "READY": frozenset({"all-prs-ready"}),
+    "BLOCKED": frozenset(
+        {"ci-failed", "review-open", "merge-conflict", "fix-cycles-exhausted", "other"}
+    ),
+    "STOPPED": frozenset({"operator-stop", "deadline", "other"}),
+}
+
 _MAX_ARGUMENT_CHARS = 200
 
 
@@ -55,6 +66,20 @@ def parse_monitor_outcome(line: str) -> tuple[str | None, str]:
     if token in _TOKENS_REQUIRING_ARGUMENT and not argument:
         return None, first_line[:_MAX_ARGUMENT_CHARS]
     return token, argument
+
+
+def validate_monitor_outcome(text: str) -> tuple[str, str] | None:
+    """The `(token, reason)` of the first line of `text` when both come from
+    `MONITOR_OUTCOME_REASONS`, else `None`. `MERGED` carries an empty reason
+    (`parse_monitor_outcome` already refuses one on any other token); every other
+    reason must be one word from its own token's list. Nothing of a rejected line
+    is returned, so a caller cannot echo it."""
+    token, reason = parse_monitor_outcome(text)
+    if token is None:
+        return None
+    if reason == "" or reason in MONITOR_OUTCOME_REASONS[token]:
+        return token, reason
+    return None
 
 
 def read_monitor_outcome(path: Path) -> str:

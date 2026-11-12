@@ -182,7 +182,7 @@ def run_reindex() -> "tuple[int | None, str | None]":
     owns its own reporting, because the same rebuild is a whole command in one
     place and a footnote to a sync in the other.
 
-    Holds EVERY configured vault's write lock (sorted-path order) across the
+    Holds EVERY configured writable vault's write lock (sorted-path order) across the
     rebuild — lore's one named all-vault serialization point. See the comment at
     the acquisition for why it is the only one and why it comes first.
     """
@@ -229,7 +229,11 @@ def run_reindex() -> "tuple[int | None, str | None]":
         # This is the only all-vault acquisition in lore. It is bounded by local
         # disk-scan time, and a writer that waits on it past the notice threshold
         # says so on stderr rather than looking stuck.
-        with locking.vault_write_locks(*vault_roots), \
+        #
+        # A read-only vault is indexed but never locked: its folder is changed by
+        # hand outside lore, and lore takes no lock file into it.
+        lock_roots = [r for r in vault_roots if locking.read_only_vault_name(r) is None]
+        with locking.vault_write_locks(*lock_roots), \
                 record_store_mod.index_transaction() as conn:
             count = index_store_mod.rebuild(
                 vault_roots, conn, shared_roots=shared_roots

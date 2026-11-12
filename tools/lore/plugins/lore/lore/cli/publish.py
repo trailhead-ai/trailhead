@@ -62,6 +62,7 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
+from .. import locking
 from ..vault import layers as layers_mod
 from .common import (
     _load_vault_config,
@@ -657,6 +658,10 @@ def cmd_publish(args) -> int:
     if vault_path is None:
         print(f"error: unknown vault: {vault_name!r}", file=sys.stderr)
         return 1
+
+    # A worker for a read-only vault would run git against it; refuse before the
+    # publish lock, marker and log exist.
+    locking.assert_writable(vault_path)
 
     lock_fd = _open_lock_fd(vault_path)
     try:

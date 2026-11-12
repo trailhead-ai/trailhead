@@ -97,7 +97,7 @@ is frozen is judged on the record's status **before** the write:
 | `adr` | `active`, `superseded`, `dropped` | metadata only |
 | `spec` | `ready`, `planned`, `complete`, `superseded`, `dropped` | metadata, and changes confined to `## Slices` |
 | `decision` | every status | metadata only |
-| `task` | `done`, `dropped`, `superseded` | metadata, and changes confined to `## Driver run` blocks |
+| `task` | `done`, `dropped`, `superseded` | metadata, and changes confined to `## Driver run` or `## Unattended run` blocks |
 
 `lesson`, `area`, `collaboration`, `blob` and `session` are never frozen. Authored
 content is the body minus the kind's pipeline-maintained sections, so the slice

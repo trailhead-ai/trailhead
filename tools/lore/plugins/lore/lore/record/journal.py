@@ -431,8 +431,20 @@ def recover_vault(vault_root: str | Path) -> None:
 
 
 def recover_if_pending(vault_root: str | Path) -> None:
-    """Take the vault lock (which recovers) only when a journal is pending."""
+    """Take the vault lock (which recovers) only when a journal is pending.
+
+    A read-only vault is never written, so its pending journal is left alone and
+    named on stderr in one line.
+    """
     if has_pending(vault_root):
+        name = locking.read_only_vault_name(vault_root)
+        if name is not None:
+            print(
+                f"lore: vault {name} is read-only — a pending write journal for it "
+                "was left unrecovered",
+                file=sys.stderr,
+            )
+            return
         with locking.vault_write_lock(vault_root):
             pass
 

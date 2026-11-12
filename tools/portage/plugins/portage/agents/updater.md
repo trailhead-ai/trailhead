@@ -38,7 +38,7 @@ so invoke it as bare `portage <subcommand>`.
 
 ## Inputs (from the dispatch)
 
-- `mode` — `create` (branches not yet pushed to origin) or `update` (branches already have PRs)
+- `mode` — `create` (branches with no PR yet: push the branch if it is not on origin, and open a PR for it; a branch already pushed with no PR gets only the PR) or `update` (branches already have PRs)
 - `group` — the camp group name (e.g. `my-feature`)
 - `slug` — the worktree slug within the group (e.g. `ai-tooling`)
 - `manifest_path` — absolute path to the camp central manifest JSON for this worktree
@@ -169,7 +169,7 @@ push-ready state:
   root cause (e.g. citing `ssh-add -l` output) that hasn't been independently confirmed.
 - Local checks pass (lint / typecheck / tests as the repo defines them).
 - The branch is rebased/up to date enough to push without a forced overwrite of others' work.
-- For `mode=create`: the branch is not yet on origin → push and open a PR.
+- For `mode=create`: the branch has no PR → push it if it is not yet on origin, and open a PR (a branch already on origin with no PR just gets the PR).
   For `mode=update`: the branch already has a PR → push new commits to it.
 
 Then push and (for `create`) open the PR with `gh pr create` (title/body/links are judgment —

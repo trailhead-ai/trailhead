@@ -1,0 +1,6 @@
+PR_STATE=existing
+MONITOR_MODE=ready
+AUTO_MERGE=false
+PR_COMMENT=none
+RECORD_STATE=stuck-earlier
+LORE_WRITE=ok

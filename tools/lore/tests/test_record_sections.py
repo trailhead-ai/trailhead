@@ -386,3 +386,55 @@ def test_waiting_unregistered_makes_a_waiting_change_authored(monkeypatch):
         tuple(s for s in sections.PIPELINE_SECTIONS["spec"] if s.heading != "## Waiting"),
     )
     assert not same("spec", PLAN, base)
+
+
+UNATTENDED_BASE = "# Task\n\nIntro.\n\n## Plan\n\nStep A\n"
+UNATTENDED_1 = "\n## Unattended run\n\n- **Session:** one\n- **Outcome:** pending\n"
+UNATTENDED_2 = "\n## Unattended run\n\n- **Session:** two\n- **Outcome:** pending\n"
+
+
+@pytest.mark.parametrize("before, after", [
+    pytest.param(UNATTENDED_BASE, UNATTENDED_BASE + UNATTENDED_1, id="first-block-appended"),
+    pytest.param(UNATTENDED_BASE + UNATTENDED_1, UNATTENDED_BASE + UNATTENDED_1 + UNATTENDED_2,
+                 id="second-block-appended"),
+    pytest.param(UNATTENDED_BASE + UNATTENDED_1,
+                 (UNATTENDED_BASE + UNATTENDED_1).replace("pending", "pr-ready"),
+                 id="outcome-line-edited"),
+])
+def test_an_unattended_run_change_alone_is_pipeline(before, after):
+    assert same("task", before, after)
+
+
+@pytest.mark.parametrize("after", [
+    pytest.param((UNATTENDED_BASE + UNATTENDED_1 + UNATTENDED_2).replace("Step A", "Step B"),
+                 id="beside-a-block-change"),
+    pytest.param((UNATTENDED_BASE + UNATTENDED_1).replace("Step A", "Step B"), id="alone"),
+])
+def test_an_authored_change_beside_an_unattended_run_is_authored(after):
+    assert not same("task", UNATTENDED_BASE + UNATTENDED_1, after)
+
+
+@pytest.mark.parametrize("mask", ["```\n{h}\n- **Outcome:** x\n```\n", "<!--\n{h}\n- **Outcome:** x\n-->\n"])
+def test_masked_unattended_run_heading_opens_no_exempt_region(mask):
+    block = mask.format(h="## Unattended run")
+    before = UNATTENDED_BASE + "\n" + block
+    assert not same("task", before, before.replace("x", "y"))
+
+
+def test_driver_and_unattended_blocks_are_both_pipeline_in_one_write():
+    driver = "\n## Driver run\n\n- **Phase:** plan\n"
+    before = UNATTENDED_BASE + driver
+    assert same("task", before, before + UNATTENDED_1)
+    assert same("task", before + UNATTENDED_1, before.replace("plan", "build") + UNATTENDED_1)
+
+
+def test_unattended_run_is_not_a_spec_section():
+    before = "# S\n\n## Unattended run\n\n- a\n"
+    assert not same("spec", before, before + "- b\n")
+
+
+def test_replay_naive_heading_covers_unattended_run():
+    replay = _replay_module()
+    before = UNATTENDED_BASE + UNATTENDED_1
+    assert replay.expected_class("task", before, before.replace("pending", "pr-ready")) == "pipeline"
+    assert replay.expected_class("task", before, before.replace("Step A", "Step B")) == "authored"

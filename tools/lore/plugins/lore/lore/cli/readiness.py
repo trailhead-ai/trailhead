@@ -28,7 +28,7 @@ from .common import (
     DRIFT_NO_REMOTE,
     DRIFT_RESOLVING,
     DRIFT_SYNC_FIXABLE,
-    _resolve_all_vaults,
+    _resolve_all_vaults_and_read_only,
     _vault_drift,
 )
 
@@ -139,6 +139,7 @@ class _Vault:
     name: str
     path: Path
     findings: list
+    read_only: bool = False
 
     @property
     def codes(self) -> set:
@@ -146,14 +147,29 @@ class _Vault:
 
     @property
     def has_remote(self) -> bool:
-        return not (self.codes & _VAULT_MISSING_CODES)
+        return not self.read_only and not (self.codes & _VAULT_MISSING_CODES)
+
+
+def _read_only_findings(path: Path) -> list:
+    """A read-only vault is read from its folder alone: present and listable, or missing."""
+    try:
+        with os.scandir(path):
+            pass
+    except OSError:
+        return [(DRIFT_MISSING, "folder is absent, not a directory, or cannot be listed")]
+    return []
 
 
 def collect_vaults() -> "tuple[list[_Vault], str | None]":
-    vaults, error = _resolve_all_vaults()
+    vaults, read_only_names, error = _resolve_all_vaults_and_read_only()
     if error is not None:
         return [], error
-    return [_Vault(name, path, _vault_drift(Path(path))) for name, path in vaults], None
+    return [
+        _Vault(name, path, _read_only_findings(Path(path)), True)
+        if name in read_only_names
+        else _Vault(name, path, _vault_drift(Path(path)))
+        for name, path in vaults
+    ], None
 
 
 def _vault_config_item(error: str) -> ReadinessItem:
@@ -171,6 +187,21 @@ def build_vault_items(vaults: "list[_Vault]", error: "str | None") -> list:
 
 
 def _vault_item(vault: _Vault) -> ReadinessItem:
+    if vault.read_only:
+        if not vault.findings:
+            return ReadinessItem(
+                f"vault:{vault.name}", OK,
+                f"vault {vault.name} is a read-only folder and is present",
+                line=f"lore: vault {vault.name}: read-only, folder present",
+            )
+        return ReadinessItem(
+            f"vault:{vault.name}", MISSING,
+            f"vault {vault.name}: read-only {vault.findings[0][1]}",
+            line=(
+                f"lore: vault {vault.name}: read-only {vault.findings[0][1]} "
+                "— correct its path in config.json"
+            ),
+        )
     if not vault.findings:
         return ReadinessItem(
             f"vault:{vault.name}", OK,

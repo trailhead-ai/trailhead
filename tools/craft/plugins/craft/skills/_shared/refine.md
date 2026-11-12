@@ -37,7 +37,7 @@ Mode follows the caller. Everything below is identical in both modes **except th
 |---|---|
 | `/craft:refine <task>` | **unattended** — the default posture |
 | `/craft:refine <task> --interactive` | interactive — the one-question-at-a-time path |
-| execute's inline run | `--interactive` only when execute itself has a human channel; otherwise unattended |
+| execute's inline run | `--interactive` when execute runs attended; unattended when execute runs under `--unattended`. Execute passes the mode explicitly; refine never infers it from whether a person seems present |
 
 ## Status gate
 

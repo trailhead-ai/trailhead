@@ -29,7 +29,7 @@ for a graph load. It judges the record's PRIOR status against the per-kind table
 :data:`FROZEN_STATUSES` (adr ``active``/``superseded``/``dropped``; spec
 ``ready`` and later; every decision status; task ``done``/``dropped``/``superseded``)
 and compares authored content — the body minus a spec's ``## Slices`` and
-``## Follow-ups`` and a task's ``## Driver run`` — so only those sections pass a
+``## Follow-ups`` and a task's ``## Driver run`` and ``## Unattended run`` — so only those sections pass a
 plain update. Refusals are ``[frozen-body]`` and ``[frozen-status]`` and name
 ``lore record amend``, the one write that may change a frozen body, and
 ``lore record supersede`` for a change of scope.
@@ -713,7 +713,7 @@ def check_frozen_body(
     :func:`check_superseded_status`, not here.) Authored content is the body minus
     the kind's pipeline-maintained sections (:func:`sections.authored_content`),
     so a change confined to ``## Slices``, ``## Follow-ups`` or ``## Waiting`` (spec), or
-    ``## Driver run`` (task) passes a plain update.
+    ``## Driver run`` or ``## Unattended run`` (task) passes a plain update.
 
     Returns a formatted ``graph-guard`` message, or ``None`` when the write may
     proceed. A ``None`` *prior_body* is the no-enforcement default: the caller is

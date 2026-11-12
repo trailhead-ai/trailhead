@@ -43,7 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from trailhead.launch_profile import ResolvedProfile
+    from trailhead.launch_profile import BrokerLaunch, ResolvedProfile
 
 
 class HarnessError(Exception):
@@ -200,6 +200,20 @@ class EvalRunner:
 
 
 @dataclass(frozen=True)
+class SessionFile:
+    """A file the launcher must write before it execs the session's argv.
+
+    ``mode`` is the octal permission string (``"0600"``). The content holds no secret.
+    The path lies where the session can neither read nor write, so the session cannot
+    change what a program the harness runs outside the session's confinement will read.
+    """
+
+    path: str
+    content: str
+    mode: str
+
+
+@dataclass(frozen=True)
 class SessionStart:
     """How to start one confined session: the argv to exec and the env edits to apply.
 
@@ -212,6 +226,7 @@ class SessionStart:
     argv: list[str]
     env_set: dict[str, str]
     env_unset: list[str]
+    files: tuple[SessionFile, ...] = ()
 
 
 class Harness(ABC):
@@ -753,6 +768,7 @@ class Harness(ABC):
         interactive: bool,
         account: str | None,
         env: dict[str, str] | None = None,
+        broker: BrokerLaunch | None = None,
     ) -> SessionStart | None:
         """How to start a session confined to *profile* in *directory*, or ``None``.
 
@@ -770,6 +786,11 @@ class Harness(ABC):
         offending entry, when the profile would widen it, and when it cannot
         establish what the user-level configuration permits or that the confinement
         will be enforced. A refusal is never expressed by returning ``None``.
+
+        When the profile names the Outpost broker server, ``broker`` says how to reach it;
+        an implementation raises :class:`HarnessError` rather than render a session
+        without the server. Any config the rendering needs a file for comes back in
+        ``SessionStart.files`` for the caller to write; the argv names those paths.
 
         The seam never execs: the caller owns the spawn. An implementation's one
         permitted side effect is the per-directory trust record a harness needs so

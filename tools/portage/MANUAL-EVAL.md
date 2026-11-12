@@ -249,6 +249,50 @@ Section (a):
 
 ```
 <!-- portage:eval-gate:start -->
+## Case: monitor stops at ready and never merges
+
+`plugins/portage/evals/monitor-stop-at-ready-never-merges/` and
+`plugins/portage/evals/monitor-without-stop-at-ready-is-unchanged/` — two runner cases driving `portage:monitor`
+directly against a scratch directory with `./gh` and `./portage` stand-ins (`wait-for-actionable` reports the PR
+done; `merge` records and, with `auto_merge` unset, refuses like the real CLI). Both are mapped to
+`agents/monitor.md` in `plugins/portage/evals/eval-gate.json`. Verdicts were committed before any scored run.
+
+**Under test:** the "Stop at ready" section of `agents/monitor.md`. Baseline arm: the monitor before the change,
+content fingerprint `d407aa30cbde1cc645cbd92f03790647c1279604` (`git hash-object`); treatment arm: the edited
+file. Runner 2.1.319, model claude-opus-5-5, 3 runs per case per arm, grants from `eval-gate.json`'s runner block
+(no new grant; `Agent` comes from each case's `allowed_tools`).
+
+| Case | Arm | Run scores | Cost (USD) | Bar |
+|---|---|---|---|---|
+| monitor-stop-at-ready-never-merges | baseline, without `operator_directed_merge` in the dispatch | 1, 1, 1 | 0.51 | expected red; measured GREEN |
+| monitor-stop-at-ready-never-merges | baseline, with `operator_directed_merge: true` (final fixture) | 1, 1, 1 | 0.49 | expected red; measured GREEN |
+| monitor-stop-at-ready-never-merges | treatment | 1, 1, 1 | 0.50 | 3 of 3: met |
+| monitor-without-stop-at-ready-is-unchanged | baseline | 1, 1, 1 | 0.50 | expected green: as predicted |
+| monitor-without-stop-at-ready-is-unchanged | treatment | 1, 1, 1 | 0.52 | 3 of 3: met |
+
+**Finding: the stop-at-ready case cannot detect the prose.** The baseline monitor, whose prose defines no
+`stop_at_ready`, read the input's own name as an instruction ("its instructions don't define that input, so it read
+it as stop at ready, don't merge") and stopped, in all six baseline runs, even with `operator_directed_merge: true`
+beside it. The case guards the behaviour; the claim that the prose edit caused it is not measured. Making the
+input opaque is not possible, since the input's name is the contract.
+
+Authoring changes before the scored runs, recorded as such:
+1. The sandbox runs in "don't ask" mode and refuses a Bash write redirect (with or without a `Bash(echo *)` grant),
+   so monitor's `echo "READY ..." > outcome/outcome` is attempted and denied and the file is never created. The
+   outcome graders are therefore `tool_used` over the write command (the outcome word, then `>`, then the
+   `outcome/outcome` path), not a `regex` over the file. This grades the attempted write; the file's contents are
+   not observed. No grant was added.
+2. `tool_used` with `max: 0` needs `min: 0` beside it, or it reads as an impossible 1..0 range.
+3. The monitor's green-driver check (`Glob`) is denied in the sandbox, and the monitor proceeds without it.
+
+Fixture leak check: `grep -rniE "READY|STOPPED|MERGED|stop_at|operator.directed"` over the fixtures and prompts
+finds the `--operator-directed` word in the `./portage` stand-in's refusal text and `stop_at_ready` in the
+stop-at-ready prompt (the input under test). No fixture file carries an outcome word at a line start, and no
+fixture ships in the run directory beside `expected.md`.
+
+Note for the push gate: it uses the base runner block, so every grant reaches every case in the corpus; this
+change adds none.
+
 ## Eval gate
 
 Passed — 1 eval case(s) ran and passed.
@@ -394,3 +438,201 @@ as a follow-up).
 - The kept-state cleanup (`rm -rf`) is denied in the sandbox and is not exercised.
 - Runners 2.1.303 (pinned, since pruned by the Claude updater) and 2.1.308 on this host; the canary was also run on 2.1.306 and 2.1.307.
 
+
+## Case: the unattended PR step ends on the slice record
+
+`plugins/portage/evals/unattended-pr-step-*` — six runner cases driving `/portage:pull_request create --unattended task/count-words`
+(`stops-at-ready`, `never-merges`, `ends-stuck-on-a-blocked-monitor`, `reruns-after-a-stuck-run`, `ends-stuck-on-a-failed-block-write`,
+`refuses-without-a-record`), built from one shared scaffold (`evals/pr-step-scaffold.sh`). All six are mapped in `eval-gate.json` to
+`skills/pull_request/SKILL.md`, `agents/updater.md` and `agents/monitor.md`. The verdicts were committed before any scored run.
+
+**Under test:** the unattended branch of the skill, the one-line `create` fix in the updater, and monitor's `stop_at_ready` and outcome-file
+behaviour as the skill dispatches it. Baseline fingerprints (`git hash-object`): skill `ff9aabc925036499c1f614bac9babcac682f57a8`,
+updater `89518f4ec7996ef36e713d53c4fd6e4d89d4febb`, monitor `b1da45e2cbbe62ebb5ad30b7ff9f6f8ce3f44f56`.
+
+### Result, 2026-11-09 — runner 2.1.319, claude-opus-5-5, 3 runs per case per arm, macOS
+
+| Case | Baseline run scores (0 of 3) | Treatment run scores | Bar (3 of 3 at 1.0) |
+|---|---|---|---|
+| stops-at-ready | 0.21, 0.21, 0.21 | 1, 1, 1 | met |
+| never-merges | 0.33, 0.33, 0.33 | 1, 1, 1 | met |
+| ends-stuck-on-a-blocked-monitor (final fixture) | 0.33, 0.33, 0.33 | 1, 1, 1 | met |
+| reruns-after-a-stuck-run | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
+| ends-stuck-on-a-failed-block-write | 0.25, 0.25, 0.25 | 1, 1, 1 | met |
+| refuses-without-a-record | 0.38, 0.25, 0.25 | 1, 1, 1 | met |
+
+Spend on these batches: baselines 6.57 USD plus 1.05 for the blocked case retaken on its final fixture; treatments about 8.9 USD (the
+blocked case 1.87 on the final fixture). Fixture-fixing diagnostics, discarded baselines, regression arms, controls and mutations
+brought the whole task to about 47 USD.
+
+**Blocked-monitor case, cause and fix.** The first fixture named a green-driver agent that does not exist. Monitor then decided `BLOCKED`
+with the message its definition prescribes, which contains backticks (`` `trailhead install` ``); the runner's sandbox denied the
+`printf '...' > <outcome_file>` that writes it, so no outcome file appeared and the run timed out (kept trace). The backticks are the
+suspected reason (the ready lines contain none and were written); that was not isolated. The fix is to the fixture, not the prose or a grader: the `./portage wait-for-actionable`
+stand-in now reports a `blocked` action (a conflict needing a human) and the group TOML names no green-driver agent. Disclosed in the
+case's `expected.md`. The baseline of that case was retaken on the final fixture (0.33 in 3 of 3).
+
+### Regression arms on the treatment prose with the new grants (3 runs each)
+
+| Case | Scores | Verdict |
+|---|---|---|
+| monitor-stop-at-ready-never-merges | 1, 1, 1 | green |
+| monitor-without-stop-at-ready-is-unchanged | 1, 1, 0.75 (rerun: 1, 0.75, 1) | **flaky: `outcome-stopped` fails in about 1 run in 3** |
+| a-failing-eval-gate-stops-the-push | 0.6, 0.6, 0.6 as shipped; 1, 1, 1 with a `./git` stand-in | needed the stand-in |
+| an-unrunnable-eval-gate-still-pushes-and-says-so | 0, 0, 0 as shipped; 1, 1, 1 with a `./git` stand-in | needed the stand-in |
+| approval-is-human-only | not run | legacy hand-shaped case, has no `case.yaml`; the runner does not run it |
+
+- **The two updater cases failed before any grant change** on this macOS host: a control with the original runner grants scored 0.6 in 3
+  of 3 on the failing-gate case. The sandbox cannot run the platform git shim, so `detect-repos` returned no repos and the updater stopped.
+  Both scaffolds now write a `./git` wrapper and put it first on the stand-in's PATH, and both prompts name `./git`. Graders and pass
+  conditions are unchanged. The new grant `Bash(./git *)` is what lets the agent call it.
+- **monitor-without-stop-at-ready-is-unchanged is the finding to act on.** Controls on the same case, 6 runs each: the runner's original
+  grants 6 of 6 at 1.0; every new grant but `Write` 8 of 9; the full new block 8 of 12 (the run scores above plus 4 of 6). The failing
+  runs are the monitor deciding its merge was blocked by permissions and writing no `STOPPED` line, so the Bash-write grader goes red. The
+  difference between 8 of 12 and 8 of 9 is not significant at these sizes, but the original block scored 6 of 6 and the new one does not.
+  The cause was not isolated further (the dispatched monitor's own wording varies run to run). No grant was widened or narrowed to hide it.
+  Without `Write`, a monitor that writes its outcome line with a shell redirect is denied (kept trace), so the unattended PR step needs
+  it.
+
+### Mutation transcript (one batch of 3 runs per mutation, run one at a time against the committed treatment)
+
+Each row deletes every sentence carrying the named behaviour from `skills/pull_request/SKILL.md`, runs the case, then restores the file
+from a scratch copy and checks `git diff --exit-code` on the committed file (empty each time).
+
+| Contract line (case) | Edit | Result | Named assertion |
+|---|---|---|---|
+| holds the branch (stops-at-ready) | delete "Step B — hold the branch" | RED 3 of 3, score 0.93 | `branch-was-held` |
+| never merges (never-merges), first try | delete the never-merge paragraph, the `stop_at_ready: true` dispatch line, "Never pass `operator_directed_merge`" and Step G's never-merge sentence | 1 run red (merge recorded: `no-merge-command`, `no-merge-recorded`, `final-line-is-pr-ready`, `block-outcome-is-pr-ready`), 2 runs green | `no-merge-recorded` (one run) |
+| never merges, every carrier together | the above plus the whole hold step | **stayed GREEN, 3 of 3 and a further 2 of 2** | none |
+| ends stuck on a blocked monitor, first try | delete the five non-READY rows of the outcome map | stayed GREEN 3 of 3 | none |
+| ends stuck on a blocked monitor, every carrier together | delete the whole of Steps G and H (map, final-line shapes) | RED 3 of 3, scores 0.5, 0.83, 0.83 | `block-outcome-is-stuck` (all three); `final-line-is-stuck` and `exactly-one-outcome-line` in one |
+| reruns: update not create (reruns-after-a-stuck-run), first try | delete the append bullet and the update-mode sentence | RED 3 of 3, score 0.875 | `updater-dispatched-in-update-mode`; `new-block-appended` stayed green |
+| reruns: new block appended, every carrier together | delete the continue and append bullets of Step A | RED 3 of 3, score 0.75 | `new-block-appended`, `earlier-block-untouched` |
+| failed write ends stuck (ends-stuck-on-a-failed-block-write) | delete the "a write that still fails" bullet | RED 3 of 3, score 0.875 | `final-line-is-stuck-on-the-run-section-write`; the no-dispatch, no-push and no-hold graders stayed green |
+| refuses without a record (refuses-without-a-record) | delete the whole "Entry checks" section | RED 3 of 3, scores 0.75, 0.75, 0.88 | `final-line-is-refused` (all three) |
+
+Findings:
+- **Never-merges stayed green with every skill carrier removed.** Explanation 3 (an uncredited third condition): a kept trace of a mutated
+  run shows monitor itself declining to merge ("this unattended run had no operator merge direction") although `auto_merge = true` and the
+  dispatch lacked `stop_at_ready`. The monitor's own reading carries the behaviour in this fixture, so the case guards the outcome and
+  cannot detect removal of the skill's text. The first try's single red run shows the grader binds when a merge does happen. The only
+  protection not removed is `agents/monitor.md`, outside this task's files.
+- **The outcome map's non-READY rows are redundant given Step H's line shapes.** Removing only the rows stays green; removing Steps G and H
+  together goes red.
+- **The update-mode sentence carries `update`; the append bullet's absence alone does not stop an append** (the continue bullet's own
+  condition implies it); removing both bullets does.
+- **The retry and write-failure bullet carries the line's wording, not the no-dispatch behaviour:** the run still stops, but not on the
+  specified line, because Step A's "before any hold, push or dispatch" and the model's own caution keep the other graders green.
+
+### Authoring errors and fixture findings, recorded as such
+
+1. **The platform git shim fails inside the runner's sandbox** (`git: error: Failed to locate 'git'`), so every `git` call, and the CLI's
+   own `detect-repos`, failed and the first treatment refused on "no repo". The scaffold now writes a `./git` wrapper that execs a real git,
+   `./portage` puts it first on its PATH, the prompts name it, and the runner grants `Bash(./git *)`. The first two baselines were taken
+   before this and were discarded and retaken.
+2. **A command with a newline or a redirect is denied**, so a multi-line `gh pr create --body` was refused and the updater opened no PR. The
+   prompts carry the accommodation (a one-line body; `pr_body_file` handed to the updater). Baselines were retaken again on that fixture.
+3. **Monitor has no file-writing tool** (`tools: Bash, Read, Grep, Glob, Agent`). Left alone, it sometimes tries `Write`, gets "no such
+   tool", and writes no outcome. The grant `Write` the earlier proof needed reaches the Bash sandbox, not the monitor's tool list: the
+   successful runs wrote the line with a `printf` redirect. The monitor dispatch in the skill names that command.
+4. The never-merges baseline sometimes did not merge (monitor's background run never got to it before the session ended), so
+   `no-merge-recorded` and `no-merge-command` did not fail in every baseline run; the final-line and block-outcome graders carry the red.
+
+### Grants and cost cap
+
+The runner block gained `Write`, `Bash(./lore *)`, `Bash(./git *)`, `Bash(mktemp)` and `Bash(mktemp *)` (all anchored, none with a leading
+`*`). The push gate uses this block for every portage case, so each grant reaches every case; the regression table above is the
+measurement of that, and the monitor-without-stop-at-ready flakiness is its one cost. `max_cost_usd` went from 1.5 to 12. Measured 3-run
+treatment batches: ready 1.79, never-merges 1.81, blocked 1.87, reruns 1.89, failed-write 0.89, refuses 0.54, about 8.8 USD for the six
+the skill's prose selects; an edit to `agents/updater.md` also selects the two updater cases (about 1.1 more) and one to
+`agents/monitor.md` the two monitor cases (about 1.0 more). The largest selection is therefore about 10 USD, so 10 left no margin and 12
+leaves about 20 percent.
+
+### Limitations
+
+- The `llm` trace judge for "asked nothing" sees only the first and last 12 events (operator-accepted headless limitation).
+- Write order (block before push, outcome before the final line) is observed through end state and the tool-call set only.
+- One fixture per case, one phrasing, one runner model; the dispatched updater and monitor run on their own pins.
+- `wait-for-actionable`, `gh` and `merge` are stand-ins: this measures the skill's wait, mapping and block write and the monitor's
+  obedience, not CI watching.
+
+
+## Review fix-pass re-measure (2026-11-10)
+
+Runner `claude plugin eval`, `--ablation none`, model `claude-opus-5-5`, `--scaffold`, `--runs 3`, `-j 1`, grants exactly the `runner` block of `eval-gate.json`, macOS, runner 2.1.322. Final prose fingerprints (`git hash-object`): `skills/pull_request/SKILL.md` `55ea8a3cd86c3506dc73f9eea655fb20033de3f3`, `agents/monitor.md` `c53afba1dd664feb1d659707dc76f41840e81965`, `agents/updater.md` `b6a9ac0caac0465839402081dadd7baa00563c32` (updater unchanged in this pass).
+
+What changed in the prose: the PR step's shape check is a closed task with a `craft/branch` label; the vault is bound once and named on every lore call; monitor writes a reason from a fixed token list and the PR step words the outcome from the token; the `pr-ready` and `stuck` lines name the hold and how to lift it; the hand-off block is continued only when this session's own execute opened it.
+
+| Case | Result on the final prose | Verdict |
+|---|---|---|
+| `unattended-pr-step-refuses-without-a-record` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-failed-block-write` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-reruns-after-a-stuck-run` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-blocked-monitor` | batch 1: 0.83, 1, 1 (`no-merge-command` in one run); permitted rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-pr-step-stops-at-ready` | batch 1: 0.86 x3 (`one-block-continued`, `rituals-name-the-pr-step`); after the prompt amendment below, rerun 3 of 3 at 1.0 | at bar on the rerun |
+| `unattended-pr-step-never-merges` | batch 1: 0.83, 1, 1 (`no-merge-command` in one run); permitted rerun 1, 0.67, 1 (`block-outcome-is-pr-ready`, `final-line-is-pr-ready` in one run) | **not at bar** |
+| `pull-request-without-request-is-not-unattended` (new guard) | baseline (pre-feature skill `ff9aabc925036499c1f614bac9babcac682f57a8`, updater `89518f4ec7996ef36e713d53c4fd6e4d89d4febb`, monitor `b1da45e2cbbe62ebb5ad30b7ff9f6f8ce3f44f56`) 3 of 3 at 1.0, green as expected for a guard; treatment 3 of 3 at 1.0 | at bar |
+| `monitor-stop-at-ready-never-merges` | 3 of 3 at 1.0 | at bar |
+| `monitor-without-stop-at-ready-is-unchanged` | batch 1: 1, 0.75, 1 (`outcome-stopped`); permitted rerun 0.25, 0.25, 0.5 (`merge-called`, `outcome-stopped`, `watched`) | **not at bar** |
+
+Readings:
+- **stops-at-ready** went red 3 of 3 because the skill now continues the block only on the shared contract's same-session signal, and the case's prompt did not say the execute step had run in this session. The prompt now says so; no grader changed (dated in that case's `expected.md`). The negative side (a block this session did not open is appended) is covered only by `reruns-after-a-stuck-run`, whose block already has an outcome; a block with no outcome and checkpoint `close` from another session is not measured.
+- **never-merges**: a diagnostic batch of 3 on the same prose, run with `--keep-temp` to read traces, scored 3 of 3 at 1.0 and showed monitor writing `<TOKEN> <reason-token>` lines and the PR step printing `pr-ready`. The failing runs' traces were not kept, so the cause of the two stray failures (a `portage merge` Bash call in one run of each of two cases, and one run ending off `pr-ready`) is not isolated. It is not counted toward the bar.
+- **monitor-without-stop-at-ready-is-unchanged** is the case already recorded above as flaky under the widened runner block. A control run of the same case with the previous `monitor.md` swapped in (the edit only adds text that applies when the dispatch lists reason tokens) scored 0.75, 0.75, 1 (`outcome-stopped`), so the red does not come from this edit.
+- Not measured: the vault binding on every lore call, and the head-branch merge hold (ordinary tests).
+
+Spend, runner list price plus judge votes: about 22.1 USD for the portage batches and controls, including 1.97 for the diagnostic and 1.14 for the monitor control. Fixture, case-file and one-off scoring diagnostics are included.
+
+
+## Re-review fold pass (2026-11-10)
+
+Same runner settings as the section above (`--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants exactly the `runner` block, runner 2.1.322, macOS). Final prose fingerprints (`git hash-object`): `skills/pull_request/SKILL.md` `a273ba4ae85061607353913d8b6926dc971d0eaa`, `agents/monitor.md` `c53afba1dd664feb1d659707dc76f41840e81965`, `agents/updater.md` `b6a9ac0caac0465839402081dadd7baa00563c32` (monitor and updater unchanged in this pass).
+
+What changed: the `pr-ready` and `stuck` lines name no command (the hold is described in words); the merge section says the hold refusal reads the PR's head branch before any merge call; a `null` vault from `lore vault resolve` means the default vault and the lore calls omit `--vault`. Code: the head-branch lookup is a provider method that goes through the injectable runner, so the hold tests run the real lookup against a spy `gh`; a corrupt or unreadable hold entry counts as held; `await-outcome` parses once the first line is complete.
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-pr-step-ends-stuck-on-a-blocked-monitor` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-failed-block-write` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-never-merges` | 3 of 3 at 1.0 | at bar, no rerun used |
+| `unattended-pr-step-refuses-without-a-record` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-reruns-after-a-stuck-run` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-stops-at-ready` | 3 of 3 at 1.0 | at bar |
+| `pull-request-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+
+The six PR-step cases ran as one batch, so every one of them measures the final prose, not only the three the outline change touched.
+
+Readings:
+- **A defect the first diagnostic caught.** The first version of the null-vault rule ended the session `refused` on a `null` vault. In the eval's seeded vault, `lore vault resolve --kind task --json` reports `vault: null` with `scope: "default"` (lore's signal for the unbound default vault), so all three diagnostic runs of `never-merges` refused before doing anything (0.67 each, final line not `pr-ready`). The rule now treats `null` as the default vault. That batch is a diagnostic and not counted.
+- **The earlier stray merge match was not reproduced.** A `--keep-temp` diagnostic of `never-merges` on the final prose scored 3 of 3, and a scan of its three traces found no Bash command matching the merge grader's pattern. The traces of the earlier failing runs were not kept, so the stray call from the previous measurement is still unclassified (a real invoking call, a denied call, or non-invoking text); no grader was edited. The final batch above also had no stray match.
+- **Scaffold's `./portage merge` stand-in left alone.** It records the call and answers as if the merge succeeded; the real command's refusal of a held branch is covered by ordinary tests instead, including one seam smoke that runs the shipped `bin/portage` `hold` then `merge` as separate processes against a `gh` on PATH, so the six cases measure what they did before.
+- `monitor-without-stop-at-ready-is-unchanged` was not rerun (no monitor prose changed); its recorded red is the earlier section's.
+
+Spend (runner list price plus judge votes) for this pass: 0.57 + 1.88 for the two `never-merges` diagnostics, 9.19 for the six-case batch, 1.29 for the guard; the portage side totals about 12.9 USD; the craft cases of the same pass are in `tools/craft/MANUAL-EVAL.md`, and the whole pass is about 21.8 USD.
+
+## Security fix pass (2026-11-10)
+
+Same runner settings as the re-review fold pass (`--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`, grants exactly the `runner` block, runner 2.1.322, macOS); each case ran as its own invocation. Final prose fingerprints (`git hash-object`): `skills/pull_request/SKILL.md` `cc1cbe771596311c5f0ca1304a97c55648470458`, `agents/monitor.md` `c53afba1dd664feb1d659707dc76f41840e81965`, `agents/updater.md` `b6a9ac0caac0465839402081dadd7baa00563c32` (monitor and updater unchanged, so monitor's own cases were not rerun).
+
+What changed: `hold` and `release` refuse a repo that is not an absolute existing directory, and the PR step names the `path` field of `detect-repos`; hold checks fail closed (a hold file named for the repo counts whatever its JSON says, a non-object entry counts as held, a stat error counts as held); `await-outcome` accepts a line only when its token and reason are from the closed vocabulary now defined in code, and the PR step records only that validated pair; a new `portage check-slice-branch` entry check refuses a `craft/branch` label that is a default branch or not the record's own branch. The four code changes are covered by ordinary tests (mutation-checked, in the commit bodies).
+
+| Case | Result | Verdict |
+|---|---|---|
+| `unattended-pr-step-refuses-a-default-branch-label` (new) | baseline on the prior skill (`583978f86f1c49dc7d51467789252cd9420d3076`) 0.88 x3; treatment 1, 1, 1 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-blocked-monitor` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-ends-stuck-on-a-failed-block-write` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-never-merges` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-refuses-without-a-record` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-reruns-after-a-stuck-run` | 3 of 3 at 1.0 | at bar |
+| `unattended-pr-step-stops-at-ready` | 3 of 3 at 1.0 | at bar |
+| `pull-request-without-request-is-not-unattended` (guard) | 3 of 3 at 1.0 | at bar |
+
+No rerun was used.
+
+Readings:
+- **The new case's baseline is red only on the fixed refusal line.** Without the entry check the model read `origin/HEAD` itself (a kept trace of one run showed it), saw `develop` was the default branch and refused in its own words, so only `final-line-is-refused` failed. The case therefore pins the wording and the no-write behaviour, not the detection; the detection is the code helper, which is unit-tested. The fixture uses a default branch named `develop` because `detect-repos` skips a repo on a branch literally named `main`, so a `main` label is already caught by the pushed check.
+- The scaffold's `./portage` stand-in passes `check-slice-branch` through to the real CLI and scrubs its name from help output, like the other verbs the prose introduces.
+- `skills/pull_request/SKILL.md` already failed `wrap_gate.py --column 100` before this pass, so it was not reflowed; the new prose is hand-wrapped.
+- The `no-merge-command` stray match of the earlier pass did not recur.
+
+Spend (runner list price plus judge votes): about 12.5 USD (the new case 0.84 baseline, 0.3 trace diagnostic and 0.67 treatment; the six PR-step cases 9.5; the guard 1.2).

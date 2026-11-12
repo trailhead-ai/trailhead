@@ -3,7 +3,7 @@
 
 For every commit that changed a spec or task body, derive the expected class
 from the diff alone (does every changed non-blank line sit inside a naive
-``## Slices`` / ``## Driver run`` region of its own side?) and compare it with
+``## Slices`` / ``## Driver run`` / ``## Unattended run`` region of its own side?) and compare it with
 what ``authored_content`` says (equal before and after = pipeline-only). The
 ground-truth region finder here is deliberately naive (no fence or comment
 masking) so it shares no logic with the function under test; any disagreement
@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "plugins" / "lore"))
 from lore.record.sections import authored_content  # noqa: E402
 
-NAIVE_HEADINGS = {"spec": re.compile(r"## Slices", re.I), "task": re.compile(r"## Driver run", re.I)}
+NAIVE_HEADINGS = {"spec": re.compile(r"## Slices", re.I), "task": re.compile(r"## (?:Driver|Unattended) run", re.I)}
 ANY_HEADING = re.compile(r"#{1,6}[ \t]|#{1,6}$")
 LINE_SPLIT = re.compile(r"\r\n|\r|\n")
 

@@ -110,12 +110,30 @@ def _cmd_vault_add(args) -> int:
         )
         return 1
 
+    read_only = scope == "read-only"
+    if getattr(args, "trusted", False) and not read_only:
+        print(
+            "lore: --trusted applies only to --scope read-only; other scopes are "
+            "trusted unless --shared is given",
+            file=sys.stderr,
+        )
+        return 1
+    if read_only and bool(args.shared) == bool(getattr(args, "trusted", False)):
+        print(
+            "lore: a read-only vault needs exactly one of --shared or --trusted "
+            "(its declared trust is never guessed)",
+            file=sys.stderr,
+        )
+        return 1
+
     entry: dict = {"name": normalized, "scope": scope}
     if args.path:
         entry["path"] = str(Path(args.path).expanduser())
     if records:
         entry["records"] = records
-    if args.shared:
+    if read_only:
+        entry["shared"] = bool(args.shared)
+    elif args.shared:
         entry["shared"] = True
 
     vault_config_mod.add_vault_entry(config, entry)
@@ -140,10 +158,25 @@ def _cmd_vault_add(args) -> int:
         print(f"lore: vault {normalized!r} not found after validation", file=sys.stderr)
         return 1
 
+    if read_only and not vault.path.is_dir():
+        print(
+            f"lore: read-only vault folder {vault.path} does not exist; lore never "
+            "creates a read-only vault's folder — create or clone it first",
+            file=sys.stderr,
+        )
+        return 1
+
+    # A folder some configured read-only vault already names is never scaffolded
+    # under a second entry: `.gitignore` below would land in it.
+    if not read_only:
+        from .. import locking
+
+        locking.assert_writable(vault.path)
+
     # Create the vault directory when it does not yet exist.  Existing
     # directories (already-populated repos registered via --path, or a prior
     # partial add) are left untouched.
-    if not vault.path.exists():
+    if not read_only and not vault.path.exists():
         try:
             vault.path.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
@@ -162,7 +195,8 @@ def _cmd_vault_add(args) -> int:
     # anything writes to it (`lore reindex` writes to every configured vault), and
     # `lore sync`'s `git add -A` would commit it. Applied to an existing dir too —
     # it only writes when there is no `.gitignore` at all.
-    installer_mod.scaffold_gitignore(vault.path)
+    if not read_only:
+        installer_mod.scaffold_gitignore(vault.path)
 
     config_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -183,6 +217,12 @@ def _cmd_vault_add(args) -> int:
         return 1
 
     print(f"Added vault {normalized!r} ({scope}); indexed {count} record(s).")
+    if read_only:
+        print(
+            "Note: older lore releases refuse a config carrying this read-only entry; "
+            f"remove it with 'lore vault delete {normalized}' (or delete the entry from "
+            "config.json by hand) to undo."
+        )
     return 0
 
 
@@ -222,6 +262,9 @@ def _cmd_vault_delete(args) -> int:
     # --remove-from-disk gating happens BEFORE any config/index mutation so a
     # refused destructive request leaves everything intact.
     if args.remove_from_disk:
+        from .. import locking
+
+        locking.assert_tree_writable(vault.path)
         vaults_root = _resolve_vaults_root()
         # The LITERAL configured path (pre-resolution) is what we guard: a symlink
         # at the configured path must be refused even when its target resolves
@@ -492,11 +535,12 @@ def _cmd_vault_reformat(args) -> int:
     ``record create`` / ``record update`` / ``flush``.
     """
     from . import resolve_state as resolve_state_mod
-    from .common import _resolve_all_vaults_strict
+    from .common import _drop_read_only_vaults, _resolve_all_vaults_strict
 
     targets = _resolve_all_vaults_strict("reformat")
     if targets is None:
         return 1
+    targets = _drop_read_only_vaults(targets)
 
     for name, path in targets:
         if not path.is_dir():
@@ -627,6 +671,8 @@ def _cmd_vault_resolve(args) -> int:
 
 def add_vault_subparser(sub) -> None:
     """Register the ``vault`` command parser and its add/delete/ls/config actions."""
+    from ..vault import config as vault_config_mod
+
     p_vault = sub.add_parser(
         "vault",
         help="Manage configured layered vaults (add/delete/ls/config)",
@@ -637,8 +683,9 @@ def add_vault_subparser(sub) -> None:
     p_vault_add.add_argument("name", help="Vault name (a repo name may contain '/')")
     p_vault_add.add_argument(
         "--scope", required=True,
-        choices=["repo", "product", "suite", "team", "default"],
-        help="Vault scope (precedence repo > product > suite > team > default)",
+        choices=sorted(vault_config_mod.VALID_SCOPES),
+        help="Vault scope (precedence repo > product > suite > team > default; "
+        "read-only is a folder lore never writes to)",
     )
     p_vault_add.add_argument("--path", default=None, help="Override the on-disk path")
     p_vault_add.add_argument(
@@ -648,6 +695,10 @@ def add_vault_subparser(sub) -> None:
     p_vault_add.add_argument(
         "--shared", action="store_true",
         help="Mark the vault as untrusted/shared (its hits are fenced by search)",
+    )
+    p_vault_add.add_argument(
+        "--trusted", action="store_true",
+        help="Declare a read-only vault trusted (read-only vaults need --shared or --trusted)",
     )
     p_vault_add.set_defaults(func=cmd_vault)
 

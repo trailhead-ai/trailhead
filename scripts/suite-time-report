@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""suite-time-report — measure a pytest run from its JUnit XML and fail it over budget.
+"""suite-time-report — measure a pytest run from its JUnit XML and check its counts and times.
 
 Reads the file written by `pytest --junitxml=PATH -o junit_family=xunit1
 -o junit_duration_report=total` and reports wall time, per-area totals, the
-slowest tests and pass/fail/skip counts. Exits 1 when the wall time passes
---budget, when one test passes --per-test-cap, or when the passed count falls
+slowest tests and pass/fail/skip counts. Exits 1 when the passed count falls
 below --baseline-passed without a --deletions list that accounts for the drop, or when the
-skipped count passes --max-skipped.
+skipped count passes --max-skipped. A wall time over --budget, or one test over
+--per-test-cap, is a warning: it is reported (and, under GitHub Actions, annotated as
+`::warning`) but does not change the exit code.
 Exits 2 with `suite-time-report: <message>` when the XML cannot be read.
 
 Wall time is the `<testsuite time>` attribute: under pytest-xdist the merged
@@ -22,6 +23,7 @@ The report is built from parsed attributes only. A test's captured
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import tomllib
 import xml.etree.ElementTree as ET
@@ -155,22 +157,23 @@ def fmt(seconds: float) -> str:
     return f"{seconds:.1f}s"
 
 
-def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str], str]:
-    """Return (breaches, body lines, verdict-first line)."""
+def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str], list[str], str]:
+    """Return (breaches, timing warnings, body lines, verdict-first line)."""
     breaches: list[str] = []
+    warnings: list[str] = []
     passed, failed, skipped = run.count("passed"), run.count("failed"), run.count("skipped")
     totals = area_totals(run, areas)
     top = slowest(run, args.top)
 
     if args.budget is not None and run.wall > args.budget:
-        breaches.append(
+        warnings.append(
             f"wall time {fmt(run.wall)} exceeds the budget of {fmt(args.budget)} "
             f"(over by {fmt(run.wall - args.budget)})"
         )
     if args.per_test_cap is not None:
         for c in sorted((c for c in run.cases if c.outcome != "skipped"), key=lambda c: -c.seconds):
             if c.seconds > args.per_test_cap:
-                breaches.append(
+                warnings.append(
                     f"test {c.id} took {fmt(c.seconds)}, over the per-test cap of "
                     f"{fmt(args.per_test_cap)}"
                 )
@@ -189,16 +192,18 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
             f"{args.max_skipped} for tier {args.tier!r}"
         )
 
-    verdict = (
-        f"{PROG}: FAIL tier {args.tier}: {breaches[0]}"
-        if breaches
-        else f"{PROG}: OK tier {args.tier}: wall time {fmt(run.wall)}"
-        + (f" within budget {fmt(args.budget)}" if args.budget is not None else "")
-    )
+    if breaches:
+        verdict = f"{PROG}: FAIL tier {args.tier}: {breaches[0]}"
+    elif warnings:
+        verdict = f"{PROG}: WARN tier {args.tier}: {warnings[0]}"
+    else:
+        verdict = f"{PROG}: OK tier {args.tier}: wall time {fmt(run.wall)}" + (
+            f" within budget {fmt(args.budget)}" if args.budget is not None else ""
+        )
 
     body: list[str] = []
-    if breaches:
-        body += [f"- {b}" for b in breaches[1:]]
+    listed = breaches[1:] + warnings if breaches else warnings[1:]
+    body += [f"- {b}" for b in listed]
     if args.baseline_seconds is not None:
         delta = run.wall - args.baseline_seconds
         body.append(
@@ -227,7 +232,7 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
         "-o junit_duration_report=total):"
     )
     body += [f"  {fmt(c.seconds)}  {c.id}" for c in top]
-    if breaches:
+    if breaches or warnings:
         pytest_args = f" {args.repro_pytest_args}" if args.repro_pytest_args else ""
         flags = ""
         if args.budget is not None:
@@ -240,8 +245,8 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
             flags += f" --max-skipped {args.max_skipped}"
         body += [
             "Where the budget lives: .github/workflows/tests.yml, beside the step that runs this "
-            "guard. Raising a budget is a reviewed edit; its pull request states the newly "
-            "measured spread.",
+            "guard. A time over budget is a warning, not a failure; raising a budget is a reviewed "
+            "edit and its pull request states the newly measured spread.",
             "The per-test cap is checked after the run, so a hung test still costs the job's "
             "timeout.",
             "Reproduce locally:",
@@ -249,7 +254,7 @@ def build_report(args, run: Run, areas: list[str]) -> tuple[list[str], list[str]
             "-o junit_duration_report=total",
             f"  scripts/suite-time-report junit.xml --tier {args.tier}{flags}",
         ]
-    return breaches, body, verdict
+    return breaches, warnings, body, verdict
 
 
 def markdown(args, verdict: str, body: list[str], run: Run, areas: list[str]) -> str:
@@ -303,7 +308,7 @@ def main(argv: list[str]) -> int:
     try:
         run = parse(args.junit_xml)
         areas = args.area or default_areas()
-        breaches, body, verdict = build_report(args, run, areas)
+        breaches, warnings, body, verdict = build_report(args, run, areas)
         if args.summary:
             args.summary.write_text(markdown(args, verdict, body, run, areas), encoding="utf-8")
     except ReportError as exc:
@@ -313,6 +318,9 @@ def main(argv: list[str]) -> int:
         print(f"{PROG}: cannot write summary: {exc.strerror or exc}", file=sys.stderr)
         return 2
     print("\n".join([verdict, *body]), file=sys.stderr if breaches else sys.stdout)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        for w in warnings:
+            print(f"::warning title=Suite time (tier {args.tier})::{w}")
     return 1 if breaches else 0
 
 

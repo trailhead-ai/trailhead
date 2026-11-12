@@ -41,6 +41,19 @@ Semantics (matching the session-store idiom this replaces):
     The depth map is thread-local, so two threads in one process still exclude
     each other through the kernel exactly as two processes do.
 
+**Read-only vaults.** A vault declared ``read-only`` in ``config.json`` is one lore
+never writes to. :func:`vault_write_lock` / :func:`vault_write_locks` refuse such a
+root with :class:`ReadOnlyVaultError` BEFORE the lock directory is created or
+``.lore.lock`` opened, above the reentrancy fast path, so a refused acquisition
+leaves the folder byte-identical. The root is identified by ``(st_dev, st_ino)``,
+so a symlink or a second config entry reaching the folder is the same root, and a
+folder two entries resolve to is read-only if either is. No config means every
+root is writable; a config that is present but unreadable fails closed with
+:class:`VaultWriteRefusedError`. Neither is an ``OSError``. Writers that bypass the
+lock (the session store, ``vault delete --remove-from-disk``) call
+:func:`assert_writable` at their own site; every CLI boundary prints the error as
+the one line :func:`read_only_message` builds.
+
 **On-acquire hook (crash recovery).** A fresh, outermost ``vault``-scope
 acquisition runs every hook registered with :func:`register_on_acquire`, once the
 flock is held and before the caller's critical section starts, passing the
@@ -94,6 +107,116 @@ LOCK_WAIT_NOTICE_SECONDS = 2.0
 #: How often to re-try a non-blocking acquisition while waiting for the notice
 #: threshold. Small enough to be invisible, large enough not to spin hot.
 _POLL_SECONDS = 0.01
+
+class VaultWriteRefusedError(Exception):
+    """lore refuses to write into a vault root.
+
+    Not an ``OSError`` — ``lore sync`` reads any ``OSError`` from a lock
+    acquisition as a lock failure and skips the vault silently, and a refusal is a
+    different condition. The message is user-facing and starts with ``lore:``;
+    every CLI boundary prints it as one stderr line with a non-zero exit.
+    """
+
+
+class ReadOnlyVaultError(VaultWriteRefusedError):
+    """The root is a configured ``read-only`` vault: its content is changed by hand
+    outside lore. *vault_name* is the declaring config entry."""
+
+    def __init__(self, vault_name: str):
+        self.vault_name = vault_name
+        super().__init__(read_only_message(vault_name))
+
+
+def read_only_message(vault_name: str) -> str:
+    """The one stderr line every refusal of a read-only vault prints."""
+    return f"lore: vault {vault_name} is read-only — its content is changed by hand outside lore"
+
+
+def _root_id(path: str | Path) -> tuple[int, int] | None:
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    return (st.st_dev, st.st_ino)
+
+
+def _root_key(path: str | Path) -> str:
+    """The resolved spelling of *path*, which exists even when the folder does not."""
+    return os.path.realpath(path)
+
+
+def read_only_roots(env: dict[str, str] | None = None) -> dict[tuple[int, int] | str, str]:
+    """``identity -> vault name`` for every configured read-only vault.
+
+    Identity is the folder itself — ``(st_dev, st_ino)`` — so a symlink or a second
+    config entry reaching the same folder is the same root; a folder two entries
+    resolve to is read-only if either entry is. Every entry is also keyed by its
+    resolved path (``os.path.realpath``), the only identity a folder that does not
+    exist yet has; match through :func:`read_only_name_of`. No config file means
+    every root is writable; a config that is present but cannot be read or
+    validated fails closed with :class:`VaultWriteRefusedError`.
+    """
+    from .vault import config as vault_config
+
+    path = vault_config._resolve_config_path(env=env)
+    try:
+        vaults = vault_config.load_config(str(path), env=env)
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError, vault_config.VaultConfigError) as exc:
+        raise VaultWriteRefusedError(
+            f"lore: refusing to write — config.json at {path} cannot be read: {exc}"
+        ) from exc
+    roots: dict[tuple[int, int] | str, str] = {}
+    for vault in vaults:
+        if vault.read_only:
+            ident = _root_id(vault.path)
+            if ident is not None:
+                roots.setdefault(ident, vault.name)
+            roots.setdefault(_root_key(vault.path), vault.name)
+    return roots
+
+
+def read_only_name_of(root: str | Path, roots: dict[tuple[int, int] | str, str]) -> str | None:
+    """The read-only vault *root* is within *roots* (from :func:`read_only_roots`), or ``None``.
+
+    The folder's ``(st_dev, st_ino)`` decides when it can be stat'd; its resolved
+    path decides otherwise, so a declared folder that is absent is still refused.
+    """
+    ident = _root_id(root)
+    if ident is not None and ident in roots:
+        return roots[ident]
+    return roots.get(_root_key(root))
+
+
+def read_only_vault_name(root: str | Path, *, env: dict[str, str] | None = None) -> str | None:
+    """The name of the read-only vault *root* is, or ``None`` when it is writable."""
+    return read_only_name_of(root, read_only_roots(env))
+
+
+def assert_tree_writable(root: str | Path, *, env: dict[str, str] | None = None) -> None:
+    """Raise :class:`ReadOnlyVaultError` if *root* is, or holds, a read-only vault's folder.
+
+    For an operation that removes a whole folder: a read-only vault nested
+    anywhere inside it would go too. Containment is by path segment, so a sibling
+    ``team-x`` is not inside ``team``.
+    """
+    roots = read_only_roots(env)
+    name = read_only_name_of(root, roots)
+    if name is not None:
+        raise ReadOnlyVaultError(name)
+    top = _root_key(root)
+    for key, vault_name in roots.items():
+        if isinstance(key, str) and os.path.commonpath([top, key]) == top:
+            raise ReadOnlyVaultError(vault_name)
+
+
+def assert_writable(root: str | Path, *, env: dict[str, str] | None = None) -> None:
+    """Raise :class:`ReadOnlyVaultError` if *root* is a read-only vault's folder."""
+    name = read_only_vault_name(root, env=env)
+    if name is not None:
+        raise ReadOnlyVaultError(name)
+
 
 class VaultRecoveryError(Exception):
     """A vault-scope on-acquire hook could not finish repairing the vault.
@@ -247,8 +370,15 @@ def vault_write_lock(
     *,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
     blocking: bool = True,
+    env: dict[str, str] | None = None,
+    _checked: bool = False,
 ):
     """Serialize writes to one vault on ``<vault_root>/.lore.lock``.
+
+    Raises :class:`ReadOnlyVaultError` — before the lock directory or file is
+    touched, and ahead of the reentrancy fast path — when *vault_root* is a
+    configured read-only vault. *env* is the injectable environment the config is
+    found through (``None`` reads ``os.environ``).
 
     Wrap the whole critical section — naming/placement, the body+sidecar write,
     and the index upsert — so a concurrent writer can never interleave between
@@ -263,6 +393,8 @@ def vault_write_lock(
     always-blocks behavior, because a write that gave up would lose the write.
     """
     root = Path(vault_root)
+    if not _checked:
+        assert_writable(root, env=env)
     return _flock(root / VAULT_LOCK_NAME, "vault", str(root), notice_after, blocking=blocking)
 
 
@@ -286,6 +418,7 @@ def vault_lock_sort_key(vault_root: str | Path) -> str:
 def vault_write_locks(
     *vault_roots: str | Path,
     notice_after: float = LOCK_WAIT_NOTICE_SECONDS,
+    env: dict[str, str] | None = None,
 ) -> Iterator[None]:
     """Hold several vault write locks at once, in **sorted path order**.
 
@@ -293,9 +426,18 @@ def vault_write_locks(
     from deadlocking. Duplicate roots collapse to one acquisition.
     """
     roots = sorted({vault_lock_sort_key(r) for r in vault_roots})
+    # Refuse before taking any lock, so a read-only root among them leaves every
+    # other root untouched too. The config is read once for the whole set.
+    read_only = read_only_roots(env)
+    for root in roots:
+        name = read_only_name_of(root, read_only)
+        if name is not None:
+            raise ReadOnlyVaultError(name)
     with ExitStack() as stack:
         for root in roots:
-            stack.enter_context(vault_write_lock(root, notice_after=notice_after))
+            stack.enter_context(
+                vault_write_lock(root, notice_after=notice_after, env=env, _checked=True)
+            )
         yield
 
 

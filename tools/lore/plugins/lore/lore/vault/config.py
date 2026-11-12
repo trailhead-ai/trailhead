@@ -51,11 +51,17 @@ write).
 - ``name`` is stored **normalized** (``/`` → ``_`` via
   :func:`normalize_vault_name`).  Raw names like ``trailhead-ai/trailhead``
   are converted at load time so callers never see a ``/`` in a vault name.
-- ``scope`` ∈ ``{repo, product, suite, team, default}``.
+- ``scope`` ∈ ``{repo, product, suite, team, default, read-only}``. A
+  ``read-only`` vault is one lore never writes to; ``Vault.read_only`` is the
+  one predicate for it. It is declared as a scope value (not a separate key) so
+  a release that predates it rejects the whole config instead of silently
+  treating the vault as writable.
 - ``records`` is a (possibly empty) list of record kind strings; empty means
   *all kinds eligible*.
-- ``shared`` is a bool (default ``False`` = own/trusted); the ``default``-scope
-  vault is always ``shared=False`` and may not be declared ``shared: true``.
+- ``shared`` is a bool (default ``False`` = own/trusted, except a ``read-only``
+  vault, whose absent ``shared`` defaults to ``True`` = untrusted; a declared
+  value is always kept); the ``default``-scope vault is always ``shared=False``
+  and may not be declared ``shared: true``.
 - ``path`` is the resolved ``Path`` for the vault's on-disk directory. A
   *relative* explicit ``path`` is confined via ``layers.assert_within_root``
   to the vaults root; an *absolute* explicit ``path`` is **honored as given**
@@ -66,7 +72,7 @@ write).
 
 **Validation rules — all hard errors (raise :class:`VaultConfigError`):**
 
-1. ``scope`` ∈ ``{repo, product, suite, team, default}``.
+1. ``scope`` ∈ ``{repo, product, suite, team, default, read-only}``.
 2. Exactly one ``default``-scope vault.
 3. Names globally unique after normalization.
 4. The ``default`` vault may NOT carry a ``records`` allowlist.
@@ -109,7 +115,9 @@ from ..record import model as record_model
 # ---------------------------------------------------------------------------
 
 #: The closed set of valid scope values.
-VALID_SCOPES: frozenset[str] = frozenset({"repo", "product", "suite", "team", "default"})
+VALID_SCOPES: frozenset[str] = frozenset(
+    {"repo", "product", "suite", "team", "default", "read-only"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +153,7 @@ class Vault(NamedTuple):
     Attributes:
         name:    Normalized vault name (``/`` replaced with ``_``); safe as
                  a single filesystem path segment.
-        scope:   One of ``repo|product|suite|team|default``.
+        scope:   One of ``repo|product|suite|team|default|read-only``.
         path:    Resolved absolute ``Path`` to the vault directory.
         records: Allowed record kinds; empty list means *all kinds eligible*.
         shared:  ``True`` iff the vault is marked untrusted/shared; the
@@ -163,6 +171,11 @@ class Vault(NamedTuple):
     records: list
     shared: bool
     auto_publish: bool = True
+
+    @property
+    def read_only(self) -> bool:
+        """``True`` iff the vault is declared ``read-only`` (lore never writes to it)."""
+        return self.scope == "read-only"
 
 
 # ---------------------------------------------------------------------------
@@ -608,7 +621,15 @@ def _validate_config(data: dict, env: dict | None) -> list:
         raw_name = entry.get("name", "")
         scope = entry.get("scope", "")
         records = entry.get("records", [])
-        shared = bool(entry.get("shared", False))
+        if scope == "read-only":
+            shared = entry.get("shared", True)
+            if not isinstance(shared, bool):
+                raise VaultConfigError(
+                    f"lore: vault {raw_name!r} has invalid shared {shared!r}; "
+                    "a read-only vault's shared must be a bool (true or false)"
+                )
+        else:
+            shared = bool(entry.get("shared", False))
         explicit_path = entry.get("path")
         raw_auto_publish = entry.get("auto_publish", True)
         if not isinstance(raw_auto_publish, bool):
