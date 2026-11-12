@@ -52,6 +52,8 @@ class StubOutpost:
     token: str = TOKEN
     token_reply: tuple[int, object] | None = None
     runs_reply: tuple[int, object] | None = None
+    token_redirect: str | None = None
+    runs_redirect: str | None = None
     requests: list[Seen] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -75,10 +77,18 @@ class StubOutpost:
                     Seen(self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body)
                 )
 
+            def _redirect(self, location: str) -> None:
+                self.send_response(302)
+                self.send_header("Location", location)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(length).decode()
                 self._record(body)
+                if stub.token_redirect is not None and self.path == "/broker/token":
+                    return self._redirect(stub.token_redirect)
                 if self.path != "/broker/token":
                     return self._send(404, {"error": "not_found"})
                 if stub.token_reply is not None:
@@ -92,6 +102,8 @@ class StubOutpost:
 
             def do_GET(self):
                 self._record("")
+                if stub.runs_redirect is not None and self.path == "/gateway/runs":
+                    return self._redirect(stub.runs_redirect)
                 if self.path != "/gateway/runs":
                     return self._send(404, {"error": "not_found"})
                 if stub.runs_reply is not None:

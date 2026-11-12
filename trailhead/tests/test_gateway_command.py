@@ -108,8 +108,7 @@ class TestFailurePaths:
     def _fails_with(self, r, text):
         assert r.proc.returncode != 0
         assert r.proc.stdout == ""
-        assert r.proc.stderr.strip().splitlines() == [text] or text in r.proc.stderr
-        assert len(r.proc.stderr.strip().splitlines()) == 1
+        assert r.proc.stderr.splitlines() == [text]
 
     def test_no_harness_ancestor_says_it_is_running_in_the_sandbox(self, tmp_path, state):
         import subprocess
@@ -146,7 +145,7 @@ class TestFailurePaths:
         with StubOutpost(runs=RUNS) as stub:
             r = _run(launcher, tmp_path, state, stub.port, seed=None, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")})
         expected_log = tmp_path / "xdg" / "trailhead" / "gateway" / "register.log"
-        self._fails_with(r, f"this session has no gateway credential; see {expected_log} for why")
+        self._fails_with(r, f"outpost-gateway: this session has no gateway credential; see {expected_log} for why")
 
     def test_credential_missing_refusal_is_named_by_its_reason_code(self, launcher, tmp_path, state):
         body = {"reason": "credential_missing", "message": "No credential was presented."}
@@ -221,11 +220,43 @@ class TestHygiene:
                 assert all(secret not in k for k in r.env_after)
         assert "AssertionError" not in r.proc.stderr, "the command started a subprocess"
 
+    def test_secret_never_appears_when_outpost_is_unreachable(self, launcher, tmp_path, state):
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        r = _run(launcher, tmp_path, state, port)
+        assert r.proc.returncode != 0
+        for secret in (CLIENT_SECRET, TOKEN):
+            assert secret not in r.proc.stdout
+            assert secret not in r.proc.stderr
+            assert "Traceback" not in r.proc.stderr
+            assert r.env_after is not None
+            assert all(secret not in v for v in r.env_after.values())
+            assert all(secret not in k for k in r.env_after)
+        assert "AssertionError" not in r.proc.stderr, "the command started a subprocess"
+
     def test_a_reply_of_the_wrong_shape_is_reported_as_unreadable(self, launcher, tmp_path, state):
         with StubOutpost(runs_reply=(200, {"workspace": 7, "runs": "x"})) as stub:
             r = _run(launcher, tmp_path, state, stub.port)
         assert r.proc.returncode != 0
         assert r.proc.stderr.strip() == "outpost-gateway: Outpost answered with a reply this command cannot read"
+
+
+class TestRedirects:
+    CANNOT_READ = "outpost-gateway: Outpost answered with a reply this command cannot read"
+
+    @pytest.mark.parametrize("route", ["token", "runs"])
+    def test_a_redirect_is_not_followed_off_the_first_listener(self, route, launcher, tmp_path, state):
+        with StubOutpost(runs=RUNS) as second:
+            kwargs = {f"{route}_redirect": f"http://127.0.0.1:{second.port}/stolen"}
+            with StubOutpost(runs=RUNS, **kwargs) as first:
+                r = _run(launcher, tmp_path, state, first.port)
+            assert second.requests == []
+        assert r.proc.returncode != 0
+        assert r.proc.stdout == ""
+        assert r.proc.stderr.splitlines() == [self.CANNOT_READ]
+        for secret in (CLIENT_SECRET, TOKEN):
+            assert secret not in r.proc.stderr
 
 
 class TestIgnoresCallerInput:
