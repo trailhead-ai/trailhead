@@ -22,6 +22,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 from portage.cli import dispatch
 from portage.eval_gate import unmapped_runner_cases
 from portage.eval_gate.mapping import load_mapping
+from portage.eval_gate.run import MAX_TIMEOUT_SECONDS
 from test_portage_eval_gate_plan import _git
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -220,6 +221,73 @@ class TestCoverageInvariant:
         (evals / "eval-gate.json").write_text(json.dumps(doc))
         marked = load_mapping((evals / "eval-gate.json").read_text(), "eval-gate.json")
         assert prose in _files_with_no_push_case(marked)
+
+
+DEFAULT_TIMEOUT_SECONDS = 300
+
+
+def _declared_timeout(case_dir: Path) -> int:
+    """A case's declared ``timeout_seconds``: the ``prompt.md`` frontmatter wins over ``case.yaml``
+    ``execution:``, and 300 applies when neither declares one (docs/eval-protocol.md)."""
+    prompt = (case_dir / "prompt.md").read_text()
+    front = re.match(r"---\n(.*?)\n---\n", prompt, re.S)
+    for text, rx in (
+        (front.group(1) if front else "", r"^timeout_seconds:\s*(\d+)\s*$"),
+        ((case_dir / "case.yaml").read_text(), r"^\s+timeout_seconds:\s*(\d+)\s*$"),
+    ):
+        m = re.search(rx, text, re.M)
+        if m:
+            return int(m.group(1))
+    return DEFAULT_TIMEOUT_SECONDS
+
+
+def _over_budget_merge_only(corpus: Path) -> list[str]:
+    return sorted(n for n in _merge_only(corpus) if _declared_timeout(corpus / n) > MAX_TIMEOUT_SECONDS)
+
+
+class TestDeclaredTimeout:
+    def _case(self, tmp_path, *, front="", execution=""):
+        (tmp_path / "case.yaml").write_text(f'schema_version: "1.1"\nname: x\n{execution}')
+        (tmp_path / "prompt.md").write_text(f"---\n{front}---\nbody\n" if front else "body\n")
+        return tmp_path
+
+    def test_the_prompt_frontmatter_wins_over_case_yaml(self, tmp_path):
+        case = self._case(tmp_path, front="timeout_seconds: 900\n",
+                          execution="execution:\n  timeout_seconds: 100\n")
+        assert _declared_timeout(case) == 900
+
+    def test_case_yaml_execution_applies_without_frontmatter(self, tmp_path):
+        assert _declared_timeout(self._case(tmp_path, execution="execution:\n  timeout_seconds: 450\n")) == 450
+
+    def test_an_undeclared_timeout_is_the_documented_default(self, tmp_path):
+        assert _declared_timeout(self._case(tmp_path)) == 300
+
+
+@pytest.mark.parametrize("corpus", CORPORA, ids=IDS)
+class TestMergeOnlyFitsTheGateBudget:
+    def test_every_merge_only_case_declares_a_timeout_within_the_gate_budget(self, corpus):
+        assert _over_budget_merge_only(corpus) == []
+
+    def test_a_merge_only_case_over_the_budget_is_reported(self, corpus, tmp_path):
+        evals = tmp_path / "evals"
+        shutil.copytree(corpus, evals, ignore=shutil.ignore_patterns("__pycache__", "results"))
+        case = sorted(_runner_cases(evals))[0]
+        (evals / case / "prompt.md").write_text(
+            f"---\ntimeout_seconds: {MAX_TIMEOUT_SECONDS + 1}\n---\nbody\n")
+        doc = json.loads((evals / "eval-gate.json").read_text())
+        doc["cases"][case]["merge_only"] = True
+        (evals / "eval-gate.json").write_text(json.dumps(doc))
+        assert case in _over_budget_merge_only(evals)
+
+    def test_a_timeout_exactly_at_the_budget_fits(self, corpus, tmp_path):
+        evals = tmp_path / "evals"
+        shutil.copytree(corpus, evals, ignore=shutil.ignore_patterns("__pycache__", "results"))
+        case = sorted(_runner_cases(evals))[0]
+        (evals / case / "prompt.md").write_text(f"---\ntimeout_seconds: {MAX_TIMEOUT_SECONDS}\n---\nbody\n")
+        doc = json.loads((evals / "eval-gate.json").read_text())
+        doc["cases"][case]["merge_only"] = True
+        (evals / "eval-gate.json").write_text(json.dumps(doc))
+        assert case not in _over_budget_merge_only(evals)
 
 
 class TestRealCoreSelection:

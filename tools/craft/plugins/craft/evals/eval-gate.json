@@ -152,8 +152,7 @@
       "measures": [
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "plan-refuses-a-topic-unattended": {
       "measures": [
@@ -165,8 +164,7 @@
       "measures": [
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-slice-then-plan-ends-plan-ready": {
       "measures": [
@@ -233,8 +231,7 @@
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
       "measures": [
         "skills/slice/SKILL.md"
-      ],
-      "merge_only": true
+      ]
     },
     "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
       "measures": [
@@ -245,8 +242,7 @@
     "build-close-marks-folded-entries": {
       "measures": [
         "skills/_shared/execute.md"
-      ],
-      "merge_only": true
+      ]
     },
     "council-synthesis-stands-down-a-waived-concern": {
       "measures": [
@@ -449,36 +445,31 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-never-drops-a-security-finding": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-decides-surviving-findings": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-close-hands-off-to-the-pr-step": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-close-records-a-manual-check-pending": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-close-names-a-brainstorm-task-by-id": {
       "measures": [
@@ -490,15 +481,13 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-execute-close-ends-stuck-on-a-failed-push": {
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
-      ],
-      "merge_only": true
+      ]
     }
   }
 }

@@ -40,9 +40,10 @@ actually decide something. Eval cases run through the plugin eval runner,
    (`tools/portage/tests/test_portage_eval_gate_corpora.py`). On a file that many
    cases measure, say whether the new case is core (runs on every push) or
    `"merge_only": true` (runs before merge): keep core the case that detects a
-   behaviour the file decides, and mark the rest merge-only. A case that runs
-   past the 540 s gate budget stays core, and every measured file keeps at least
-   one core case. The mapping, the tiers, the
+   behaviour the file decides, and mark the rest merge-only. A `merge_only`
+   case's declared `timeout_seconds` fits the 540 s gate budget (a case that
+   declares more stays core), and every measured file keeps at least one core
+   case. The mapping, the tiers, the
    bar and the verdict are described in
    `tools/portage/plugins/portage/docs/eval-gate.md`.
 5. **Take the red baseline** on the prose as it stands before your change. See

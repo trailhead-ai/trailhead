@@ -83,24 +83,21 @@
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-pr-step-never-merges": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-pr-step-refuses-a-default-branch-label": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ],
-      "merge_only": true
+      ]
     },
     "unattended-pr-step-refuses-without-a-record": {
       "measures": [
