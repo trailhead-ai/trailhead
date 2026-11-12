@@ -2118,10 +2118,15 @@ narrows to what remains. Exit `0` is done; a refusal exits `1` or `2` with a `re
 stderr, and only that token is copied into the report, never any `reason:` text. Then deal with the
 build task that reported `BLOCKED`, so every child ends terminal and the slice reaches its close:
 
-- If work remains for the narrowed claim, re-scope the task body to what it still has to deliver,
-  rewriting it as a scope change always is, and re-dispatch it.
-- If nothing of it remains, drop it with a note saying why and naming the spec's waiting entry for
-  the criterion, never `blocked`.
+- If work remains for the narrowed claim, re-scope the task body to what it still has to deliver
+  with `lore record update task/<child-name>`, rewriting it as a scope change always is, and add a
+  note to the body saying the criterion was set aside and naming the spec's waiting entry for it.
+  Then re-dispatch it. The rewrite lands before the re-dispatch.
+- If nothing of it remains, drop it as [Drop the task](#handling-executor-status) does, with the
+  note in the **same invocation** as the flip (`--status dropped --diff`), saying why and naming the
+  spec's waiting entry for the criterion, never `blocked`.
+
+Either note runs through the credential-pattern scrub first, since it lands in a record body.
 
 Then carry on: the narrowed slice goes on to review and to [Phase
 6](#phase-6-close-and-completion-report) as any other.
