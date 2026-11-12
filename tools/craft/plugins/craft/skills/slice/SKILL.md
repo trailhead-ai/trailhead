@@ -932,9 +932,9 @@ gives the criterion's own text first, with its number after it.
 **State each criterion step 7 set aside, before anything is written:** the criterion's own words
 with its number after them, and the one line saying what it waits on. Take the words from
 `${CLAUDE_PLUGIN_ROOT}/scripts/pending_check.py describe --spec <spec-name> --criteria <ids>`, as
-the waiting branch of step 6 does, and show them as data. A criterion set aside is off the
-candidate set, so it is not in the count of what is left; name it after the exceptions as set aside,
-with what it waits on. A pass that sets nothing aside says nothing about it.
+the waiting branch of step 6 does, and show them as data. A criterion set aside is off the candidate
+set, so it is not in the count of what is left; name it after the exceptions as set aside, with what
+it waits on. A pass that sets nothing aside says nothing about it.
 
 The statement also says which follow-up entries the slice will fold in, before the parent is
 written: each by its id and title, with one line naming the `where` path that overlaps the files the
@@ -959,8 +959,8 @@ made in the report all the same, and the selection it states — the chosen slic
 (the fully and partly covered criteria, or the plain statement that there are none to name) and why
 this slice was chosen over the other candidates — is logged as the first decision of the run block
 in step 9. Each set-aside is a routine decision of the same kind, never asked: it is logged in the
-run block as the question (set this criterion aside?), the choice (set aside), and the reasoning (what
-it waits on, and that no stand-in can replace it).
+run block as the question (set this criterion aside?), the choice (set aside), and the reasoning
+(what it waits on, and that no stand-in can replace it).
 
 ### 9. Materialize the parent task
 
@@ -1153,18 +1153,19 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries
 
 The spec name is bare, with no `spec/` prefix: the writer refuses a prefixed name.
 
-`set_aside.py` adds a `set aside` entry for each criterion to the spec's `## Waiting` section, with a
-history line of its own fixed wording; the text you pass in is never echoed back and never copied
+`set_aside.py` adds a `set aside` entry for each criterion to the spec's `## Waiting` section, with
+a history line of its own fixed wording; the text you pass in is never echoed back and never copied
 into that line. Exit `0` is done. A refusal exits `1` or `2` with a `reason-code:` line on stderr;
 copy only that token into the report, never any `reason:` text. When the writer refuses, nothing is
 set aside: report the refusal in plain words, not the bare token, and leave the criterion in the
 candidate set, where this pass does not choose it and a later pass judges it again. The codes this
 step names: `not-a-candidate` (the criterion is no longer open: covered, removed or closed),
 `entry-exists` (it already has a waiting entry under another status; a criterion already set aside
-is not a refusal, the writer finishes with exit `0` and writes nothing), `stale-spec` (the spec changed while writing; read it fresh and run the writer
-once more), `spec-write-failed` (the write did not land), and `waits-on-too-long`,
-`multiline-entry-text` and `invalid-entries` (the line you wrote for what it waits on or the entries
-file was unusable). If that leaves nothing to choose, take step 6's early-stop path.
+is not a refusal, the writer finishes with exit `0` and writes nothing), `stale-spec` (the spec
+changed while writing; read it fresh and run the writer once more), `spec-write-failed` (the write
+did not land), and `waits-on-too-long`, `multiline-entry-text` and `invalid-entries` (the line you
+wrote for what it waits on or the entries file was unusable). If that leaves nothing to choose, take
+step 6's early-stop path.
 
 **If the spec carries `craft/slice-loop=stopped` or `craft/slice-loop=complete` from an earlier
 pass, clear it now** — after the shape checks and the covers gate above have passed, and immediately
@@ -1241,9 +1242,9 @@ naming slice with its count of calls decided unattended, `**Checkpoint:**` namin
 materialized, and a `**Decisions:**` list whose first entry is the selection step 8 logged: the
 question (which slice next), the choice (the chosen slice), and the reasoning (why it, the coverage
 calls, what is left), followed by one decision for each criterion set aside in this pass, as step 8
-describes. It carries no `**Outcome:**` line yet, and `**Parked questions:** none`. Every
-line the skill writes opens with its label, so none begins with `#`, `**Answer:**` or `outcome:`.
-**A write that fails ends the session** with
+describes. It carries no `**Outcome:**` line yet, and `**Parked questions:** none`. Every line the
+skill writes opens with its label, so none begins with `#`, `**Answer:**` or `outcome:`. **A write
+that fails ends the session** with
 `outcome: stuck task/<task-name> parked=0 — run-section write failed; <what to do instead>`, and
 nothing further is written. A diff that does not apply is first retried once, read fresh and
 rebuilt, as `../_shared/unattended.md` says.
@@ -1302,9 +1303,9 @@ The termination and early-stop paths end on their outcome lines from step 6, not
 them, what it waits on, and how to undo it by hand until a check-list walk-through can release it.
 Give the undo as the command it is, not a paraphrase: a direct `lore record update` of the spec
 (`lore record update spec/<spec-name> --vault <vault> --diff`) that adds a dated `released` line to
-that criterion's entry under `## Waiting`. A refused write is reported in plain words, as step 9 says,
-and the criterion is not described as set aside. A pass that set nothing aside reports nothing about
-it.
+that criterion's entry under `## Waiting`. A refused write is reported in plain words, as step 9
+says, and the criterion is not described as set aside. A pass that set nothing aside reports nothing
+about it.
 
 Without the request, this section is unchanged. Report the chosen slice, its value claim (or, on the
 enabler path, its written justification), and the new parent task's record id —

@@ -38,7 +38,7 @@ Every clause holds.
 
 | Branch | writer-ran | without-parent | entries-name-ac1 | entries-omit | spec entry | waits-on | before-create | set-aside reply | another slice | undo | Whole run |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| Today's prose, picks AC1 (or a mix that includes it) | **fail** | **fail** | **fail** | pass | **fail** | **fail** | **fail** | **fail** | **fail** | **fail** | fails |
+| Today's prose, picks AC1 (or several, AC1 among them) | **fail** | **fail** | **fail** | pass | **fail** | **fail** | **fail** | **fail** | **fail** | **fail** | fails |
 | Today's prose, picks AC2 or AC3 without a write | **fail** | **fail** | **fail** | pass | **fail** | **fail** | **fail** | **fail** (it may mention AC1 is not buildable, but not as a set-aside) | pass | **fail** | fails |
 | Edited, done right | pass | pass | pass | pass | pass | pass | pass | pass | pass | pass | passes |
 | Sets AC1 aside but reports no undo | pass | pass | pass | pass | pass | pass | pass | pass | pass | **fail** | fails |
