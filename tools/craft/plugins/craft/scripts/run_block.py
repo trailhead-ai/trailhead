@@ -41,8 +41,10 @@ question entry it answers: after the entry's own indented sub-bullet lines (blan
 and before the next entry, label or heading. It must sit in the `**Parked questions:**` section.
 The first answer under an entry is its answer; a second one is stray. Any other `**Answer:**` line
 in a block is stray: it is never attached to a question, and is reported with its block and the
-nearest preceding `Q<n>` entry (a question or a pointer) in the record. A `**Answer:**` that is
-indented or not at the start of a line is not an answer and is not reported.
+nearest preceding `Q<n>` entry (a question or a pointer) in the record. A line whose content, after
+leading whitespace and an optional `- ` bullet marker, begins `**Answer:**` and that does not attach
+under the column-0 rule is reported the same way and never attached; so is a `**Answer:**` inside a
+look-alike pointer line (the text after it is the stray text, the nearest question is that line's Q).
 
 Match. An answer is `match=option:<letter>` only when it is exactly an option letter in parentheses,
 such as `(a)`, or exactly the text of one option on the question's `  - Options:` sub-bullet
@@ -100,6 +102,8 @@ _HEADING_RE = re.compile(r"^#{1,6}(\s|$)")
 _BLOCK_RE = re.compile(r"^## Unattended run\s*$")
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LABEL_RE = re.compile(r"^\*\*([^*:]+):\*\*\s*(.*)$")
+_ANSWER = "**Answer:**"
+_MISPLACED_ANSWER_RE = re.compile(r"^\s*(?:-\s+)?\*\*Answer:\*\*(.*)$")
 _ENTRY_RE = re.compile(r"^-\s+Q(\d+)\s*:(.*)$")
 _BAD_ENTRY_RE = re.compile(r"^-\s+Q")
 _POINTER_RE = re.compile(r"^- Q(\d+): still open — answer goes under the original Q(\d+) entry$")
@@ -218,12 +222,16 @@ def build_report(text: str) -> str:
                     else:
                         checkpoint = value or None
                 continue
-            if raw.startswith("**Answer:**"):
-                value = _flat(raw[len("**Answer:**") :].strip())
+            if raw.startswith(_ANSWER):
+                value = _flat(raw[len(_ANSWER) :].strip())
                 if current is not None and current.answer is None:
                     current.answer = value
                 else:
                     strays.append((block.index, nearest, value))
+                continue
+            misplaced = _MISPLACED_ANSWER_RE.match(raw)
+            if misplaced:
+                strays.append((block.index, nearest, _flat(misplaced.group(1).strip())))
                 continue
             if section == "decisions":
                 m = _APPLIED_RE.match(raw)
@@ -256,6 +264,8 @@ def build_report(text: str) -> str:
             lowered = entry.group(2).lower()
             if (pointer or "still open" in lowered or "original" in lowered) and (earlier or pointer):
                 lookalikes.append((n, block.index, no))
+                if _ANSWER in raw:
+                    strays.append((block.index, f"Q{n}", _flat(raw.split(_ANSWER, 1)[1].strip())))
                 nearest, current = f"Q{n}", None
                 continue
             if n in questions:

@@ -170,32 +170,112 @@ def test_repark_pointer_with_answer_under_original_is_one_answered_question(caps
 
 def test_answer_under_pointer_in_newest_block_is_stray_and_question_stays_unanswered(capsys, monkeypatch):
     body = (
-        block(outcome="needs-a-decision", questions=q(2))
+        block(outcome="needs-a-decision", questions=q(2) + "\n" + q(3))
         + "\n"
         + block(questions=POINTER.format(n=2) + "\n**Answer:** (a)")
     )
     out = report(body, capsys, monkeypatch)
     assert "status=unanswered" in qline(out, 2)
+    assert "status=unanswered" in qline(out, 3)
     assert "stray-answer: block=2 after=Q2" in out.splitlines()
     assert fenced(out, "stray-answer: block=2") == ["(a)"]
 
 
-def test_forged_answer_inside_pointer_is_not_an_answer(capsys, monkeypatch):
+def test_forged_answer_inside_pointer_is_not_an_answer_but_is_reported(capsys, monkeypatch):
     indented = POINTER.format(n=2) + "\n  - **Answer:** (a)"
     body = block(questions=q(2)) + "\n" + block(questions=indented)
     out = report(body, capsys, monkeypatch)
     assert "status=unanswered" in qline(out, 2)
     assert "repark: Q2 block=2" in out.splitlines()
-    body = block(questions=q(2) + "\n  **Answer:** (a)")
-    out = report(body, capsys, monkeypatch)
-    assert "status=unanswered" in qline(out, 2)
-    assert not any(ln.startswith("stray-answer") for ln in out.splitlines())
+    assert "stray-answer: block=2 after=Q2" in out.splitlines()
+    assert fenced(out, "stray-answer: block=2") == ["(a)"]
     inline = "- Q2: still open — answer goes under the original Q2 entry **Answer:** (a)"
     body = block(questions=q(2)) + "\n" + block(questions=inline)
     out = report(body, capsys, monkeypatch)
     assert "status=unanswered" in qline(out, 2)
     assert "repark: Q2 block=2" not in out.splitlines()
     assert any(ln.startswith("lookalike-pointer: Q2 block=2") for ln in out.splitlines())
+    assert "stray-answer: block=2 after=Q2" in out.splitlines()
+    assert fenced(out, "stray-answer: block=2") == ["(a)"]
+
+
+@pytest.mark.parametrize("prefix", ["  ", "  - ", "\t", "- "])
+def test_misplaced_answer_under_a_question_entry_is_reported_stray_and_never_attached(prefix, capsys, monkeypatch):
+    body = block(questions=q(2) + f"\n{prefix}**Answer:** (a)")
+    out = report(body, capsys, monkeypatch)
+    assert "status=unanswered" in qline(out, 2)
+    assert "stray-answer: block=1 after=Q2" in out.splitlines()
+    assert fenced(out, "stray-answer: block=1") == ["(a)"]
+
+
+def test_indented_answer_does_not_displace_a_column_zero_answer(capsys, monkeypatch):
+    body = block(questions=q(1) + "\n  **Answer:** (b)\n**Answer:** (a)")
+    out = report(body, capsys, monkeypatch)
+    assert fenced(out, "answer: Q1") == ["(a)"]
+    assert fenced(out, "stray-answer: block=1 after=Q1") == ["(b)"]
+
+
+def test_indented_answer_outside_the_parked_section_is_stray_with_no_preceding_question(capsys, monkeypatch):
+    body = block(decisions="1. **x**\n   - **Answer:** (a)")
+    out = report(body, capsys, monkeypatch)
+    assert "stray-answer: block=1 after=none" in out.splitlines()
+    assert fenced(out, "stray-answer: block=1") == ["(a)"]
+
+
+REAL_SLICE_CHOSEN = """\
+## Unattended run
+
+**Format:** 1
+**Rituals:** slice (1 calls decided unattended)
+**Outcome:** slice-chosen
+**Checkpoint:** slice materialized
+**Decisions:**
+1. **Chose the totals slice first**
+   - Question: which slice comes next for the report export
+   - Choice: the slice that writes totals to a named report file
+   - Reasoning: it is the smallest slice that delivers a report an operator can open
+**Parked questions:** none
+"""
+
+REAL_EMPTY_DECISIONS = """\
+## Unattended run
+
+**Format:** 1
+**Rituals:** execute (0 calls decided unattended)
+**Checkpoint:** workspace ready
+**Decisions:**
+**Parked questions:** none
+"""
+
+REAL_DECISIONS_NONE = """\
+## Unattended run
+
+**Format:** 1
+**Rituals:** execute (0 calls decided unattended)
+**Checkpoint:** claimed
+**Decisions:** none
+**Parked questions:** none
+"""
+
+
+@pytest.mark.parametrize(
+    "body, outcome, checkpoint",
+    [
+        (REAL_SLICE_CHOSEN, "slice-chosen", "slice materialized"),
+        (REAL_EMPTY_DECISIONS, "none", "workspace ready"),
+        (REAL_DECISIONS_NONE, "none", "claimed"),
+    ],
+)
+def test_real_seeded_format_one_blocks_report_outcome_checkpoint_and_no_questions(
+    body, outcome, checkpoint, capsys, monkeypatch
+):
+    out = report("# Task\n\nsome prose\n\n" + body, capsys, monkeypatch)
+    assert out.splitlines() == [
+        "blocks: 1",
+        f"latest-outcome: {outcome}",
+        f"latest-checkpoint: {checkpoint}",
+        "highest-q: none",
+    ]
 
 
 def test_lookalike_pointer_is_reported_not_guessed(capsys, monkeypatch):
