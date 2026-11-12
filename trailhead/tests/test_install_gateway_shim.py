@@ -34,6 +34,15 @@ class TestShimBuild:
         assert proc.returncode == 0, proc.stderr
         assert "outpost-gateway" in proc.stdout and "run list" in proc.stdout
 
+    def test_the_pinned_script_follows_the_root_the_shims_are_built_from(self, tmp_path):
+        env = _env(tmp_path)
+        root = tmp_path / "other-root"
+        (root / "bin").mkdir(parents=True)
+        (root / "bin" / "_outpost_gateway.py").write_text("print('from other root')\n")
+        build_cli_shims(_tools(), env=env, root=root, outpost_enabled=True)
+        shim = resolve_shim_dir(env=env) / "outpost-gateway"
+        assert str(root / "bin" / "_outpost_gateway.py") in shim.read_text()
+
     def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(self, tmp_path):
         env = _env(tmp_path)
         build_cli_shims(_tools(), env=env, outpost_enabled=True)

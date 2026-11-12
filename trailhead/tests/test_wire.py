@@ -1147,3 +1147,16 @@ class TestSplitMarkers:
         # And it must NOT use plugin update.
         update_calls = [c for c in calls if "update" in c]
         assert update_calls == [], f"rewire must not use 'plugin update': {update_calls}"
+
+
+def test_lock_error_carries_the_path_of_the_held_lock(tmp_path):
+    from trailhead.wire import LockError, wire_lock
+
+    env = {"TRAILHEAD_STATE_DIR": str(tmp_path), "HOME": str(tmp_path)}
+    with wire_lock(env=env) as held:
+        with pytest.raises(LockError) as exc_info:
+            with wire_lock(env=env):
+                pass
+    assert exc_info.value.lock_path == held
+    assert f"lock file exists at {held}" in str(exc_info.value)
+    assert f"rm {held}" in str(exc_info.value)

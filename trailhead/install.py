@@ -32,7 +32,7 @@ repo checkout IS the source ("install = clone the repo").
 Upgrades are additive: re-running install only adds; it never removes a plugin
 or CLI shim that a previous run installed. The shim build itself is
 ``build_cli_shims``, which ``trailhead update`` calls too so both build the same
-set (the enabled plugin CLIs plus ``bin/ranger``).
+set (the enabled plugin CLIs plus ``bin/trailhead`` when executable and ``bin/ranger``).
 
 No harness found (and none named): warn, still build the CLI shims, exit non-zero.
 
@@ -42,6 +42,7 @@ imported at module level so tests can patch them.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -53,7 +54,13 @@ from trailhead.capabilities import (
     ruleset_bearing_manifests,
 )
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
-from trailhead.core_vault import CoreVaultOutcome, install_core_vault, skipped_core_vault
+from trailhead.core_vault import (
+    CoreVaultOutcome,
+    install_core_vault,
+    lock_held_core_vault,
+    lock_unavailable_core_vault,
+    skipped_core_vault,
+)
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
     ConfigResolveError,
@@ -62,6 +69,7 @@ from trailhead.install_config import (
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
 from trailhead.provenance import write_stamp
+from trailhead.paths import PathResolutionError
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
@@ -96,42 +104,45 @@ def outpost_enabled(cfg) -> bool:
     return any(p.name == "outpost" for h in cfg.harnesses for p in h.plugins)
 
 
-def _with_ranger(cli_tools: dict[str, Path], *, outpost_enabled: bool = False) -> dict[str, Path]:
-    """The shim set: the plugin CLIs plus the repo's own ``bin/ranger`` when present,
-    and ``bin/trailhead`` when the Outpost tool is enabled
-    (its SessionStart hook runs ``trailhead`` from a plain ``sh``, where the ``shellenv``
-    function is not defined)."""
-    extra = {}
-    if _RANGER_BIN.exists():
-        extra["ranger"] = _RANGER_BIN
-    if outpost_enabled and _TRAILHEAD_BIN.exists():
-        extra["trailhead"] = _TRAILHEAD_BIN
-    return {**cli_tools, **extra}
+def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[str, Path]:
+    """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` when it is
+    executable and ``bin/ranger`` when present — of *root* when given, else of this checkout."""
+    trailhead_bin = _TRAILHEAD_BIN if root is None else root / "bin" / "trailhead"
+    ranger_bin = _RANGER_BIN if root is None else root / "bin" / "ranger"
+    tools = dict(cli_tools)
+    if trailhead_bin_executable(trailhead_bin.parent.parent):
+        tools["trailhead"] = trailhead_bin
+    if ranger_bin.exists():
+        tools["ranger"] = ranger_bin
+    return tools
 
 
 def build_cli_shims(
-    cli_tools: dict[str, Path], *, env: dict[str, str], outpost_enabled: bool = False
+    cli_tools: dict[str, Path],
+    *,
+    env: dict[str, str],
+    root: Path | None = None,
+    outpost_enabled: bool = False,
 ) -> Path | None:
-    """Build the CLI shim dir for *cli_tools* plus ``bin/ranger`` (and
-    ``bin/trailhead`` when *outpost_enabled*, plus an ``outpost-gateway`` shim pinned to
-    this interpreter, because the harness runs that command outside its sandbox); the one shim
+    """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``
+    (plus an ``outpost-gateway`` shim pinned to this interpreter when *outpost_enabled*,
+    because the harness runs that command outside its sandbox); the one shim
     build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
-    disables every CLI builds no shims, and ranger alone does not change that.
-    Additive: shims already in the dir are left alone. Raises whatever
+    disables every CLI builds no shims, and the repo's own binaries alone do not change that.
+    Shims already in the dir are rewritten, so a build from a different *root* repoints them. Raises whatever
     ``create_shims`` raises; the caller decides how loudly to fail.
     """
     if not cli_tools:
         return None
+    shim_root = _REPO_ROOT if root is None else root
     pinned = {}
-    if outpost_enabled and _GATEWAY_SCRIPT.exists():
-        pinned["outpost-gateway"] = _GATEWAY_SCRIPT
+    gateway_script = _GATEWAY_SCRIPT if root is None else root / "bin" / "_outpost_gateway.py"
+    if outpost_enabled and gateway_script.exists():
+        pinned["outpost-gateway"] = gateway_script
     return create_shims(
-        _with_ranger(cli_tools, outpost_enabled=outpost_enabled),
-        str(_REPO_ROOT),
-        env=env,
-        pinned_scripts=pinned,
+        _with_own_binaries(cli_tools, root), str(shim_root), env=env, pinned_scripts=pinned
     ).shim_dir
 
 
@@ -428,13 +439,23 @@ def run_install(
     # Its human line goes to stderr under --json so stdout stays one JSON document.
     core_out = sys.stderr if as_json else None
     if "lore" in cli_tools:
-        core_vault = install_core_vault(
-            source=_REPO_ROOT / "core-vault",
-            env=_env,
-            lore_bin=cli_tools["lore"],
-            runner=runner,
-            file=core_out,
-        )
+        # Taken here, never inside install_core_vault: an updater already holding the
+        # lock calls the step itself. A held lock degrades the step, not the install.
+        with contextlib.ExitStack() as stack:
+            try:
+                stack.enter_context(wire_lock(env=_env))
+            except LockError as exc:
+                core_vault = lock_held_core_vault(exc.lock_path)
+            except (PathResolutionError, OSError) as exc:
+                core_vault = lock_unavailable_core_vault(exc, lore_bin=cli_tools["lore"])
+            else:
+                core_vault = install_core_vault(
+                    source=_REPO_ROOT / "core-vault",
+                    env=_env,
+                    lore_bin=cli_tools["lore"],
+                    runner=runner,
+                    file=core_out,
+                )
     else:
         core_vault = skipped_core_vault(
             lore_enabled=bool(cfg.cli_flags.get("lore")), file=core_out

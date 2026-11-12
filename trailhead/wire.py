@@ -79,7 +79,14 @@ Selection = dict[str, tuple[dict[str, str | None], dict[str, str | None]]]
 
 
 class LockError(Exception):
-    """Raised when the shared wire lock is already held by another operation."""
+    """Raised when the shared wire lock is already held by another operation.
+
+    ``lock_path`` is the lock file that was found held.
+    """
+
+    def __init__(self, message: str, lock_path: Path):
+        super().__init__(message)
+        self.lock_path = lock_path
 
 
 def _acquire_wire_lock(lock_path: Path) -> None:
@@ -96,7 +103,8 @@ def _acquire_wire_lock(lock_path: Path) -> None:
             f"trailhead: another trailhead operation is already running "
             f"(lock file exists at {lock_path}).\n"
             f"If no other process is running, remove the lock file and retry:\n"
-            f"  rm {lock_path}"
+            f"  rm {lock_path}",
+            lock_path,
         )
 
 
