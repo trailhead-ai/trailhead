@@ -11,6 +11,7 @@ from .common import (
     DRIFT_SYNC_FIXABLE,
     _add_session_selectors,
     _git,
+    _drop_read_only_vaults,
     _partition_writable_vaults,
     _resolve_all_vaults,
     _resolve_session_vault_strict,
@@ -212,6 +213,9 @@ def _report_unsynced_vaults(
         if error is not None:
             print(f"notice: cannot check vault sync state — {error}", file=sys.stderr)
             return
+        vaults = _drop_read_only_vaults(vaults)
+    else:
+        vaults = _drop_read_only_vaults(vaults, announce=False)
 
     drifted = []
     for name, path in vaults:
@@ -317,7 +321,7 @@ def _flush_sync_tail() -> None:
         print(f"notice: cannot sync after flush — {error}", file=sys.stderr)
         return
 
-    writable, _shared = _partition_writable_vaults(vaults)
+    writable, _shared = _partition_writable_vaults(_drop_read_only_vaults(vaults))
     for name, path in writable:
         vault = Path(path)
         if vault_is_resolving(vault):
@@ -375,7 +379,7 @@ def _flush_request_tail() -> None:
 
     requested: list[str] = []
     auto_publish_off: list[str] = []
-    for name, path in vaults:
+    for name, path in _drop_read_only_vaults(vaults):
         vault = Path(path)
         if vault_is_resolving(vault):
             print(
@@ -587,6 +591,8 @@ def _flush_one_session(vault: Path, key: str, committer: str, *, push: bool) -> 
                 committer=committer,
                 open_index=_open_session_index,
             )
+        except locking.VaultWriteRefusedError:
+            raise
         except Exception as exc:
             print(f"error: session flush failed: {exc}", file=sys.stderr)
             return 1
@@ -817,6 +823,9 @@ def _flush_batch(args, *, query: str, scope_label: str, push: bool) -> int:
                 rc = _flush_commit(vault, key, push=False)
                 if rc != 0:
                     raise RuntimeError(f"commit failed (rc={rc})")
+        except locking.VaultWriteRefusedError:
+            # Refused before the flip, so there is nothing to roll back.
+            raise
         except Exception as exc:
             # Per-session atomicity: the flip happened before the commit, so on a
             # commit failure roll the flip BACK to `dirty` (shared with the

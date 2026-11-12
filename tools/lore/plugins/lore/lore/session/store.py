@@ -284,6 +284,7 @@ def capture_candidate(
     from ..vault import config as vault_config
 
     vault_config.assert_session_vault(vault_root, env=env)
+    locking.assert_writable(vault_root, env=env)
 
     session_dir = Path(vault_root) / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -380,6 +381,7 @@ def flush_session(
     if not sidecar_path.exists():
         return FLUSH_NO_SESSION
 
+    locking.assert_writable(vault_root)
     session_dir.mkdir(parents=True, exist_ok=True)
     with locking.session_write_lock(vault_root, key):
         if not sidecar_path.exists():
@@ -441,6 +443,7 @@ def revert_flush(
     if not sidecar_path.exists():
         return
 
+    locking.assert_writable(vault_root)
     session_dir.mkdir(parents=True, exist_ok=True)
     with locking.session_write_lock(vault_root, key):
         if not sidecar_path.exists():
@@ -502,6 +505,7 @@ def capture_referenced(
     if not body_path.exists() and not sidecar_path.exists():
         return False
 
+    locking.assert_writable(vault_root)
     session_dir.mkdir(parents=True, exist_ok=True)
     with locking.session_write_lock(vault_root, key):
         if not body_path.exists() and not sidecar_path.exists():

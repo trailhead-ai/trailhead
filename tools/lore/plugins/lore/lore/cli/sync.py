@@ -106,6 +106,7 @@ from ..record import model as record_model
 from .common import (
     SYNC_REFUSAL_MESSAGES,
     _git,
+    _drop_read_only_vaults,
     _resolve_all_vaults,
     _resolve_lore_state_dir,
     _shared_vault_paths,
@@ -679,6 +680,19 @@ def _pull_only_one(vault: Path, say, say_err) -> tuple[str, int]:
     return _pull_one(vault, say, say_err, already_fetched=True)
 
 
+def _hold_unwritable(vault: Path, exc: Exception, say_err) -> tuple[str, int]:
+    """End a pull whose write lock was refused because the config cannot be read.
+
+    Nothing was written. No person is present to read a traceback: hold the vault
+    for one, the same ending an unsettled conflict reaches.
+    """
+    say_err(f"error: {exc}")
+    from . import resolve_state as resolve_state_mod
+
+    resolve_state_mod.mark_held(vault)
+    return PULL_AWAITING_PERSON, 0
+
+
 def _pull_one(
     vault: Path, say, say_err, *, already_fetched: bool = False,
     resolve_conflicts: bool = False, name: str = "", shared: bool = False,
@@ -753,10 +767,15 @@ def _pull_one(
                 return PULL_OK, 0
             rc_n, n_out, _ = _git(vault, "rev-list", "--count", f"origin/{unborn}")
             # Tree mutation — locked (the fetch above was not).
-            with locking.vault_write_lock(vault):
-                rc_reset, _, stderr_reset = _git(
-                    vault, "reset", "--hard", f"origin/{unborn}"
-                )
+            try:
+                with locking.vault_write_lock(vault):
+                    rc_reset, _, stderr_reset = _git(
+                        vault, "reset", "--hard", f"origin/{unborn}"
+                    )
+            except locking.ReadOnlyVaultError:
+                raise
+            except locking.VaultWriteRefusedError as exc:
+                return _hold_unwritable(vault, exc, say_err)
             if rc_reset != 0:
                 say_err(f"error: could not adopt origin/{unborn}: {stderr_reset}")
                 return PULL_FAILED, 0
@@ -778,13 +797,18 @@ def _pull_one(
     # Tree mutation — locked, so a concurrent record write can never see a
     # half-replayed tree. The abort is part of the same critical section: the
     # vault must not be observable mid-rebase.
-    with locking.vault_write_lock(vault):
-        rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
-        if rc_rebase != 0:
-            # Abort unconditionally: whether the rebase stopped on a conflict or
-            # never started, the vault must come back to its pre-pull state before
-            # anything is reported. Verified below rather than trusted.
-            _git(vault, "rebase", "--abort")
+    try:
+        with locking.vault_write_lock(vault):
+            rc_rebase, stdout_rebase, stderr_rebase = _git(vault, "rebase", upstream)
+            if rc_rebase != 0:
+                # Abort unconditionally: whether the rebase stopped on a conflict or
+                # never started, the vault must come back to its pre-pull state before
+                # anything is reported. Verified below rather than trusted.
+                _git(vault, "rebase", "--abort")
+    except locking.ReadOnlyVaultError:
+        raise
+    except locking.VaultWriteRefusedError as exc:
+        return _hold_unwritable(vault, exc, say_err)
     if rc_rebase != 0:
         if not resolve_conflicts:
             say_err("error: rebase onto origin failed — pull skipped")
@@ -1398,6 +1422,10 @@ def implicit_pull(vault_root: str | Path) -> None:
         print(f"  lore: {name}: {text}", file=sys.stderr)
 
     try:
+        # Before the throttle stamp and any git: the write this precedes is refused
+        # for a read-only vault, and a fetch would write its ``.git/`` first.
+        if locking.read_only_vault_name(vault) is not None:
+            return
         if _fetch_is_fresh(vault):
             return
         _stamp_fetch_attempt(vault)
@@ -1425,10 +1453,12 @@ def implicit_pull(vault_root: str | Path) -> None:
 def _select_targets(vault_filter: str | None) -> tuple[list, int]:
     """Resolve the vaults to sync. Returns ``(targets, exit_code)``.
 
-    A non-empty ``targets`` always pairs with exit code 0. An unreadable config or
-    an unknown ``--vault`` name yields ``([], 1)`` with the diagnostic already
-    printed — both are refusals, never a silent fallback to syncing ``default``
-    alone, which would recreate the very gap this command closes.
+    An unreadable config or an unknown ``--vault`` name yields ``([], 1)`` with the
+    diagnostic already printed — both are refusals, never a silent fallback to
+    syncing ``default`` alone, which would recreate the very gap this command
+    closes. A ``read-only`` vault is dropped from a sweep (one skip line each, so
+    ``targets`` may come back empty with exit code 0) and a ``--vault`` naming one
+    raises :class:`locking.ReadOnlyVaultError`; either way before any git call.
     """
     from ..vault import config as vault_config_mod
 
@@ -1439,7 +1469,7 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
         return [], 1
 
     if vault_filter is None:
-        return targets, 0
+        return _drop_read_only_vaults(targets), 0
 
     wanted = vault_config_mod.normalize_vault_name(vault_filter)
     selected = [(n, p) for n, p in targets if n == wanted]
@@ -1448,6 +1478,7 @@ def _select_targets(vault_filter: str | None) -> tuple[list, int]:
         print(f"error: unknown vault: {vault_filter!r}", file=sys.stderr)
         print(f"  configured vaults: {known}", file=sys.stderr)
         return [], 1
+    locking.assert_writable(selected[0][1])
     return selected, 0
 
 
@@ -1548,6 +1579,10 @@ def cmd_sync(args) -> int:
     targets, rc = _select_targets(getattr(args, "vault", None))
     if rc != 0:
         return rc
+    if not targets:
+        if bool(getattr(args, "json", False)):
+            print(json.dumps(render_sync_json([]), indent=2))
+        return 0
 
     # ``None`` means every vault gets its OWN generated message, computed from
     # what THAT vault actually stages — see ``_stage_and_commit_one`` /
@@ -1637,6 +1672,12 @@ def cmd_sync(args) -> int:
                     say, _say_err = say_map[name]
                     say(f"sync already in progress for {name!r} — skipped")
                     outcomes[name] = SYNC_IN_PROGRESS
+                    continue
+                except locking.VaultWriteRefusedError as exc:
+                    # Refused before any lock file exists (a read-only vault):
+                    # name it and skip the vault, never the silent OSError skip.
+                    say_map[name][1](f"{exc} — skipped")
+                    commit_rc[name] = 1
                     continue
                 except locking.VaultRecoveryError as exc:
                     # Not an OSError on purpose: the lock was acquired, the
