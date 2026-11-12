@@ -402,7 +402,10 @@ edit.
 - **The completion report** is the phase lines and what each phase did. It has no needs-the-operator
   block that ends in a question, no `/craft:brainstorm` or `/portage:pull_request` command and no
   line that begins with a slash command, and, on a successful close, no outcome line: see [Hand-off
-  at close](#hand-off-at-close). Do not carry `found_work.py report`'s needs-the-operator lines as
+  at close](#hand-off-at-close). On a spec-linked parent, still run `found_work.py report --parent
+  task/<parent-name>` before writing the report, as [Found work](#found-work) says, and build the
+  report from its output; never decide from the record alone that there is no found work. Do not
+  carry `found_work.py report`'s needs-the-operator lines as
   printed, since they hold the `/craft:brainstorm` command: name each brainstorm task by its record
   id (`task/<id>`) and each failed write in words, then carry the decision sentences. The
   manual-check block names `/craft:checks` inside a sentence, never at the start of a line.
