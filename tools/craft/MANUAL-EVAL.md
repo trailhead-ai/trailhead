@@ -5379,6 +5379,8 @@ Prose measured: before the change, `skills/slice/SKILL.md` `a77e8c5c2b69096f43f4
 | execute detector | shipped | 3 of 3 at 1.0 | 2.25 |
 | execute guard | shipped | 3 of 3 at 1.0 | 1.13 |
 
+After measurement the shipped prose moved on, to `skills/slice/SKILL.md` `fac973fb40e9c2db333626c9192bcf31466b1d97` and `skills/_shared/execute.md` `df7465378b9a7b7f4a83a7610ba953d3ad1eabaa`. The differences are a reflow, a new contents line in `execute.md`, and refusal-handling text that no case reaches: one instruction for how a writer refusal is reported, in both procedures, and the `would-empty-slice` branch in `execute.md`, which now lands the waiting entry without `--parent` before dropping the slice. Every grader in the four cases reads the success path, where the writer is never refused, and the push gate re-measures the cases through `eval-gate.json`.
+
 **Amendments to the two slice cases**, recorded in their `expected.md`. The first post-change batch passed the slice detector 1 of 3 and the slice guard 2 of 3, for three reasons:
 - **Prose:** the report paraphrased the manual undo instead of giving the `lore record update` command. The prose was fixed.
 - **Grader:** the create regex required `--kind task` directly after `record create`, and one run put `--vault` first. The regex was fixed.
