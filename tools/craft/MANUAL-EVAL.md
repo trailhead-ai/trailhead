@@ -5248,7 +5248,7 @@ After every run, delete the untracked `evals/<case>/fixtures/<sessionId>.jsonl` 
 
 ### Not measured
 
-The harness's choice prompt. The reading of an answer that arrives in the same turn as the question (no later turn exists headless). A grader on the decision log's `(operator confirmed)` wording; the Write of `operator_confirmed` stands in for it. The existing urgent-entry grader `no-slice-parent-was-created` globs `vault/task/*.md` with `exists: false` although the scaffold seeds task records there; it was not copied here and is unconfirmed.
+The harness's choice prompt. The reading of an answer that arrives in the same turn as the question (no later turn exists headless). A grader on the decision log's `(operator confirmed)` wording; the Write of `operator_confirmed` stands in for it.
 
 ## Case: the decide-or-ask rule for found-work calls
 
