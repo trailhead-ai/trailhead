@@ -8,6 +8,7 @@ Usage:
     found_work.py entries --spec spec/<id> (--folded-into task/<id> --vault NAME | --open)
     found_work.py entry --session build|slice|plan [--session-id ID] [--vault NAME] < transition.json
     found_work.py reopen-abandoned --spec spec/<id> --session build|slice|plan [--session-id ID] [--vault NAME]
+    found_work.py scrub < text
 
 `decide` reads ONE JSON document on stdin — never a command-line argument:
 
@@ -1593,6 +1594,7 @@ def _parser() -> argparse.ArgumentParser:
     a.add_argument("--spec", required=True)
     a.add_argument("--session-id", default=None)
     a.add_argument("--vault", default=None)
+    sub.add_parser("scrub")
     return p
 
 
@@ -1621,6 +1623,14 @@ def _entries_command(args, runner) -> int:
         if not args.vault:
             raise Refusal("--folded-into needs --vault NAME", "malformed-input")
     print(list_entries(args.spec, runner, folded_into=args.folded_into, vault=args.vault))
+    return EXIT_DONE
+
+
+def _scrub_command(raw: str) -> int:
+    line = _clean(raw)
+    if not line:
+        raise Refusal("the text is empty once control characters are removed", "malformed-input")
+    print(line)
     return EXIT_DONE
 
 
@@ -1657,6 +1667,8 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
             return _entries_command(args, runner)
         if args.command == "reopen-abandoned":
             return _reopen_abandoned_command(args, runner)
+        if args.command == "scrub":
+            return _scrub_command(sys.stdin.read() if stdin is None else stdin)
         if args.command == "entry":
             return _entry_command(args, sys.stdin.read() if stdin is None else stdin, runner)
         if args.parent is None and args.session == "build":

@@ -3177,3 +3177,43 @@ def test_a_report_under_build_lists_only_the_build_lines_of_a_stream_mixing_all_
     assert "Build call" in out and "Slice call" not in out and "Plan call" not in out
     code, out, _ = run_report_raw(lore, capsys, "--session", "plan")
     assert "Plan call" in out and "Build call" not in out and "Slice call" not in out
+
+
+# --- scrub mode: a finding reduced to one safe line ----------------------------
+
+
+def run_scrub(text, capsys, *extra):
+    code = fw.main(["scrub", *extra], stdin=text, runner=None)
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_scrub_redacts_a_credential_shaped_run(capsys):
+    code, out, err = run_scrub("login fails when password=Zq7planted8841 is set", capsys)
+    assert code == 0, err
+    assert "Zq7planted8841" not in out
+    assert "[redacted]" in out
+    assert out.count("\n") == 1
+
+
+def test_scrub_passes_a_clean_line_unchanged(capsys):
+    code, out, _ = run_scrub("Handle the empty export case", capsys)
+    assert code == 0
+    assert out == "Handle the empty export case\n"
+
+
+def test_scrub_removes_control_characters_and_makes_one_line(capsys):
+    code, out, _ = run_scrub("first\x1b[2K line\x00\nsecond\r\nthird\u202e", capsys)
+    assert code == 0
+    assert out.count("\n") == 1
+    assert "\x1b" not in out and "\x00" not in out and "\r" not in out and "\u202e" not in out
+    assert out.split() == ["first", "[2K", "line", "second", "third"]
+
+
+def test_scrub_of_input_that_reduces_to_nothing_is_refused_without_echoing_it(capsys):
+    code, out, err = run_scrub("\x1b\x00  \n\u200b", capsys)
+    assert code == 1
+    assert out == ""
+    assert reason_of(err) == "malformed-input"
+    assert "empty" in err
+    assert "\x1b" not in err and "\x00" not in err and "\u200b" not in err
