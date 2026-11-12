@@ -275,6 +275,18 @@ def _fail(step: str, detail: str, *, lore_bin: Path) -> CoreVaultOutcome:
     return CoreVaultOutcome("failed", reason)
 
 
+def lock_held_core_vault(lock_path: Path, *, file=None) -> CoreVaultOutcome:
+    """Print and return the failed outcome for a held wire lock; writes nothing else."""
+    reason = f"the wire lock {lock_path} is held (another trailhead install or update may be running)"
+    print(
+        f"trailhead: core vault: {reason}; install otherwise succeeded. "
+        f"The core vault was not touched. If no other install or update is running, "
+        f"remove the lock with `rm {lock_path}`, then re-run `trailhead install`.",
+        file=sys.stderr,
+    )
+    return CoreVaultOutcome("failed", reason)
+
+
 def _decline(path: str, reason: str) -> CoreVaultOutcome:
     print(
         f"trailhead: core vault not registered: {reason} (path: {path}); nothing was changed. "

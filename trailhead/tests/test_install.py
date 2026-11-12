@@ -932,3 +932,132 @@ class TestCoreVaultStep:
         captured = capsys.readouterr()
         assert "core vault registered" in captured.err
         assert "core vault" not in captured.out.replace('"core_vault"', "")
+
+
+# ---------------------------------------------------------------------------
+# core vault step under the wire lock
+# ---------------------------------------------------------------------------
+
+
+def _lock_path(env: dict[str, str]) -> Path:
+    from trailhead.paths import state_dir
+
+    return state_dir("trailhead", env=env) / "trailhead.lock"
+
+
+def _snapshot(root: Path) -> dict[str, bytes | None]:
+    return {str(p.relative_to(root)): (p.read_bytes() if p.is_file() else None) for p in sorted(root.rglob("*"))}
+
+
+def _seed_copy(env: dict[str, str]) -> Path:
+    from trailhead.core_vault import core_copy_dir
+
+    copy = core_copy_dir(env)
+    (copy / "sub").mkdir(parents=True)
+    (copy / "sub" / "doc.md").write_text("pre-existing copy content\n")
+    return copy
+
+
+class TestCoreVaultStepUnderWireLock:
+    """The lock is taken at install's call site; a held lock degrades the step, never the install."""
+
+    def _held_after_lore_init(self, m, env):
+        """Create the lock once wiring (which takes and releases it) is done."""
+        lock = _lock_path(env)
+
+        def hold(*a, **k):
+            lock.write_text("held by someone else\n")
+            return (0, "")
+
+        m["lore_init"].side_effect = hold
+        return lock
+
+    def test_held_lock_writes_nothing_and_install_exits_zero(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        copy = _seed_copy(env)
+        before = _snapshot(copy)
+        lore = FakeLore([])
+        with _patched(detected=True, real_core=True) as m:
+            self._held_after_lore_init(m, env)
+            rc = run_install(env=env, as_json=True, runner=lore)
+        assert rc == 0
+        data = _json.loads(capsys.readouterr().out)
+        assert data["core_vault"]["outcome"] == "failed"
+        assert lore.calls == []
+        assert _snapshot(copy) == before
+        assert not [p for p in copy.parent.iterdir() if p.name.startswith(".core-vault.")]
+
+    def test_human_stderr_names_lock_path_rm_recovery_and_rerun(self, tmp_path, capsys):
+        env = _env(tmp_path)
+        lore = FakeLore([])
+        with _patched(detected=True, real_core=True) as m:
+            lock = self._held_after_lore_init(m, env)
+            assert run_install(env=env, runner=lore) == 0
+        captured = capsys.readouterr()
+        assert "installed plugins" in captured.out
+        assert str(lock) in captured.err
+        assert "another trailhead install or update may be running" in captured.err
+        assert f"rm {lock}" in captured.err
+        assert "re-run `trailhead install`" in captured.err
+
+    def test_json_mode_sends_same_line_to_stderr_and_reason_names_the_lock(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        with _patched(detected=True, real_core=True) as m:
+            lock = self._held_after_lore_init(m, env)
+            run_install(env=env, as_json=True, runner=FakeLore([]))
+        captured = capsys.readouterr()
+        data = _json.loads(captured.out)
+        assert data["core_vault"]["outcome"] == "failed"
+        assert str(lock) in data["core_vault"]["reason"]
+        assert f"rm {lock}" in captured.err and "re-run `trailhead install`" in captured.err
+        assert "re-run" not in captured.out
+
+    def test_no_harness_config_still_takes_the_lock(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        lock = _lock_path(env)
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        lock.write_text("held by someone else\n")
+        lore = FakeLore([])
+        with _patched(detected=False, real_core=True):
+            run_install(env=env, as_json=True, runner=lore)
+        data = _json.loads(capsys.readouterr().out)
+        assert data["core_vault"]["outcome"] == "failed"
+        assert lore.calls == []
+
+    def test_unheld_lock_leaves_normal_behaviour_and_no_lock_file(self, tmp_path, capsys):
+        import json as _json
+
+        env = _env(tmp_path)
+        lore = FakeLore([])
+        with _patched(detected=True, real_core=True):
+            assert run_install(env=env, as_json=True, runner=lore) == 0
+        assert _json.loads(capsys.readouterr().out)["core_vault"]["outcome"] == "registered"
+        assert not _lock_path(env).exists()
+
+    def test_lock_is_released_and_exception_propagates_when_the_step_raises(self, tmp_path):
+        env = _env(tmp_path)
+
+        def runner(args, **kw):
+            raise RuntimeError("lore exploded")
+
+        with _patched(detected=True, real_core=True), pytest.raises(RuntimeError, match="lore exploded"):
+            run_install(env=env, runner=runner)
+        assert not _lock_path(env).exists()
+
+    def test_install_core_vault_called_directly_leaves_a_caller_held_lock_alone(self, tmp_path):
+        from trailhead.wire import wire_lock
+
+        env = _env(tmp_path)
+        lore = FakeLore([])
+        with wire_lock(env=env) as lock:
+            outcome = install_core_vault(
+                source=_REPO_ROOT / "core-vault", env=env, lore_bin=Path("/x/lore"), runner=lore
+            )
+            assert lock.exists()
+        assert outcome.outcome == "registered"

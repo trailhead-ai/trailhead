@@ -53,7 +53,12 @@ from trailhead.capabilities import (
     ruleset_bearing_manifests,
 )
 from trailhead.compose import UnknownSkillError, UnknownSubagentError
-from trailhead.core_vault import CoreVaultOutcome, install_core_vault, skipped_core_vault
+from trailhead.core_vault import (
+    CoreVaultOutcome,
+    install_core_vault,
+    lock_held_core_vault,
+    skipped_core_vault,
+)
 from trailhead.harness import detect_harnesses, get_harness
 from trailhead.install_config import (
     ConfigResolveError,
@@ -62,7 +67,8 @@ from trailhead.install_config import (
 )
 from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
 from trailhead.provenance import write_stamp
-from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
+from trailhead.paths import state_dir
+from trailhead.wire import _LOCK_FILENAME, LockError, WireError, default_manifest_paths, wire, wire_lock
 
 _REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
@@ -408,13 +414,19 @@ def run_install(
     # Its human line goes to stderr under --json so stdout stays one JSON document.
     core_out = sys.stderr if as_json else None
     if "lore" in cli_tools:
-        core_vault = install_core_vault(
-            source=_REPO_ROOT / "core-vault",
-            env=_env,
-            lore_bin=cli_tools["lore"],
-            runner=runner,
-            file=core_out,
-        )
+        # Taken here, never inside install_core_vault: an updater already holding the
+        # lock calls the step itself. A held lock degrades the step, not the install.
+        try:
+            with wire_lock(env=_env):
+                core_vault = install_core_vault(
+                    source=_REPO_ROOT / "core-vault",
+                    env=_env,
+                    lore_bin=cli_tools["lore"],
+                    runner=runner,
+                    file=core_out,
+                )
+        except LockError:
+            core_vault = lock_held_core_vault(state_dir("trailhead", env=_env) / _LOCK_FILENAME, file=core_out)
     else:
         core_vault = skipped_core_vault(
             lore_enabled=bool(cfg.cli_flags.get("lore")), file=core_out
