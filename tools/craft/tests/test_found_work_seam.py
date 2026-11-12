@@ -81,7 +81,7 @@ class Seam:
         )
 
     def decide(self, doc, *args, cwd=None):
-        return self.script("decide", "--session-id", SID, *args, stdin=json.dumps(doc), cwd=cwd)
+        return self.script("decide", "--session", "build", "--session-id", SID, *args, stdin=json.dumps(doc), cwd=cwd)
 
     def report(self, parent):
         return self.script("report", "--parent", parent, "--session-id", SID)
@@ -173,7 +173,7 @@ def test_a_credential_is_redacted_in_the_logged_line(seam):
 
 
 def test_without_a_session_key_nothing_is_captured_and_the_finding_is_printed(seam):
-    r = seam.script("decide", stdin=json.dumps(decision()), cwd="/")
+    r = seam.script("decide", "--session", "build", stdin=json.dumps(decision()), cwd="/")
     assert r.returncode == 2
     assert "reason-code: capture-failed" in r.stderr
     assert "title: Handle the empty case" in r.stdout
@@ -301,7 +301,7 @@ def go(seam, doc, lore=None, *extra):
 
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = fw.main(["decide", "--session-id", SID, *extra], stdin=stdin, runner=lore)
+        code = fw.main(["decide", "--session", "build", "--session-id", SID, *extra], stdin=stdin, runner=lore)
     return code, out.getvalue(), err.getvalue()
 
 
@@ -934,7 +934,7 @@ def transition_doc(kind, entries, parent, **over):
 
 
 def run_entry_cli(seam, doc, vault="default"):
-    return seam.script("entry", "--session-id", SID, "--vault", vault, stdin=json.dumps(doc))
+    return seam.script("entry", "--session", "build", "--session-id", SID, "--vault", vault, stdin=json.dumps(doc))
 
 
 def test_a_fold_then_a_done_land_on_a_ready_spec_through_lores_base_check_and_read_back(seam):
@@ -992,7 +992,7 @@ def test_reopen_abandoned_reopens_the_entry_of_a_dropped_slice_and_leaves_the_ru
     spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, dropped), (2, running)))
     before = show(seam, spec_id)["body"]
 
-    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session", "build", "--session-id", SID, "--vault", "default")
     assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines() == [
         f"found-work-result: written | parent: {dropped} | finding: Thing 1 | record: {spec_id}#F1"
@@ -1008,7 +1008,7 @@ def test_reopen_abandoned_reopens_the_entry_of_a_dropped_slice_and_leaves_the_ru
         f" | where: src/a.py | why: its slice {dropped} ended dropped without building it"
     )
 
-    again = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    again = seam.script("reopen-abandoned", "--spec", spec_id, "--session", "build", "--session-id", SID, "--vault", "default")
     assert (again.returncode, again.stdout, again.stderr) == (0, "", "")
 
 
@@ -1018,7 +1018,7 @@ def test_reopen_abandoned_marks_the_entry_a_done_child_built_done_and_reopens_th
     make_task(seam, "Build thing one", delivers, "done", parent)
     spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, parent), (2, parent)))
 
-    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session", "build", "--session-id", SID, "--vault", "default")
     assert done.returncode == 0, done.stderr
     assert done.stdout.splitlines()[-2:] == [
         f"marked done: {spec_id}#F1 ({parent})", f"reopened: {spec_id}#F2 ({parent})"]
@@ -1032,7 +1032,7 @@ def test_reopen_abandoned_marks_the_entry_a_done_child_built_done_and_reopens_th
 
 def test_reopen_abandoned_with_an_unknown_task_exits_2_lookup_failed(seam):
     spec_id = make_spec(seam, SPEC_BODY + _folded_section((1, "task/no-such-task")))
-    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session-id", SID, "--vault", "default")
+    done = seam.script("reopen-abandoned", "--spec", spec_id, "--session", "build", "--session-id", SID, "--vault", "default")
     assert done.returncode == 2
     assert "reason-code: lookup-failed" in done.stderr
     assert {e.id: e.status_kind for e in followups.parse_followups(show(seam, spec_id)["body"])} == {"F1": "folded"}

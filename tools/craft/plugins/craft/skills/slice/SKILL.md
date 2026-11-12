@@ -336,7 +336,7 @@ against the composed body; use that result and do not run the gate a second time
 certified, before the candidate set is derived, run:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault>
+${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault> --session slice
 ```
 
 In one write it settles every follow-up entry folded into a slice task now `dropped`, `superseded`
@@ -556,7 +556,7 @@ text and the diff stays in permanent, team-synced vault history: run it through 
 credential-pattern scrub in `../_shared/security.md` first, and never use a drop to take out a
 secret already in the record — rotate the credential and escalate to the operator. **When this
 session drops a slice parent, run
-`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault>`
+`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault> --session slice`
 right after the drop lands**, so the follow-ups folded into that slice return to open now rather
 than at the next pass; report a failure as step 4 says. A crashed or interrupted run must be resumed
 or explicitly dropped, never silently duplicated by a second invocation of this skill.
@@ -774,7 +774,7 @@ work, or names the existing `task/<id>` the work belongs to (find it with `lore 
 refuses any other reason as `drop-target-missing`. Run it with the document read by redirect:
 
    ```sh
-   ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --vault <vault> < <transition-path>
+   ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session slice --vault <vault> < <transition-path>
    ```
 
 It logs one decision per entry before it writes, marks the entries `dropped: <reason>` in one write
@@ -1104,7 +1104,7 @@ credential-pattern scrub first:
 and run, with the document read by redirect:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --vault <vault> < <transition-path>
+${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session slice --vault <vault> < <transition-path>
 ```
 
 It logs one decision per entry before it writes, marks the entries folded into the parent in one
@@ -1153,26 +1153,23 @@ through the same `--diff` edit confined to the block.
 
 ## Outcome
 
-**Report the pass's found-work decisions first, whenever it made any.** When step 4 or step 5
-reopened entries, step 7 dropped them, step 9 folded them, or a `reopen-abandoned` pass only marked
-entries done, run `${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<id>` once for
-the new slice parent, once for the slice parent step 7's drops were written under, and once for each
-`task/<id>` that `reopen-abandoned` printed as a `parent:`, and put the sentences it prints in your
-closing message, above any outcome line, as printed — a sentence left in an earlier message does not
-count — for example "Folded spec/x#F2 into this slice: …", "Dropped spec/x#F3: <title>, because …",
-"Returned spec/x#F2 to open: …" and "Marked spec/x#F1 done by this slice: <title>.". Any failure
-step 4, step 7 or step 9 reported, with its reason-code and retry command, goes in the same report.
+**Report the pass's found-work decisions first.** On every path that ends in a report, a slice
+chosen, a termination or an early stop alike, run
+`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --session slice` once, for the whole pass. It
+lists the decisions this pass made, whatever parent they sit under, and needs no `--parent`. Put the
+sentences it prints in your closing message, above any outcome line, as printed — a sentence left in
+an earlier message does not count — for example "Folded spec/x#F2 into this slice: …", "Dropped
+spec/x#F3: <title>, because …", "Returned spec/x#F2 to open: …" and "Marked spec/x#F1 done by this
+slice: <title>.". Any failure step 4, step 7 or step 9 reported, with its reason-code and retry
+command, goes in the same report.
 
 **When the pass dropped any entry, name the way back.** Say that a dropped entry is put back with
 `found_work.py entry` and its `restore` transition, which appends a new open entry carrying the
 dropped one's work and leaves the dropped entry as it is, and never by editing the section by hand.
 
-**A pass that made no found-work decision says so in one line.** Run
-`${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<id> --session slice` once, for
-the new slice parent, or on a path that creates none (termination, an early stop) for the spec's
-most recently closed slice parent, and put the line it prints in your closing message, above any
-outcome line, as printed: `The slice made no decisions about found work.` A refusal ends on its own
-outcome line and prints nothing else.
+**A pass that made no found-work decision says so in one line.** That same report then prints
+`The slice made no decisions about found work.`; put it in your closing message, above any outcome
+line, as printed. A refusal ends on its own outcome line and prints nothing else.
 
 **Under `--unattended`, the handoff below does not apply.** Report the chosen slice, its value claim
 and the new parent task's record id in prose, then finish the run block and end:

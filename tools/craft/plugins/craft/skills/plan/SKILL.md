@@ -232,7 +232,7 @@ through the credential-pattern scrub first, and run the command with the documen
    ```
 
    ```sh
-   ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --vault <vault> < <transition-path>
+   ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session plan --vault <vault> < <transition-path>
    ```
 
 An entry already folded into this parent is not in that list and needs nothing. When the call exits
@@ -577,7 +577,7 @@ either part of a child task or given back, and none is left unplaced.
   ```
 
   ```sh
-  ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --vault <vault> < <transition-path>
+  ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session plan --vault <vault> < <transition-path>
   ```
 
 The entry goes back to `open` for a later slice, and no child names it. **Under `--unattended` this

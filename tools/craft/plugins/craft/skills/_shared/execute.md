@@ -1858,7 +1858,7 @@ stops](#end-phase-stops) says.
 one JSON document on stdin, so no finding text is ever put on a command line:
 
 ```
-${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py decide < decision.json
+${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py decide --session build < decision.json
 ```
 
 The document is `{"decision", "parent", "spec", "finding": {"title", "what", "where", "found",
@@ -1916,7 +1916,7 @@ script refuses (`reason-code: entry-not-built`) changes none of them:
 ```
 
 ```
-${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --vault <elected-vault> < <transition-path>
+${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session build --vault <elected-vault> < <transition-path>
 ```
 
 The script logs each transition before it writes it, as `decide` does. When it refuses `done` with
