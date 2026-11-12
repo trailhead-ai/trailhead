@@ -8,7 +8,9 @@
 # state_dir("trailhead")/bin (TRAILHEAD_STATE_DIR, else $XDG_STATE_HOME/trailhead,
 # else ~/.local/state/trailhead, mirroring trailhead/paths.py), else `trailhead`
 # on PATH. The hook input on stdin is not read: the step takes nothing from its
-# caller. Every path exits 0 and prints nothing to stdout.
+# caller. Every path exits 0 and prints nothing to stdout; when no CLI is found the
+# hook appends `<timestamp> - cli_not_found` to <state>/gateway/register.log, the log
+# the registration step itself writes.
 
 if [ -n "${TRAILHEAD_STATE_DIR:-}" ]; then
     state="$TRAILHEAD_STATE_DIR"
@@ -20,7 +22,12 @@ fi
 
 trailhead="$state/bin/trailhead"
 if [ ! -x "$trailhead" ]; then
-    trailhead=$(command -v trailhead 2>/dev/null) || exit 0
+    trailhead=$(command -v trailhead 2>/dev/null) || {
+        # Leave the one-line trace `outpost-gateway` points an operator at.
+        { mkdir -p "$state/gateway" &&
+            printf '%s - cli_not_found\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$state/gateway/register.log"; } 2>/dev/null
+        exit 0
+    }
 fi
 
 "$trailhead" gateway register --hook >/dev/null

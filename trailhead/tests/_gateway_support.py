@@ -53,6 +53,15 @@ def runner_env(
     return env
 
 
+def register_port_env(port: int) -> dict[str, str]:
+    """Environment that points the real ``trailhead`` shim's registration step at *port*."""
+    return {
+        "PYTHONPATH": str(Path(__file__).with_name("_register_port")),
+        "TRAILHEAD_TEST_REGISTER_PORT": str(port),
+        "TRAILHEAD_TEST_REPO_ROOT": str(REPO_ROOT),
+    }
+
+
 def gateway_runner_cmd(port: int, env_dump: Path, argv: list[str]) -> str:
     """Shell command running the gateway command against *port*, dumping its environment to *env_dump*."""
     return shlex.join([sys.executable, str(GATEWAY_RUNNER), str(port), str(env_dump), *argv])

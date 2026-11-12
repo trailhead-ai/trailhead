@@ -34,6 +34,56 @@ class TestShimBuild:
         assert proc.returncode == 0, proc.stderr
         assert "outpost-gateway" in proc.stdout and "run list" in proc.stdout
 
+    def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(self, tmp_path):
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        shim = resolve_shim_dir(env=env) / "outpost-gateway"
+        marker = tmp_path / "ran-hostile-code"
+        hostile_bin = tmp_path / "venv-bin"
+        hostile_bin.mkdir()
+        fake_python = hostile_bin / "python3"
+        fake_python.write_text(f'#!/bin/sh\necho python3 >> "{marker}"\nexit 0\n')
+        fake_python.chmod(0o755)
+        planted = tmp_path / "planted"
+        planted.mkdir()
+        for module in ("sitecustomize", "json"):
+            (planted / f"{module}.py").write_text(f'open("{marker}", "a").write("{module}\\n")\n')
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        (cwd / "json.py").write_text(f'open("{marker}", "a").write("cwd-json\\n")\n')
+        run_env = {
+            "HOME": env["HOME"],
+            "PATH": os.pathsep.join([str(hostile_bin), "/usr/bin", "/bin"]),
+            "PYTHONPATH": str(planted),
+        }
+        proc = subprocess.run(
+            [str(shim), "--help"], capture_output=True, text=True, env=run_env, cwd=cwd, timeout=60
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "run list" in proc.stdout
+        assert not marker.exists(), marker.read_text()
+
+    def test_an_installing_venv_that_is_a_copy_does_not_put_its_site_packages_in_front(self, tmp_path, monkeypatch):
+        venv = tmp_path / "venv"
+        subprocess.run([sys.executable, "-m", "venv", "--copies", "--without-pip", str(venv)], check=True)
+        marker = tmp_path / "ran-pth"
+        (next((venv / "lib").glob("python*/site-packages"))).joinpath("evil.pth").write_text(
+            f'import os; open("{marker}", "a").write("pth")\n'
+        )
+        monkeypatch.setattr("trailhead.pathint.sys.executable", str(venv / "bin" / "python"))
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "outpost-gateway"), "--help"],
+            capture_output=True,
+            text=True,
+            env={"HOME": env["HOME"], "PATH": "/usr/bin:/bin"},
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "run list" in proc.stdout
+        assert not marker.exists()
+
     def test_outpost_disabled_writes_no_shim(self, tmp_path):
         env = _env(tmp_path)
         build_cli_shims(_tools(), env=env, outpost_enabled=False)

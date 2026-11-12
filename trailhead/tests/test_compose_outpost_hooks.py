@@ -6,10 +6,21 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
+from trailhead.install import build_cli_shims, resolve_cli_tools
+from trailhead.harness import harness_process
+from trailhead.tests._gateway_support import (
+    REGISTRATION_AUTHORITY,
+    StubOutpost,
+    register_port_env,
+    run_under_harness,
+    write_authority,
+)
+from trailhead.tests._harness_process_support import make_fake_harness
 from trailhead.uninstall import run_uninstall
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -106,7 +117,7 @@ class TestScript:
         assert record.read_text().split() == ["gateway", "register", "--hook"]
         assert proc.returncode == 0
 
-    def test_without_a_trailhead_cli_it_exits_zero_silently(self, tmp_path):
+    def test_without_a_trailhead_cli_it_exits_zero_silently_and_leaves_a_trace(self, tmp_path):
         proc = subprocess.run(
             [str(self._script(tmp_path))],
             input="{}",
@@ -115,6 +126,45 @@ class TestScript:
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "empty"), "HOME": str(tmp_path)},
         )
         assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+        (line,) = (tmp_path / "empty" / "gateway" / "register.log").read_text().splitlines()
+        assert line.endswith(" - cli_not_found")
+
+    def test_a_trace_that_cannot_be_written_leaves_the_exit_and_output_untouched(self, tmp_path):
+        state = tmp_path / "ro"
+        state.mkdir()
+        state.chmod(0o500)
+        try:
+            proc = subprocess.run(
+                [str(self._script(tmp_path))],
+                input="{}",
+                capture_output=True,
+                text=True,
+                env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)},
+            )
+        finally:
+            state.chmod(0o700)
+        assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+
+    def test_after_a_real_install_the_hook_runs_the_cli_install_wrote(self, tmp_path):
+        state = tmp_path / "state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
+        tools = resolve_cli_tools({"camp": True, "lore": True, "portage": True})
+        build_cli_shims(tools, env=env, outpost_enabled=True)
+        launcher = make_fake_harness(tmp_path / "fake")
+        proc = run_under_harness(
+            launcher,
+            str(self._script(tmp_path)),
+            env={
+                **env,
+                "OUTPOST_STATE_DIR": str(tmp_path / "outpost-empty"),
+                "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
+            },
+            on_start=lambda pid: None,
+            stdin="{}",
+        )
+        assert (proc.returncode, proc.stdout) == (0, "")
+        (line,) = (state / "gateway" / "register.log").read_text().splitlines()
+        assert line.split()[2] == "authority_missing"
 
 
 class TestUninstall:
@@ -144,3 +194,34 @@ class TestUninstall:
         run_uninstall(env=env, assume_yes=True, runner=runner)
         assert ["claude", "plugin", "uninstall", "outpost@trailhead"] in [c[:4] for c in calls]
         assert not (plugin / "hooks" / "hooks.json").exists()
+
+
+class TestRealInstallReachesOutpost:
+    def test_the_hook_registers_through_the_shim_install_wrote(self, tmp_path):
+        state = tmp_path / "state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
+        build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
+        outpost_state = tmp_path / "outpost-state"
+        write_authority(outpost_state)
+        launcher = make_fake_harness(tmp_path / "fake")
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        found = []
+        with StubOutpost() as stub:
+            proc = run_under_harness(
+                launcher,
+                str(dest / "hooks" / "gateway-register"),
+                env={
+                    **env,
+                    **register_port_env(stub.port),
+                    "OUTPOST_STATE_DIR": str(outpost_state),
+                    "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
+                },
+                on_start=lambda pid: found.append(harness_process(start_pid=pid)),
+                stdin="{}",
+            )
+        assert (proc.returncode, proc.stdout) == (0, "")
+        (seen,) = stub.requests
+        assert (seen.method, seen.path) == ("POST", "/gateway/sessions")
+        assert seen.headers["authorization"] == f"Bearer {REGISTRATION_AUTHORITY}"
+        assert json.loads(seen.body) == {"pid": found[0][0], "start_time": found[0][1]}

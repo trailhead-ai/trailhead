@@ -68,6 +68,7 @@ _REPO_ROOT = repo_root()
 _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 _GATEWAY_BIN = _REPO_ROOT / "bin" / "outpost-gateway"
+_GATEWAY_SCRIPT = _REPO_ROOT / "bin" / "_outpost_gateway.py"
 
 
 def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
@@ -97,12 +98,14 @@ def outpost_enabled(cfg) -> bool:
 
 def _with_ranger(cli_tools: dict[str, Path], *, outpost_enabled: bool = False) -> dict[str, Path]:
     """The shim set: the plugin CLIs plus the repo's own ``bin/ranger`` when present,
-    and ``bin/outpost-gateway`` when the Outpost tool is enabled."""
+    and ``bin/trailhead`` when the Outpost tool is enabled
+    (its SessionStart hook runs ``trailhead`` from a plain ``sh``, where the ``shellenv``
+    function is not defined)."""
     extra = {}
     if _RANGER_BIN.exists():
         extra["ranger"] = _RANGER_BIN
-    if outpost_enabled and _GATEWAY_BIN.exists():
-        extra["outpost-gateway"] = _GATEWAY_BIN
+    if outpost_enabled and _TRAILHEAD_BIN.exists():
+        extra["trailhead"] = _TRAILHEAD_BIN
     return {**cli_tools, **extra}
 
 
@@ -110,7 +113,8 @@ def build_cli_shims(
     cli_tools: dict[str, Path], *, env: dict[str, str], outpost_enabled: bool = False
 ) -> Path | None:
     """Build the CLI shim dir for *cli_tools* plus ``bin/ranger`` (and
-    ``bin/outpost-gateway`` when *outpost_enabled*); the one shim
+    ``bin/trailhead`` when *outpost_enabled*, plus an ``outpost-gateway`` shim pinned to
+    this interpreter, because the harness runs that command outside its sandbox); the one shim
     build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
@@ -120,8 +124,14 @@ def build_cli_shims(
     """
     if not cli_tools:
         return None
+    pinned = {}
+    if outpost_enabled and _GATEWAY_SCRIPT.exists():
+        pinned["outpost-gateway"] = _GATEWAY_SCRIPT
     return create_shims(
-        _with_ranger(cli_tools, outpost_enabled=outpost_enabled), str(_REPO_ROOT), env=env
+        _with_ranger(cli_tools, outpost_enabled=outpost_enabled),
+        str(_REPO_ROOT),
+        env=env,
+        pinned_scripts=pinned,
     ).shim_dir
 
 
