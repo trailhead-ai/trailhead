@@ -2145,16 +2145,17 @@ The refusals `set_aside.py` gives, each handled by the run itself:
   slice mode accepts it and lands the entry. If that call is refused, report it in plain words and
   do not claim a set-aside. Once the entry exists, drop the slice with a note naming the criterion's
   waiting entry and pointing the operator to `/craft:checks`, and do not close it.
-- `stale-parent` and `parent-write-failed` — the spec entry landed and the parent was not narrowed.
-  Run the writer once more; a re-run finds the entry present and finishes the parent. If it fails
-  again, leave the slice open and report that the spec entry landed and the parent was not narrowed.
+- `stale-parent`, `parent-write-failed`, and any other refusal whose `reason:` says the spec entry
+  already landed — the spec entry landed and the parent was not narrowed. Run the writer once more;
+  a re-run finds the entry present and finishes the parent. If it fails again, leave the slice open
+  and report that the spec entry landed and the parent was not narrowed.
 - `entry-exists` — the criterion already has a waiting entry under another status (released earlier,
   now blocked again). It is not set aside and not written `blocked`: leave the slice open and
   escalate to the operator, naming the criterion.
 
-Any other refusal is reported in plain words; the criterion is not described as set aside, and the
-run takes the branches above it as if the criterion could not be set aside. The codes this section
-names are the writer's own.
+Any other refusal, one whose `reason:` does not say the spec entry landed, is reported in plain
+words; the criterion is not described as set aside, and the run takes the branches above it as if
+the criterion could not be set aside. The codes this section names are the writer's own.
 
 **Every report that follows names each criterion set aside**, with its own words and its number
 after them, what it waits on, and how to undo it by hand until a check-list walk-through can release
