@@ -26,6 +26,7 @@ from trailhead.compose import (
     UnknownSkillError,
     UnknownSubagentError,
 )
+from trailhead.core_vault import core_show, resolve_lore_bin
 from trailhead.doctor import run_doctor
 from trailhead.harness import HarnessError, detect_harnesses, get_harness
 from trailhead.install import run_install
@@ -91,6 +92,7 @@ Commands:
   doctor      Report what trailhead has installed (read-only).
   update      Upgrade the install (or --check for a read-only freshness check).
   shellenv    Print shell env to put the camp/lore CLIs on PATH (brew-style).
+  core show   Print a record from trailhead's own core vault (`core show <kind>/<name>`).
 
 Install is config-driven and non-interactive. By default it auto-detects your
 harness (e.g. ~/.claude → claude_code) and installs every plugin. Override with:
@@ -223,6 +225,16 @@ def _cmd_outpost(args: argparse.Namespace) -> int:
         args.outpost_parser.print_help(file=sys.stderr)
         return 2
     return handler()
+
+
+def _cmd_core(args: argparse.Namespace) -> int:
+    if args.core_command != "show":
+        args.core_parser.print_help(file=sys.stderr)
+        return 2
+    result = core_show(args.record_id, env=dict(os.environ), lore_bin=resolve_lore_bin())
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    return result.code
 
 
 def _cmd_broker_header(args: argparse.Namespace) -> int:
@@ -468,6 +480,18 @@ def _build_parser() -> argparse.ArgumentParser:
     # Carry the parser so the handler can print help when no verb is given.
     outpost_p.set_defaults(outpost_parser=outpost_p)
 
+    core_p = subparsers.add_parser(
+        "core",
+        help="Read records from trailhead's own core vault (show <kind>/<name>).",
+    )
+    core_sub = core_p.add_subparsers(dest="core_command", metavar="<verb>")
+    core_show_p = core_sub.add_parser(
+        "show",
+        help="Print a core-vault record; exit 0 ok, 1 lore failed, 2 bad id, 3 core vault unavailable.",
+    )
+    core_show_p.add_argument("record_id", metavar="<kind>/<name>", help="The record to read from core.")
+    core_p.set_defaults(core_parser=core_p)
+
     session_p = subparsers.add_parser(
         "session-start",
         help="Print the argv and env to start a confined session for a role (never execs).",
@@ -514,6 +538,7 @@ def main() -> int:
         "update": _cmd_update,
         "shellenv": _cmd_shellenv,
         "outpost": _cmd_outpost,
+        "core": _cmd_core,
         "session-start": _cmd_session_start,
         "broker-header": _cmd_broker_header,
     }

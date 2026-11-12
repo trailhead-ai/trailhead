@@ -185,3 +185,64 @@ def test_preexisting_core_elsewhere_is_left_registered_and_untouched(source, env
     assert Path(vault_ls(env)["core"]["path"]) == other.resolve()
     assert snapshot(other) == before
     assert not core_copy_dir(env).exists()
+
+
+# -- trailhead core show, against real lore ---------------------------------
+
+
+def _show(env, record_id="adr/x"):
+    from trailhead.core_vault import core_show
+
+    return core_show(record_id, env=env, runner=real_lore, lore_bin=LORE_CLI)
+
+
+def _adr(root: Path, body: str) -> None:
+    (root / "adr").mkdir(parents=True, exist_ok=True)
+    (root / "adr" / "x.json").write_text(
+        json.dumps(
+            {
+                "version": "v1",
+                "kind": "adr",
+                "title": "X",
+                "status": "active",
+                "created-at": "2026-06-17T10:00:00Z",
+                "updated-at": "2026-06-17T10:00:00Z",
+            }
+        )
+    )
+    (root / "adr" / "x.md").write_text(body + "\n")
+
+
+def test_core_show_reads_core_never_another_vault(source, env, lore_ready, tmp_path):
+    _adr(source, "CORE-BODY-MARK")
+    other = tmp_path / "mine"
+    _adr(other, "OTHER-BODY-MARK")
+    assert step(source, env).outcome == "registered"
+    lore(env, "vault", "add", "mine", "--scope", "team", "--path", str(other))
+    r = _show(env)
+    assert r.code == 0 and "CORE-BODY-MARK" in r.stdout
+    assert "OTHER-BODY-MARK" not in r.stdout + r.stderr
+
+
+def test_core_show_without_a_core_vault_is_unavailable(env, lore_ready, tmp_path):
+    other = tmp_path / "mine"
+    _adr(other, "OTHER-BODY-MARK")
+    lore(env, "vault", "add", "mine", "--scope", "team", "--path", str(other))
+    r = _show(env)
+    assert r.code == 3 and r.stdout == ""
+    assert "trailhead install" in r.stderr and "OTHER-BODY-MARK" not in r.stderr
+
+
+def test_core_show_with_core_at_another_path_is_unavailable(env, lore_ready, tmp_path):
+    other = tmp_path / "other-core"
+    _adr(other, "OTHER-BODY-MARK")
+    lore(env, "vault", "add", "core", "--scope", "read-only", "--trusted", "--path", str(other))
+    r = _show(env)
+    assert r.code == 3 and r.stdout == ""
+    assert str(other.resolve()) in r.stderr and "OTHER-BODY-MARK" not in r.stderr
+
+
+def test_core_show_of_a_record_absent_from_core_exits_1(source, env, lore_ready):
+    step(source, env)
+    r = _show(env, "adr/nope")
+    assert r.code == 1 and r.stdout == "" and r.stderr
