@@ -3,8 +3,3 @@ name: unattended-execute-binds-the-unbound-default-vault
 runs: 3
 context:
   scaffold_script: fixtures/scaffold.sh
----
-allowed_tools: [Skill, Read, Glob, Grep, Write]
-max_turns: 40
-timeout_seconds: 400
----
