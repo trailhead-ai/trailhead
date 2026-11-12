@@ -2119,8 +2119,9 @@ name.
 `set_aside.py` adds a `set aside` entry for the criterion to the spec's `## Waiting` section and
 takes it off the parent's `**Covers:**` or `**Partially covers:**` line, so the slice's claim
 narrows to what remains. Exit `0` is done; a refusal exits `1` or `2` with a `reason-code:` line on
-stderr, and only that token is copied into the report, never any `reason:` text. Then deal with the
-build task that reported `BLOCKED`, so every child ends terminal and the slice reaches its close:
+stderr; the report translates that token into plain words, never reports it bare, and never copies
+any `reason:` text. Then deal with the build task that reported `BLOCKED`, so every child ends
+terminal and the slice reaches its close:
 
 - If work remains for the narrowed claim, re-scope the task body to what it still has to deliver
   with `lore record update task/<child-name>`, rewriting it as a scope change always is, and add a
@@ -2137,9 +2138,13 @@ Then carry on: the narrowed slice goes on to review and to [Phase
 
 The refusals `set_aside.py` gives, each handled by the run itself:
 
-- `would-empty-slice` — setting the criterion aside would leave the slice covering nothing. Nothing
-  was written. Drop the slice with a note naming the criterion's waiting entry and pointing the
-  operator to `/craft:checks`, and do not close it.
+- `would-empty-slice` — setting the criterion aside would leave the slice covering nothing. When the
+  `reason:` says the spec entry already landed, the entry exists and the slice only needs dropping.
+  Otherwise the writer refused before writing and there is no waiting entry yet: run the same writer
+  call again without `--parent`. The criterion is still a candidate while the slice is open, so
+  slice mode accepts it and lands the entry. If that call is refused, report it in plain words and
+  do not claim a set-aside. Once the entry exists, drop the slice with a note naming the criterion's
+  waiting entry and pointing the operator to `/craft:checks`, and do not close it.
 - `stale-parent` and `parent-write-failed` — the spec entry landed and the parent was not narrowed.
   Run the writer once more; a re-run finds the entry present and finishes the parent. If it fails
   again, leave the slice open and report that the spec entry landed and the parent was not narrowed.
