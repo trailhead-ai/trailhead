@@ -12,4 +12,6 @@ _OPT_IN_FILES = {"test_gateway_e2e_andromeda.py": "TRAILHEAD_GATEWAY_E2E"}
 
 def pytest_ignore_collect(collection_path, config):
     gate = _OPT_IN_FILES.get(collection_path.name)
-    return gate is not None and os.environ.get(gate) != "1"
+    if gate is not None and os.environ.get(gate) != "1":
+        return True
+    return None  # not False: False would stop pytest's own ignore rules (--ignore, norecursedirs) from running
