@@ -5290,6 +5290,7 @@ Five new runner cases and one grader on each of three existing found-work cases,
 | mutation, the stuck-close clause removed from the no-ask-close parenthetical (escalation.md, execute.md); observed by no case (a Phase 6 run alone makes no found-work call) | edited | 1 | pending | |
 | mutation, slice item 2's restored-entry exemption removed; observed by no case (`slice-asks-about-an-entry-a-slice-failed-to-build` ends at the question, before any restore) | edited | 1 | pending | |
 | mutation, the slice-stream statement removed from slice's Outcome report paragraph; observed by no case | edited | 1 | pending | |
+| grader revision: `no-question-is-asked` on both `driver-build-defers-*` cases now fails only a question, an invitation to reply, or a run that ends waiting; a closing report naming ways forward is allowed (the first run found 2 of 3 runs behaving correctly and failing only the old wording) | edited | 3 each | pending | pass at 2 of 3 |
 
 ### Not measured
 
