@@ -2,7 +2,7 @@
 
 ## Under test
 
-The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`), the one-line `create` fix in `agents/updater.md`, and the `stop_at_ready` / outcome-file behaviour of `agents/monitor.md` that the skill dispatches. The claim: `--unattended` with no record argument ends `outcome: refused task/<unresolved> parked=0 — <why>` and writes, holds, pushes and dispatches nothing.
+The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended task/<slice>`). The updater and monitor agents are not under test: this run ends before the skill dispatches any subagent, which the `no-agent-dispatched` grader pins, so no change to either agent can move its result. The claim: `--unattended` with no record argument ends `outcome: refused task/<unresolved> parked=0 — <why>` and writes, holds, pushes and dispatches nothing.
 
 ## Fixture
 
