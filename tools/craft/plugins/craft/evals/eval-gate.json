@@ -249,6 +249,24 @@
         "skills/slice/SKILL.md"
       ]
     },
+    "slice-carries-out-a-free-text-answer-to-its-question": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-asks-again-on-a-free-text-answer-that-cannot-be-undone": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-stops-on-a-free-text-answer-that-changes-the-spec": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
     "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
       "measures": [
         "skills/plan/SKILL.md",
