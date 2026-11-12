@@ -43,7 +43,11 @@ class TestCompose:
         assert os.access(script, os.X_OK)
 
     def test_no_other_tool_composes_the_gateway_hook(self, tmp_path):
-        others = [d.name for d in (REPO_ROOT / "tools").iterdir() if (d / "capabilities.toml").exists() and d.name != "outpost"]
+        others = [
+            d.name
+            for d in (REPO_ROOT / "tools").iterdir()
+            if (d / "capabilities.toml").exists() and d.name != "outpost"
+        ]
         assert others
         for tool in others:
             dest = tmp_path / "plugins" / tool
@@ -86,7 +90,11 @@ class TestScript:
             input="{}",
             capture_output=True,
             text=True,
-            env={"PATH": f"{tmp_path / 'onpath'}:/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "empty"), "HOME": str(tmp_path)},
+            env={
+                "PATH": f"{tmp_path / 'onpath'}:/usr/bin:/bin",
+                "TRAILHEAD_STATE_DIR": str(tmp_path / "empty"),
+                "HOME": str(tmp_path),
+            },
         )
         assert record.read_text().split() == ["gateway", "register", "--hook"]
         assert proc.returncode == 0

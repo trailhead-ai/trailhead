@@ -5,6 +5,7 @@ stub Outpost port (the production port is a constant the caller cannot set).
 Refuses any subprocess, so the step can only find the harness through /proc.
 """
 
+import os
 import subprocess
 import sys
 
@@ -15,9 +16,7 @@ def _no_subprocess(*args, **kwargs):
 
 subprocess.Popen = _no_subprocess
 
-import os
-
-import trailhead.harness
+import trailhead.harness  # noqa: E402
 
 if os.environ.get("REGISTER_RUNNER_NO_HARNESS"):
     trailhead.harness._HARNESSES.clear()

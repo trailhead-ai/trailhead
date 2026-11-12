@@ -123,7 +123,12 @@ class TestIgnoresTheCaller:
             proc, harness = run(
                 stub.port,
                 (*HOOK, "--pid", "1", "--workspace", "evil/ws", "--session-key", "ws-1-1"),
-                extra_env={"PID": "1", "WORKSPACE": "evil/ws", "SESSION_KEY": "ws-1-1", "OUTPOST_SESSION_KEY": "ws-1-1"},
+                extra_env={
+                    "PID": "1",
+                    "WORKSPACE": "evil/ws",
+                    "SESSION_KEY": "ws-1-1",
+                    "OUTPOST_SESSION_KEY": "ws-1-1",
+                },
             )
         assert proc.returncode == 0, proc.stderr
         (seen,) = stub.requests
@@ -239,7 +244,11 @@ class TestAuthorityProblems:
     @pytest.mark.parametrize(
         ("setup", "reason"),
         [
-            pytest.param(lambda d: (d / "registration" / "credential").mkdir(parents=True), "authority_unreadable", id="directory"),
+            pytest.param(
+                lambda d: (d / "registration" / "credential").mkdir(parents=True),
+                "authority_unreadable",
+                id="directory",
+            ),
             pytest.param(lambda d: write_authority(d, "bad\x07authority"), "authority_unreadable", id="control-char"),
             pytest.param(lambda d: write_authority(d, ""), "authority_missing", id="empty"),
         ],

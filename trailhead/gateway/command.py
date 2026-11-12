@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from trailhead.gateway import outpost_http
 from trailhead.harness import session_key

@@ -50,7 +50,16 @@ class TestShimBuild:
 class TestInstallPipeline:
     def _cfg(self, plugin_names):
         return type(
-            "Cfg", (), {"harnesses": [ResolvedHarness(name="claude_code", plugins=[ResolvedPlugin(name=n, subagents={}, skills={}) for n in plugin_names])]}
+            "Cfg",
+            (),
+            {
+                "harnesses": [
+                    ResolvedHarness(
+                        name="claude_code",
+                        plugins=[ResolvedPlugin(name=n, subagents={}, skills={}) for n in plugin_names],
+                    )
+                ]
+            },
         )()
 
     def test_outpost_enabled_reads_the_resolved_plugin_selection(self):

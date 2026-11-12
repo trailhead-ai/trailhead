@@ -99,7 +99,12 @@ class TestRunList:
         with StubOutpost(runs=RUNS) as stub:
             r = _run(
                 launcher, tmp_path, state, stub.port,
-                extra_env={"HTTP_PROXY": "http://127.0.0.1:9", "http_proxy": "http://127.0.0.1:9", "NO_PROXY": "", "no_proxy": ""},
+                extra_env={
+                    "HTTP_PROXY": "http://127.0.0.1:9",
+                    "http_proxy": "http://127.0.0.1:9",
+                    "NO_PROXY": "",
+                    "no_proxy": "",
+                },
             )
         assert r.proc.returncode == 0, r.proc.stderr
 
@@ -143,7 +148,9 @@ class TestFailurePaths:
 
     def test_missing_credential_file_points_at_the_register_log(self, launcher, tmp_path, state):
         with StubOutpost(runs=RUNS) as stub:
-            r = _run(launcher, tmp_path, state, stub.port, seed=None, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")})
+            r = _run(
+                launcher, tmp_path, state, stub.port, seed=None, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
+            )
         expected_log = tmp_path / "xdg" / "trailhead" / "gateway" / "register.log"
         self._fails_with(r, f"outpost-gateway: this session has no gateway credential; see {expected_log} for why")
 
@@ -183,7 +190,9 @@ class TestFailurePaths:
             (write_credential(state, key)).write_text("{not json")
 
         with StubOutpost() as stub:
-            r = _run(launcher, tmp_path, state, stub.port, seed=seed, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")})
+            r = _run(
+                launcher, tmp_path, state, stub.port, seed=seed, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
+            )
             assert stub.requests == []
         assert r.proc.returncode != 0
         assert "this session has no gateway credential" in r.proc.stderr
@@ -269,7 +278,13 @@ class TestIgnoresCallerInput:
 
         env = {
             name: decoy_key
-            for name in ("OUTPOST_SESSION_KEY", "OUTPOST_SESSION", "TRAILHEAD_SESSION_KEY", "SESSION_KEY", "CAMP_SESSION_KEY")
+            for name in (
+                "OUTPOST_SESSION_KEY",
+                "OUTPOST_SESSION",
+                "TRAILHEAD_SESSION_KEY",
+                "SESSION_KEY",
+                "CAMP_SESSION_KEY",
+            )
         }
         with StubOutpost(runs=RUNS) as stub:
             r = _run(launcher, tmp_path, state, stub.port, extra_env=env)
@@ -277,7 +292,8 @@ class TestIgnoresCallerInput:
         assert r.proc.returncode == 0, r.proc.stderr
         import base64
 
-        assert token_req.headers["authorization"] == "Basic " + base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+        basic = base64.b64encode(f"{CLIENT_ID}:{CLIENT_SECRET}".encode()).decode()
+        assert token_req.headers["authorization"] == "Basic " + basic
 
     @pytest.mark.parametrize("flag", ["--session-key", "--session", "--key"])
     def test_a_session_key_argument_is_refused_and_nothing_is_read_or_sent(self, flag, launcher, tmp_path, state):
