@@ -151,6 +151,48 @@
         "skills/pull_request/SKILL.md",
         "agents/updater.md"
       ]
+    },
+    "unattended-pr-step-refuses-an-outcome-less-block": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-resumes-an-interrupted-run-on-request": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-ends-needs-a-decision-on-a-parked-correction": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-resumes-after-an-answered-correction": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-resumes-with-a-repark-pointer": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
+    "unattended-pr-step-takes-over-an-interrupted-block": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
     }
   }
 }
