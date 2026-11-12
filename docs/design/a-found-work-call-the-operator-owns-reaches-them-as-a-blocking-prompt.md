@@ -29,20 +29,21 @@ spec/streaming-export#F4 fits no slice of this spec: it changes the billing serv
 spec does not touch. It is urgent because it is a security finding (services/billing/export.py:88).
 At stake: dropping it takes it out of this spec's loop, so the spec can finish with it unbuilt.
 
-  ( ) Move it to task/billing-export-hardening (Recommended)
+  Move it to the existing task/billing-export-hardening (Recommended)
         — dropped here with a reason that names that task; the work stays tracked there
-  ( ) Keep it open and stop the loop here
-        — the spec cannot be reported complete until someone builds or drops it
-  ( ) Drop it with no task to hold it
+  Keep it open and stop the loop here
+        — the spec cannot be reported complete until someone builds or drops it, and the next
+          slice pass asks this same question again
+  Drop it with no task to hold it
         — the security finding is no longer tracked anywhere
-  ( ) Other — tell me in your own words
+  Other — tell me in your own words
 ```
 
 When the operator picks the recommended fix, the session carries it out without asking again: it
 logs the decision, writes the drop, and prints one line:
 
 ```
-Dropped spec/streaming-export#F4: billing export rate limit, because it moved to task/billing-export-hardening.
+Dropped spec/streaming-export#F4: billing export accepts unsigned requests, because it moved to task/billing-export-hardening.
 ```
 
 Then the session carries on from where it stopped, here by choosing the next slice.
@@ -84,14 +85,15 @@ free text:
 ```
 spec/streaming-export#F4 fits no slice of this spec ... (as above)
 
-Two other fixes are not listed below. Answer in your own words to choose one:
+Two other fixes are not listed below:
   - Restore it as a new, narrower entry scoped to this spec's export code — costs a slice later.
   - Turn it into a task that needs a brainstorm — costs a brainstorm before anyone builds it.
+To choose one of these, pick Other and name it, or describe a fix of your own.
 
-  ( ) Move it to task/billing-export-hardening (Recommended) — ...
-  ( ) Keep it open and stop the loop here — ...
-  ( ) Drop it with no task to hold it — ...
-  ( ) Other — tell me in your own words
+  Move it to the existing task/billing-export-hardening (Recommended) — ...
+  Keep it open and stop the loop here — ...
+  Drop it with no task to hold it — ...
+  Other — name one of the fixes above, or tell me in your own words
 ```
 
 ## State — the harness offers no choice prompt
@@ -105,10 +107,10 @@ spec/streaming-export#F4 fits no slice of this spec: it changes the billing serv
 spec does not touch. It is urgent because it is a security finding (services/billing/export.py:88).
 At stake: dropping it takes it out of this spec's loop, so the spec can finish with it unbuilt.
 
-1. Move it to task/billing-export-hardening (recommended) — dropped here with a reason that names
+1. Move it to the existing task/billing-export-hardening (recommended) — dropped here with a reason that names
    that task; the work stays tracked there.
 2. Keep it open and stop the loop here — the spec cannot be reported complete until someone builds
-   or drops it.
+   or drops it, and the next slice pass asks this same question again.
 3. Drop it with no task to hold it — the security finding is no longer tracked anywhere.
 
 Reply with a number, or tell me in your own words what to do.
@@ -116,3 +118,9 @@ Reply with a number, or tell me in your own words what to do.
 
 Nothing is written before the reply arrives. The reply is handled exactly as in the three states
 above.
+
+When no one is there to answer — a run under the driver or an unattended run — no question is
+shown at all. The session takes no action a question would have guarded: an urgent entry is not
+dropped, and a finding whose fix would change the spec, cannot be undone, or lies outside the
+session's allowed actions is deferred to the spec's follow-ups section as an open entry whose reason
+names the trigger. The report lists each one first, among what needs the operator.
