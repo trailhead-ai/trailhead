@@ -2,7 +2,7 @@
 
 ## Under test
 
-When `/craft:slice --unattended` reaches its entries path and an open entry is one an earlier entries-only slice closed without building (step 7 rule 1), nobody is there to answer, so the early stop stays: the run records the stop on the spec and ends `needs-a-decision`. What changes is what it tells the reader. Its report and its outcome line name the two ways out, dropping the entry with a reason that names where the work went and restoring it as a new narrower entry, in words, and neither prints a command that re-runs slice, which would reach the same rule again. The prose under test is `skills/slice/SKILL.md` (step 6's early stop, step 7 rule 1, the Outcome early-stop handoff) as it stands when the baseline runs and after the edit.
+When `/craft:slice --unattended` reaches its entries path and an open entry is one an earlier entries-only slice closed without building (step 7 rule 1), nobody is there to answer, so the early stop stays: the run records the stop on the spec and ends `needs-a-decision`. What changes is what it tells the reader. Its report and its outcome line name the two ways out, dropping the entry with a reason that names where the work went and restoring it as a new entry, in words, and neither prints a command that re-runs slice, which would reach the same rule again. The prose under test is `skills/slice/SKILL.md` (step 6's early stop, step 7 rule 1, the Outcome early-stop handoff) as it stands when the baseline runs and after the edit.
 
 ## Fixture
 

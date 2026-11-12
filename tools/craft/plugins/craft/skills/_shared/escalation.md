@@ -8,14 +8,15 @@ states its own stop and points here for the rest; none restates the shape.
 
 ## Triggers
 
-A session raises the blocking prompt when it reaches a trigger below, and at no other time.
+A session raises the blocking prompt when it reaches a trigger below, or a stop that a ritual's own
+procedure names as the operator's call, and at no other time.
 
 ### Deciding a found-work call: decide it, or ask
 
 A call about found work is a decision the session makes while it works: what to do with a finding, a
 follow-up entry or a task the work turned up. **A routine decision is made and logged without
-asking.** A decision is routine when no trigger below covers it. **The session asks, through the
-blocking prompt, before any of these:**
+asking.** A decision is routine when no trigger below covers it and no ritual procedure names it as
+the operator's call. **The session asks, through the blocking prompt, before any of these:**
 
 - **A decision that would change the spec's objectives, non-goals or acceptance criteria.** The fix,
   taken as the only way to resolve the finding, contradicts or rewrites one of them.

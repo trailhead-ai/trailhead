@@ -786,10 +786,15 @@ decides anything. Then, in this order:
        reported complete until someone drops or restores the entry.
    - **On the answer,** carry out the fix chosen: write each drop and restore through
      `found_work.py entry --session slice`, run exactly as item 2 below runs a drop, with `parent`
-     the slice that did not build the entry, and with `operator_confirmed` never set here. A failure
-     reports its `reason-code:` token and the `retry:` command it prints. A drop or a restore then
-     lets the pass go on to item 2 over the entries still open, and when none is open, to item 3's
-     rule for an empty remainder.
+     the slice that did not build the entry. Set `"operator_confirmed": true` only when the entry is
+     marked as a security finding and only from the operator's reply in a later turn, as the
+     urgent-entry paragraph below does; the restore's `nowhere:` drop is a drop for this purpose. A
+     restore is two writes, the drop and then the `restore`. A failed drop or a failed restore ends
+     the pass at this entry: report the script's `reason-code:` token and the `retry:` command it
+     prints, leave the entry as the failed write left it, and go on to neither item 2, item 3 nor
+     step 4's completion gate. The `retry:` command converges, so running it again appends nothing
+     twice. A drop or a restore that succeeded lets the pass go on to item 2 over the entries still
+     open, and when none is open, to item 3's rule for an empty remainder.
    - **Under `--unattended`, or when `/craft:drive` is running this pass,** nobody is there to
      answer: take step 6's recorded early stop with its fixed reason
      `completion is not certified (complete-eligible: no)`, naming each such entry by id and the
