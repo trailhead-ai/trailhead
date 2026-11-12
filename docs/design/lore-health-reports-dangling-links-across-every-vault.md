@@ -34,8 +34,9 @@ vault.
 Session records are read, because a reference may point at one, but a session is never reported.
 
 A target can be confirmed missing only if every configured vault was read. When any vault cannot
-be read, or holds records that were not read because they lie outside the vault root, the check is
-skipped for every vault, with the reason naming that vault, rather than reporting references into
+be read (its directory is missing, or it or one of its kind directories cannot be listed), or holds
+records that were not read because they lie outside the vault root, the check is skipped for every
+vault, with the reason naming that vault, rather than reporting references into
 it as dangling.
 
 A target must look like a record id: an optional kind, then a name in lore's name characters and
@@ -57,8 +58,9 @@ line and can never carry a terminal escape.
    them.
 
 Records checked counts the records a check judged: every readable record in the vault except
-sessions. The index line counts every record read, sessions included, because the index holds
-sessions too, so its number is larger than the summary's.
+sessions. The index line counts every record the index would hold, sessions included, so its number is
+larger than the summary's. After a match or a mismatch it adds that the count is a snapshot and can
+lag a running writer.
 
 ## State — No findings
 
@@ -129,8 +131,11 @@ claiming a match:
 Could not confirm the count against the index: no index found. 6,402 records read.
 ```
 
-A record whose sidecar or body cannot be read is counted as read but cannot be judged. Each vault
-with any such record gets one line after the summary:
+A record whose sidecar or body cannot be read cannot be judged, and is not counted as read, because
+the index skips it too. The one exception is a record over the size cap: the index holds it, so it
+counts toward the index comparison, though it is still not judged. A record the index cannot store,
+such as one with no `created-at` or `updated-at`, is judged but not counted toward the comparison.
+Each vault with any unreadable record gets one line after the summary:
 
 ```
 trailhead: 2 records could not be read and were not checked.
@@ -153,7 +158,7 @@ names a vault that is not configured.
 lore: cannot run the health report: no vault named 'scratch' is configured (configured: default, trailhead, levr)
 ```
 
-A vault whose directory cannot be read once the run has started does not stop the run, but no
+A vault whose directory is missing or cannot be read once the run has started does not stop the run, but no
 target can then be confirmed missing, so the dangling-link check is skipped on every row, with the
 reason naming that vault. No finding and no "no findings" line is printed, and the report exits
 successfully:

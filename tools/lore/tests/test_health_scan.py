@@ -312,13 +312,6 @@ def test_unreadable_index_is_a_value_not_an_exception(scan, inst):
     assert res[str(inst.roots["default"])].status == scan.INDEX_UNREADABLE
 
 
-def test_count_flags_itself_as_an_immutable_snapshot(scan, inst):
-    _put(inst.roots["default"], "lesson", "a", _sidecar("A"))
-    inst.index()
-    res = scan.count_index_rows([str(inst.roots["default"])], env=inst.env)
-    assert res[str(inst.roots["default"])].immutable_snapshot is True
-
-
 def test_index_path_with_uri_special_characters_still_counts(scan, tmp_path, monkeypatch):
     weird = tmp_path / "we?ird#state%20"
     weird.mkdir()

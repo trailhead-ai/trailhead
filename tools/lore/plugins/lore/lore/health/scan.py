@@ -27,6 +27,7 @@ REASON_SIDECAR_UNREADABLE = "sidecar-unreadable"
 REASON_BODY_UNREADABLE = "body-unreadable"
 REASON_OVERSIZE = "oversize"
 REASON_VAULT_UNREADABLE = "vault-unreadable"
+REASON_VAULT_MISSING = "vault-missing"
 
 INDEX_OK = "ok"
 INDEX_ABSENT = "absent"
@@ -77,23 +78,66 @@ def _read_capped(path: Path) -> str:
     return data.decode("utf-8")
 
 
+class _IndexerProbe:
+    """Decides whether the indexer would hold a record, by running its own projection.
+
+    The projection runs against a throwaway in-memory database with the real
+    schema, so every condition the indexer skips a record on (a missing
+    ``created-at`` or ``updated-at``, a reserved label key, an unbindable value)
+    is applied exactly as it applies there, without a second list to keep in step.
+    """
+
+    def __init__(self):
+        self._conn = sqlite3.connect(":memory:")
+        self._conn.execute("PRAGMA foreign_keys=ON")
+        for statement in index_mod._DDL_STATEMENTS:
+            self._conn.execute(statement)
+
+    def holds(self, kind: str, name: str, sidecar: dict, body: str) -> bool:
+        record_id = index_mod._record_id("probe", kind, name)
+        try:
+            index_mod._project_record(self._conn, "probe", kind, name, sidecar, body, 0, 0.0, 0)
+        except Exception:  # noqa: BLE001 - mirrors the indexer's per-record skip guard
+            index_mod._delete_projection(self._conn, record_id)
+            return False
+        index_mod._delete_projection(self._conn, record_id)
+        return True
+
+    def close(self) -> None:
+        self._conn.close()
+
+
 def iter_vault_records(result: VaultScan):
     """Yield each readable record of ``result.root`` one at a time.
 
     Unreadable records, escaping skips and an unreadable vault are accumulated
     on *result*; the generator itself never raises for a bad record or vault.
-    A record counts exactly when the indexer would count it: a flat
-    ``<kind>/<name>`` with both ``.md`` and ``.json`` present.
+    A record is considered exactly when the indexer would consider it: a flat
+    ``<kind>/<name>`` with both ``.md`` and ``.json`` present. ``result.indexed``
+    counts those the indexer would hold, which excludes an unreadable record
+    (the indexer skips it) but includes an oversize one (it reads without a cap).
+    A vault directory that is missing, or a kind directory that cannot be
+    listed, marks the vault unreadable.
     """
 
     def skipped():
         result.skipped_escaping += 1
 
+    def unlistable():
+        result.unreadable_reason = REASON_VAULT_UNREADABLE
+
+    probe = _IndexerProbe()
     try:
-        for record_id, kind, body_path in rename.iter_records(Path(result.root), skipped):
-            _, name = record_id.split("/", 1)
-            if "/" in name:
-                continue
+        root = Path(result.root)
+        if not root.is_dir():
+            result.unreadable_reason = (
+                REASON_VAULT_UNREADABLE if root.exists() else REASON_VAULT_MISSING
+            )
+            return
+        for record_id, kind, body_path in rename.iter_records(
+            root, skipped, flat_only=True, on_unlistable=unlistable
+        ):
+            name = record_id.split("/", 1)[1]
             sidecar_path = body_path.with_suffix(".json")
             try:
                 if not sidecar_path.exists():
@@ -103,6 +147,8 @@ def iter_vault_records(result: VaultScan):
                 reason = (
                     REASON_OVERSIZE if str(exc) == REASON_OVERSIZE else REASON_SIDECAR_MALFORMED
                 )
+                if reason == REASON_OVERSIZE:
+                    result.indexed += 1
                 result.unreadable.append(UnreadableRecord(result.vault, kind, name, reason))
                 continue
             except OSError:
@@ -123,6 +169,8 @@ def iter_vault_records(result: VaultScan):
                 body = _read_capped(body_path)
             except ValueError as exc:
                 reason = REASON_OVERSIZE if str(exc) == REASON_OVERSIZE else REASON_BODY_UNREADABLE
+                if reason == REASON_OVERSIZE:
+                    result.indexed += 1
                 result.unreadable.append(UnreadableRecord(result.vault, kind, name, reason))
                 continue
             except OSError:
@@ -130,6 +178,8 @@ def iter_vault_records(result: VaultScan):
                     UnreadableRecord(result.vault, kind, name, REASON_BODY_UNREADABLE)
                 )
                 continue
+            if probe.holds(kind, name, sidecar, body):
+                result.indexed += 1
             updated = sidecar.get("updated-at")
             yield ScannedRecord(
                 result.vault,
@@ -141,6 +191,8 @@ def iter_vault_records(result: VaultScan):
             )
     except OSError:
         result.unreadable_reason = REASON_VAULT_UNREADABLE
+    finally:
+        probe.close()
 
 
 def scan_vault(name: str, root) -> VaultScan:
@@ -159,8 +211,7 @@ def count_index_rows(roots, env: dict[str, str] | None = None) -> dict[str, Inde
     Opens the index with SQLite's ``immutable=1``, which creates and modifies
     nothing in any state (``mode=ro`` would still create ``-shm``/``-wal`` files
     and fail in a read-only directory). The price is that rows a live writer has
-    not yet checkpointed are invisible, hence ``immutable_snapshot`` on every
-    result. A missing index and an unreadable one come back as values.
+    not yet checkpointed are invisible, so a count can lag the index. A missing index and an unreadable one come back as values.
     """
     roots = [str(r) for r in roots]
     path = index_mod._resolve_index_path(env=env)

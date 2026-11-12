@@ -358,7 +358,7 @@ def _confined_kind_dirs(root: Path, on_skip=None):
         yield kind_dir, root_real
 
 
-def iter_records(root: Path, on_skip=None):
+def iter_records(root: Path, on_skip=None, *, flat_only: bool = False, on_unlistable=None):
     """Yield ``(record_id, kind, body_path)`` for every confined record under *root*.
 
     Discovery walks only the kind directories :func:`_confined_kind_dirs`
@@ -373,9 +373,25 @@ def iter_records(root: Path, on_skip=None):
     A caller that must account for the skips passes *on_skip*, a zero-argument
     callable invoked once per skipped record or kind directory. It is handed no
     path, so the confinement contract above holds for it too.
+
+    With *flat_only*, only ``<kind>/<name>.md`` directly inside a kind directory
+    is considered; a nested record is neither yielded nor counted as skipped.
+
+    ``Path.rglob`` swallows a permission error, so a kind directory that cannot
+    be listed would look empty. A caller passing *on_unlistable*, a
+    zero-argument callable, has each kind directory probed first: one that
+    cannot be listed is reported through it and not descended.
     """
     for kind_dir, root_real in _confined_kind_dirs(root, on_skip):
-        for body_path in sorted(kind_dir.rglob("*.md")):
+        if on_unlistable is not None:
+            try:
+                with os.scandir(kind_dir):
+                    pass
+            except OSError:
+                on_unlistable()
+                continue
+        pattern = "*.md" if flat_only else "**/*.md"
+        for body_path in sorted(kind_dir.glob(pattern)):
             if not store._realpath_is_descendant(
                 body_path, root_real
             ) or not store._realpath_is_descendant(body_path.with_suffix(".json"), root_real):

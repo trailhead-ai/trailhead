@@ -34,6 +34,9 @@ class VaultScan:
     ``unreadable_reason`` is set when the vault directory itself could not be
     read. ``skipped_escaping`` counts records (or kind directories) whose files
     resolve outside the vault root; their paths are never recorded.
+    ``indexed`` counts the records the search index would hold: every readable
+    record whose projection the indexer accepts, plus every oversize record
+    (the indexer reads without a cap).
     """
 
     vault: str
@@ -42,6 +45,7 @@ class VaultScan:
     unreadable: list[UnreadableRecord] = field(default_factory=list)
     unreadable_reason: str | None = None
     skipped_escaping: int = 0
+    indexed: int = 0
 
     @property
     def fully_read(self) -> bool:
@@ -54,12 +58,10 @@ class IndexCount:
     """The search index's row count for one vault root, or why there is none.
 
     ``status`` is ``"ok"``, ``"absent"`` or ``"unreadable"``; ``count`` is
-    ``None`` unless ``"ok"``. ``immutable_snapshot`` is always ``True``: the
-    count is read without touching the index, so rows a live writer has not yet
-    checkpointed are not seen and the count can lag the index.
+    ``None`` unless ``"ok"``. The count is read without touching the index, so
+    rows a live writer has not yet checkpointed are not seen.
     """
 
     root: str
     status: str
     count: int | None
-    immutable_snapshot: bool = True

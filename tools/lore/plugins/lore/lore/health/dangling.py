@@ -203,10 +203,13 @@ def check_dangling(
                 continue
             judged += 1
             seen: set[tuple[str, str]] = set()
+            malformed_fields: set[str] = set()
             for field_label, raw, default_kind in _references(record):
                 parsed = _resolve(raw, default_kind)
                 if parsed is None:
-                    result.findings.append(_finding(record, field_label, None))
+                    if field_label not in malformed_fields:
+                        malformed_fields.add(field_label)
+                        result.findings.append(_finding(record, field_label, None))
                     continue
                 kind, name = parsed
                 target = f"{kind}/{name}" if kind else name

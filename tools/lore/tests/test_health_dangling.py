@@ -179,6 +179,20 @@ def test_malformed_sidecar_reference_is_flagged_without_echoing():
     assert "Bad" not in json.dumps(dataclasses.asdict(f))
 
 
+def test_a_malformed_reference_repeated_in_one_field_is_one_finding():
+    body = "[[Bad Target]] and again [[Bad Target]] and [[Other Bad]]"
+    res = run([vault("a", rec("a", "lesson", "src", {}, body))])
+    assert [(f.name, f.field, f.malformed) for f in res.findings] == [("src", "wikilink", True)]
+
+
+def test_malformed_references_in_different_fields_or_records_stay_separate():
+    one = rec("a", "task", "one", {"depends-on": ["Bad One"], "parent": "Bad Two"}, "[[Bad Three]]")
+    two = rec("a", "task", "two", {}, "[[Bad Three]]")
+    res = run([vault("a", one, two)])
+    assert sorted((f.name, f.field) for f in res.findings) == [
+        ("one", "depends-on"), ("one", "parent"), ("one", "wikilink"), ("two", "wikilink")]
+
+
 # --- skip -------------------------------------------------------------------
 
 

@@ -62,7 +62,6 @@ class IndexLine:
     indexed: int | None = None
     mismatches: list[tuple[str, int, int]] = field(default_factory=list)
     reason: str | None = None
-    immutable_snapshot: bool = False
 
 
 @dataclass
@@ -92,6 +91,8 @@ def _plural(n: int, singular: str, plural: str) -> str:
 
 
 def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...]) -> str:
+    if scan.unreadable_reason == scan_mod.REASON_VAULT_MISSING:
+        return "its directory does not exist"
     if scan.unreadable_reason is not None:
         return "its directory could not be read"
     if scan.skipped_escaping:
@@ -117,15 +118,15 @@ def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
     if bad is not None:
         reason = "no index found" if bad.status == scan_mod.INDEX_ABSENT else "the index could not be read"
         return IndexLine(INDEX_UNCONFIRMED, read, reason=reason)
-    snapshot = any(c.immutable_snapshot for c in counts.values())
+    held = sum(s.indexed for s in selected_scans)
     mismatches = [
-        (s.vault, len(s.records), counts[s.root].count)
+        (s.vault, s.indexed, counts[s.root].count)
         for s in selected_scans
-        if counts[s.root].count != len(s.records)
+        if counts[s.root].count != s.indexed
     ]
     indexed = sum(c.count for c in counts.values())
     status = INDEX_MISMATCH if mismatches else INDEX_MATCH
-    return IndexLine(status, read, indexed, mismatches, immutable_snapshot=snapshot)
+    return IndexLine(status, held, indexed, mismatches)
 
 
 def build_report(only: str | None = None, *, env=None) -> HealthReport:
@@ -208,8 +209,7 @@ def _index_lines(ix: IndexLine) -> list[str]:
     else:
         return [f"Could not confirm the count against the index: {_safe(ix.reason)}. "
                 f"{_plural(ix.read, 'record', 'records')} read."]
-    if ix.immutable_snapshot:
-        out.append(caveat)
+    out.append(caveat)
     return out
 
 

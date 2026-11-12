@@ -9,6 +9,7 @@ import importlib
 import json
 import os
 import re
+import shutil
 
 import pytest
 
@@ -211,6 +212,7 @@ def test_vault_flag_narrows_rows_but_targets_resolve_everywhere(world):
 
 def test_unreadable_vault_skips_every_row_and_names_it(world):
     _put(world.roots["default"], "task", "d", related={"lesson": ["nowhere"]})
+    world.index()
     os.chmod(world.roots["levr"], 0)
     try:
         r = world.run()
@@ -228,6 +230,8 @@ def test_unreadable_vault_skips_every_row_and_names_it(world):
     assert finding_lines(r.stdout) == []
     assert "no findings" not in r.stdout
     assert "dangling-links — skipped." in r.stdout
+    assert ("Could not confirm the count against the index: vault levr was not fully read. "
+            "1 record read.") in r.stdout
 
 
 def test_records_outside_the_vault_root_skip_the_check_and_are_counted_nameless(world, tmp_path):
@@ -237,8 +241,11 @@ def test_records_outside_the_vault_root_skip_the_check_and_are_counted_nameless(
     (world.roots["trailhead"] / "lesson").mkdir()
     (world.roots["trailhead"] / "lesson" / "esc.md").symlink_to(outside / "secret-name.md")
     (world.roots["trailhead"] / "lesson" / "esc.json").write_text("{}")
+    world.index()
     r = world.run()
     assert r.returncode == 0, r.stderr
+    assert ("Could not confirm the count against the index: vault trailhead was not fully read. "
+            "0 records read.") in r.stdout
     assert "trailhead: 1 record lies outside the vault root and was not read." in r.stdout
     assert "secret-name" not in r.stdout and "elsewhere" not in r.stdout
     assert all(v[2].startswith("yes:") for v in rows(r.stdout).values())
@@ -415,3 +422,102 @@ def test_stderr_refusal_neutralizes_the_vault_echo_and_configured_list(evil):
     assert r.stderr.startswith("lore: cannot run the health report: ")
     assert "no\\nsuch\\x1b[1m" in r.stderr
     assert "ev\\nil\\x1b[31mv" in r.stderr
+
+
+# --- the index comparison counts what the indexer holds ------------------------
+
+CAVEAT = "The index count is a snapshot and can lag a running writer."
+
+
+def test_oversize_record_the_index_holds_still_matches(world):
+    _put(world.roots["default"], "lesson", "a")
+    _put(world.roots["default"], "lesson", "big", body="x" * (1024 * 1024 + 1))
+    world.index()
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "Records read match the index (sessions included): 2 read, 2 indexed." in r.stdout
+    assert "default: 1 record could not be read and was not checked." in r.stdout
+    assert rows(r.stdout)["default"][0] == "1"
+
+
+@pytest.mark.parametrize("missing", ["updated-at", "created-at"])
+def test_record_the_indexer_cannot_insert_is_judged_but_not_counted_as_read(world, missing):
+    _put(world.roots["default"], "lesson", "a")
+    _put(world.roots["default"], "lesson", "b", related={"decision": ["gone"]})
+    side = world.roots["default"] / "lesson" / "b.json"
+    data = json.loads(side.read_text())
+    del data[missing]
+    side.write_text(json.dumps(data))
+    world.index()
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "Records read match the index (sessions included): 1 read, 1 indexed." in r.stdout
+    assert rows(r.stdout)["default"] == ("2", "1", "no")
+    assert len(finding_lines(r.stdout)) == 1
+
+
+def test_snapshot_caveat_follows_a_counted_line_and_not_an_unconfirmed_one(world):
+    _put(world.roots["default"], "lesson", "a")
+    no_index = world.run()
+    assert "no index found" in no_index.stdout
+    assert CAVEAT not in no_index.stdout
+    world.index()
+    matched = world.run()
+    assert "match the index" in matched.stdout
+    assert CAVEAT in matched.stdout
+    _put(world.roots["default"], "lesson", "b")
+    differing = world.run()
+    assert "differ from the index" in differing.stdout
+    assert CAVEAT in differing.stdout
+
+
+# --- a vault the scan cannot fully list skips the check -------------------------
+
+
+def test_unreadable_kind_directory_in_another_vault_skips_the_check(world):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["target"]})
+    _put(world.roots["levr"], "lesson", "target")
+    kind_dir = world.roots["levr"] / "lesson"
+    os.chmod(kind_dir, 0)
+    try:
+        r = world.run()
+    finally:
+        os.chmod(kind_dir, 0o755)
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout)
+    assert sorted(got) == ["default", "levr", "trailhead"]
+    for vault, (records, findings, skipped) in got.items():
+        assert (records, findings) == ("—", "—"), vault
+        assert skipped.startswith("yes:"), vault
+    assert got["default"][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
+    assert finding_lines(r.stdout) == []
+    assert "no findings" not in r.stdout
+
+
+def test_missing_vault_directory_skips_the_check_and_says_so(world):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["target"]})
+    shutil.rmtree(world.roots["levr"])
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout)
+    assert sorted(got) == ["default", "levr", "trailhead"]
+    assert all(v[2].startswith("yes:") for v in got.values())
+    assert got["levr"][2] == "yes: its directory does not exist"
+    assert got["default"][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
+    assert finding_lines(r.stdout) == []
+
+
+def test_escaping_record_under_a_nested_name_does_not_skip_the_check(world, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "n.md").write_text("x")
+    nested = world.roots["trailhead"] / "lesson" / "sub"
+    nested.mkdir(parents=True)
+    (nested / "esc.md").symlink_to(outside / "n.md")
+    (nested / "esc.json").write_text("{}")
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "outside the vault root" not in r.stdout
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+    assert rows(r.stdout)["trailhead"][2] == "no"
