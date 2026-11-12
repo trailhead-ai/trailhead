@@ -1116,7 +1116,11 @@ def _rebuild_shims(cfg, *, env: dict[str, str]) -> bool:
     stamp: a failure here is reported and fails the run, but never rolls back
     a completed upgrade."""
     try:
-        install.build_cli_shims(install.resolve_cli_tools(cfg.cli_flags), env=env)
+        install.build_cli_shims(
+            install.resolve_cli_tools(cfg.cli_flags),
+            env=env,
+            outpost_enabled=install.outpost_enabled(cfg),
+        )
     except Exception as exc:
         print(
             f"trailhead: could not rebuild the CLI shims ({exc}); the upgrade "

@@ -195,6 +195,7 @@ def run_doctor(
         "shim_dir": str(shim_dir),
         "shim_dir_present": shim_dir.exists(),
         "clis": clis,
+        "outpost_gateway": _which("outpost-gateway"),
         "trailhead": _trailhead_field(_which("trailhead")),
         "python3_version": _python_version(_pyrunner),
         "provenance": provenance,
@@ -256,6 +257,7 @@ def _build_human(data: dict) -> str:
     lines.append("  CLIs on PATH:")
     for name, resolved in data["clis"].items():
         lines.append(f"    {name}: {resolved or 'not on PATH'}")
+    lines.append(f"    outpost-gateway: {data['outpost_gateway'] or 'not on PATH'}")
     lines.append(f"    trailhead: {_build_trailhead_human(data['trailhead'])}")
     lines.append(
         f"  shim dir: {data['shim_dir']} ({'present' if data['shim_dir_present'] else 'absent'})"

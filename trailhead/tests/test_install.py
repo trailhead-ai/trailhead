@@ -116,7 +116,7 @@ class TestDetectionDrivenInstall:
         with _patched(detected=True) as m:
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
-        assert set(cli_tools) == {"camp", "lore", "portage", "ranger"}
+        assert set(cli_tools) == {"camp", "lore", "portage", "ranger", "outpost-gateway"}
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):
         with _patched(detected=True):
