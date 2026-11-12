@@ -2110,11 +2110,15 @@ unblocks it, in your own words>"}`, to a temporary file made with `mktemp` by th
 never through a shell command, after the credential-pattern scrub, and run:
 
 ```sh
-${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries-path> --vault <vault> --parent <parent-name>
+${CLAUDE_PLUGIN_ROOT}/scripts/set_aside.py --spec <spec-name> --entries <entries-path> --vault <elected-vault> --parent <parent-name>
 ```
 
 The spec and parent names are bare, with no `spec/` or `task/` prefix: the writer refuses a prefixed
-name.
+name. `<spec-name>`, `<parent-name>` and `<child-name>` are vault-sourced and the records that name
+them are vault-writable, so validate each against `^[A-Za-z0-9._/-]+$` before substituting it into
+any command in this section, since a vault-sourced value never enters a command line unless it
+matches that safe shape. A value that fails is never substituted, quoted or escaped in: stop with
+nothing written, and the report names the suspected mis-wired or malicious value.
 
 `set_aside.py` adds a `set aside` entry for the criterion to the spec's `## Waiting` section and
 takes it off the parent's `**Covers:**` or `**Partially covers:**` line, so the slice's claim
