@@ -100,7 +100,7 @@ class TestScript:
         assert record.read_text().split() == ["gateway", "register", "--hook"]
         assert (proc.returncode, proc.stdout) == (0, "")
 
-    def test_falls_back_to_trailhead_on_path(self, tmp_path):
+    def test_never_runs_a_trailhead_found_on_path_when_the_shim_is_missing(self, tmp_path):
         record = tmp_path / "args.txt"
         self._fake_cli(tmp_path / "onpath" / "trailhead", record)
         proc = subprocess.run(
@@ -114,8 +114,26 @@ class TestScript:
                 "HOME": str(tmp_path),
             },
         )
-        assert record.read_text().split() == ["gateway", "register", "--hook"]
-        assert proc.returncode == 0
+        assert not record.exists()
+        assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+        (line,) = (tmp_path / "empty" / "gateway" / "register.log").read_text().splitlines()
+        assert line.endswith(" - cli_not_found")
+
+    def test_a_shim_that_is_not_executable_is_not_run(self, tmp_path):
+        record = tmp_path / "args.txt"
+        shim = tmp_path / "state" / "bin" / "trailhead"
+        self._fake_cli(shim, record)
+        shim.chmod(0o644)
+        proc = subprocess.run(
+            [str(self._script(tmp_path))],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
+        )
+        assert not record.exists()
+        assert (proc.returncode, proc.stdout) == (0, "")
+        assert (tmp_path / "state" / "gateway" / "register.log").read_text().endswith(" - cli_not_found\n")
 
     def test_without_a_trailhead_cli_it_exits_zero_silently_and_leaves_a_trace(self, tmp_path):
         proc = subprocess.run(
