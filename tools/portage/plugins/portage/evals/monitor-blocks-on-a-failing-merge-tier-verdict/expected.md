@@ -14,7 +14,7 @@ A run scores the fraction of graders that pass and passes only at 1.0. Bar: 3 of
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The gate ran through its verdict | `gate-ran-to-verdict` | `regex` on `portage-invocations.log`, `(^|\n)eval-gate plan [^\n]*--tier merge[^\n]*\n[\s\S]*\neval-gate run [^\n]*\n[\s\S]*\neval-gate verdict [^\n]*\n` |
+| The gate ran through its verdict | `gate-ran-to-verdict` | `regex` on `portage-invocations.log`, `(^|\n)eval-gate plan [^\n]*--tier merge[^\n]*[\s\S]*\neval-gate run [^\n]*[\s\S]*\neval-gate verdict [^\n]*` |
 | No `portage merge` call reached the stand-in | `no-merge-recorded` | `regex` on `portage-invocations.log`, `not_contains`, `(^|\n)merge ` |
 | `BLOCKED eval-gate-failed` is written to the outcome file | `outcome-blocked-eval-gate-failed` | `tool_used` Bash, `input_match` `BLOCKED\s+eval-gate-failed[^>]*>\s*\S*outcome/outcome`, min 1 (the write command) |
 | The report names the failing case | `report-names-the-case` | `regex` on the final reply, `ledger-rounding-merge-only-case` |

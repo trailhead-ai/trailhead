@@ -115,6 +115,31 @@
         "agents/updater.md",
         "agents/monitor.md"
       ]
+    },
+    "monitor-runs-the-merge-tier-before-merging": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "monitor-blocks-on-a-failing-merge-tier-verdict": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "monitor-blocks-when-a-merge-only-case-could-not-run": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "monitor-runs-the-merge-tier-before-ready": {
+      "measures": [
+        "agents/monitor.md"
+      ]
+    },
+    "pull-request-merge-runs-the-merge-tier-gate": {
+      "measures": [
+        "skills/pull_request/SKILL.md"
+      ]
     }
   }
 }

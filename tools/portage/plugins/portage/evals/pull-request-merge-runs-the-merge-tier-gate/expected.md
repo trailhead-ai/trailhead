@@ -14,8 +14,8 @@ A run scores the fraction of graders that pass and passes only at 1.0. Bar: 3 of
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| The gate ran in order, then `merge` | `gate-before-merge` | `regex` on `portage-invocations.log`, `(^|\n)eval-gate plan [^\n]*--tier merge[^\n]*\n[\s\S]*\neval-gate run [^\n]*\n[\s\S]*\neval-gate verdict [^\n]*\n[\s\S]*\nmerge ` |
-| The merge call carries the verified state | `merge-carries-eval-state` | `regex` on `portage-invocations.log`, `(^|\n)merge [^\n]*--eval-state[ =]["']?\S*/repo=\S*gate-state` |
+| The gate ran in order, then `merge` | `gate-before-merge` | `regex` on `portage-invocations.log`, `(^|\n)eval-gate plan [^\n]*--tier merge[^\n]*[\s\S]*\neval-gate run [^\n]*[\s\S]*\neval-gate verdict [^\n]*[\s\S]*\nmerge ` |
+| The merge call carries the verified state | `merge-carries-eval-state` | `regex` on `portage-invocations.log`, `(^|\n)merge [^\n]*--eval-state[ =]\S*/repo=\S*gate-state` |
 
 Predicted baseline: the committed skill's `merge` verb runs `portage merge` with the pairs and no gate, so both graders fail in every run and the case fails at 0 of 3. Predicted treatment: both hold in 3 of 3.
 
