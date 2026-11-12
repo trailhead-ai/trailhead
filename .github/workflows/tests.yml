@@ -56,14 +56,15 @@ jobs:
           # deviations over its CI history, rounded up to 10 s, and never above 300 s (the 5-minute
           # target). The history is every guarded run of this job layout: 7 runs x 3 Pythons = 21
           # legs per job, guard wall times from the "Suite run-time guard" step. craft: median
-          # 110.2, sd 26.7, so 163.7, budget 170. lore-camp: median 167.8, sd 19.9, so 207.5,
+          # 110.2, sd 26.7, so 163.7, budget 170, raised to 200 because ordinary py3.12 legs
+          # reached 171.4 s and 172.9 s on a change that touched no test or code. lore-camp: median 167.8, sd 19.9, so 207.5,
           # budget 210. rest: median 56.2, sd 12.9, so 81.9, raised to 100 because one ordinary leg
-          # already reached 91.8 s. A leg over its budget is the signal to look for a cause before
-          # raising the number.
+          # already reached 91.8 s. A leg over its budget is a warning, not a failure: the
+          # signal to look for a cause before raising the number.
           - area: craft
             baseline: 3345
             max_skipped: 18
-            budget: 170
+            budget: 200
           - area: lore-camp
             baseline: 7495
             max_skipped: 8
@@ -129,8 +130,10 @@ jobs:
 
       - name: Suite run-time guard
         # Owner: the budgets and the passed-count baselines live in the matrix above, beside
-        # the job that enforces them. Raising a budget is a reviewed edit and its pull request
-        # states the newly measured spread; the failure text says so too. Runs after pytest even
+        # the job that enforces them. The passed-count baseline and the skipped ceiling fail the
+        # job; a wall time over budget or a test over the per-test cap is reported and annotated
+        # as a warning and does not. Raising a budget is a reviewed edit and its pull request
+        # states the newly measured spread; the report says so too. Runs after pytest even
         # when pytest failed (the job is already red then); skipped only when the run is
         # cancelled. The per-test cap is checked after the run, so a hung test still costs the
         # job timeout. Per-test cap: twice the 60 s wall-clock the Chromium harness allows one
