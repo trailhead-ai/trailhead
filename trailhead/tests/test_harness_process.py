@@ -108,7 +108,22 @@ class TestLinuxStatParsing:
         assert parse_linux_stat("5 (claude) R 6 0\n") is None
 
 
+# 2026-11-03 12:34:56 in America/New_York (EST, UTC-5) is 17:34:56 UTC.
+_LSTART = "Tue Nov  3 12:34:56 2026"
+_LSTART_EPOCH_NEW_YORK = 1793727296
+
+
 class TestMacOS:
+    @pytest.fixture(autouse=True)
+    def _new_york_local_time(self, monkeypatch: pytest.MonkeyPatch):
+        import time
+
+        monkeypatch.setenv("TZ", "America/New_York")
+        time.tzset()
+        yield
+        monkeypatch.undo()
+        time.tzset()
+
     def _runner(self, table: dict[int, tuple[str, str, str]]):
         def run(args: list[str]) -> str:
             pid = int(args[-1])
@@ -120,20 +135,16 @@ class TestMacOS:
         return run
 
     def test_lstart_parsed_to_epoch_seconds(self) -> None:
-        import time
-
-        got = parse_lstart("Tue Nov  3 12:34:56 2026")
-        assert got == int(time.mktime(time.strptime("Tue Nov  3 12:34:56 2026", "%a %b %d %H:%M:%S %Y")))
+        assert parse_lstart(_LSTART) == _LSTART_EPOCH_NEW_YORK
 
     def test_lstart_garbage_is_none(self) -> None:
         assert parse_lstart("not a date") is None
 
     def test_walk_via_injected_runner(self, tmp_path: Path) -> None:
         launcher = make_fake_harness(tmp_path)
-        lstart = "Tue Nov  3 12:34:56 2026"
-        table = {50: ("40", str(launcher), lstart), 60: ("50", "/bin/zsh", lstart)}
+        table = {50: ("40", str(launcher), _LSTART), 60: ("50", "/bin/zsh", _LSTART)}
         got = harness_process(start_pid=60, system="Darwin", runner=self._runner(table))
-        assert got == (50, parse_lstart(lstart))
+        assert got == (50, _LSTART_EPOCH_NEW_YORK)
 
     def test_runner_failure_is_none(self) -> None:
         assert harness_process(start_pid=60, system="Darwin", runner=self._runner({})) is None
