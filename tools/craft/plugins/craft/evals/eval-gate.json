@@ -19,6 +19,7 @@
       "Bash(*/scripts/migration_bar.py)",
       "Bash(*/scripts/migration_bar.py *)",
       "Bash(*/scripts/pending_check.py *)",
+      "Bash(*/scripts/set_aside.py *)",
       "Bash(*/scripts/observation_gate.py)",
       "Bash(git status --porcelain)",
       "Bash(git rev-parse --verify --quiet refs/heads/*)",
