@@ -836,11 +836,15 @@ def declared_codes(module) -> set[str]:
 
 
 def codes_named_for_writer(text: str) -> set[str]:
-    """Backticked hyphenated tokens in every paragraph that names `set_aside.py`."""
+    """Backticked hyphenated tokens in every paragraph that names `set_aside.py`, and in the list right after it."""
     named: set[str] = set()
+    after_writer = False
     for block in re.split(r"\n\s*\n", text):
-        if "set_aside.py" in block:
+        if "set_aside.py" in block or (after_writer and block.lstrip().startswith("- ")):
             named |= set(_TOKEN_RE.findall(block))
+            after_writer = True
+        else:
+            after_writer = False
     return named
 
 
@@ -858,6 +862,11 @@ def test_the_check_reports_a_code_the_module_does_not_declare(tmp_path):
     doc = f"Run `set_aside.py --spec x`; it may refuse `{declared}` or `zz-made-up-code`.\n\nOther `unrelated-token`."
     assert undeclared_in(doc, sa) == ["zz-made-up-code"]
     assert undeclared_in(doc.replace("zz-made-up-code", "not-a-candidate"), sa) == []
+
+
+def test_the_check_reads_a_list_that_follows_a_paragraph_naming_the_writer(tmp_path):
+    doc = "The refusals `set_aside.py` gives:\n\n- `zz-made-up-code` — nothing written.\n- `not-a-candidate` — fine.\n\nOther `unrelated-token`.\n\n- `another-unrelated`"
+    assert undeclared_in(doc, sa) == ["zz-made-up-code"]
 
 
 def test_the_declared_codes_are_the_ones_the_writer_can_emit(world, entries_file, capsys):
