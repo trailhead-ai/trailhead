@@ -549,7 +549,10 @@ def test_a_partially_covered_criterion_is_set_aside_and_an_emptied_line_is_remov
         (PARENT_PLAIN.replace("**Covers:** AC2, AC4, AC5", "**Covers:** AC2"), ["AC2", "AC3"]),
         (PARENT_PLAIN.replace("**Covers:** AC2, AC4, AC5", "**Covers:** AC2").replace(
             "\n**Partially covers:** AC3\n", ""), ["AC2"]),
-        (PARENT_PLAIN.replace("**Partially covers:** AC3", "**Partially covers:** AC3, AC1"), ["AC2", "AC4", "AC5", "AC3", "AC1"]),
+        (
+            PARENT_PLAIN.replace("**Partially covers:** AC3", "**Partially covers:** AC3, AC1"),
+            ["AC2", "AC4", "AC5", "AC3", "AC1"],
+        ),
     ],
     ids=["covers-and-partial-both-emptied", "only-covered-criterion", "everything-at-once"],
 )
@@ -795,7 +798,10 @@ def run_build_with(runner, entries_path, capsys):
 def test_a_parent_narrowed_to_nothing_after_the_spec_write_says_the_spec_entry_landed(build, entries_file, capsys):
     fake = build()
     runner = after_spec_write(
-        fake, lambda: fake.edit_parent(lambda b: b.replace("AC2, AC4, AC5", "AC4").replace("**Partially covers:** AC3\n", ""))
+        fake,
+        lambda: fake.edit_parent(
+            lambda b: b.replace("AC2, AC4, AC5", "AC4").replace("**Partially covers:** AC3\n", "")
+        ),
     )
     rc, out, err = run_build_with(runner, entries_file([item("AC4")]), capsys)
     assert (rc, out, code_of(err)) == (1, "", "would-empty-slice")
@@ -934,7 +940,7 @@ def undeclared_in(text: str, module) -> list[str]:
 
 
 @pytest.mark.parametrize("path", DOCUMENTS, ids=lambda p: p.name)
-def test_every_reason_code_a_skill_names_for_the_writer_is_one_the_module_declares(path):  # inert-gate: allow code-vs-document consistency seam
+def test_every_reason_code_a_skill_names_for_the_writer_is_declared(path):  # inert-gate: allow code-vs-document seam
     assert undeclared_in(path.read_text(encoding="utf-8"), sa) == []
 
 
@@ -946,7 +952,10 @@ def test_the_check_reports_a_code_the_module_does_not_declare(tmp_path):
 
 
 def test_the_check_reads_a_list_that_follows_a_paragraph_naming_the_writer(tmp_path):
-    doc = "The refusals `set_aside.py` gives:\n\n- `zz-made-up-code` — nothing written.\n- `not-a-candidate` — fine.\n\nOther `unrelated-token`.\n\n- `another-unrelated`"
+    doc = (
+        "The refusals `set_aside.py` gives:\n\n- `zz-made-up-code` — nothing written.\n"
+        "- `not-a-candidate` — fine.\n\nOther `unrelated-token`.\n\n- `another-unrelated`"
+    )
     assert undeclared_in(doc, sa) == ["zz-made-up-code"]
 
 
