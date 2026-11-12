@@ -54,6 +54,7 @@ from ..gitutil import _git, _git_is_dirty
 from ..group.config import tasks_in_phase
 from ..group.manifest import (
     ManifestError,
+    TASK_WRAPPER_KEY,
     carry_forward_owner,
     manifest_path_for,
     owner_of,
@@ -61,11 +62,13 @@ from ..group.manifest import (
     reap_lock_unlocked,
     reconcile_lock,
     remove_central_manifest,
+    task_wrapper_of,
     work_state_for_new_entry,
     workspace_dir,
     write_central_manifest,
 )
 from .tasks import TaskError, TaskResult, run_member_tasks
+from .wrapper import env_wrapper, resolve_wrapper
 
 # Thread-local lock registry for concurrent-run guard (same process; file lock
 # guards cross-process concurrency).
@@ -660,6 +663,7 @@ def reconcile_worktree(
             prior_tasks: dict[str, dict[str, Any]] = {}
             prior_state: dict[str, dict[str, Any]] = {}
             prior_owner: str | None = None
+            prior_manifest = None
             if mpath.is_file():
                 try:
                     prior_manifest = read_central_manifest(mpath)
@@ -694,6 +698,13 @@ def reconcile_worktree(
             # all, so the merge below leaves the prior "over-budget" entry
             # untouched. `camp setup`'s retry path (_provision_member_and_flip)
             # takes no such filter — over-budget stays retry-worthy there.
+            # The wrapper is read from the environment only when this run
+            # creates the workspace's manifest; afterwards the recorded one rules.
+            if prior_manifest is None:
+                recorded_wrapper: Any = env_wrapper(env)
+            else:
+                recorded_wrapper = task_wrapper_of(prior_manifest)
+            run_wrapper = resolve_wrapper(recorded_wrapper, env)
             task_results: dict[str, list[TaskResult]] = {}
             required_failure: Exception | None = None
             if any(_has_provision_tasks(m) for m in members):
@@ -721,6 +732,7 @@ def reconcile_worktree(
                             context,
                             completed,
                             task_deadline_seconds=BOOT_TASK_BUDGET_SECONDS,
+                            wrapper=run_wrapper,
                         )
                         futures[fut] = member["name"]
 
@@ -775,6 +787,8 @@ def reconcile_worktree(
             # clears ownership itself, only preserves whatever was already
             # recorded. Absent when the prior manifest never recorded one.
             carry_forward_owner(manifest_data, prior_owner)
+            if recorded_wrapper is not None:
+                manifest_data[TASK_WRAPPER_KEY] = recorded_wrapper
             write_central_manifest(mpath, manifest_data)
 
     return {

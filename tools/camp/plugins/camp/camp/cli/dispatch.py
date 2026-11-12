@@ -497,6 +497,11 @@ def main() -> None:
         _cmd_which()
         return
 
+    if argv and argv[0] == "capabilities":
+        from .status import _cmd_capabilities
+        _cmd_capabilities(argv[1:])
+        return
+
     # Read (never consume) --dry-run; spine re-checks it on its own path. An
     # opaque payload is excluded from the argv read for the reason
     # `_OPAQUE_PAYLOAD_VERBS` exists: a `--dry-run` past the wrapped command is
@@ -825,7 +830,7 @@ def main() -> None:
     _SKIP_GROUP_RESOLVE = frozenset({
         "help", "--help", "-h", "doctor",
         "foreach", "path", "which",
-        "--version", "version",
+        "--version", "version", "capabilities",
         # Resolves its own group (`_resolve_group_for_attach`) over only the
         # configs that parse, so resolving a group here first would let a
         # sibling group's malformed config block an attach.

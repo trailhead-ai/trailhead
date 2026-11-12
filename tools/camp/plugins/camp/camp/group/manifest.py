@@ -54,6 +54,11 @@ Schema (v1):
         # carry an owner forward fails loudly on its first write instead of
         # shipping silently.
         "owner": "<declared host name, or absent>",
+        # The raw CAMP_TASK_WRAPPER text (a JSON array of strings) read when
+        # the workspace was created; every later run of the workspace's steps
+        # wraps them with it. Absent when the workspace has none. Read via
+        # task_wrapper_of; rebuilds preserve it via carry_forward_task_wrapper.
+        "task_wrapper": "<raw JSON array text, or absent>",
     }
 """
 
@@ -431,6 +436,26 @@ def carry_forward_owner(manifest_data: dict[str, Any], prior_owner: str | None) 
     if prior_owner is None:
         return
     manifest_data.setdefault("owner", prior_owner)
+
+
+#: The workspace-level manifest key holding the raw `CAMP_TASK_WRAPPER` text
+#: recorded when the workspace was created (see camp.provision.wrapper).
+TASK_WRAPPER_KEY = "task_wrapper"
+
+
+def task_wrapper_of(manifest: dict[str, Any]) -> Any:
+    """The wrapper recorded at creation, or None when the workspace has none.
+
+    Returned exactly as recorded — a value that is not valid wrapper text is
+    still returned, so the runner fails closed on it rather than running bare.
+    """
+    return manifest.get(TASK_WRAPPER_KEY)
+
+
+def carry_forward_task_wrapper(manifest_data: dict[str, Any], prior: Any) -> None:
+    """Preserve a recorded wrapper across a manifest rebuild; never sets one."""
+    if prior is not None:
+        manifest_data.setdefault(TASK_WRAPPER_KEY, prior)
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:

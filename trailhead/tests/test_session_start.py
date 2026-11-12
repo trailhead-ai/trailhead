@@ -1380,6 +1380,20 @@ def test_the_drive_constants_match_the_contract_fixture():  # inert-gate: allow 
     )}
 
 
+def test_camps_task_wrapper_names_match_the_contract_fixture():  # inert-gate: allow cross-package contract seam
+    import importlib.util
+    import sys
+
+    path = REPO / "tools" / "camp" / "plugins" / "camp" / "camp" / "provision" / "wrapper.py"
+    spec = importlib.util.spec_from_file_location("camp_task_wrapper_contract", path)
+    camp_wrapper = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = camp_wrapper
+    spec.loader.exec_module(camp_wrapper)
+
+    assert camp_wrapper.TASK_WRAPPER_ENV == CONTRACT["task_wrapper_env"]
+    assert list(camp_wrapper.TASK_WRAPPER_PLACEHOLDERS) == CONTRACT["task_wrapper_placeholders"]
+
+
 # -- the broker MCP server ---------------------------------------------------
 
 SECRET = "s3cret-client-secret-value"

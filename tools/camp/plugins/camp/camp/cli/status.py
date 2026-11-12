@@ -26,6 +26,20 @@ def _cmd_version() -> None:
     _print_active_group()
 
 
+def _cmd_capabilities(rest: list[str]) -> None:
+    """`camp capabilities --json`: the optional features this camp supports, so a
+    caller can refuse to rely on a camp that predates one."""
+    import json
+
+    from ..provision.wrapper import CAPABILITIES
+    from .parser import CampParser
+
+    parser = CampParser(verb="capabilities")
+    parser.add_argument("--json", action="store_true", required=True)
+    parser.parse_args(rest)
+    print(json.dumps({"capabilities": list(CAPABILITIES)}))
+
+
 def _print_active_group() -> None:
     """Print the active group (and slug, if any) for the --version header.
 

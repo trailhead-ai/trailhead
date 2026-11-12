@@ -335,6 +335,8 @@ def run_activate_tasks_in_background(
             _warn_optional_task_failures,
         )
         from .tasks import TaskError, run_member_tasks
+        from .wrapper import resolve_wrapper
+        from ..group.manifest import task_wrapper_of
 
         context = _build_task_context(
             repo_root=member_config["repo_root"],
@@ -350,6 +352,7 @@ def run_activate_tasks_in_background(
                 ACTIVATE_PHASE,
                 context,
                 completed,
+                wrapper=resolve_wrapper(task_wrapper_of(data), env),
             )
         except TaskError as e:
             # A required activate-phase task failed: persist the partial

@@ -32,13 +32,18 @@ from typing import Any
 
 from ..group.manifest import (
     ManifestError,
+    TASK_WRAPPER_KEY,
     carry_forward_owner,
+    carry_forward_task_wrapper,
     manifest_path_for,
     owner_of,
+    read_central_manifest,
+    task_wrapper_of,
     work_state_for_new_entry,
     workspace_dir,
     write_central_manifest,
 )
+from .wrapper import env_wrapper, resolve_wrapper
 
 # The camp binary this process was launched as — used to build the detached
 # `camp setup --background` argv. Resolved relative to the plugin root
@@ -149,7 +154,7 @@ def seed_pending_workspace(
     self-stamped default.
     """
     from . import reconcile
-    from ..group.manifest import read_central_manifest, reconcile_lock
+    from ..group.manifest import reconcile_lock
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
@@ -169,12 +174,16 @@ def seed_pending_workspace(
 
         existing_states: dict[str, dict[str, Any]] = {}
         prior_owner: str | None = None
+        prior_wrapper: Any = None
+        creating = True
         if mpath.is_file():
             try:
                 prior = read_central_manifest(mpath)
             except Exception:
                 prior = None
             if prior is not None:
+                creating = False
+                prior_wrapper = task_wrapper_of(prior)
                 for m in prior.get("members", []):
                     existing_states[m["name"]] = m
                 # A malformed workspace-level owner (owner_of's own
@@ -221,6 +230,14 @@ def seed_pending_workspace(
             declared = owner if owner is not None else _declared_owner(env)
             if declared is not None:
                 manifest_data["owner"] = declared
+        # The wrapper is read from the environment only when the workspace is
+        # created; a re-seed of an existing one keeps what it recorded.
+        if creating:
+            created_with = env_wrapper(env)
+            if created_with is not None:
+                manifest_data[TASK_WRAPPER_KEY] = created_with
+        else:
+            carry_forward_task_wrapper(manifest_data, prior_wrapper)
         write_central_manifest(mpath, manifest_data)
     return mpath
 
@@ -371,9 +388,14 @@ def provision_member(
     context = reconcile._build_task_context(
         repo_root=repo_root, worktree=wt_path, slug=slug, member_name=member["name"]
     )
+    # An unreadable manifest raises (fail closed); only an absent one means
+    # nothing was recorded.
+    mpath = manifest_path_for(group_name, slug, env=env)
+    recorded = task_wrapper_of(read_central_manifest(mpath)) if mpath.exists() else None
     return run_member_tasks(
         reconcile._adapt_task_steps(member.get("tasks") or []),
         reconcile.PROVISION_PHASE,
         context,
         completed or {},
+        wrapper=resolve_wrapper(recorded, env),
     )
