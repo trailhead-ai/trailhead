@@ -89,27 +89,30 @@ def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
     return tools
 
 
-def _with_own_binaries(cli_tools: dict[str, Path]) -> dict[str, Path]:
+def _with_own_binaries(cli_tools: dict[str, Path], root: Path | None) -> dict[str, Path]:
     """The shim set: the plugin CLIs plus the repo's own ``bin/trailhead`` and,
-    when present, ``bin/ranger``."""
-    tools = {**cli_tools, "trailhead": _TRAILHEAD_BIN}
-    if _RANGER_BIN.exists():
-        tools["ranger"] = _RANGER_BIN
+    when present, ``bin/ranger`` — of *root* when given, else of this checkout."""
+    trailhead_bin = _TRAILHEAD_BIN if root is None else root / "bin" / "trailhead"
+    ranger_bin = _RANGER_BIN if root is None else root / "bin" / "ranger"
+    tools = {**cli_tools, "trailhead": trailhead_bin}
+    if ranger_bin.exists():
+        tools["ranger"] = ranger_bin
     return tools
 
 
-def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str]) -> Path | None:
+def build_cli_shims(cli_tools: dict[str, Path], *, env: dict[str, str], root: Path | None = None) -> Path | None:
     """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``; the one shim
     build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
     disables every CLI builds no shims, and the repo's own binaries alone do not change that.
-    Additive: shims already in the dir are left alone. Raises whatever
+    Shims already in the dir are rewritten, so a build from a different *root* repoints them. Raises whatever
     ``create_shims`` raises; the caller decides how loudly to fail.
     """
     if not cli_tools:
         return None
-    return create_shims(_with_own_binaries(cli_tools), str(_REPO_ROOT), env=env).shim_dir
+    shim_root = _REPO_ROOT if root is None else root
+    return create_shims(_with_own_binaries(cli_tools, root), str(shim_root), env=env).shim_dir
 
 
 def install_user_rulesets(
