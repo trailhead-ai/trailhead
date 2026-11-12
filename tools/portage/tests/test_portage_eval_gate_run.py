@@ -62,6 +62,20 @@ open(LOG + ".calls", "a").write(json.dumps(
       "tmpdir_mode": (os.stat(os.environ["TMPDIR"]).st_mode & 0o777) if os.environ.get("TMPDIR") else None}}) + "\\n")
 payload, code, sleep = ({canary_payload!r}, {canary_code!r}, {canary_sleep!r}) if CANARY else (
     {payload!r}, {code!r}, {sleep!r})
+POOL = {pool!r}
+if POOL and not CANARY:
+    doc = json.load(open(POOL))
+    pool = doc["cases"][0]["arms"]["with"]
+    off = int(open(LOG + ".off").read()) if os.path.exists(LOG + ".off") else 0
+    asked = int(sys.argv[sys.argv.index("--runs") + 1])
+    doc["cases"][0]["arms"]["with"] = pool[off:off + asked]
+    open(LOG + ".off", "w").write(str(off + asked))
+    payload = LOG + ".pooled"
+    json.dump(doc, open(payload, "w"))
+SEQ = {seq!r}
+if SEQ and not CANARY:
+    N = sum(1 for l in open(LOG + ".calls") if not json.loads(l)["canary"]) - 1
+    payload = SEQ[min(N, len(SEQ) - 1)]
 if {grandchild!r} and not CANARY:
     p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     open(LOG + ".pid", "w").write(str(p.pid))
@@ -117,8 +131,13 @@ class Env:
 
     def fake(self, doc: dict | str | None = None, code: int = 0, sleep: float = 0,
              grandchild: bool = False, canary: dict | str | None = "pass", canary_code: int = 0,
-             canary_sleep: float = 0, path: Path | None = None) -> Path:
-        """Install the fake runner; the canary (any call with ``--eval-dir``) passes by default."""
+             canary_sleep: float = 0, path: Path | None = None,
+             seq: list[dict] | None = None, pool: dict | None = None) -> Path:
+        """Install the fake runner; the canary (any call with ``--eval-dir``) passes by default.
+
+        ``seq`` gives the result JSON of the 1st, 2nd, ... case call (the last repeats).
+        ``pool`` is one result JSON whose runs the fake hands out in order, as many per call as
+        that call's ``--runs`` asks for."""
         if canary == "pass":
             canary = _result([PASS])
         exe = path or self.bin / "claude"
@@ -126,9 +145,18 @@ class Env:
             python=sys.executable, log=self.log, payload=self._payload(doc, "payload.json"),
             code=code, sleep=sleep, grandchild=grandchild,
             canary_payload=self._payload(canary, "canary-payload.json"),
-            canary_code=canary_code, canary_sleep=canary_sleep))
+            canary_code=canary_code, canary_sleep=canary_sleep,
+            pool=self._payload(pool, "pool.json"),
+            seq=[self._payload(d, f"payload-{i}.json") for i, d in enumerate(seq or [])]))
         exe.chmod(0o755)
         return exe
+
+    @property
+    def case_calls(self) -> list[dict]:
+        return [c for c in self.calls if not c["canary"]]
+
+    def asked(self, call: dict, flag: str) -> str:
+        return call["argv"][call["argv"].index(flag) + 1]
 
     @property
     def calls(self) -> list[dict]:
@@ -165,7 +193,8 @@ def env(tmp_path, monkeypatch):
 
 
 def _verdict(env, runs, code=1, **top):
-    env.fake(_result(runs, **top), code=code)
+    top.setdefault("costUsd", 0.1)
+    env.fake(pool=_result(runs, **top), code=code)
     assert env.run() == 0
     r = env.result()
     return r["verdict"], r["reason"], (r["passed"], r["failed"], r["errored"])
@@ -173,22 +202,22 @@ def _verdict(env, runs, code=1, **top):
 
 class TestScoredRuns:
     def test_three_of_three_passing_is_pass(self, env):
-        assert _verdict(env, [PASS] * 3, code=0) == ("pass", None, (3, 0, 0))
+        assert _verdict(env, [PASS] * 3, code=0) == ("pass", None, (2, 0, 0))
 
     def test_two_passing_one_failing_is_pass(self, env):
-        assert _verdict(env, [PASS, PASS, FAIL]) == ("pass", None, (2, 1, 0))
+        assert _verdict(env, [PASS, FAIL, PASS]) == ("pass", None, (2, 1, 0))
 
     def test_one_passing_two_failing_is_fail(self, env):
         assert _verdict(env, [PASS, FAIL, FAIL]) == ("fail", None, (1, 2, 0))
 
     def test_two_passing_one_errored_is_pass(self, env):
-        assert _verdict(env, [PASS, PASS, ERR]) == ("pass", None, (2, 0, 1))
+        assert _verdict(env, [PASS, ERR, PASS]) == ("pass", None, (2, 0, 1))
 
     def test_one_pass_one_fail_one_errored_is_not_run_runs_errored(self, env):
         assert _verdict(env, [PASS, FAIL, ERR]) == ("not-run", "runs-errored", (1, 1, 1))
 
     def test_zero_passing_two_failing_one_errored_is_fail(self, env):
-        assert _verdict(env, [FAIL, FAIL, ERR]) == ("fail", None, (0, 2, 1))
+        assert _verdict(env, [FAIL, FAIL, ERR]) == ("fail", None, (0, 2, 0))
 
     def test_pass_at_three_with_two_passing_is_fail(self, env):
         env.cases[0]["pass_at"] = 3
@@ -200,12 +229,11 @@ class TestScoredRuns:
         assert _verdict(env, [PASS, skipped, skipped]) == ("not-run", "runs-errored", (1, 0, 2))
 
     def test_runs_missing_from_the_result_count_as_errored(self, env):
-        assert _verdict(env, [PASS, PASS]) == ("pass", None, (2, 0, 1))
         assert _verdict(env, [PASS, FAIL]) == ("not-run", "runs-errored", (1, 1, 1))
 
     def test_a_decided_fail_survives_a_cost_ceiling_partial(self, env):
         verdict = _verdict(env, [FAIL, FAIL], code=2, partial=True, partialReason="cost_ceiling")
-        assert verdict == ("fail", None, (0, 2, 1))
+        assert verdict == ("fail", None, (0, 2, 0))
 
     def test_result_lists_per_run_grader_verdicts_and_nothing_else(self, env):
         _verdict(env, [PASS, FAIL, ERR])
@@ -298,7 +326,7 @@ class TestRunnerFailures:
         env.fake(doc, code=2)
         assert env.run() == 0
         r = env.result()
-        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "cost-cap", 3)
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "cost-cap", 2)
 
     def test_auth_failed_partial_is_runner_error(self, env):
         env.fake(_fixture("partial_auth_failed"), code=2)
@@ -402,8 +430,8 @@ class TestArgv:
         assert after("--case") == "c1"
         assert after("--ablation") == "none"
         assert after("--model") == "sonnet"
-        assert after("--runs") == "3"
-        assert after("-j") == "3"
+        assert after("--runs") == "2"
+        assert after("-j") == "2"
         assert after("--max-cost-usd") == "2.0"
         assert after("--json") == str(env.state / "runs" / "c1.json")
         assert after("--output-dir") == str(env.state / "runs" / "c1") + "/"
@@ -413,9 +441,9 @@ class TestArgv:
             assert flag in argv
 
     def test_parallelism_is_capped_at_eight(self, env):
-        env.cases[0]["runs"] = 12
+        env.cases[0].update(runs=20, pass_at=10)
         env.plan()
-        env.fake(_result([PASS] * 12))
+        env.fake(_result([PASS] * 10))
         assert env.run() == 0
         argv = env.seen["argv"]
         assert argv[argv.index("-j") + 1] == "8"
@@ -681,3 +709,187 @@ class TestChildIsReaped:
         else:
             os.kill(pid, 9)
             pytest.fail("the runner's process group survived the interrupt")
+
+
+def _batch(env, runs, **top):
+    """A result JSON of one runner call; ``costUsd`` defaults to a small spend under the cap."""
+    top.setdefault("costUsd", 0.1)
+    return _result(runs, **top)
+
+
+class TestStopAtAgreement:
+    def test_two_passes_decide_pass_in_one_call_asking_two_runs(self, env):
+        env.fake(seq=[_batch(env, [PASS, PASS])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["passed"], r["failed"], r["errored"]) == (
+            "pass", None, 2, 0, 0)
+        assert len(env.case_calls) == 1
+        assert env.asked(env.case_calls[0], "--runs") == "2"
+        assert env.asked(env.case_calls[0], "-j") == "2"
+
+    def test_two_fails_decide_fail_in_one_call(self, env):
+        env.fake(seq=[_batch(env, [FAIL, FAIL])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["passed"], r["failed"]) == ("fail", None, 0, 2)
+        assert len(env.case_calls) == 1
+
+    def test_a_split_asks_one_more_run_and_its_pass_gives_pass(self, env):
+        env.fake(seq=[_batch(env, [PASS, FAIL]), _batch(env, [PASS])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["passed"], r["failed"], r["errored"]) == (
+            "pass", None, 2, 1, 0)
+        assert [env.asked(c, "--runs") for c in env.case_calls] == ["2", "1"]
+        assert [x["passed"] for x in r["runs"]] == [True, False, True]
+        assert set(r) == {"case", "verdict", "passed", "failed", "errored", "reason", "runs"}
+
+    def test_a_split_asks_one_more_run_and_its_fail_gives_fail(self, env):
+        env.fake(seq=[_batch(env, [FAIL, PASS]), _batch(env, [FAIL])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["passed"], r["failed"]) == ("fail", 1, 2)
+        assert [x["passed"] for x in r["runs"]] == [False, True, False]
+
+    def test_run_records_of_every_call_are_merged_in_order_with_their_graders(self, env):
+        env.fake(seq=[_batch(env, [PASS, FAIL]), _batch(env, [PASS])])
+        assert env.run() == 0
+        runs = env.result()["runs"]
+        expect = [{"passed": True, "errored": False,
+                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in PASS["graders"]]},
+                  {"passed": False, "errored": False,
+                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in FAIL["graders"]]},
+                  {"passed": True, "errored": False,
+                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in PASS["graders"]]}]
+        assert runs == expect
+
+    @pytest.mark.parametrize("n,pass_at,first", [(3, 2, "2"), (5, 3, "3"), (5, 4, "2"), (4, 1, "1")])
+    def test_the_first_batch_is_the_smallest_that_could_decide(self, env, n, pass_at, first):
+        env.cases[0].update(runs=n, pass_at=pass_at)
+        env.plan()
+        env.fake(seq=[_batch(env, [PASS] * int(first))])
+        assert env.run() == 0
+        assert env.asked(env.case_calls[0], "--runs") == first
+
+    def test_an_errored_run_in_the_first_batch_sizes_the_next_from_the_bar(self, env):
+        env.cases[0].update(runs=5, pass_at=4)
+        env.plan()
+        env.fake(seq=[_batch(env, [PASS, ERR]), _batch(env, [PASS, PASS]), _batch(env, [PASS])])
+        assert env.run() == 0
+        assert [env.asked(c, "--runs") for c in env.case_calls] == ["2", "2", "1"]
+        r = env.result()
+        assert (r["verdict"], r["passed"], r["errored"]) == ("pass", 4, 1)
+        assert [x["errored"] for x in r["runs"]] == [False, True, False, False, False]
+
+    def test_with_three_of_two_an_errored_run_leaves_one_more_run(self, env):
+        env.fake(seq=[_batch(env, [PASS, ERR]), _batch(env, [FAIL])])
+        assert env.run() == 0
+        assert [env.asked(c, "--runs") for c in env.case_calls] == ["2", "1"]
+        assert (env.result()["verdict"], env.result()["reason"]) == ("not-run", "runs-errored")
+
+    def test_the_second_call_gets_the_cost_left_as_a_hard_cap(self, env):
+        env.cases[0]["runner"] = dict(RUNNER, max_cost_usd=1.0)
+        env.plan()
+        env.fake(seq=[_batch(env, [PASS, FAIL], costUsd=0.9), _batch(env, [PASS])])
+        assert env.run() == 0
+        first, second = env.case_calls
+        assert env.asked(first, "--max-cost-usd") == "1.0"
+        assert env.asked(second, "--max-cost-usd") == "0.1"
+
+    @pytest.mark.parametrize("cost", [{}, {"costUsd": "0.5"}, {"costUsd": True}])
+    def test_a_missing_or_invalid_cost_counts_as_the_whole_cap_and_starts_no_second_call(
+            self, env, cost):
+        doc = _result([PASS, FAIL])
+        doc.pop("costUsd")
+        doc.update(cost)
+        env.fake(seq=[doc, _batch(env, [PASS])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "cost-cap")
+        assert len(env.case_calls) == 1
+        assert [x["passed"] for x in r["runs"]] == [True, False]
+
+    def test_a_first_call_that_spends_the_whole_cap_starts_no_second_call(self, env):
+        env.cases[0]["runner"] = dict(RUNNER, max_cost_usd=1.0)
+        env.plan()
+        env.fake(seq=[_batch(env, [PASS, FAIL], costUsd=1.0), _batch(env, [PASS])])
+        assert env.run() == 0
+        assert env.result()["reason"] == "cost-cap"
+        assert len(env.case_calls) == 1
+
+    def test_a_batch_whose_runs_all_error_ends_the_case_without_another_call(self, env):
+        env.fake(seq=[_batch(env, [ERR, ERR], costUsd=0), _batch(env, [PASS])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"], r["errored"]) == ("not-run", "runs-errored", 2)
+        assert len(env.case_calls) == 1
+
+    def test_a_later_batch_whose_runs_all_error_ends_the_case_without_another_call(self, env):
+        env.cases[0].update(runs=5, pass_at=4)
+        env.plan()
+        env.fake(seq=[_batch(env, [PASS, ERR]), _batch(env, [ERR, ERR], costUsd=0),
+                      _batch(env, [PASS])])
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runs-errored")
+        assert len(env.case_calls) == 2
+        assert [x["errored"] for x in r["runs"]] == [False, True, True, True]
+
+    def test_the_canary_runs_once_however_many_batches_the_case_takes(self, env):
+        env.fake(seq=[_batch(env, [PASS, FAIL]), _batch(env, [PASS])])
+        assert env.run() == 0
+        assert [c["canary"] for c in env.calls] == [True, False, False]
+        assert env.run() == 0
+        assert [c["canary"] for c in env.calls].count(True) == 1
+
+
+class _Clock:
+    """A clock the test moves: each real runner call is made to take ``durations[i]`` seconds."""
+
+    def __init__(self, env, durations):
+        from portage.eval_gate import run as run_mod
+
+        self.now, self.timeouts = 1000.0, []
+        real = run_mod._execute
+
+        def execute(runner, state, timeout):
+            self.timeouts.append(timeout)
+            out = real(runner, state, timeout)
+            self.now += durations[len(self.timeouts) - 1]
+            return out
+
+        env.mp.setattr(run_mod, "_execute", execute)
+
+    def __call__(self):
+        return self.now
+
+
+class TestBatchWallClockBudget:
+    def _run(self, env, durations):
+        env.seed_canary()
+        env.fake(seq=[_batch(env, [PASS, FAIL]), _batch(env, [PASS])])
+        clock = _Clock(env, durations)
+        result = run_case(env.state, "c1", env=dict(os.environ), clock=clock)
+        return result, clock
+
+    def test_a_first_call_over_half_the_budget_leaves_no_second_call(self, env):
+        result, _ = self._run(env, [300, 1])
+        assert (result["verdict"], result["reason"]) == ("not-run", "timeout")
+        assert len(env.case_calls) == 1
+        assert [x["passed"] for x in result["runs"]] == [True, False]
+        assert env.result()["reason"] == "timeout"
+
+    def test_a_second_call_that_fits_gets_what_is_left_of_the_budget(self, env):
+        result, clock = self._run(env, [100, 1])
+        assert result["verdict"] == "pass"
+        assert len(env.case_calls) == 2
+        assert clock.timeouts == [540, 440]
+
+    def test_exactly_the_first_calls_elapsed_time_left_still_starts_the_second_call(self, env):
+        result, _ = self._run(env, [270, 1])
+        assert len(env.case_calls) == 2 and result["verdict"] == "pass"
+
+    def test_one_second_less_than_the_first_calls_elapsed_time_does_not(self, env):
+        result, _ = self._run(env, [271, 1])
+        assert len(env.case_calls) == 1 and result["reason"] == "timeout"

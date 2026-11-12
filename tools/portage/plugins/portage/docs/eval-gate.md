@@ -42,7 +42,7 @@ cases that check the updater obeys the gate.
 ## Running a case
 
 `portage eval-gate run --state <dir> --case <name>` runs one planned case in the foreground (up to 540 s per
-call, so give the tool call a 600000 ms timeout) and records a verdict in the state directory:
+call, counting every batch, so give the tool call a 600000 ms timeout) and records a verdict in the state directory:
 
 - **pass**: at least `pass_at` runs scored 1.0.
 - **fail**: so many scored runs failed that `pass_at` is out of reach.
@@ -51,6 +51,19 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
   `case.yaml` is gone, so nothing ran), or its corpus is new on the branch (`corpus-new-on-branch`: this
   corpus is new on the branch, so its runner grants are unreviewed and its cases were not run — review the
   grants). A not-run case is never a pass and never a fail.
+
+A case is decided in batches, not in one call for all its `runs`. The first call asks for the fewest runs
+that could decide it, `min(pass_at, runs - pass_at + 1)`: two for the default three runs, two to pass. When
+those agree the case is decided from them. When they split, the next call asks for the smallest batch that
+could still decide it, up to `runs` in all. The verdict rule is the same as if every run had been taken.
+Later calls get what is left of the case's `max_cost_usd` (as a hard `--max-cost-usd`) and of the 540 s
+budget. A later call does not start, and the case is not-run, when:
+
+- the last call added no scored run (`runs-errored`);
+- the cost reported so far has used the cap, or the runner reported no valid `costUsd` (`cost-cap`);
+- less time is left than the first call took (`timeout`).
+
+The `runs` in the result hold every call's runs, in order.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
 `USER`, `LANG`, `TERM`, `LC_*`, plus the gate's own `TMPDIR`), so API keys and tokens in the caller's

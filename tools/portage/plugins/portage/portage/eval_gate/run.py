@@ -28,8 +28,30 @@ fail when scored failing > n - k; otherwise nothing is decidable and the reason 
 ``runner-error`` (``auth_failed`` partial, or a non-zero exit with no usable JSON),
 else ``runs-errored``.
 
+A case is decided in batches, not one ``--runs n`` call. The first call asks for
+``min(k, n - k + 1)`` runs (2 for 3 of 2), the fewest that could decide it. After each call
+the rule above is applied to every run so far (only the runs asked for are counted). While
+neither verdict is reached, the next call asks for the smallest batch that could still decide
+it, ``min(k - passing, n - k + 1 - failing)`` runs, capped at the runs not yet asked, until
+``n`` have been asked. ``errored`` counts errored runs among those asked, so a case decided
+early does not count the runs it never asked for as errored. ``runs`` holds every call's run
+records in order. Each call's runner result stays at ``<state>/runs/<case>.json`` (the first)
+and ``<state>/runs/<case>/batch-<runs asked before it>.json`` (later calls).
+
+A later call is started only when all of these hold; otherwise the case is not-run with the
+reason named, and the runs so far stay in ``runs``:
+
+- the last call added at least one scored run (``runs-errored`` otherwise);
+- the case's ``max_cost_usd`` minus the ``costUsd`` reported so far is above zero; a missing,
+  non-numeric or negative ``costUsd`` counts as the whole cap spent (``cost-cap``). That
+  remainder is passed to the call as its ``--max-cost-usd``;
+- the wall-clock budget left is at least the first call's elapsed time (``timeout``). The
+  budget left is the call's timeout minus the time since ``run`` started, the canary included,
+  and it is the timeout the later call runs under. ``clock`` (default ``time.monotonic``)
+  supplies the time.
+
 The sandbox-write canary (``canary.py``) runs once per state directory before the first
-case and is cached at ``<state>/canary.json`` — the same shape as a case result, with
+case, not once per batch, and is cached at ``<state>/canary.json`` — the same shape as a case result, with
 ``case`` ``"sandbox-write"`` and a single run (runs 1, pass_at 1, same ``_decide``)::
 
     {"case": "sandbox-write", "verdict": "pass" | "fail" | "not-run", "passed": int,
@@ -80,6 +102,7 @@ whose name fails the mapping's shape; a plugin root that leaves the repo.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import stat
@@ -232,14 +255,17 @@ def _run_record(run: dict) -> dict:
     }
 
 
-def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool) -> dict:
+def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool,
+            asked: int | None = None) -> dict:
+    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far."""
+    asked = n if asked is None else asked
     runs = _runs_of(doc)
-    records = [_run_record(r) for r in (runs or [])][:n]
-    scored = [r for r in (runs or [])[:n] if not _is_errored(r)]
+    records = [_run_record(r) for r in (runs or [])][:asked]
+    scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
     passing = sum(1 for r in scored if _passes(r))
     failing = len(scored) - passing
-    errored = n - len(scored)
-    records += [{"passed": False, "errored": True, "graders": []}] * max(0, n - len(records))
+    errored = asked - len(scored)
+    records += [{"passed": False, "errored": True, "graders": []}] * max(0, asked - len(records))
     base = {"passed": passing, "failed": failing, "errored": errored, "runs": records}
 
     if runs is not None and passing >= pass_at:
@@ -321,6 +347,7 @@ def run_case(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     harnesses: list | None = None,
     env: dict[str, str] | None = None,
+    clock=time.monotonic,
 ) -> dict:
     """Validate, run and record one case; return the result written."""
     state = Path(state)
@@ -360,7 +387,7 @@ def run_case(
     try:
         with _call_tmpdir(env) as case_tmp:
             return _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
-                                json_path, timeout_seconds, request, override, env, case_tmp)
+                                json_path, timeout_seconds, request, override, env, case_tmp, clock)
     except TmpPathTooLong as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return _record(state, case, _not_run(case, n, SANDBOX_UNWRITABLE))
@@ -369,23 +396,40 @@ def run_case(
         return _record(state, case, _not_run(case, n, RUNNER_ERROR))
 
 
+def _first_batch(n: int, pass_at: int) -> int:
+    return max(1, min(pass_at, n - pass_at + 1, n))
+
+
+def _valid_cost(doc: object) -> float | None:
+    cost = doc.get("costUsd") if isinstance(doc, dict) else None
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        return None
+    return float(cost) if math.isfinite(cost) and cost >= 0 else None
+
+
 def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json_path,
-                 timeout_seconds, request, override, env, case_tmp) -> dict:
-    runner = _pin(request(
-        tmpdir=case_tmp,
-        plugin_dir=plugin_dir,
-        case=case,
-        runs=n,
-        model=runner_cfg["model"],
-        allow_tools=list(runner_cfg["allow_tools"]),
-        max_cost_usd=runner_cfg["max_cost_usd"],
-        json_path=json_path,
-        output_dir=runs_dir / case,
-    ), override)
+                 timeout_seconds, request, override, env, case_tmp, clock=time.monotonic) -> dict:
+    cap = runner_cfg["max_cost_usd"]
+
+    def runner_for(batch: int, max_cost: float, json_out: Path, output_dir: Path):
+        return _pin(request(
+            tmpdir=case_tmp,
+            plugin_dir=plugin_dir,
+            case=case,
+            runs=batch,
+            model=runner_cfg["model"],
+            allow_tools=list(runner_cfg["allow_tools"]),
+            max_cost_usd=max_cost,
+            json_path=json_out,
+            output_dir=output_dir,
+        ), override)
+
+    batch = _first_batch(n, pass_at)
+    runner = runner_for(batch, cap, json_path, runs_dir / case)
     if runner is None:
         return _record(state, case, _not_run(case, n, NO_RUNNER))
 
-    started = time.monotonic()
+    started = clock()
     gate = canary.read_cached(state)
     if gate is None:
         gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds), env)
@@ -394,11 +438,46 @@ def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json
         reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
         return _record(state, case, _not_run(case, n, reason))
 
-    remaining = max(1.0, timeout_seconds - (time.monotonic() - started))
-    code, killed, missing = _execute(runner, state, remaining)
-    if missing:
-        return _record(state, case, _not_run(case, n, RUNNER_MISSING))
-    return _record(state, case, {"case": case, **_decide(_read_json(json_path), n, pass_at, code, killed)})
+    merged: list[dict] = []
+    asked, spent, first_elapsed = 0, 0.0, 0.0
+    while True:
+        call_start = clock()
+        code, killed, missing = _execute(runner, state, max(1.0, timeout_seconds - (call_start - started)))
+        if missing:
+            return _record(state, case, _not_run(case, n, RUNNER_MISSING))
+        if not asked:
+            first_elapsed = clock() - call_start
+        doc = _read_json(json_path)
+        runs = _runs_of(doc)
+        segment = (runs or [])[:batch]
+        segment += [{"error": "missing"}] * (batch - len(segment))
+        merged += segment
+        asked += batch
+        view = {**(doc if isinstance(doc, dict) else {}), "cases": [{"arms": {"with": merged}}]}
+        decided = _decide(view, n, pass_at, code, killed, asked=asked)
+        if runs is None and decided["verdict"] == "not-run":
+            decided["reason"] = TIMEOUT if killed else RUNNER_ERROR
+        result = {"case": case, **decided}
+        if decided["verdict"] != "not-run" or decided["reason"] != RUNS_ERRORED:
+            return _record(state, case, result)
+        if all(_is_errored(r) for r in segment) or asked >= n:
+            return _record(state, case, result)
+
+        cost = _valid_cost(doc)
+        spent = cap if cost is None else spent + cost
+        left = round(cap - spent, 6)
+        if left <= 0:
+            return _record(state, case, {**result, "reason": COST_CAP})
+        time_left = timeout_seconds - (clock() - started)
+        if time_left < first_elapsed:
+            return _record(state, case, {**result, "reason": TIMEOUT})
+
+        need = min(pass_at - decided["passed"], n - pass_at + 1 - decided["failed"])
+        batch = max(1, min(need, n - asked))
+        json_path = runs_dir / case / f"batch-{asked}.json"
+        json_path.parent.mkdir(mode=0o700, exist_ok=True)
+        json_path.unlink(missing_ok=True)
+        runner = runner_for(batch, left, json_path, runs_dir / case / f"batch-{asked}")
 
 
 def record_crash(state: Path, case: str) -> None:
