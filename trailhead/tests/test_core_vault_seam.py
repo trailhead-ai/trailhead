@@ -217,8 +217,9 @@ def test_core_show_reads_core_never_another_vault(source, env, lore_ready, tmp_p
     _adr(source, "CORE-BODY-MARK")
     other = tmp_path / "mine"
     _adr(other, "OTHER-BODY-MARK")
-    assert step(source, env).outcome == "registered"
     lore(env, "vault", "add", "mine", "--scope", "team", "--path", str(other))
+    assert step(source, env).outcome == "registered"
+    assert "OTHER-BODY-MARK" in lore(env, "record", "show", "adr/x")
     r = _show(env)
     assert r.code == 0 and "CORE-BODY-MARK" in r.stdout
     assert "OTHER-BODY-MARK" not in r.stdout + r.stderr
