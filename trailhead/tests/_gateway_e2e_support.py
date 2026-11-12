@@ -205,7 +205,9 @@ def render_sandbox_settings(dotfiles: Path, outpost_state: Path, port: int, *, d
 
     The real template names ``~/.local/state/outpost`` and ``127.0.0.1:7313``; here those name this
     test's Outpost state and port, since both are fixed in the template for the operator's own
-    Outpost. ``deny_read=False`` removes both ways the template hides the credential folders.
+    Outpost. The ``Read`` rules are rewritten to the ``//<absolute path>`` form Claude Code requires for an
+    absolute path (a single slash is relative to the settings file). ``deny_read=False`` removes both
+    ways the template hides the credential folders: the sandbox ``denyRead`` and the ``Read`` denials.
     """
     template = dotfiles / "dot_claude" / "private_settings.json.tmpl"
     done = subprocess.run(
@@ -218,6 +220,7 @@ def render_sandbox_settings(dotfiles: Path, outpost_state: Path, port: int, *, d
         raise AssertionError(f"chezmoi could not render the settings template: {done.stderr[-500:]}")
     rendered = json.loads(done.stdout)
     text = json.dumps({"sandbox": rendered["sandbox"], "deny": rendered["permissions"]["deny"]})
+    text = text.replace("Read(~/.local/state/outpost", f"Read(/{outpost_state}")
     text = text.replace("~/.local/state/outpost", str(outpost_state)).replace("127.0.0.1:7313", f"127.0.0.1:{port}")
     cut = json.loads(text)
     sandbox, deny = cut["sandbox"], cut["deny"]
@@ -262,7 +265,7 @@ def sandbox_steps(state: Path, port: int, other_port: int) -> dict[str, str]:
     and error reach the result, and no step echoes the proxy variable. Each is a single simple command:
     a chained one would need an approval a ``-p`` run cannot give.
     """
-    probe = 'curl -sS --max-time 10 --proxy "$HTTP_PROXY" -w "\\nhttp=%{http_code}\\n"'
+    probe = 'curl -sS --max-time 10 --noproxy "" --proxy "$HTTP_PROXY" -w "\\nhttp=%{http_code}\\n"'
     post = "-X POST -H 'content-type: application/json' -d '{\"pid\":1,\"start_time\":1}'"
     return {
         "credential_read": f'cat "{state}"/sessions/*/gateway-client.json > /dev/null',

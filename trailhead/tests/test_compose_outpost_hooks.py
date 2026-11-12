@@ -42,6 +42,13 @@ class TestCompose:
         assert script == dest / "hooks" / "gateway-register"
         assert os.access(script, os.X_OK)
 
+    def test_hook_timeout_fits_the_session_start_budget(self, tmp_path):
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        hooks = json.loads((dest / "hooks" / "hooks.json").read_text())
+        (hook,) = [h for e in hooks["hooks"]["SessionStart"] for h in e["hooks"]]
+        assert hook["timeout"] <= 3
+
     def test_no_other_tool_composes_the_gateway_hook(self, tmp_path):
         others = [
             d.name
@@ -129,5 +136,11 @@ class TestUninstall:
         (claude_dir / ".trailhead-registered").write_text("{}")
         (claude_dir / ".trailhead-installed-outpost").write_text("{}")
         assert (plugin / "hooks" / "gateway-register").is_file()
-        run_uninstall(env=env, assume_yes=True, runner=lambda args, **kw: None)
+        calls: list[list[str]] = []
+
+        def runner(args, **kw):
+            calls.append(list(args))
+
+        run_uninstall(env=env, assume_yes=True, runner=runner)
+        assert ["claude", "plugin", "uninstall", "outpost@trailhead"] in [c[:4] for c in calls]
         assert not (plugin / "hooks" / "hooks.json").exists()

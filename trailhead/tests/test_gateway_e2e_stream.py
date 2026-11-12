@@ -1,6 +1,7 @@
 """The stream reader and the checks the opt-in gateway end-to-end test applies to a sandboxed session (ungated)."""
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,9 @@ from ._gateway_e2e_support import (
     check_proxied_curl_to_another_loopback_port_is_refused,
     check_registering_without_the_authority_is_refused,
     check_run_list_prints_the_empty_list,
+    dotfiles_checkout,
+    render_sandbox_settings,
+    sandbox_steps,
     tool_results,
 )
 
@@ -185,3 +189,46 @@ def test_a_check_fails_for_its_own_reason_on_the_session_that_breaks_it(label):
 def test_a_step_the_session_never_ran_fails_its_check_instead_of_passing(step, check):
     with pytest.raises(AssertionError, match="was not run as written"):
         check(GOOD_FACTS, _session(**{step: None}))
+
+
+_FAKE_CURL = """#!/bin/sh
+# Routes the way real curl does: NO_PROXY hosts go direct unless --noproxy '' overrides it.
+override=0
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "--noproxy" ] && [ -z "$a" ]; then override=1; fi
+  prev="$a"
+  case "$a" in http://*) url="$a" ;; esac
+done
+host=${url#http://}; host=${host%%[:/]*}
+case ",$NO_PROXY," in
+  *",$host,"*) [ "$override" = 1 ] && echo proxy || echo direct ;;
+  *) echo proxy ;;
+esac
+"""
+
+
+def test_the_probe_commands_reach_the_proxy_even_though_loopback_is_in_no_proxy(tmp_path):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    curl = bin_dir / "curl"
+    curl.write_text(_FAKE_CURL)
+    curl.chmod(0o755)
+    env = {
+        "PATH": f"{bin_dir}:/usr/bin:/bin",
+        "HTTP_PROXY": "http://127.0.0.1:9",
+        "NO_PROXY": "127.0.0.1",
+    }
+    steps = sandbox_steps(tmp_path, 7000, 7001)
+    for name in ("command_route", "other_loopback_port", "register_without_authority"):
+        out = subprocess.run(["sh", "-c", steps[name]], env=env, capture_output=True, text=True).stdout
+        assert out.strip() == "proxy", name
+
+
+def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_form(tmp_path):
+    state = tmp_path / "outpost-state"
+    settings = render_sandbox_settings(dotfiles_checkout(), state, 7000)
+    deny = settings["permissions"]["deny"]
+    assert f"Read(/{state}/sessions/**)" in deny
+    assert f"Read(/{state}/registration/**)" in deny
+    assert render_sandbox_settings(dotfiles_checkout(), state, 7000, deny_read=False)["permissions"]["deny"] == []
