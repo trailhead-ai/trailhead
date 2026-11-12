@@ -5,6 +5,7 @@ file runs the script as a subprocess against the real lore CLI."""
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import sys
@@ -3266,6 +3267,27 @@ def test_scrub_redacts_each_documented_credential_shape(shape, text, secret, cap
     assert code == 0, err
     assert secret not in out
     assert "[redacted]" in out
+
+
+def run_scrub_stdin_bytes(data, capsys, monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(data), encoding="utf-8"))
+    code = fw.main(["scrub"], runner=None)
+    out = capsys.readouterr()
+    return code, out.out, out.err
+
+
+def test_scrub_of_non_utf8_stdin_redacts_the_credential_and_never_raises(capsys, monkeypatch):
+    code, out, err = run_scrub_stdin_bytes(b"login fails when password=Zq7planted8841\xff is set", capsys, monkeypatch)
+    assert code == 0, err
+    assert "Zq7planted8841" not in out
+    assert "[redacted]" in out
+    assert out.count("\n") == 1
+
+
+def test_scrub_of_non_utf8_stdin_without_a_credential_keeps_the_text_and_replaces_the_bad_byte(capsys, monkeypatch):
+    code, out, err = run_scrub_stdin_bytes(b"empty export \xff case", capsys, monkeypatch)
+    assert code == 0, err
+    assert out == "empty export \ufffd case\n"
 
 
 def test_scrub_passes_a_clean_line_unchanged(capsys):

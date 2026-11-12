@@ -1676,7 +1676,8 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
         if args.command == "reopen-abandoned":
             return _reopen_abandoned_command(args, runner)
         if args.command == "scrub":
-            return _scrub_command(sys.stdin.read() if stdin is None else stdin)
+            raw = sys.stdin.buffer.read().decode("utf-8", errors="replace") if stdin is None else stdin
+            return _scrub_command(raw)
         if args.command == "entry":
             return _entry_command(args, sys.stdin.read() if stdin is None else stdin, runner)
         if args.parent is None and args.session == "build":
