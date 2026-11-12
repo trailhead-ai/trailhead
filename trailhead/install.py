@@ -426,7 +426,7 @@ def run_install(
                     file=core_out,
                 )
         except LockError:
-            core_vault = lock_held_core_vault(state_dir("trailhead", env=_env) / _LOCK_FILENAME, file=core_out)
+            core_vault = lock_held_core_vault(state_dir("trailhead", env=_env) / _LOCK_FILENAME)
     else:
         core_vault = skipped_core_vault(
             lore_enabled=bool(cfg.cli_flags.get("lore")), file=core_out

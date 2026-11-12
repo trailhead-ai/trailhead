@@ -275,7 +275,7 @@ def _fail(step: str, detail: str, *, lore_bin: Path) -> CoreVaultOutcome:
     return CoreVaultOutcome("failed", reason)
 
 
-def lock_held_core_vault(lock_path: Path, *, file=None) -> CoreVaultOutcome:
+def lock_held_core_vault(lock_path: Path) -> CoreVaultOutcome:
     """Print and return the failed outcome for a held wire lock; writes nothing else."""
     reason = f"the wire lock {lock_path} is held (another trailhead install or update may be running)"
     print(

@@ -7,14 +7,14 @@ LORE_* environment and asserts the real ``~/.config/lore`` and
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from trailhead.core_vault import MARKER_NAME, core_copy_dir, install_core_vault
+from trailhead.core_vault import MARKER_NAME, core_copy_dir, core_show, install_core_vault
+from trailhead.tests.test_cli_shims import _minimal_path
 
 pytestmark = pytest.mark.seam_real
 
@@ -100,13 +100,13 @@ def lore(env, *args):
     return r.stdout
 
 
-def write_record(root: Path, name: str, title: str, body: str) -> None:
-    (root / "blob").mkdir(parents=True, exist_ok=True)
-    (root / "blob" / f"{name}.json").write_text(
+def write_record(root: Path, name: str, title: str, body: str, kind: str = "blob") -> None:
+    (root / kind).mkdir(parents=True, exist_ok=True)
+    (root / kind / f"{name}.json").write_text(
         json.dumps(
             {
                 "version": "v1",
-                "kind": "blob",
+                "kind": kind,
                 "title": title,
                 "status": "active",
                 "created-at": "2026-06-17T10:00:00Z",
@@ -114,7 +114,7 @@ def write_record(root: Path, name: str, title: str, body: str) -> None:
             }
         )
     )
-    (root / "blob" / f"{name}.md").write_text(body + "\n")
+    (root / kind / f"{name}.md").write_text(body + "\n")
 
 
 def snapshot(root: Path) -> dict[str, bytes | None]:
@@ -192,26 +192,11 @@ def test_preexisting_core_elsewhere_is_left_registered_and_untouched(source, env
 
 
 def _show(env, record_id="adr/x"):
-    from trailhead.core_vault import core_show
-
     return core_show(record_id, env=env, runner=real_lore, lore_bin=LORE_CLI)
 
 
 def _adr(root: Path, body: str) -> None:
-    (root / "adr").mkdir(parents=True, exist_ok=True)
-    (root / "adr" / "x.json").write_text(
-        json.dumps(
-            {
-                "version": "v1",
-                "kind": "adr",
-                "title": "X",
-                "status": "active",
-                "created-at": "2026-06-17T10:00:00Z",
-                "updated-at": "2026-06-17T10:00:00Z",
-            }
-        )
-    )
-    (root / "adr" / "x.md").write_text(body + "\n")
+    write_record(root, "x", "X", body, kind="adr")
 
 
 def test_core_show_reads_core_never_another_vault(source, env, lore_ready, tmp_path):
@@ -251,17 +236,6 @@ def test_core_show_of_a_record_absent_from_core_exits_1(source, env, lore_ready)
 
 
 # -- trailhead core show, through the installed `trailhead` shim ------------
-
-
-def _minimal_path(tmp_path: Path, shim_dir: Path) -> str:
-    """PATH holding only the shim dir, the few tools the shim and launcher need,
-    and one python3 that meets the floor."""
-    tools = tmp_path / "_tools"
-    tools.mkdir()
-    for name in ("bash", "env", "dirname", "readlink", "grep", "head"):
-        (tools / name).symlink_to(shutil.which(name))
-    (tools / "python3").symlink_to(Path(sys.executable).resolve())
-    return f"{shim_dir}:{tools}"
 
 
 def test_trailhead_shim_shows_a_core_record_from_an_unrelated_cwd(source, env, lore_ready, tmp_path):
