@@ -3,10 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
-import socket
-import subprocess
-import sys
 import time
 
 import pytest
@@ -14,13 +10,15 @@ import pytest
 from trailhead.harness import harness_process
 from trailhead.tests._gateway_support import (
     REGISTRATION_AUTHORITY,
-    REPO_ROOT,
     StubOutpost,
+    free_port,
+    register_runner_cmd,
+    run_under_harness,
+    runner_env,
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
 
-RUNNER = REPO_ROOT / "trailhead" / "tests" / "_register_runner.py"
 ECHOED_SECRET = "echoed-secret-SEEDED-0a1b"
 HOOK = ("gateway", "register", "--hook")
 
@@ -47,26 +45,15 @@ def trailhead_state(tmp_path):
 @pytest.fixture
 def run(launcher, outpost_state, trailhead_state):
     def _run(port, argv=HOOK, *, extra_env=None, stdin='{"cwd": "/elsewhere"}'):
-        env = {
-            **os.environ,
-            "OUTPOST_STATE_DIR": str(outpost_state),
-            "TRAILHEAD_STATE_DIR": str(trailhead_state),
-            "PYTHONPATH": str(REPO_ROOT),
-        }
-        env.update(extra_env or {})
-        script = f'read go; "{sys.executable}" "{RUNNER}" {port} ' + " ".join(f"'{a}'" for a in argv)
-        proc = subprocess.Popen(
-            [str(launcher), "-c", script],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=env,
-            cwd=REPO_ROOT,
+        found = []
+        proc = run_under_harness(
+            launcher,
+            register_runner_cmd(port, list(argv)),
+            env=runner_env(outpost_state, trailhead_state=trailhead_state, extra=extra_env),
+            on_start=lambda pid: found.append(harness_process(start_pid=pid)),
+            stdin=stdin,
         )
-        harness = harness_process(start_pid=proc.pid)
-        out, err = proc.communicate("go\n" + stdin, timeout=60)
-        return subprocess.CompletedProcess(proc.args, proc.returncode, out, err), harness
+        return proc, found[0]
 
     return _run
 
@@ -74,12 +61,6 @@ def run(launcher, outpost_state, trailhead_state):
 def _log_lines(trailhead_state):
     log = trailhead_state / "gateway" / "register.log"
     return log.read_text().splitlines() if log.exists() else []
-
-
-def _closed_port():
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 class TestRequest:
@@ -180,7 +161,7 @@ class TestFailurePaths:
     def test_a_closed_port_exits_zero_well_inside_two_seconds(self, run, outpost_state, trailhead_state):
         write_authority(outpost_state)
         started = time.monotonic()
-        proc, _ = run(_closed_port())
+        proc, _ = run(free_port())
         elapsed = time.monotonic() - started
         assert proc.returncode == 0
         assert proc.stderr.strip() == "outpost_unreachable"
@@ -212,7 +193,7 @@ class TestFailurePaths:
         write_authority(outpost_state)
         if scenario == "missing":
             (outpost_state / "registration" / "credential").unlink()
-        port = _closed_port()
+        port = free_port()
         if scenario == "refused":
             with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": ECHOED_SECRET})) as stub:
                 proc, _ = run(stub.port)

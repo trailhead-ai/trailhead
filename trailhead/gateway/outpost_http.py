@@ -31,8 +31,8 @@ class OutpostUnreachable(Exception):
 @dataclass(frozen=True)
 class Reply:
     status: int
-    body: object
-    """The decoded JSON body, or ``None`` when the body was not JSON."""
+    body: dict
+    """The decoded JSON body when it is an object, else an empty dict."""
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -58,7 +58,7 @@ def request(
     port: int = DAEMON_PORT,
     timeout: float = CONNECT_TIMEOUT_SECONDS,
 ) -> Reply:
-    """One loopback call. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as JSON."""
+    """One loopback call. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as a JSON object."""
     data = urllib.parse.urlencode(form).encode() if form is not None else None
     if json_body is not None:
         data = json.dumps(json_body).encode()
@@ -80,4 +80,4 @@ def request(
         body = json.loads(raw)
     except ValueError:
         body = None
-    return Reply(status, body)
+    return Reply(status, body if isinstance(body, dict) else {})

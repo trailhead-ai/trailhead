@@ -16,6 +16,7 @@ import json
 import sys
 
 from trailhead.gateway import outpost_http
+from trailhead.gateway.register import register_log
 from trailhead.harness import session_key
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
@@ -34,9 +35,7 @@ def _fail(message: str) -> CommandError:
 
 def _read_credential(key: str) -> tuple[str, str]:
     path = state_dir(OUTPOST_APP) / "sessions" / key / "gateway-client.json"
-    no_credential = _fail(
-        f"this session has no gateway credential; see {state_dir('trailhead') / 'gateway' / 'register.log'} for why"
-    )
+    no_credential = _fail(f"this session has no gateway credential; see {register_log()} for why")
     try:
         raw = path.read_text()
     except FileNotFoundError:
@@ -61,11 +60,10 @@ def _exchange(client_id: str, client_secret: str, port: int) -> str:
         form={"grant_type": "client_credentials"},
         port=port,
     )
-    body = reply.body if isinstance(reply.body, dict) else {}
-    token = body.get("access_token")
+    token = reply.body.get("access_token")
     if reply.status == 200 and isinstance(token, str) and token:
         return token
-    code = body.get("error")
+    code = reply.body.get("error")
     if isinstance(code, str):
         raise _fail(f"Outpost refused the credential: {code}")
     raise _fail("Outpost answered with a reply this command cannot read")
@@ -75,7 +73,7 @@ def _list_runs(token: str, port: int) -> dict:
     reply = outpost_http.request(
         "GET", "/gateway/runs", headers={"Authorization": f"Bearer {token}"}, port=port
     )
-    body = reply.body if isinstance(reply.body, dict) else {}
+    body = reply.body
     if reply.status == 200:
         runs = body.get("runs")
         if isinstance(body.get("workspace"), str) and isinstance(runs, list):

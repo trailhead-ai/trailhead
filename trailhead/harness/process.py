@@ -144,9 +144,14 @@ def harness_process(
     return None
 
 
+def format_session_key(pid: int, start_time: int) -> str:
+    """The session key Outpost registers a harness process under: ``ws-<pid>-<start_time>``."""
+    return f"ws-{pid}-{start_time}"
+
+
 def session_key(**kwargs: object) -> str | None:
-    """``ws-<pid>-<start_time>`` for the owning harness process, or ``None``."""
+    """The session key of the owning harness process, or ``None``."""
     found = harness_process(**kwargs)  # type: ignore[arg-type]
     if found is None:
         return None
-    return f"ws-{found[0]}-{found[1]}"
+    return format_session_key(*found)

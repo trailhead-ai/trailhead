@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import os
 import shutil
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -27,22 +26,21 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from ._gateway_support import REPO_ROOT
+from ._gateway_support import (
+    REGISTER_RUNNER,
+    REPO_ROOT,
+    free_port,
+    gateway_runner_cmd,
+    register_runner_cmd,
+    runner_env,
+)
 from ._harness_process_support import make_fake_harness
 
 GROUP = "e2e"
 W1, W2 = "ws-one", "ws-two"
 PLUGIN_DIR = REPO_ROOT / "tools" / "outpost" / "plugins" / "outpost"
-REGISTER_RUNNER = Path(__file__).with_name("_register_runner.py")
-GATEWAY_RUNNER = Path(__file__).with_name("_gateway_runner.py")
 SANDBOX_MODEL = "sonnet"
 SESSION_TIMEOUT_SECONDS = 600
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
 
 
 @dataclass(frozen=True)
@@ -160,28 +158,14 @@ def real_outpost(root: Path, camp: Camp) -> Iterator[RealOutpost]:
 
 def step_env(root: Path, outpost: RealOutpost) -> dict[str, str]:
     """The environment the trailhead side runs in: where Outpost's state is, and a scratch trailhead state."""
-    return {
-        **os.environ,
-        "OUTPOST_STATE_DIR": str(outpost.state),
-        "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
-        "PYTHONPATH": str(REPO_ROOT),
-    }
+    return runner_env(outpost.state, trailhead_state=root / "trailhead-state")
 
 
 # --- a fake harness ---------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class Sections:
-    """The output of a script that wrote ``@@name`` before each step."""
-
-    text: dict[str, str]
-
-    def __getitem__(self, name: str) -> str:
-        return self.text[name]
-
-
-def _parse_sections(out: str) -> Sections:
+def _parse_sections(out: str) -> dict[str, str]:
+    """The output of a script that wrote ``@@name`` before each step, by step name."""
     text: dict[str, list[str]] = {}
     current: list[str] | None = None
     for line in out.splitlines():
@@ -189,10 +173,12 @@ def _parse_sections(out: str) -> Sections:
             current = text.setdefault(line[2:], [])
         elif current is not None:
             current.append(line)
-    return Sections({name: "\n".join(lines) for name, lines in text.items()})
+    return {name: "\n".join(lines) for name, lines in text.items()}
 
 
-def run_fake_harness(root: Path, name: str, cwd: Path, steps: list[tuple[str, str]], env: dict[str, str]) -> Sections:
+def run_fake_harness(
+    root: Path, name: str, cwd: Path, steps: list[tuple[str, str]], env: dict[str, str]
+) -> dict[str, str]:
     """Run *steps* — ``(name, shell command)`` — as children of a ``claude``-named process started in *cwd*.
 
     Each step's combined output, then ``rc=<n>``, lands in the section of its name.
@@ -204,11 +190,11 @@ def run_fake_harness(root: Path, name: str, cwd: Path, steps: list[tuple[str, st
 
 
 def register_cmd(port: int) -> str:
-    return f'"{sys.executable}" "{REGISTER_RUNNER}" {port} gateway register'
+    return register_runner_cmd(port, ["gateway", "register"])
 
 
 def list_cmd(port: int, scratch: Path) -> str:
-    return f'"{sys.executable}" "{GATEWAY_RUNNER}" {port} "{scratch / "env-after.json"}" run list'
+    return gateway_runner_cmd(port, scratch / "env-after.json", ["run", "list"])
 
 
 # --- a real sandboxed claude session ----------------------------------------------------------------

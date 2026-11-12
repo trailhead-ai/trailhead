@@ -16,9 +16,10 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 from trailhead.gateway import outpost_http
-from trailhead.harness import harness_process
+from trailhead.harness import format_session_key, harness_process
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
@@ -44,6 +45,11 @@ AUTHORITY_UNREADABLE = "authority_unreadable"
 OUTPOST_UNREACHABLE = "outpost_unreachable"
 UNEXPECTED_REPLY = "unexpected_reply"
 UNEXPECTED_FAILURE = "unexpected_failure"
+
+
+def register_log() -> Path:
+    """Where a failed registration leaves its one-line reason."""
+    return state_dir("trailhead") / "gateway" / "register.log"
 
 
 class Refused(Exception):
@@ -74,7 +80,7 @@ def register() -> str:
     if found is None:
         raise Refused(NO_HARNESS)
     pid, start_time = found
-    local_key = f"ws-{pid}-{start_time}"
+    local_key = format_session_key(pid, start_time)
     authority = _read_authority()
     try:
         reply = outpost_http.request(
@@ -87,10 +93,9 @@ def register() -> str:
         )
     except outpost_http.OutpostUnreachable:
         raise Refused(OUTPOST_UNREACHABLE, local_key) from None
-    body = reply.body if isinstance(reply.body, dict) else {}
-    if reply.status == 200 and isinstance(body.get("session_key"), str):
+    if reply.status == 200 and isinstance(reply.body.get("session_key"), str):
         return local_key
-    reason = body.get("reason")
+    reason = reply.body.get("reason")
     if reply.status != 200 and reason in OUTPOST_REASONS:
         raise Refused(reason, local_key)
     raise Refused(UNEXPECTED_REPLY, local_key)
@@ -99,7 +104,7 @@ def register() -> str:
 def _log(reason: str, key: str | None) -> None:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        path = state_dir("trailhead") / "gateway" / "register.log"
+        path = register_log()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as fh:
             fh.write(f"{stamp} {key or '-'} {reason}\n")

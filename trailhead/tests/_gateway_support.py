@@ -1,9 +1,11 @@
 """Shared fixtures for tests of the Outpost gateway commands.
 
-``StubOutpost`` is a loopback stand-in for the two Outpost routes the gateway
-commands call; ``run_gateway_runner`` runs ``_gateway_runner.py`` as a child of a
-fake harness process, so the command finds a real harness ancestor and a real
-session key, and returns what the command printed.
+``StubOutpost`` is a loopback stand-in for the Outpost routes the gateway
+commands call; ``run_under_harness`` runs a shell command as a child of a fake
+harness process, so the command finds a real harness ancestor and a real session
+key; ``run_gateway_runner`` uses it to run ``_gateway_runner.py`` and returns what
+the command printed. The ``*_cmd`` builders are the shell commands that run the two
+test entry points, shared with the end-to-end test.
 """
 
 from __future__ import annotations
@@ -11,6 +13,8 @@ from __future__ import annotations
 import base64
 import json
 import os
+import shlex
+import socket
 import subprocess
 import sys
 import threading
@@ -22,12 +26,64 @@ from pathlib import Path
 from trailhead.harness import session_key
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-RUNNER = Path(__file__).with_name("_gateway_runner.py")
+GATEWAY_RUNNER = Path(__file__).with_name("_gateway_runner.py")
+REGISTER_RUNNER = Path(__file__).with_name("_register_runner.py")
 
 CLIENT_ID = "client-id-SEEDED-1f3a"
 CLIENT_SECRET = "client-secret-SEEDED-9c7e"
 TOKEN = "access-token-SEEDED-5b2d"
 REGISTRATION_AUTHORITY = "registration-authority-SEEDED-7d4e"
+
+
+def free_port() -> int:
+    """A loopback port nothing is listening on (once this returns)."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def runner_env(
+    outpost_state: Path, *, trailhead_state: Path | None = None, extra: dict[str, str] | None = None
+) -> dict[str, str]:
+    """The environment a test entry point runs in: Outpost's state dir, and this checkout importable."""
+    env = {**os.environ, "OUTPOST_STATE_DIR": str(outpost_state), "PYTHONPATH": str(REPO_ROOT)}
+    if trailhead_state is not None:
+        env["TRAILHEAD_STATE_DIR"] = str(trailhead_state)
+    env.update(extra or {})
+    return env
+
+
+def gateway_runner_cmd(port: int, env_dump: Path, argv: list[str]) -> str:
+    """Shell command running the gateway command against *port*, dumping its environment to *env_dump*."""
+    return shlex.join([sys.executable, str(GATEWAY_RUNNER), str(port), str(env_dump), *argv])
+
+
+def register_runner_cmd(port: int, argv: list[str]) -> str:
+    """Shell command running the ``trailhead`` CLI with the registration step aimed at *port*."""
+    return shlex.join([sys.executable, str(REGISTER_RUNNER), str(port), *argv])
+
+
+def run_under_harness(
+    launcher: Path, command: str, *, env: dict[str, str], on_start: Callable[[int], None], stdin: str = ""
+) -> subprocess.CompletedProcess[str]:
+    """Run shell *command* as a child of the fake harness *launcher*.
+
+    The command is held until *on_start* has been called with the harness's pid, so
+    a test can read the harness or seed a file before the command looks for it.
+    *stdin* is what the command reads after that.
+    """
+    proc = subprocess.Popen(
+        [str(launcher), "-c", f"read go; {command}"],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+    )
+    on_start(proc.pid)
+    out, err = proc.communicate("go\n" + stdin, timeout=60)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
 @dataclass
@@ -160,7 +216,6 @@ def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) ->
 @dataclass
 class RunResult:
     proc: subprocess.CompletedProcess[str]
-    key: str
     env_after: dict[str, str] | None
 
 
@@ -181,30 +236,18 @@ def run_gateway_runner(
     """
     env_dump = scratch / "env-after.json"
     env_dump.unlink(missing_ok=True)
-    env = {**os.environ, "OUTPOST_STATE_DIR": str(state_dir), "PYTHONPATH": str(REPO_ROOT)}
-    env.update(extra_env or {})
-    script = (
-        f'read go; "{sys.executable}" "{RUNNER}" {port} "{env_dump}" '
-        + " ".join(_q(a) for a in argv)
+
+    def started(pid: int) -> None:
+        key = session_key(start_pid=pid)
+        assert key is not None, "fake harness did not resolve to a session key"
+        if seed is not None:
+            seed(key)
+
+    done = run_under_harness(
+        launcher,
+        gateway_runner_cmd(port, env_dump, argv),
+        env=runner_env(state_dir, extra=extra_env),
+        on_start=started,
     )
-    proc = subprocess.Popen(
-        [str(launcher), "-c", script],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-        cwd=REPO_ROOT,
-    )
-    key = session_key(start_pid=proc.pid)
-    assert key is not None, "fake harness did not resolve to a session key"
-    if seed is not None:
-        seed(key)
-    out, err = proc.communicate("go\n", timeout=60)
-    done = subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
     after = json.loads(env_dump.read_text()) if env_dump.exists() else None
-    return RunResult(done, key, after)
-
-
-def _q(arg: str) -> str:
-    return "'" + arg.replace("'", "'\\''") + "'"
+    return RunResult(done, after)

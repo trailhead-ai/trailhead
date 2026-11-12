@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import socket
 
 import pytest
 
@@ -13,7 +12,9 @@ from trailhead.tests._gateway_support import (
     CLIENT_SECRET,
     TOKEN,
     StubOutpost,
+    free_port,
     run_gateway_runner,
+    runner_env,
     write_credential,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -118,18 +119,13 @@ class TestFailurePaths:
     def test_no_harness_ancestor_says_it_is_running_in_the_sandbox(self, tmp_path, state):
         import subprocess
         import sys
-        from trailhead.tests._gateway_support import REPO_ROOT, RUNNER
+        from trailhead.tests._gateway_support import GATEWAY_RUNNER, REPO_ROOT
 
         with StubOutpost(runs=RUNS) as stub:
             proc = subprocess.run(
-                [sys.executable, str(RUNNER), str(stub.port), str(tmp_path / "env.json"), "run", "list"],
+                [sys.executable, str(GATEWAY_RUNNER), str(stub.port), str(tmp_path / "env.json"), "run", "list"],
                 capture_output=True, text=True, cwd=REPO_ROOT,
-                env={
-                    **os.environ,
-                    "OUTPOST_STATE_DIR": str(state),
-                    "PYTHONPATH": str(REPO_ROOT),
-                    "GATEWAY_RUNNER_NO_HARNESS": "1",
-                },
+                env=runner_env(state, extra={"GATEWAY_RUNNER_NO_HARNESS": "1"}),
             )
             assert stub.requests == []
         assert proc.returncode != 0
@@ -179,9 +175,7 @@ class TestFailurePaths:
         self._fails_with(r, "outpost-gateway: Outpost refused the credential: invalid_client")
 
     def test_closed_port_says_outpost_is_unreachable(self, launcher, tmp_path, state):
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
+        port = free_port()
         r = _run(launcher, tmp_path, state, port)
         self._fails_with(r, f"outpost-gateway: Outpost is not reachable at 127.0.0.1:{port}; is it running?")
 
@@ -230,9 +224,7 @@ class TestHygiene:
         assert "AssertionError" not in r.proc.stderr, "the command started a subprocess"
 
     def test_secret_never_appears_when_outpost_is_unreachable(self, launcher, tmp_path, state):
-        with socket.socket() as s:
-            s.bind(("127.0.0.1", 0))
-            port = s.getsockname()[1]
+        port = free_port()
         r = _run(launcher, tmp_path, state, port)
         assert r.proc.returncode != 0
         for secret in (CLIENT_SECRET, TOKEN):
