@@ -260,6 +260,8 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
     ritual = args.role == RITUAL_ROLE
+    if args.setup_sandbox_only:
+        return _session_start_setup_sandbox_only(args, ritual)
     if ritual and args.broker_session is not None:
         print(
             "trailhead: --broker-session is not accepted for the ritual role; "
@@ -326,6 +328,33 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
         ]
     print(json.dumps(output))
+    return 0
+
+
+def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) -> int:
+    if not ritual or args.workspace is not None or args.prompt_file is not None or args.broker_session is not None:
+        print(
+            "trailhead: --setup-sandbox-only belongs to the ritual role alone and takes no "
+            "--workspace, --prompt-file or --broker-session",
+            file=sys.stderr,
+        )
+        return 1
+    env = dict(os.environ)
+    config = read_hub_config(args.account, env=env)
+    profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, without_workspace=True)
+    harnesses = [get_harness(args.harness)] if args.harness else detect_harnesses(env)
+    if not harnesses:
+        print("trailhead: no harness detected; pass --harness", file=sys.stderr)
+        return 1
+    launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
+    section = harnesses[0].setup_sandbox(profile, account=launch_account, env=env)
+    if section is None:
+        print(
+            f"trailhead: harness {harnesses[0].name!r} cannot derive a setup sandbox; refusing",
+            file=sys.stderr,
+        )
+        return 1
+    print(json.dumps({"setup_sandbox": section}))
     return 0
 
 
@@ -569,6 +598,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="ID",
         default=None,
         help="Outpost's session id; adds a broker section naming where its credentials live.",
+    )
+    session_p.add_argument(
+        "--setup-sandbox-only",
+        action="store_true",
+        default=False,
+        help="Print only the ritual's setup_sandbox section; takes no workspace or prompt.",
     )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 

@@ -1370,6 +1370,107 @@ def test_the_code_constants_match_the_contract_fixture():  # inert-gate: allow c
     assert launch_profile.BROKER_SCOPE == CONTRACT["broker_scope"]
 
 
+def _setup_only_cli(monkeypatch, env, *extra, role=RITUAL_ROLE):
+    return _run_cli(
+        monkeypatch, env,
+        ["session-start", "--role", role, "--account", "a", "--setup-sandbox-only", "--json", *extra],
+    )
+
+
+@pytest.mark.parametrize(
+    "network",
+    [
+        {"allowedDomains": ["a.example", "b.example"], "deniedDomains": ["c.example"]},
+        {"allowedDomains": ["d.example"]},
+    ],
+)
+def test_setup_sandbox_only_prints_the_section_a_full_ritual_start_prints_and_nothing_else(
+    tmp_path, monkeypatch, capsys, network
+):
+    env, ws = _ritual_ready(tmp_path)
+    _user_network(env, ws, **network)
+    home = Path(env["HOME"]).resolve()
+    data = json.loads((home / ".claude" / "settings.json").read_text())
+    data["permissions"] = {"deny": [f"Read(//{home}/.aws/**)"]}
+    (home / ".claude" / "settings.json").write_text(json.dumps(data))
+    assert _ritual_cli(monkeypatch, env, ws) == 0
+    full = json.loads(capsys.readouterr().out)
+    assert _setup_only_cli(monkeypatch, env) == 0
+    only = json.loads(capsys.readouterr().out)
+    assert set(only) == {"setup_sandbox"}
+    assert only["setup_sandbox"] == full["setup_sandbox"]
+    assert only["setup_sandbox"]["allowed_domains"] == network["allowedDomains"]
+    assert str(home / ".aws") in only["setup_sandbox"]["denied_reads"]
+
+
+def test_setup_sandbox_only_follows_the_users_network_lists(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    _user_network(env, ws, allowedDomains=["a.example"])
+    assert _setup_only_cli(monkeypatch, env) == 0
+    before = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    _user_network(env, ws, allowedDomains=["a.example", "z.example"], deniedDomains=["a.example"])
+    assert _setup_only_cli(monkeypatch, env) == 0
+    after = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    assert before["allowed_domains"] == ["a.example"]
+    assert after["allowed_domains"] == ["z.example"] and after["denied_domains"] == ["a.example"]
+
+
+def test_setup_sandbox_only_reads_the_launch_accounts_own_settings_and_denies_the_default_config(
+    tmp_path, monkeypatch, capsys
+):
+    env, ws, own = _ritual_on_named_account(tmp_path)
+    Path(env["HOME"], ".claude").mkdir(parents=True, exist_ok=True)
+    _, lore, cache = _ritual_roots(env, ws)
+    _write_user_settings(
+        env, _user_sandbox(allowWrite=[".", cache, lore], allowedDomains=["own.example"]), account_dir=own
+    )
+    assert _ritual_cli(monkeypatch, env, ws) == 0
+    full = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    assert _setup_only_cli(monkeypatch, env) == 0
+    only = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    assert only == full
+    assert only["allowed_domains"] == ["own.example"]
+    assert str(Path(env["HOME"]).resolve() / ".claude") in only["denied_reads"]
+
+
+def test_setup_sandbox_only_works_before_any_workspace_exists(tmp_path, monkeypatch, capsys):
+    env = _fence(tmp_path)
+    _configure_hub(env)
+    Path(env["HOME"], ".claude").mkdir(parents=True)
+    _write_user_settings(env, _user_sandbox(allowedDomains=["a.example"]))
+    assert _setup_only_cli(monkeypatch, env) == 0
+    assert json.loads(capsys.readouterr().out)["setup_sandbox"]["allowed_domains"] == ["a.example"]
+
+
+@pytest.mark.parametrize(
+    "role, extra",
+    [
+        (RITUAL_ROLE, ["--workspace", "WS"]),
+        (RITUAL_ROLE, ["--prompt-file", "PROMPT"]),
+        ("hub", []),
+    ],
+)
+def test_setup_sandbox_only_refuses_a_workspace_a_prompt_or_another_role(
+    tmp_path, monkeypatch, capsys, role, extra
+):
+    env, ws = _ritual_ready(tmp_path)
+    prompt = tmp_path / "prompt.txt"
+    prompt.write_text("hello")
+    extra = [str(ws) if a == "WS" else str(prompt) if a == "PROMPT" else a for a in extra]
+    rc = _setup_only_cli(monkeypatch, env, *extra, role=role)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "--setup-sandbox-only" in captured.err
+
+
+def test_setup_sandbox_only_refuses_when_the_seam_answers_none(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    monkeypatch.setattr(cli, "detect_harnesses", lambda e: [_NoLaunchHarness()])
+    rc = _setup_only_cli(monkeypatch, env)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == "" and captured.err.startswith("trailhead: ")
+
+
 def test_the_drive_constants_match_the_contract_fixture():  # inert-gate: allow cross-repo contract seam
     from trailhead import launch_profile as lp
 

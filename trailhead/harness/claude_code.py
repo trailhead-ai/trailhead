@@ -1623,6 +1623,47 @@ def _seed_folder_trust(config_file: Path, directory: Path) -> None:
         raise HarnessError(f"{config_file}: cannot write ({exc}); refusing the launch") from exc
 
 
+def _effective_user_settings(
+    config_dir: str | None, home: Path, launch_dir: Path, platform: str | None
+) -> _UserSettings:
+    """The account's user-level settings merged with the platform's managed ones, checked confinable."""
+    user = _UserSettings(
+        (Path(config_dir) if config_dir else home / ".claude") / _SETTINGS_FILENAME,
+        home,
+        launch_dir,
+        platform=platform,
+    )
+    for managed in _managed_settings(home, launch_dir, platform):
+        user.absorb(managed)
+    _refuse_unconfinable_sandbox(user)
+    return user
+
+
+def _profile_denied_reads(
+    profile: ResolvedProfile, config_dir: str | None, home: Path
+) -> list[Path]:
+    """Every path the profile denies reading, with the default account's config dir when it applies."""
+    denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
+    own_config = Path(os.path.realpath(config_dir)) if config_dir else None
+    default_config = Path(os.path.realpath(home / ".claude"))
+    if ROLE_OTHER_ACCOUNT_CONFIGS in profile.profile.read_denied_roles and own_config not in (
+        None,
+        default_config,
+    ):
+        denied_reads.append(default_config)
+    return denied_reads
+
+
+def _setup_sandbox_section(user: _UserSettings, denied_reads: list[Path]) -> dict[str, list[str]]:
+    return {
+        "allowed_domains": [d for d in (user.allowed_domains or []) if d not in user.denied_domains],
+        "denied_domains": list(user.denied_domains),
+        "denied_reads": list(
+            dict.fromkeys([*user.read_denial_paths, *(str(p) for p in denied_reads)])
+        ),
+    }
+
+
 class ClaudeCodeHarness(Harness):
     """Install agent-plugins into Claude Code via the ``claude plugin`` CLI."""
 
@@ -2585,15 +2626,7 @@ class ClaudeCodeHarness(Harness):
         config_dir = env_set.get("CLAUDE_CONFIG_DIR")
         home = _account_home(source)
         launch_dir = Path(os.path.realpath(directory))
-        user = _UserSettings(
-            (Path(config_dir) if config_dir else home / ".claude") / _SETTINGS_FILENAME,
-            home,
-            launch_dir,
-            platform=platform,
-        )
-        for managed in _managed_settings(home, launch_dir, platform):
-            user.absorb(managed)
-        _refuse_unconfinable_sandbox(user)
+        user = _effective_user_settings(config_dir, home, launch_dir, platform)
         roots = [Path(os.path.realpath(p)) for p in profile.writable]
         if wants_broker:
             _refuse_helper_code_under_write_roots(
@@ -2621,14 +2654,7 @@ class ClaudeCodeHarness(Harness):
         write_denied = [Path(os.path.realpath(p)) for p in profile.write_denied]
         deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
-        denied_reads = [Path(os.path.realpath(p)) for p in profile.read_denied]
-        own_config = Path(os.path.realpath(config_dir)) if config_dir else None
-        default_config = Path(os.path.realpath(home / ".claude"))
-        if ROLE_OTHER_ACCOUNT_CONFIGS in profile.profile.read_denied_roles and own_config not in (
-            None,
-            default_config,
-        ):
-            denied_reads.append(default_config)
+        denied_reads = _profile_denied_reads(profile, config_dir, home)
         settings: dict = {
             "sandbox": {
                 "enabled": True,
@@ -2727,18 +2753,37 @@ class ClaudeCodeHarness(Harness):
             argv += ["--effort", profile.profile.effort]
         if prompt:
             argv.append(prompt)
-        setup_sandbox = {
-            "allowed_domains": [
-                d for d in (user.allowed_domains or []) if d not in user.denied_domains
-            ],
-            "denied_domains": list(user.denied_domains),
-            "denied_reads": list(
-                dict.fromkeys([*user.read_denial_paths, *(str(p) for p in denied_reads)])
-            ),
-        }
         return SessionStart(
-            argv=argv, env_set=env_set, env_unset=env_unset, files=files, setup_sandbox=setup_sandbox
+            argv=argv,
+            env_set=env_set,
+            env_unset=env_unset,
+            files=files,
+            setup_sandbox=_setup_sandbox_section(user, denied_reads),
         )
+
+    def setup_sandbox(
+        self,
+        profile: ResolvedProfile,
+        *,
+        account: str | None,
+        env: dict[str, str] | None = None,
+        platform: str | None = None,
+    ) -> dict[str, list[str]]:
+        """The ``setup_sandbox`` section a session of *profile* would carry, with no directory.
+
+        The section is the user's network lists and read denials plus the profile's own
+        read denials; none of it needs the session's directory, so a caller can have it
+        before the directory exists. The user's relative read-denial entries, which
+        :meth:`session_start` resolves against the session directory, resolve against the
+        account's home here. Refuses the same unreadable or unconfinable user and managed
+        settings :meth:`session_start` refuses.
+        """
+        source = env if env is not None else dict(os.environ)
+        env_set = self.session_launch_env_set(account, env=source)
+        config_dir = env_set.get("CLAUDE_CONFIG_DIR")
+        home = _account_home(source)
+        user = _effective_user_settings(config_dir, home, Path(os.path.realpath(home)), platform)
+        return _setup_sandbox_section(user, _profile_denied_reads(profile, config_dir, home))
 
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None

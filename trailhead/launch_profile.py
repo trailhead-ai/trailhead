@@ -447,7 +447,14 @@ def resolve_profile(
     env: dict[str, str] | None = None,
     platform: str | None = None,
     workspace: str | os.PathLike[str] | None = None,
+    without_workspace: bool = False,
 ) -> ResolvedProfile:
+    """Resolve *profile*'s roles for *account*.
+
+    ``without_workspace`` resolves a workspace-taking profile with no workspace, for a
+    caller that reads only what does not depend on one (the ``workspace`` role is then
+    absent from the result's paths); it is refused alongside a *workspace*.
+    """
     validate_account(account)
     roles = dict.fromkeys(
         (
@@ -459,7 +466,9 @@ def resolve_profile(
         )
     )
     wants_workspace = ROLE_WORKSPACE in roles
-    if wants_workspace and workspace is None:
+    if without_workspace and workspace is not None:
+        raise WorkspaceError("without_workspace and a workspace were both given")
+    if wants_workspace and workspace is None and not without_workspace:
         raise WorkspaceError("a ritual session needs a workspace; none was given")
     if workspace is not None and not wants_workspace:
         raise WorkspaceError("this profile takes no workspace")
@@ -467,6 +476,8 @@ def resolve_profile(
     path_sets: dict[str, tuple[Path, ...]] = {}
     for role in roles:
         if role == ROLE_WORKSPACE:
+            if without_workspace:
+                continue
             paths[role] = validate_workspace(workspace, env=env, platform=platform)
         elif role in _ROLE_SET_RESOLVERS:
             path_sets[role] = _ROLE_SET_RESOLVERS[role](account, env, platform)

@@ -813,6 +813,24 @@ class Harness(ABC):
         """
         return None
 
+    def setup_sandbox(
+        self,
+        profile: ResolvedProfile,
+        *,
+        account: str | None,
+        env: dict[str, str] | None = None,
+        platform: str | None = None,
+    ) -> dict[str, list[str]] | None:
+        """The ``setup_sandbox`` section a session of *profile* would carry, needing no directory.
+
+        The same three keys :attr:`SessionStart.setup_sandbox` carries, for a caller that
+        needs the rules before the session's directory exists. Raises
+        :class:`HarnessError` like :meth:`session_start` for settings it cannot read or
+        confine. Returns ``None`` only from this base default — the harness cannot
+        derive one, and a caller must treat that as a refusal.
+        """
+        return None
+
     def session_launch_account_identity(
         self, account: str | None, *, env: dict[str, str] | None = None
     ) -> AccountIdentity | None:
