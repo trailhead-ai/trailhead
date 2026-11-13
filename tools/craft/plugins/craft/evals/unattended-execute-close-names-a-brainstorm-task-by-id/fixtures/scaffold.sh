@@ -141,7 +141,7 @@ EOW
 cat > decision.json <<'EOJ'
 {"decision":"brainstorm","parent":"task/export-invoices-as-csv","spec":"spec/export-invoices","finding":{"title":"Streaming export design","what":"Accounts with millions of invoices need a streaming export; no approach is agreed and it spans storage, queueing and the API.","where":["export/"],"found":"re-review"},"reason":"too open for any slice"}
 EOJ
-./scripts/found_work.py decide --session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee < decision.json >/dev/null
+./scripts/found_work.py decide --session build --session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee < decision.json >/dev/null
 rm decision.json
 : > lore-calls.log
 : > script-lore-calls.log
