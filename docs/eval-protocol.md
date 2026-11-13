@@ -37,7 +37,13 @@ actually decide something. Eval cases run through the plugin eval runner,
 4. **Map the case to the prose it measures.** Add an entry to the corpus's
    `eval-gate.json` listing the plugin-relative paths `expected.md` names under
    test. A case with no entry fails the portage eval-gate corpus test
-   (`tools/portage/tests/test_portage_eval_gate_corpora.py`). The mapping, the
+   (`tools/portage/tests/test_portage_eval_gate_corpora.py`). On a file that many
+   cases measure, say whether the new case is core (runs on every push) or
+   `"merge_only": true` (runs before merge): keep core the case that detects a
+   behaviour the file decides, and mark the rest merge-only. A `merge_only`
+   case's declared `timeout_seconds` fits the 540 s gate budget (a case that
+   declares more stays core), and every measured file keeps at least one core
+   case. The mapping, the tiers, the
    bar and the verdict are described in
    `tools/portage/plugins/portage/docs/eval-gate.md`.
 5. **Take the red baseline** on the prose as it stands before your change. See
@@ -325,9 +331,11 @@ because ignoring it produced a wrong read at least once.
   runner, so no case can measure it and the gate cannot select one. Do not write a
   hand-run case for it. Record the limitation in the task that changes the prose,
   so the reader knows the change was not behaviourally measured.
-- **Cost.** The gate re-runs every touched case on every push; nothing is cached.
-  A multi-case batch costs real money, so size `--max-cost-usd` from the logged
-  cost of the corpus.
+- **Cost.** A push re-runs the touched core cases; the touched `merge_only`
+  cases run once before merge. A pass is cached by the content of the case and the
+  prose it measures, so unchanged content is not paid for twice. A multi-case
+  batch still costs real money, so size `--max-cost-usd` from the logged cost of
+  the corpus.
 - **A subagent inherits the user's rulesets.** Where a case drives a subagent, the
   baseline arm may already carry a user-level ruleset; probe before trusting a
   baseline.

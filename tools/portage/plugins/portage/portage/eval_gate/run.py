@@ -10,7 +10,7 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
      "passed": int, "failed": int, "errored": int,     # scored passes / scored fails / errored runs
      "reason": null | "harness-has-no-eval-runner" | "runner-missing" | "timeout"
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
-                    | "case-removed-on-branch" | "corpus-new-on-branch",
+                    | "case-removed-on-branch" | "corpus-new-on-branch" | "head-moved",
      "runs": [{"passed": bool, "errored": bool,
                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
@@ -28,8 +28,38 @@ fail when scored failing > n - k; otherwise nothing is decidable and the reason 
 ``runner-error`` (``auth_failed`` partial, or a non-zero exit with no usable JSON),
 else ``runs-errored``.
 
+Before the canary and the runner, ``run`` looks the case up in the pass cache (``cache.py``, which
+holds the key and the store). A hit records ``verdict`` ``pass`` with ``cached`` true and the stored
+counts and runs, and starts no runner and no canary. A fresh ``pass`` is stored after the case ran,
+only when the fingerprint recomputed after the run equals the one looked up before it; a fail and a
+not-run never are. A case whose inputs hold a symlink has no key (never looked up, never stored), and
+with ``PORTAGE_EVAL_RUNNER`` set the cache is neither read nor written. ``cached`` is false on every
+result of a case that ran.
+
+A case is decided in batches, not one ``--runs n`` call. The first call asks for
+``min(k, n - k + 1)`` runs (2 for 3 of 2), the fewest that could decide it. After each call
+the rule above is applied to every run so far (only the runs asked for are counted). While
+neither verdict is reached, the next call asks for the smallest batch that could still decide
+it, ``min(k - passing, n - k + 1 - failing)`` runs, capped at the runs not yet asked, until
+``n`` have been asked. ``errored`` counts errored runs among those asked, so a case decided
+early does not count the runs it never asked for as errored. ``runs`` holds every call's run
+records in order. Each call's runner result stays at ``<state>/runs/<case>.json`` (the first)
+and ``<state>/runs/<case>/batch-<runs asked before it>.json`` (later calls).
+
+A later call is started only when all of these hold; otherwise the case is not-run with the
+reason named, and the runs so far stay in ``runs``:
+
+- the last call added at least one scored run (``runs-errored`` otherwise);
+- the case's ``max_cost_usd`` minus the ``costUsd`` reported so far is above zero; a missing,
+  non-numeric or negative ``costUsd`` counts as the whole cap spent (``cost-cap``). That
+  remainder is passed to the call as its ``--max-cost-usd``;
+- the wall-clock budget left is at least the first call's elapsed time (``timeout``). The
+  budget left is the call's timeout minus the time since ``run`` started, the canary included,
+  and it is the timeout the later call runs under. ``clock`` (default ``time.monotonic``)
+  supplies the time.
+
 The sandbox-write canary (``canary.py``) runs once per state directory before the first
-case and is cached at ``<state>/canary.json`` — the same shape as a case result, with
+case, not once per batch, and is cached at ``<state>/canary.json`` — the same shape as a case result, with
 ``case`` ``"sandbox-write"`` and a single run (runs 1, pass_at 1, same ``_decide``)::
 
     {"case": "sandbox-write", "verdict": "pass" | "fail" | "not-run", "passed": int,
@@ -60,6 +90,11 @@ that is a symlink, owned by another user or group- or world-writable makes the c
 ``runner-error`` (a stderr line names the problem) and no runner starts. The directory is placed
 through the harness's ``eval_runner`` hook (``tmpdir``).
 
+A result describes the head the plan was made at. Before it looks anything up or starts anything, ``run``
+asks git in the plan's ``repo``: unless ``HEAD`` is the plan's ``head`` and no tracked file differs
+from it (untracked files do not count), the case is recorded as not-run ``head-moved`` (a plan with
+no ``head``, or a repo git cannot answer for, is the same). Plan again at the current head.
+
 A plan entry with ``new_runner_grants`` true (its corpus has no mapping at the base, so its
 runner grants are unreviewed) is recorded as not-run ``corpus-new-on-branch`` the same way: no
 harness lookup, no canary, no runner.
@@ -80,6 +115,7 @@ whose name fails the mapping's shape; a plugin root that leaves the repo.
 from __future__ import annotations
 
 import json
+import math
 import os
 import signal
 import stat
@@ -91,7 +127,9 @@ import time
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 
+from . import cache as pass_cache
 from . import canary
+from .cache import ensure_private_dir
 from .mapping import CASE_NAME
 
 DEFAULT_TIMEOUT_SECONDS = 540
@@ -106,6 +144,7 @@ RUNS_ERRORED = "runs-errored"
 SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
 CASE_REMOVED = "case-removed-on-branch"
 CORPUS_NEW = "corpus-new-on-branch"
+HEAD_MOVED = "head-moved"
 RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
@@ -113,7 +152,11 @@ class RunRefused(Exception):
     pass
 
 
-def _check_state(state: Path) -> None:
+def check_state(state: Path) -> None:
+    """Refuse a state directory that is not a real, caller-owned directory with mode 0700.
+
+    Every reader of a state directory (``run``, ``verdict``, the merge backstop) goes
+    through this, because a state others can write is a verdict others can forge."""
     try:
         st = os.lstat(state)
     except OSError as e:
@@ -151,17 +194,9 @@ def _tmp_base(env: dict[str, str]) -> Path:
         cache = Path(home) / ".cache"
     base = cache / "pegt"
     try:
-        base.mkdir(mode=0o700, parents=True, exist_ok=True)
-        st = os.lstat(base)
-    except OSError as e:
-        raise TmpBaseRefused(f"runner temp base {base} unusable: {e}") from e
-    if stat.S_ISLNK(st.st_mode) or not stat.S_ISDIR(st.st_mode):
-        raise TmpBaseRefused(f"runner temp base {base} is a symlink or not a directory")
-    if st.st_uid != os.geteuid():
-        raise TmpBaseRefused(f"runner temp base {base} is owned by another user")
-    if st.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
-        raise TmpBaseRefused(f"runner temp base {base} is group- or world-writable")
-    return base
+        return ensure_private_dir(base, "runner temp base")
+    except ValueError as e:
+        raise TmpBaseRefused(str(e)) from e
 
 
 @contextmanager
@@ -200,6 +235,22 @@ def _plugin_dir(plan: dict, entry: dict) -> Path:
     return Path(plan["repo"]) / root
 
 
+def _at_planned_head(plan: dict) -> bool:
+    """Whether ``plan["repo"]`` is at ``plan["head"]`` with no tracked file modified. Any failure
+    to ask git is a no."""
+    head, repo = plan.get("head"), plan.get("repo")
+    if not isinstance(head, str) or not isinstance(repo, str):
+        return False
+    try:
+        now = subprocess.run(["git", "-C", repo, "rev-parse", "HEAD"], capture_output=True, text=True)
+        dirty = subprocess.run(["git", "-C", repo, "status", "--porcelain", "--untracked-files=no"],
+                               capture_output=True, text=True)
+    except OSError:
+        return False
+    return (now.returncode == 0 and dirty.returncode == 0
+            and now.stdout.strip() == head and not dirty.stdout.strip())
+
+
 def _runs_of(doc: object) -> list[dict] | None:
     try:
         runs = doc["cases"][0]["arms"]["with"]  # type: ignore[index]
@@ -232,14 +283,17 @@ def _run_record(run: dict) -> dict:
     }
 
 
-def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool) -> dict:
+def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool,
+            asked: int | None = None) -> dict:
+    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far."""
+    asked = n if asked is None else asked
     runs = _runs_of(doc)
-    records = [_run_record(r) for r in (runs or [])][:n]
-    scored = [r for r in (runs or [])[:n] if not _is_errored(r)]
+    records = [_run_record(r) for r in (runs or [])][:asked]
+    scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
     passing = sum(1 for r in scored if _passes(r))
     failing = len(scored) - passing
-    errored = n - len(scored)
-    records += [{"passed": False, "errored": True, "graders": []}] * max(0, n - len(records))
+    errored = asked - len(scored)
+    records += [{"passed": False, "errored": True, "graders": []}] * max(0, asked - len(records))
     base = {"passed": passing, "failed": failing, "errored": errored, "runs": records}
 
     if runs is not None and passing >= pass_at:
@@ -321,15 +375,18 @@ def run_case(
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS,
     harnesses: list | None = None,
     env: dict[str, str] | None = None,
+    clock=time.monotonic,
 ) -> dict:
     """Validate, run and record one case; return the result written."""
     state = Path(state)
     if not 1 <= timeout_seconds <= MAX_TIMEOUT_SECONDS:
         raise RunRefused(f"timeout must be between 1 and {MAX_TIMEOUT_SECONDS} seconds")
-    _check_state(state)
+    check_state(state)
     plan, entry = _load_case(state, case)
     plugin_dir = _plugin_dir(plan, entry)
     n, pass_at = entry["runs"], entry["pass_at"]
+    if not _at_planned_head(plan):
+        return _record(state, case, _not_run(case, n, HEAD_MOVED))
     if entry.get("case_removed") is True:
         return _record(state, case, _not_run(case, n, CASE_REMOVED))
     if entry.get("new_runner_grants") is True:
@@ -338,6 +395,10 @@ def run_case(
 
     if env is None:
         env = dict(os.environ)
+    key = None if RUNNER_OVERRIDE_ENV in env else _cache_key(plugin_dir, entry)
+    hit = pass_cache.lookup(key, env) if key else None
+    if hit is not None:
+        return _record(state, case, {"case": case, **hit, "reason": None, "cached": True})
     if harnesses is None:
         from trailhead.harness import detect_harnesses
 
@@ -359,8 +420,11 @@ def run_case(
 
     try:
         with _call_tmpdir(env) as case_tmp:
-            return _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
-                                json_path, timeout_seconds, request, override, env, case_tmp)
+            result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
+                                  json_path, timeout_seconds, request, override, env, case_tmp, clock)
+        if key and _cache_key(plugin_dir, entry) == key:
+            pass_cache.store(key, result, env)
+        return result
     except TmpPathTooLong as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
         return _record(state, case, _not_run(case, n, SANDBOX_UNWRITABLE))
@@ -369,23 +433,47 @@ def run_case(
         return _record(state, case, _not_run(case, n, RUNNER_ERROR))
 
 
+def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
+    try:
+        return pass_cache.fingerprint(plugin_dir, entry)
+    except (OSError, KeyError, TypeError):
+        return None
+
+
+def _first_batch(n: int, pass_at: int) -> int:
+    return max(1, min(pass_at, n - pass_at + 1, n))
+
+
+def _valid_cost(doc: object) -> float | None:
+    cost = doc.get("costUsd") if isinstance(doc, dict) else None
+    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
+        return None
+    return float(cost) if math.isfinite(cost) and cost >= 0 else None
+
+
 def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json_path,
-                 timeout_seconds, request, override, env, case_tmp) -> dict:
-    runner = _pin(request(
-        tmpdir=case_tmp,
-        plugin_dir=plugin_dir,
-        case=case,
-        runs=n,
-        model=runner_cfg["model"],
-        allow_tools=list(runner_cfg["allow_tools"]),
-        max_cost_usd=runner_cfg["max_cost_usd"],
-        json_path=json_path,
-        output_dir=runs_dir / case,
-    ), override)
+                 timeout_seconds, request, override, env, case_tmp, clock=time.monotonic) -> dict:
+    cap = runner_cfg["max_cost_usd"]
+
+    def runner_for(batch: int, max_cost: float, json_out: Path, output_dir: Path):
+        return _pin(request(
+            tmpdir=case_tmp,
+            plugin_dir=plugin_dir,
+            case=case,
+            runs=batch,
+            model=runner_cfg["model"],
+            allow_tools=list(runner_cfg["allow_tools"]),
+            max_cost_usd=max_cost,
+            json_path=json_out,
+            output_dir=output_dir,
+        ), override)
+
+    batch = _first_batch(n, pass_at)
+    runner = runner_for(batch, cap, json_path, runs_dir / case)
     if runner is None:
         return _record(state, case, _not_run(case, n, NO_RUNNER))
 
-    started = time.monotonic()
+    started = clock()
     gate = canary.read_cached(state)
     if gate is None:
         gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds), env)
@@ -394,11 +482,46 @@ def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json
         reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
         return _record(state, case, _not_run(case, n, reason))
 
-    remaining = max(1.0, timeout_seconds - (time.monotonic() - started))
-    code, killed, missing = _execute(runner, state, remaining)
-    if missing:
-        return _record(state, case, _not_run(case, n, RUNNER_MISSING))
-    return _record(state, case, {"case": case, **_decide(_read_json(json_path), n, pass_at, code, killed)})
+    merged: list[dict] = []
+    asked, spent, first_elapsed = 0, 0.0, 0.0
+    while True:
+        call_start = clock()
+        code, killed, missing = _execute(runner, state, max(1.0, timeout_seconds - (call_start - started)))
+        if missing:
+            return _record(state, case, _not_run(case, n, RUNNER_MISSING))
+        if not asked:
+            first_elapsed = clock() - call_start
+        doc = _read_json(json_path)
+        runs = _runs_of(doc)
+        segment = (runs or [])[:batch]
+        segment += [{"error": "missing"}] * (batch - len(segment))
+        merged += segment
+        asked += batch
+        view = {**(doc if isinstance(doc, dict) else {}), "cases": [{"arms": {"with": merged}}]}
+        decided = _decide(view, n, pass_at, code, killed, asked=asked)
+        if runs is None and decided["verdict"] == "not-run":
+            decided["reason"] = TIMEOUT if killed else RUNNER_ERROR
+        result = {"case": case, **decided}
+        if decided["verdict"] != "not-run" or decided["reason"] != RUNS_ERRORED:
+            return _record(state, case, result)
+        if all(_is_errored(r) for r in segment) or asked >= n:
+            return _record(state, case, result)
+
+        cost = _valid_cost(doc)
+        spent = cap if cost is None else spent + cost
+        left = round(cap - spent, 6)
+        if left <= 0:
+            return _record(state, case, {**result, "reason": COST_CAP})
+        time_left = timeout_seconds - (clock() - started)
+        if time_left < first_elapsed:
+            return _record(state, case, {**result, "reason": TIMEOUT})
+
+        need = min(pass_at - decided["passed"], n - pass_at + 1 - decided["failed"])
+        batch = max(1, min(need, n - asked))
+        json_path = runs_dir / case / f"batch-{asked}.json"
+        json_path.parent.mkdir(mode=0o700, exist_ok=True)
+        json_path.unlink(missing_ok=True)
+        runner = runner_for(batch, left, json_path, runs_dir / case / f"batch-{asked}")
 
 
 def record_crash(state: Path, case: str) -> None:
@@ -407,7 +530,7 @@ def record_crash(state: Path, case: str) -> None:
     directory or the case would have been refused."""
     try:
         state = Path(state)
-        _check_state(state)
+        check_state(state)
         _, entry = _load_case(state, case)
         _record(state, case, _not_run(case, entry["runs"], RUNNER_ERROR))
     except Exception:
@@ -425,7 +548,7 @@ def _ordered(result: dict) -> dict:
 
 
 def _record(state: Path, case: str, result: dict) -> dict:
-    ordered = _ordered(result)
+    ordered = {**_ordered(result), "cached": result.get("cached", False)}
     _write_result(state, case, ordered)
     return ordered
 

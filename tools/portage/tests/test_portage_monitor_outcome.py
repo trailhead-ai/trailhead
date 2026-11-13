@@ -9,6 +9,7 @@ from portage.monitor_outcome import (
     parse_strategy_disclosure,
     read_monitor_outcome,
     summarize_strategy_disclosures,
+    validate_monitor_outcome,
 )
 
 from trailhead.vcs.github import (
@@ -62,6 +63,19 @@ def test_unparseable_line_is_refused(line, argument):
     token, parsed_argument = parse_monitor_outcome(line)
     assert token is None
     assert parsed_argument == argument
+
+
+@pytest.mark.parametrize(
+    ("line", "expected"),
+    [
+        pytest.param("BLOCKED eval-gate-failed", ("BLOCKED", "eval-gate-failed"), id="eval-gate-failed"),
+        pytest.param("BLOCKED eval-gate-not-run", ("BLOCKED", "eval-gate-not-run"), id="eval-gate-not-run"),
+        pytest.param("BLOCKED eval-gate-borked", None, id="unknown-reason-refused"),
+        pytest.param("READY eval-gate-failed", None, id="reason-belongs-to-its-own-token"),
+    ],
+)
+def test_validate_monitor_outcome_reads_the_eval_gate_reasons(line, expected):
+    assert validate_monitor_outcome(line) == expected
 
 
 def test_read_missing_file_synthesizes_a_failure(tmp_path):

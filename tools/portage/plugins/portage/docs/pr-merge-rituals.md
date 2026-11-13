@@ -114,12 +114,23 @@ threshold is treated as real work and excluded from the count.
 see "Strategy disclosure" in `monitor.md` for the exact line shape and how the watch agent
 surfaces it.
 
+## Merge-only eval cases
+
+A repo whose change touches an eval case mapped `merge_only` merges only with a current merge-tier eval-gate
+state: `portage merge ... --eval-state <repo_path>=<state_dir>` (repeatable). The state comes from
+`portage eval-gate plan --repo <repo> --tier merge`, one `portage eval-gate run` per planned case, and a
+passing `portage eval-gate verdict`; its head must be the PR's current head. Without it `portage merge`
+exits 2 before any merge, with `portage merge: eval-gate check failed for <repo>: <check> — <detail>` and
+the commands to run, whatever `--operator-directed` says. The merge is then pinned to the verified head, so
+a push after the check makes `gh pr merge` refuse. A repo whose change touches no `merge_only` case merges as
+before. See `eval-gate.md`, "Before merge".
+
 ## Error convention split
 
 The PR-evaluator surface (evaluate-status, check-status, wait-for-actionable)
 returns **JSON on stdout including errors** (callers parse structured output).
 The orchestration surface (repo detection, merge) uses **exit-code + stderr**
-for errors (exit 2 on config/manifest failure, exit 1 on partial-merge). The
+for errors (exit 2 on config/manifest failure or a refused merge gate, exit 1 on partial-merge). The
 two conventions are not mixed within a single operation.
 
 ## Injectable runner

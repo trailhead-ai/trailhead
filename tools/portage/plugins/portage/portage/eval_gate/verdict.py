@@ -3,13 +3,15 @@
 ``verdict(state)`` reads ``<state>/plan.json`` (shape in ``select``) and
 ``<state>/results/<case>.json`` (shape in ``run``) and decides push or stop.
 ``splice`` inserts or replaces the rendered section in a PR body. The state
-directory goes through ``run._check_state`` (not a symlink, caller-owned, 0700);
+directory goes through ``run.check_state`` (not a symlink, caller-owned, 0700);
 ``canary.json`` at the state root and ``runs/`` (raw runner output) are never read.
 
 The section is built only from shape-validated case names, corpus paths and
 grader names, and from the closed reason set (``run``'s plus ``no-result-recorded``
 for a planned case with no usable result). Result fields outside that vocabulary
-make the result unusable, i.e. ``no-result-recorded``; they are never echoed.
+make the result unusable, i.e. ``no-result-recorded``; they are never echoed. ``cached`` is optional
+(absent reads as false) and must be a boolean; a pass with ``cached`` true is listed as
+``<case> — pass (cached)``.
 
 Handoffs the updater (child 7) depends on
 -----------------------------------------
@@ -44,6 +46,15 @@ plus a final newline) so an agent that cannot redirect shell output can hand it 
 ``splice --state <dir>``. ``verdict --gate-error <step>`` reads no state; with
 ``--state`` it still writes the section file there.
 
+At the merge tier (plan ``tier`` is ``merge``) a ``merge_only`` case that is not-run stops the
+change too: exit 1, the report line ``merge-only-not-run: <cases>``, then one line per case naming its
+not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: raise the
+case's ``max_cost_usd`` or merge by hand; ``runner-error`` and ``runs-errored``: re-run after the usage limit
+resets, or merge by hand; ``head-moved``: re-plan at the current head; any other reason: merge by hand),
+repeated in the section. A merge-only case that can never run (``case-removed-on-branch``,
+``corpus-new-on-branch``) is reported as on push and does not stop the change. A not-run core case
+still lets the change through, as on push.
+
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
 A fault writing the section file never turns a decided stop into 2: with a stop decided the
 fault goes to stderr, the section is still printed and the exit code stays 1.
@@ -65,14 +76,16 @@ import stat
 from pathlib import Path
 
 from .mapping import CASE_NAME, valid_corpus_path
+from .select import TIERS
 from .run import (
     NO_RUNNER,
     RUNNER_MISSING,
     CASE_REMOVED,
     CORPUS_NEW,
+    HEAD_MOVED,
     SANDBOX_UNWRITABLE,
     RunRefused,
-    _check_state,
+    check_state,
     atomic_write,
 )
 
@@ -80,6 +93,9 @@ START_MARKER = "<!-- portage:eval-gate:start -->"
 END_MARKER = "<!-- portage:eval-gate:end -->"
 SECTION_FILE = "eval-gate-section.md"
 NO_RESULT = "no-result-recorded"
+MERGE_ONLY_NOT_RUN = "merge-only-not-run"
+
+UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW)
 
 PERSISTENT = (NO_RUNNER, RUNNER_MISSING, SANDBOX_UNWRITABLE)
 
@@ -98,6 +114,8 @@ REASONS = {
     CASE_REMOVED: "the branch removes this case; it was not run — review the removal",
     CORPUS_NEW: ("this corpus is new on the branch, so its runner grants are unreviewed and its "
                  "cases were not run — review the grants"),
+    HEAD_MOVED: ("the repo's head or a tracked file changed after the plan was made, so the case "
+                 "was not run"),
     NO_RESULT: "no usable result was recorded for this case",
 }
 
@@ -159,7 +177,10 @@ def _usable(doc: object, case: str) -> dict | None:
                 if isinstance(g["name"], str)
             ]
             runs.append(graders)
-        return {"verdict": doc["verdict"], "reason": reason, "runs": runs,
+        cached = doc.get("cached", False)
+        if not isinstance(cached, bool):
+            return None
+        return {"verdict": doc["verdict"], "reason": reason, "runs": runs, "cached": cached,
                 "passed": _count(doc, "passed"), "failed": _count(doc, "failed"),
                 "errored": _count(doc, "errored")}
     except (KeyError, TypeError, ValueError):
@@ -185,6 +206,8 @@ def _load_plan(state: Path) -> dict:
         for c in cases:
             if not isinstance(c["case"], str) or not CASE_NAME.match(c["case"]):
                 raise ValueError(f"case name {_safe(c['case'], 60)!r} must match {CASE_NAME.pattern}")
+            if not isinstance(c["plugin_root"], str):
+                raise ValueError(f"plugin_root of case {c['case']!r} must be a string")
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise Fault(f"plan.json unusable: {_safe(e)}") from e
     return plan
@@ -217,6 +240,7 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
         res = found.get(c["case"])
         rows.append({"case": c["case"], "corpus": _corpus(c.get("plugin_root")),
                      "grants": c.get("new_runner_grants") is True,
+                     "merge_only": c.get("merge_only") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
                                        "passed": 0, "failed": 0, "errored": 0}})
     return rows, ignored, invalid
@@ -250,9 +274,44 @@ def _extras(plan, rows, ignored, invalid) -> list[str]:
     return out
 
 
+def _pending_line(plan: dict) -> list[str]:
+    pending = plan.get("merge_only_pending")
+    if (plan.get("tier") == "push" and isinstance(pending, int) and not isinstance(pending, bool)
+            and pending > 0):
+        return [f"{pending} merge-only case(s) touched by this change will run before merge."]
+    return []
+
+
+def _tier_lines(plan: dict) -> list[str]:
+    if plan.get("tier") not in TIERS:
+        return []
+    return [f"Tier: {plan['tier']}.", *_pending_line(plan)]
+
+
+def _pass_item(row: dict) -> str:
+    return f"`{row['case']}` — pass (cached)" if row["result"]["cached"] else f"`{row['case']}`"
+
+
 def _not_run_items(rows: list[dict]) -> list[str]:
     return [f"`{r['case']}` — `{r['result']['reason']}`: {REASONS[r['result']['reason']]}"
             for r in rows if r["result"]["verdict"] == "not-run"]
+
+
+def _merge_only_recovery(reason: str) -> str:
+    if reason == "timeout":
+        return "the runs split and the budget ran out; re-run the merge-tier gate"
+    if reason == "cost-cap":
+        return "the case hit its own cost ceiling; raise its `max_cost_usd` or merge by hand"
+    if reason in ("runner-error", "runs-errored"):
+        return "re-run after the usage limit resets, or merge by hand"
+    if reason == HEAD_MOVED:
+        return "re-plan at the current head"
+    return f"{REASONS[reason]}; merge by hand"
+
+
+def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
+    return [f"{r['case']}: {r['result']['reason']} — {_merge_only_recovery(r['result']['reason'])}"
+            for r in rows]
 
 
 def _failure_details(rows: list[dict], state: Path) -> list[str]:
@@ -301,13 +360,16 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
             ["The eval gate could not determine the changed files (the base ref did not resolve), "
              "so it selected no cases."])
     if status == "no-cases-mapped" or not plan["cases"]:
+        pending = _pending_line(plan)
         return 0, ["eval-gate: no-cases-mapped", "persistent: none"], _wrap(
-            ["No eval cases are mapped to this change."])
+            ["No eval cases are mapped to this change.", *([""] + pending if pending else [])])
 
     rows, ignored, invalid = _collect(state, plan)
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
+    unrun_merge_only = ([r for r in notrun if r["merge_only"] and r["result"]["reason"] not in UNRUNNABLE]
+                        if plan.get("tier") == "merge" else [])
     outcome = "failed" if failed else "not-run" if notrun else "passed"
     report = [f"eval-gate: {outcome}", f"persistent: {','.join(persistent) or 'none'}"]
     if ignored:
@@ -316,6 +378,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         report.append(f"ignored: {invalid} result with an invalid name")
     if failed:
         report += _failure_details(rows, state)
+    if unrun_merge_only:
+        report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
+        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
 
     body: list[str] = []
     if failed:
@@ -324,16 +389,26 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
                           f"{r['result']['failed']}, errored {r['result']['errored']}" for r in failed])
     passed = [r for r in rows if r["result"]["verdict"] == "pass"]
     if not failed and not notrun:
-        body += [f"Passed — {len(passed)} eval case(s) ran and passed.", ""]
-        body += _bullets([f"`{r['case']}`" for r in passed])
+        reused = sum(1 for r in passed if r["result"]["cached"])
+        ran = f"{len(passed)} eval case(s) ran and passed" if not reused else (
+            f"{len(passed)} eval case(s) passed, {reused} reused from the cache")
+        body += [f"Passed — {ran}.", ""]
+        body += _bullets([_pass_item(r) for r in passed])
     elif passed:
         body += ["", "Passed:", ""] if failed else ["Some cases passed:", ""]
-        body += _bullets([f"`{r['case']}`" for r in passed])
+        body += _bullets([_pass_item(r) for r in passed])
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))
+    if unrun_merge_only:
+        body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + ".", ""]
+        body += _bullets(_merge_only_stop_lines(unrun_merge_only))
+    tier = _tier_lines(plan)
+    if tier:
+        body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
-    return (1 if failed else 0), report, _wrap(body)
+    return (1 if failed or unrun_merge_only else 0), report, _wrap(body)
 
 
 def render_gate_error(step: str) -> str:
@@ -345,7 +420,7 @@ def render_gate_error(step: str) -> str:
 
 def require_state(state: Path) -> None:
     try:
-        _check_state(Path(state))
+        check_state(Path(state))
     except RunRefused as e:
         raise Fault(str(e)) from e
 

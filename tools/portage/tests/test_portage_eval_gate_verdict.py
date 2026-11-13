@@ -635,3 +635,202 @@ def test_splice_out_replaces_the_file_instead_of_writing_through_its_inode(tmp_p
     assert code == 0
     assert outp.read_text().startswith("body\n")
     assert peer.read_text() == "old\n"
+
+
+class TestCachedPass:
+    def test_a_cached_pass_reads_pass_cached_in_the_section_and_exits_0(self, st, capsys):
+        st.plan([_entry("reused"), _entry("fresh")])
+        st.result("reused", doc={**_result("reused"), "cached": True})
+        st.result("fresh", doc={**_result("fresh"), "cached": False})
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert out.splitlines()[0] == "eval-gate: passed"
+        lines = section_of(out).splitlines()
+        assert [ln for ln in lines if "`reused`" in ln] == ["- `reused` — pass (cached)"]
+        assert [ln for ln in lines if "`fresh`" in ln] == ["- `fresh`"]
+
+    def test_a_result_without_cached_is_a_plain_pass(self, st, capsys):
+        st.plan([_entry("old")])
+        st.result("old")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "(cached)" not in out
+
+    @pytest.mark.parametrize("bad", ["true", 1, 0, None, [], {"x": 1}])
+    def test_a_non_boolean_cached_is_no_result_recorded(self, st, capsys, bad):
+        st.plan([_entry("odd")])
+        st.result("odd", doc={**_result("odd"), "cached": bad})
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "`odd` — `no-result-recorded`" in section_of(out)
+        assert "(cached)" not in out
+
+
+def _tiered_plan(st, tier, pending):
+    st.plan([_entry("core")])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": tier, "head": "abc123", "merge_only_pending": pending})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    st.result("core")
+
+
+def test_push_tier_section_names_the_tier_and_counts_pending_merge_only_cases(st, capsys):
+    _tiered_plan(st, "push", 1)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: push" in section
+    assert "1 merge-only case(s) touched by this change will run before merge" in section
+
+
+def test_push_tier_pending_line_carries_the_count(st, capsys):
+    _tiered_plan(st, "push", 3)
+    _, out, _ = verdict(capsys, st)
+    assert "3 merge-only case(s) touched by this change will run before merge" in section_of(out)
+
+
+def test_push_tier_with_no_pending_merge_only_cases_has_no_pending_line(st, capsys):
+    _tiered_plan(st, "push", 0)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: push" in section
+    assert "merge-only" not in section
+
+
+def test_merge_tier_section_names_the_tier_and_has_no_pending_line(st, capsys):
+    _tiered_plan(st, "merge", 1)
+    _, out, _ = verdict(capsys, st)
+    section = section_of(out)
+    assert "Tier: merge" in section
+    assert "merge-only" not in section
+
+
+def test_push_that_touches_only_merge_only_cases_still_says_they_run_before_merge(st, capsys):
+    st.plan([], status="no-cases-mapped")
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": "push", "head": "abc123", "merge_only_pending": 2})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert "2 merge-only case(s) touched by this change will run before merge" in section_of(out)
+
+
+def _merge_tier_plan(st, tier, *, slow_result, core_result="pass"):
+    slow = {**_entry("slow"), "merge_only": True}
+    core = {**_entry("core"), "merge_only": False}
+    st.plan([core, slow])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": tier, "head": "a" * 40, "merge_only_pending": 0})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    for case, res in (("core", core_result), ("slow", slow_result)):
+        if res == "pass":
+            st.result(case)
+        elif res == "not-run":
+            st.result(case, verdict="not-run", passed=0, errored=3, reason="timeout")
+
+
+class TestMergeTierVerdict:
+    def test_a_not_run_merge_only_case_stops_the_change(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run" in out.split("<!--", 1)[0]
+        assert "merge-only-not-run" in section_of(out)
+        assert "`slow`" in section_of(out)
+
+    def test_a_merge_only_case_with_no_result_at_all_stops_the_change(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="missing")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run" in section_of(out)
+
+    def test_a_not_run_core_case_still_lets_the_change_through(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="pass", core_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+
+    def test_a_passing_merge_only_case_lets_the_change_through(self, st, capsys):
+        _merge_tier_plan(st, "merge", slow_result="pass")
+        code, _, _ = verdict(capsys, st)
+        assert code == 0
+
+    def test_the_same_not_run_case_does_not_stop_a_push_tier_state(self, st, capsys):
+        _merge_tier_plan(st, "push", slow_result="not-run")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+
+
+def _slow_not_run(st, reason, *, tier="merge"):
+    _merge_tier_plan(st, tier, slow_result="pass")
+    st.result("slow", verdict="not-run", passed=0, errored=0, reason=reason)
+
+
+class TestMergeTierUnrunnableCases:
+    @pytest.mark.parametrize("reason", ["case-removed-on-branch", "corpus-new-on-branch"])
+    def test_a_merge_only_case_that_can_never_run_does_not_stop_the_change(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+        assert "eval-gate: not-run" in out
+
+    @pytest.mark.parametrize("reason", ["case-removed-on-branch", "corpus-new-on-branch"])
+    def test_it_is_reported_as_on_push(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        _, out, _ = verdict(capsys, st)
+        assert f"`slow` — `{reason}`" in section_of(out)
+
+    @pytest.mark.parametrize("reason", ["timeout", "cost-cap", "runner-error", "runs-errored",
+                                        "head-moved"])
+    def test_a_merge_only_case_that_could_still_run_stops_the_change(self, st, capsys, reason):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run: slow" in out
+
+    def test_an_unrunnable_case_does_not_hide_a_runnable_one_beside_it(self, st, capsys):
+        slow = {**_entry("slow"), "merge_only": True}
+        gone = {**_entry("gone"), "merge_only": True}
+        st.plan([slow, gone])
+        doc = json.loads((st.dir / "plan.json").read_text())
+        doc.update({"tier": "merge", "head": "a" * 40, "merge_only_pending": 0})
+        (st.dir / "plan.json").write_text(json.dumps(doc))
+        st.result("slow", verdict="not-run", passed=0, errored=0, reason="timeout")
+        st.result("gone", verdict="not-run", passed=0, errored=0, reason="case-removed-on-branch")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "merge-only-not-run: slow" in out
+        assert "merge-only-not-run: slow, gone" not in out
+
+
+class TestMergeOnlyNotRunRecovery:
+    @pytest.mark.parametrize("reason,recovery", [
+        ("timeout", "the runs split and the budget ran out; re-run the merge-tier gate"),
+        ("cost-cap", "the case hit its own cost ceiling; raise its `max_cost_usd` or merge by hand"),
+        ("runner-error", "re-run after the usage limit resets, or merge by hand"),
+        ("runs-errored", "re-run after the usage limit resets, or merge by hand"),
+        ("head-moved", "re-plan at the current head"),
+        ("runner-missing", "the eval runner binary was not found on this machine; merge by hand"),
+    ])
+    def test_each_not_run_case_names_its_reason_and_the_matching_recovery(
+        self, st, capsys, reason, recovery
+    ):
+        _slow_not_run(st, reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        stdout_part = out.split("<!--", 1)[0]
+        for text in (stdout_part, section_of(out)):
+            line = next(ln for ln in text.splitlines() if "slow" in ln and recovery in ln)
+            assert reason in line
+
+    def test_the_recoveries_differ_by_reason(self, st, capsys):
+        _slow_not_run(st, "timeout")
+        _, timeout_out, _ = verdict(capsys, st)
+        _slow_not_run(st, "runner-error")
+        _, other_out, _ = verdict(capsys, st)
+        assert "re-run the merge-tier gate" in timeout_out
+        assert "re-run the merge-tier gate" not in other_out
+        assert "merge by hand" not in timeout_out
+        assert "usage limit resets" not in timeout_out
+        assert "usage limit resets" in other_out

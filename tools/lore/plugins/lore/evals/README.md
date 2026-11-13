@@ -201,6 +201,11 @@ measured by all 22 cases; the four that also name deferred-work capture add
 prose) is outside the plugin root and cannot be listed. A case with no entry is a
 failure: add its entry when you add the case.
 
+Most `skills/correct/SKILL.md` cases are `"merge_only": true`: they run before merge, not on every
+push. The six detectors (one per correction route the skill decides) stay core, as does every case that
+measures `skills/record/SKILL.md` or `skills/flush/SKILL.md`, so each measured file keeps at least one core
+case. Say which tier a new case is in when you add it.
+
 The `runner` block holds the grants of the batch command above (`Bash(./lore *)`), the
 model `claude-opus-5-5`, and `max_cost_usd` 1.5 per case. The cap is sized from the
 logged cost: a 22-case batch costs about 15 USD at list price (0.68 USD a case across

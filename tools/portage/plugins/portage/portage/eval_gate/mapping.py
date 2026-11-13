@@ -6,13 +6,15 @@ Shape::
      "runner": {"model": str, "allow_tools": [str, ...], "max_cost_usd": number},
      "cases": {"<case>": {"measures": ["<plugin-relative path>", ...],
                           "runs": int (optional, default 3),
-                          "pass_at": int (optional)}}}
+                          "pass_at": int (optional),
+                          "merge_only": bool (optional, default false)}}}
 
 ``pass_at`` defaults to 2 when ``runs`` is 3; any other ``runs`` must declare its
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
 presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model id, each
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
 single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25].
+``merge_only`` marks a case the push tier leaves out; it must be a boolean.
 Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 
@@ -35,7 +37,7 @@ MAX_RUNS = 10
 
 _TOP_KEYS = {"schema_version", "runner", "cases"}
 _RUNNER_KEYS = {"model", "allow_tools", "max_cost_usd"}
-_CASE_KEYS = {"measures", "runs", "pass_at"}
+_CASE_KEYS = {"measures", "runs", "pass_at", "merge_only"}
 
 
 class MappingError(Exception):
@@ -52,6 +54,7 @@ class Case:
     measures: tuple[str, ...]
     runs: int
     pass_at: int
+    merge_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -137,7 +140,10 @@ def _case(name: str, obj, file: str, plugin_root: Path | None, evals_dir: Path |
         raise MappingError(file, f"case {name!r}: runs={runs} requires its own pass_at")
     if evals_dir is not None and not (evals_dir / name / "case.yaml").is_file():
         raise MappingError(file, f"case {name!r} has no case.yaml")
-    return Case(name, paths, runs, pass_at)
+    merge_only = obj.get("merge_only", False)
+    if not isinstance(merge_only, bool):
+        raise MappingError(file, f"case {name!r}: merge_only must be a boolean")
+    return Case(name, paths, runs, pass_at, merge_only)
 
 
 def load_mapping(

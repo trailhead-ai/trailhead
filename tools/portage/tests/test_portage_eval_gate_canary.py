@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -28,7 +29,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 def env(tmp_path, monkeypatch):
     e = Env(tmp_path, monkeypatch)
     e.plan()
-    return e
+    yield e
+    shutil.rmtree(e.root, ignore_errors=True)
 
 
 def _canary_calls(env):
@@ -45,7 +47,7 @@ class TestCanaryGatesTheCase:
         assert env.run() == 0
         assert [c["canary"] for c in env.calls] == [True, False]
         r = env.result()
-        assert (r["verdict"], r["reason"], r["passed"]) == ("pass", None, 3)
+        assert (r["verdict"], r["reason"], r["passed"]) == ("pass", None, 2)
 
     def test_a_scored_fail_canary_is_runner_sandbox_unwritable_and_no_case_starts(self, env):
         env.fake(_result([PASS] * 3), canary=_result([FAIL]), canary_code=1)

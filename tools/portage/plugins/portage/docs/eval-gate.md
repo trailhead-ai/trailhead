@@ -16,22 +16,41 @@ environment allowlist below keeps environment-borne keys and tokens out of the r
 not isolation. A corpus that is new on the branch is not run until its grants are reviewed
 (`corpus-new-on-branch`).
 
+Merge-tier runs (see "Before merge") execute the branch's scaffolds the same way, as the operator and
+unattended, on whatever commits the PR holds when the gate runs. `portage merge` pins the merge to the head
+commit the gate ran on (`gh pr merge --match-head-commit`), so a push after the gate makes `gh` refuse
+instead of merging content nobody evaluated. That limits what the gate ran to the commits present when it
+ran; it does not make a hostile branch safe to gate.
+
+The pass cache and the state directory are not integrity boundaries against the code under test. Scaffolds
+run as the operator, so they can write the cache entries and the state directory's results, plan and canary
+files just as the operator can. The cache lives outside any one repo and persists across branches. A cache hit
+is reused only for identical committed content: the key covers the case's own files, its measured files, the
+corpus scaffolds and the runner block, and `run` refuses a plan whose repo is no longer at the planned head.
+
 ## What it runs
 
-`portage eval-gate plan --repo <path> [--base <ref>]` diffs the branch against its base (default: the target
-of `origin/HEAD`) and selects every case that either measures a changed file or lives in a changed case
-directory. It writes the selection to a fresh state directory and prints it.
+`portage eval-gate plan --repo <path> [--base <ref>] [--tier push|merge]` diffs the branch against its base
+(default: the target of `origin/HEAD`) and selects every case that either measures a changed file or lives in
+a changed case directory. It writes the selection to a fresh state directory and prints it. The tier decides
+which of those cases run: `push` (the default, and what the updater calls) leaves out cases marked
+`merge_only`; `merge` selects every touched case. `plan.json` records the `tier`, the `head` commit at plan
+time, and how many touched `merge_only` cases a push left out (`merge_only_pending`); `total_max_cost_usd`
+counts only the cases the tier runs.
 
 Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 
 ```json
 {"schema_version": 1,
  "runner": {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
- "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2}}}
+ "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false}}}
 ```
 
 - `measures` are plugin-relative paths of the prose the case's `expected.md` names as under test.
 - `runs` defaults to 3 and `pass_at` to 2; any other `runs` must declare its own `pass_at`.
+- `merge_only` is optional and defaults to false; it must be a boolean. A `merge_only` case is left out of the
+  push tier and runs at the merge tier. For a corpus that already has a mapping on the base, the base's value
+  is used, as for `runs` and `pass_at`.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.
@@ -39,10 +58,28 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 portage's own corpus maps its two updater cases to `agents/updater.md`, so a change to the updater runs the
 cases that check the updater obeys the gate.
 
+## Tiers
+
+The gate has two tiers, chosen by how often a case should pay for itself:
+
+- **Core** cases (no `merge_only`) run on every push that touches what they measure.
+- **`merge_only`** cases run once, before merge, over everything the change touches. A push leaves them out
+  and the PR section counts them as pending; `portage merge` refuses a change that touches one without a
+  current merge-tier verdict.
+
+A file that many cases measure keeps one detector per behaviour it decides as core and marks the rest
+`merge_only`. A `merge_only` case's declared `timeout_seconds` fits the gate budget (540 s); a case that
+declares more stays core, because it could never finish at merge and would always block. A case whose runs
+take more than about half the budget can still go not-run at merge when its first two runs split, because the
+call that decides it then has less time left than the first call took (`timeout`); re-running the merge-tier
+gate is the remedy. Every prose file some case measures keeps at least one core case, so a
+push that edits it always runs something; the corpus test enforces this from each mapping. Passes are cached
+by content (see "Cost and limits"), so a case already passed on the same content costs nothing at either tier.
+
 ## Running a case
 
 `portage eval-gate run --state <dir> --case <name>` runs one planned case in the foreground (up to 540 s per
-call, so give the tool call a 600000 ms timeout) and records a verdict in the state directory:
+call, counting every batch, so give the tool call a 600000 ms timeout) and records a verdict in the state directory:
 
 - **pass**: at least `pass_at` runs scored 1.0.
 - **fail**: so many scored runs failed that `pass_at` is out of reach.
@@ -50,7 +87,22 @@ call, so give the tool call a 600000 ms timeout) and records a verdict in the st
   (below), or the branch removes the case (`case-removed-on-branch`: the case was selected but its
   `case.yaml` is gone, so nothing ran), or its corpus is new on the branch (`corpus-new-on-branch`: this
   corpus is new on the branch, so its runner grants are unreviewed and its cases were not run — review the
-  grants). A not-run case is never a pass and never a fail.
+  grants), or the repo's `HEAD` is no longer the plan's `head`, or a tracked file differs from it
+  (`head-moved`: a result describes the head the plan was made at, so `run` checks before it looks anything
+  up or starts anything; plan again at the current head). A not-run case is never a pass and never a fail.
+
+A case is decided in batches, not in one call for all its `runs`. The first call asks for the fewest runs
+that could decide it, `min(pass_at, runs - pass_at + 1)`: two for the default three runs, two to pass. When
+those agree the case is decided from them. When they split, the next call asks for the smallest batch that
+could still decide it, up to `runs` in all. The verdict rule is the same as if every run had been taken.
+Later calls get what is left of the case's `max_cost_usd` (as a hard `--max-cost-usd`) and of the 540 s
+budget. A later call does not start, and the case is not-run, when:
+
+- the last call added no scored run (`runs-errored`);
+- the cost reported so far has used the cap, or the runner reported no valid `costUsd` (`cost-cap`);
+- less time is left than the first call took (`timeout`).
+
+The `runs` in the result hold every call's runs, in order.
 
 The runner is the harness's `claude plugin eval`, started with an allowlist environment (`PATH`, `HOME`,
 `USER`, `LANG`, `TERM`, `LC_*`, plus the gate's own `TMPDIR`), so API keys and tokens in the caller's
@@ -97,7 +149,8 @@ PORTAGE_EVAL_RUNNER=/absolute/path/to/a/claude/build portage eval-gate run --sta
 `portage eval-gate verdict --state <dir>` exits 0 (push) or 1 (stop), and 2 on a fault. Its stdout opens
 with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR section between
 `<!-- portage:eval-gate:start -->` and `<!-- portage:eval-gate:end -->`. The section is also saved to
-`<state>/eval-gate-section.md`.
+`<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
+the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
 
 - Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
   (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
@@ -114,10 +167,85 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `updater` then pushes anyway. `portage eval-gate splice --body-file <f> (--state <dir> | --section-file <f>)
 [--out <path>]` puts the section into an existing PR body, replacing an earlier one.
 
+## Before merge
+
+Cases mapped `merge_only` do not run on push; they run at the merge tier, and `portage merge` will not merge
+a change that touches one without a current verdict.
+
+1. `portage eval-gate plan --repo <repo> --tier merge` selects every touched case, `merge_only` included, and
+   records the tier, the repo and `HEAD` in `plan.json`.
+2. `portage eval-gate run --state <dir> --case <name>` once per planned case.
+3. `portage eval-gate verdict --state <dir>` exits 0 or 1. At the merge tier a not-run `merge_only` case
+   stops the change (exit 1, reason `merge-only-not-run`), and the verdict names each case's not-run reason
+   and its recovery: `timeout` (the runs split and the budget ran out) means re-run the merge-tier gate,
+   `cost-cap` (the case hit its own cost ceiling) means raise its `max_cost_usd` or merge by hand,
+   `runner-error` and `runs-errored` mean re-run after the usage limit resets, or merge by hand, `head-moved`
+   means re-plan at the current head, any other reason means merge by hand. A `merge_only` case
+   that can never run, because the branch removes it (`case-removed-on-branch`) or its corpus is new on the
+   branch (`corpus-new-on-branch`), is reported as on push and does not stop the change. A not-run core case
+   still lets the change through, as on push.
+4. `portage merge --manifest <m> [--toml <t>] --eval-state <repo>=<dir> <repo>:<pr>:<member>` (repeatable,
+   one per repo).
+
+The check applies to a repo only when its change touches a `merge_only` case, decided by the selection
+`plan` uses. A case counts as `merge_only` when the merge-base's mapping or HEAD's committed mapping marks it,
+so a stale `origin/HEAD` cannot hide a flag a newer base carries. Only commits are read: the mappings, the
+measured paths and the `case.yaml` files come from the merge-base and HEAD, and an uncommitted edit changes
+no answer. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
+applies. Where it does not apply and the repo holds no `eval-gate.json` mapping (at HEAD or the merge-base),
+`portage merge` behaves as without the flag (a given `--eval-state` is not read, no head is read, and the
+merge is not pinned). Where it does not apply but the repo holds any mapping, the PR's remote head is read:
+a head that is not this checkout's `HEAD` is refused with exit 2 as `local-head-stale` (pull the PR head and
+retry), because a commit that landed only on the remote was never checked for what it touches or what it
+marks `merge_only`; a head that matches pins the merge to it; an unreadable head is refused. A git or OS
+failure while answering is refused as `selection-failed`; only git's own "not a git repository" makes the
+check not apply.
+
+Where it applies, the merge is refused with exit 2, before any provider merge and before the `auto_merge`
+refusal, when any of these holds: no state was given; the state directory is not a real, caller-owned 0700
+directory; `plan.json` is unusable; the plan's tier is not `merge`; its `repo` is another repo; its status is
+not `cases-selected`; its `head` is not a full lowercase hex commit id; it lacks a merge-only case the change
+touches; the PR's current remote head cannot be read or differs from the plan's `head` (a push landed after
+the gate); or `verdict` stops the change. `--operator-directed` waives none of this. On success the merge is
+pinned to the verified head. When the refusal comes from a plan or repo whose base did not resolve, the
+remedy names `portage eval-gate plan --repo <repo> --tier merge --base <ref>`.
+
+A refusal prints, on stderr, `portage merge: eval-gate check failed for <repo>: <check> — <detail>`, where
+`<check>` is one of `no-state`, `state-unusable`, `plan-unusable`, `state-tier-not-merge`,
+`state-for-another-repo`, `plan-not-selected`, `plan-head-malformed`, `plan-misses-merge-only-case`,
+`head-unreadable`, `head-mismatch`, `verdict-stops-the-change`, `selection-failed` or `local-head-stale`,
+followed by the `plan` / `run` / `verdict` commands that produce a valid state (a `local-head-stale` refusal
+instead says to pull the PR head and retry). After a `head-mismatch`, plan, run and verify again on the new
+head.
+
 ## Cost and limits
 
 `plan` prints the number of selected cases and the sum of their `max_cost_usd` caps, which is a ceiling. One
 lore case at 3 runs measured about 0.61 USD on 2026-10-21 (`MANUAL-EVAL.md`, "Live gate check").
 
 Cases that measure user rulesets or `CLAUDE.md` cannot be gated, because the runner loads only the plugin
-under test. Every update push re-runs the touched cases; nothing is cached between pushes.
+under test.
+
+A pass is reused. Before the canary and the runner, `run` looks the case up in a per-machine cache at
+`<cache dir>/portage/eval-gate/<fingerprint>.json` (`$XDG_CACHE_HOME`, else `~/.cache`). A hit records
+`pass` with `cached: true`, starts nothing and costs nothing, and the section lists the case as
+`pass (cached)`. Only a fresh pass is stored; a fail or a not-run never is, so the next push runs the case
+again. The fingerprint is a SHA-256 over:
+
+- every file in the case directory, with its executable bit;
+- every file of the case's `measures`, with its executable bit;
+- every file directly under the corpus `evals/` directory except `eval-gate.json` (the shared scaffolds),
+  with its executable bit;
+- the case's runner block, `runs`, `pass_at`, plugin root and name.
+
+A symlink anywhere among those inputs makes the case uncacheable: it is never looked up and never stored.
+With `PORTAGE_EVAL_RUNNER` set the cache is neither read nor written, because the key does not cover which
+runner produced a pass. A fresh pass is stored only when the fingerprint, recomputed after the run, equals
+the one looked up before it, so inputs that changed while the case ran are never stored.
+
+The key is content alone, so a pass carries over between branches and worktrees. It has known limits, and a
+change to any of them does not change it: a script a scaffold calls from outside `evals/`, other plugin
+prose the case does not list in `measures`, the `claude` CLI version, and a model alias the runner
+re-targets. Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
+that is a symlink, owned by another user or group- or world-writable is not used, and an unreadable or
+corrupt entry is a miss, so the case just runs.

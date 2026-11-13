@@ -649,3 +649,40 @@ dispatched, so no edit to either agent can move its result. The sections and the
 
 Effect on the push gate: a change to the monitor agent selects 12 cases instead of 15, and a change to the
 updater 7 instead of 10.
+
+## Merge-tier gate pass (2026-11-12)
+
+Runner settings: `--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`. The grants are exactly the `runner` block. Runner 2.1.322 on Linux. Each case ran as its own invocation. The runs were made outside the session's sandbox, because the runner's inner sandbox cannot open its socket inside the session sandbox.
+
+Prose fingerprints (`git hash-object`):
+
+| File | Baseline | Final |
+|---|---|---|
+| `agents/monitor.md` | `c53afba1dd664feb1d659707dc76f41840e81965` | `39ff18c7fdee0439a98a36a252b554b9ef7ca7dc` |
+| `skills/pull_request/SKILL.md` | `04a673f92c92f361ded894abfe0279c96f41841c` | `dc40f9137a1310885b1814e26ff0c6f25de74da2` |
+
+What changed: once the watch loop has seen every PR `done`, the monitor and the PR skill's `merge` verb run the merge-tier gate (`eval-gate plan --tier merge`, then `run` per case, then `verdict`) before they merge. Under `stop_at_ready` the gate runs before `READY`. A failing case ends `BLOCKED eval-gate-failed`. A `merge_only` case that could not run ends `BLOCKED eval-gate-not-run`.
+
+New cases, five in all. Each `expected.md` was committed alone before any run. Two grader patterns in those files could never match, and were corrected in the next commit, before any run.
+
+| Case | Baseline (old prose) | Final prose | Verdict |
+|---|---|---|---|
+| `monitor-runs-the-merge-tier-before-merging` | 0.33 x3 (only `watched`) | 1, 1, 1 | red to bar |
+| `monitor-blocks-on-a-failing-merge-tier-verdict` | 0 x3 | 1, 1, 1 | red to bar |
+| `monitor-blocks-when-a-merge-only-case-could-not-run` | 0 x3 | 1, 1, 1 | red to bar |
+| `monitor-runs-the-merge-tier-before-ready` | 0.67 x3 (gate never ran) | 1, 1, 1 | red to bar |
+| `pull-request-merge-runs-the-merge-tier-gate` | 0 x3 | 1, 1, 1 (first prose; the skill did not change after) | red to bar |
+
+Regression check: every existing case mapped to either prose file.
+- **First prose** (`monitor.md` `5770d9a6863c1c7b47c7885da7eb700ebc8a643c`): the eight `unattended-pr-step-*` and `pull-request-without-request-is-not-unattended` cases, both `monitor-*` cases and two `approval-is-human-only-*` cases scored 3 of 3. The other three approval cases each lost one or two runs on `loop-reached-the-stand-ins`. A rerun with traces repeated it (4 of 9 runs both times) and showed two modes:
+  - The monitor took the prompt's "everything is done" as its own observation. It went straight to the gate and `merge`, never calling `wait-for-actionable` or `evaluate-status`.
+  - The monitor's first call was a `python3` `tomllib` read of the group TOML. The runner refused it, and the monitor ended without watching.
+- **Fix:** `done` now means an `evaluate-status` result observed in this run, and the gate, merge and `READY` are reached only from the watch loop. A refused Python TOML read falls back to `Read`.
+- **Final prose:** all five approval cases, the four new monitor cases, `monitor-stop-at-ready-never-merges` and `monitor-without-stop-at-ready-is-unchanged` scored 1, 1, 1 (33 of 33 runs).
+
+Spend (runner list price plus judge votes): about 33.1 USD in total.
+- 0.41 for two sandbox probes;
+- 3.19 for the baseline;
+- 20.65 for the first treatment (20 cases);
+- 1.78 for the traced approval rerun;
+- 7.08 for the final monitor batch (11 cases).

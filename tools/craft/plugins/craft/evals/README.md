@@ -124,6 +124,12 @@ names under "Under test". The two review-correction cases measure
 `skills/receiving-code-review/SKILL.md`; the consult case measures `skills/consult/SKILL.md` and
 `skills/_shared/council.md`. A case with no entry is a failure: add its entry when you add the case.
 
+A case marked `"merge_only": true` runs before merge, not on every push. On the heavily shared files
+(`skills/_shared/execute.md`, `skills/_shared/unattended.md`, `skills/slice/SKILL.md`, `skills/plan/SKILL.md`)
+the core cases are the detectors, one per behaviour the file decides, and the other cases are `merge_only`.
+A case that also measures a file with no `merge_only` case, or that runs past the 540 s gate budget, stays
+core, and every measured file keeps at least one core case. Say which tier a new case is in when you add it.
+
 The `runner` block holds the grants of that batch command, the model `claude-opus-5-5`, and
 `max_cost_usd` 3.5 per case. The cap is sized from the logged cost: the consult case is the dearest
 at about 0.75 to 0.93 USD a run, 2.4 to 2.5 USD for three runs (`tools/craft/MANUAL-EVAL.md`), and
