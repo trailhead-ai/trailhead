@@ -14,4 +14,5 @@ detectors for their file are `"merge_only": true` and run before merge; the merg
 and every measured file keeps at least one core case.
 Of the `unattended-pr-step-*` cases for a resumed run, `unattended-pr-step-ends-needs-a-decision-on-a-parked-correction`
 is core, because only the PR step ends on a parked correction; the others repeat resume behaviours craft's execute
-cases detect and are `merge_only`.
+cases detect and are `merge_only`. `unattended-pr-step-starts-fresh-after-a-finished-plan` is a core case too: it
+detects the PR step's own fresh start after a finished earlier ritual.
