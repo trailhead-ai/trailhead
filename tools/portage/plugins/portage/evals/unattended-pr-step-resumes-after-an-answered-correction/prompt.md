@@ -1,7 +1,7 @@
 ---
 allowed_tools: [Skill, Read, Glob, Grep, Agent]
 max_turns: 100
-timeout_seconds: 900
+timeout_seconds: 540
 ---
 Run `/portage:pull_request create --unattended task/count-words`.
 
