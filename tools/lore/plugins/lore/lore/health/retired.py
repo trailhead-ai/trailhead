@@ -57,6 +57,8 @@ class Finding:
 
     ``field`` is ``related <kind>``, ``depends-on``, ``parent`` or ``wikilink``;
     ``target`` is ``<kind>/<name>`` (a bare name for a bare reference).
+    ``linker_duplicated`` is set when another vault also holds a record, readable
+    or not, with the linker's kind and name.
     """
 
     vault: str
@@ -66,6 +68,7 @@ class Finding:
     field: str
     target: str
     retired: tuple[RetiredCandidate, ...] = ()
+    linker_duplicated: bool = False
 
 
 @dataclass(frozen=True)
@@ -92,6 +95,10 @@ def check_retired(
         return RetiredSkipped(at_fault)
 
     candidates = references.build_candidates(scans)
+    holders: dict[tuple[str, str], set[str]] = {}
+    for s in scans:
+        for r in (*s.records, *s.unreadable):
+            holders.setdefault((r.kind, r.name), set()).add(s.vault)
 
     result = RetiredResult()
     for s in scans:
@@ -120,6 +127,7 @@ def check_retired(
                     Finding(
                         record.vault, record.kind, record.name, record.updated_at,
                         ref.field, target, retired,
+                        len(holders[(record.kind, record.name)]) > 1,
                     )
                 )
         result.judged[s.vault] = judged

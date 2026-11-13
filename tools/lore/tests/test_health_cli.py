@@ -1515,6 +1515,72 @@ def test_a_target_in_one_vault_gets_no_vault_flag_even_when_the_linker_is_elsewh
     assert line.endswith("`lore record supersede decision/old --by adr/src`")
 
 
+def _put_full(root, kind, name, **extra):
+    _put(root, kind, name, **{"created-at": "2026-01-01T00:00:00Z", **extra})
+    path = root / kind / f"{name}.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "kind": kind}))
+
+
+def _printed_command(line):
+    return re.search(r"`(lore record supersede [^`]+)`", line).group(1)
+
+
+def _run_printed(world, line):
+    import shlex
+    argv = shlex.split(_printed_command(line))
+    assert argv[:2] == ["lore", "record"]
+    return run_cli(argv[1:], vault=world.roots["default"], state_dir=world.state,
+                   env_extra={"XDG_CONFIG_HOME": str(world.cfg)})
+
+
+def _supersedes(root, kind, name):
+    return json.loads((root / kind / f"{name}.json").read_text()).get("supersedes", [])
+
+
+def test_a_linker_name_held_by_an_earlier_vault_makes_the_command_act_on_the_linkers_own_vault(world):
+    first, second = world.roots["default"], world.roots["levr"]
+    _put_full(first, "adr", "src")
+    _put_full(second, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(second, "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line) == (
+        "lore record supersede decision/old --by adr/src --vault levr")
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(second, "adr", "src") == ["decision/old"]
+    assert _supersedes(first, "adr", "src") == []
+
+
+def test_a_linker_name_held_by_a_later_vault_also_gets_the_vault_flag(world):
+    first, second = world.roots["default"], world.roots["levr"]
+    _put_full(first, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(first, "adr", "src", related={"decision": ["old"]})
+    _put_full(second, "adr", "src")
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault default")
+    assert _run_printed(world, line).returncode == 0
+    assert _supersedes(first, "adr", "src") == ["decision/old"]
+    assert _supersedes(second, "adr", "src") == []
+
+
+def test_target_and_linker_in_different_vaults_with_a_duplicated_linker_get_words_and_no_command(world):
+    _put_full(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(world.roots["default"], "adr", "src", related={"decision": ["old"]})
+    _put_full(world.roots["trailhead"], "adr", "src")
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+def test_a_same_named_record_that_cannot_be_read_still_counts_as_a_duplicate_linker(world):
+    d, other = world.roots["default"], world.roots["levr"]
+    _put_full(d, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(d, "adr", "src", related={"decision": ["old"]})
+    _put_full(other, "adr", "src")
+    (other / "adr" / "src.json").write_text("{not json")
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault default")
+
+
 def _line_for(finding_name, candidate_name, *, links_back=True):
     health = importlib.import_module("lore.cli.health")
     retired = importlib.import_module("lore.health.retired")

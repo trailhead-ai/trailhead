@@ -427,12 +427,13 @@ LINKS_BACK = "it links back to this record, so if this record replaced it, recor
 def _supersede_command(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, shared: bool) -> str | None:
     """``lore record supersede`` for *c* by the linker, or ``None`` when no safe command exists.
 
-    ``--vault`` locates both records in one vault, so a target that also exists in another
-    vault can be named only when the linker sits beside it."""
+    ``--vault`` locates both records in one vault, so it can only name the vault they
+    share; two records in different vaults can be told apart only when neither name
+    exists anywhere else."""
     if not (_well_shaped(f.name) and _well_shaped(c.name)):
         return None
     cmd = f"lore record supersede {shlex.quote(f'{c.kind}/{c.name}')} --by {shlex.quote(f'{f.kind}/{f.name}')}"
-    if shared:
+    if shared or f.linker_duplicated:
         if f.vault != c.vault:
             return None
         cmd += f" --vault {shlex.quote(c.vault)}"
