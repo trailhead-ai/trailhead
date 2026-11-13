@@ -190,21 +190,33 @@ def _run_view(run_id: int, port: int) -> int:
 
 def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
     token = _token(port)
-    stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log?follow=1", headers=_bearer(token), port=port)
-    try:
-        if stream.refusal is not None:
-            raise _refusal(stream.refusal, run_id)
+    written = 0
+    while True:
+        run = None
+        stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log?follow=1", headers=_bearer(token), port=port)
         try:
-            for line in stream.lines():
-                sys.stdout.write(line.decode(errors="replace"))
-                sys.stdout.flush()
-        except outpost_http.StreamBroken as err:
-            raise _fail(
-                f"the log stream {'timed out' if err.timed_out else 'was dropped'} before run {run_id} completed"
-            ) from None
-    finally:
-        stream.close()
-    run = _get_view(token, run_id, port)
+            if stream.refusal is not None:
+                raise _refusal(stream.refusal, run_id)
+            position = 0
+            try:
+                for line in stream.lines():
+                    end = position + len(line)
+                    if end > written:
+                        sys.stdout.write(line[max(0, written - position) :].decode(errors="replace"))
+                        sys.stdout.flush()
+                        written = end
+                    position = end
+            except outpost_http.StreamBroken as err:
+                if not err.timed_out:
+                    raise _fail(f"the log stream was dropped before run {run_id} completed") from None
+                run = _get_view(token, run_id, port)
+                if run["state"] != "completed":
+                    continue
+            break
+        finally:
+            stream.close()
+    if run is None:
+        run = _get_view(token, run_id, port)
     if run["state"] != "completed":
         raise _fail(f"the log stream ended before run {run_id} completed")
     if not exit_status or run["result"] == "success":

@@ -18,6 +18,7 @@ from trailhead.tests._gateway_support import (
     CLIENT_ID,
     CLIENT_SECRET,
     TOKEN,
+    Cut,
     StubOutpost,
     free_port,
     run_gateway_runner,
@@ -619,14 +620,6 @@ class TestRunWatch:
             rc, _, _ = self._watch(cli, stub)
         assert rc == 2
 
-    def test_a_stream_that_goes_quiet_past_the_idle_timeout_exits_2(self, cli, monkeypatch):
-        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
-        with StubOutpost(view=view(), log_steps=["one\n", threading.Event()]) as stub:
-            rc, out, err = self._watch(cli, stub, "--exit-status")
-        assert rc == 2
-        assert out == "one\n"
-        assert "timed out" in err
-
     @pytest.mark.parametrize(
         "bad",
         [dict(state="finished", result=None), dict(result="passed"), dict(result=None), dict(reason=5)],
@@ -644,6 +637,44 @@ class TestRunWatch:
             rc, out, err = cli(stub.port, "run", "watch", "99")
         assert (rc, out) == (2, "")
         assert err == "outpost-gateway: no run 99 in this workspace\n"
+
+    @pytest.mark.parametrize("flags", [("--exit-status",), ()], ids=["with-flag", "without-flag"])
+    def test_a_connection_cut_mid_chunk_is_a_dropped_stream(self, flags, cli):
+        with StubOutpost(view=view(), log_steps=["one\n", Cut()], log_chunked=True) as stub:
+            rc, out, err = self._watch(cli, stub, *flags)
+        assert rc == 2
+        assert out == "one\n"
+        assert "was dropped" in err
+
+    def test_a_quiet_running_job_is_followed_without_repeating_output(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        running = view(state="in_progress", result=None, exit_code=None)
+        with StubOutpost(
+            log_connections=[["one\n", "tw", threading.Event()], ["one\n", "two\n", "three\n"]],
+            view_sequence=[running, view(result="failure", exit_code=1)],
+        ) as stub:
+            rc, out, err = self._watch(cli, stub, "--exit-status")
+            follows = [q for q in stub.requests if q.path.endswith("/log?follow=1")]
+        assert out == "one\ntwo\nthree\n"
+        assert rc == 1, err
+        assert len(follows) == 2
+
+    def test_a_quiet_stream_whose_view_cannot_be_read_exits_2(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        refused = (500, {"reason": "boom", "message": "no"})
+        with StubOutpost(view_reply=refused, log_steps=["one\n", threading.Event()]) as stub:
+            rc, out, _ = self._watch(cli, stub, "--exit-status")
+        assert (rc, out) == (2, "one\n")
+
+    def test_a_quiet_stream_of_a_completed_run_is_not_reopened(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(
+            view=view(result="failure", exit_code=1), log_connections=[["one\n", threading.Event()], ["one\n"]]
+        ) as stub:
+            rc, out, _ = self._watch(cli, stub, "--exit-status")
+            follows = [q for q in stub.requests if "/log" in q.path]
+        assert (rc, out) == (1, "one\n")
+        assert len(follows) == 1
 
     def test_a_non_numeric_id_is_a_usage_error(self, cli):
         with StubOutpost() as stub, pytest.raises(SystemExit) as stop:

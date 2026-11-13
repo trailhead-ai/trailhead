@@ -110,6 +110,10 @@ def run_under_harness(
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
+class Cut:
+    """A ``log_steps`` entry for a chunked log: announce a chunk, send part of it, and close the socket."""
+
+
 @dataclass
 class Seen:
     method: str
@@ -128,7 +132,10 @@ class StubOutpost:
     ``POST /gateway/runs`` answers 202 (or ``start_reply``) and keeps the uploaded tar in
     ``requests``; ``GET /gateway/runs/<id>`` serves ``view``; ``GET /gateway/runs/<id>/log``
     writes ``log_steps`` in order, a ``str`` as it is, a ``threading.Event`` as a wait until it
-    is set, then closes the connection (an early close is a dropped stream). ``release`` is set
+    is set, then closes the connection (an early close is a dropped stream). ``log_connections``,
+    when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
+    likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
+    and a ``Cut`` step ends it mid-chunk. ``release`` is set
     on exit so no waiting step outlives the stub.
     """
 
@@ -147,6 +154,9 @@ class StubOutpost:
     view: dict | None = None
     view_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
+    log_connections: list[list] | None = None
+    view_sequence: list[dict] | None = None
+    log_chunked: bool = False
     requests: list[Seen] = field(default_factory=list)
     release: threading.Event = field(default_factory=threading.Event)
 
@@ -184,16 +194,32 @@ class StubOutpost:
                 return False
 
             def _stream_log(self) -> None:
+                logs = sum(1 for q in stub.requests if urlsplit(q.path).path.endswith("/log"))
+                steps = stub.log_steps
+                if stub.log_connections is not None:
+                    steps = stub.log_connections[min(logs - 1, len(stub.log_connections) - 1)]
                 self.send_response(200)
                 self.send_header("Content-Type", "text/plain")
+                if stub.log_chunked:
+                    self.send_header("Transfer-Encoding", "chunked")
                 self.end_headers()
-                for step in stub.log_steps:
+                for step in steps:
                     if isinstance(step, threading.Event):
                         while not (step.is_set() or stub.release.is_set()):
                             step.wait(0.05)
                         continue
-                    self.wfile.write(step.encode())
+                    if isinstance(step, Cut):
+                        self.wfile.write(b"ff\r\npartial")
+                        self.wfile.flush()
+                        self.close_connection = True
+                        return
+                    data = step.encode()
+                    if stub.log_chunked:
+                        data = f"{len(data):x}\r\n".encode() + data + b"\r\n"
+                    self.wfile.write(data)
                     self.wfile.flush()
+                if stub.log_chunked:
+                    self.wfile.write(b"0\r\n\r\n")
 
             def _redirect(self, location: str) -> None:
                 self.send_response(302)
@@ -250,6 +276,9 @@ class StubOutpost:
                         if stub.view_reply is not None:
                             return self._send(*stub.view_reply)
                         if self._authorised():
+                            if stub.view_sequence is not None:
+                                views = sum(1 for q in stub.requests if urlsplit(q.path).path.count("/") == 3)
+                                return self._send(200, stub.view_sequence[min(views - 1, len(stub.view_sequence) - 1)])
                             self._send(200, stub.view)
                         return
                 if stub.runs_redirect is not None and self.path == "/gateway/runs":
