@@ -825,6 +825,14 @@
         "scripts/run_block.py"
       ]
     },
+    "unattended-execute-refuses-a-block-stopped-in-plan": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
     "unattended-execute-refuses-an-outcome-less-block": {
       "measures": [
         "skills/_shared/execute.md",

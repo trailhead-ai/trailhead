@@ -83,9 +83,13 @@ ritual resumes), whose refusal words this skill uses as written:
 
 - No outcome, and this session's own `/craft:slice --then-plan` pass did not open it: refused as
   `outcome: refused task/<parent-name> parked=0 — <why>; <what to run instead>` unless `--resume` is
-  given. The reason is the shared contract's fixed sentence: `the latest run block has no outcome so
-  another run holds it; the record last changed <age> ago, from the record's own update time;
-  --resume is only for an earlier run known to be over`.
+  given and `latest-ritual:` is `plan`. The reason is the shared contract's fixed sentence: `the
+  latest run block has no outcome so another run holds it; the record last changed <age> ago, from
+  the record's own update time; --resume is only for an earlier run known to be over`. With
+  `--resume` and any other ritual, refused, the reason saying in words which ritual to run to resume
+  it (for example, the latest run stopped in slice; run slice to resume it). With `--resume` and
+  `none`, refused, the reason saying in words that the latest run block names no ritual, so the
+  stopped ritual cannot be told.
 - `slice-chosen`: a fresh run. Slice's work is finished and plan is the next ritual, so plan opens
   its own block after the earlier one and leaves that one as it is.
 - `plan-ready` or `pr-ready`: refused, the reason saying in words that plan's work is finished
@@ -98,6 +102,8 @@ ritual resumes), whose refusal words this skill uses as written:
   the reason saying in words that the latest run block names no ritual, so the stopped ritual cannot
   be told.
 - No run block on the record and `--resume` given: refused, there is no earlier run to resume.
+- Any other `latest-outcome:` value, such as `refused` or free text: refused, the reason saying in
+  words that the outcome is not recognised, so the block is to be read and finished by hand.
 - `run_block.py` refusing the body: refused, the reason naming its `reason-code`.
 
 A refusal writes nothing. A resumed run follows Resuming below. When the elected vault is unbound
@@ -165,10 +171,11 @@ applies: every `--vault <elected-vault>` in this skill is omitted from the call.
 **Resuming.** A resumed run reads the parent fresh and continues from the record's state;
 `**Checkpoint:**` is a note, never the guide (`_shared/unattended.md`, Resume).
 
-- **Takeover and the new block.** With `--resume` on an outcome-less latest block, the run first
-  closes that block as `_shared/unattended.md` says (Taking over an outcome-less block), then opens
-  its own block as above, and logs that the flag was given when the latest block already had an
-  outcome. Earlier blocks stay as they are.
+- **Takeover and the new block.** With `--resume` on an outcome-less latest block whose
+  `latest-ritual:` is `plan`, the run takes that block over as `_shared/unattended.md` says (Taking
+  over an outcome-less block): one `--diff` write closes it and appends the run's own block as above
+  together. It logs that the flag was given when the latest block already had an outcome. Earlier
+  blocks stay as they are.
 - **Answers.** Read them once with `run_block.py` and handle them as `_shared/unattended.md`
   (Reading answers) says: a matched answer is applied where the resume point below reaches its
   question, an unmatched or missing one is re-parked as a pointer, and an answer to a correction
