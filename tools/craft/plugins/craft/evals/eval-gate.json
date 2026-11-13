@@ -563,6 +563,7 @@
       ]
     },
     "driver-build-defers-a-found-work-call-outside-its-allowed-actions": {
+      "merge_only": true,
       "measures": [
         "skills/_shared/escalation.md",
         "skills/_shared/execute.md",
