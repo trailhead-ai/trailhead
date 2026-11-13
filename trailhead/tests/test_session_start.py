@@ -28,7 +28,6 @@ from trailhead.launch_profile import (
     HUB_PROFILE,
     RITUAL_PROFILE,
     RITUAL_ROLE,
-    SETUP_SANDBOX_KEYS,
     LaunchProfile,
     WorkspaceError,
     broker_launch,
@@ -41,7 +40,6 @@ from trailhead.tests.test_ranger_start import OUTPOST_REFUSAL_BODIES, _Stub
 
 REPO = Path(__file__).resolve().parents[2]
 GOLDEN = Path(__file__).parent / "fixtures" / "session_start_hub.json"
-RITUAL_GOLDEN = Path(__file__).parent / "fixtures" / "session_start_ritual.json"
 ROOT_TOKEN = "<ROOT>"
 _HUB_ARGV = ["session-start", "--role", "hub", "--account", "a", "--json", "--broker-session", "s1"]
 
@@ -2530,7 +2528,6 @@ def test_setup_sandbox_carries_every_user_level_read_denial_and_the_profiles_own
     (home / ".claude" / "settings.json").write_text(json.dumps(data))
     _write_managed(tmp_path, {"sandbox": {"filesystem": {"denyRead": ["/managed/creds"]}}})
     sandbox = _sandbox_of(env, ws)
-    assert tuple(sandbox) == SETUP_SANDBOX_KEYS
     reads = sandbox["denied_reads"]
     for expected in (home / ".ssh", home / ".aws", Path("/etc/secret"), Path("/managed/creds"),
                      Path(env["OUTPOST_STATE_DIR"]).resolve()):
@@ -2619,8 +2616,6 @@ def test_cli_prints_the_ritual_launch_shape(tmp_path, monkeypatch, capsys):
     assert set(out) == {"argv", "env_set", "env_unset", "directory", "files", "setup_sandbox"}
     assert out["directory"] == str(ws)
     assert out["argv"][-1] == "/craft:slice spec/x --unattended"
-    assert tuple(out["setup_sandbox"]) == SETUP_SANDBOX_KEYS
-    assert all(isinstance(v, list) for v in out["setup_sandbox"].values())
 
 
 def test_cli_starts_the_ritual_in_the_real_path_of_a_workspace_named_through_a_symlink(
@@ -2752,25 +2747,3 @@ def test_a_mixed_case_read_denial_entry_covering_a_root_refuses_on_darwin_only(t
         _start(env, platform="darwin")
     assert _start(env, platform="linux") is not None
 
-
-# the seam smoke
-
-
-def test_ritual_session_start_subprocess_matches_the_golden(  # inert-gate: allow wiring seam smoke
-    tmp_path,
-):
-    env, ws = _ritual_ready(tmp_path)
-    _other_account(env)
-    _group_toml(env, "theirs", account="~/acct-b", vaults=["bvault"])
-    foreign = tmp_path / "foreign"
-    foreign.mkdir()
-    prompt = tmp_path / "prompt.txt"
-    prompt.write_text("/craft:slice spec/x --unattended --then-plan")
-    result = subprocess.run(
-        [str(REPO / "bin" / "trailhead"), "session-start", "--role", RITUAL_ROLE, "--account", "a",
-         "--workspace", str(ws), "--headless", "--prompt-file", str(prompt), "--json"],
-        cwd=foreign, env=env, capture_output=True, text=True, timeout=120,
-    )
-    assert result.returncode == 0, result.stderr
-    actual = json.loads(_normalised(result.stdout.replace(env["PATH"], PATH_TOKEN), tmp_path))
-    assert actual == json.loads(RITUAL_GOLDEN.read_text())

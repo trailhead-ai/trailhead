@@ -2,6 +2,9 @@
 
 - `camp groups --json` with two configured groups emits a JSON array of
   {"name": ..., "members": [<member names>]} sorted by name, exit 0.
+- Each entry also carries the group's `[launch] account` (null when it declares
+  none) and the sorted names of the vaults its `lore_scopes` and `shared_vaults`
+  bind.
 - Human mode prints exactly one line per group, `<name>: <members>`, in name
   order.
 - No groups configured: exit 0, `[]` / "no groups configured" — not an error.
@@ -26,6 +29,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from ._helpers import run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -106,17 +111,19 @@ def test_camp_groups_json_names_each_groups_account_and_vaults(tmp_path: Path) -
     )
     (groups_dir / "two.toml").write_text(
         '[group]\nname = "two"\n\n[[members]]\nname = "repo-t"\nrepo_root = "/tmp/fake-t"\n\n'
-        '[[lore_scopes]]\nscope = "product"\nname = "alpha"\n\n'
-        '[[shared_vaults]]\nname = "beta"\nroot = "/tmp/beta"\n'
+        '[[lore_scopes]]\nscope = "product"\nname = "zeta"\n\n'
+        '[[lore_scopes]]\nscope = "team"\nname = "mid"\n\n'
+        '[[shared_vaults]]\nname = "beta"\nroot = "/tmp/beta"\n\n'
+        '[[shared_vaults]]\nname = "alpha"\nroot = "/tmp/alpha"\n'
     )
 
-    result = _run_cli(["groups", "--json"], env=env)
+    result = run_camp(["groups", "--json"], env={**os.environ, **env})
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     by_name = {g["name"]: g for g in json.loads(result.stdout)}
     assert (by_name["plain"]["account"], by_name["plain"]["vaults"]) == (None, [])
     assert (by_name["named"]["account"], by_name["named"]["vaults"]) == ("~/.claude-work", [])
-    assert (by_name["two"]["account"], by_name["two"]["vaults"]) == (None, ["alpha", "beta"])
+    assert (by_name["two"]["account"], by_name["two"]["vaults"]) == (None, ["alpha", "beta", "mid", "zeta"])
 
 
 # ---------------------------------------------------------------------------

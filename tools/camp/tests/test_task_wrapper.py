@@ -6,11 +6,15 @@ workspace manifest as `task_wrapper`. Every later run of that workspace's steps
 (`camp setup`, `camp activate`, reconcile) uses the RECORDED wrapper, whatever
 the shell's environment says.
 
-These tests drive the real `camp` CLI as a subprocess against a scratch group,
-under scratch CAMP_CONFIG_DIR / CAMP_STATE_DIR / HOME. The wrapper is a script
-that itself writes a marker (the member's substituted worktree and the argv it
-wrapped) and then execs the wrapped argv, so a marker proves the step really
-ran *through* the wrapper.
+Lifecycle cases run camp's own code in this process (`run_camp`, and the
+seed / reconcile functions) against a scratch group under scratch
+CAMP_CONFIG_DIR / CAMP_STATE_DIR / HOME: `camp setup --background` and
+`camp activate --background` are the bodies the detached provisioner runs, and
+they complete before they return. The one seam where the process boundary is
+the subject, `camp new` handing the workspace to a detached provisioner, spawns
+the real CLI once. The wrapper is a script that itself writes a marker (the
+member's substituted worktree and the argv it wrapped) and then execs the
+wrapped argv, so a marker proves the step really ran *through* the wrapper.
 """
 from __future__ import annotations
 
@@ -23,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from ._helpers import CLI_CAMP, init_git_repo
+from ._helpers import CLI_CAMP, init_git_repo, run_camp
 
 VAR = "CAMP_TASK_WRAPPER"
 
@@ -86,6 +90,9 @@ class Scenario:
         assert r.returncode == 0, r.stderr
 
     def camp(self, *argv, env=None):
+        return run_camp(list(argv), env=env if env is not None else self.base_env)
+
+    def camp_cli(self, *argv, env=None):
         return subprocess.run(
             [sys.executable, str(CLI_CAMP), *argv],
             capture_output=True,
@@ -124,18 +131,36 @@ class Scenario:
         )
         toml.write_text(body)
 
-    def new(self, wrapper: str | None, *, extra=()):
+    def env_with(self, wrapper: str | None) -> dict[str, str]:
         env = dict(self.base_env)
         if wrapper is not None:
             env[VAR] = wrapper
-        r = self.camp("new", "s1", "--group", "g", "--no-session", "--json", *extra, env=env)
+        return env
+
+    def new(self, wrapper: str | None) -> None:
+        """What `camp new` does before the harness launches, run in-process:
+        seed the workspace (recording the wrapper) and run the provisioner's body."""
+        from camp.group.config import load_group
+        from camp.provision.provision import seed_pending_workspace
+
+        env = self.env_with(wrapper)
+        seed_pending_workspace(load_group(self.cfg / "groups" / "g.toml"), "s1", env=env)
+        r = self.camp("setup", "--background", "s1", "--group", "g", env=env)
         assert r.returncode == 0, r.stderr
-        return r
+
+    def new_via_cli(self, wrapper: str | None) -> None:
+        r = self.camp_cli(
+            "new", "s1", "--group", "g", "--no-session", "--json", env=self.env_with(wrapper)
+        )
+        assert r.returncode == 0, r.stderr
+
+    def status(self) -> int:
+        return self.camp("status", "--name", "s1", "--group", "g").returncode
 
     def wait_settled(self) -> subprocess.CompletedProcess:
         deadline = time.monotonic() + 90
         while True:
-            st = self.camp("status", "--name", "s1", "--group", "g")
+            st = self.camp_cli("status", "--name", "s1", "--group", "g")
             if st.returncode != 2 or time.monotonic() > deadline:
                 return st
             time.sleep(0.2)  # poll interval on the observable exit code
@@ -161,8 +186,11 @@ def sc(tmp_path):
 
 
 def test_each_member_step_runs_through_the_wrapper_with_its_own_worktree(sc):
+    # The one real-process seam: `camp new` hands the workspace to a detached
+    # provisioner. The wait is a bounded poll on `camp status`'s exit code.
     sc.define_task()
-    sc.new(sc.wrapper_json())
+    wrapper = sc.wrapper_json()
+    sc.new_via_cli(wrapper)
     assert sc.wait_settled().returncode == 0
 
     ws = sc.ws_dir()
@@ -172,13 +200,22 @@ def test_each_member_step_runs_through_the_wrapper_with_its_own_worktree(sc):
     assert by_member["m2"]["worktree"] == str(ws / "m2")
     assert by_member["m1"]["cmd"][0] == sys.executable
     assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
+    assert sc.manifest()["task_wrapper"] == wrapper
 
 
-def test_new_records_the_wrapper_in_the_manifest_as_given(sc):
+def test_each_member_step_is_wrapped_with_its_own_worktree_in_process(sc):
     sc.define_task()
     wrapper = sc.wrapper_json()
     sc.new(wrapper)
-    assert sc.wait_settled().returncode == 0
+    assert sc.status() == 0
+
+    ws = sc.ws_dir()
+    by_member = {e["member"]: e for e in sc.wrapper_log()}
+    assert {m: e["worktree"] for m, e in by_member.items()} == {
+        "m1": str(ws / "m1"),
+        "m2": str(ws / "m2"),
+    }
+    assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
     assert sc.manifest()["task_wrapper"] == wrapper
 
 
@@ -186,7 +223,7 @@ def test_setup_rerun_with_var_unset_applies_the_recorded_wrapper(sc):
     sc.define_task(required=False)
     (sc.marks / "require-gate").write_text("")
     sc.new(sc.wrapper_json())
-    assert sc.wait_settled().returncode == 0
+    assert sc.status() == 0
     assert not (sc.marks / "ran-m1").exists()
     first_runs = len(sc.wrapper_log())
     assert first_runs == 2
@@ -203,7 +240,7 @@ def test_recorded_wrapper_wins_over_a_different_wrapper_in_the_rerun_env(sc):
     sc.define_task(required=False)
     (sc.marks / "require-gate").write_text("")
     sc.new(sc.wrapper_json())
-    assert sc.wait_settled().returncode == 0
+    assert sc.status() == 0
     (sc.marks / "gate").write_text("")
 
     env = {**sc.base_env, VAR: json.dumps([str(sc.tmp / "no-such-wrapper")])}
@@ -216,34 +253,24 @@ def test_recorded_wrapper_wins_over_a_different_wrapper_in_the_rerun_env(sc):
 def test_activate_with_var_unset_applies_the_recorded_wrapper(sc):
     sc.define_task(phase="activate")
     sc.new(sc.wrapper_json())
-    assert sc.wait_settled().returncode == 0
+    assert sc.status() == 0
     assert sc.wrapper_log() == []
 
-    r = sc.camp("activate", "m1", "--name", "s1", "--group", "g")
+    r = sc.camp("activate", "--background", "m1", "--name", "s1", "--group", "g")
     assert r.returncode == 0, r.stderr
-    deadline = time.monotonic() + 90
-    while not (sc.marks / "ran-m1").exists() and time.monotonic() < deadline:
-        time.sleep(0.1)  # poll interval on the step's own marker
     assert (sc.marks / "ran-m1").exists()
     log = sc.wrapper_log()
     assert [e["member"] for e in log] == ["m1"]
     assert log[0]["worktree"] == str(sc.ws_dir() / "m1")
 
 
-def test_unwrapped_workspace_runs_steps_bare(sc):
+@pytest.mark.parametrize("unset", [None, "", "   "], ids=["absent", "empty", "blank"])
+def test_unwrapped_workspace_runs_steps_bare(sc, unset):
     sc.define_task()
-    sc.new(None)
-    assert sc.wait_settled().returncode == 0
+    sc.new(unset)
+    assert sc.status() == 0
     assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
     assert sc.wrapper_log() == []
-    assert "task_wrapper" not in sc.manifest()
-
-
-def test_empty_wrapper_variable_is_treated_as_unset(sc):
-    sc.define_task()
-    sc.new("")
-    assert sc.wait_settled().returncode == 0
-    assert (sc.marks / "ran-m1").exists()
     assert "task_wrapper" not in sc.manifest()
 
 
@@ -251,13 +278,12 @@ def test_missing_recorded_policy_file_fails_the_step_closed(sc):
     sc.define_task()
     (sc.marks / "require-gate").write_text("")
     sc.new(sc.wrapper_json())
-    assert sc.wait_settled().returncode == 3
+    assert sc.status() == 3
     (sc.marks / "gate").write_text("")
     sc.policy.unlink()
 
-    r = sc.camp("setup", "s1", "--group", "g")
-    st = sc.camp("status", "--name", "s1", "--group", "g")
-    assert st.returncode == 3, (r.stderr, st.stdout)
+    sc.camp("setup", "s1", "--group", "g")
+    assert sc.status() == 3
     assert not (sc.marks / "ran-m1").exists()
     assert not (sc.marks / "ran-m2").exists()
     reasons = " ".join(m.get("reason", "") for m in sc.manifest()["members"])
@@ -272,13 +298,12 @@ def test_missing_recorded_wrapper_executable_fails_the_step_closed(sc):
     sc.define_task()
     (sc.marks / "require-gate").write_text("")
     sc.new(json.dumps([str(exe), "--"]))
-    assert sc.wait_settled().returncode == 3
+    assert sc.status() == 3
     (sc.marks / "gate").write_text("")
     exe.unlink()
 
     sc.camp("setup", "s1", "--group", "g")
-    st = sc.camp("status", "--name", "s1", "--group", "g")
-    assert st.returncode == 3
+    assert sc.status() == 3
     assert not (sc.marks / "ran-m1").exists()
     reasons = " ".join(m.get("reason", "") for m in sc.manifest()["members"])
     assert f"executable {exe} is not found" in reasons
@@ -298,8 +323,7 @@ def test_missing_recorded_wrapper_executable_fails_the_step_closed(sc):
 def test_malformed_wrapper_fails_each_step_closed_and_status_exits_3(sc, raw, reason_part):
     sc.define_task()
     sc.new(raw)
-    st = sc.wait_settled()
-    assert st.returncode == 3, (st.stdout, st.stderr)
+    assert sc.status() == 3
     assert not (sc.marks / "ran-m1").exists()
     assert not (sc.marks / "ran-m2").exists()
     reasons = [m.get("reason", "") for m in sc.manifest()["members"]]
@@ -310,13 +334,12 @@ def test_stray_wrapper_variable_on_an_unwrapped_workspace_fails_setup_closed(sc)
     sc.define_task()
     (sc.marks / "require-gate").write_text("")
     sc.new(None)
-    assert sc.wait_settled().returncode == 3
+    assert sc.status() == 3
     (sc.marks / "gate").write_text("")
 
     env = {**sc.base_env, VAR: sc.wrapper_json()}
     sc.camp("setup", "s1", "--group", "g", env=env)
-    st = sc.camp("status", "--name", "s1", "--group", "g")
-    assert st.returncode == 3
+    assert sc.status() == 3
     assert not (sc.marks / "ran-m1").exists()
     assert sc.wrapper_log() == []
     reasons = " ".join(m.get("reason", "") for m in sc.manifest()["members"])
@@ -334,7 +357,7 @@ def test_retry_cleanup_runs_through_the_wrapper_too(sc):
     sc.define_task(required=False, cleanup=cleanup)
     (sc.marks / "require-gate").write_text("")
     sc.new(sc.wrapper_json())
-    assert sc.wait_settled().returncode == 0
+    assert sc.status() == 0
     (sc.marks / "gate").write_text("")
 
     sc.camp("setup", "s1", "--group", "g")
@@ -343,13 +366,7 @@ def test_retry_cleanup_runs_through_the_wrapper_too(sc):
 
 
 def test_capabilities_json_lists_task_wrapper(tmp_path):
-    r = subprocess.run(
-        [sys.executable, str(CLI_CAMP), "capabilities", "--json"],
-        capture_output=True,
-        text=True,
-        env={**os.environ, "HOME": str(tmp_path)},
-        timeout=60,
-    )
+    r = run_camp(["capabilities", "--json"], env={**os.environ, "HOME": str(tmp_path)})
     assert r.returncode == 0, r.stderr
     assert "task-wrapper" in json.loads(r.stdout)["capabilities"]
 
@@ -406,8 +423,8 @@ def test_an_absolute_path_built_from_a_placeholder_is_not_checked(tmp_path):
     exe = tmp_path / "w"
     exe.write_text("")
     exe.chmod(0o755)
-    raw = json.dumps([str(exe), "--worktree", "{worktree}", "--"])
-    assert _wrap(raw, worktree="/not/yet/there")[2] == "/not/yet/there"
+    raw = json.dumps([str(exe), "/not/yet/there/{member}", "--"])
+    assert _wrap(raw)[1] == "/not/yet/there/m1"
 
 
 def test_the_executable_resolves_on_path_when_not_absolute(tmp_path, monkeypatch):
