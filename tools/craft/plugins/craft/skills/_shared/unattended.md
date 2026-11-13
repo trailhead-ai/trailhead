@@ -309,7 +309,10 @@ plan, execute, the PR step.
   The refusal reason is, in these words on the one line: `the latest run block has no outcome so
   another run holds it; the record last changed <age> ago, from the record's own update time;
   --resume is only for an earlier run known to be over`. Plan, execute and the PR step use exactly
-  these words. With `--resume` the run takes the block over, below.
+  these words. With `--resume` the run takes the block over, below, only when `latest-ritual:` names
+  the running ritual; any other ritual refuses as in Which ritual resumes, the reason naming in
+  words which ritual to run to resume it, and `none` refuses because the stopped ritual cannot be
+  told.
 - `slice-chosen`, `plan-ready` or `pr-ready`, each the finished outcome of one ritual (slice, plan
   and the PR step respectively): written by an **earlier** ritual than the one running, it means a
   fresh run, which appends its own new block and leaves the earlier one as it is. Written by the
@@ -346,11 +349,20 @@ is a progress note only, so a block written without a marker resumes the same wa
 
 ### Taking over an outcome-less block
 
-With `--resume`, the run first closes the earlier block with one confined edit: it adds
-`**Outcome:** stuck` directly above `**Checkpoint:**` and sets the checkpoint to exactly
-`taken over by a resumed run`. Then it appends its own block. The double-start check keeps its
-meaning: only outcome-less blocks other than this run's own count. A live run that was wrongly taken
-over meets the own-block read in How the block is written at its next write and halts there.
+A takeover needs `--resume` and a `latest-ritual:` that names the running ritual. Any other ritual
+refuses with the reason Which ritual resumes fixes (the latest run stopped in plan; run plan to
+resume it), and `none` refuses with that section's no-ritual reason. One exception: plan continuing
+its own session's `/craft:slice --then-plan` block, which names slice and which this session opened,
+is not a takeover and needs no flag.
+
+The takeover is one `lore record update --diff` write confined to the blocks, read fresh beforehand.
+It adds `**Outcome:** stuck` directly above the earlier block's `**Checkpoint:**`, sets that
+checkpoint to exactly `taken over by a resumed run`, and appends the run's own new block, so a
+failure of the write leaves the record as it was and never an earlier block closed with no block of
+this run's own. The double-start check keeps its meaning: only outcome-less blocks other than this
+run's own, and appearing after the block this run took over or followed, count. A live run that was
+wrongly taken over meets the own-block read in How the block is written at its next write and halts
+there.
 
 A resumed run can follow a stuck run without limit; an attempt budget and a stuck count are not yet
 defined.

@@ -202,14 +202,20 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      - `none`, no `--resume`: `the latest run block has no outcome so another run holds it; the
        record last changed <age> ago, from the record's own update time; --resume is only for an
        earlier run known to be over`;
-     - `none`, with `--resume`: resumed, taking the block over at step 6;
+     - `none`, with `--resume`: resumed, taking the block over at step 6, when `latest-ritual:` is
+       `execute`. When it names any other ritual, refused:
+       `the latest run stopped in <ritual>; run <ritual> to resume it`, naming the ritual in words.
+       When it is `none`: `the latest run block names no ritual, so the stopped ritual cannot be
+       told; read the block and finish it by hand`;
      - `needs-a-decision` or `stuck`: resumed, without `--resume`, when `latest-ritual:` is
        `execute`; given the flag, the run logs it. When it names any other ritual, refused:
        `the latest run stopped in <ritual>; run <ritual> to resume it`, naming the ritual in words.
        When it is `none`: `the latest run block names no ritual, so the stopped ritual cannot be
        told; read the block and finish it by hand`;
-     - `slice-chosen`: a fresh run, since slice's work is finished and an attended plan came
-       between;
+     - `slice-chosen` on a record with no `craft/branch` label: a fresh run, since slice's work is
+       finished and an attended plan came between;
+     - `slice-chosen` on a record with a `craft/branch` label: `the slice was claimed attended after
+       the unattended slice; resume it attended`;
      - `plan-ready` on a record with no `craft/branch` label: a fresh run, since plan's work is
        finished and execute is the next ritual;
      - `plan-ready` on a record with a `craft/branch` label: `the slice was claimed attended after
@@ -227,18 +233,20 @@ the branch cut and every dispatch come after it. A stop at step 6 or later is no
 it comes after a write: it ends `stuck` or `needs-a-decision`.
 
 6. **Open the block on the run's task record**, the slice parent or the standalone task, and nowhere
-   else. Opening it is the unattended claim. With `--resume` over an outcome-less latest block,
-   first take that block over as the shared contract's Resume says, in one confined edit. Append one
-   `## Unattended run` block after the existing body, shaped as the unattended contract fixes:
-   `**Format:** 1`, `**Rituals:** execute (0 calls decided unattended)`, `**Checkpoint:** entered`,
-   an empty `**Decisions:**` list, `**Parked questions:** none`, and **no** `**Outcome:**` line.
-   Leave every earlier block as it is.
+   else. Opening it is the unattended claim. With `--resume` over an outcome-less latest block, take
+   that block over as the shared contract's Resume says: one `--diff` write closes the earlier block
+   and appends this run's block together. Otherwise append one `## Unattended run` block after the
+   existing body. The block is shaped as the unattended contract fixes: `**Format:** 1`,
+   `**Rituals:** execute (0 calls decided unattended)`, `**Checkpoint:** entered`, an empty
+   `**Decisions:**` list, `**Parked questions:** none`, and **no** `**Outcome:**` line. Leave every
+   earlier block as it is.
 7. **Re-read the record** straight after the write. Count only the blocks with no `**Outcome:**`
-   line other than this run's own, the last one, which the write just made. If this run's own block
-   has gained an `**Outcome:**` line this run did not write, the run stops as [The run
-   block](#the-run-block) says. If another such block now sits beside this one, another session
-   opened one at the same moment: this run cannot tell which of the two it wrote, so it edits
-   neither. It ends
+   line other than this run's own, the last one, which the write just made, and only those that sit
+   after the latest block step 5 read, the one this run took over or followed. An older outcome-less
+   block that was already there does not count. If this run's own block has gained an `**Outcome:**`
+   line this run did not write, the run stops as [The run block](#the-run-block) says. If another
+   such block now sits beside this one, another session opened one at the same moment: this run
+   cannot tell which of the two it wrote, so it edits neither. It ends
    `outcome: stuck task/<name> parked=0 — a second run opened a block on this record at the same moment; close the extra block by hand and run execute again`.
    This makes a double start visible; it does not make the claim atomic.
 
