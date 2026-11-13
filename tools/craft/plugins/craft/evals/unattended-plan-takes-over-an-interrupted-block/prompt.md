@@ -1,7 +1,7 @@
 ---
 allowed_tools: [Skill, Read, Glob, Grep, Agent, Write]
 max_turns: 120
-timeout_seconds: 900
+timeout_seconds: 540
 ---
 Run `/craft:plan task/print-the-totals-of-a-csv-input --unattended --resume`.
 

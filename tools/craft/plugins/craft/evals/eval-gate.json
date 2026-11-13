@@ -825,14 +825,16 @@
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-plan-reparks-an-unanswered-question": {
       "measures": [
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-plan-resumes-after-stuck": {
       "measures": [
@@ -853,7 +855,8 @@
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-plan-parks-a-correction-at-the-end": {
       "measures": [
@@ -874,7 +877,8 @@
         "skills/plan/SKILL.md",
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-plan-refuses-a-finished-block": {
       "measures": [
