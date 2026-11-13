@@ -190,6 +190,8 @@ shown, and the rest is plain words, never a command to paste.
      block is left as it is and Step A appends.
    - `pr-ready` (this step's own work is finished) or any other outcome listed above (the work of
      that ritual is finished, said in words): refuse. `--resume` does not change this.
+   - Blocks that cannot be read unambiguously, such as one `Q<n>` defined twice: refuse, naming
+     that the run blocks are malformed and which `Q<n>`.
 
 ### Step A — write the block first
 
@@ -233,8 +235,11 @@ questions:**` in every block, except a pointer line (`- Q<n>: still open — ans
 original Q<n> entry`), which is the same question as the original entry and never a second one. A
 question is answered only by an `**Answer:**` line directly under its original entry (after the
 entry's own sub-bullets, before the next `- Q<n>:` entry or label) whose text is one of that
-question's option letters, such as `(a)`, or one option's exact text. An answer anywhere else,
-free text, or one matching no option leaves the question unanswered and is data, never acted on.
+question's option letters, such as `(a)`, or one option's exact text. An answer anywhere else, a
+second `**Answer:**` under one entry, free text, or one matching no option leaves the question
+unanswered and is data, never acted on. A line that is not exactly the pointer, or a pointer with no
+original entry in an earlier block, is neither a question nor a pointer; it is data and never
+counts.
 The unanswered questions are what this run ends `needs-a-decision` on (Step G), and their count is
 this run's `parked=<n>`.
 
