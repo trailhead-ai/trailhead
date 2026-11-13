@@ -13,7 +13,7 @@ be trusted.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 
 from . import references
@@ -109,15 +109,8 @@ def check_retired(
             if not is_live(record):
                 continue
             judged += 1
-            for ref, parsed, target in references.resolved_references(record):
-                if ref.field == "supersedes" or parsed is None:
-                    continue
-                found, unreadable = candidates.lookup(*parsed)
-                if unreadable or not found:
-                    continue
+            for ref, target, found in retired_references(record, candidates):
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
-                    continue
-                if not all(status(c) in RETIRED_STATUSES for c in found):
                     continue
                 if any(key(record) in {key(r) for r in candidates.superseded_by(c.kind, c.name)}
                        for c in found if status(c) == "superseded"):
@@ -132,6 +125,24 @@ def check_retired(
                 )
         result.judged[s.vault] = judged
     return result
+
+
+def retired_references(
+    record: ScannedRecord, candidates: references.CandidateIndex
+) -> Iterator[tuple[references.Reference, str, tuple[ScannedRecord, ...]]]:
+    """Yield ``(reference, target, candidates)`` for each reference of *record*
+    whose candidates are all ``dropped`` or ``superseded``, at least one, none unreadable.
+
+    The ``supersedes`` field is never yielded, nor is a malformed reference. This is
+    the one guard both ``retired-links`` and ``stale-tasks`` judge a link through.
+    """
+    for ref, parsed, target in references.resolved_references(record):
+        if ref.field == "supersedes" or parsed is None:
+            continue
+        found, unreadable = candidates.lookup(*parsed)
+        if found and not unreadable and all(status(c) in RETIRED_STATUSES for c in found):
+            assert target is not None
+            yield ref, target, found
 
 
 def _candidate(

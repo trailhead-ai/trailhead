@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import shlex
 import sys
+from collections import Counter
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -490,15 +491,12 @@ def _stale_line(f: stale_mod.Finding) -> str:
 
 def _stale_note(sec: Section, ctx: RunContext) -> str:
     window = f" (window: {ctx.stale_days} days)"
-    counts = {"undated": 0, "tied to a retired spec": 0, "stale on age": 0}
-    for f in sec.findings or ():
-        reason = ("undated" if f.undated
-                  else "tied to a retired spec" if f.retired_specs else "stale on age")
-        counts[reason] += 1
-    parts = [f"{_num(n)} {reason}" for reason, n in
-             (("stale on age", counts["stale on age"]),
-              ("tied to a retired spec", counts["tied to a retired spec"]),
-              ("undated", counts["undated"])) if n]
+    counts = Counter(
+        "undated" if f.undated else "tied to a retired spec" if f.retired_specs else "stale on age"
+        for f in sec.findings or ()
+    )
+    parts = [f"{_num(counts[reason])} {reason}"
+             for reason in ("stale on age", "tied to a retired spec", "undated") if counts[reason]]
     return window + (": " + ", ".join(parts) if parts else "")
 
 

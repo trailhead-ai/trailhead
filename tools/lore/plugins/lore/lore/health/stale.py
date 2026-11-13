@@ -20,7 +20,6 @@ from datetime import datetime, timedelta
 
 from . import references
 from .model import (
-    RETIRED_STATUSES,
     UNFINISHED_TASK_STATUSES,
     ScannedRecord,
     VaultScan,
@@ -28,6 +27,7 @@ from .model import (
     parse_timestamp,
     status,
 )
+from .retired import retired_references
 
 
 @dataclass(frozen=True)
@@ -113,12 +113,7 @@ def _retired_specs(
     record: ScannedRecord, candidates: references.CandidateIndex
 ) -> tuple[RetiredSpec, ...]:
     tied: dict[tuple[str, str, str], ScannedRecord] = {}
-    for ref, parsed, _ in references.resolved_references(record):
-        if ref.field == "supersedes" or parsed is None:
-            continue
-        found, unreadable = candidates.lookup(*parsed)
-        if unreadable or not all(status(c) in RETIRED_STATUSES for c in found):
-            continue
+    for _, _, found in retired_references(record, candidates):
         tied.update((key(c), c) for c in found if c.kind == "spec")
     return tuple(
         RetiredSpec(c.vault, c.name, status(c))
