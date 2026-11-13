@@ -17,7 +17,10 @@ Report, on stdout, exit 0. Every line starts with its own token; none starts wit
     blocks: <n>
     latest-outcome: <kind>|none            the LAST block's `**Outcome:**`, never an earlier block's
     latest-checkpoint: <text>|none
-    highest-q: Q<n>|none                   highest question id defined in any block
+    latest-ritual: <name>|none             the LAST ritual named on the last block's `**Rituals:**` line
+    highest-q: Q<n>|none                   highest Q number carried by any question, pointer or look-alike
+    planned-tasks-block: <k>|none          the most recent block carrying a `**Planned tasks:**` marker
+    planned-task: block=<k>                one per planned title, in order, then the data fence below
     question: Q<n> block=<k> status=answered|unanswered match=option:<letter>|unmatched|none applied=yes|no
     answer: Q<n>                           only for an answered question, then the data fence below
     repark: Q<n> block=<k>                 a recognised re-park pointer (not a second question)
@@ -25,6 +28,16 @@ Report, on stdout, exit 0. Every line starts with its own token; none starts wit
     stray-answer: block=<k> after=Q<n>|none   then the data fence below
 
 `block=<k>` is the 1-based block. One `question:` line per Q defined, in record order.
+
+Rituals. `**Rituals:**` is a comma-separated list of `<name> (<tally>)`; `latest-ritual` is the last
+name, which is one of slice, plan, execute, pull_request. A block with no such line reports `none`.
+A name outside that set, a line that does not parse, or a second `**Rituals:**` line in a block is
+refused `unparsable-block`; the value is never echoed.
+
+Planned tasks. A `**Planned tasks:**` label is followed by column-0 `- <title>` lines. The report
+carries the titles of the most recent block that has the label, which need not be the last block.
+`planned-tasks-block: none` means no block has the label; a block number with no `planned-task:`
+lines means the label carried no titles. The sub-lines are read only here, never as questions.
 
 Data fence. Answer text is vault data. It is printed on its own line between
 
@@ -78,8 +91,8 @@ The marker counts nowhere else (not in the question's own block, not in `**Parke
 Refusals, on stderr as `run_block.py: reason: ...` then `run_block.py: reason-code: <code>`, nothing on
 stdout. Exit 2 when stdin cannot be read as a body: `empty-stdin`, `non-utf8-stdin`,
 `stdin-too-large`. Exit 1 when the body is read but refused: `duplicate-question`,
-`unparsable-block` (a `**Format:**` other than 1, a second `**Outcome:**` or `**Checkpoint:**` in a
-block, or a `- Q` entry in `**Parked questions:**` that is not `- Q<digits>:`).
+`unparsable-block` (a `**Format:**` other than 1, a second `**Outcome:**`, `**Checkpoint:**` or
+`**Rituals:**` in a block, an unknown or unparsable `**Rituals:**` line, or a `- Q` entry in `**Parked questions:**` that is not `- Q<digits>:`).
 """
 
 from __future__ import annotations
@@ -111,6 +124,8 @@ _APPLIED_RE = re.compile(r"^\s+- Applied: Q(\d+)$")
 _OPTIONS_RE = re.compile(r"^\s+-\s+Options:\s*(.*)$")
 _OPTION_SPLIT_RE = re.compile(r"(?:^|;\s+)\(([a-z])\)\s+")
 _LETTER_RE = re.compile(r"^\(([a-z])\)$")
+_RITUALS = ("slice", "plan", "execute", "pull_request")
+_RITUAL_ENTRY_RE = re.compile(r"^([a-z_]+) \([^()]*\)$")
 _SEPARATORS_RE = re.compile("[  \u0085\v\f]")
 
 
@@ -185,6 +200,16 @@ def _match(question: Question) -> str:
     return "unmatched"
 
 
+def _last_ritual(block: Block, value: str) -> str:
+    names = []
+    for entry in value.split(", "):
+        m = _RITUAL_ENTRY_RE.match(entry)
+        if not m or m.group(1) not in _RITUALS:
+            raise _unparsable(block, "unrecognised **Rituals:** line")
+        names.append(m.group(1))
+    return names[-1]
+
+
 def _unparsable(block: Block, why: str) -> Refusal:
     return Refusal(f"block {block.index} does not parse: {why}", "unparsable-block", 1)
 
@@ -197,13 +222,15 @@ def build_report(text: str) -> str:
     lookalikes: list[tuple[int, int, int]] = []
     strays: list[tuple[int, str, str]] = []
     applied_marks: list[tuple[int, int]] = []
-    outcome = checkpoint = None
+    outcome = checkpoint = ritual = None
+    planned: tuple[int, list[str]] | None = None
+    mentioned: list[int] = []
     nearest = "none"
 
     for block in blocks:
         section = ""
-        seen = {"outcome": 0, "checkpoint": 0}
-        outcome = checkpoint = None
+        seen = {"outcome": 0, "checkpoint": 0, "rituals": 0}
+        outcome = checkpoint = ritual = None
         current: Question | None = None
         for no, raw in block.lines:
             label = _LABEL_RE.match(raw)
@@ -218,8 +245,12 @@ def build_report(text: str) -> str:
                         raise _unparsable(block, f"more than one **{label.group(1)}:** line")
                     if name == "outcome":
                         outcome = value or None
+                    elif name == "rituals":
+                        ritual = _last_ritual(block, value)
                     else:
                         checkpoint = value or None
+                if name == "planned tasks":
+                    planned = (block.index, [])
                 continue
             if raw.startswith(_ANSWER):
                 value = _flat(raw[len(_ANSWER) :].strip())
@@ -231,6 +262,11 @@ def build_report(text: str) -> str:
             misplaced = _MISPLACED_ANSWER_RE.match(raw)
             if misplaced:
                 strays.append((block.index, nearest, _flat(misplaced.group(1).strip())))
+                continue
+            if section == "planned tasks":
+                title = _flat(raw[2:].strip()) if raw.startswith("- ") else ""
+                if title and planned is not None:
+                    planned[1].append(title)
                 continue
             if section == "decisions":
                 m = _APPLIED_RE.match(raw)
@@ -263,6 +299,7 @@ def build_report(text: str) -> str:
             lowered = entry.group(2).lower()
             if (pointer or "still open" in lowered or "original" in lowered) and (earlier or pointer):
                 lookalikes.append((n, block.index, no))
+                mentioned.append(n)
                 if _ANSWER in raw:
                     strays.append((block.index, f"Q{n}", _flat(raw.split(_ANSWER, 1)[1].strip())))
                 nearest, current = f"Q{n}", None
@@ -281,8 +318,13 @@ def build_report(text: str) -> str:
         f"blocks: {len(blocks)}",
         f"latest-outcome: {_flat(outcome) if outcome else 'none'}",
         f"latest-checkpoint: {_flat(checkpoint) if checkpoint else 'none'}",
-        f"highest-q: Q{max(order)}" if order else "highest-q: none",
+        f"latest-ritual: {ritual or 'none'}",
+        f"highest-q: Q{max(order + mentioned)}" if order or mentioned else "highest-q: none",
+        f"planned-tasks-block: {planned[0]}" if planned else "planned-tasks-block: none",
     ]
+    if planned:
+        for title in planned[1]:
+            out.extend([f"planned-task: block={planned[0]}", *_fenced(title)])
     for n in order:
         qn = questions[n]
         status = "answered" if qn.answer is not None else "unanswered"

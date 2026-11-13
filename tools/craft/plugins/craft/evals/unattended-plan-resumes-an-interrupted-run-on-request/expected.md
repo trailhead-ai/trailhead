@@ -46,4 +46,3 @@ Every clause holds.
 - The `asked-nothing` and any other `llm` grader read only the first and last 12 messages of the trace.
 - One fixture, one phrasing, one model tier.
 - Leak check, run on the prompt and `fixtures/scaffold.sh` before commit: a case-insensitive search for `resum`, `taken over`, `refus`, `re-park`, `pointer`, `still open`, `applied`, `unmatched`, `expected`, `baseline` finds only the `--resume` token in the two prompts that measure it and, in one fixture, the word `refuse` inside an option the fixture itself parks. The records show the state an earlier session left, not the rule or the outcome measured.
-- The runner block of `eval-gate.json` carries no grant for `run_block.py`. The baseline does not need it (the unedited prose never calls it). A run on edited prose that calls it by path is denied by the runner unless a grant is added; this case does not add one.
