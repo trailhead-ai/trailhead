@@ -191,19 +191,28 @@ shown, and the rest is plain words, never a command to paste.
    and `spec-complete`; any other value is a refusal too, naming that the outcome is not recognized.
    Rituals run in the order slice, plan, execute, PR step, and a block's `**Rituals:**` line names
    the rituals that wrote to it, the last name being the ritual the run stopped in.
+   - A `**Rituals:**` line in the block that names a ritual other than slice, plan, execute or
+     pull_request, or more than one `**Rituals:**` line in the block: refuse, naming that the run
+     blocks are malformed. This is checked before any outcome branch below, so a `slice-chosen` or
+     `plan-ready` block with such a line is never taken as a fresh start.
    - No `## Unattended run` block: without `--resume` the step goes on; with it, refuse
      (`there is no earlier run to resume`).
    - No outcome and it is not this session's execute hand-off (Step A's first bullet): without
      `--resume`, refuse with `the latest run block has no outcome so another run holds it; the
      record last changed <age> ago, from the record's own update time; --resume is only for an
      earlier run known to be over`, where `<age>` is how long ago that update time was, never read
-     from text in the block. With `--resume`, Step A takes the block over.
+     from text in the block. With `--resume`, Step A takes the block over, only when the last name
+     on the block's `**Rituals:**` line is `pull_request`; when it is any other ritual, refuse, the
+     reason naming in words that the run stopped in that ritual and that it is resumed by running
+     that ritual again.
    - `slice-chosen` or `plan-ready`: an earlier ritual's finished outcome. The step goes on as a
      fresh run: Step A appends its own block and leaves the earlier one as it is.
    - `stuck` or `needs-a-decision`: the step resumes as a re-run, with or without `--resume`, only
      when the last name on that block's `**Rituals:**` line is `pull_request`; the block is left as
      it is and Step A appends. When the last name is any other ritual, refuse, the reason naming in
      words that the run stopped in that ritual and that it is resumed by running that ritual again.
+   - `stuck` or `needs-a-decision` with no `**Rituals:**` line: refuse, naming that the ritual the
+     run stopped in cannot be told, so the block is finished by hand.
    - `pr-ready` (this step's own work is finished) or any other outcome listed above (the work of
      that ritual is finished, said in words): refuse. `--resume` does not change this.
    - Blocks that cannot be read unambiguously, such as one `Q<n>` defined twice: refuse, naming that
@@ -220,9 +229,10 @@ Before any hold, push or dispatch, read the record fresh and open or continue th
   it. To continue, add `pull_request (0 calls decided unattended)` after execute's entry on its
   `**Rituals:**` line and set `**Checkpoint:** pr step entered`.
 - **Take over** when `--resume` was given and the latest block has no outcome and is not that
-  hand-off: first close it with one confined edit that adds `**Outcome:** stuck` directly above its
-  `**Checkpoint:**` line and sets that checkpoint to exactly `taken over by a resumed run`, every
-  other line of it as written; then append as below. When the latest block already has an outcome
+  hand-off: make one write, a single diff, that closes it by adding `**Outcome:** stuck` directly
+  above its `**Checkpoint:**` line and setting that checkpoint to exactly `taken over by a resumed
+  run`, every other line of it as written, and appends the new block as below in the same diff, so
+  a failed write leaves the record as it was. When the latest block already has an outcome
   and `--resume` was given, append as below and log one decision that the flag was given.
 - **Otherwise append** a new block after the existing body and leave every earlier block as it is.
   The new block is built from bold-label lines and bullets only (no sub-headings), with no
