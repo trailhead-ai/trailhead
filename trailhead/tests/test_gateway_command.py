@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
+import subprocess
+import sys
+import tarfile
+import threading
 
 import pytest
+
+from trailhead.gateway import command, outpost_http
 
 from trailhead.tests._gateway_support import (
     CLIENT_ID,
@@ -20,10 +27,10 @@ from trailhead.tests._gateway_support import (
 from trailhead.tests._harness_process_support import make_fake_harness
 
 RUNS = [
-    {"id": "run-1", "workspace": "trailhead/ws", "job": "unit-tests", "state": "finished",
-     "result": "passed", "created_at": "2026-11-10T09:00:00Z"},
-    {"id": "run-2", "workspace": "trailhead/ws", "job": "lint", "state": "running",
-     "result": None, "created_at": "2026-11-10T09:05:00Z"},
+    {"id": 1, "workspace": "trailhead/ws", "job": "unit-tests", "state": "completed",
+     "result": "failure", "reason": "no runner for ubuntu-22.04", "created_at": "2026-11-10T09:00:00Z"},
+    {"id": 2, "workspace": "trailhead/ws", "job": "lint", "state": "in_progress",
+     "result": None, "reason": None, "created_at": "2026-11-10T09:05:00Z"},
 ]
 
 SANDBOX_LINE = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
@@ -59,9 +66,11 @@ class TestRunList:
             r = _run(launcher, tmp_path, state, stub.port)
         assert r.proc.returncode == 0, r.proc.stderr
         lines = r.proc.stdout.splitlines()
-        assert lines[0].split() == ["ID", "JOB", "STATE", "RESULT", "CREATED"]
-        assert lines[1].split() == ["run-1", "unit-tests", "finished", "passed", "2026-11-10T09:00:00Z"]
-        assert lines[2].split() == ["run-2", "lint", "running", "-", "2026-11-10T09:05:00Z"]
+        assert lines[0].split() == ["ID", "JOB", "STATE", "RESULT", "REASON", "CREATED"]
+        assert lines[1].split() == [
+            "1", "unit-tests", "completed", "failure", "no", "runner", "for", "ubuntu-22.04", "2026-11-10T09:00:00Z"
+        ]
+        assert lines[2].split() == ["2", "lint", "in_progress", "-", "-", "2026-11-10T09:05:00Z"]
 
     def test_json_flag_prints_the_workspace_and_runs(self, launcher, tmp_path, state):
         with StubOutpost(workspace="trailhead/ws", runs=RUNS) as stub:
@@ -309,3 +318,416 @@ class TestHelpNamesTheInvocation:
             main(["--help"])
         assert stop.value.code == 0
         assert f"run it as: {tmp_path / name / 'bin' / 'outpost-gateway'} run list" in capsys.readouterr().out
+
+
+# --- run start / watch / view -------------------------------------------------------------
+
+WORKFLOW = ".github/workflows/ci.yml"
+CI_YML = """name: ci
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make
+  test:
+    runs-on: ubuntu-latest
+"""
+LINT_YML = """name: lint
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+"""
+NOT_FOUND = (404, {"reason": "run_not_found", "message": "No run with that id."})
+
+
+def view(**over):
+    base = {
+        "id": 7, "workspace": "trailhead/ws", "workflow": WORKFLOW, "job": "build", "matrix": None,
+        "state": "completed", "result": "success", "reason": None,
+        "created_at": "2026-11-10T09:00:00Z", "started_at": "2026-11-10T09:00:01Z",
+        "finished_at": "2026-11-10T09:00:09Z", "exit_code": 0,
+    }
+    return {**base, **over}
+
+
+def git(cwd, *args):
+    subprocess.run(
+        ["git", "-c", "commit.gpgsign=false", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+        cwd=cwd, check=True, capture_output=True,
+    )
+
+
+@pytest.fixture
+def repo(tmp_path):
+    root = tmp_path / "repo"
+    (root / ".github" / "workflows").mkdir(parents=True)
+    (root / "sub").mkdir()
+    (root / WORKFLOW).write_text(CI_YML)
+    (root / ".gitignore").write_text("ignored.log\n")
+    (root / "tracked.txt").write_text("v1\n")
+    (root / "gone.txt").write_text("gone\n")
+    (root / "script.sh").write_text("#!/bin/sh\n")
+    (root / "script.sh").chmod(0o755)
+    (root / "sub" / "inner.txt").write_text("inner\n")
+    git(root, "init", "-q")
+    git(root, "add", ".")
+    git(root, "commit", "-q", "-m", "init")
+    (root / "tracked.txt").write_text("v2 edited\n")
+    (root / "gone.txt").unlink()
+    (root / "untracked.txt").write_text("fresh\n")
+    (root / "ignored.log").write_text("noise\n")
+    (root / "link").symlink_to("/etc/passwd")
+    (root / "nested").mkdir()
+    git(root / "nested", "init", "-q")
+    (root / "nested" / "f.txt").write_text("n\n")
+    return root
+
+
+@pytest.fixture
+def cli(tmp_path, state, monkeypatch, capsys):
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
+    write_credential(state, "ws-test-1")
+
+    def call(port, *argv, cwd=None):
+        if cwd is not None:
+            monkeypatch.chdir(cwd)
+        capsys.readouterr()
+        rc = command.main(list(argv), port=port)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+def uploaded(stub):
+    post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+    return tarfile.open(fileobj=io.BytesIO(post.raw))
+
+
+class TestRunStart:
+    def test_upload_holds_the_working_tree_and_only_it(self, cli, repo):
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            tar = uploaded(stub)
+        assert rc == 0, err
+        names = set(tar.getnames())
+        assert tar.extractfile("tracked.txt").read() == b"v2 edited\n"
+        assert "untracked.txt" in names
+        assert "sub/inner.txt" in names
+        assert "ignored.log" not in names
+        assert "gone.txt" not in names
+        assert not any(n.startswith("nested") for n in names)
+        assert not any(n.startswith(".git/") for n in names)
+
+    def test_a_symlink_is_sent_as_a_link_with_no_content(self, cli, repo):
+        with StubOutpost() as stub:
+            cli(stub.port, "run", "start", "build", cwd=repo)
+            member = uploaded(stub).getmember("link")
+        assert member.issym()
+        assert member.linkname == "/etc/passwd"
+        assert member.size == 0
+
+    def test_the_user_exec_bit_is_kept(self, cli, repo):
+        with StubOutpost() as stub:
+            cli(stub.port, "run", "start", "build", cwd=repo)
+            tar = uploaded(stub)
+        assert tar.getmember("script.sh").mode & 0o100
+        assert not tar.getmember("tracked.txt").mode & 0o100
+
+    def test_from_a_subfolder_the_upload_is_rooted_at_the_top_level(self, cli, repo):
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo / "sub")
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert {"tracked.txt", "sub/inner.txt", WORKFLOW} <= names
+
+    def test_outside_a_git_work_tree_it_is_refused_before_anything_is_sent(self, cli, tmp_path):
+        bare = tmp_path / "plain"
+        bare.mkdir()
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", "--workflow", WORKFLOW, cwd=bare)
+            assert stub.requests == []
+        assert rc == 2
+        assert out == ""
+        assert err == "outpost-gateway: this folder is not inside a git work tree\n"
+
+    def test_prints_only_the_id_and_returns_without_following_the_run(self, cli, repo):
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            paths = [q.path.split("?")[0] for q in stub.requests]
+        assert rc == 0, err
+        assert out == "7\n"
+        assert paths == ["/broker/token", "/gateway/runs"]
+
+    def test_the_request_names_the_workflow_and_job_and_carries_the_bearer_token(self, cli, repo):
+        with StubOutpost(token="t-123") as stub:
+            cli(stub.port, "run", "start", "test", cwd=repo)
+            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+        assert post.path == "/gateway/runs?workflow=.github%2Fworkflows%2Fci.yml&job=test"
+        assert post.headers["authorization"] == "Bearer t-123"
+        assert post.headers["content-length"] == str(len(post.raw))
+
+    def test_the_matrix_combination_chosen_goes_to_stderr(self, cli, repo):
+        reply = (202, {"id": 9, "state": "queued", "matrix": {"os": "linux", "node": "20"}, "not_run": 0})
+        with StubOutpost(start_reply=reply) as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert (rc, out) == (0, "9\n")
+        assert err == "outpost-gateway: matrix combination: os=linux, node=20\n"
+
+    def test_other_combinations_not_run_are_counted_on_stderr(self, cli, repo):
+        reply = (202, {"id": 9, "state": "queued", "matrix": {"os": "linux"}, "not_run": 3})
+        with StubOutpost(start_reply=reply) as stub:
+            _, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert "3 other matrix combinations not run" in err
+
+    def test_a_single_other_combination_is_still_reported(self, cli, repo):
+        reply = (202, {"id": 9, "state": "queued", "matrix": {"os": "linux"}, "not_run": 1})
+        with StubOutpost(start_reply=reply) as stub:
+            _, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert "1 other matrix combinations not run" in err
+
+    def test_no_note_without_a_matrix(self, cli, repo):
+        with StubOutpost() as stub:
+            _, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert err == ""
+
+    def test_the_only_workflow_defining_the_job_is_the_default(self, cli, repo):
+        (repo / ".github" / "workflows" / "lint.yaml").write_text(LINT_YML)
+        with StubOutpost() as stub:
+            cli(stub.port, "run", "start", "lint", cwd=repo)
+            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+        assert "workflow=.github%2Fworkflows%2Flint.yaml&job=lint" in post.path
+
+    def test_several_workflows_defining_the_job_are_refused(self, cli, repo):
+        (repo / ".github" / "workflows" / "lint.yml").write_text(LINT_YML.replace("lint:", "build:"))
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert out == ""
+        assert ".github/workflows/ci.yml" in err and ".github/workflows/lint.yml" in err
+        assert "--workflow" in err
+
+    def test_no_workflow_defining_the_job_is_refused(self, cli, repo):
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "deploy", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert "no workflow under .github/workflows/ defines job deploy" in err
+
+    def test_an_explicit_workflow_is_sent_as_given(self, cli, repo):
+        (repo / ".github" / "workflows" / "lint.yml").write_text(LINT_YML.replace("lint:", "build:"))
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", "--workflow", ".github/workflows/lint.yml", cwd=repo)
+            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+        assert rc == 0, err
+        assert "workflow=.github%2Fworkflows%2Flint.yml" in post.path
+
+    @pytest.mark.parametrize(
+        "status, body",
+        [
+            (422, {"reason": "upload_refused", "message": "The upload holds a path outside the tree.", "rule": "path"}),
+            (501, {"reason": "runs_not_configured", "message": "runs are not configured on this host"}),
+            (429, {"reason": "queue_full", "message": "Too many queued runs.", "limit": 4}),
+        ],
+    )
+    def test_outposts_refusal_is_printed_with_its_reason_and_message(self, status, body, cli, repo):
+        with StubOutpost(start_reply=(status, body)) as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert rc == 2
+        assert out == ""
+        assert err == f"outpost-gateway: {body['reason']}: {body['message']}\n"
+
+    def test_a_start_reply_without_an_integer_id_is_refused(self, cli, repo):
+        with StubOutpost(start_reply=(202, {"id": "7; rm", "state": "queued"})) as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
+    def test_an_unreachable_outpost_exits_2(self, cli, repo):
+        port = free_port()
+        rc, _, err = cli(port, "run", "start", "build", cwd=repo)
+        assert rc == 2
+        assert f"Outpost is not reachable at 127.0.0.1:{port}" in err
+
+
+class TestRunWatch:
+    LOG = ["step one\n", "step two\n"]
+
+    def _watch(self, cli, stub, *flags):
+        return cli(stub.port, "run", "watch", "7", *flags)
+
+    def test_a_completed_run_replays_its_whole_log(self, cli):
+        with StubOutpost(view=view(), log_steps=self.LOG) as stub:
+            rc, out, err = self._watch(cli, stub)
+            follow = next(q for q in stub.requests if "/log" in q.path)
+        assert (rc, out) == (0, "step one\nstep two\n")
+        assert follow.path == "/gateway/runs/7/log?follow=1"
+        assert follow.headers["authorization"] == f"Bearer {TOKEN}"
+
+    def test_lines_are_printed_as_the_stream_delivers_them(self, cli, monkeypatch):
+        first_printed = threading.Event()
+
+        class Tap(io.StringIO):
+            def write(self, text):
+                if "first line" in text:
+                    first_printed.set()
+                return super().write(text)
+
+        tap = Tap()
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 3.0)
+        with StubOutpost(view=view(), log_steps=["first line\n", first_printed, "second line\n"]) as stub:
+            monkeypatch.setattr(sys, "stdout", tap)
+            rc = command.main(["run", "watch", "7"], port=stub.port)
+        assert rc == 0
+        assert tap.getvalue() == "first line\nsecond line\n"
+
+    @pytest.mark.parametrize(
+        "name, stub_kwargs, code, stderr_has",
+        [
+            ("success", dict(view=view()), 0, ""),
+            ("failure", dict(view=view(result="failure", exit_code=1)), 1, ""),
+            (
+                "did-not-execute",
+                dict(view=view(result="failure", reason="no runner for macos-14", exit_code=None)),
+                3,
+                "no runner for macos-14",
+            ),
+            ("dropped-stream", dict(view=view(state="in_progress", result=None, exit_code=None)), 2, "ended before"),
+        ],
+    )
+    def test_exit_status_maps_the_final_view(self, name, stub_kwargs, code, stderr_has, cli):
+        with StubOutpost(log_steps=self.LOG, **stub_kwargs) as stub:
+            rc, _, err = self._watch(cli, stub, "--exit-status")
+        assert rc == code, err
+        assert stderr_has in err
+
+    def test_exit_status_is_2_when_outpost_is_unreachable(self, cli):
+        rc, _, err = cli(free_port(), "run", "watch", "7", "--exit-status")
+        assert rc == 2
+        assert "not reachable" in err
+
+    def test_without_the_flag_a_failed_run_still_exits_0_once_complete(self, cli):
+        with StubOutpost(view=view(result="failure", exit_code=1), log_steps=self.LOG) as stub:
+            rc, _, _ = self._watch(cli, stub)
+        assert rc == 0
+
+    def test_without_the_flag_a_dropped_stream_exits_2(self, cli):
+        with StubOutpost(view=view(state="in_progress", result=None), log_steps=self.LOG) as stub:
+            rc, _, _ = self._watch(cli, stub)
+        assert rc == 2
+
+    def test_a_stream_that_goes_quiet_past_the_idle_timeout_exits_2(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(view=view(), log_steps=["one\n", threading.Event()]) as stub:
+            rc, out, err = self._watch(cli, stub, "--exit-status")
+        assert rc == 2
+        assert out == "one\n"
+        assert "timed out" in err
+
+    @pytest.mark.parametrize(
+        "bad",
+        [dict(state="finished", result=None), dict(result="passed"), dict(result=None), dict(reason=5)],
+        ids=["state", "result", "completed-without-result", "reason-type"],
+    )
+    def test_a_view_outside_the_known_values_is_refused(self, bad, cli):
+        with StubOutpost(view=view(**bad), log_steps=self.LOG) as stub:
+            rc, _, err = self._watch(cli, stub, "--exit-status")
+        assert rc == 2
+        assert "cannot read" in err
+
+    def test_an_unknown_run_prints_no_run_in_this_workspace(self, cli):
+        with StubOutpost(view_reply=NOT_FOUND) as stub:
+            stub.log_steps = []
+            rc, out, err = cli(stub.port, "run", "watch", "99")
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: no run 99 in this workspace\n"
+
+    def test_a_non_numeric_id_is_a_usage_error(self, cli):
+        with StubOutpost() as stub, pytest.raises(SystemExit) as stop:
+            cli(stub.port, "run", "watch", "abc")
+        assert stop.value.code == 2
+
+
+class TestRunView:
+    def test_prints_state_result_reason_job_workflow_and_matrix(self, cli):
+        v = view(result="failure", reason="no runner", matrix={"os": "linux", "node": "20"}, job="test")
+        with StubOutpost(view=v) as stub:
+            rc, out, _ = cli(stub.port, "run", "view", "7")
+        assert rc == 0
+        assert out.splitlines() == [
+            "id:       7",
+            "state:    completed",
+            "result:   failure",
+            "reason:   no runner",
+            "job:      test",
+            f"workflow: {WORKFLOW}",
+            "matrix:   os=linux, node=20",
+        ]
+
+    def test_empty_fields_print_a_dash(self, cli):
+        with StubOutpost(view=view(state="queued", result=None)) as stub:
+            _, out, _ = cli(stub.port, "run", "view", "7")
+        assert "result:   -" in out and "reason:   -" in out and "matrix:   -" in out
+
+    def test_an_unknown_run_prints_no_run_in_this_workspace(self, cli):
+        with StubOutpost(view_reply=NOT_FOUND) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "99")
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: no run 99 in this workspace\n"
+
+    def test_a_refusal_is_printed_with_its_reason_and_message(self, cli):
+        reply = (403, {"reason": "scope_missing", "message": "No scope."})
+        with StubOutpost(view_reply=reply) as stub:
+            rc, _, err = cli(stub.port, "run", "view", "7")
+        assert (rc, err) == (2, "outpost-gateway: scope_missing: No scope.\n")
+
+    def test_a_state_outside_the_known_values_is_refused(self, cli):
+        with StubOutpost(view=view(state="finished", result=None)) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "7")
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
+
+class TestRunListRefusals:
+    def test_a_state_outside_the_known_values_is_refused_not_listed(self, cli):
+        bad = [{**RUNS[1], "state": "finished"}]
+        with StubOutpost(runs=bad) as stub:
+            rc, out, err = cli(stub.port, "run", "list")
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
+    def test_every_refusal_reason_is_printed_and_exits_2(self, cli):
+        reply = (501, {"reason": "runs_not_configured", "message": "runs are not configured on this host"})
+        with StubOutpost(runs_reply=reply) as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+        assert (rc, err) == (2, "outpost-gateway: runs_not_configured: runs are not configured on this host\n")
+
+
+class TestHygieneAcrossVerbs:
+    @pytest.mark.parametrize(
+        "argv, stub_kwargs",
+        [
+            (("run", "start", "build"), dict()),
+            (("run", "start", "build"), dict(start_reply=(422, {"reason": "upload_refused", "message": "no"}))),
+            (("run", "watch", "7", "--exit-status"), dict(view=view(), log_steps=["x\n"])),
+            (("run", "watch", "7", "--exit-status"), dict(view=view(result="failure", reason="r"), log_steps=[])),
+            (("run", "view", "7"), dict(view=view())),
+            (("run", "view", "7"), dict(view_reply=(401, {"reason": "credential_revoked", "message": "Revoked."}))),
+            (("run", "list"), dict(runs=RUNS)),
+        ],
+    )
+    def test_secret_and_token_appear_in_no_output_or_environment(self, argv, stub_kwargs, cli, repo):
+        with StubOutpost(**stub_kwargs) as stub:
+            _, out, err = cli(stub.port, *argv, cwd=repo)
+        for secret in (CLIENT_SECRET, TOKEN):
+            assert secret not in out and secret not in err
+            assert all(secret not in k and secret not in v for k, v in os.environ.items())
+
+    def test_the_exit_code_reaches_the_process_through_the_real_entry_point(self, launcher, tmp_path, state):
+        with StubOutpost(view=view(result="failure", exit_code=1), log_steps=["boom\n"]) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, ("run", "watch", "7", "--exit-status"))
+        assert r.proc.returncode == 1
+        assert r.proc.stdout == "boom\n"
