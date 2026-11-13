@@ -578,7 +578,8 @@
     "slice-builds-against-a-stand-in-instead-of-setting-aside": {
       "measures": [
         "skills/slice/SKILL.md"
-      ]
+      ],
+      "merge_only": true
     },
     "execute-sets-aside-a-criterion-blocked-on-an-outside-account": {
       "measures": [
@@ -588,7 +589,8 @@
     "execute-builds-against-a-stand-in-when-one-exists": {
       "measures": [
         "skills/_shared/execute.md"
-      ]
+      ],
+      "merge_only": true
     }
   }
 }
