@@ -140,6 +140,13 @@ the core cases are the detectors, one per behaviour the file decides, and the ot
 A case that also measures a file with no `merge_only` case, or that runs past the 540 s gate budget, stays
 core, and every measured file keeps at least one core case. Say which tier a new case is in when you add it.
 
+The resumed-run cases (`unattended-plan-*` and `unattended-execute-*` that also measure
+`scripts/run_block.py`) keep their detectors in execute: each execute case detects one resume behaviour and
+is core. The plan cases that repeat a behaviour execute already detects (an answered question, a re-parked
+question, an outcome-less block, a takeover) are `merge_only`; the plan cases for behaviours only plan
+decides (a finished block, an unmatched answer, the missing planned children, a correction parked at the
+end) stay core, as do the two that resume a run to its end, which run past the gate budget.
+
 The `runner` block holds the grants of that batch command, the model `claude-opus-5-5`, and
 `max_cost_usd` 3.5 per case. The cap is sized from the logged cost: the consult case is the dearest
 at about 0.75 to 0.93 USD a run, 2.4 to 2.5 USD for three runs (`tools/craft/MANUAL-EVAL.md`), and

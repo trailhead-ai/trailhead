@@ -157,14 +157,16 @@
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-resumes-an-interrupted-run-on-request": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-ends-needs-a-decision-on-a-parked-correction": {
       "measures": [
@@ -178,21 +180,24 @@
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-resumes-with-a-repark-pointer": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     },
     "unattended-pr-step-takes-over-an-interrupted-block": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md",
         "agents/monitor.md"
-      ]
+      ],
+      "merge_only": true
     }
   }
 }
