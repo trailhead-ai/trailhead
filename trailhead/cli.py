@@ -56,7 +56,7 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
-from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfigError, read_hub_config
+from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfig, HubConfigError, read_hub_config
 from trailhead.ranger.drive_groups import DriveGroupsError, drive_groups
 from trailhead.uninstall import run_uninstall
 from trailhead.update import (
@@ -255,6 +255,11 @@ def _cmd_gateway(args: argparse.Namespace) -> int:
     return register_run(["--hook"] if args.hook else [])
 
 
+def _launch_account(config: HubConfig) -> str | None:
+    """The launch account an account's sessions bind; ``None`` for the harness's default one."""
+    return None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
+
+
 def _cmd_session_start(args: argparse.Namespace) -> int:
     if not args.json:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
@@ -297,9 +302,14 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
     if not harnesses:
         print("trailhead: no harness detected; pass --harness", file=sys.stderr)
         return 1
-    launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
     start = harnesses[0].session_start(
-        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env, broker=launch
+        profile,
+        directory,
+        prompt,
+        interactive=not args.headless,
+        account=_launch_account(config),
+        env=env,
+        broker=launch,
     )
     if start is None:
         print(
@@ -313,10 +323,9 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         "env_unset": start.env_unset,
         "directory": str(directory),
     }
+    files = [{"path": f.path, "content": f.content, "mode": f.mode} for f in start.files]
     if ritual:
-        output["files"] = [
-            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
-        ]
+        output["files"] = files
         output["setup_sandbox"] = start.setup_sandbox
     if launch is not None:
         output["broker"] = {
@@ -324,9 +333,7 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             "scope": BROKER_SCOPE,
             "credential_path": launch.credential_path,
         }
-        output["files"] = [
-            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
-        ]
+        output["files"] = files
     print(json.dumps(output))
     return 0
 
@@ -346,8 +353,7 @@ def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) ->
     if not harnesses:
         print("trailhead: no harness detected; pass --harness", file=sys.stderr)
         return 1
-    launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
-    section = harnesses[0].setup_sandbox(profile, account=launch_account, env=env)
+    section = harnesses[0].setup_sandbox(profile, account=_launch_account(config), env=env)
     if section is None:
         print(
             f"trailhead: harness {harnesses[0].name!r} cannot derive a setup sandbox; refusing",

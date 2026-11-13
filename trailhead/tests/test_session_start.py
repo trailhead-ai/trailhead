@@ -2287,10 +2287,10 @@ def _ritual_ready(tmp_path, *, launch="default"):
     return env, ws
 
 
-def _ritual_start(env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, **extra):
+def _ritual_start(env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, account=None, **extra):
     return ClaudeCodeHarness().session_start(
         _ritual_resolved(env, ws, profile, platform), ws, prompt,
-        interactive=False, account=None, env=env, platform=platform, **extra,
+        interactive=False, account=account, env=env, platform=platform, **extra,
     )
 
 
@@ -2423,13 +2423,6 @@ def _ritual_on_named_account(tmp_path):
     return env, ws, own
 
 
-def _named_start(env, ws, own):
-    return ClaudeCodeHarness().session_start(
-        _ritual_resolved(env, ws), ws, None,
-        interactive=False, account=str(own), env=env, platform="linux",
-    )
-
-
 def test_ritual_writes_deny_another_accounts_vaults_and_mirror_but_not_its_own(tmp_path):
     env, ws = _ritual_ready(tmp_path)
     _other_account(env)
@@ -2452,7 +2445,7 @@ def test_ritual_writes_deny_another_accounts_vaults_and_mirror_but_not_its_own(t
 
 def test_a_ritual_on_a_named_account_denies_reading_the_default_accounts_config_dir(tmp_path):
     env, ws, own = _ritual_on_named_account(tmp_path)
-    start = _named_start(env, ws, own)
+    start = _ritual_start(env, ws, account=str(own))
     default = Path(env["HOME"]).resolve() / ".claude"
     settings = _settings_of(start)
     assert str(default) in settings["sandbox"]["filesystem"]["denyRead"]
@@ -2474,7 +2467,7 @@ def test_a_ritual_on_the_default_account_does_not_deny_its_own_config_dir(tmp_pa
 def test_a_ritual_whose_launch_account_is_the_default_config_dir_named_explicitly_keeps_it_readable(tmp_path):
     env, ws = _ritual_ready(tmp_path)
     default = Path(env["HOME"]).resolve() / ".claude"
-    start = _named_start(env, ws, default)
+    start = _ritual_start(env, ws, account=str(default))
     assert str(default) not in _settings_of(start)["sandbox"]["filesystem"]["denyRead"]
 
 
