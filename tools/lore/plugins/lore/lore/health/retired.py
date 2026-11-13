@@ -16,6 +16,7 @@ from __future__ import annotations
 from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 
+from ..record import guards
 from . import references
 from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
 
@@ -39,7 +40,9 @@ class RetiredCandidate:
     vault; ``nonconforming_successors`` counts the rest, whose names are never
     carried. Both are empty for a dropped candidate. ``links_back`` is set on a
     superseded candidate with no successor at all whose own ``related`` entries
-    name the linking record.
+    name the linking record. ``supersede_allowed`` is set when it is a links-back
+    candidate and ``lore record supersede`` would accept the linker as its
+    successor, judged by the verb's own pairing guard.
     """
 
     vault: str
@@ -49,6 +52,7 @@ class RetiredCandidate:
     successors: tuple[Successor, ...] = ()
     nonconforming_successors: int = 0
     links_back: bool = False
+    supersede_allowed: bool = False
 
 
 @dataclass(frozen=True)
@@ -169,7 +173,31 @@ def _candidate(
     )
     return RetiredCandidate(
         record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
-        links_back,
+        links_back, links_back and _supersede_accepted(record, linker, candidates),
+    )
+
+
+def _supersede_accepted(
+    predecessor: ScannedRecord, successor: ScannedRecord, candidates: references.CandidateIndex
+) -> bool:
+    """Whether the supersede verb's pairing guard accepts *successor* for *predecessor*."""
+    def sidecar(rec: ScannedRecord) -> dict:
+        data = dict(rec.sidecar) if isinstance(rec.sidecar, dict) else {}
+        if not isinstance(data.get("supersedes"), list):
+            data.pop("supersedes", None)
+        return data
+
+    def load(record_id: str) -> dict | None:
+        kind, _, name = record_id.partition("/")
+        found, _ = candidates.lookup(kind, name)
+        return sidecar(found[0]) if found else None
+
+    return not guards.evaluate_supersede_pairing(
+        predecessor_id=f"{predecessor.kind}/{predecessor.name}",
+        predecessor=sidecar(predecessor),
+        successor_id=f"{successor.kind}/{successor.name}",
+        successor=sidecar(successor),
+        load_sidecar=load,
     )
 
 

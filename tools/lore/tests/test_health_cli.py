@@ -1513,10 +1513,13 @@ def test_a_target_in_two_vaults_gets_the_vault_flag_only_where_the_linker_shares
 
 
 def test_a_target_in_one_vault_gets_no_vault_flag_even_when_the_linker_is_elsewhere(world):
-    _put(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
-    _put(world.roots["default"], "adr", "src", related={"decision": ["old"]})
+    _put_full(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(world.roots["default"], "adr", "src", related={"decision": ["old"]})
     (line,) = retired_lines(world.run().stdout)
     assert line.endswith("`lore record supersede decision/old --by adr/src`")
+    assert _run_printed(world, line).returncode == 0
+    assert _supersedes(world.roots["default"], "adr", "src") == ["decision/old"]
+    assert _supersedes(world.roots["levr"], "decision", "old") == []
 
 
 def _put_full(root, kind, name, **extra):
@@ -1604,3 +1607,79 @@ def test_a_name_that_is_not_a_record_id_gets_the_words_and_no_command(linker, ta
     for word in ("Bad", "ignore", "previous", "also"):
         assert word not in line
 
+
+
+# --- the supersede command is printed only where the record guards accept it ----
+
+
+def _linker_world(world, *, pred_kind="decision", linker_kind, linker_status, **pred_extra):
+    d = world.roots["default"]
+    _put_full(d, pred_kind, "old", status="superseded", related={linker_kind: ["src"]}, **pred_extra)
+    _put_full(d, linker_kind, "src", status=linker_status, related={pred_kind: ["old"]})
+    return d
+
+
+@pytest.mark.parametrize("pred_kind,linker_kind,linker_status", [
+    ("decision", "adr", "active"),
+    ("adr", "decision", "active"),
+    ("task", "task", "open"),
+    ("task", "decision", "active"),
+])
+def test_a_printed_supersede_command_runs_and_records_the_edge(world, pred_kind, linker_kind, linker_status):
+    d = _linker_world(world, pred_kind=pred_kind, linker_kind=linker_kind, linker_status=linker_status)
+    (line,) = retired_lines(world.run().stdout)
+    assert f"`lore record supersede {pred_kind}/old --by {linker_kind}/src`" in line
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(d, linker_kind, "src") == [f"{pred_kind}/old"]
+
+
+@pytest.mark.parametrize("pred_kind,linker_kind,linker_status", [
+    ("decision", "task", "open"),
+    ("decision", "area", "active"),
+    ("adr", "task", "in-progress"),
+])
+def test_a_linker_the_supersede_guard_would_refuse_gets_the_words_and_no_command(
+        world, pred_kind, linker_kind, linker_status):
+    _linker_world(world, pred_kind=pred_kind, linker_kind=linker_kind, linker_status=linker_status)
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+def test_a_predecessor_that_already_supersedes_its_linker_gets_the_words_and_no_command(world):
+    _linker_world(world, linker_kind="adr", linker_status="active", supersedes=["adr/src"])
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+# --- the cap hint carries the run's staleness window ----------------------------
+
+
+def test_cap_hint_carries_a_non_default_stale_days_and_the_default_window_adds_nothing(world):
+    _twenty_five(world.roots["trailhead"])
+    custom = world.run("--vault", "trailhead", "--stale-days", "90")
+    default = world.run("--vault", "trailhead")
+    assert "`lore health --vault trailhead --stale-days 90 --all`" in custom.stdout
+    assert "`lore health --vault trailhead --all`" in default.stdout
+    assert "--stale-days" not in default.stdout.replace("--stale-days <n>", "")
+    assert "`lore health --stale-days 90 --all`" in world.run("--stale-days", "90").stdout
+
+
+# --- a raising heading note errors only its own check ---------------------------
+
+
+def test_a_heading_note_that_raises_errors_only_its_check(world, monkeypatch):
+    _put(world.roots["default"], "task", "t", status="open", updated="2020-01-01T00:00:00Z")
+    health = importlib.import_module("lore.cli.health")
+
+    def boom(sec, ctx):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, heading_note=boom) if c.name == "stale-tasks" else c for c in health.CHECKS))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — errored: RuntimeError."]
+    assert rows(r.stdout, "stale-tasks")["default"] == ("—", "—", "errored: RuntimeError")
+    assert group(r.stdout, "dangling-links")[0].startswith("dangling-links — ")
+    assert "errored" not in "\n".join(group(r.stdout, "retired-links"))

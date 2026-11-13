@@ -83,11 +83,15 @@ at it. When the target relates back to the linking record, the finding says so a
 command that records the supersession, instead of leaving only the advice to remove the link:
 
 ```
-  trailhead/adr/notes-are-records  2026-06-02  related decision → decision/notes-policy: superseded, and no record supersedes it; it links back to this record, so if this record replaced it, record that: lore record supersede decision/notes-policy --by adr/notes-are-records
+  trailhead/adr/notes-are-records  2026-06-02  related decision → decision/notes-policy: superseded, and no record supersedes it; it links back to this record, so if this record replaced it, record that: `lore record supersede decision/notes-policy --by adr/notes-are-records`
 ```
 
-The command is printed only when both ids pass the record-id shape check; otherwise the finding
-keeps only the words, with no command. Each id is quoted for the shell. When the target's kind and
+The command is printed only when both ids pass the record-id shape check and the guards of
+`lore record supersede` would accept the linking record as the successor: an adr, spec or decision
+target needs a successor in a frozen status (so an open task or an area cannot be one), and the
+pair must not form a cycle through `supersedes` edges. Otherwise the finding keeps only the words,
+with no command, because pasting it would be refused. The verdict comes from the verb's own pairing
+guard, so the two cannot drift. Each id is quoted for the shell. When the target's kind and
 name exist in more than one vault, the command adds `--vault <the target's vault>`, so pasting it
 changes the record the finding describes and no other.
 

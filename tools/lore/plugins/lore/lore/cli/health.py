@@ -129,6 +129,7 @@ class Section:
     findings: list | None = None
     error: str | None = None
     lines: list[str] = field(default_factory=list)
+    note: str | None = None
 
 
 @dataclass
@@ -165,7 +166,8 @@ class Check:
     a target. ``action`` is the line that names what acts on the findings.
     ``heading_note(section, ctx)``, when set, returns text appended verbatim to the
     group heading (after ``oldest first``, or after ``no findings``), or ``None``
-    for none. It is called for any check that ran, with or without findings.
+    for none. It is called for any check that ran, with or without findings, inside
+    the check's exception boundary, and its result is stored on the section.
     """
 
     name: str
@@ -279,10 +281,13 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
             run = check.run(scans, selected, ctx)
             findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
             lines = [] if findings is None else [check.render(f) for f in findings]
+            section = Section(check, run, findings, lines=lines)
+            if check.heading_note is not None:
+                section.note = check.heading_note(section, ctx)
         except Exception as exc:  # noqa: BLE001 - one check's failure must not take the report down
             sections.append(Section(check, None, error=type(exc).__name__))
             continue
-        sections.append(Section(check, run, findings, lines=lines))
+        sections.append(section)
 
     rows: list[VaultRow] = []
     for v in selected:
@@ -429,10 +434,13 @@ LINKS_BACK = "it links back to this record, so if this record replaced it, recor
 def _supersede_command(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, shared: bool) -> str | None:
     """``lore record supersede`` for *c* by the linker, or ``None`` when no safe command exists.
 
+    No command is built where the supersede verb's own pairing guard would refuse the
+    linker as successor (``c.supersede_allowed``).
+
     ``--vault`` locates both records in one vault, so it can only name the vault they
     share; two records in different vaults can be told apart only when neither name
     exists anywhere else."""
-    if not (_well_shaped(f.name) and _well_shaped(c.name)):
+    if not (c.supersede_allowed and _well_shaped(f.name) and _well_shaped(c.name)):
         return None
     cmd = f"lore record supersede {shlex.quote(f'{c.kind}/{c.name}')} --by {shlex.quote(f'{f.kind}/{f.name}')}"
     if shared or f.linker_duplicated:
@@ -585,7 +593,7 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunConte
     findings = sec.findings
     if findings is None:
         return [f"{name} — skipped."]
-    note = sec.check.heading_note(sec, ctx) if sec.check.heading_note else None
+    note = sec.note
     if not findings:
         return [f"{name} — no findings{_safe(note) if note else ''}."]
     total = len(findings)
@@ -596,6 +604,8 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunConte
     rest = total - len(shown)
     if rest:
         scope = f" --vault {_safe(shlex.quote(vault_arg))}" if vault_arg is not None else ""
+        if ctx.stale_days != DEFAULT_STALE_DAYS:
+            scope += f" --stale-days {ctx.stale_days}"
         out.append(f"  {_num(rest)} more. Run `lore health{scope} --all` to see every "
                    "finding, or `--limit <n>` for more.")
     out.append(sec.check.action)
