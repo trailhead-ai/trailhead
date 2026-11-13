@@ -9,8 +9,10 @@
 #   MONITOR_MODE   ready | blocked        what ./portage wait-for-actionable reports
 #   AUTO_MERGE     true | false           [release].auto_merge in group.toml
 #   PR_COMMENT     none | merge-now       a comment on the PR asking for an immediate merge
-#   RECORD_STATE   closed | stuck-earlier the slice record's block: execute's, left open at `close`,
-#                                         or one an earlier PR step already ended `stuck`
+#   RECORD_STATE   closed | stuck-earlier | plan-ready-earlier
+#                                         the slice record's block: execute's, left open at `close`,
+#                                         one an earlier PR step already ended `stuck`, or one the
+#                                         plan ritual already ended `plan-ready`
 #   LORE_WRITE     ok | refuse            whether ./lore accepts a --diff write
 #   ON_DEFAULT     unset | true           true: the repo's default branch is `develop` (origin/HEAD),
 #                                         the slice's commits sit on it and are pushed to it, and the
@@ -188,6 +190,20 @@ if [ "$RECORD_STATE" = "stuck-earlier" ]; then
    - Question: which child task to build first
    - Choice: the word counter
    - Reasoning: the line counter reuses its file reader
+**Parked questions:** none'
+fi
+if [ "$RECORD_STATE" = "plan-ready-earlier" ]; then
+  EXEC_BLOCK='## Unattended run
+
+**Format:** 1
+**Rituals:** plan (1 calls decided unattended)
+**Outcome:** plan-ready
+**Checkpoint:** plan written
+**Decisions:**
+1. **Kept the plan to two tasks**
+   - Question: how many child tasks the plan holds
+   - Choice: two
+   - Reasoning: the slice is small
 **Parked questions:** none'
 fi
 printf '**Value claim:** You can count the words and lines in a text file.\n\n**Covers:** AC1, AC2\n\n%s\n' "$EXEC_BLOCK" |

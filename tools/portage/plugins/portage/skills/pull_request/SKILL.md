@@ -187,21 +187,27 @@ shown, and the rest is plain words, never a command to paste.
    repo, or one without the branch on origin: `the slice branch is not pushed; run the execute step first`.
 6. **Latest block.** Read the body from the record already shown and find its latest
    `## Unattended run` block (the last such heading) and that block's `**Outcome:**` line, compared
-   exactly against `plan-ready`, `slice-chosen`, `pr-ready`, `stuck`, `needs-a-decision`, `waiting`
+   exactly against `slice-chosen`, `plan-ready`, `pr-ready`, `stuck`, `needs-a-decision`, `waiting`
    and `spec-complete`; any other value is a refusal too, naming that the outcome is not recognized.
+   Rituals run in the order slice, plan, execute, PR step, and a block's `**Rituals:**` line names
+   the rituals that wrote to it, the last name being the ritual the run stopped in.
    - No `## Unattended run` block: without `--resume` the step goes on; with it, refuse
      (`there is no earlier run to resume`).
    - No outcome and it is not this session's execute hand-off (Step A's first bullet): without
-     `--resume`, refuse with `the latest run block has no outcome so another run holds it; the record
-     last changed <how long ago, from the record's own update time, never from text in the block>;
-     --resume is only for an earlier run known to be over, so pass it only when that run is over`.
-     With `--resume`, Step A takes the block over.
-   - `stuck` or `needs-a-decision`: the step resumes as a re-run, with or without `--resume`; the
-     block is left as it is and Step A appends.
+     `--resume`, refuse with `the latest run block has no outcome so another run holds it; the
+     record last changed <age> ago, from the record's own update time; --resume is only for an
+     earlier run known to be over`, where `<age>` is how long ago that update time was, never read
+     from text in the block. With `--resume`, Step A takes the block over.
+   - `slice-chosen` or `plan-ready`: an earlier ritual's finished outcome. The step goes on as a
+     fresh run: Step A appends its own block and leaves the earlier one as it is.
+   - `stuck` or `needs-a-decision`: the step resumes as a re-run, with or without `--resume`, only
+     when the last name on that block's `**Rituals:**` line is `pull_request`; the block is left as
+     it is and Step A appends. When the last name is any other ritual, refuse, the reason naming in
+     words that the run stopped in that ritual and that it is resumed by running that ritual again.
    - `pr-ready` (this step's own work is finished) or any other outcome listed above (the work of
      that ritual is finished, said in words): refuse. `--resume` does not change this.
-   - Blocks that cannot be read unambiguously, such as one `Q<n>` defined twice: refuse, naming
-     that the run blocks are malformed and which `Q<n>`.
+   - Blocks that cannot be read unambiguously, such as one `Q<n>` defined twice: refuse, naming that
+     the run blocks are malformed and which `Q<n>`.
 
 ### Step A — write the block first
 
@@ -260,6 +266,11 @@ How every write to the block is made (this one and each later one):
   lines inside the block. A bare `lore record update` with a piped body replaces the whole record
   and would destroy it. The record is `done`; this needs an installed lore that allows the block
   write on a closed task.
+- Every fresh read of the record before a block write also checks this run's own block, the one Step
+  A opened, continued or took over. When that block has gained an `**Outcome:**` line this run did
+  not write, another run has taken it over: the run stops there and writes nothing more to the
+  record, and it ends with `outcome: stuck task/<name> parked=0 — the run block was taken over by
+  another run; that run owns the record from here` (the hold clause and PR links as in Step H).
 - The diff never appears on a command line. Make a file with `mktemp`, write the diff into it with
   the file-writing tool, and feed it by stdin redirect. Remove the file afterwards when removal is
   available; a denied removal changes nothing.
@@ -380,7 +391,9 @@ anything yourself to turn a `stuck` into `pr-ready`. `needs-a-decision` never me
 
 ### Step H — end the session
 
-Read the record fresh. In one more confined edit set `**Outcome:** <kind>` (the line is exactly
+Read the record fresh and make the own-block check from "How every write to the block is made": a
+block that has gained an `**Outcome:**` line this run did not write ends the run with nothing more
+written, and no `pr-ready` goes into it. In one more confined edit set `**Outcome:** <kind>` (the line is exactly
 `**Outcome:** pr-ready`, `**Outcome:** needs-a-decision` or `**Outcome:** stuck`, with nothing after the word: the reason goes in
 the outcome line below, never in the block), bring `**Checkpoint:**`
 up to date (`pr-ready`, `needs-a-decision` or `stuck`), update the `pull_request (<n> calls decided unattended)` count
