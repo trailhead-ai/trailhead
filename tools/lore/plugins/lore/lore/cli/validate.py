@@ -54,7 +54,6 @@ from ..health import dangling as dangling_mod
 from ..health import scan as scan_mod
 from ..health import structure as structure_mod
 from ..health.model import VaultScan
-from ..record import rename
 from .health import _malformed_evidence
 from .record import _printable
 
@@ -96,30 +95,13 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return f"{n} {singular if n == 1 else plural}"
 
 
-def _kind_dir_skips(root: Path) -> int:
-    """How many symlinked kind directories escape *root* (the scan and the orphan walk both count each)."""
-    n = 0
-
-    def bump():
-        nonlocal n
-        n += 1
-
-    try:
-        for _ in rename._confined_kind_dirs(root, bump):
-            pass
-    except OSError:
-        return 0
-    return n
-
-
 def _structure(scan: VaultScan, root: Path) -> tuple[list[Finding], int]:
     """Structural findings, and the escaping skips the orphan walk adds beyond the scan's own."""
     try:
         found, skips = structure_mod.check_structure(scan, root)
     except OSError:
         return [], 0
-    findings = [Finding(f.vault, f.record_id, f.code, f.detail) for f in found]
-    return findings, max(skips - _kind_dir_skips(root), 0)
+    return [Finding(f.vault, f.record_id, f.code, f.detail) for f in found], skips
 
 
 def _vault_level(scan: VaultScan, extra_skips: int) -> list[Finding]:

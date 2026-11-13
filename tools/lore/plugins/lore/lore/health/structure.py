@@ -34,15 +34,14 @@ class StructuralFinding:
 
 
 def _orphans(vault: str, root: Path):
-    """Return ``(findings, escaping_skips)`` for flat artifacts missing their partner."""
+    """Return ``(findings, escaping_skips)`` for flat artifacts missing their partner.
+
+    A symlinked kind directory is passed over without counting: the scan
+    already counts it in ``skipped_escaping``.
+    """
     findings: list[StructuralFinding] = []
     skips = 0
-
-    def kind_dir_skipped():
-        nonlocal skips
-        skips += 1
-
-    for kind_dir, _ in rename._confined_kind_dirs(root, kind_dir_skipped):
+    for kind_dir, _ in rename._confined_kind_dirs(root):
         kind = kind_dir.name
         try:
             with os.scandir(kind_dir) as it:
@@ -74,7 +73,11 @@ def _orphans(vault: str, root: Path):
 
 
 def check_structure(scan: VaultScan, root) -> tuple[list[StructuralFinding], int]:
-    """Return ``(findings, escaping_skips)`` for one scanned vault rooted at *root*."""
+    """Return ``(findings, escaping_skips)`` for one scanned vault rooted at *root*.
+
+    ``escaping_skips`` counts only symlinked orphan artifacts, which the scan
+    never sees, so it adds to the scan's ``skipped_escaping`` without overlap.
+    """
     findings = [
         StructuralFinding(u.vault, f"{u.kind}/{u.name}", u.reason, "record could not be read")
         for u in scan.unreadable
