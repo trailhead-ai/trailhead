@@ -105,12 +105,9 @@ skips the waiting gate.
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import re
-import subprocess
 import sys
-from contextlib import redirect_stderr
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -123,7 +120,8 @@ import criterion_gate  # noqa: E402
 import followup_gather as gather  # noqa: E402
 import markdown_section  # noqa: E402
 import observation_gate as obs  # noqa: E402
-import waiting  # noqa: E402
+import parent_coverage  # noqa: E402
+import spec_write as sw  # noqa: E402
 import waiting_gate  # noqa: E402
 from gate_plumbing import Refusal, emit_refusal  # noqa: E402
 
@@ -137,7 +135,6 @@ _PENDING = "pending-check"
 _MANUAL = "manual-check"
 _PARENT_WRITE_CODES = ("stale-parent", "parent-write-failed", "lore-too-old")
 _NO_OBSERVATION = "no observation recorded before close"
-_BASE_REJECTED_RE = re.compile(r"unrecogni[sz]ed arguments?:.*--base")
 STUCK_REASON_CODES = (
     "not-a-slice-parent",
     "build-unfinished",
@@ -161,16 +158,6 @@ _HISTORY_WORDS = "closed with this check not yet carried out"
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str):
         raise Refusal("invalid arguments — see the usage in the script docstring", "invalid-arguments", 2)
-
-
-def _check_names(*names: str | None) -> None:
-    for name in names:
-        if name is not None and not gather._shape_ok(name):
-            raise Refusal(
-                "a spec, parent or vault name has a shape that cannot be used",
-                "invalid-name",
-                2,
-            )
 
 
 def _load_entries(path: str) -> list[dict]:
@@ -217,115 +204,12 @@ def _refuse_structural_text(entries: list[dict]) -> None:
                 )
 
 
-def _refusal_from(err: gather.GatherError, exit_code: int = 2) -> Refusal:
-    return Refusal(f"lore could not be read: {err.reason}", err.reason, exit_code)
-
-
-def _read(runner, vault: str, record_id: str, missing_code: str, *, personal_only: bool = True):
-    """(sidecar, body, revision, layer) of `record_id`."""
-    try:
-        done = gather._call(runner, ["record", "show", "--json", "--vault", vault, record_id])
-        if done.returncode != 0:
-            if "record not found" in done.stderr:
-                raise Refusal(f"{record_id} was not found in the vault", missing_code, 1)
-            raise Refusal(f"lore could not show {record_id}", "lore-failed", 2)
-        sidecar = gather._parse_sidecar(done.stdout)
-    except gather.GatherError as err:
-        raise _refusal_from(err)
-    doc = json.loads(done.stdout)
-    body, revision, layer = doc.get("body"), doc.get("revision"), doc.get("layer")
-    if not isinstance(body, str) or not isinstance(revision, str) or not revision:
-        raise Refusal(f"lore's reply for {record_id} is malformed", "malformed-sidecar", 2)
-    if personal_only and layer != "personal":
-        raise Refusal(
-            f"{record_id} is not in a personal-layer vault: in a shared vault 'show' "
-            "XML-escapes the body, so a body composed from it would write escaped text",
-            "shared-layer-prior",
-            2,
-        )
-    return sidecar, body, revision, layer
-
-
-def _resolve_vault(runner, spec: str, vault: str | None, *, refusal_exit: int = 1) -> str:
-    """`vault`, or the one vault holding `spec`; a spec that is missing, in several vaults
-    or not a spec is refused with `refusal_exit`, any other failure with 2."""
-    if vault is not None:
-        return vault
-    try:
-        return gather.resolve_spec(runner, spec)[0]
-    except gather.GatherError as err:
-        raise _refusal_from(
-            err, refusal_exit if err.reason in ("spec-not-found", "spec-ambiguous", "not-a-spec") else 2
-        )
-
-
-def _spec_entries(body: str) -> dict[tuple[str, str | None], waiting.WaitingEntry]:
-    try:
-        return {e.key: e for e in waiting.parse_waiting(body)}
-    except (waiting.WaitingParseError, covers_gate.DuplicateHeadingError):
-        raise Refusal(
-            "the spec's own '## Waiting' section does not parse — repair it with a direct "
-            "edit before writing again",
-            "malformed-prior-section",
-            2,
-        )
-
-
 def _pending_line(criterion: str, spec: str, evidence: str) -> str:
     return f"- **{criterion}** — {_PENDING} — waiting entry on spec/{spec}; {evidence}"
 
 
-def _append_to_section(
-    body: str, heading: str, duplicate_code: str, new_lines: list[str], *, separated: bool = False
-) -> str:
-    """`body` with `new_lines` after the last non-blank line of its `heading` section (after
-    a blank line when `separated`), or under a new `heading` at the end of the body when it
-    has none."""
-    lines, masked = markdown_section.split_body(body)
-    located = markdown_section.section_range(lines, masked, heading, duplicate_code)
-    if located is None:
-        return body.rstrip("\n") + "\n\n" + heading + "\n\n" + "\n".join(new_lines) + "\n"
-    start, end = located
-    last = start
-    for i in range(start + 1, end):
-        if lines[i].strip():
-            last = i
-    lines[last + 1 : last + 1] = ([""] if separated else []) + new_lines
-    return "\n".join(lines)
-
-
-class _Parent:
+class _Parent(parent_coverage.ParentCoverage):
     """A parent body read through observation_gate's own parsers."""
-
-    def __init__(self, body: str):
-        self.body = body
-        try:
-            self.lines, self.masked, self.covers, self.partial = obs.read_covers_fields(body)
-            self.observations = obs.parse_observations(self.lines, self.masked)
-            self.attestations = obs.parse_attestations(self.lines, self.masked)
-            self.obs_lines = self._observation_lines()
-        except ValueError:
-            raise Refusal(
-                "the parent's covers fields or observations cannot be read unambiguously",
-                "unreadable-parent",
-                2,
-            )
-
-    def _observation_lines(self) -> dict[str, int]:
-        start = covers_gate._find_unique_heading(
-            self.lines, self.masked, obs._OBSERVATIONS_HEADING_RE, obs._OBSERVATIONS_HEADING,
-            obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE,
-        )
-        if start is None:
-            return {}
-        found = obs._scan_section(self.lines, self.masked, start, obs._OBSERVATION_LINE_RE)
-        return {identifier: idx for identifier, (_rest, idx) in found.items()}
-
-    def _field_index(self, field_re) -> int | None:
-        for i, line in enumerate(self.lines):
-            if not self.masked[i] and field_re.match(line):
-                return i
-        return None
 
     def classify(self, criteria: list[str], spec_body: str) -> list[str]:
         """The criteria still to move; the rest are already pending. Refuses any
@@ -359,48 +243,13 @@ class _Parent:
                 unrecorded.append(_pending_line(criterion, spec, _NO_OBSERVATION))
         covers = [c for c in self.covers if c not in moving]
         partial = self.partial + moving
-        covers_idx = self._field_index(obs._COVERS_FIELD_RE)
-        partial_idx = self._field_index(obs._PARTIALLY_COVERS_FIELD_RE)
-        partial_line = f"**Partially covers:** {', '.join(partial)}"
-        if partial_idx is not None:
-            lines[partial_idx] = partial_line
-            if covers:
-                lines[covers_idx] = f"**Covers:** {', '.join(covers)}"
-            else:
-                del lines[covers_idx]
-        elif covers:
-            lines[covers_idx] = f"**Covers:** {', '.join(covers)}"
-            lines.insert(covers_idx + 1, partial_line)
-        else:
-            lines[covers_idx] = partial_line
+        lines = self.rewrite_lists(lines, covers, partial)
         body = "\n".join(lines)
         if unrecorded:
-            body = _append_to_section(
+            body = sw.append_to_section(
                 body, obs._OBSERVATIONS_HEADING, obs._DUPLICATE_OBSERVATIONS_SECTION_REASON_CODE, unrecorded
             )
         return body, covers, partial
-
-
-def _is_slice_parent(sidecar: dict, spec: str, statuses: tuple[str, ...]) -> bool:
-    """A task in one of `statuses`, labelled a slice parent, related to `spec`."""
-    related = sidecar.get("related")
-    specs = related.get("spec") if isinstance(related, dict) else None
-    linked = {v.removeprefix("spec/") for v in specs if isinstance(v, str)} if isinstance(specs, list) else set()
-    return (
-        sidecar.get("kind") == "task"
-        and sidecar.get("status") in statuses
-        and gather.SLICE_LABEL in gather._labels(sidecar)
-        and spec in linked
-    )
-
-
-def _check_parent(sidecar: dict, spec: str) -> None:
-    if not _is_slice_parent(sidecar, spec, ("in-progress",)):
-        raise Refusal(
-            "the parent is not an in-progress slice parent related to this spec",
-            "not-a-slice-parent",
-            1,
-        )
 
 
 def _entry_lines(item: dict, parent: str, today: str) -> list[str]:
@@ -415,72 +264,7 @@ def _entry_lines(item: dict, parent: str, today: str) -> list[str]:
 
 def _with_entries(body: str, items: list[dict], parent: str) -> str:
     today = waiting_gate._today().isoformat()
-    block: list[str] = []
-    for item in items:
-        if block:
-            block.append("")
-        block += _entry_lines(item, parent, today)
-    return _append_to_section(body, waiting.HEADING, waiting.DUPLICATE_HEADING_REASON_CODE, block, separated=True)
-
-
-def _write(runner, argv: list[str], stdin: str):
-    try:
-        return runner(argv, stdin=stdin)
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return None
-
-
-def _update_argv(record_id: str, vault: str, revision: str) -> list[str]:
-    return ["record", "update", record_id, "--vault", vault, "--base", revision]
-
-
-def _refuse_if_base_rejected(done) -> None:
-    if done is not None and done.returncode != 0 and _BASE_REJECTED_RE.search(done.stderr or ""):
-        raise Refusal("this lore's 'record update' has no --base, so nothing was written", "lore-too-old", 2)
-
-
-def _revision_changed(runner, vault: str, record_id: str, revision: str, missing: str) -> bool:
-    try:
-        return _read(runner, vault, record_id, missing)[2] != revision
-    except Refusal:
-        return False
-
-
-def _landed_body(runner, vault: str, spec_id: str, missing: list[dict], parent: str) -> str | None:
-    """The spec body when a write that reported failure had in fact committed every
-    entry this run proposed (each present under its key, still `waiting`), else None."""
-    try:
-        body = _read(runner, vault, spec_id, "spec-not-found")[1]
-        present = _spec_entries(body)
-    except Refusal:
-        return None
-    for item in missing:
-        existing = present.get((item["criterion"], parent))
-        if existing is None or existing.status != "waiting":
-            return None
-    return body
-
-
-def _certify_covers(spec_body: str, covers: list[str], partial: list[str]) -> None:
-    argv = []
-    if covers:
-        argv += ["--covers", ", ".join(covers)]
-    argv += ["--partial-covers", ", ".join(partial)]
-    saved = sys.stdin
-    sys.stdin = io.TextIOWrapper(io.BytesIO(spec_body.encode("utf-8")), encoding="utf-8")
-    captured = io.StringIO()
-    try:
-        with redirect_stderr(captured):
-            rc = covers_gate.main(argv)
-    finally:
-        sys.stdin = saved
-    if rc == 0:
-        return
-    codes = re.findall(r"reason-code: (\S+)", captured.getvalue())
-    raise Refusal(
-        "covers_gate refused the moved identifier lists", codes[-1] if codes else "covers-refused",
-        rc if rc in (1, 2) else 2,
-    )
+    return sw.append_waiting_entries(body, [_entry_lines(item, parent, today) for item in items])
 
 
 def _precertify_covers(state: _Parent, moving: list[str], spec: str, spec_body: str) -> None:
@@ -488,41 +272,37 @@ def _precertify_covers(state: _Parent, moving: list[str], spec: str, spec_body: 
     criterion the spec does not declare leaves nothing behind."""
     if moving:
         _, covers, partial = state.moved(moving, spec)
-        _certify_covers(spec_body, covers, partial)
+        parent_coverage.certify_covers(spec_body, covers, partial)
 
 
 def _finish_parent(runner, vault, spec, parent, criteria, spec_body) -> str:
-    sidecar, body, revision, _ = _read(runner, vault, f"task/{parent}", "parent-not-found")
-    _check_parent(sidecar, spec)
+    sidecar, body, revision, _ = sw.read_record(runner, vault, f"task/{parent}", "parent-not-found")
+    parent_coverage.require_slice_parent(sidecar, spec)
     state = _Parent(body)
     todo = state.classify(criteria, spec_body)
     if not todo:
         return "already-updated"
     new_body, covers, partial = state.moved(todo, spec)
-    _certify_covers(spec_body, covers, partial)
-    done = _write(runner, _update_argv(f"task/{parent}", vault, revision), new_body)
-    if done is not None and done.returncode == 0:
-        return "updated"
-    _refuse_if_base_rejected(done)
-    if _revision_changed(runner, vault, f"task/{parent}", revision, "parent-not-found"):
-        raise Refusal(f"task/{parent} changed after it was read", "stale-parent", 2)
-    raise Refusal(f"lore could not write task/{parent}", "parent-write-failed", 2)
+    parent_coverage.certify_covers(spec_body, covers, partial)
+    parent_coverage.write_parent(runner, vault, f"task/{parent}", revision, new_body)
+    return "updated"
 
 
 def write_mode(args, runner) -> int:
-    _check_names(args.spec, args.parent, args.vault)
+    sw.check_names(args.spec, args.parent, args.vault)
     entries = _load_entries(args.entries)
+    sw.require_utf8_text(entries)
     _refuse_structural_text(entries)
     criteria = [item["criterion"] for item in entries]
-    vault = _resolve_vault(runner, args.spec, args.vault)
+    vault = sw.resolve_vault(runner, args.spec, args.vault)
 
     spec_id = f"spec/{args.spec}"
-    parent_sidecar, parent_body, _, _ = _read(runner, vault, f"task/{args.parent}", "parent-not-found")
-    _check_parent(parent_sidecar, args.spec)
-    _, spec_body, spec_rev, _ = _read(runner, vault, spec_id, "spec-not-found")
+    parent_sidecar, parent_body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
+    parent_coverage.require_slice_parent(parent_sidecar, args.spec)
+    _, spec_body, spec_rev, _ = sw.read_record(runner, vault, spec_id, "spec-not-found")
     state = _Parent(parent_body)
     moving = state.classify(criteria, spec_body)
-    present = _spec_entries(spec_body)
+    present = sw.spec_entries(spec_body)
     missing = []
     for item in entries:
         existing = present.get((item["criterion"], args.parent))
@@ -537,19 +317,13 @@ def write_mode(args, runner) -> int:
 
     spec_status = "already-present"
     if missing:
-        proposed = _with_entries(spec_body, missing, args.parent)
-        waiting_gate.certify(spec_body, proposed)
-        _precertify_covers(state, moving, args.spec, proposed)
-        done = _write(runner, _update_argv(spec_id, vault, spec_rev), proposed)
-        if done is None or done.returncode != 0:
-            _refuse_if_base_rejected(done)
-            landed = _landed_body(runner, vault, spec_id, missing, args.parent)
-            if landed is None:
-                if _revision_changed(runner, vault, spec_id, spec_rev, "spec-not-found"):
-                    raise Refusal(f"{spec_id} changed after it was read", "stale-spec", 2)
-                raise Refusal(f"lore could not write {spec_id}", "spec-write-failed", 2)
-            proposed = landed
-        spec_body, spec_status = proposed, "written"
+        drafted = _with_entries(spec_body, missing, args.parent)
+        spec_body = sw.certify_and_write(
+            runner, vault, spec_id, spec_body, spec_rev, drafted,
+            [(item["criterion"], args.parent) for item in missing],
+            before_write=lambda: _precertify_covers(state, moving, args.spec, drafted),
+        )
+        spec_status = "written"
 
     try:
         parent_status = _finish_parent(runner, vault, args.spec, args.parent, criteria, spec_body)
@@ -570,12 +344,12 @@ def write_mode(args, runner) -> int:
 
 
 def verify_mode(args, runner) -> int:
-    _check_names(args.spec, args.parent, args.vault)
-    vault = _resolve_vault(runner, args.spec, args.vault)
-    _, parent_body, _, _ = _read(runner, vault, f"task/{args.parent}", "parent-not-found")
+    sw.check_names(args.spec, args.parent, args.vault)
+    vault = sw.resolve_vault(runner, args.spec, args.vault)
+    _, parent_body, _, _ = sw.read_record(runner, vault, f"task/{args.parent}", "parent-not-found")
     pending = [i for i, (method, _e) in _Parent(parent_body).observations.items() if method == _PENDING]
-    _, spec_body, _, _ = _read(runner, vault, f"spec/{args.spec}", "spec-not-found")
-    present = _spec_entries(spec_body)
+    _, spec_body, _, _ = sw.read_record(runner, vault, f"spec/{args.spec}", "spec-not-found")
+    present = sw.spec_entries(spec_body)
     unbacked = [
         i for i in pending
         if (i, args.parent) not in present or present[(i, args.parent)].status != "waiting"
@@ -592,13 +366,13 @@ def verify_mode(args, runner) -> int:
 
 
 def describe_mode(args, runner) -> int:
-    _check_names(args.spec, args.vault)
+    sw.check_names(args.spec, args.vault)
     try:
         wanted = covers_gate.parse_covers(args.criteria, "--criteria")
     except ValueError:
         raise Refusal("--criteria must be ACn identifiers separated by commas", "invalid-criteria", 2)
-    vault = _resolve_vault(runner, args.spec, args.vault)
-    _, body, _, layer = _read(runner, vault, f"spec/{args.spec}", "spec-not-found", personal_only=False)
+    vault = sw.resolve_vault(runner, args.spec, args.vault)
+    _, body, _, layer = sw.read_record(runner, vault, f"spec/{args.spec}", "spec-not-found", personal_only=False)
     if layer == "shared":
         body = checklist_gather._unescape(body)
     try:
@@ -681,7 +455,7 @@ def _children_statuses(runner, vault: str, parent: str) -> list[str]:
     try:
         rows = gather._call_json(runner, ["task", "list", "--vault", vault, "--json"])
     except gather.GatherError as err:
-        raise _refusal_from(err)
+        raise sw.refusal_from(err)
     named = (
         {r["name"]: r for r in rows if isinstance(r, dict) and isinstance(r.get("name"), str)}
         if isinstance(rows, list)
@@ -707,7 +481,7 @@ def _refuse_stuck(reason: str, code: str) -> Refusal:
 
 def _read_or_fail(runner, vault: str, record_id: str, missing_code: str, **kwargs):
     try:
-        return _read(runner, vault, record_id, missing_code, **kwargs)
+        return sw.read_record(runner, vault, record_id, missing_code, **kwargs)
     except Refusal as r:
         if r.reason_code == missing_code:
             raise Refusal(str(r), r.reason_code, 2)
@@ -715,20 +489,20 @@ def _read_or_fail(runner, vault: str, record_id: str, missing_code: str, **kwarg
 
 
 def stuck_mode(args, runner) -> int:
-    _check_names(args.spec, args.parent, args.vault)
+    sw.check_names(args.spec, args.parent, args.vault)
     try:
         probe = gather._call(runner, ["record", "update", "--help"])
     except gather.GatherError as err:
-        raise _refusal_from(err)
+        raise sw.refusal_from(err)
     if probe.returncode != 0:
         raise Refusal("lore could not describe 'record update'", "lore-failed", 2)
     if "--base" not in probe.stdout:
         raise _refuse_stuck("this lore's 'record update' has no --base, so no close could write", "lore-too-old")
-    vault = _resolve_vault(runner, args.spec, args.vault, refusal_exit=2)
+    vault = sw.resolve_vault(runner, args.spec, args.vault, refusal_exit=2)
     sidecar, parent_body, _, _ = _read_or_fail(runner, vault, f"task/{args.parent}", "parent-not-found")
-    if _is_slice_parent(sidecar, args.spec, ("blocked",)):
+    if parent_coverage.is_slice_parent(sidecar, args.spec, ("blocked",)):
         raise _refuse_stuck("the parent is blocked; only an in-progress parent is certified", "parent-blocked")
-    if not _is_slice_parent(sidecar, args.spec, ("in-progress",)):
+    if not parent_coverage.is_slice_parent(sidecar, args.spec, ("in-progress",)):
         raise _refuse_stuck("the parent is not an in-progress slice parent related to this spec", "not-a-slice-parent")
     if gather._labels(sidecar).get("craft/push") == "failed":
         raise _refuse_stuck("the parent's last push failed and needs settling by hand", "push-failed")

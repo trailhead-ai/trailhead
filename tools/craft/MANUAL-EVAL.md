@@ -5361,3 +5361,54 @@ One run each on the edited prose, a single carrier changed, case named in the la
 | failed write ends the pass at the entry | `skills/slice/SKILL.md` item 1, the "On the answer" bullet | delete the sentences from "A failed drop or a failed restore" to "twice" | none: both cases stop at the question, so the write path is unobserved. A cheap grader would need a case whose reply chooses a drop and whose fixture makes `found_work.py` exit non-zero, judging that the final message carries `reason-code:` and `retry:` and that no slice parent is created; not built |
 | `operator_confirmed` set for a security entry | `skills/slice/SKILL.md` item 1, the "On the answer" bullet | delete the sentence beginning "Set `\"operator_confirmed\": true`" | none: the fixture's entry F1 is not marked as a security finding, and the case stops at the question |
 | unattended exception for plan's reopen | `skills/_shared/unattended.md`, the Parkable bullet | delete the sentence beginning "The exception is" | none: no case runs plan unattended on an entry a found-work trigger covers |
+
+## Cases: setting a criterion aside, in a slice pass and in a build (2026-11-12)
+
+Four cases, each pre-registered in its `expected.md` and committed before any run: two detectors (`slice-sets-aside-what-needs-an-outside-account`, `execute-sets-aside-a-criterion-blocked-on-an-outside-account`) and two guards (`slice-builds-against-a-stand-in-instead-of-setting-aside`, `execute-builds-against-a-stand-in-when-one-exists`). The detectors are core cases; the guards are `merge_only`, since both files they measure are shared and each keeps its detector as a core case. Each fixture's `scripts/set_aside.py` logs its call and runs the real writer over the fixture's lore. Model `claude-opus-5-5`, `--ablation none`, `-j 1`, runner grants from craft's `eval-gate.json` plus `Bash(*/scripts/set_aside.py *)`. Real lore config and state were hashed before and after every batch. Every change was another session's own commits; no fixture record appears in any real vault.
+
+Prose measured: before the change, `skills/slice/SKILL.md` `a77e8c5c2b69096f43f42078d4c7ec0bb580aef6` and `skills/_shared/execute.md` `2244ad181e0d05d15fc268eb58da8db17fac98b7`; shipped, `skills/slice/SKILL.md` `162021e5493d8dfccf77630bd70bfcef52bc3fb1` and `skills/_shared/execute.md` `8387b6aa8e0fc1f9120a26151a1509e6375ab8be`.
+
+| Case | Prose | Result | Cost (USD) |
+|---|---|---|---|
+| slice detector | before | 0 of 3 (scores 0.2–0.3) | 2.67 |
+| slice guard | before | 3 of 3 at 1.0 | 2.45 |
+| execute detector | before | 0 of 3 (0.2 each; the session wrote `blocked`) | 2.65 |
+| execute guard | before | 3 of 3 at 1.0 | 1.32 |
+| slice detector | shipped | 3 of 3 at 1.0 | 2.79 |
+| slice guard | shipped | 3 of 3 at 1.0 | 2.47 |
+| execute detector | shipped | 3 of 3 at 1.0 | 2.25 |
+| execute guard | shipped | 3 of 3 at 1.0 | 1.13 |
+
+After measurement the shipped prose moved on, to `skills/slice/SKILL.md` `fac973fb40e9c2db333626c9192bcf31466b1d97` and `skills/_shared/execute.md` `6f31c3cc5c3f1ff5589a6c0bbb6d70da7e85fbb0`. The differences are a reflow, a new contents line in `execute.md`, and refusal-handling text that no case reaches: one instruction for how a writer refusal is reported, in both procedures, and the `would-empty-slice` branch in `execute.md`, which now lands the waiting entry without `--parent` before dropping the slice, and every refusal whose `reason:` says the spec entry landed is now handled like a failed parent write. The set-aside commands also restate the safe-value check on the names they substitute. Every grader in the four cases reads the success path, where the writer is never refused, and the push gate re-measures the cases through `eval-gate.json`.
+
+**Amendments to the two slice cases**, recorded in their `expected.md`. The first post-change batch passed the slice detector 1 of 3 and the slice guard 2 of 3, for three reasons:
+- **Prose:** the report paraphrased the manual undo instead of giving the `lore record update` command. The prose was fixed.
+- **Grader:** the create regex required `--kind task` directly after `record create`, and one run put `--vault` first. The regex was fixed.
+- **Prompt:** the pass sometimes stopped to wait for an absent operator's go-ahead. Step 8 states the claim "while it is still cheap to reject", so this predates the change. It also happened in 1 of 3 runs of the first slice guard baseline. The prompt now says the slice is pre-approved.
+
+The slice baselines in the table were rerun under the amended prompt and graders. The execute cases were not amended.
+
+**A bug the traces surfaced.** `execute.md` passed `--parent task/<parent-name>`. The writer reads that as `task/task/<name>` and refuses it, so every passing execute run had retried with the bare name. Both procedures now pass bare names. The shipped execute rows were run after that fix.
+
+**Mutation checks**, 3 runs each on the shipped prose with one edit, restored byte-exactly after each batch:
+
+| Edit | Case | Result | Cost (USD) |
+|---|---|---|---|
+| Rule paragraph rewritten over-eager (set aside anything touching an outside service, even with a stand-in) | slice guard | 0 of 3 (0.25 each) | 2.61 |
+| Same rewrite | execute guard | 0 of 3 (0.43 each) | 1.91 |
+| Rule paragraph deleted | slice detector | 3 of 3 at 1.0 | 2.79 |
+| Rule paragraph and BLOCKED item 6 deleted | execute detector | 3 of 3 at 1.0 | 2.17 |
+| Writer command block deleted (rule kept) | execute detector | 3 of 3 at 1.0 | about 2 |
+| Stand-in sentence inverted in place (rest of rule kept) | execute guard | 3 of 3 at 1.0 | about 1.2 |
+
+Reading:
+- **Guards.** They go red when the rule's stand-in boundary is made over-eager, so the boundary decides that behaviour.
+- **Detectors.** They stay green when only the rule paragraph is removed. The remaining set-aside prose (stating, writing and reporting a set-aside) still leads the agent to set aside a criterion that is plainly unbuildable. The traces show this, and with the command block removed they show the agent finding the writer from its help.
+- **Detector mutation.** The detectors' behaviour is carried by the set-aside prose as a whole. Removing all of it is exactly the "before" prose, which the detectors fail 3 of 3. That removal is taken as the detectors' mutation check.
+- **In-place inversion.** The first in-place inversion left the guard green because the agent named the contradiction with the surrounding rule and followed the rule. So the inversion was redone as a rewrite of the paragraph.
+
+Limitations:
+- One fixture per case, one model tier, three runs, one Linux host.
+- No case exercises the report when every remaining candidate is set aside (a recorded follow-up).
+- No case exercises the `entry-exists`, `would-empty-slice` or failed-parent-write branches of the execute prose.
+- The judge clauses read the first and last 12 events of a run.
