@@ -115,7 +115,6 @@ from trailhead.harness.base import (
     SessionTranscript,
 )
 from trailhead.launch_profile import BROKER_SERVER, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
-from trailhead.paths import state_dir
 
 if TYPE_CHECKING:
     from trailhead.launch_profile import BrokerLaunch, ResolvedProfile
@@ -2506,6 +2505,7 @@ class ClaudeCodeHarness(Harness):
         env: dict[str, str] | None = None,
         uid: int | None = None,
         broker: BrokerLaunch | None = None,
+        session_dir: Path | None = None,
         platform: str | None = None,
     ) -> SessionStart:
         """Render *profile* into a confined, never-prompting ``claude`` launch.
@@ -2703,9 +2703,13 @@ class ClaudeCodeHarness(Harness):
                 holder[key] = False
         files: tuple[SessionFile, ...] = ()
         if not profile.profile.mcp_servers:
+            if session_dir is None:
+                raise HarnessError(
+                    "a profile with no MCP servers needs the session directory to hold its empty MCP config"
+                )
             files = (
                 SessionFile(
-                    path=str(state_dir("trailhead", env=source) / "launch" / _EMPTY_MCP_CONFIG),
+                    path=str(session_dir / _EMPTY_MCP_CONFIG),
                     content=json.dumps({"mcpServers": {}}) + "\n",
                     mode="0600",
                 ),

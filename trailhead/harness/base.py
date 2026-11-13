@@ -779,6 +779,7 @@ class Harness(ABC):
         account: str | None,
         env: dict[str, str] | None = None,
         broker: BrokerLaunch | None = None,
+        session_dir: Path | None = None,
     ) -> SessionStart | None:
         """How to start a session confined to *profile* in *directory*, or ``None``.
 
@@ -801,6 +802,9 @@ class Harness(ABC):
         an implementation raises :class:`HarnessError` rather than render a session
         without the server. Any config the rendering needs a file for comes back in
         ``SessionStart.files`` for the caller to write; the argv names those paths.
+        A profile naming no MCP servers has an empty MCP config written to ``session_dir``,
+        the directory Outpost accepts that session's files in; an implementation raises
+        :class:`HarnessError` when it is not given one.
 
         The seam never execs: the caller owns the spawn. An implementation's one
         permitted side effect is the per-directory trust record a harness needs so

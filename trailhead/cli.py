@@ -41,6 +41,7 @@ from trailhead.launch_profile import (
     ROLE_WORKSPACE,
     LaunchProfileError,
     broker_launch,
+    broker_mcp_config_path,
     hub_home,
     resolve_profile,
 )
@@ -282,8 +283,17 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if ritual != (args.session is not None):
+        print(
+            "trailhead: --session is required for the ritual role and refused for the hub"
+            if ritual
+            else "trailhead: --session belongs to the ritual role; a hub names its session with --broker-session",
+            file=sys.stderr,
+        )
+        return 1
     env = dict(os.environ)
     launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
+    session_dir = broker_mcp_config_path(args.session, env=env).parent if ritual else None
     config = read_hub_config(args.account, env=env)
     if ritual:
         profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, workspace=args.workspace)
@@ -310,6 +320,7 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         account=_launch_account(config),
         env=env,
         broker=launch,
+        session_dir=session_dir,
     )
     if start is None:
         print(
@@ -339,10 +350,11 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
 
 
 def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) -> int:
-    if not ritual or args.workspace is not None or args.prompt_file is not None or args.broker_session is not None:
+    refused = (args.workspace, args.prompt_file, args.broker_session, args.session)
+    if not ritual or any(value is not None for value in refused):
         print(
             "trailhead: --setup-sandbox-only belongs to the ritual role alone and takes no "
-            "--workspace, --prompt-file or --broker-session",
+            "--workspace, --prompt-file, --broker-session or --session",
             file=sys.stderr,
         )
         return 1
@@ -604,6 +616,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="ID",
         default=None,
         help="Outpost's session id; adds a broker section naming where its credentials live.",
+    )
+    session_p.add_argument(
+        "--session",
+        metavar="ID",
+        default=None,
+        help="Outpost's session id for a ritual; its session files land in that session's directory.",
     )
     session_p.add_argument(
         "--setup-sandbox-only",

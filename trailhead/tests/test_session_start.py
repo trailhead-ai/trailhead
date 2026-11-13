@@ -131,6 +131,7 @@ def _start(env, *, profile=HUB_PROFILE, prompt=None, interactive=True, account=N
     if not bare:
         _give_user_a_write_list(env, account)
     extra.setdefault("platform", "linux")
+    extra.setdefault("session_dir", Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "s1")
     if BROKER_SERVER in profile.mcp_servers and "broker" not in extra:
         extra["broker"] = broker_launch("s1", env=env)
     resolved = _resolved(env, profile)
@@ -1578,6 +1579,13 @@ def test_a_profile_naming_no_mcp_server_gets_an_empty_strict_mcp_config(tmp_path
     assert "allow" not in _settings_of(start)["permissions"]
 
 
+def test_a_profile_naming_no_mcp_server_is_refused_without_a_session_directory(tmp_path):
+    env = _fence(tmp_path)
+    profile = LaunchProfile(writable_roles=HUB_PROFILE.writable_roles, mcp_servers=())
+    with pytest.raises(HarnessError, match="session directory"):
+        _start(env, profile=profile, session_dir=None)
+
+
 def test_a_profile_naming_the_broker_server_is_refused_without_a_broker_session(tmp_path):
     env = _fence(tmp_path)
     resolved = _resolved(env)
@@ -2288,6 +2296,7 @@ def _ritual_ready(tmp_path, *, launch="default"):
 
 
 def _ritual_start(env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, account=None, **extra):
+    extra.setdefault("session_dir", Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "rit-1")
     return ClaudeCodeHarness().session_start(
         _ritual_resolved(env, ws, profile, platform), ws, prompt,
         interactive=False, account=account, env=env, platform=platform, **extra,
@@ -2311,10 +2320,11 @@ def _other_account(env, name="b", launch="~/acct-b"):
     write_hub_config(HubConfig(name=f"Hub {name}", account=name, launch_account=launch), env=env, platform="linux")
 
 
-def _ritual_cli(monkeypatch, env, ws, *extra):
+def _ritual_cli(monkeypatch, env, ws, *extra, session="rit-1"):
     return _run_cli(
         monkeypatch, env,
-        ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json", *extra],
+        ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json",
+         *([f"--session={session}"] if session is not None else []), *extra],
     )
 
 
@@ -2337,7 +2347,53 @@ def test_ritual_launch_has_no_broker_allow_rules_and_an_empty_strict_mcp_config(
     (file,) = start.files
     assert _flag_value(start.argv, "--mcp-config") == file.path
     assert json.loads(file.content) == {"mcpServers": {}}
-    assert Path(file.path).parent == Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "launch"
+    assert file.mode == "0600"
+
+
+@pytest.mark.parametrize("sid", ["rit-1", "Abc_9", "x" * 64])
+def test_cli_places_a_rituals_empty_mcp_config_in_outposts_session_directory(
+    tmp_path, monkeypatch, capsys, sid
+):
+    env, ws = _ritual_ready(tmp_path)
+    assert _ritual_cli(monkeypatch, env, ws, "--headless", session=sid) == 0
+    out = json.loads(capsys.readouterr().out)
+    expected = str(Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / sid / "empty-mcp-config.json")
+    (file,) = out["files"]
+    assert file["path"] == expected and file["mode"] == "0600"
+    assert json.loads(file["content"]) == {"mcpServers": {}}
+    assert _flag_value(out["argv"], "--mcp-config") == expected
+
+
+@pytest.mark.parametrize("sid", ["", "-lead", "a/b", "../x", "has space", "x" * 65])
+def test_cli_refuses_a_ritual_session_id_outside_the_broker_session_shape(tmp_path, monkeypatch, capsys, sid):
+    env, ws = _ritual_ready(tmp_path)
+    rc = _ritual_cli(monkeypatch, env, ws, "--headless", session=sid)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == "" and captured.err.startswith("trailhead: ")
+
+
+def test_cli_refuses_a_ritual_start_without_a_session(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    rc = _ritual_cli(monkeypatch, env, ws, "--headless", session=None)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "--session" in captured.err
+
+
+def test_cli_refuses_a_session_with_setup_sandbox_only(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    rc = _setup_only_cli(monkeypatch, env, "--session", "rit-1")
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "--session" in captured.err
+
+
+def test_cli_refuses_a_session_for_the_hub(tmp_path, monkeypatch, capsys):
+    env = _broker_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, [*_broker_argv("sess-1"), "--session", "sess-1"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "--session" in captured.err
 
 
 def test_ritual_launch_never_prompts(tmp_path):
