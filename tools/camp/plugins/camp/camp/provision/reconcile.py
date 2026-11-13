@@ -67,7 +67,7 @@ from ..group.manifest import (
     write_central_manifest,
 )
 from .tasks import TaskError, TaskResult, run_member_tasks
-from .recorded_wrapper import read_prior, record_sidecar
+from .recorded_wrapper import read_prior, reap_sidecar, record_sidecar
 from .wrapper import resolve_wrapper
 
 # Thread-local lock registry for concurrent-run guard (same process; file lock
@@ -784,8 +784,8 @@ def reconcile_worktree(
             carry_forward_owner(manifest_data, prior_owner)
             if known.wrapper is not None:
                 manifest_data[TASK_WRAPPER_KEY] = known.wrapper
-            write_central_manifest(mpath, manifest_data)
             record_sidecar(mpath, known.wrapper)
+            write_central_manifest(mpath, manifest_data)
 
     return {
         "slug": slug,
@@ -967,6 +967,7 @@ def reconcile_break(
             # blocked on this inode re-validate identity on wake (see
             # reconcile_lock), which is what makes the unlink race-free.
             reap_lock_unlocked(ws_dir)
+            reap_sidecar(mpath)
             # Also reap each member's activate-phase concurrency guard
             # lockfile (provision/activation.py). Without this, every removed
             # workspace that ever ran activate-phase work leaks one lockfile
@@ -988,6 +989,7 @@ def reconcile_break(
                 write_central_manifest(mpath, updated)
             else:
                 remove_central_manifest(mpath)
+                reap_sidecar(mpath)
             status = "ok_with_errors"
 
     return {

@@ -2,8 +2,8 @@
 
 `CAMP_TASK_WRAPPER` (TASK_WRAPPER_ENV) carries a JSON array of strings. When a
 workspace is created camp records the raw value in the workspace manifest as
-`task_wrapper` (group.manifest.TASK_WRAPPER_KEY) and in `task-wrapper.json` beside it
-(see recorded_wrapper, which also says what a rebuilt manifest keeps); every later run
+`task_wrapper` (group.manifest.TASK_WRAPPER_KEY) and in `<slug>.task-wrapper.json` beside
+the workspace dir (see recorded_wrapper, which says which of the two is authoritative); every later run
 of that workspace's steps (provision, reconcile reruns, activate, retry cleanups)
 is wrapped by the RECORDED value, whatever the running shell's environment says. A step runs as
 `<wrapper argv, placeholders substituted> + <step argv>`. Camp's own

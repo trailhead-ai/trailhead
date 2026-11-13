@@ -37,12 +37,11 @@ from ..group.manifest import (
     manifest_path_for,
     owner_of,
     read_central_manifest,
-    task_wrapper_of,
     work_state_for_new_entry,
     workspace_dir,
     write_central_manifest,
 )
-from .recorded_wrapper import read_prior, record_sidecar
+from .recorded_wrapper import read_prior, record_sidecar, recorded_wrapper
 from .wrapper import resolve_wrapper
 
 # The camp binary this process was launched as — used to build the detached
@@ -228,8 +227,8 @@ def seed_pending_workspace(
         # sidecar's) and records it again in both places.
         if known.wrapper is not None:
             manifest_data[TASK_WRAPPER_KEY] = known.wrapper
-        write_central_manifest(mpath, manifest_data)
         record_sidecar(mpath, known.wrapper)
+        write_central_manifest(mpath, manifest_data)
     return mpath
 
 
@@ -379,10 +378,10 @@ def provision_member(
     context = reconcile._build_task_context(
         repo_root=repo_root, worktree=wt_path, slug=slug, member_name=member["name"]
     )
-    # An unreadable manifest raises (fail closed); only an absent one means
-    # nothing was recorded.
+    # An unreadable manifest or wrapper record raises (fail closed); only an absent
+    # manifest means nothing was recorded.
     mpath = manifest_path_for(group_name, slug, env=env)
-    recorded = task_wrapper_of(read_central_manifest(mpath)) if mpath.exists() else None
+    recorded = recorded_wrapper(mpath, read_central_manifest(mpath)) if mpath.exists() else None
     return run_member_tasks(
         reconcile._adapt_task_steps(member.get("tasks") or []),
         reconcile.PROVISION_PHASE,

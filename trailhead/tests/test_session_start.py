@@ -2455,6 +2455,20 @@ def test_the_accounts_own_launch_account_is_not_denied_but_the_default_groups_va
     assert str(Path(env["HOME"]).resolve() / "acct-a") not in denied
 
 
+def test_the_ritual_session_can_write_the_manifest_but_not_the_wrapper_record_camp_keeps_beside_its_workspace(
+    tmp_path,
+):
+    env, ws = _ritual_ready(tmp_path)
+    sidecar = ws.parent / f"{ws.name}.task-wrapper.json"
+    grants = _ritual_resolved(env, ws).writable
+
+    def granted(path):
+        return any(g == path or g in path.parents for g in map(Path, grants))
+
+    assert granted(ws / "manifest.json")
+    assert not granted(sidecar)
+
+
 def test_another_hub_sharing_the_accounts_own_launch_account_does_not_deny_it(tmp_path):
     env, ws = _ritual_ready(tmp_path, launch="~/acct-a")
     _other_account(env, "b", launch="~/acct-a")

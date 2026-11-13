@@ -483,9 +483,10 @@ def test_reseeding_an_existing_workspace_keeps_what_it_recorded(sc):
 
 
 # ---------------------------------------------------------------------------
-# A workspace that records a wrapper also writes it to task-wrapper.json beside
-# its manifest. A manifest that cannot be read is rebuilt, and the wrapper comes
-# from that sidecar; an unreadable sidecar is the only refusal.
+# A workspace that records a wrapper also writes it to <slug>.task-wrapper.json,
+# a sibling of the workspace dir beside the slug lock, out of its session's reach.
+# A readable sidecar is the recorded wrapper whatever the manifest says; a
+# manifest that cannot be read is rebuilt from it; an unreadable sidecar refuses.
 # ---------------------------------------------------------------------------
 
 _BAD_SIDECARS = ["{not json", "[]", "", '{"task_wrapper": 3}']
@@ -494,6 +495,11 @@ _BAD_SIDECARS = ["{not json", "[]", "", '{"task_wrapper": 3}']
 def _manifest_path(sc):
     (path,) = list(sc.state.rglob("manifest.json"))
     return path
+
+
+def _sidecar_path(sc):
+    ws = _manifest_path(sc).parent
+    return ws.parent / f"{ws.name}.task-wrapper.json"
 
 
 def _seed(sc, wrapper):
@@ -505,16 +511,16 @@ def _seed(sc, wrapper):
     return group
 
 
-def test_creation_writes_the_wrapper_to_a_private_sidecar_beside_the_manifest(sc):
+def test_creation_writes_the_wrapper_to_a_private_sidecar_beside_the_workspace_dir(sc):
     _seed(sc, sc.wrapper_json())
-    sidecar = _manifest_path(sc).parent / "task-wrapper.json"
+    sidecar = _sidecar_path(sc)
     assert json.loads(sidecar.read_text()) == {"task_wrapper": sc.wrapper_json()}
     assert sidecar.stat().st_mode & 0o777 == 0o600
 
 
 def test_an_unwrapped_creation_writes_no_sidecar(sc):
     _seed(sc, None)
-    assert not (_manifest_path(sc).parent / "task-wrapper.json").exists()
+    assert not (_sidecar_path(sc)).exists()
 
 
 def test_reseeding_over_a_truncated_manifest_carries_the_wrapper_from_the_sidecar(sc):
@@ -560,7 +566,7 @@ def test_reseeding_refuses_a_truncated_manifest_whose_sidecar_is_unreadable(sc, 
 
     group = _seed(sc, sc.wrapper_json())
     path = _manifest_path(sc)
-    sidecar = path.parent / "task-wrapper.json"
+    sidecar = _sidecar_path(sc)
     path.write_text("{ truncated")
     sidecar.write_text(text)
 
@@ -578,7 +584,7 @@ def test_reconcile_refuses_a_truncated_manifest_whose_sidecar_is_unreadable_and_
     sc.define_task()
     group = _seed(sc, sc.wrapper_json())
     path = _manifest_path(sc)
-    sidecar = path.parent / "task-wrapper.json"
+    sidecar = _sidecar_path(sc)
     path.write_text("{ truncated")
     sidecar.write_text(text)
 
@@ -598,9 +604,159 @@ def test_reconcile_creating_a_workspace_writes_the_wrapper_sidecar_that_survives
     group = load_group(sc.cfg / "groups" / "g.toml")
     reconcile_worktree(group, "s1", env={**sc.base_env, VAR: sc.wrapper_json()})
     path = _manifest_path(sc)
-    assert json.loads((path.parent / "task-wrapper.json").read_text()) == {"task_wrapper": sc.wrapper_json()}
+    assert json.loads((_sidecar_path(sc)).read_text()) == {"task_wrapper": sc.wrapper_json()}
 
     path.write_text("{ truncated")
     (sc.marks / "gate").write_text("")
     reconcile_worktree(group, "s1", env=sc.base_env)
     assert len(sc.wrapper_log()) == 4
+
+
+def test_the_sidecar_sits_beside_the_slug_lock_outside_the_workspace_dir(sc):
+    from camp.group.manifest import lock_path_for
+
+    _seed(sc, sc.wrapper_json())
+    ws = _manifest_path(sc).parent
+    sidecar = _sidecar_path(sc)
+    assert sidecar.parent == lock_path_for(ws).parent
+    assert ws not in sidecar.parents
+
+
+def _tamper(sc, how):
+    path = _manifest_path(sc)
+    data = json.loads(path.read_text())
+    if how == "deleted":
+        del data["task_wrapper"]
+    else:
+        data["task_wrapper"] = json.dumps(["/usr/bin/env"])
+    path.write_text(json.dumps(data))
+    return path
+
+
+@pytest.mark.parametrize("how", ["deleted", "swapped"])
+def test_setup_over_a_tampered_manifest_runs_through_the_sidecar_wrapper_and_rewrites_it(sc, how):
+    sc.define_task(required=False)
+    (sc.marks / "require-gate").write_text("")
+    sc.new(sc.wrapper_json())
+    assert len(sc.wrapper_log()) == 2
+    path = _tamper(sc, how)
+    (sc.marks / "gate").write_text("")
+
+    r = sc.camp("setup", "s1", "--group", "g")
+    assert r.returncode == 0, r.stderr
+
+    assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
+    assert len(sc.wrapper_log()) == 4
+    assert json.loads(path.read_text())["task_wrapper"] == sc.wrapper_json()
+
+
+@pytest.mark.parametrize("how", ["deleted", "swapped"])
+def test_reconcile_over_a_tampered_manifest_runs_through_the_sidecar_wrapper_and_rewrites_it(sc, how):
+    from camp.group.config import load_group
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task(required=False)
+    (sc.marks / "require-gate").write_text("")
+    group = load_group(sc.cfg / "groups" / "g.toml")
+    reconcile_worktree(group, "s1", env=sc.env_with(sc.wrapper_json()))
+    path = _tamper(sc, how)
+    (sc.marks / "gate").write_text("")
+
+    reconcile_worktree(group, "s1", env=sc.base_env)
+
+    assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
+    assert len(sc.wrapper_log()) == 4
+    assert json.loads(path.read_text())["task_wrapper"] == sc.wrapper_json()
+
+
+@pytest.mark.parametrize("how", ["deleted", "swapped"])
+def test_activate_runs_through_the_sidecar_wrapper_over_a_tampered_manifest(sc, how):
+    sc.define_task(phase="activate")
+    sc.new(sc.wrapper_json())
+    _tamper(sc, how)
+
+    r = sc.camp("activate", "--background", "m1", "--name", "s1", "--group", "g")
+    assert r.returncode == 0, r.stderr
+    assert [e["member"] for e in sc.wrapper_log()] == ["m1"]
+
+
+@pytest.mark.parametrize("text", _BAD_SIDECARS)
+def test_a_corrupt_sidecar_refuses_even_beside_a_readable_manifest(sc, text):
+    from camp.group.manifest import ManifestError
+    from camp.provision.provision import seed_pending_workspace
+
+    group = _seed(sc, sc.wrapper_json())
+    sidecar = _sidecar_path(sc)
+    sidecar.write_text(text)
+    before = _manifest_path(sc).read_text()
+
+    with pytest.raises(ManifestError) as info:
+        seed_pending_workspace(group, "s1", env=sc.base_env)
+    assert str(sidecar) in str(info.value)
+    assert _manifest_path(sc).read_text() == before
+
+
+def test_removing_a_workspace_clears_its_sidecar_so_a_new_one_starts_clean(sc):
+    from camp.provision.reconcile import reconcile_break
+
+    group = _seed(sc, sc.wrapper_json())
+    sidecar = _sidecar_path(sc)
+    assert sidecar.exists()
+
+    reconcile_break(group, "s1", env=sc.base_env, force=True)
+
+    from camp.provision.provision import seed_pending_workspace
+
+    seed_pending_workspace(group, "s1", env=sc.base_env)
+    assert "task_wrapper" not in _manifest_path(sc).read_text()
+    assert not sidecar.exists()
+
+
+def _with_unwritable_worktrees_root(sc, group):
+    """A slug whose lock and workspace dir exist but whose worktrees root is read-only.
+
+    The sidecar lives in that root, so writing it fails while the workspace dir
+    stays writable.
+    """
+    import contextlib
+    import stat
+
+    from camp.group.manifest import manifest_path_for
+    from camp.provision.provision import seed_pending_workspace
+
+    seed_pending_workspace(group, "s1", env=sc.base_env)
+    mpath = manifest_path_for("g", "s1", env=sc.base_env)
+    mpath.unlink()
+    root = mpath.parent.parent
+
+    @contextlib.contextmanager
+    def locked():
+        root.chmod(stat.S_IRUSR | stat.S_IXUSR)
+        try:
+            yield mpath
+        finally:
+            root.chmod(stat.S_IRWXU)
+
+    return locked()
+
+
+def test_a_failed_sidecar_write_leaves_no_wrapper_bearing_manifest(sc):
+    from camp.group.config import load_group
+    from camp.provision.provision import seed_pending_workspace
+
+    group = load_group(sc.cfg / "groups" / "g.toml")
+    with _with_unwritable_worktrees_root(sc, group) as mpath:
+        with pytest.raises(OSError):
+            seed_pending_workspace(group, "s1", env=sc.env_with(sc.wrapper_json()))
+        assert not mpath.exists()
+
+
+def test_a_failed_sidecar_write_in_reconcile_leaves_no_wrapper_bearing_manifest(sc):
+    from camp.group.config import load_group
+    from camp.provision.reconcile import reconcile_worktree
+
+    group = load_group(sc.cfg / "groups" / "g.toml")
+    with _with_unwritable_worktrees_root(sc, group) as mpath:
+        with pytest.raises(OSError):
+            reconcile_worktree(group, "s1", env=sc.env_with(sc.wrapper_json()))
+        assert not mpath.exists()

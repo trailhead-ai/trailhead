@@ -57,9 +57,9 @@ Schema (v1):
         # The raw CAMP_TASK_WRAPPER text (a JSON array of strings) read when
         # the workspace was created; every later run of the workspace's steps
         # wraps them with it. Absent when the workspace has none. Read via
-        # task_wrapper_of. The same value is kept in task-wrapper.json beside
-        # the manifest (provision.recorded_wrapper), so a manifest that has to be
-        # rebuilt keeps it.
+        # task_wrapper_of. The same value is kept in <slug>.task-wrapper.json beside
+        # the workspace dir (provision.recorded_wrapper); that copy is the
+        # authoritative one, out of reach of a session granted the workspace.
         "task_wrapper": "<raw JSON array text, or absent>",
     }
 """
