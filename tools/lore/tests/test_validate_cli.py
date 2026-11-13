@@ -123,7 +123,7 @@ def test_unparseable_sidecar_is_one_line_naming_the_record(world):
     (world.roots["default"] / "lesson" / "torn.json").write_text("{not json")
     r = world.run()
     assert r.returncode == 1
-    assert [l.split(":")[0] + ":" + l.split(":")[1] for l in lines(r)] == [
+    assert [ln.split(":")[0] + ":" + ln.split(":")[1] for ln in lines(r)] == [
         "default lesson/torn: sidecar-malformed"
     ]
 
@@ -175,7 +175,7 @@ def test_no_flag_checks_every_configured_vault(two):
     _defect_pair(two)
     r = two.run()
     assert r.returncode == 1
-    assert sorted(l.split(":")[0] for l in lines(r)) == ["default lesson/in-default", "other lesson/in-other"]
+    assert sorted(ln.split(":")[0] for ln in lines(r)) == ["default lesson/in-default", "other lesson/in-other"]
     assert summary(r) == (2, 2, 2)
 
 
@@ -183,7 +183,7 @@ def test_named_vault_checks_only_that_vault(two):
     _defect_pair(two)
     r = two.run("--vault", "default")
     assert r.returncode == 1
-    assert [l.split(":")[0] for l in lines(r)] == ["default lesson/in-default"]
+    assert [ln.split(":")[0] for ln in lines(r)] == ["default lesson/in-default"]
     assert summary(r) == (1, 1, 1)
 
 
@@ -218,7 +218,7 @@ def test_path_on_a_configured_vaults_folder_still_resolves_only_within_it(two):
     _put(two.roots["default"], "lesson", "src", body="see [[lesson/only-in-other]]\n")
     r = two.run("--path", str(two.roots["default"]))
     assert r.returncode == 1
-    assert [l.split(": ")[1] for l in lines(r)] == ["missing-target"]
+    assert [ln.split(": ")[1] for ln in lines(r)] == ["missing-target"]
 
 
 def test_path_reads_no_lore_config(world, tmp_path):
@@ -239,7 +239,7 @@ def test_path_on_an_empty_directory_is_a_no_records_finding(world, tmp_path):
     d.mkdir()
     r = world.run("--path", str(d))
     assert r.returncode == 1
-    assert [l.split(": ")[:2] for l in lines(r)] == [["path", "no-records"]]
+    assert [ln.split(": ")[:2] for ln in lines(r)] == [["path", "no-records"]]
     assert summary(r) == (0, 1, 1)
 
 
@@ -250,7 +250,7 @@ def test_path_with_records_outside_kind_directories_is_no_records(world, tmp_pat
     (d / "stray.json").write_text("{}")
     r = world.run("--path", str(d))
     assert r.returncode == 1
-    assert [l.split(": ")[:2] for l in lines(r)] == [["path", "no-records"]]
+    assert [ln.split(": ")[:2] for ln in lines(r)] == [["path", "no-records"]]
 
 
 def test_configured_vault_with_no_records_is_not_a_finding(world):
@@ -315,7 +315,7 @@ def test_configured_vault_whose_folder_is_missing_is_vault_missing(two):
     _put(two.roots["default"], "lesson", "good")
     r = two.run()
     assert r.returncode == 1
-    assert sorted(l.split(": ")[:2] for l in lines(r) if l.startswith("other")) == [
+    assert sorted(ln.split(": ")[:2] for ln in lines(r) if ln.startswith("other")) == [
         ["other", "links-not-checked"],
         ["other", "vault-missing"],
     ]
@@ -331,7 +331,7 @@ def test_vault_that_cannot_be_listed_is_vault_unreadable(world):
     finally:
         root.chmod(0o755)
     assert r.returncode == 1
-    assert sorted(l.split(": ")[:2] for l in lines(r)) == [
+    assert sorted(ln.split(": ")[:2] for ln in lines(r)) == [
         ["default", "links-not-checked"],
         ["default", "vault-unreadable"],
     ]
@@ -348,7 +348,7 @@ def test_symlinked_kind_directory_is_counted_once_without_a_path_when_checked(wo
     _symlink_kind_dir(world.roots["default"], "task", outside)
     r = world.run()
     assert r.returncode == 1
-    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+    assert [ln for ln in lines(r) if "links-not-checked" not in ln] == [
         "default: records-outside-vault: 1 record lies outside the vault root and was not read"
     ]
     assert "outside-secret" not in r.stdout + r.stderr
@@ -360,7 +360,7 @@ def test_two_symlinked_kind_directories_are_counted_twice(world, tmp_path):
     _symlink_kind_dir(root, "task", tmp_path / "o1")
     _symlink_kind_dir(root, "decision", tmp_path / "o2")
     r = world.run()
-    assert [l.split(": ")[:3] for l in lines(r) if "records-outside-vault" in l] == [
+    assert [ln.split(": ")[:3] for ln in lines(r) if "records-outside-vault" in ln] == [
         ["default", "records-outside-vault", "2 records lie outside the vault root and were not read"]
     ]
 
@@ -372,7 +372,7 @@ def test_symlinked_md_orphan_is_counted_once_without_a_path(world, tmp_path):
     (world.roots["default"] / "lesson" / "ghost.md").symlink_to(outside)
     r = world.run()
     assert r.returncode == 1
-    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+    assert [ln for ln in lines(r) if "links-not-checked" not in ln] == [
         "default: records-outside-vault: 1 record lies outside the vault root and was not read"
     ]
     assert "outside-secret" not in r.stdout + r.stderr
@@ -385,7 +385,7 @@ def test_symlinked_json_with_a_non_record_name_is_counted_once_without_a_path(wo
     (world.roots["default"] / "lesson" / "Ghost.json").symlink_to(outside)
     r = world.run()
     assert r.returncode == 1
-    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+    assert [ln for ln in lines(r) if "links-not-checked" not in ln] == [
         "default: records-outside-vault: 1 record lies outside the vault root and was not read"
     ]
     assert "outside-secret" not in r.stdout + r.stderr
@@ -397,7 +397,7 @@ def test_md_orphan_symlinked_inside_the_vault_is_sidecar_missing_not_outside(wor
     (root / "lesson" / "alias.md").symlink_to(root / "lesson" / "good.md")
     r = world.run()
     assert r.returncode == 1
-    out = [l for l in lines(r) if "links-not-checked" not in l]
+    out = [ln for ln in lines(r) if "links-not-checked" not in ln]
     assert len(out) == 1 and out[0].startswith("default lesson/alias: sidecar-missing: ")
     assert "records-outside-vault" not in r.stdout
 
@@ -425,7 +425,7 @@ def test_symlinked_kind_directory_is_counted_with_path(world, tmp_path):
     _symlink_kind_dir(d, "task", tmp_path / "outside-secret-dir")
     r = world.run("--path", str(d))
     assert r.returncode == 1
-    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+    assert [ln for ln in lines(r) if "links-not-checked" not in ln] == [
         "path: records-outside-vault: 1 record lies outside the vault root and was not read"
     ]
     assert "outside-secret" not in r.stdout + r.stderr
@@ -436,11 +436,11 @@ def test_unchecked_vault_in_the_resolution_set_is_reported_and_links_not_checked
     _symlink_kind_dir(two.roots["other"], "task", tmp_path / "outside")
     r = two.run("--vault", "default")
     assert r.returncode == 1
-    assert sorted(l.split(": ")[:2] for l in lines(r)) == [
+    assert sorted(ln.split(": ")[:2] for ln in lines(r)) == [
         ["other", "links-not-checked"],
         ["other", "records-outside-vault"],
     ]
-    assert not any(l.startswith("default") for l in lines(r))
+    assert not any(ln.startswith("default") for ln in lines(r))
 
 
 def test_links_not_checked_names_the_missing_vault_and_a_has_no_record_findings(two):
@@ -448,7 +448,7 @@ def test_links_not_checked_names_the_missing_vault_and_a_has_no_record_findings(
     os.rmdir(two.roots["other"])
     r = two.run("--vault", "default")
     assert r.returncode == 1
-    assert sorted(l.split(": ")[:2] for l in lines(r)) == [
+    assert sorted(ln.split(": ")[:2] for ln in lines(r)) == [
         ["other", "links-not-checked"],
         ["other", "vault-missing"],
     ]
@@ -458,7 +458,7 @@ def test_structural_findings_still_run_when_links_are_not_checked(two):
     _put(two.roots["default"], "lesson", "bad", status="nonsense")
     os.rmdir(two.roots["other"])
     r = two.run("--vault", "default")
-    assert any(": invalid-sidecar: " in l and l.startswith("default lesson/bad") for l in lines(r))
+    assert any(": invalid-sidecar: " in ln and ln.startswith("default lesson/bad") for ln in lines(r))
 
 
 # --- output safety and order -------------------------------------------------
@@ -485,9 +485,9 @@ def test_output_is_sorted_and_byte_identical_across_runs(world):
     assert first.stdout == second.stdout
     out = lines(first)
     assert len(out) == 5
-    keys = [(l.split(": ")[0], l.split(": ")[1], l.split(": ", 2)[2]) for l in out]
+    keys = [(ln.split(": ")[0], ln.split(": ")[1], ln.split(": ", 2)[2]) for ln in out]
     assert keys == sorted(keys)
-    assert [l.split("→ ")[1].split(":")[0] for l in out if "missing-target" in l] == ["aaa", "zzz"]
+    assert [ln.split("→ ")[1].split(":")[0] for ln in out if "missing-target" in ln] == ["aaa", "zzz"]
 
 
 # --- never changes any file (AC28) ------------------------------------------
@@ -547,7 +547,7 @@ def test_dangling_symlinked_sidecar_exits_one_with_a_sidecar_unreadable_line(wor
     (root / "decision" / "x.json").symlink_to("nowhere-in-vault")
     r = world.run()
     assert r.returncode == 1
-    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+    assert [ln for ln in lines(r) if "links-not-checked" not in ln] == [
         "default decision/x: sidecar-unreadable: record could not be read"
     ]
 
