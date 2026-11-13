@@ -14,8 +14,12 @@ record:
   manifest that names another wrapper, or none, is rewritten to the sidecar's.
 - a sidecar that exists but cannot be read raises ManifestError naming it: what
   the workspace recorded is unknown, so nothing is rebuilt or run.
-- no sidecar and a readable manifest: the wrapper the manifest recorded; the
+- no sidecar and a readable manifest that names no wrapper: none; the
   environment never overrides it.
+- no sidecar and a readable manifest that names a wrapper: ManifestError naming
+  both files. The manifest is inside the workspace, so a session granted it could
+  have written that wrapper; camp runs only a wrapper read from the sidecar, and
+  neither runs the manifest's nor falls back to running bare.
 - no sidecar and a manifest that exists but cannot be read: reconcile and seed
   rebuild it, as they always have, and the workspace never had a wrapper.
 - no sidecar and no manifest: a creation. The wrapper is the environment's, if any.
@@ -74,6 +78,16 @@ def _read_sidecar(mpath: Path) -> tuple[bool, Any]:
     return True, data[_SIDECAR_KEY]
 
 
+def _refuse_manifest_only_wrapper(mpath: Path, manifest: dict[str, Any]) -> None:
+    if task_wrapper_of(manifest) is not None:
+        raise ManifestError(
+            f"camp: the workspace manifest at {mpath} names a task wrapper but its "
+            f"wrapper record at {sidecar_path(mpath)} does not exist; the manifest is "
+            f"writable from inside the workspace, so camp will not run a wrapper "
+            f"it names, and will not run the workspace's steps without one"
+        )
+
+
 def read_prior(mpath: Path, env: Mapping[str, str] | None) -> PriorWorkspace:
     """The manifest to carry forward and the wrapper to record for a run on *mpath*."""
     present, sidecar_wrapper = _read_sidecar(mpath)
@@ -87,14 +101,21 @@ def read_prior(mpath: Path, env: Mapping[str, str] | None) -> PriorWorkspace:
     if present:
         return PriorWorkspace(manifest, sidecar_wrapper)
     if manifest is not None:
-        return PriorWorkspace(manifest, task_wrapper_of(manifest))
+        _refuse_manifest_only_wrapper(mpath, manifest)
+        return PriorWorkspace(manifest, None)
     return PriorWorkspace(None, None if manifest_exists else env_wrapper(env))
 
 
 def recorded_wrapper(mpath: Path, manifest: dict[str, Any]) -> Any:
-    """The wrapper a run of *manifest*'s steps applies: the sidecar's, else the manifest's."""
+    """The wrapper a run of *manifest*'s steps applies: the sidecar's, else none.
+
+    A manifest that names a wrapper with no sidecar raises ManifestError.
+    """
     present, sidecar_wrapper = _read_sidecar(mpath)
-    return sidecar_wrapper if present else task_wrapper_of(manifest)
+    if present:
+        return sidecar_wrapper
+    _refuse_manifest_only_wrapper(mpath, manifest)
+    return None
 
 
 def restore_manifest_wrapper(mpath: Path) -> None:

@@ -760,3 +760,84 @@ def test_a_failed_sidecar_write_in_reconcile_leaves_no_wrapper_bearing_manifest(
         with pytest.raises(OSError):
             reconcile_worktree(group, "s1", env=sc.env_with(sc.wrapper_json()))
         assert not mpath.exists()
+
+
+# ---------------------------------------------------------------------------
+# camp executes only a wrapper read from the sidecar. A manifest that names a
+# wrapper while no sidecar exists was written from inside the workspace: setup,
+# activate and reconcile refuse it, and no step runs bare or wrapped.
+# ---------------------------------------------------------------------------
+
+def _plant_manifest_only_wrapper(sc):
+    """A wrapperless workspace whose manifest gains a task_wrapper; it has no sidecar."""
+    path = _manifest_path(sc)
+    data = json.loads(path.read_text())
+    data["task_wrapper"] = json.dumps(["/bin/sh", "-c", f"touch {sc.marks}/planted", "--"])
+    path.write_text(json.dumps(data))
+    assert not _sidecar_path(sc).exists()
+    return path
+
+
+def _no_step_ran(sc):
+    return not list(sc.marks.glob("ran-*")) and not (sc.marks / "planted").exists() and not sc.wrapper_log()
+
+
+def test_setup_refuses_a_manifest_only_wrapper_and_runs_no_step(sc):
+    sc.define_task(required=False)
+    (sc.marks / "require-gate").write_text("")
+    sc.new(None)
+    _plant_manifest_only_wrapper(sc)
+    (sc.marks / "gate").write_text("")
+
+    r = sc.camp("setup", "s1", "--group", "g")
+
+    assert "task wrapper" in r.stderr and "manifest.json" in r.stderr and "task-wrapper.json" in r.stderr
+    assert _no_step_ran(sc)
+
+
+def test_activate_refuses_a_manifest_only_wrapper_and_runs_no_step(sc):
+    sc.define_task(phase="activate")
+    sc.new(None)
+    _plant_manifest_only_wrapper(sc)
+
+    sc.camp("activate", "--background", "m1", "--name", "s1", "--group", "g")
+
+    assert _no_step_ran(sc)
+
+
+def test_reconcile_refuses_a_manifest_only_wrapper_and_runs_no_step(sc):
+    from camp.group.manifest import ManifestError
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task()
+    group = _seed(sc, None)
+    path = _plant_manifest_only_wrapper(sc)
+
+    with pytest.raises(ManifestError) as info:
+        reconcile_worktree(group, "s1", env=sc.base_env)
+
+    assert str(path) in str(info.value) and str(_sidecar_path(sc)) in str(info.value)
+    assert _no_step_ran(sc)
+
+
+def test_provisioning_a_member_refuses_a_manifest_only_wrapper(sc):
+    from camp.group.manifest import ManifestError
+    from camp.provision.provision import seed_pending_workspace
+
+    group = _seed(sc, None)
+    _plant_manifest_only_wrapper(sc)
+
+    with pytest.raises(ManifestError):
+        seed_pending_workspace(group, "s1", env=sc.base_env)
+
+
+def test_a_workspace_with_neither_manifest_nor_sidecar_wrapper_runs_bare(sc):
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task()
+    group = _seed(sc, None)
+
+    reconcile_worktree(group, "s1", env=sc.base_env)
+
+    assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
+    assert sc.wrapper_log() == []
