@@ -13,18 +13,27 @@ credential transcribed into a task body ships as surely as one committed to code
 the text through this credential-pattern scrub regex list and drop/redact any match rather than
 capturing it:
 
-- **Key-like tokens** — `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s*[=:]\s*\S+`
-  — the trailing character class is load-bearing: it lets the keyword carry qualifier text before
-  the separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A
-  keyword anchored straight to `[=:]` walks past every compound name.
+- **Key-like tokens** —
+  `(?i)(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*['"]?\s*[=:]\s*(?:"[^"]*"|'[^']*'|\S+)`;
+  the trailing character class is load-bearing: it lets the keyword carry qualifier text before the
+  separator, which is what catches `SECRET_KEY=`, `AWS_SECRET_ACCESS_KEY=`, and `API_KEY_ID=`. A
+  keyword anchored straight to `[=:]` walks past every compound name. The optional quote before the
+  separator catches a JSON-quoted key (`"password": "…"`), and the quoted-value alternatives take a
+  value containing spaces whole rather than stopping at the first one.
 - **Vendor fixed-prefix tokens** —
   `(?i)\b(AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|xox[baprs]-[A-Za-z0-9-]+|sk_live_[A-Za-z0-9]+|AIza[0-9A-Za-z_-]{35})\b`
   — issuer-shaped credentials identifiable on their own, with no `key=` preamble to trip the pattern
   above
 - **URL userinfo** — `[a-z][a-z0-9+.-]*://[^/\s:@]+:[^/\s@]+@` — a password carried in a remote or
   service URL, which none of the patterns above matches
-- **Bearer / api-key shapes** — `(?i)bearer\s+[A-Za-z0-9._\-]+`,
-  `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`
+- **Bearer / api-key / Basic shapes** — `(?i)bearer\s+[A-Za-z0-9._\-+/=~]+`,
+  `(?i)api[_-]?key['"]?\s*[:=]\s*['"]?[A-Za-z0-9._\-]{16,}`,
+  `(?i)authorization['"]?\s*[:=]\s*basic\s+\S+`
+- **Command-line flags** —
+  `(?i)--[A-Za-z0-9_-]*(secret|token|passwd|password|api[_-]?key)[A-Za-z0-9_-]*\s+\S+` — a secret
+  passed as the next word after a flag such as `--password`
+- **Prose statements** — `(?i)\b(password|passwd|passphrase)\s+(is|was)\s+\S+` — "the password is
+  …"; narrowed to these three words so ordinary talk of tokens and secrets is left alone
 - **High-entropy literals** — `\b[A-Za-z0-9+/]{32,}={0,2}\b` (base64/hex-shaped secrets),
   `\b[A-Fa-f0-9]{40,}\b`
 - **PEM private-key blocks** — `-----BEGIN [A-Z ]*PRIVATE KEY-----` (the high-entropy pattern

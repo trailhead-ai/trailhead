@@ -24,16 +24,17 @@ states what each stop does, and `../_shared/unattended.md` defines the contract 
 `../_shared/unattended.md` now when `--unattended` is present, and follow it in full.**
 
 **The procedure lives in `../_shared/execute.md`** (a sibling of this skill's directory), alongside
-five documents: four its rules draw on without naming — `../_shared/status-ownership.md`
-(task-status ownership), `../_shared/refine.md` (the standalone refine procedure),
-`../_shared/slice.md` (design-doc state coverage), and `../_shared/security.md` (the
-credential-pattern scrub and untrusted-value validation rules) — and `../_shared/council.md`, whose
-"How a finding reads" section governs how a code review finding is shown to the user at the end of a
-build (it does not ask a build to convene a council). Read all six and follow `execute.md` end to
-end — the subagent roles, the task-shape branch, the per-task loop, the end-of-run phase pipeline,
-and the status-handling rules are all defined there, and `execute.md`'s task-shape branch decides
-when each of the other four applies. This skill does **not** restate any of it: a second copy here
-is how the wrapper and the procedure would drift apart.
+six documents: four its rules draw on without naming — `../_shared/status-ownership.md` (task-status
+ownership), `../_shared/refine.md` (the standalone refine procedure), `../_shared/slice.md`
+(design-doc state coverage), and `../_shared/security.md` (the credential-pattern scrub and
+untrusted-value validation rules) — `../_shared/escalation.md` (the escalation rule: how each
+found-work call is decided and when the blocking prompt is raised), and `../_shared/council.md`,
+whose "How a finding reads" section governs how a code review finding is shown to the user at the
+end of a build (it does not ask a build to convene a council). Read all seven and follow
+`execute.md` end to end — the subagent roles, the task-shape branch, the per-task loop, the
+end-of-run phase pipeline, and the status-handling rules are all defined there, and `execute.md`'s
+task-shape branch decides when each of the other four applies. This skill does **not** restate any
+of it: a second copy here is how the wrapper and the procedure would drift apart.
 
 ## When to Use
 

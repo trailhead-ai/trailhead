@@ -34,6 +34,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).parent.parent
 GATE = REPO_ROOT / "plugins" / "craft" / "scripts" / "criterion_gate.py"
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -570,7 +572,7 @@ _SHARED_SECURITY_MD = REPO_ROOT / "plugins" / "craft" / "skills" / "_shared" / "
 # (e.g. `SECRET_KEY=`, `[=:]`) begins with a literal character instead, so
 # this discriminates the pattern spans unambiguously without hand-picking
 # line offsets into the bullet text.
-_PATTERN_PREFIXES = ("(?i)", r"\b", "-----BEGIN")
+_PATTERN_PREFIXES = ("(?i)", r"\b", "-----BEGIN", "[a-z]")
 
 
 def _parse_credential_patterns_from_shared_doc() -> list[str]:
@@ -600,3 +602,30 @@ def test_credential_pattern_list_matches_the_shared_document_it_was_copied_from(
         for p in criterion_gate._CREDENTIAL_PATTERNS
     ]
     assert doc_patterns == code_patterns
+
+
+@pytest.mark.parametrize(
+    "text,secret",
+    [
+        ("db is postgres://app:S3cr3tPw@db.internal/prod ok", "S3cr3tPw"),
+        ('config {"password": "hunter2"} here', "hunter2"),
+        ("ran tool --password hunter2 again", "hunter2"),
+        ("the password is hunter2 apparently", "hunter2"),
+        ('password = "S3cr3t Pw x" seen', "Pw x"),
+        ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+        ("Authorization: Bearer ab12.cd+ef/gh==", "ef/gh"),
+    ],
+    ids=["url-userinfo", "json-quoted-key", "cli-flag", "prose-password-is", "quoted-spaces", "basic", "bearer-punct"],
+)
+def test_scrub_function_redacts_each_documented_credential_shape(text, secret):
+    out = criterion_gate.scrub_credential_shaped(text)
+    assert secret not in out
+    assert "[redacted]" in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    ["Handle the empty export case", "the basic usage of the token bucket", "see https://example.com/a:b/c for docs"],
+)
+def test_scrub_function_leaves_ordinary_prose_unchanged(text):
+    assert criterion_gate.scrub_credential_shaped(text) == text

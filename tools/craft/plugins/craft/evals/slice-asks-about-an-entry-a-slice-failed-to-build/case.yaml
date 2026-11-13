@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: slice-asks-about-an-entry-a-slice-failed-to-build
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

@@ -3,11 +3,12 @@
 about work it finds, and reports those calls back.
 
 Usage:
-    found_work.py decide [--session-id ID] < decision.json
-    found_work.py report --parent <task id> [--session build|slice|plan] [--session-id ID]
+    found_work.py decide --session build|slice|plan [--session-id ID] < decision.json
+    found_work.py report (--parent <task id> [--session build|slice|plan] | --session slice|plan) [--session-id ID]
     found_work.py entries --spec spec/<id> (--folded-into task/<id> --vault NAME | --open)
-    found_work.py entry [--session-id ID] [--vault NAME] < transition.json
-    found_work.py reopen-abandoned --spec spec/<id> [--session-id ID] [--vault NAME]
+    found_work.py entry --session build|slice|plan [--session-id ID] [--vault NAME] < transition.json
+    found_work.py reopen-abandoned --spec spec/<id> --session build|slice|plan [--session-id ID] [--vault NAME]
+    found_work.py scrub < text
 
 `decide` reads ONE JSON document on stdin — never a command-line argument:
 
@@ -30,8 +31,10 @@ decision line was captured with exit 0 and returns a `WriteResult`. `folded` and
 `runner(argv, stdin=None) -> subprocess.CompletedProcess` running `lore <argv>`;
 tests inject a fake.
 
-Both log lines are captured with `lore session candidate --phase Build`, one
-candidate body, one line, every field neutralized:
+`--session` is required on `decide`, `entry` and `reopen-abandoned` and accepted only from the fixed set
+`build|slice|plan`; it names the session making the call, and every line the call logs is captured with
+`lore session candidate --phase Build|Slice|Plan` to match. Both log lines are one candidate body, one line,
+every field neutralized:
 
     found-work: <decision> | parent: <id> | record: <id>[#F<n>] | finding: <title> | where: <paths> | why: <reason>
     found-work-result: <written|failed> | parent: <id> | finding: <title> | record: <id>[#F<n>]
@@ -127,10 +130,16 @@ Exit codes for `decide`:
        be captured (the result line is printed instead; the write may have landed).
     3  write-failed: the write returned a reason-code; a `failed` result line is captured and printed.
 
-`report --parent <id>` reads the session log (`lore session show`), parses only
-well-formed lines, from entries of the right kind, whose parent equals the
-argument exactly, and shape-checks every id before printing it. Output: first,
-under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
+`report` reads the session log (`lore session show`), parses only
+well-formed lines, from entries of the right kind, captured under the phase `--session` names
+(`build` by default), whose parent equals `--parent` exactly when one is given, and shape-checks every id
+before printing it. `--parent` is required for `--session build` (refused `malformed-input` without it); a
+`slice` or `plan` report needs none, because a pass that ended without a new parent still made decisions,
+and it reports every parent's decisions of that phase. Every line names the phase of the session that wrote
+it; a `phase=Build` line reports under `--session build` whatever wrote it. A reader that filters by parent
+alone sees a parent's Build, Slice and Plan lines together, each still rendered by its own kind, so none is
+misreported. Without `--parent`, two decisions of one kind on one finding under different parents stay two
+lines. Output: first, under `NEEDS_OPERATOR_HEADING`, each `failed` result not later retried to `written` marked not
 written (what happened, what to do; flush files it as a task) and each brainstorm task with its
 `/craft:brainstorm task/<id>` command; then each decision as a plain sentence;
 or exactly `NO_DECISIONS_LINE`. A session that does not exist yet reads as no
@@ -157,11 +166,13 @@ read back from, in `entries`, `entry` and `reopen-abandoned` alike. `reason` is 
 `drop` needs `open` or `folded into` this parent (else `entry-not-open`) and sets `dropped: <reason>`. The reason
 must begin `nowhere:` or name a `task/<id>` that `lore record show` can read (else `drop-target-missing`); an entry
 whose `found:` or title marks a security finding is refused `drop-needs-operator` unless `operator_confirmed` is true,
-and its decision line's `why` then ends " (operator confirmed)". An entry already `dropped` with the same reason is a
-no-op. `restore` needs a `dropped` entry (else `entry-not-dropped`) and appends a new `open` entry under the next
-unused id (dropped ids included) carrying its title, `what` and `where`, with `found: restored from F<n>`; the
-dropped entry is left as it is. Its decision and result lines name the new entry's id, and a re-run while that new
-entry is still `open` appends nothing more. Both need a reason.
+and its decision line's `why` then ends " (operator confirmed)". A drop document with `operator_confirmed` true names
+one entry: more than one is refused `confirmed-drop-names-several-entries` with nothing written.
+An entry already `dropped` with the same reason is a no-op. `restore` needs a `dropped` entry (else
+`entry-not-dropped`) and appends a new `open` entry under the next unused id (dropped ids included) carrying its
+title, `what` and `where`, with `found: restored from F<n>`; the dropped entry is left as it is. Its decision and
+result lines name the new entry's id, and a re-run while that new entry is still `open` appends nothing more.
+Both need a reason.
 Allowed moves: `fold` needs `open`; `done` and `reopen` need `folded into` this parent; `done` also needs a
 child of this parent at `done` whose `**Delivers:**` names the entry (`names_entry`), else `entry-not-built`.
 An entry already in the target state (`folded into` this parent for `fold`, `done by` this parent for
@@ -283,6 +294,7 @@ REASON_CODES = frozenset(
         "entry-not-dropped",
         "drop-target-missing",
         "drop-needs-operator",
+        "confirmed-drop-names-several-entries",
     }
     | GATE_CODES
 )
@@ -304,6 +316,7 @@ ENTRY_KINDS = tuple(TRANSITIONS.values())
 NEEDS_OPERATOR_HEADING = "Needs the operator:"
 RECOVERED_NOTE = " An earlier attempt failed and left a task candidate; discard it at flush."
 SESSIONS = ("build", "slice", "plan")
+PHASE_OF = {name: name.capitalize() for name in SESSIONS}
 NO_DECISIONS_LINES = {name: f"The {name} made no decisions about found work." for name in SESSIONS}
 NO_DECISIONS_LINE = NO_DECISIONS_LINES["build"]
 NOWHERE_PREFIX = "nowhere:"
@@ -326,7 +339,7 @@ _CODE_RE = re.compile(r"[a-z0-9-]+")
 _LOCATION_RE = re.compile(r".+:[0-9]+(?:-[0-9]+)?")
 _PATH_SHAPE_RE = re.compile(r"[A-Za-z0-9._/-]+(?::[0-9]+(?:-[0-9]+)?)?")
 _LINE_SUFFIX_RE = re.compile(r":[0-9]+(?:-[0-9]+)?$")
-_ENTRY_HEADER_RE = re.compile(r"- candidate \S+ kind=(\S+) phase=\S+")
+_ENTRY_HEADER_RE = re.compile(r"- candidate \S+ kind=(\S+) phase=(\S+)")
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
 _ENTRY_ID_RE = re.compile(r"F[1-9][0-9]*")
 _STATUS_LINE_RE = re.compile(r"^( {2,}- status:)(.*)$")
@@ -772,6 +785,7 @@ class Logged:
     result_record: str | None = None
     result_code: str | None = None
     result_line: str | None = None
+    phase: str = "Build"
 
 
 def _fields(line: str, prefix: str, keys: list[str]) -> list[str] | None:
@@ -789,10 +803,11 @@ def _fields(line: str, prefix: str, keys: list[str]) -> list[str] | None:
 def parse_log(body: str) -> list[Logged]:
     entries: list[Logged] = []
     kind = None
+    phase = "Build"
     for raw in body.splitlines():
         header = _ENTRY_HEADER_RE.fullmatch(raw)
         if header:
-            kind = header.group(1)
+            kind, phase = header.group(1), header.group(2)
             continue
         if not raw.startswith("  "):
             kind = None
@@ -802,7 +817,7 @@ def parse_log(body: str) -> list[Logged]:
             f = _fields(line, "found-work: ", ["parent", "record", "finding", "where", "why"])
             known = f and f[0] in KNOWN_DECISIONS + ENTRY_KINDS
             if known and _ID_RE.fullmatch(f[1]) and _RECORD_RE.fullmatch(f[2]) and f[3]:
-                entries.append(Logged(f[0], f[1], f[2], f[3], f[4], f[5]))
+                entries.append(Logged(f[0], f[1], f[2], f[3], f[4], f[5], phase=phase))
         elif kind == "found-work-result":
             f = _fields(line, "found-work-result: ", ["parent", "finding", "record", "reason-code"])
             if not (f and f[0] in ("written", "failed") and _ID_RE.fullmatch(f[1])):
@@ -833,8 +848,8 @@ def _read_log(runner, session_id: str | None) -> list[Logged]:
 # --- decide -------------------------------------------------------------------
 
 
-def _capture(runner, kind: str, line: str, session_id: str | None) -> bool:
-    done = _call(runner, ["session", "candidate", "--kind", kind, "--phase", "Build", *_session_args(session_id)], line)
+def _capture(runner, kind: str, line: str, session_id: str | None, phase: str) -> bool:
+    done = _call(runner, ["session", "candidate", "--kind", kind, "--phase", phase, *_session_args(session_id)], line)
     return done.returncode == 0
 
 
@@ -846,7 +861,9 @@ def _already_failed(log: list[Logged] | None, d: Decision) -> bool:
     )
 
 
-def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler]) -> tuple[int, str]:
+def decide(
+    raw: str, runner, session_id: str | None, handlers: dict[str, Handler], phase: str = "Build"
+) -> tuple[int, str]:
     d = build_decision(raw)
     handler = handlers[d.kind]
 
@@ -866,14 +883,14 @@ def decide(raw: str, runner, session_id: str | None, handlers: dict[str, Handler
                 return EXIT_DONE, e.result_line
 
     record = handler.prepare(d, runner)
-    if not _capture(runner, "found-work", decision_line(d, record), session_id):
+    if not _capture(runner, "found-work", decision_line(d, record), session_id, phase):
         return EXIT_CAPTURE_FAILED, finding_text(d)
 
     outcome = handler.write(d, runner, record)
     if outcome.reason_code and not _already_failed(log, d):
-        _capture(runner, "task", fallback_text(d, outcome.reason_code), session_id)
+        _capture(runner, "task", fallback_text(d, outcome.reason_code), session_id, phase)
     line = result_line(d, outcome.record or record, outcome.reason_code)
-    if not _capture(runner, "found-work-result", line, session_id):
+    if not _capture(runner, "found-work-result", line, session_id, phase):
         return EXIT_CAPTURE_FAILED, line
     return (EXIT_WRITE_FAILED if outcome.reason_code else EXIT_DONE), line
 
@@ -925,18 +942,21 @@ def _sentence(e: Logged) -> str:
     return f"Needs a brainstorm: {e.title}{_because(e.why)}."
 
 
-def report(parent: str, runner, session_id: str | None, session: str = "build") -> str:
-    entries = [e for e in _read_log(runner, session_id) if e.parent == parent]
+def report(parent: str | None, runner, session_id: str | None, session: str = "build") -> str:
+    phase = PHASE_OF[session]
+    entries = [
+        e for e in _read_log(runner, session_id) if e.phase == phase and (parent is None or e.parent == parent)
+    ]
     if not entries:
         return NO_DECISIONS_LINES[session]
     operator: list[str] = []
     plain: list[str] = []
     recovered: set[int] = set()
-    latest: dict[tuple[str, str, str, str], Logged] = {}
-    failed_before: set[tuple[str, str, str, str]] = set()
+    latest: dict[tuple[str, str, str, str, str], Logged] = {}
+    failed_before: set[tuple[str, str, str, str, str]] = set()
 
-    def key_of(e: Logged) -> tuple[str, str, str, str]:
-        return (e.kind, e.title, e.where, e.record if e.kind in ENTRY_KINDS else "")
+    def key_of(e: Logged) -> tuple[str, str, str, str, str]:
+        return (e.kind, e.title, e.where, e.record if e.kind in ENTRY_KINDS else "", e.parent if parent is None else "")
 
     for e in entries:
         key = key_of(e)
@@ -1314,7 +1334,7 @@ def _landed_ok(landed: dict[str, followups.Entry], p: Planned) -> bool:
 
 def apply_moves(
     spec: str, moves: list[Move], runner, session_id: str | None, *, vault: str | None = None,
-    retry_command: str | None = None,
+    retry_command: str | None = None, phase: str = "Build",
 ) -> tuple[int, str]:
     """The whole `entry` pipeline over `moves` (any parents, one spec): plan against the spec read, capture
     one decision line per entry that changes, then compose one body, certify it, write it once and read it
@@ -1330,7 +1350,7 @@ def apply_moves(
         if not p.changes:
             results[p.entry.id] = line_for(p, None)
     for p in changing:
-        if not _capture(runner, "found-work", decision_line(p.decision, f"{spec}#{p.record_id}"), session_id):
+        if not _capture(runner, "found-work", decision_line(p.decision, f"{spec}#{p.record_id}"), session_id, phase):
             retry = f"\nretry: {retry_command}" if retry_command else ""
             text = f"capture-failed: no decision was logged for {spec}#{p.record_id}; nothing was written.{retry}"
             return EXIT_CAPTURE_FAILED, text
@@ -1350,7 +1370,7 @@ def apply_moves(
         results[p.entry.id] = line_for(p, code)
     lines = [results[p.entry.id] for p in planned]
     for p in changing:
-        if not _capture(runner, "found-work-result", results[p.entry.id], session_id):
+        if not _capture(runner, "found-work-result", results[p.entry.id], session_id, phase):
             return EXIT_CAPTURE_FAILED, "\n".join(lines)
     if code:
         if retry_command:
@@ -1360,11 +1380,12 @@ def apply_moves(
 
 
 def _apply(
-    spec: str, moves: list[Move], runner, session_id: str | None, vault: str | None, retry_command: str | None
+    spec: str, moves: list[Move], runner, session_id: str | None, vault: str | None, retry_command: str | None,
+    phase: str = "Build",
 ) -> tuple[int, str]:
     """`apply_moves`, a refusal returned as exit 1 (a failed lookup, 2) with its `reason-code:` line in the text."""
     try:
-        return apply_moves(spec, moves, runner, session_id, vault=vault, retry_command=retry_command)
+        return apply_moves(spec, moves, runner, session_id, vault=vault, retry_command=retry_command, phase=phase)
     except Refusal as r:
         code = EXIT_LOOKUP_FAILED if r.reason_code in LOOKUP_CODES else EXIT_REFUSED
         return code, f"reason: {r}\nreason-code: {r.reason_code}"
@@ -1414,7 +1435,8 @@ def _task_status(runner, task: str, vault: str | None) -> str | None:
 
 
 def reopen_abandoned(
-    spec: str, runner, session_id: str | None, *, vault: str | None = None, retry_command: str | None = None
+    spec: str, runner, session_id: str | None, *, vault: str | None = None, retry_command: str | None = None,
+    phase: str = "Build",
 ) -> tuple[int, str, list[str]]:
     """Settle every entry folded into a task that ended `dropped`, `superseded` or `done`, in one composed
     write. An entry of a `done` task that a `done` child of it names (`_named_by`) was built and is marked
@@ -1454,7 +1476,7 @@ def reopen_abandoned(
     ]
     code, text, err = EXIT_DONE, "", []
     if moves:
-        code, text = _apply(spec, moves, runner, session_id, vault, retry_command)
+        code, text = _apply(spec, moves, runner, session_id, vault, retry_command, phase)
         if code == EXIT_DONE:
             text = "\n".join([text, *_settled_lines(spec, moves)])
         else:
@@ -1506,6 +1528,11 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     confirmed = doc.get("operator_confirmed", False)
     if not isinstance(confirmed, bool):
         raise Refusal("operator_confirmed must be a boolean", "malformed-input")
+    if kind == "drop" and confirmed and len(ids) > 1:
+        raise Refusal(
+            "a confirmed drop names one entry: the operator confirmed one, so write one document per entry",
+            "confirmed-drop-names-several-entries",
+        )
     moves = [Move(kind, parent, i, _clean(reason), confirmed) for i in ids]
     for m in moves:
         _check_move(m)
@@ -1515,25 +1542,28 @@ def build_moves(raw: str) -> tuple[str, list[Move], dict]:
     return spec, moves, retry_doc
 
 
-def _rerun_command(args: list[str], session_id: str | None, vault: str | None) -> str:
+def _rerun_command(args: list[str], session_id: str | None, vault: str | None, session: str) -> str:
     """A shell command that re-runs this script with `args` plus the session and vault, quoted to run as pasted."""
     parts = ["python3", str(Path(__file__).resolve()), *args]
     if session_id:
         parts += ["--session-id", session_id]
     if vault:
         parts += ["--vault", vault]
+    parts += ["--session", session]
     return " ".join(shlex.quote(p) for p in parts)
 
 
-def retry_command_for(doc: dict, session_id: str | None, vault: str | None) -> str:
-    return f"printf %s {shlex.quote(json.dumps(doc))} | {_rerun_command(['entry'], session_id, vault)}"
+def retry_command_for(doc: dict, session_id: str | None, vault: str | None, session: str) -> str:
+    return f"printf %s {shlex.quote(json.dumps(doc))} | {_rerun_command(['entry'], session_id, vault, session)}"
 
 
 def _entry_command(args, raw: str, runner) -> int:
     spec, moves, doc = build_moves(raw)
     vault = args.vault
-    retry = retry_command_for(doc, args.session_id, vault)
-    code, text = apply_moves(spec, moves, runner, args.session_id, vault=vault, retry_command=retry)
+    retry = retry_command_for(doc, args.session_id, vault, args.session)
+    code, text = apply_moves(
+        spec, moves, runner, args.session_id, vault=vault, retry_command=retry, phase=PHASE_OF[args.session]
+    )
     print(text)
     if code == EXIT_CAPTURE_FAILED:
         print("reason-code: capture-failed", file=sys.stderr)
@@ -1552,9 +1582,10 @@ def _parser() -> argparse.ArgumentParser:
     p = _Parser(prog="found_work.py")
     sub = p.add_subparsers(dest="command", required=True, parser_class=_Parser)
     d = sub.add_parser("decide")
+    d.add_argument("--session", choices=SESSIONS, required=True)
     d.add_argument("--session-id", default=None)
     r = sub.add_parser("report")
-    r.add_argument("--parent", required=True)
+    r.add_argument("--parent", default=None)
     r.add_argument("--session", choices=SESSIONS, default="build")
     r.add_argument("--session-id", default=None)
     e = sub.add_parser("entries")
@@ -1563,20 +1594,25 @@ def _parser() -> argparse.ArgumentParser:
     e.add_argument("--vault", default=None)
     e.add_argument("--open", action="store_true")
     t = sub.add_parser("entry")
+    t.add_argument("--session", choices=SESSIONS, required=True)
     t.add_argument("--session-id", default=None)
     t.add_argument("--vault", default=None)
     a = sub.add_parser("reopen-abandoned")
+    a.add_argument("--session", choices=SESSIONS, required=True)
     a.add_argument("--spec", required=True)
     a.add_argument("--session-id", default=None)
     a.add_argument("--vault", default=None)
+    sub.add_parser("scrub")
     return p
 
 
 def _reopen_abandoned_command(args, runner) -> int:
     if not _SPEC_RECORD_RE.fullmatch(args.spec):
         raise Refusal("spec must be spec/<id>", "unsafe-id")
-    retry = _rerun_command(["reopen-abandoned", "--spec", args.spec], args.session_id, args.vault)
-    code, text, err = reopen_abandoned(args.spec, runner, args.session_id, vault=args.vault, retry_command=retry)
+    retry = _rerun_command(["reopen-abandoned", "--spec", args.spec], args.session_id, args.vault, args.session)
+    code, text, err = reopen_abandoned(
+        args.spec, runner, args.session_id, vault=args.vault, retry_command=retry, phase=PHASE_OF[args.session]
+    )
     if text:
         print(text)
     for line in err:
@@ -1595,6 +1631,14 @@ def _entries_command(args, runner) -> int:
         if not args.vault:
             raise Refusal("--folded-into needs --vault NAME", "malformed-input")
     print(list_entries(args.spec, runner, folded_into=args.folded_into, vault=args.vault))
+    return EXIT_DONE
+
+
+def _scrub_command(raw: str) -> int:
+    line = _clean(raw)
+    if not line:
+        raise Refusal("the text is empty once control characters are removed", "malformed-input")
+    print(line)
     return EXIT_DONE
 
 
@@ -1622,7 +1666,7 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
                 )
         if args.command == "decide":
             raw = sys.stdin.read() if stdin is None else stdin
-            code, text = decide(raw, runner, args.session_id, handlers)
+            code, text = decide(raw, runner, args.session_id, handlers, PHASE_OF[args.session])
             print(text)
             if code == EXIT_CAPTURE_FAILED:
                 print("reason-code: capture-failed", file=sys.stderr)
@@ -1631,9 +1675,14 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
             return _entries_command(args, runner)
         if args.command == "reopen-abandoned":
             return _reopen_abandoned_command(args, runner)
+        if args.command == "scrub":
+            raw = sys.stdin.buffer.read().decode("utf-8", errors="replace") if stdin is None else stdin
+            return _scrub_command(raw)
         if args.command == "entry":
             return _entry_command(args, sys.stdin.read() if stdin is None else stdin, runner)
-        if not _ID_RE.fullmatch(args.parent):
+        if args.parent is None and args.session == "build":
+            raise Refusal("report --session build needs --parent <task id>", "malformed-input")
+        if args.parent is not None and not _ID_RE.fullmatch(args.parent):
             raise Refusal(f"parent id must match {_ID_RE.pattern}", "unsafe-id")
         print(report(args.parent, runner, args.session_id, args.session))
         return EXIT_DONE

@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: slice-amends-the-spec-on-a-free-text-answer-that-changes-it
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
+  history_file: fixtures/history.jsonl

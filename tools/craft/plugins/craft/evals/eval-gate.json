@@ -182,7 +182,8 @@
     },
     "build-triages-found-work": {
       "measures": [
-        "skills/_shared/execute.md"
+        "skills/_shared/execute.md",
+        "skills/_shared/escalation.md"
       ]
     },
     "build-records-a-security-finding-by-location": {
@@ -209,7 +210,8 @@
     },
     "close-defers-an-unconfirmed-check": {
       "measures": [
-        "skills/_shared/execute.md"
+        "skills/_shared/execute.md",
+        "skills/_shared/escalation.md"
       ]
     },
     "stale-write-leaves-the-slice-open": {
@@ -226,18 +228,63 @@
     },
     "slice-folds-entries-that-touch-its-code": {
       "measures": [
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "skills/_shared/escalation.md"
       ]
     },
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
       "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/escalation.md"
+      ]
+    },
+    "slice-asks-before-dropping-an-urgent-entry": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-asks-before-dropping-an-urgent-entry-with-a-planted-credential": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-asks-about-an-entry-a-slice-failed-to-build": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "unattended-slice-names-the-remedy-for-an-entry-a-slice-failed-to-build": {
+      "measures": [
+        "skills/slice/SKILL.md",
+        "skills/_shared/escalation.md"
+      ]
+    },
+    "slice-carries-out-a-free-text-answer-to-its-question": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-asks-again-on-a-free-text-answer-that-cannot-be-undone": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-amends-the-spec-on-a-free-text-answer-that-changes-it": {
+      "measures": [
+        "skills/_shared/escalation.md",
         "skills/slice/SKILL.md"
       ]
     },
     "planning-builds-each-folded-entry-into-a-task-or-reopens-it": {
       "measures": [
         "skills/plan/SKILL.md",
-        "scripts/found_work.py"
+        "scripts/found_work.py",
+        "skills/_shared/escalation.md"
       ]
     },
     "build-close-marks-folded-entries": {
@@ -488,6 +535,39 @@
       "measures": [
         "skills/_shared/execute.md",
         "skills/_shared/unattended.md"
+      ]
+    },
+    "plan-asks-before-a-found-work-call-that-changes-the-spec": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/plan/SKILL.md"
+      ]
+    },
+    "build-asks-before-a-found-work-call-that-cannot-be-undone": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "build-asks-before-a-found-work-call-outside-its-allowed-actions": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/_shared/execute.md"
+      ]
+    },
+    "driver-build-defers-a-found-work-call-that-cannot-be-undone": {
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/_shared/execute.md",
+        "skills/drive/SKILL.md"
+      ]
+    },
+    "driver-build-defers-a-found-work-call-outside-its-allowed-actions": {
+      "merge_only": true,
+      "measures": [
+        "skills/_shared/escalation.md",
+        "skills/_shared/execute.md",
+        "skills/drive/SKILL.md"
       ]
     }
   }
