@@ -3,11 +3,12 @@
 The checks, in the order they print, are ``dangling-links`` (references that
 point at no record), ``retired-links`` (live records that link to dropped or
 superseded records) and ``stale-tasks`` (unfinished tasks not updated within the
-staleness window, ``--stale-days``, or tied to a dropped or superseded spec). The command builds a plain-data :class:`HealthReport` from
-the scan of every configured vault and the registry of checks (:data:`CHECKS`),
-then renders it: one summary row per vault per check, then one findings group
-per check, each with its own ``--limit`` cap and action line. Nothing is
-written: no record, no lock, no index.
+staleness window, ``--stale-days``, or tied to a dropped or superseded spec).
+The command builds a plain-data :class:`HealthReport` from the scan of every
+configured vault and the registry of checks (:data:`CHECKS`), then renders it:
+one summary row per vault per check, then one findings group per check, each
+with its own ``--limit`` cap and action line. Nothing is written: no record, no
+lock, no index.
 
 Each check runs inside its own exception boundary: one that raises is reported
 as ``errored: <error type>`` on its rows and in its group, every other check

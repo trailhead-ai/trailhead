@@ -65,7 +65,10 @@ def test_the_window_start_itself_is_inside_and_a_second_before_it_is_outside():
     assert res.findings[0].age_days == 30
 
 
-@pytest.mark.parametrize("window,days,reported", [(90, 91, True), (90, 31, False), (30, 31, True), (1, 2, True), (1, 0, False)])
+@pytest.mark.parametrize(
+    "window,days,reported",
+    [(90, 91, True), (90, 31, False), (30, 31, True), (1, 2, True), (1, 0, False)],
+)
 def test_the_window_argument_moves_the_boundary(window, days, reported):
     res = run([vault("a", task("t", days))], window=window)
     assert (names(res) == ["t"]) is reported

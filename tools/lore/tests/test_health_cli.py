@@ -846,7 +846,11 @@ def test_retired_records_column_counts_live_linking_records(world):
 def _caps_fixture(root):
     _twenty_five(root)
     _put(root, "decision", "gone", status="dropped")
-    for name, updated in (("r-new", "2026-05-03T00:00:00Z"), ("r-old", "2026-05-01T00:00:00Z"), ("r-mid", "2026-05-02T00:00:00Z")):
+    for name, updated in (
+        ("r-new", "2026-05-03T00:00:00Z"),
+        ("r-old", "2026-05-01T00:00:00Z"),
+        ("r-mid", "2026-05-02T00:00:00Z"),
+    ):
         _put(root, "decision", name, updated=updated, related={"decision": ["gone"]})
 
 
@@ -1116,11 +1120,11 @@ def test_a_sort_key_that_raises_errors_only_its_check(world, monkeypatch):
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
     health = importlib.import_module("lore.cli.health")
-    model = importlib.import_module("lore.health.model")
 
     def stubbed(scans, selected, ctx):
-        mk = lambda: type("F", (), {"vault": "default", "kind": "lesson", "name": _Unorderable(),
-                                    "updated_at": "2026-03-01T00:00:00Z"})()
+        def mk():
+            return type("F", (), {"vault": "default", "kind": "lesson", "name": _Unorderable(),
+                                  "updated_at": "2026-03-01T00:00:00Z"})()
         return health.CheckRun([mk(), mk()], {"default": 2})
 
     _with_checks(monkeypatch, "retired-links", stubbed)
