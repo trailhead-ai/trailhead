@@ -17,7 +17,7 @@ from pathlib import Path
 
 from ..record import model as record_model
 from ..record import rename, store
-from . import references
+from . import references, scan as scan_mod
 from .model import VaultScan
 
 CODE_SIDECAR_MISSING = "sidecar-missing"
@@ -34,8 +34,13 @@ class StructuralFinding:
     detail: str
 
 
-def _orphans(vault: str, root: Path):
+def _orphans(vault: str, root: Path, reported: frozenset[tuple[str, str]] = frozenset()):
     """Return ``(findings, escaping_skips)`` for flat artifacts missing their partner.
+
+    A symlinked artifact of a complete pair that resolves to no existing file
+    (dangling or a loop) is unreadable, which the scan skips silently; it is a
+    finding here unless the scan already reported that record (*reported* holds
+    its ``(kind, stem)`` pairs). The link is resolved, never opened.
 
     Escaping artifacts are counted once across scan and walk. The scan counts a
     symlinked kind directory and any escaping ``.md``, so the walk skips those;
@@ -54,6 +59,7 @@ def _orphans(vault: str, root: Path):
         except OSError:
             continue
         present: dict[str, dict[str, bool]] = {}
+        dead: dict[str, list[str]] = {}
         for entry in entries:
             stem, ext = os.path.splitext(entry.name)
             if ext not in (".md", ".json"):
@@ -64,8 +70,14 @@ def _orphans(vault: str, root: Path):
                     skips += 1
                 continue
             present.setdefault(stem, {})[ext] = escapes
+            if entry.is_symlink() and not escapes and not os.path.exists(entry.path):
+                dead.setdefault(stem, []).append(ext)
         for stem, exts in present.items():
             if len(exts) == 2:
+                if not any(exts.values()) and (kind, stem) not in reported:
+                    for ext in dead.get(stem, ()):
+                        code = scan_mod.REASON_SIDECAR_UNREADABLE if ext == ".json" else scan_mod.REASON_BODY_UNREADABLE
+                        findings.append(StructuralFinding(vault, f"{kind}/{stem}", code, "record could not be read"))
                 continue
             if any(exts.values()):
                 if ".json" in exts:
@@ -100,7 +112,7 @@ def check_structure(scan: VaultScan, root) -> tuple[list[StructuralFinding], int
             )
         for error in record_model.validate(rec.sidecar).errors:
             findings.append(StructuralFinding(scan.vault, record_id, CODE_INVALID_SIDECAR, error))
-    orphan_findings, skips = _orphans(scan.vault, Path(root))
+    orphan_findings, skips = _orphans(scan.vault, Path(root), frozenset((u.kind, u.name) for u in scan.unreadable))
     findings.extend(orphan_findings)
     findings.sort(key=lambda f: (f.vault, f.record_id, f.code, f.detail))
     return findings, skips

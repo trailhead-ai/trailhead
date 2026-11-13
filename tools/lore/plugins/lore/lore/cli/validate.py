@@ -37,10 +37,14 @@ vaults: <K> findings``, with per-code counts when K > 0.
 **Exit codes.** 0 with empty stdout when there are no findings; 1 when there are
 any findings, vault-level ones included (also when a closed stdout pipe ends the
 run); 2 with one ``lore:`` stderr line when it cannot run (unreadable or invalid
-config, unknown ``--vault``, ``--path`` not a directory, both flags given, or any
+config, unknown ``--vault``, ``--path`` not a directory or itself a symbolic link, both flags given, stdout that
+cannot be written, or any
 unexpected error, never a traceback). A gate must fail on any non-zero exit.
 
-Read-only: nothing is written, and no lock, index or scaffolding file is created.
+Read-only: no file in any vault is ever created, changed or removed, and a ``--path``
+run creates nothing anywhere. A run that reads the lore configuration (no ``--path``)
+may create lore's empty state vaults directory through the shared config loader, as
+every lore command does.
 """
 from __future__ import annotations
 
@@ -142,6 +146,8 @@ def validate(only: str | None, path: str | None) -> tuple[list[Finding], int, in
         raise _CannotRun("give --vault or --path, not both")
     if path is not None:
         root = Path(path)
+        if root.is_symlink():
+            raise _CannotRun("--path must not be a symbolic link")
         if not root.is_dir():
             raise _CannotRun(f"{path} is not a directory")
         roots = [(PATH_LABEL, root)]
@@ -217,6 +223,10 @@ def cmd_validate(args) -> int:
         _stdout_closed()
         print(_summary(findings, records, vaults), file=sys.stderr)
         return 1
+    except (OSError, UnicodeEncodeError) as exc:
+        _stdout_closed()
+        print(_printable(f"lore: cannot write findings: {type(exc).__name__}"), file=sys.stderr)
+        return 2
     print(_summary(findings, records, vaults), file=sys.stderr)
     return 1 if findings else 0
 

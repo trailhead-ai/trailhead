@@ -538,3 +538,69 @@ def test_closed_stdout_pipe_ends_without_a_traceback(world):
     assert "Traceback" not in err and "BrokenPipe" not in err
     assert p.returncode == 1
     assert "lore: validated 50 records in 1 vaults: 50 findings (invalid-sidecar 50)" in err
+
+
+def test_dangling_symlinked_sidecar_exits_one_with_a_sidecar_unreadable_line(world):
+    root = world.roots["default"]
+    _put(root, "decision", "x")
+    (root / "decision" / "x.json").unlink()
+    (root / "decision" / "x.json").symlink_to("nowhere-in-vault")
+    r = world.run()
+    assert r.returncode == 1
+    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+        "default decision/x: sidecar-unreadable: record could not be read"
+    ]
+
+
+# --- stdout that cannot be written -------------------------------------------
+
+
+def _subprocess_validate(world, env_extra, stdout):
+    root = world.roots["default"]
+    env = _cli_env(root, world.state, {"XDG_CONFIG_HOME": str(world.cfg), **env_extra})
+    return subprocess.run(
+        [sys.executable, str(CLI_PATH), "validate"],
+        stdout=stdout, stderr=subprocess.PIPE, env=env, text=True,
+    )
+
+
+def test_stdout_that_cannot_encode_a_finding_exits_two_with_one_lore_line(world):
+    root = world.roots["default"]
+    _put(root, "lesson", "bad", **{"ünï": "x"})
+    p = _subprocess_validate(world, {"PYTHONIOENCODING": "ascii"}, subprocess.PIPE)
+    assert p.returncode == 2
+    assert "Traceback" not in p.stderr
+    err = p.stderr.splitlines()
+    assert len(err) == 1 and err[0].startswith("lore: "), p.stderr
+
+
+@pytest.mark.skipif(not os.path.exists("/dev/full"), reason="needs /dev/full")
+def test_stdout_on_a_full_device_exits_two_with_one_lore_line(world):
+    root = world.roots["default"]
+    _put(root, "lesson", "bad", status="nonsense")
+    with open("/dev/full", "w") as full:
+        p = _subprocess_validate(world, {}, full)
+    assert p.returncode == 2
+    assert "Traceback" not in p.stderr and "Exception ignored" not in p.stderr
+    err = p.stderr.splitlines()
+    assert len(err) == 1 and err[0].startswith("lore: "), p.stderr
+
+
+# --- a --path that is a symlink ----------------------------------------------
+
+
+def test_path_that_is_a_symlink_exits_two_without_echoing_its_target(world, tmp_path):
+    real = tmp_path / "secret-target-dir"
+    _put(real, "lesson", "bad", status="nonsense")
+    link = tmp_path / "linked"
+    link.symlink_to(real)
+    r = world.run("--path", str(link))
+    assert r.returncode == 2
+    one_lore_line(r)
+    assert "secret-target-dir" not in r.stderr
+
+
+def test_path_naming_the_real_directory_still_runs(world, tmp_path):
+    real = tmp_path / "real-dir"
+    _put(real, "lesson", "bad", status="nonsense")
+    assert world.run("--path", str(real)).returncode == 1

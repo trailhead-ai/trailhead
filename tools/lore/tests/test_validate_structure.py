@@ -255,3 +255,67 @@ def test_findings_are_sorted_and_deterministic(root):
     _put(root, "lesson", "alpha", sidecar=None)
     findings, _ = check(root)
     assert [f.record_id for f in findings] == ["lesson/alpha", "lesson/zed"]
+
+
+def _replace_with_symlink(path, target):
+    path.unlink(missing_ok=True)
+    path.symlink_to(target)
+
+
+@pytest.mark.parametrize("ext, code", [(".json", "sidecar-unreadable"), (".md", "body-unreadable")])
+@pytest.mark.parametrize("shape", ["dangling", "self-loop"])
+def test_a_symlinked_artifact_that_resolves_to_no_file_is_one_finding(root, ext, code, shape):
+    d = root / "decision"
+    _put(root, "decision", "x", _sidecar(kind="decision"))
+    link = d / f"x{ext}"
+    _replace_with_symlink(link, f"x{ext}" if shape == "self-loop" else "nowhere-in-vault")
+    findings, skips = check(root)
+    assert codes(findings) == [("decision/x", code)]
+    assert skips == 0
+
+
+def test_two_dangling_artifacts_of_one_record_are_two_findings(root):
+    _put(root, "decision", "x", _sidecar(kind="decision"))
+    _replace_with_symlink(root / "decision" / "x.json", "nowhere-in-vault")
+    _replace_with_symlink(root / "decision" / "x.md", "also-nowhere")
+    findings, skips = check(root)
+    assert codes(findings) == [("decision/x", "body-unreadable"), ("decision/x", "sidecar-unreadable")]
+    assert skips == 0
+
+
+def test_a_dangling_symlink_the_scan_already_reports_is_not_reported_twice(root):
+    _put(root, "decision", "x", _sidecar(kind="decision"))
+    _replace_with_symlink(root / "decision" / "x.md", "nowhere-in-vault")
+    scan = scan_mod.scan_vault("v", root)
+    assert [(u.name, u.reason) for u in scan.unreadable] == [("x", "body-unreadable")]
+    findings, _ = structure.check_structure(scan, root)
+    assert codes(findings) == [("decision/x", "body-unreadable")]
+
+
+def test_a_dangling_symlink_beside_an_unparseable_partner_is_one_finding(root):
+    _put(root, "decision", "x", "{not json")
+    _replace_with_symlink(root / "decision" / "x.md", "nowhere-in-vault")
+    assert codes(check(root)[0]) == [("decision/x", "sidecar-malformed")]
+
+
+def test_a_dangling_symlink_escaping_the_vault_is_counted_once_not_found(root, tmp_path):
+    _put(root, "decision", "x", _sidecar(kind="decision"))
+    _replace_with_symlink(root / "decision" / "x.json", tmp_path / "outside-nowhere.json")
+    scan = scan_mod.scan_vault("v", root)
+    findings, skips = structure.check_structure(scan, root)
+    assert scan.skipped_escaping + skips == 1
+    assert findings == []
+
+
+def test_a_dangling_artifact_is_never_opened_by_the_walk(root, monkeypatch):
+    _put(root, "decision", "x", _sidecar(kind="decision"))
+    _replace_with_symlink(root / "decision" / "x.json", "nowhere-in-vault")
+    scan = scan_mod.scan_vault("v", root)
+
+    def refuse(*a, **k):
+        raise AssertionError("the walk opened a file")
+
+    monkeypatch.setattr("builtins.open", refuse)
+    monkeypatch.setattr(os, "open", refuse)
+    findings, _ = structure.check_structure(scan, root)
+    assert codes(findings) == [("decision/x", "sidecar-unreadable")]
