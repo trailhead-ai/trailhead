@@ -2669,7 +2669,7 @@ class ClaudeCodeHarness(Harness):
             "permissions": {
                 "deny": [f"Read(/{p}/**)" for p in denied_reads]
                 + [f"Edit(/{g}/**)" for g in granted]
-                + [f"Edit(/{p}/**)" for p in write_denied]
+                + [rule for p in write_denied for rule in (f"Edit(/{p})", f"Edit(/{p}/**)")]
                 + (
                     _edit_denials(
                         user,

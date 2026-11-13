@@ -27,6 +27,13 @@ configuration directories. The other accounts are the other configured hubs and 
 groups whose launch account differs from this account's own; a vault that one of this
 account's own groups also binds is never denied.
 
+``credential-dirs`` is a set role that resolves ``CREDENTIAL_DIRS`` against the home of the
+environment given; both the session's read denials and its setup steps' sandbox use it.
+``workspace-guards`` is a set role derived from the workspace: its ``manifest.json`` and, for
+each direct subdirectory of it that holds a ``.git`` entry (a member's worktree), that
+member's ``MEMBER_GUARDED_NAMES``. It is read from disk when the profile resolves, so a
+member created later is not named.
+
 ``readable_roles`` names directories the session may read although they lie outside its
 write roots; the harness grants read access and no write there.
 
@@ -54,6 +61,28 @@ ROLE_OTHER_HUB_HOMES = "other-hub-homes"
 ROLE_OTHER_MIRRORS = "other-mirrors"
 ROLE_OTHER_VAULTS = "other-vaults"
 ROLE_OTHER_ACCOUNT_CONFIGS = "other-account-configs"
+ROLE_CREDENTIAL_DIRS = "credential-dirs"
+ROLE_WORKSPACE_GUARDS = "workspace-guards"
+
+#: Credential stores under the account's home that a session may neither read nor send to an
+#: allowed domain, named relative to the home. ``~/.npmrc`` is deliberately absent: installs
+#: from a private registry authenticate with it, so setup steps must still read it.
+CREDENTIAL_DIRS = (
+    ".ssh",
+    ".aws",
+    ".gnupg",
+    ".config/gh",
+    ".netrc",
+    ".git-credentials",
+    ".kube",
+    ".config/gcloud",
+    ".azure",
+    ".docker",
+)
+
+#: What a member directory holds that the operator's own tools later act on: the git pointer
+#: (whose target's config can run commands unsandboxed), harness settings and MCP servers.
+MEMBER_GUARDED_NAMES = (".git", ".claude", ".mcp.json")
 
 _ACCOUNT_RE = re.compile(r"[a-z0-9][a-z0-9-]*")
 
@@ -332,7 +361,21 @@ def _other_account_configs(account: str, env, platform) -> tuple[Path, ...]:
     return tuple(dict.fromkeys(Path(a) for a in declared if a and a != own))
 
 
+def _credential_dirs(account: str, env, platform) -> tuple[Path, ...]:
+    home = (env if env is not None else os.environ).get("HOME")
+    root = Path(home) if home else Path.home()
+    return tuple(root / rel for rel in CREDENTIAL_DIRS)
+
+
+def _workspace_guards(workspace: Path) -> tuple[Path, ...]:
+    guarded = [workspace / "manifest.json"]
+    for member in sorted(p for p in workspace.iterdir() if p.is_dir() and os.path.lexists(p / ".git")):
+        guarded.extend(member / name for name in MEMBER_GUARDED_NAMES)
+    return tuple(guarded)
+
+
 _ROLE_SET_RESOLVERS = {
+    ROLE_CREDENTIAL_DIRS: _credential_dirs,
     ROLE_OTHER_HUB_HOMES: lambda a, e, p: tuple(
         hub_home(b, env=e, platform=p) for b in _other_hub_accounts(a, e, p)
     ),
@@ -366,7 +409,7 @@ class LaunchProfile:
     effort: str | None = None
 
     def __post_init__(self) -> None:
-        known = (*_ROLE_RESOLVERS, *_ROLE_SET_RESOLVERS, ROLE_WORKSPACE)
+        known = (*_ROLE_RESOLVERS, *_ROLE_SET_RESOLVERS, ROLE_WORKSPACE, ROLE_WORKSPACE_GUARDS)
         for role in (
             *self.writable_roles,
             *self.git_guarded_roles,
@@ -429,8 +472,9 @@ RITUAL_PROFILE = LaunchProfile(
         ROLE_OTHER_MIRRORS,
         ROLE_OTHER_VAULTS,
         ROLE_OTHER_ACCOUNT_CONFIGS,
+        ROLE_CREDENTIAL_DIRS,
     ),
-    write_denied_roles=(ROLE_OTHER_MIRRORS, ROLE_OTHER_VAULTS),
+    write_denied_roles=(ROLE_OTHER_MIRRORS, ROLE_OTHER_VAULTS, ROLE_WORKSPACE_GUARDS),
     readable_roles=(ROLE_PLUGIN_TREE,),
     network_allowed_hosts=(),
     mcp_servers=(),
@@ -465,7 +509,7 @@ def resolve_profile(
             *profile.readable_roles,
         )
     )
-    wants_workspace = ROLE_WORKSPACE in roles
+    wants_workspace = ROLE_WORKSPACE in roles or ROLE_WORKSPACE_GUARDS in roles
     if without_workspace and workspace is not None:
         raise WorkspaceError("without_workspace and a workspace were both given")
     if wants_workspace and workspace is None and not without_workspace:
@@ -479,6 +523,10 @@ def resolve_profile(
             if without_workspace:
                 continue
             paths[role] = validate_workspace(workspace, env=env, platform=platform)
+        elif role == ROLE_WORKSPACE_GUARDS:
+            if without_workspace:
+                continue
+            path_sets[role] = _workspace_guards(validate_workspace(workspace, env=env, platform=platform))
         elif role in _ROLE_SET_RESOLVERS:
             path_sets[role] = _ROLE_SET_RESOLVERS[role](account, env, platform)
         else:

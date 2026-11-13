@@ -2911,3 +2911,97 @@ def test_a_mixed_case_read_denial_entry_covering_a_root_refuses_on_darwin_only(t
         _start(env, platform="darwin")
     assert _start(env, platform="linux") is not None
 
+
+
+# -- a ritual cannot write what the operator's own tools later run or read -----
+
+
+def _add_members(ws: Path, names) -> list[Path]:
+    members = []
+    for name in names:
+        member = ws / name
+        (member / "src").mkdir(parents=True)
+        (member / "src" / "app.py").write_text("x = 1\n")
+        (member / ".git").write_text(f"gitdir: {ws.parent / 'repo.git' / 'worktrees' / name}\n")
+        members.append(member)
+    return members
+
+
+def _ritual_denials(env, ws):
+    settings = _settings_of(_ritual_start(env, ws))
+    return settings["sandbox"]["filesystem"]["denyWrite"], settings["permissions"]["deny"]
+
+
+@pytest.mark.parametrize("names", [(), ("m1",), ("m1", "m2"), ("alpha", "beta", "gamma")])
+def test_ritual_denies_writing_the_manifest_and_every_members_git_pointer_and_config(tmp_path, names):
+    env, ws = _ritual_ready(tmp_path)
+    members = _add_members(ws, names)
+    (ws / "notes").mkdir()
+    deny_write, rules = _ritual_denials(env, ws)
+    guarded = [ws / "manifest.json"]
+    for member in members:
+        guarded += [member / ".git", member / ".claude", member / ".mcp.json"]
+    for path in guarded:
+        assert str(path) in deny_write, path
+        assert f"Edit(/{path})" in rules and f"Edit(/{path}/**)" in rules, path
+    for member in members:
+        for ordinary in (member / "src" / "app.py", member / "README.md", member / "src"):
+            assert not _covered_by(deny_write, ordinary), ordinary
+    assert not _covered_by(deny_write, ws / "notes" / "x.md")
+    assert str(ws / "notes" / ".git") not in deny_write
+
+
+def test_ritual_guards_a_member_present_when_the_session_starts_not_one_named_in_the_manifest(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    (ws / "manifest.json").write_text(json.dumps({"members": [{"name": "ghost"}]}))
+    (member,) = _add_members(ws, ["real"])
+    deny_write, _ = _ritual_denials(env, ws)
+    assert str(member / ".git") in deny_write
+    assert str(ws / "ghost" / ".git") not in deny_write
+
+
+# the credential folders a session can read and send to an allowed domain
+_CREDENTIAL_DIRS = (
+    ".ssh", ".aws", ".gnupg", ".config/gh", ".netrc", ".git-credentials", ".kube",
+    ".config/gcloud", ".azure", ".docker",
+)
+
+
+def test_ritual_and_setup_sandbox_deny_reading_the_credential_folders_of_the_accounts_home(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    home = Path(env["HOME"]).resolve()
+    start = _ritual_start(env, ws)
+    settings = _settings_of(start)
+    deny_read = settings["sandbox"]["filesystem"]["denyRead"]
+    rules = settings["permissions"]["deny"]
+    for rel in _CREDENTIAL_DIRS:
+        path = home / rel
+        assert str(path) in deny_read, rel
+        assert f"Read(/{path}/**)" in rules, rel
+        assert str(path) in start.setup_sandbox["denied_reads"], rel
+    assert str(home / ".npmrc") not in deny_read
+    assert not _covered_by(deny_read, home / ".npmrc")
+
+
+def test_credential_denials_follow_the_accounts_home(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    other = tmp_path.resolve() / "elsewhere" / "operator"
+    env["HOME"] = str(other)
+    (other / ".claude").mkdir(parents=True)
+    _ritual_user(env, ws)
+    reads = _sandbox_of(env, ws)["denied_reads"]
+    for rel in _CREDENTIAL_DIRS:
+        assert str(other / rel) in reads, rel
+
+
+def test_setup_sandbox_only_still_equals_the_full_ritual_sections_with_the_credential_denials(
+    tmp_path, monkeypatch, capsys
+):
+    env, ws = _ritual_ready(tmp_path)
+    assert _ritual_cli(monkeypatch, env, ws) == 0
+    full = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    assert _setup_only_cli(monkeypatch, env) == 0
+    only = json.loads(capsys.readouterr().out)["setup_sandbox"]
+    assert only == full
+    assert str(Path(env["HOME"]).resolve() / ".ssh") in only["denied_reads"]
+
