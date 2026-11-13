@@ -378,6 +378,19 @@ def test_symlinked_md_orphan_is_counted_once_without_a_path(world, tmp_path):
     assert "outside-secret" not in r.stdout + r.stderr
 
 
+def test_symlinked_json_with_a_non_record_name_is_counted_once_without_a_path(world, tmp_path):
+    outside = tmp_path / "outside-secret.json"
+    outside.write_text("{}")
+    _put(world.roots["default"], "lesson", "good")
+    (world.roots["default"] / "lesson" / "Ghost.json").symlink_to(outside)
+    r = world.run()
+    assert r.returncode == 1
+    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+        "default: records-outside-vault: 1 record lies outside the vault root and was not read"
+    ]
+    assert "outside-secret" not in r.stdout + r.stderr
+
+
 def test_md_orphan_symlinked_inside_the_vault_is_sidecar_missing_not_outside(world):
     root = world.roots["default"]
     _put(root, "lesson", "good")

@@ -126,8 +126,9 @@ def test_sidecar_symlinked_outside_names_no_outside_path(root, tmp_path):
     (root / "lesson" / "good.json").unlink()
     (root / "lesson" / "good.json").symlink_to(outside)
     scan = scan_mod.scan_vault("v", root)
-    findings, _ = structure.check_structure(scan, root)
+    findings, skips = structure.check_structure(scan, root)
     assert scan.skipped_escaping == 1
+    assert (findings, skips) == ([], 0)
     assert all("outside-secret" not in f.detail and "outside-secret" not in f.record_id
                for f in findings)
 
@@ -218,7 +219,28 @@ def test_a_directory_named_as_the_sidecar_is_one_finding(root):
     (root / "lesson" / "good.json").unlink()
     (root / "lesson" / "good.json").mkdir()
     findings, _ = check(root)
-    assert [f.record_id for f in findings] == ["lesson/good"]
+    assert [(f.record_id, f.code) for f in findings] == [("lesson/good", "sidecar-unreadable")]
+
+
+def test_symlinked_json_with_a_non_record_name_escaping_the_vault_is_one_skip(root, tmp_path):
+    outside = tmp_path / "outside-secret.json"
+    outside.write_text(json.dumps(_sidecar()))
+    (root / "lesson" / "Ghost.json").symlink_to(outside)
+    assert check(root) == ([], 1)
+
+
+def test_symlinked_md_with_a_non_record_name_escaping_the_vault_is_the_scans_count_only(root, tmp_path):
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("secret\n")
+    (root / "lesson" / "Ghost.md").symlink_to(outside)
+    scan = scan_mod.scan_vault("v", root)
+    assert scan.skipped_escaping == 1
+    assert structure.check_structure(scan, root) == ([], 0)
+
+
+def test_symlinked_json_with_a_non_record_name_inside_the_vault_is_ignored(root):
+    (root / "lesson" / "Ghost.json").symlink_to(root / "lesson" / "good.json")
+    assert check(root) == ([], 0)
 
 
 def test_non_kind_top_level_dirs_are_ignored(root):

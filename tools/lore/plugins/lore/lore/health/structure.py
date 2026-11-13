@@ -39,7 +39,8 @@ def _orphans(vault: str, root: Path):
 
     Escaping artifacts are counted once across scan and walk. The scan counts a
     symlinked kind directory and any escaping ``.md``, so the walk skips those;
-    it counts only an escaping ``.json`` orphan, which the scan never sees. An
+    it counts only an escaping ``.json`` orphan, whatever its name, which the
+    scan never sees; an in-vault entry with a non-record name is ignored. An
     existing non-symlink entry of any type counts as present, so an unreadable
     sidecar is the scan's one finding and not also a missing one.
     """
@@ -55,9 +56,13 @@ def _orphans(vault: str, root: Path):
         present: dict[str, dict[str, bool]] = {}
         for entry in entries:
             stem, ext = os.path.splitext(entry.name)
-            if ext not in (".md", ".json") or references.resolve(stem, kind) is None:
+            if ext not in (".md", ".json"):
                 continue
             escapes = entry.is_symlink() and not store._realpath_is_descendant(entry.path, root_real)
+            if references.resolve(stem, kind) is None:
+                if escapes and ext == ".json":
+                    skips += 1
+                continue
             present.setdefault(stem, {})[ext] = escapes
         for stem, exts in present.items():
             if len(exts) == 2:
