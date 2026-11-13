@@ -90,8 +90,14 @@ The command is printed only when both ids pass the record-id shape check and the
 `lore record supersede` would accept the linking record as the successor: an adr, spec or decision
 target needs a successor in a frozen status (so an open task or an area cannot be one), and the
 pair must not form a cycle through `supersedes` edges. Otherwise the finding keeps only the words,
-with no command, because pasting it would be refused. The verdict comes from the verb's own pairing
-guard, so the two cannot drift. Each id is quoted for the shell. When the target's kind and
+with no command, because pasting it would be refused; the words then say the link back exists but
+this pairing cannot be recorded as a supersession. The verdict comes from the verb's own pairing
+guard (`evaluate_supersede_pairing`), and its cycle walk reads chain members the way the verb will
+once the printed command is pasted: from the named vault alone when the command carries `--vault`,
+otherwise from the first configured vault holding the record, with an unparseable copy ending the
+chain. The verb also runs `evaluate_graph_guards` on each record it writes, which includes
+`evaluate_supersedes_guard`; the report does not run those, so a pasted command can still be refused
+by them even when the pairing guard accepts. Each id is quoted for the shell. When the target's kind and
 name exist in more than one vault, the command adds `--vault <the target's vault>`, so pasting it
 changes the record the finding describes and no other.
 

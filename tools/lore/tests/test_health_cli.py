@@ -1442,6 +1442,7 @@ def test_help_names_the_stale_check_and_its_window_flag(world):
 
 NO_SUCCESSOR = "superseded, and no record supersedes it"
 LINKS_BACK = "it links back to this record, so if this record replaced it, record that"
+REFUSED = "it links back to this record, but this pairing cannot be recorded as a supersession"
 
 
 def _links_back_world(root, *, target_related, target_status="superseded", linker="src"):
@@ -1592,7 +1593,7 @@ def _line_for(finding_name, candidate_name, *, links_back=True):
     health = importlib.import_module("lore.cli.health")
     retired = importlib.import_module("lore.health.retired")
     cand = retired.RetiredCandidate("default", "decision", candidate_name, "superseded",
-                                    links_back=links_back)
+                                    links_back=links_back, supersede_allowed=True)
     f = retired.Finding("default", "adr", finding_name, "2026-03-01", "related decision",
                         "decision/old", (cand,))
     return health._retired_line(f)
@@ -1643,13 +1644,66 @@ def test_a_linker_the_supersede_guard_would_refuse_gets_the_words_and_no_command
         world, pred_kind, linker_kind, linker_status):
     _linker_world(world, pred_kind=pred_kind, linker_kind=linker_kind, linker_status=linker_status)
     (line,) = retired_lines(world.run().stdout)
-    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
 
 
 def test_a_predecessor_that_already_supersedes_its_linker_gets_the_words_and_no_command(world):
     _linker_world(world, linker_kind="adr", linker_status="active", supersedes=["adr/src"])
     (line,) = retired_lines(world.run().stdout)
-    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+
+
+def test_a_two_hop_supersedes_chain_back_to_the_linker_gets_the_words_and_no_command(world):
+    d = world.roots["default"]
+    _put_full(d, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid", supersedes=["adr/src"])
+    _put_full(d, "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+    assert "lore record supersede" not in line
+
+
+def _chain_world(world, *, default_mid, levr_mid):
+    d, lv = world.roots["default"], world.roots["levr"]
+    _put_full(d, "adr", "src")
+    _put_full(lv, "adr", "src", related={"decision": ["old"]})
+    _put_full(lv, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid", **default_mid)
+    _put_full(lv, "decision", "mid", **levr_mid)
+    return d, lv
+
+
+def test_a_vault_flagged_command_judges_the_chain_in_that_vault_only(world):
+    _chain_world(world, default_mid={}, levr_mid={"supersedes": ["adr/src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+    assert "lore record supersede" not in line
+
+
+def test_a_vault_flagged_command_ignores_a_cycle_that_exists_only_in_another_vault(world):
+    _, lv = _chain_world(world, default_mid={"supersedes": ["adr/src"]}, levr_mid={})
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault levr")
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(lv, "adr", "src") == ["decision/old"]
+
+
+def test_an_unflagged_command_reads_the_chain_from_the_first_vault_holding_it_even_if_unparseable(world):
+    d, lv = world.roots["default"], world.roots["levr"]
+    _put_full(lv, "adr", "src", related={"decision": ["old"]})
+    _put_full(lv, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid")
+    (d / "decision" / "mid.json").write_text("{not json")
+    _put_full(lv, "decision", "mid", supersedes=["adr/src"])
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line) == "lore record supersede decision/old --by adr/src"
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(lv, "adr", "src") == ["decision/old"]
 
 
 # --- the cap hint carries the run's staleness window ----------------------------

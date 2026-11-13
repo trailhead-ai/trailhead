@@ -429,6 +429,9 @@ def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
 
 
 LINKS_BACK = "it links back to this record, so if this record replaced it, record that"
+LINKS_BACK_REFUSED = (
+    "it links back to this record, but this pairing cannot be recorded as a supersession"
+)
 
 
 def _supersede_command(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, shared: bool) -> str | None:
@@ -457,6 +460,8 @@ def _candidate_status(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, s
     if not c.links_back:
         return phrase
     cmd = _supersede_command(f, c, shared)
+    if not c.supersede_allowed:
+        return f"{phrase}; {LINKS_BACK_REFUSED}"
     return f"{phrase}; {LINKS_BACK}" + (f": `{_safe(cmd)}`" if cmd else "")
 
 

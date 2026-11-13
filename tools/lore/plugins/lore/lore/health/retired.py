@@ -104,6 +104,13 @@ def check_retired(
         for r in (*s.records, *s.unreadable):
             holders.setdefault((r.kind, r.name), set()).add(s.vault)
 
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]] = {}
+    for s in scans:
+        for r in s.records:
+            holdings.setdefault((r.kind, r.name), []).append((s.vault, r))
+        for r in s.unreadable:
+            holdings.setdefault((r.kind, r.name), []).append((s.vault, None))
+
     result = RetiredResult()
     for s in scans:
         if s.vault not in selected:
@@ -119,12 +126,17 @@ def check_retired(
                 if any(key(record) in {key(r) for r in candidates.superseded_by(c.kind, c.name)}
                        for c in found if status(c) == "superseded"):
                     continue
-                retired = tuple(_candidate(c, candidates, record) for c in sorted(found, key=key))
+                linker_duplicated = len(holders[(record.kind, record.name)]) > 1
+                shared = len({(c.kind, c.name) for c in found}) < len(found)
+                retired = tuple(
+                    _candidate(c, candidates, record, holdings, shared or linker_duplicated)
+                    for c in sorted(found, key=key)
+                )
                 result.findings.append(
                     Finding(
                         record.vault, record.kind, record.name, record.updated_at,
                         ref.field, target, retired,
-                        len(holders[(record.kind, record.name)]) > 1,
+                        linker_duplicated,
                     )
                 )
         result.judged[s.vault] = judged
@@ -150,7 +162,11 @@ def retired_references(
 
 
 def _candidate(
-    record: ScannedRecord, candidates: references.CandidateIndex, linker: ScannedRecord
+    record: ScannedRecord,
+    candidates: references.CandidateIndex,
+    linker: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault_flagged: bool,
 ) -> RetiredCandidate:
     state = status(record)
     assert state is not None
@@ -173,14 +189,25 @@ def _candidate(
     )
     return RetiredCandidate(
         record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
-        links_back, links_back and _supersede_accepted(record, linker, candidates),
+        links_back,
+        links_back and _supersede_accepted(
+            record, linker, holdings, record.vault if vault_flagged else None
+        ),
     )
 
 
 def _supersede_accepted(
-    predecessor: ScannedRecord, successor: ScannedRecord, candidates: references.CandidateIndex
+    predecessor: ScannedRecord,
+    successor: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault: str | None,
 ) -> bool:
-    """Whether the supersede verb's pairing guard accepts *successor* for *predecessor*."""
+    """Whether the supersede verb's pairing guard accepts *successor* for *predecessor*.
+
+    Chain members are read as the verb reads them: from *vault* alone when the printed
+    command carries ``--vault``, else from the first vault holding the record. A copy
+    that cannot be parsed ends the chain there, as it does in the verb.
+    """
     def sidecar(rec: ScannedRecord) -> dict:
         data = dict(rec.sidecar) if isinstance(rec.sidecar, dict) else {}
         if not isinstance(data.get("supersedes"), list):
@@ -189,8 +216,10 @@ def _supersede_accepted(
 
     def load(record_id: str) -> dict | None:
         kind, _, name = record_id.partition("/")
-        found, _ = candidates.lookup(kind, name)
-        return sidecar(found[0]) if found else None
+        for held_in, rec in holdings.get((kind, name), ()):
+            if vault is None or held_in == vault:
+                return sidecar(rec) if rec is not None else None
+        return None
 
     return not guards.evaluate_supersede_pairing(
         predecessor_id=f"{predecessor.kind}/{predecessor.name}",
