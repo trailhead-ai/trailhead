@@ -84,11 +84,16 @@ the parent through `run_block.py` and decide on its `latest-outcome:` by `_share
   `outcome: refused task/<parent-name> parked=0 — <why>; <what to run instead>` unless `--resume` is
   given. The reason says the latest run block is held by another run, how long ago the record last
   changed, and that `--resume` is only for an earlier run known to be over.
-- `plan-ready`: refused, the reason saying the latest run is finished and its plan is complete.
-  `--resume` does not change this.
+- `plan-ready`, `pr-ready`, `slice-chosen`, `waiting` or `spec-complete`: refused, the reason saying
+  the latest run is finished and, for `plan-ready`, that its plan is complete. `--resume` does not
+  change this.
+- No run block on the record and `--resume` given: refused, there is no earlier run to resume.
+- `run_block.py` refusing the body: refused, the reason naming its `reason-code`.
 - `needs-a-decision` or `stuck`: resumed without `--resume`.
 
-A refusal writes nothing. A resumed run follows Resuming below.
+A refusal writes nothing. A resumed run follows Resuming below. When the elected vault is unbound
+(`lore vault resolve` returns a null `vault`), `_shared/unattended.md` (The unbound default vault)
+applies: every `--vault <elected-vault>` in this skill is omitted from the call.
 
 **The run block, once the check passes.** Read `../_shared/unattended.md` for the block's shape, the
 `Q<n>` shape and numbering, and the outcome grammar; this skill never restates them.
@@ -158,9 +163,10 @@ A refusal writes nothing. A resumed run follows Resuming below.
 - **Answers.** Read them once with `run_block.py` and handle them as `_shared/unattended.md`
   (Reading answers) says: a matched answer is applied where the resume point below reaches its
   question, an unmatched or missing one is re-parked as a pointer, and an answer to a correction
-  question is logged applied with the record left for the operator, since plan writes to no record
-  outside the slice. Re-parked pointers are counted in `parked=<n>` and end the run
-  `needs-a-decision` once nothing else is left; the rest of the work is done first.
+  question is logged applied, the decision saying the record was not edited and is left for the
+  operator, since plan writes to no record outside the slice. Re-parked pointers are counted in
+  `parked=<n>` and end the run `needs-a-decision` once nothing else is left; the rest of the work is
+  done first.
 - **The resume point, in this order.**
   1. No `**Goal:**` and no `## Flow-out`: not planned. Plan from step 1, answers applied as the
      decisions they are.
@@ -175,7 +181,7 @@ A refusal writes nothing. A resumed run follows Resuming below.
      Apply its answered option by a confined `--diff` edit that closes the Critical in the plan and
      sets the line to `` `resolved` (decided from the answer to Q<n>) ``, overwriting
      `bounced-back-to-spec`, and log it applied. An option the plan cannot apply by editing itself
-     stays parked, with a decision saying so.
+     is re-parked as a pointer counted in `parked=<n>`, with a decision saying so.
   6. Every Critical dispositioned and no question open: step 9 and `plan-ready`.
 - **Never** re-create or touch an existing child, run the council over a section that exists, or
   write the parent body wholesale; step 8's full-body write belongs to point 1 alone.
