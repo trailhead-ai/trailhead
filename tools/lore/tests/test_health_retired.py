@@ -350,3 +350,30 @@ def test_target_with_a_named_or_nonconforming_successor_is_not_marked():
 def test_dropped_target_relating_back_is_not_marked():
     f = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}, status="dropped"))]))
     assert f.retired[0].links_back is False
+
+
+def _hostile_old(entries):
+    return _old_relating({"adr": ["src"]}) if entries is None else rec(
+        "a", "decision", "old", "superseded",
+        {"related": {"adr": ["src"]}, "supersedes": entries})
+
+
+def test_a_target_with_an_unboundedly_long_supersedes_list_is_not_offered_a_command():
+    from lore.record import guards as g
+    hostile = [1] * (g._SUPERSEDE_ENTRY_LIMIT + 1)
+    f = single(run([vault("a", _adr_src(), _hostile_old(hostile))]))
+    assert (f.retired[0].links_back, f.retired[0].supersede_allowed) == (True, False)
+    ok = single(run([vault("a", _adr_src(), _hostile_old([1] * 10))]))
+    assert (ok.retired[0].links_back, ok.retired[0].supersede_allowed) == (True, True)
+
+
+def test_the_pairing_guard_runs_once_per_pair_however_many_findings_repeat_it(monkeypatch):
+    calls = []
+    real = retired.guards.evaluate_supersede_pairing
+    monkeypatch.setattr(retired.guards, "evaluate_supersede_pairing",
+                        lambda **kw: calls.append(kw["predecessor_id"]) or real(**kw))
+    src = rec("a", "adr", "src", "active", {"related": {"decision": ["old"]}}, "see [[decision/old]]")
+    res = run([vault("a", src, _old_relating({"adr": ["src"]}))])
+    assert len(res.findings) == 2
+    assert [c.supersede_allowed for f in res.findings for c in f.retired] == [True, True]
+    assert calls == ["decision/old"]

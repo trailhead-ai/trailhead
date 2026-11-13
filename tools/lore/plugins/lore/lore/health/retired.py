@@ -111,6 +111,17 @@ def check_retired(
         for r in s.unreadable:
             holdings.setdefault((r.kind, r.name), []).append((s.vault, None))
 
+    superseders: dict[tuple[str, str], tuple[tuple[ScannedRecord, ...], frozenset]] = {}
+
+    def superseders_of(c: ScannedRecord) -> tuple[tuple[ScannedRecord, ...], frozenset]:
+        found = superseders.get((c.kind, c.name))
+        if found is None:
+            records = candidates.superseded_by(c.kind, c.name)
+            found = superseders[(c.kind, c.name)] = (records, frozenset(key(r) for r in records))
+        return found
+
+    accepted: dict[tuple[str, str, str, str | None], bool] = {}
+
     result = RetiredResult()
     for s in scans:
         if s.vault not in selected:
@@ -123,13 +134,13 @@ def check_retired(
             for ref, target, found in retired_references(record, candidates):
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
-                if any(key(record) in {key(r) for r in candidates.superseded_by(c.kind, c.name)}
+                if any(key(record) in superseders_of(c)[1]
                        for c in found if status(c) == "superseded"):
                     continue
                 linker_duplicated = len(holders[(record.kind, record.name)]) > 1
                 shared = len({(c.kind, c.name) for c in found}) < len(found)
                 retired = tuple(
-                    _candidate(c, candidates, record, holdings, shared or linker_duplicated)
+                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted)
                     for c in sorted(found, key=key)
                 )
                 result.findings.append(
@@ -163,10 +174,11 @@ def retired_references(
 
 def _candidate(
     record: ScannedRecord,
-    candidates: references.CandidateIndex,
+    superseders: tuple[ScannedRecord, ...],
     linker: ScannedRecord,
     holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
     vault_flagged: bool,
+    accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
 ) -> RetiredCandidate:
     state = status(record)
     assert state is not None
@@ -174,7 +186,7 @@ def _candidate(
     nonconforming = 0
     if state == "superseded":
         seen: set[tuple[str, str, str]] = set()
-        for s in candidates.superseded_by(record.kind, record.name):
+        for s in superseders:
             if key(s) in seen:
                 continue
             seen.add(key(s))
@@ -190,10 +202,23 @@ def _candidate(
     return RetiredCandidate(
         record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
         links_back,
-        links_back and _supersede_accepted(
-            record, linker, holdings, record.vault if vault_flagged else None
+        links_back and _accepted_once(
+            accepted, record, linker, holdings, record.vault if vault_flagged else None
         ),
     )
+
+
+def _accepted_once(
+    accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
+    predecessor: ScannedRecord,
+    successor: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault: str | None,
+) -> bool:
+    cache_key = (*key(predecessor), *key(successor), vault)
+    if cache_key not in accepted:
+        accepted[cache_key] = _supersede_accepted(predecessor, successor, holdings, vault)
+    return accepted[cache_key]
 
 
 def _supersede_accepted(

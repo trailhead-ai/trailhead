@@ -87,6 +87,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -973,6 +974,11 @@ _FROZEN_PREDECESSOR_KINDS: frozenset[str] = frozenset({"adr", "spec", "decision"
 #: cycle, so a malformed or enormous chain cannot make the verb run unbounded.
 _SUPERSEDE_CHAIN_LIMIT = 256
 
+#: Upper bound on ``supersedes`` entries examined in all, whatever they hold, so a
+#: sidecar padded with non-string or repeated entries cannot make the walk run
+#: unbounded either.
+_SUPERSEDE_ENTRY_LIMIT = 4096
+
 
 def _supersede_refusal(guard: str, message: str) -> list[str]:
     return [graph_mod.format_guard_message(guard, message)]
@@ -980,17 +986,23 @@ def _supersede_refusal(guard: str, message: str) -> list[str]:
 
 def _supersedes_reaches(
     start: dict, target_id: str, load_sidecar: Callable[[str], dict | None]
-) -> bool:
+) -> bool | None:
     """Whether following ``supersedes`` edges from *start* arrives at *target_id*.
 
-    Breadth-first over resolved records, visiting each at most once and at most
-    :data:`_SUPERSEDE_CHAIN_LIMIT` in all; an entry that does not resolve ends
-    that branch.
+    Breadth-first over resolved records, visiting each at most once; an entry
+    that does not resolve ends that branch. Returns ``None`` when the walk would
+    pass :data:`_SUPERSEDE_CHAIN_LIMIT` records or examine more than
+    :data:`_SUPERSEDE_ENTRY_LIMIT` entries, so the caller can refuse rather than
+    take an unfinished walk for an answer.
     """
-    queue = list(start.get("supersedes") or [])
+    queue = deque(start.get("supersedes") or [])
     seen: set[str] = set()
-    while queue and len(seen) < _SUPERSEDE_CHAIN_LIMIT:
-        entry = queue.pop(0)
+    examined = 0
+    while queue:
+        if examined >= _SUPERSEDE_ENTRY_LIMIT or len(seen) >= _SUPERSEDE_CHAIN_LIMIT:
+            return None
+        examined += 1
+        entry = queue.popleft()
         if not isinstance(entry, str) or entry in seen:
             continue
         if entry == target_id:
@@ -1048,7 +1060,14 @@ def evaluate_supersede_pairing(
             "supersede-dead-successor",
             f"{succ_node} is {successor.get('status')} and cannot replace {pred_node}",
         )
-    if _supersedes_reaches(predecessor, successor_id, load_sidecar):
+    reaches = _supersedes_reaches(predecessor, successor_id, load_sidecar)
+    if reaches is None:
+        return _supersede_refusal(
+            "supersede-chain-too-long",
+            f"{pred_node} has a supersedes chain too long to check for a cycle, so"
+            f" {succ_node} cannot be recorded as its successor",
+        )
+    if reaches:
         return _supersede_refusal(
             "supersede-cycle",
             f"{pred_node} already supersedes {succ_node}, directly or through a chain of"

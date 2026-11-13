@@ -1495,3 +1495,45 @@ def test_superseded_status_undo_hint_is_runnable_for_a_shell_safe_id():
     msg = _supersede_hint_messages(_guards(), "safe-name")["superseded-status"]
     assert "lore record update adr/safe-name --status <prior status>" in msg
     assert "--unset-supersedes adr/safe-name" in msg
+
+
+# --- the supersede cycle walk is bounded in entries examined, not only records -----
+
+def _pairing(g, predecessor_supersedes, *, load=lambda _id: None):
+    return g.evaluate_supersede_pairing(
+        predecessor_id="task/old",
+        predecessor={"status": "open", "supersedes": predecessor_supersedes},
+        successor_id="task/new",
+        successor={"status": "open"},
+        load_sidecar=load,
+    )
+
+
+def test_a_supersedes_list_of_non_string_entries_beyond_the_bound_is_refused():
+    g = _guards()
+    refusal = _pairing(g, [1] * (g._SUPERSEDE_ENTRY_LIMIT + 1))
+    assert len(refusal) == 1
+    assert "supersede-chain-too-long" in refusal[0]
+
+
+def test_a_supersedes_list_of_repeated_entries_beyond_the_bound_is_refused():
+    g = _guards()
+    refusal = _pairing(g, ["task/x"] * (g._SUPERSEDE_ENTRY_LIMIT + 1))
+    assert len(refusal) == 1
+    assert "supersede-chain-too-long" in refusal[0]
+
+
+def test_a_supersedes_list_within_the_bound_is_still_walked_normally():
+    g = _guards()
+    assert _pairing(g, [1] * g._SUPERSEDE_ENTRY_LIMIT) == []
+    reaching = ["task/x"] * (g._SUPERSEDE_ENTRY_LIMIT - 1) + ["task/new"]
+    refusal = _pairing(g, reaching)
+    assert len(refusal) == 1 and "supersede-cycle" in refusal[0]
+
+
+def test_a_chain_whose_entries_fan_out_past_the_bound_is_refused():
+    g = _guards()
+    wide = [f"task/n{i}" for i in range(g._SUPERSEDE_ENTRY_LIMIT // 2 + 1)]
+    refusal = _pairing(g, ["task/hub"], load=lambda _id: {"supersedes": wide})
+    assert len(refusal) == 1
+    assert "supersede-chain-too-long" in refusal[0]
