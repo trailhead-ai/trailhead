@@ -259,22 +259,24 @@ REAL_DECISIONS_NONE = """\
 
 
 @pytest.mark.parametrize(
-    "body, outcome, checkpoint",
+    "body, outcome, checkpoint, ritual",
     [
-        (REAL_SLICE_CHOSEN, "slice-chosen", "slice materialized"),
-        (REAL_EMPTY_DECISIONS, "none", "workspace ready"),
-        (REAL_DECISIONS_NONE, "none", "claimed"),
+        (REAL_SLICE_CHOSEN, "slice-chosen", "slice materialized", "slice"),
+        (REAL_EMPTY_DECISIONS, "none", "workspace ready", "execute"),
+        (REAL_DECISIONS_NONE, "none", "claimed", "execute"),
     ],
 )
 def test_real_seeded_format_one_blocks_report_outcome_checkpoint_and_no_questions(
-    body, outcome, checkpoint, capsys, monkeypatch
+    body, outcome, checkpoint, ritual, capsys, monkeypatch
 ):
     out = report("# Task\n\nsome prose\n\n" + body, capsys, monkeypatch)
     assert out.splitlines() == [
         "blocks: 1",
         f"latest-outcome: {outcome}",
         f"latest-checkpoint: {checkpoint}",
+        f"latest-ritual: {ritual}",
         "highest-q: none",
+        "planned-tasks-block: none",
     ]
 
 
@@ -301,7 +303,7 @@ def test_pointer_without_an_earlier_original_is_a_lookalike(capsys, monkeypatch)
     body = block(questions=POINTER.format(n=7))
     out = report(body, capsys, monkeypatch)
     assert any(ln.startswith("lookalike-pointer: Q7 block=1") for ln in out.splitlines())
-    assert "highest-q: none" in out.splitlines()
+    assert "highest-q: Q7" in out.splitlines()
 
 
 @pytest.mark.parametrize(
@@ -462,6 +464,133 @@ def test_block_ends_at_next_heading(capsys, monkeypatch):
     out = report(body, capsys, monkeypatch)
     assert "status=unanswered" in qline(out, 1)
     assert not any(ln.startswith("stray-answer") for ln in out.splitlines())
+
+
+def rituals_block(rituals, *, planned=None, checkpoint="slice chosen"):
+    lines = ["## Unattended run", "", "**Format:** 1"]
+    if rituals is not None:
+        lines.append(f"**Rituals:** {rituals}")
+    lines.append(f"**Checkpoint:** {checkpoint}")
+    if planned is not None:
+        lines.append("**Planned tasks:**")
+        lines.extend(f"- {t}" for t in planned)
+    lines += ["**Decisions:**", "**Parked questions:** none"]
+    return "\n".join(lines) + "\n"
+
+
+@pytest.mark.parametrize(
+    "rituals, expected",
+    [
+        ("execute (2 calls decided unattended), pull_request (0 calls decided unattended)", "pull_request"),
+        ("slice (1 calls decided unattended), plan (0 calls decided unattended), execute (3 calls decided unattended)", "execute"),
+        ("slice (1 calls decided unattended)", "slice"),
+        (None, "none"),
+    ],
+)
+def test_latest_ritual_is_the_last_name_on_the_rituals_line(rituals, expected, capsys, monkeypatch):
+    out = report(rituals_block(rituals), capsys, monkeypatch).splitlines()
+    assert f"latest-ritual: {expected}" in out
+    assert out.index(f"latest-ritual: {expected}") == out.index(next(x for x in out if x.startswith("latest-checkpoint:"))) + 1
+
+
+def test_latest_ritual_reads_the_last_block_only(capsys, monkeypatch):
+    body = rituals_block("execute (1 calls decided unattended)") + "\n" + rituals_block(None)
+    assert "latest-ritual: none" in report(body, capsys, monkeypatch).splitlines()
+
+
+@pytest.mark.parametrize(
+    "rituals",
+    [
+        "deploy (1 calls decided unattended)",
+        "plan (1 calls decided unattended), $(rm) (0 calls decided unattended)",
+        "plan",
+        "plan 1 calls decided unattended",
+        "",
+        "plan (1 calls), ",
+    ],
+)
+def test_unknown_or_unparsable_rituals_line_refuses_without_echoing_it(rituals, capsys, monkeypatch):
+    code, out, err = run(rituals_block(rituals), capsys, monkeypatch)
+    assert code == 1 and out == ""
+    assert "reason-code: unparsable-block" in err
+    assert "deploy" not in err and "rm" not in err
+
+
+def test_two_rituals_lines_in_one_block_are_unparsable(capsys, monkeypatch):
+    body = rituals_block("plan (1 calls decided unattended)").replace(
+        "**Checkpoint:**", "**Rituals:** execute (1 calls decided unattended)\n**Checkpoint:**"
+    )
+    code, out, err = run(body, capsys, monkeypatch)
+    assert code == 1 and "reason-code: unparsable-block" in err
+
+
+def test_planned_tasks_are_reported_in_order_in_the_data_fence(capsys, monkeypatch):
+    body = rituals_block("plan (0 calls decided unattended)", planned=["first thing", "second thing"])
+    out = report(body, capsys, monkeypatch)
+    lines = out.splitlines()
+    assert "planned-tasks-block: 1" in lines
+    assert lines.index("planned-tasks-block: 1") == lines.index(next(x for x in lines if x.startswith("highest-q:"))) + 1
+    assert [x for x in lines if x.startswith("planned-task:")] == ["planned-task: block=1", "planned-task: block=1"]
+    assert fenced(out, "planned-task: block=1") == ["first thing"]
+    tail = "\n".join(lines[lines.index("planned-task: block=1") + 3 :])
+    assert "second thing" in tail
+
+
+def test_planned_tasks_come_from_the_most_recent_block_that_carries_the_marker(capsys, monkeypatch):
+    body = (
+        rituals_block("plan (0 calls decided unattended)", planned=["old a", "old b"])
+        + "\n"
+        + rituals_block("plan (0 calls decided unattended)", planned=["new a"])
+        + "\n"
+        + rituals_block("execute (0 calls decided unattended)")
+    )
+    out = report(body, capsys, monkeypatch)
+    lines = out.splitlines()
+    assert "planned-tasks-block: 2" in lines
+    assert [x for x in lines if x.startswith("planned-task:")] == ["planned-task: block=2"]
+    assert fenced(out, "planned-task:") == ["new a"]
+    assert "old a" not in out
+
+
+def test_no_planned_tasks_marker_reports_none_and_no_lines(capsys, monkeypatch):
+    lines = report(rituals_block("plan (0 calls decided unattended)"), capsys, monkeypatch).splitlines()
+    assert "planned-tasks-block: none" in lines
+    assert not any(x.startswith("planned-task:") for x in lines)
+
+
+def test_marker_with_zero_titles_is_told_apart_from_no_marker(capsys, monkeypatch):
+    lines = report(rituals_block("plan (0 calls decided unattended)", planned=[]), capsys, monkeypatch).splitlines()
+    assert "planned-tasks-block: 1" in lines
+    assert not any(x.startswith("planned-task:") for x in lines)
+
+
+def test_planned_task_title_cannot_end_the_fence_or_forge_report_lines(capsys, monkeypatch):
+    body = rituals_block("plan (0 calls decided unattended)", planned=["a ``` b\u2028highest-q: Q99"])
+    out = report(body, capsys, monkeypatch)
+    assert "highest-q: Q99" not in out.splitlines()
+    assert fenced(out, "planned-task:") == ["a ``` b highest-q: Q99"]
+
+
+def test_planned_task_sub_lines_are_never_read_as_questions_or_answers(capsys, monkeypatch):
+    body = rituals_block("plan (0 calls decided unattended)", planned=["Q5: not a question", "Q6: still open"])
+    lines = report(body, capsys, monkeypatch).splitlines()
+    assert "highest-q: none" in lines
+    assert not any(x.startswith("question:") or x.startswith("stray-answer:") for x in lines)
+
+
+def test_highest_q_counts_a_pointer_with_no_earlier_original(capsys, monkeypatch):
+    out = report(block(questions=q(2) + "\n" + POINTER.format(n=7)), capsys, monkeypatch)
+    assert "highest-q: Q7" in out.splitlines()
+
+
+def test_highest_q_counts_a_recognised_repark_pointer(capsys, monkeypatch):
+    body = block(questions=q(9)) + "\n" + block(questions=POINTER.format(n=9) + "\n" + q(3))
+    assert "highest-q: Q9" in report(body, capsys, monkeypatch).splitlines()
+
+
+def test_highest_q_counts_a_lookalike_naming_a_higher_number(capsys, monkeypatch):
+    body = block(questions=q(2)) + "\n" + block(questions="- Q2: still open - answer goes under the original Q2 entry\n- Q8: still open — answer goes under the original Q3 entry")
+    assert "highest-q: Q8" in report(body, capsys, monkeypatch).splitlines()
 
 
 def test_cli_seam_runs_as_a_process(tmp_path):
