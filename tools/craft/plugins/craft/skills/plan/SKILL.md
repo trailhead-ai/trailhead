@@ -78,19 +78,27 @@ attended.
 
 **Entry: the record's latest block.** Once the checks pass, still before anything is written, read
 the parent through `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` and decide on its `latest-outcome:`
-by `_shared/unattended.md` (Resume, Whether a run resumes), whose refusal words this skill uses as
-written:
+and `latest-ritual:` lines by `_shared/unattended.md` (Resume, Whether a run resumes and Which
+ritual resumes), whose refusal words this skill uses as written:
 
 - No outcome, and this session's own `/craft:slice --then-plan` pass did not open it: refused as
   `outcome: refused task/<parent-name> parked=0 — <why>; <what to run instead>` unless `--resume` is
-  given. The reason says the latest run block is held by another run, how long ago the record last
-  changed, and that `--resume` is only for an earlier run known to be over.
-- `plan-ready`, `pr-ready`, `slice-chosen`, `waiting` or `spec-complete`: refused, the reason saying
-  the latest run is finished and, for `plan-ready`, that its plan is complete. `--resume` does not
-  change this.
+  given. The reason is the shared contract's fixed sentence: `the latest run block has no outcome so
+  another run holds it; the record last changed <age> ago, from the record's own update time;
+  --resume is only for an earlier run known to be over`.
+- `slice-chosen`: a fresh run. Slice's work is finished and plan is the next ritual, so plan opens
+  its own block after the earlier one and leaves that one as it is.
+- `plan-ready` or `pr-ready`: refused, the reason saying in words that plan's work is finished
+  (`plan-ready`) or that the build is finished (`pr-ready`). `--resume` does not change this.
+- `waiting` or `spec-complete`: refused, the reason saying in words that the run is finished.
+  `--resume` does not change this.
+- `needs-a-decision` or `stuck`: resumed without `--resume` when `latest-ritual:` is `plan`. When it
+  names any other ritual, refused, the reason saying in words which ritual to run to resume it (for
+  example, the latest run stopped in execute; run execute to resume it). When it is `none`, refused,
+  the reason saying in words that the latest run block names no ritual, so the stopped ritual cannot
+  be told.
 - No run block on the record and `--resume` given: refused, there is no earlier run to resume.
 - `run_block.py` refusing the body: refused, the reason naming its `reason-code`.
-- `needs-a-decision` or `stuck`: resumed without `--resume`.
 
 A refusal writes nothing. A resumed run follows Resuming below. When the elected vault is unbound
 (`lore vault resolve` returns a null `vault`), `_shared/unattended.md` (The unbound default vault)
@@ -174,10 +182,11 @@ never restates them.
      decisions they are.
   2. Exactly one of the two: the body is incomplete, never complete. Re-derive the missing section
      from the spec and the sections written and add it by a confined `--diff`.
-  3. Both: compare the children with the plan. With a `**Planned tasks:**` line in the latest
-     earlier block that names titles, compare them against `lore task graph task/<parent-name>` and
-     create only the missing children, each body re-derived from the parent's Delta design as step
-     8.2 says; without that line, the existing children are the complete set.
+  3. Both: compare the children with the plan. Read the planned titles from the `planned-task:`
+     lines of `run_block.py`, which reports the marker of the most recent block that carries one,
+     never by eye. With titles, compare them against `lore task graph task/<parent-name>` and create
+     only the missing children, each body re-derived from the parent's Delta design as step 8.2
+     says; with `planned-tasks-block: none`, the existing children are the complete set.
   4. No `## Council Review`: run step 8.5.
   5. A `*Critical:*` line with no disposition, or `bounced-back-to-spec`, is a parked Critical.
      Apply its answered option by a confined `--diff` edit that closes the Critical in the plan and
