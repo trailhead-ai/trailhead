@@ -637,6 +637,19 @@ Readings:
 
 Spend (runner list price plus judge votes): about 12.5 USD (the new case 0.84 baseline, 0.3 trace diagnostic and 0.67 treatment; the six PR-step cases 9.5; the guard 1.2).
 
+## Mapping correction: three refusal cases never reach the agents (2026-11-12)
+
+An authoring error, not a result. The `## Under test` sections of
+`unattended-pr-step-refuses-without-a-record`, `unattended-pr-step-refuses-a-default-branch-label` and
+`unattended-pr-step-ends-stuck-on-a-failed-block-write` named the updater and monitor agents as prose under test,
+and `eval-gate.json` mapped all three cases to both agents. Each case ends before the skill dispatches any
+subagent, and its `no-agent-dispatched` grader (`tool_used` on `Agent`, `max: 0`) fails the run if one is
+dispatched, so no edit to either agent can move its result. The sections and the mapping now name
+`skills/pull_request/SKILL.md` only. No case, prompt, fixture or grader changed, and nothing was run.
+
+Effect on the push gate: a change to the monitor agent selects 12 cases instead of 15, and a change to the
+updater 7 instead of 10.
+
 ## Merge-tier gate pass (2026-11-12)
 
 Runner settings: `--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 1`. The grants are exactly the `runner` block. Runner 2.1.322 on Linux. Each case ran as its own invocation. The runs were made outside the session's sandbox, because the runner's inner sandbox cannot open its socket inside the session sandbox.

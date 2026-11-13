@@ -77,6 +77,7 @@ _TRAILHEAD_BIN = _REPO_ROOT / "bin" / "trailhead"
 _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 _GATEWAY_BIN = _REPO_ROOT / "bin" / "outpost-gateway"
 _GATEWAY_SCRIPT = _REPO_ROOT / "bin" / "_outpost_gateway.py"
+_REGISTER_SCRIPT = _REPO_ROOT / "bin" / "_gateway_register.py"
 
 
 def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
@@ -125,9 +126,10 @@ def build_cli_shims(
     outpost_enabled: bool = False,
 ) -> Path | None:
     """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``
-    (plus an ``outpost-gateway`` shim pinned to this interpreter when *outpost_enabled*,
-    because the harness runs that command outside its sandbox); the one shim
-    build shared by ``trailhead install`` and ``trailhead update``.
+    (plus, when *outpost_enabled*, the ``outpost-gateway`` and ``trailhead-gateway-register``
+    shims pinned to this interpreter, because the harness runs both outside its sandbox:
+    the first as an excluded command, the second from the Outpost plugin's SessionStart
+    hook); the one shim build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
     disables every CLI builds no shims, and the repo's own binaries alone do not change that.
@@ -138,9 +140,11 @@ def build_cli_shims(
         return None
     shim_root = _REPO_ROOT if root is None else root
     pinned = {}
-    gateway_script = _GATEWAY_SCRIPT if root is None else root / "bin" / "_outpost_gateway.py"
-    if outpost_enabled and gateway_script.exists():
-        pinned["outpost-gateway"] = gateway_script
+    if outpost_enabled:
+        for name, default in (("outpost-gateway", _GATEWAY_SCRIPT), ("trailhead-gateway-register", _REGISTER_SCRIPT)):
+            script = default if root is None else root / "bin" / default.name
+            if script.exists():
+                pinned[name] = script
     return create_shims(
         _with_own_binaries(cli_tools, root), str(shim_root), env=env, pinned_scripts=pinned
     ).shim_dir

@@ -53,13 +53,27 @@ def runner_env(
     return env
 
 
-def register_port_env(port: int) -> dict[str, str]:
-    """Environment that points the real ``trailhead`` shim's registration step at *port*."""
-    return {
-        "PYTHONPATH": str(Path(__file__).with_name("_register_port")),
-        "TRAILHEAD_TEST_REGISTER_PORT": str(port),
-        "TRAILHEAD_TEST_REPO_ROOT": str(REPO_ROOT),
-    }
+def register_port_interpreter(directory: Path, port: int) -> Path:
+    """An interpreter for install to pin that aims the registration step at *port*.
+
+    The pinned shims start their interpreter isolated, from an empty environment, so no
+    variable the session sets can retarget them; a test pins this stand-in instead (patch
+    ``trailhead.pathint.sys.executable`` while building the shims). It requires the
+    ``-I -S`` the shim passes, drops them so ``_register_port/sitecustomize.py`` loads, and
+    runs this test interpreter on the shim's script.
+    """
+    directory.mkdir(parents=True, exist_ok=True)
+    interpreter = directory / "register-port-python"
+    interpreter.write_text(
+        "#!/bin/sh\n"
+        '[ "$1" = -I ] && [ "$2" = -S ] || { echo "not started isolated: $*" >&2; exit 97; }\n'
+        "shift 2\n"
+        f'PYTHONPATH="{Path(__file__).with_name("_register_port")}" '
+        f'TRAILHEAD_TEST_REGISTER_PORT="{port}" TRAILHEAD_TEST_REPO_ROOT="{REPO_ROOT}" '
+        f'exec "{sys.executable}" "$@"\n'
+    )
+    interpreter.chmod(0o755)
+    return interpreter
 
 
 def gateway_runner_cmd(port: int, env_dump: Path, argv: list[str]) -> str:

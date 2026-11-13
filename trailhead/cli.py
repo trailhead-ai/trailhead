@@ -492,7 +492,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     gateway_sub = gateway_p.add_subparsers(dest="gateway_command", metavar="<verb>", required=True)
     register_p = gateway_sub.add_parser(
-        "register", help="Register this session with Outpost's gateway (used by the SessionStart hook)."
+        "register", help="Register this session with Outpost's gateway (the SessionStart hook runs the same step)."
     )
     register_p.add_argument(
         "--hook", action="store_true", help="Run as a hook: silent on success, always exit 0."

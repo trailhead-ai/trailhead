@@ -80,9 +80,7 @@
     },
     "unattended-pr-step-ends-stuck-on-a-failed-block-write": {
       "measures": [
-        "skills/pull_request/SKILL.md",
-        "agents/updater.md",
-        "agents/monitor.md"
+        "skills/pull_request/SKILL.md"
       ]
     },
     "unattended-pr-step-never-merges": {
@@ -94,16 +92,12 @@
     },
     "unattended-pr-step-refuses-a-default-branch-label": {
       "measures": [
-        "skills/pull_request/SKILL.md",
-        "agents/updater.md",
-        "agents/monitor.md"
+        "skills/pull_request/SKILL.md"
       ]
     },
     "unattended-pr-step-refuses-without-a-record": {
       "measures": [
-        "skills/pull_request/SKILL.md",
-        "agents/updater.md",
-        "agents/monitor.md"
+        "skills/pull_request/SKILL.md"
       ]
     },
     "unattended-pr-step-reruns-after-a-stuck-run": {

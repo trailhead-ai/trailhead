@@ -1,4 +1,5 @@
-"""The `outpost-gateway` shim: built beside `ranger` when the Outpost tool is enabled."""
+"""The pinned shims, `outpost-gateway` and `trailhead-gateway-register`: built beside `ranger`
+when the Outpost tool is enabled."""
 
 from __future__ import annotations
 
@@ -6,6 +7,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 from trailhead.install import build_cli_shims, resolve_cli_tools
 from trailhead.install_config import ResolvedHarness, ResolvedPlugin
@@ -43,10 +46,29 @@ class TestShimBuild:
         shim = resolve_shim_dir(env=env) / "outpost-gateway"
         assert str(root / "bin" / "_outpost_gateway.py") in shim.read_text()
 
-    def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(self, tmp_path):
+    def test_outpost_enabled_writes_a_register_shim_that_runs_the_registration_step(self, tmp_path):
         env = _env(tmp_path)
         build_cli_shims(_tools(), env=env, outpost_enabled=True)
-        shim = resolve_shim_dir(env=env) / "outpost-gateway"
+        state = tmp_path / "trailhead-state"
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "trailhead-gateway-register"), "--hook"],
+            capture_output=True,
+            text=True,
+            env={"HOME": env["HOME"], "PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(state)},
+            timeout=60,
+        )
+        assert (proc.returncode, proc.stdout) == (0, ""), proc.stderr
+        (line,) = (state / "gateway" / "register.log").read_text().splitlines()
+        assert line.split()[2] == "no_harness"
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("outpost-gateway", "run list"), ("trailhead-gateway-register", "Register this session")],
+    )
+    def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(self, tmp_path, name, expected):
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        shim = resolve_shim_dir(env=env) / name
         marker = tmp_path / "ran-hostile-code"
         hostile_bin = tmp_path / "venv-bin"
         hostile_bin.mkdir()
@@ -69,7 +91,7 @@ class TestShimBuild:
             [str(shim), "--help"], capture_output=True, text=True, env=run_env, cwd=cwd, timeout=60
         )
         assert proc.returncode == 0, proc.stderr
-        assert "run list" in proc.stdout
+        assert expected in proc.stdout
         assert not marker.exists(), marker.read_text()
 
     def test_an_installing_venv_that_is_a_copy_does_not_put_its_site_packages_in_front(self, tmp_path, monkeypatch):
@@ -161,6 +183,7 @@ class TestShimBuild:
         shim_dir = resolve_shim_dir(env=env)
         assert (shim_dir / "ranger").exists()
         assert not (shim_dir / "outpost-gateway").exists()
+        assert not (shim_dir / "trailhead-gateway-register").exists()
 
     def test_default_is_no_gateway_shim(self, tmp_path):
         env = _env(tmp_path)
