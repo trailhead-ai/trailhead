@@ -84,7 +84,7 @@ PARENT='**Value claim:** You can run one command on a CSV input and read its col
 - The summary line wording is not fixed (raised by: Advocate)
 
 *Minor:*
-- Task names mix Read and Sum verbs (raised by: Builder)
+- Task names combine Read and Sum verbs (raised by: Builder)
 '
 printf '%s\n' "$PARENT" | ./lore record create --kind task --title 'Print the totals of a CSV input' --status in-progress --related spec=totals-report --label craft/slice-parent >/dev/null
 CHILD0='**Delivers:** `totals.py` gains `read_rows(path)`, which yields each row of a CSV input as a list of strings.
