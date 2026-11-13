@@ -70,6 +70,7 @@ CODE_NOT_A_RECORD_ID = "not-a-record-id"
 
 # Seam: the run reads vaults only through this.
 _scan_vault = scan_mod.scan_vault
+_check_structure = structure_mod.check_structure
 
 
 class _CannotRun(Exception):
@@ -96,11 +97,17 @@ def _plural(n: int, singular: str, plural: str) -> str:
 
 
 def _structure(scan: VaultScan, root: Path) -> tuple[list[Finding], int]:
-    """Structural findings, and the escaping skips the orphan walk adds beyond the scan's own."""
+    """Structural findings, and the escaping skips the orphan walk adds beyond the scan's own.
+
+    A walk that cannot read the vault is a ``vault-unreadable`` finding, unless the
+    scan already reported one, so a failure never reads as a clean pass.
+    """
     try:
-        found, skips = structure_mod.check_structure(scan, root)
+        found, skips = _check_structure(scan, root)
     except OSError:
-        return [], 0
+        if scan.unreadable_reason is not None:
+            return [], 0
+        return [Finding(scan.vault, "", CODE_VAULT_UNREADABLE, "the vault directory could not be read")], 0
     return [Finding(f.vault, f.record_id, f.code, f.detail) for f in found], skips
 
 
@@ -208,6 +215,7 @@ def cmd_validate(args) -> int:
         sys.stdout.flush()
     except BrokenPipeError:
         _stdout_closed()
+        print(_summary(findings, records, vaults), file=sys.stderr)
         return 1
     print(_summary(findings, records, vaults), file=sys.stderr)
     return 1 if findings else 0

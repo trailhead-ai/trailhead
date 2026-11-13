@@ -125,7 +125,9 @@ def test_sidecar_symlinked_outside_names_no_outside_path(root, tmp_path):
     outside.write_text(json.dumps(_sidecar()))
     (root / "lesson" / "good.json").unlink()
     (root / "lesson" / "good.json").symlink_to(outside)
-    findings, _ = check(root)
+    scan = scan_mod.scan_vault("v", root)
+    findings, _ = structure.check_structure(scan, root)
+    assert scan.skipped_escaping == 1
     assert all("outside-secret" not in f.detail and "outside-secret" not in f.record_id
                for f in findings)
 
@@ -155,6 +157,68 @@ def test_symlinked_orphan_is_skip_not_body_missing_and_never_opened(root, tmp_pa
     assert findings == []
     assert skips == 1
     assert not [p for p in opened if "ghost" in p or "outside-secret" in p]
+
+
+def _total_escaping(root):
+    scan = scan_mod.scan_vault("v", root)
+    findings, skips = structure.check_structure(scan, root)
+    return findings, scan.skipped_escaping + skips
+
+
+def test_symlinked_md_orphan_outside_is_counted_exactly_once(root, tmp_path):
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("secret\n")
+    (root / "lesson" / "ghost.md").symlink_to(outside)
+    findings, total = _total_escaping(root)
+    assert findings == []
+    assert total == 1
+
+
+def test_symlinked_json_orphan_outside_is_counted_exactly_once(root, tmp_path):
+    outside = tmp_path / "outside-secret.json"
+    outside.write_text(json.dumps(_sidecar()))
+    (root / "lesson" / "ghost.json").symlink_to(outside)
+    findings, total = _total_escaping(root)
+    assert findings == []
+    assert total == 1
+
+
+def test_md_orphan_symlinked_inside_the_vault_is_sidecar_missing(root):
+    (root / "lesson" / "alias.md").symlink_to(root / "lesson" / "good.md")
+    findings, total = _total_escaping(root)
+    assert codes(findings) == [("lesson/alias", "sidecar-missing")]
+    assert total == 0
+
+
+def test_json_orphan_symlinked_inside_the_vault_is_body_missing_and_never_opened(root, monkeypatch):
+    (root / "lesson" / "alias.json").symlink_to(root / "lesson" / "good.json")
+    scan = scan_mod.scan_vault("v", root)
+    opened = []
+    real_os_open = os.open
+    import builtins
+    real_builtin = builtins.open
+
+    def spy_os_open(path, *a, **k):
+        opened.append(str(path))
+        return real_os_open(path, *a, **k)
+
+    def spy_open(path, *a, **k):
+        opened.append(str(path))
+        return real_builtin(path, *a, **k)
+
+    monkeypatch.setattr(os, "open", spy_os_open)
+    monkeypatch.setattr(builtins, "open", spy_open)
+    findings, skips = structure.check_structure(scan, root)
+    assert codes(findings) == [("lesson/alias", "body-missing")]
+    assert skips == 0
+    assert not [p for p in opened if "alias" in p]
+
+
+def test_a_directory_named_as_the_sidecar_is_one_finding(root):
+    (root / "lesson" / "good.json").unlink()
+    (root / "lesson" / "good.json").mkdir()
+    findings, _ = check(root)
+    assert [f.record_id for f in findings] == ["lesson/good"]
 
 
 def test_non_kind_top_level_dirs_are_ignored(root):

@@ -3,19 +3,20 @@
 Findings come from three places: the scan's own unreadable records, the
 ``model.validate`` errors of each readable sidecar (plus a kind that differs
 from its directory), and a confined walk for orphan artifacts the scan skips
-silently. The walk uses ``lstat`` only and never opens or follows a file, and a
-symlinked orphan counts as an escaping skip, returned as a number and never as a path.
+silently. The walk uses ``scandir`` and realpath only and never opens or reads a
+file. A symlinked orphan whose realpath leaves the vault is an escaping skip,
+returned as a number and never as a path; one resolving inside the vault is the
+orphan defect it is.
 """
 
 from __future__ import annotations
 
 import os
-import stat
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..record import model as record_model
-from ..record import rename
+from ..record import rename, store
 from . import references
 from .model import VaultScan
 
@@ -36,12 +37,15 @@ class StructuralFinding:
 def _orphans(vault: str, root: Path):
     """Return ``(findings, escaping_skips)`` for flat artifacts missing their partner.
 
-    A symlinked kind directory is passed over without counting: the scan
-    already counts it in ``skipped_escaping``.
+    Escaping artifacts are counted once across scan and walk. The scan counts a
+    symlinked kind directory and any escaping ``.md``, so the walk skips those;
+    it counts only an escaping ``.json`` orphan, which the scan never sees. An
+    existing non-symlink entry of any type counts as present, so an unreadable
+    sidecar is the scan's one finding and not also a missing one.
     """
     findings: list[StructuralFinding] = []
     skips = 0
-    for kind_dir, _ in rename._confined_kind_dirs(root):
+    for kind_dir, root_real in rename._confined_kind_dirs(root):
         kind = kind_dir.name
         try:
             with os.scandir(kind_dir) as it:
@@ -53,18 +57,14 @@ def _orphans(vault: str, root: Path):
             stem, ext = os.path.splitext(entry.name)
             if ext not in (".md", ".json") or references.resolve(stem, kind) is None:
                 continue
-            try:
-                st = entry.stat(follow_symlinks=False)
-            except OSError:
-                continue
-            is_link = entry.is_symlink()
-            if is_link or stat.S_ISREG(st.st_mode):
-                present.setdefault(stem, {})[ext] = is_link
+            escapes = entry.is_symlink() and not store._realpath_is_descendant(entry.path, root_real)
+            present.setdefault(stem, {})[ext] = escapes
         for stem, exts in present.items():
             if len(exts) == 2:
                 continue
             if any(exts.values()):
-                skips += 1
+                if ".json" in exts:
+                    skips += 1
                 continue
             code = CODE_SIDECAR_MISSING if ".md" in exts else CODE_BODY_MISSING
             detail = "has a body but no sidecar" if ".md" in exts else "has a sidecar but no body"
@@ -75,8 +75,9 @@ def _orphans(vault: str, root: Path):
 def check_structure(scan: VaultScan, root) -> tuple[list[StructuralFinding], int]:
     """Return ``(findings, escaping_skips)`` for one scanned vault rooted at *root*.
 
-    ``escaping_skips`` counts only symlinked orphan artifacts, which the scan
-    never sees, so it adds to the scan's ``skipped_escaping`` without overlap.
+    ``escaping_skips`` counts only escaping symlinked ``.json`` orphans, which
+    the scan never sees, so it adds to the scan's ``skipped_escaping`` without
+    overlap.
     """
     findings = [
         StructuralFinding(u.vault, f"{u.kind}/{u.name}", u.reason, "record could not be read")

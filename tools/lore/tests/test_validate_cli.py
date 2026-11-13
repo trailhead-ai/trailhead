@@ -365,6 +365,47 @@ def test_two_symlinked_kind_directories_are_counted_twice(world, tmp_path):
     ]
 
 
+def test_symlinked_md_orphan_is_counted_once_without_a_path(world, tmp_path):
+    outside = tmp_path / "outside-secret.md"
+    outside.write_text("secret\n")
+    _put(world.roots["default"], "lesson", "good")
+    (world.roots["default"] / "lesson" / "ghost.md").symlink_to(outside)
+    r = world.run()
+    assert r.returncode == 1
+    assert [l for l in lines(r) if "links-not-checked" not in l] == [
+        "default: records-outside-vault: 1 record lies outside the vault root and was not read"
+    ]
+    assert "outside-secret" not in r.stdout + r.stderr
+
+
+def test_md_orphan_symlinked_inside_the_vault_is_sidecar_missing_not_outside(world):
+    root = world.roots["default"]
+    _put(root, "lesson", "good")
+    (root / "lesson" / "alias.md").symlink_to(root / "lesson" / "good.md")
+    r = world.run()
+    assert r.returncode == 1
+    out = [l for l in lines(r) if "links-not-checked" not in l]
+    assert len(out) == 1 and out[0].startswith("default lesson/alias: sidecar-missing: ")
+    assert "records-outside-vault" not in r.stdout
+
+
+def test_an_unreadable_structure_walk_is_a_vault_unreadable_finding_not_a_pass(world):
+    _put(world.roots["default"], "lesson", "good")
+    validate = importlib.import_module("lore.cli.validate")
+    saved = validate._check_structure
+
+    def boom(scan, root):
+        raise PermissionError("no")
+
+    validate._check_structure = boom
+    try:
+        r = world.run()
+    finally:
+        validate._check_structure = saved
+    assert r.returncode == 1
+    assert lines(r) == ["default: vault-unreadable: the vault directory could not be read"]
+
+
 def test_symlinked_kind_directory_is_counted_with_path(world, tmp_path):
     d = tmp_path / "bare"
     _put(d, "lesson", "good")
@@ -455,10 +496,15 @@ def test_run_over_two_vaults_one_read_only_changes_nothing(tmp_path):
 def test_path_run_changes_nothing_and_leaves_no_lock_or_index(world, tmp_path):
     d = tmp_path / "bare"
     _put(d, "lesson", "bad", status="nonsense", body="[[gone]]\n")
-    before = snapshot(d)
+    def state_snapshot():
+        # the harness itself writes a config under _xdg_config on every run
+        return {k: v for k, v in snapshot(world.state).items() if not k.startswith("_xdg_config")}
+
+    before, state_before = snapshot(d), state_snapshot()
     r = world.run("--path", str(d))
     assert r.returncode == 1
     assert snapshot(d) == before
+    assert state_snapshot() == state_before
 
 
 # --- a closed stdout pipe -----------------------------------------------------
@@ -478,3 +524,4 @@ def test_closed_stdout_pipe_ends_without_a_traceback(world):
     p.wait()
     assert "Traceback" not in err and "BrokenPipe" not in err
     assert p.returncode == 1
+    assert "lore: validated 50 records in 1 vaults: 50 findings (invalid-sidecar 50)" in err
