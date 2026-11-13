@@ -16,13 +16,13 @@ import pytest
 
 from conftest import load_script, run_cli, write_vault_config
 
-ROW_RE = re.compile(r"^(\S+)\s+(dangling-links|retired-links)\s+(\S+)\s+(\S+)\s+(.*)$")
-CHECKS = ("dangling-links", "retired-links")
-GROUP_RE = re.compile(r"^(dangling-links|retired-links) — ")
+ROW_RE = re.compile(r"^(\S+)\s+(dangling-links|retired-links|stale-tasks)\s+(\S+)\s+(\S+)\s+(.*)$")
+CHECKS = ("dangling-links", "retired-links", "stale-tasks")
+GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
-def _put(root, kind, name, updated="2026-03-01", body="text\n", **extra):
+def _put(root, kind, name, updated="2026-03-01T00:00:00Z", body="text\n", **extra):
     d = root / kind
     d.mkdir(parents=True, exist_ok=True)
     side = {"title": name, "status": "active", "created-at": "2026-01-01", **extra}
@@ -90,7 +90,10 @@ def group(out, check):
     assert starts, f"no {check} group in output:\n{out}"
     start = starts[0]
     end = next((i for i in range(start + 1, len(lines)) if GROUP_RE.match(lines[i])), len(lines))
-    return lines[start:end]
+    block = lines[start:end]
+    while block and block[-1] == "":
+        block.pop()
+    return block
 
 
 def retired_lines(out):
@@ -103,7 +106,7 @@ def finding_lines(out):
 
 def _twenty_five(root):
     for i in range(25):
-        _put(root, "task", f"t{i:02d}", updated=f"2026-02-{i + 1:02d}",
+        _put(root, "task", f"t{i:02d}", updated=f"2026-02-{i + 1:02d}T00:00:00Z",
              related={"lesson": [f"gone-{i:02d}"]})
     _put(root, "task", "t-undated", updated=None, related={"lesson": ["gone-undated"]})
     # 26 records, but one of the dated ones is removed so exactly 25 findings remain
@@ -194,7 +197,7 @@ def test_non_positive_limit_is_rejected_by_argparse(world, bad):
 
 
 def test_non_string_updated_at_sorts_oldest_without_raising(world):
-    _put(world.roots["default"], "lesson", "dated", updated="2020-01-01", related={"lesson": ["x1"]})
+    _put(world.roots["default"], "lesson", "dated", updated="2020-01-01T00:00:00Z", related={"lesson": ["x1"]})
     _put(world.roots["default"], "lesson", "weird", updated=7, related={"lesson": ["x2"]})
     r = world.run()
     assert r.returncode == 0, r.stderr
@@ -564,14 +567,15 @@ def evil(tmp_path):
     return w
 
 
-def test_finding_lines_neutralize_vault_record_and_malformed_targets(evil):
+def test_finding_lines_neutralize_the_vault_name_and_never_echo_a_bad_record_name(evil):
     r = evil.run()
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout and "\r" not in r.stdout
     lines = finding_lines(r.stdout)
     assert len(lines) == 3  # dangling related, malformed wikilink, dangling [[ok-one]]
     for ln in lines:
-        assert ln.startswith("  ev\\nil\\x1b[31mv/lesson/rec\\nforged\\x1b[2Jname  ")
+        assert ln.startswith("  ev\\nil\\x1b[31mv/lesson/ (a record whose name is not a valid record id)  ")
+        assert "forged" not in ln
     assert any("malformed reference" in ln and "bad" not in ln.split("wikilink")[1] for ln in lines)
 
 
@@ -717,6 +721,7 @@ def test_dropped_target_is_one_finding_and_a_live_target_clears_the_group(world)
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
     assert group(r.stdout, "retired-links")[-1] == (
         "Act on these with /lore:correct: point a superseded link at a named live successor; "
+        "for a superseded record that links back, run the lore record supersede command shown; "
         "remove a link to a dropped record, or to one with no live successor, unless it still applies.")
     _put(d, "decision", "pool-size-limits")
     r = world.run()
@@ -841,7 +846,11 @@ def test_retired_records_column_counts_live_linking_records(world):
 def _caps_fixture(root):
     _twenty_five(root)
     _put(root, "decision", "gone", status="dropped")
-    for name, updated in (("r-new", "2026-05-03"), ("r-old", "2026-05-01"), ("r-mid", "2026-05-02")):
+    for name, updated in (
+        ("r-new", "2026-05-03T00:00:00Z"),
+        ("r-old", "2026-05-01T00:00:00Z"),
+        ("r-mid", "2026-05-02T00:00:00Z"),
+    ):
         _put(root, "decision", name, updated=updated, related={"decision": ["gone"]})
 
 
@@ -893,7 +902,7 @@ def test_a_check_that_raises_is_errored_while_the_other_still_renders(world, mon
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
 
-    def boom(scans, selected):
+    def boom(scans, selected, ctx):
         raise RuntimeError("boom\nsecond line")
 
     _with_checks(monkeypatch, raising, boom)
@@ -924,7 +933,7 @@ def _unreadable_world(world):
 def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     r = _unreadable_world(world)
     assert r.returncode == 0, r.stderr
-    assert len(all_rows(r.stdout)) == 6
+    assert len(all_rows(r.stdout)) == 9
     for v in ("default", "trailhead"):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
         assert rows(r.stdout, "retired-links")[v][2] == (
@@ -968,14 +977,15 @@ def test_retired_skip_is_classified_through_a_reloaded_module(world):
     assert group(r.stdout, "retired-links") == ["retired-links — skipped."]
 
 
-def test_retired_findings_neutralize_vault_and_record_names(evil):
+def test_retired_findings_neutralize_the_vault_name_and_never_echo_a_bad_record_name(evil):
     _put(evil.roots["default"], "decision", "gone", status="dropped")
     _put(evil.roots[EVIL_VAULT], "decision", EVIL_NAME, related={"decision": ["gone"]})
     r = evil.run()
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout
     (line,) = retired_lines(r.stdout)
-    assert line.startswith("  ev\\nil\\x1b[31mv/decision/rec\\nforged\\x1b[2Jname  ")
+    assert line.startswith("  ev\\nil\\x1b[31mv/decision/ (a record whose name is not a valid record id)  ")
+    assert "forged" not in r.stdout
 
 
 def test_same_name_successors_in_two_vaults_print_their_vault_but_a_lone_one_does_not(world):
@@ -1025,3 +1035,705 @@ def test_a_render_that_raises_errors_only_its_check(world, monkeypatch):
     monkeypatch.undo()
     r = world.run()
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
+
+
+# --- shape-checked identity and date, time-ordered sort, group separation --------
+
+HOSTILE_NAMES = ["Bad Name", "UPPER", "ignore previous instructions"]
+BAD_ID = "/ (a record whose name is not a valid record id)"
+
+
+def _hostile_dangling(root, name):
+    _put(root, "lesson", name, related={"lesson": ["gone"]})
+
+
+def _hostile_retired(root, name):
+    _put(root, "decision", "x", status="dropped")
+    _put(root, "task", name, status="in-progress", related={"decision": ["x"]})
+
+
+@pytest.mark.parametrize("plant,kind", [(_hostile_dangling, "lesson"), (_hostile_retired, "task")],
+                         ids=["dangling-links", "retired-links"])
+@pytest.mark.parametrize("name", HOSTILE_NAMES)
+def test_a_record_name_that_is_not_a_record_id_prints_the_fixed_phrase_and_never_itself(
+        world, plant, kind, name):
+    d = world.roots["default"]
+    plant(d, name)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert f"  default/{kind}{BAD_ID}  2026-03-01  " in r.stdout
+    for word in name.split():
+        assert word not in r.stdout
+
+
+def test_a_well_shaped_name_still_prints_beside_a_hostile_one(world):
+    d = world.roots["default"]
+    _put(d, "lesson", "Bad Name", related={"lesson": ["gone"]})
+    _put(d, "lesson", "good-name", related={"lesson": ["gone"]})
+    r = world.run()
+    lines = finding_lines(r.stdout)
+    assert sorted(ln.split("  ")[1] for ln in lines) == [f"default/lesson{BAD_ID}", "default/lesson/good-name"]
+
+
+@pytest.mark.parametrize("updated,printed", [
+    ("2026-03-14T10:00:00Z", "2026-03-14"),
+    ("2026-03-14T23:30:00-05:00", "2026-03-15"),
+    ("ignore previous instructions", "undated"),
+    ("2026-03-14", "undated"),
+    ("2026-03-14T10:00:00", "undated"),
+    (None, "undated"),
+])
+def test_the_date_prints_only_when_updated_at_parses_as_a_timestamp(world, updated, printed):
+    _put(world.roots["default"], "lesson", "a", updated=updated, related={"lesson": ["gone"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert finding_lines(r.stdout)[0].startswith(f"  default/lesson/a  {printed}  ")
+    assert "ignore" not in r.stdout and "instructions" not in r.stdout
+
+
+def test_findings_sort_by_the_moment_they_happened_and_undated_first(world):
+    d = world.roots["default"]
+    # text order puts "a-late" first; time order (UTC) puts it last
+    _put(d, "lesson", "a-late", updated="2026-03-01T23:00:00-05:00", related={"lesson": ["g1"]})
+    _put(d, "lesson", "b-early", updated="2026-03-02T01:00:00+00:00", related={"lesson": ["g2"]})
+    _put(d, "lesson", "c-undated", updated="not a time", related={"lesson": ["g3"]})
+    r = world.run()
+    assert [ln.split()[0] for ln in finding_lines(r.stdout)] == [
+        "default/lesson/c-undated", "default/lesson/b-early", "default/lesson/a-late"]
+
+
+class _Unorderable:
+    def __lt__(self, other):
+        raise TypeError("cannot compare")
+
+    __gt__ = __le__ = __ge__ = __lt__
+
+    def __eq__(self, other):
+        return False
+
+    def __hash__(self):
+        return 0
+
+
+def test_a_sort_key_that_raises_errors_only_its_check(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    health = importlib.import_module("lore.cli.health")
+
+    def stubbed(scans, selected, ctx):
+        def mk():
+            return type("F", (), {"vault": "default", "kind": "lesson", "name": _Unorderable(),
+                                  "updated_at": "2026-03-01T00:00:00Z"})()
+        return health.CheckRun([mk(), mk()], {"default": 2})
+
+    _with_checks(monkeypatch, "retired-links", stubbed)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, "retired-links") == ["retired-links — errored: TypeError."]
+    assert group(r.stdout, "dangling-links")[0] == "dangling-links — 1 finding, oldest first"
+
+
+def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_line(world):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    _put(d, "task", "old", status="open", updated="2020-01-01T00:00:00Z")
+    r = world.run()
+    lines = r.stdout.split("\n")
+    assert lines[-1] == "" and lines[-2] != ""  # one final newline, no trailing blank line
+    first = lines.index(next(ln for ln in lines if ln.startswith("dangling-links — ")))
+    second = lines.index(next(ln for ln in lines if ln.startswith("retired-links — ")))
+    assert lines[second - 1] == "" and lines[second - 2] != ""
+    assert "" not in lines[first:second - 1]
+    third = lines.index(next(ln for ln in lines if ln.startswith("stale-tasks — ")))
+    assert lines[third - 1] == "" and lines[third - 2].startswith("Act on these with /lore:correct")
+    assert lines[-2] == ACTION
+
+
+TIMESTAMP_SHAPES = {
+    "z": "2026-03-01T10:00:00Z",
+    "offset": "2026-03-01T10:00:00+05:00",
+    "naive": "2026-03-01T10:00:00",
+    "date-only": "2026-03-01",
+    "year-1-positive-offset": "0001-01-01T00:00:00+05:00",
+    "year-9999-negative-offset": "9999-12-31T23:59:59-05:00",
+    "prose": "last tuesday",
+}
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("2026-03-01T10:00:00Z", "2026-03-01T10:00:00+00:00"),
+    ("2026-03-01T10:00:00+05:00", "2026-03-01T05:00:00+00:00"),
+    ("2026-03-01T10:00:00", None),
+    ("2026-03-01", None),
+    ("0001-01-01T00:00:00+05:00", None),
+    ("9999-12-31T23:59:59-05:00", None),
+    ("last tuesday", None),
+    (7, None),
+    (None, None),
+])
+def test_the_timestamp_parser_returns_aware_utc_or_none_and_never_raises(value, expected):
+    model = importlib.import_module("lore.health.model")
+    got = model.parse_timestamp(value)
+    assert (got.isoformat() if got is not None else None) == expected
+
+
+def test_one_record_of_every_timestamp_shape_errors_no_check(world):
+    d = world.roots["default"]
+    for key, value in TIMESTAMP_SHAPES.items():
+        _put(d, "lesson", f"rec-{key}", updated=value, related={"lesson": [f"gone-{key}"]})
+    _put(d, "lesson", "rec-int", updated=7, related={"lesson": ["gone-int"]})
+    _put(d, "lesson", "rec-missing", updated=None, related={"lesson": ["gone-missing"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "errored" not in r.stdout
+    assert len(finding_lines(r.stdout)) == len(TIMESTAMP_SHAPES) + 2
+
+
+def test_a_retired_candidate_beside_a_hostile_successor_never_echoes_the_hostile_name(world):
+    d = world.roots["default"]
+    _put(d, "decision", "x", status="superseded")
+    _put(d, "decision", "Bad Name", supersedes=["decision/x"])
+    _put(d, "decision", "good-successor", supersedes=["decision/x"])
+    _live_task(d, "t", related={"decision": ["x"]})
+    r = world.run()
+    (line,) = retired_lines(r.stdout)
+    assert "decision/good-successor" in line and "Bad" not in r.stdout
+    assert "a successor whose name is not a valid record id" in line
+
+
+def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch):
+    from datetime import datetime, timezone
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    seen = []
+
+    def spy(scans, selected, ctx):
+        seen.append(ctx)
+        return health.CheckRun([], {})
+
+    monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
+    now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
+    report = health.build_report(now=now, stale_days=45)
+    assert len(seen) == 3 and seen[0] is seen[1] is seen[2] is report.ctx
+    assert (seen[0].now, seen[0].stale_days) == (now, 45)
+    assert health.build_report().ctx.now.tzinfo is not None
+
+
+# --- the stale-tasks check ------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+STALE_NOW = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+ACTION = ("Act on these: if the work already landed, mark the task done; if it still applies, "
+          "resume it with /craft:execute; if it was abandoned, drop it with a note saying why "
+          "(lore record update task/<name> --status dropped --diff). "
+          "The id is task/<name>, without the vault prefix.")
+
+
+def _days_ago(n, now=STALE_NOW):
+    return (now - timedelta(days=n)).isoformat()
+
+
+def _stale_put(root, name, days=1, status="open", **extra):
+    _put(root, "task", name, status=status, updated=None if days is None else _days_ago(days), **extra)
+
+
+def _stale_run(world, monkeypatch, *, limit=None, now=STALE_NOW, **kw):
+    """The rendered report text, ``now`` injected through ``build_report``."""
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    return "\n".join(health.render(health.build_report(now=now, **kw), limit, None))
+
+
+def _stale_group(out):
+    return group(out, "stale-tasks")
+
+
+def test_default_window_reports_a_31_day_task_and_not_a_29_day_one(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "old-one", 31)
+    _stale_put(d, "new-one", 29)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:-1] == ["  default/task/old-one  2026-10-01  open  last updated 31 days ago"]
+    assert rows(out, "stale-tasks")["default"] == ("2", "1", "no")
+
+
+def test_stale_days_90_reports_a_91_day_task_and_not_a_31_day_one(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "ninety-one", 91)
+    _stale_put(d, "thirty-one", 31)
+    out = _stale_run(world, monkeypatch, stale_days=90)
+    assert [ln.split()[0] for ln in _stale_group(out)[1:-1]] == ["default/task/ninety-one"]
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 1 finding, oldest first (window: 90 days): 1 stale on age")
+
+
+def test_the_exact_window_start_is_not_stale(world, monkeypatch):
+    _stale_put(world.roots["default"], "edge", 30)
+    assert _stale_group(_stale_run(world, monkeypatch)) == ["stale-tasks — no findings (window: 30 days)."]
+
+
+def test_stale_wiring_through_cmd_health_has_no_clock_seam(world):
+    d = world.roots["default"]
+    now = datetime.now(timezone.utc)
+    _put(d, "task", "ancient", status="open", updated=(now - timedelta(days=400)).isoformat())
+    _put(d, "task", "today", status="open", updated=now.isoformat())
+    for args, window in (((), 30), (("--stale-days", "365"), 365)):
+        r = world.run(*args)
+        assert r.returncode == 0, r.stderr
+        lines = _stale_group(r.stdout)
+        assert lines[0] == f"stale-tasks — 1 finding, oldest first (window: {window} days): 1 stale on age"
+        assert [ln.split()[0] for ln in lines[1:-1]] == ["default/task/ancient"]
+    r = world.run("--stale-days", "500")
+    assert _stale_group(r.stdout) == ["stale-tasks — no findings (window: 500 days)."]
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "36501", "1.5"])
+def test_stale_days_outside_one_to_36500_is_refused_before_the_report(world, bad):
+    r = world.run("--stale-days", bad)
+    assert r.returncode == 2
+    assert "lore health —" not in r.stdout
+
+
+def test_stale_days_36500_runs(world):
+    _put(world.roots["default"], "task", "t", status="open", updated="2026-03-01T00:00:00Z")
+    r = world.run("--stale-days", "36500")
+    assert r.returncode == 0, r.stderr
+    assert _stale_group(r.stdout) == ["stale-tasks — no findings (window: 36500 days)."]
+
+
+def test_each_line_shows_the_status_after_the_date(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "waiting", 40, status="blocked")
+    _stale_put(d, "idle", 50, status="open")
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:3] == [
+        "  default/task/idle  2026-09-12  open  last updated 50 days ago",
+        "  default/task/waiting  2026-09-22  blocked  last updated 40 days ago"]
+
+
+def test_a_task_tied_to_a_retired_spec_names_it_whatever_its_age(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "spec", "streaming-export", status="dropped")
+    _put(d, "spec", "old-plan", status="superseded")
+    _stale_put(d, "export-as-csv", 1, status="ready", related={"spec": ["streaming-export"]})
+    _stale_put(d, "export-as-xlsx", 135, status="blocked", body="[[old-plan]]\n")
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 2 findings, oldest first (window: 30 days): 2 tied to a retired spec")
+    assert _stale_group(out)[1:3] == [
+        "  default/task/export-as-xlsx  2026-06-19  blocked  last updated 135 days ago; "
+        "linked to spec/old-plan, which is superseded",
+        "  default/task/export-as-csv  2026-10-31  ready  linked to spec/streaming-export, which is dropped"]
+
+
+def test_a_task_tied_to_several_specs_names_three_then_counts_the_rest(world, monkeypatch):
+    d = world.roots["default"]
+    for n in "abcde":
+        _put(d, "spec", f"spec-{n}", status="dropped")
+    _stale_put(d, "t", 1, related={"spec": [f"spec-{n}" for n in "abcde"]})
+    (line,) = _stale_group(_stale_run(world, monkeypatch))[1:-1]
+    assert line.endswith(
+        "linked to spec/spec-a, which is dropped; spec/spec-b, which is dropped; "
+        "spec/spec-c, which is dropped and 2 more")
+
+
+def test_the_breakdown_counts_a_task_once_undated_before_retired_before_age(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "spec", "s", status="dropped")
+    _stale_put(d, "undated-and-tied", None, related={"spec": ["s"]})
+    _stale_put(d, "old-and-tied", 99, related={"spec": ["s"]})
+    _stale_put(d, "just-old", 99)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 3 findings, oldest first (window: 30 days): "
+        "1 stale on age, 1 tied to a retired spec, 1 undated")
+    assert _stale_group(out)[1] == (
+        "  default/task/undated-and-tied  undated  open  no readable last-updated time; "
+        "linked to spec/s, which is dropped")
+
+
+def test_undated_tasks_list_first_and_the_group_ends_on_the_action_line(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "ancient", 900)
+    _stale_put(d, "undated", None)
+    out = _stale_run(world, monkeypatch)
+    lines = _stale_group(out)
+    assert lines[1] == "  default/task/undated  undated  open  no readable last-updated time"
+    assert lines[2].startswith("  default/task/ancient  ")
+    assert lines[-1] == ACTION
+
+
+def test_finished_tasks_decisions_and_sessions_are_never_reported(world, monkeypatch):
+    d = world.roots["default"]
+    for st in ("done", "dropped", "superseded"):
+        _stale_put(d, f"t-{st}", 900, status=st)
+    _put(d, "decision", "dec", updated=_days_ago(900))
+    _put(d, "session", "sess", status="open", updated=_days_ago(900))
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out) == ["stale-tasks — no findings (window: 30 days)."]
+    assert rows(out, "stale-tasks")["default"] == ("0", "0", "no")
+
+
+def test_the_cap_applies_to_the_stale_group_and_counts_its_rest(world, monkeypatch):
+    d = world.roots["default"]
+    for i in range(5):
+        _stale_put(d, f"t{i}", 100 + i)
+    out = _stale_run(world, monkeypatch, limit=2)
+    lines = _stale_group(out)
+    assert lines[0].startswith("stale-tasks — 5 findings, oldest first (window: 30 days)")
+    assert len(lines) == 1 + 2 + 1 + 1
+    assert lines[3] == "  3 more. Run `lore health --all` to see every finding, or `--limit <n>` for more."
+
+
+def test_an_unreadable_vault_skips_the_stale_check_naming_the_vault_and_leaves_the_others(world):
+    r = _unreadable_world(world)
+    assert rows(r.stdout, "stale-tasks")["default"][2] == (
+        "yes: vault levr could not be read, so no spec's status can be confirmed")
+    assert rows(r.stdout, "stale-tasks")["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — skipped."]
+
+
+def test_a_raising_stale_check_leaves_the_other_checks_standing(world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+
+    def boom(scans, selected, ctx):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, run=boom) if c.name == "stale-tasks" else c for c in health.CHECKS))
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    r = world.run()
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — errored: RuntimeError."]
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+
+
+def test_report_survives_an_in_place_reload_of_the_stale_check(world):
+    d = world.roots["default"]
+    _put(d, "task", "t", status="open", updated="2020-01-01T00:00:00Z")
+    assert world.run().returncode == 0
+    load_script("lore.health.stale")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, "stale-tasks")["default"] == ("1", "1", "no")
+    assert len(_stale_group(r.stdout)) == 3
+
+
+def test_a_stale_finding_on_a_bad_record_name_never_echoes_it(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "Bad_Name", 99)
+    out = _stale_run(world, monkeypatch)
+    assert "Bad_Name" not in out
+    assert _stale_group(out)[1].startswith("  default/task/ (a record whose name is not a valid record id)  ")
+
+
+def test_help_names_the_stale_check_and_its_window_flag(world):
+    r = world.run("--help")
+    flat = " ".join(r.stdout.split())
+    assert "--stale-days N" in flat and "default 30" in flat
+    assert "stale-tasks" in flat
+
+
+# --- retired-links names the supersede command when the target links back -------
+
+NO_SUCCESSOR = "superseded, and no record supersedes it"
+LINKS_BACK = "it links back to this record, so if this record replaced it, record that"
+REFUSED = "it links back to this record, but this pairing cannot be recorded as a supersession"
+
+
+def _links_back_world(root, *, target_related, target_status="superseded", linker="src"):
+    _put(root, "decision", "old", status=target_status, related=target_related)
+    _put(root, "adr", linker, related={"decision": ["old"]})
+
+
+def test_a_superseded_target_relating_back_gets_the_exact_supersede_command(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert retired_lines(r.stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {NO_SUCCESSOR}; "
+        f"{LINKS_BACK}: `lore record supersede decision/old --by adr/src`"]
+
+
+def test_a_target_relating_to_a_different_record_keeps_the_plain_phrase(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["elsewhere"]})
+    assert retired_lines(world.run().stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {NO_SUCCESSOR}"]
+
+
+def test_a_target_some_record_supersedes_gets_the_successor_phrase_and_no_advice(world):
+    d = world.roots["default"]
+    _links_back_world(d, target_related={"adr": ["src"]})
+    _put(d, "decision", "new", supersedes=["decision/old"])
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(": superseded by decision/new")
+    assert "supersede decision" not in line and "links back" not in line
+
+
+def test_a_dropped_target_relating_back_is_plain_dropped(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]},
+                      target_status="dropped")
+    assert retired_lines(world.run().stdout) == [
+        "  default/adr/src  2026-03-01  related decision → decision/old: dropped"]
+
+
+@pytest.mark.parametrize("entry", ["src", "adr/src"])
+def test_a_bare_or_kinded_related_entry_is_recognised_as_linking_back(world, entry):
+    _links_back_world(world.roots["default"], target_related={"adr": [entry]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith("`lore record supersede decision/old --by adr/src`")
+
+
+@pytest.mark.parametrize("related", [{"task": ["src"]}, {"adr": ["decision/src"]}])
+def test_a_related_entry_naming_a_same_named_record_of_another_kind_is_not_a_link_back(world, related):
+    _links_back_world(world.roots["default"], target_related=related)
+    (line,) = retired_lines(world.run().stdout)
+    assert "links back" not in line
+
+
+def test_the_action_line_names_the_supersede_remedy_beside_a_linking_back_finding(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    block = group(world.run().stdout, "retired-links")
+    assert "links back" in block[1]
+    assert "lore record supersede" in block[-1]
+
+
+def test_a_target_in_two_vaults_gets_the_vault_flag_only_where_the_linker_shares_it(world):
+    d, other = world.roots["default"], world.roots["levr"]
+    _links_back_world(d, target_related={"adr": ["src"]})
+    _put(other, "decision", "old", status="superseded", related={"adr": ["src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(
+        f"default/decision/old {NO_SUCCESSOR}; {LINKS_BACK}: "
+        f"`lore record supersede decision/old --by adr/src --vault default`; "
+        f"levr/decision/old {NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+def test_a_target_in_one_vault_gets_no_vault_flag_even_when_the_linker_is_elsewhere(world):
+    _put_full(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(world.roots["default"], "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith("`lore record supersede decision/old --by adr/src`")
+    assert _run_printed(world, line).returncode == 0
+    assert _supersedes(world.roots["default"], "adr", "src") == ["decision/old"]
+    assert _supersedes(world.roots["levr"], "decision", "old") == []
+
+
+def _put_full(root, kind, name, **extra):
+    _put(root, kind, name, **{"created-at": "2026-01-01T00:00:00Z", **extra})
+    path = root / kind / f"{name}.json"
+    path.write_text(json.dumps({**json.loads(path.read_text()), "kind": kind}))
+
+
+def _printed_command(line):
+    return re.search(r"`(lore record supersede [^`]+)`", line).group(1)
+
+
+def _run_printed(world, line):
+    import shlex
+    argv = shlex.split(_printed_command(line))
+    assert argv[:2] == ["lore", "record"]
+    return run_cli(argv[1:], vault=world.roots["default"], state_dir=world.state,
+                   env_extra={"XDG_CONFIG_HOME": str(world.cfg)})
+
+
+def _supersedes(root, kind, name):
+    return json.loads((root / kind / f"{name}.json").read_text()).get("supersedes", [])
+
+
+def test_a_linker_name_held_by_an_earlier_vault_makes_the_command_act_on_the_linkers_own_vault(world):
+    first, second = world.roots["default"], world.roots["levr"]
+    _put_full(first, "adr", "src")
+    _put_full(second, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(second, "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line) == (
+        "lore record supersede decision/old --by adr/src --vault levr")
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(second, "adr", "src") == ["decision/old"]
+    assert _supersedes(first, "adr", "src") == []
+
+
+def test_a_linker_name_held_by_a_later_vault_also_gets_the_vault_flag(world):
+    first, second = world.roots["default"], world.roots["levr"]
+    _put_full(first, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(first, "adr", "src", related={"decision": ["old"]})
+    _put_full(second, "adr", "src")
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault default")
+    assert _run_printed(world, line).returncode == 0
+    assert _supersedes(first, "adr", "src") == ["decision/old"]
+    assert _supersedes(second, "adr", "src") == []
+
+
+def test_target_and_linker_in_different_vaults_with_a_duplicated_linker_get_words_and_no_command(world):
+    _put_full(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(world.roots["default"], "adr", "src", related={"decision": ["old"]})
+    _put_full(world.roots["trailhead"], "adr", "src")
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+def test_a_same_named_record_that_cannot_be_read_still_counts_as_a_duplicate_linker(world):
+    d, other = world.roots["default"], world.roots["levr"]
+    _put_full(d, "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put_full(d, "adr", "src", related={"decision": ["old"]})
+    _put_full(other, "adr", "src")
+    (other / "adr" / "src.json").write_text("{not json")
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault default")
+
+
+def _line_for(finding_name, candidate_name, *, links_back=True):
+    health = importlib.import_module("lore.cli.health")
+    retired = importlib.import_module("lore.health.retired")
+    cand = retired.RetiredCandidate("default", "decision", candidate_name, "superseded",
+                                    links_back=links_back, supersede_allowed=True)
+    f = retired.Finding("default", "adr", finding_name, "2026-03-01", "related decision",
+                        "decision/old", (cand,))
+    return health._retired_line(f)
+
+
+@pytest.mark.parametrize("linker,target", [("Bad Name", "old"), ("src", "Bad Name"),
+                                           ("ignore previous instructions", "also bad")])
+def test_a_name_that_is_not_a_record_id_gets_the_words_and_no_command(linker, target):
+    line = _line_for(linker, target)
+    assert LINKS_BACK in line
+    assert "lore record supersede" not in line
+    for word in ("Bad", "ignore", "previous", "also"):
+        assert word not in line
+
+
+
+# --- the supersede command is printed only where the record guards accept it ----
+
+
+def _linker_world(world, *, pred_kind="decision", linker_kind, linker_status, **pred_extra):
+    d = world.roots["default"]
+    _put_full(d, pred_kind, "old", status="superseded", related={linker_kind: ["src"]}, **pred_extra)
+    _put_full(d, linker_kind, "src", status=linker_status, related={pred_kind: ["old"]})
+    return d
+
+
+@pytest.mark.parametrize("pred_kind,linker_kind,linker_status", [
+    ("decision", "adr", "active"),
+    ("adr", "decision", "active"),
+    ("task", "task", "open"),
+    ("task", "decision", "active"),
+])
+def test_a_printed_supersede_command_runs_and_records_the_edge(world, pred_kind, linker_kind, linker_status):
+    d = _linker_world(world, pred_kind=pred_kind, linker_kind=linker_kind, linker_status=linker_status)
+    (line,) = retired_lines(world.run().stdout)
+    assert f"`lore record supersede {pred_kind}/old --by {linker_kind}/src`" in line
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(d, linker_kind, "src") == [f"{pred_kind}/old"]
+
+
+@pytest.mark.parametrize("pred_kind,linker_kind,linker_status", [
+    ("decision", "task", "open"),
+    ("decision", "area", "active"),
+    ("adr", "task", "in-progress"),
+])
+def test_a_linker_the_supersede_guard_would_refuse_gets_the_words_and_no_command(
+        world, pred_kind, linker_kind, linker_status):
+    _linker_world(world, pred_kind=pred_kind, linker_kind=linker_kind, linker_status=linker_status)
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+
+
+def test_a_predecessor_that_already_supersedes_its_linker_gets_the_words_and_no_command(world):
+    _linker_world(world, linker_kind="adr", linker_status="active", supersedes=["adr/src"])
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+
+
+def test_a_two_hop_supersedes_chain_back_to_the_linker_gets_the_words_and_no_command(world):
+    d = world.roots["default"]
+    _put_full(d, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid", supersedes=["adr/src"])
+    _put_full(d, "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+    assert "lore record supersede" not in line
+
+
+def _chain_world(world, *, default_mid, levr_mid):
+    d, lv = world.roots["default"], world.roots["levr"]
+    _put_full(d, "adr", "src")
+    _put_full(lv, "adr", "src", related={"decision": ["old"]})
+    _put_full(lv, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid", **default_mid)
+    _put_full(lv, "decision", "mid", **levr_mid)
+    return d, lv
+
+
+def test_a_vault_flagged_command_judges_the_chain_in_that_vault_only(world):
+    _chain_world(world, default_mid={}, levr_mid={"supersedes": ["adr/src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {REFUSED}")
+    assert "lore record supersede" not in line
+
+
+def test_a_vault_flagged_command_ignores_a_cycle_that_exists_only_in_another_vault(world):
+    _, lv = _chain_world(world, default_mid={"supersedes": ["adr/src"]}, levr_mid={})
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line).endswith("--vault levr")
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(lv, "adr", "src") == ["decision/old"]
+
+
+def test_an_unflagged_command_reads_the_chain_from_the_first_vault_holding_it_even_if_unparseable(world):
+    d, lv = world.roots["default"], world.roots["levr"]
+    _put_full(lv, "adr", "src", related={"decision": ["old"]})
+    _put_full(lv, "decision", "old", status="superseded", related={"adr": ["src"]},
+              supersedes=["decision/mid"])
+    _put_full(d, "decision", "mid")
+    (d / "decision" / "mid.json").write_text("{not json")
+    _put_full(lv, "decision", "mid", supersedes=["adr/src"])
+    (line,) = retired_lines(world.run().stdout)
+    assert _printed_command(line) == "lore record supersede decision/old --by adr/src"
+    r = _run_printed(world, line)
+    assert r.returncode == 0, r.stderr
+    assert _supersedes(lv, "adr", "src") == ["decision/old"]
+
+
+# --- the cap hint carries the run's staleness window ----------------------------
+
+
+def test_cap_hint_carries_a_non_default_stale_days_and_the_default_window_adds_nothing(world):
+    _twenty_five(world.roots["trailhead"])
+    custom = world.run("--vault", "trailhead", "--stale-days", "90")
+    default = world.run("--vault", "trailhead")
+    assert "`lore health --vault trailhead --stale-days 90 --all`" in custom.stdout
+    assert "`lore health --vault trailhead --all`" in default.stdout
+    assert "--stale-days" not in default.stdout.replace("--stale-days <n>", "")
+    assert "`lore health --stale-days 90 --all`" in world.run("--stale-days", "90").stdout
+
+
+# --- a raising heading note errors only its own check ---------------------------
+
+
+def test_a_heading_note_that_raises_errors_only_its_check(world, monkeypatch):
+    _put(world.roots["default"], "task", "t", status="open", updated="2020-01-01T00:00:00Z")
+    health = importlib.import_module("lore.cli.health")
+
+    def boom(sec, ctx):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, heading_note=boom) if c.name == "stale-tasks" else c for c in health.CHECKS))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — errored: RuntimeError."]
+    assert rows(r.stdout, "stale-tasks")["default"] == ("—", "—", "errored: RuntimeError")
+    assert group(r.stdout, "dangling-links")[0].startswith("dangling-links — ")
+    assert "errored" not in "\n".join(group(r.stdout, "retired-links"))

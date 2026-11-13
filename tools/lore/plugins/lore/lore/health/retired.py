@@ -13,19 +13,12 @@ be trusted.
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterator, Sequence
 from dataclasses import dataclass, field
 
+from ..record import guards
 from . import references
-from .model import ScannedRecord, VaultScan
-
-RETIRED_STATUSES = ("dropped", "superseded")
-_LIVE_STATUSES = {
-    "decision": ("active",),
-    "adr": ("active",),
-    "area": ("active",),
-    "task": ("open", "ready", "in-progress", "blocked"),
-}
+from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
 
 
 @dataclass(frozen=True)
@@ -45,7 +38,11 @@ class RetiredCandidate:
 
     ``successors`` are the record-id-shaped successors, sorted by kind, name and
     vault; ``nonconforming_successors`` counts the rest, whose names are never
-    carried. Both are empty for a dropped candidate.
+    carried. Both are empty for a dropped candidate. ``links_back`` is set on a
+    superseded candidate with no successor at all whose own ``related`` entries
+    name the linking record. ``supersede_allowed`` is set when it is a links-back
+    candidate and ``lore record supersede`` would accept the linker as its
+    successor, judged by the verb's own pairing guard.
     """
 
     vault: str
@@ -54,6 +51,8 @@ class RetiredCandidate:
     status: str
     successors: tuple[Successor, ...] = ()
     nonconforming_successors: int = 0
+    links_back: bool = False
+    supersede_allowed: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +61,8 @@ class Finding:
 
     ``field`` is ``related <kind>``, ``depends-on``, ``parent`` or ``wikilink``;
     ``target`` is ``<kind>/<name>`` (a bare name for a bare reference).
+    ``linker_duplicated`` is set when another vault also holds a record, readable
+    or not, with the linker's kind and name.
     """
 
     vault: str
@@ -71,6 +72,7 @@ class Finding:
     field: str
     target: str
     retired: tuple[RetiredCandidate, ...] = ()
+    linker_duplicated: bool = False
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,28 @@ def check_retired(
         return RetiredSkipped(at_fault)
 
     candidates = references.build_candidates(scans)
+    holders: dict[tuple[str, str], set[str]] = {}
+    for s in scans:
+        for r in (*s.records, *s.unreadable):
+            holders.setdefault((r.kind, r.name), set()).add(s.vault)
+
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]] = {}
+    for s in scans:
+        for r in s.records:
+            holdings.setdefault((r.kind, r.name), []).append((s.vault, r))
+        for r in s.unreadable:
+            holdings.setdefault((r.kind, r.name), []).append((s.vault, None))
+
+    superseders: dict[tuple[str, str], tuple[tuple[ScannedRecord, ...], frozenset]] = {}
+
+    def superseders_of(c: ScannedRecord) -> tuple[tuple[ScannedRecord, ...], frozenset]:
+        found = superseders.get((c.kind, c.name))
+        if found is None:
+            records = candidates.superseded_by(c.kind, c.name)
+            found = superseders[(c.kind, c.name)] = (records, frozenset(key(r) for r in records))
+        return found
+
+    accepted: dict[tuple[str, str, str, str | None], bool] = {}
 
     result = RetiredResult()
     for s in scans:
@@ -104,62 +128,135 @@ def check_retired(
             continue
         judged = 0
         for record in s.records:
-            if not _is_live(record):
+            if not is_live(record):
                 continue
             judged += 1
-            for ref, parsed, target in references.resolved_references(record):
-                if ref.field == "supersedes" or parsed is None:
-                    continue
-                found, unreadable = candidates.lookup(*parsed)
-                if unreadable or not found:
-                    continue
+            for ref, target, found in retired_references(record, candidates):
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
-                if not all(_status(c) in RETIRED_STATUSES for c in found):
+                if any(key(record) in superseders_of(c)[1]
+                       for c in found if status(c) == "superseded"):
                     continue
-                if any(_key(record) in {_key(r) for r in candidates.superseded_by(c.kind, c.name)}
-                       for c in found if _status(c) == "superseded"):
-                    continue
-                retired = tuple(_candidate(c, candidates) for c in sorted(found, key=_key))
+                linker_duplicated = len(holders[(record.kind, record.name)]) > 1
+                shared = len({(c.kind, c.name) for c in found}) < len(found)
+                retired = tuple(
+                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted)
+                    for c in sorted(found, key=key)
+                )
                 result.findings.append(
                     Finding(
                         record.vault, record.kind, record.name, record.updated_at,
                         ref.field, target, retired,
+                        linker_duplicated,
                     )
                 )
         result.judged[s.vault] = judged
     return result
 
 
-def _status(record: ScannedRecord) -> str | None:
-    status = record.sidecar.get("status") if isinstance(record.sidecar, dict) else None
-    return status if isinstance(status, str) else None
+def retired_references(
+    record: ScannedRecord, candidates: references.CandidateIndex
+) -> Iterator[tuple[references.Reference, str, tuple[ScannedRecord, ...]]]:
+    """Yield ``(reference, target, candidates)`` for each reference of *record*
+    whose candidates are all ``dropped`` or ``superseded``, at least one, none unreadable.
+
+    The ``supersedes`` field is never yielded, nor is a malformed reference. This is
+    the one guard both ``retired-links`` and ``stale-tasks`` judge a link through.
+    """
+    for ref, parsed, target in references.resolved_references(record):
+        if ref.field == "supersedes" or parsed is None:
+            continue
+        found, unreadable = candidates.lookup(*parsed)
+        if found and not unreadable and all(status(c) in RETIRED_STATUSES for c in found):
+            assert target is not None
+            yield ref, target, found
 
 
-def _is_live(record: ScannedRecord) -> bool:
-    return _status(record) in _LIVE_STATUSES.get(record.kind, ())
-
-
-def _key(record: ScannedRecord) -> tuple[str, str, str]:
-    return record.kind, record.name, record.vault
-
-
-def _candidate(record: ScannedRecord, candidates: references.CandidateIndex) -> RetiredCandidate:
-    status = _status(record)
-    assert status is not None
+def _candidate(
+    record: ScannedRecord,
+    superseders: tuple[ScannedRecord, ...],
+    linker: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault_flagged: bool,
+    accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
+) -> RetiredCandidate:
+    state = status(record)
+    assert state is not None
     successors: list[Successor] = []
     nonconforming = 0
-    if status == "superseded":
+    if state == "superseded":
         seen: set[tuple[str, str, str]] = set()
-        for s in candidates.superseded_by(record.kind, record.name):
-            if _key(s) in seen:
+        for s in superseders:
+            if key(s) in seen:
                 continue
-            seen.add(_key(s))
+            seen.add(key(s))
             if references.resolve(f"{s.kind}/{s.name}", None) is None:
                 nonconforming += 1
             else:
-                successors.append(Successor(s.vault, s.kind, s.name, _status(s)))
+                successors.append(Successor(s.vault, s.kind, s.name, status(s)))
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
+    links_back = (
+        state == "superseded" and not successors and not nonconforming
+        and _relates_to(record, linker)
+    )
     return RetiredCandidate(
-        record.vault, record.kind, record.name, status, tuple(successors), nonconforming
+        record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
+        links_back,
+        links_back and _accepted_once(
+            accepted, record, linker, holdings, record.vault if vault_flagged else None
+        ),
+    )
+
+
+def _accepted_once(
+    accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
+    predecessor: ScannedRecord,
+    successor: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault: str | None,
+) -> bool:
+    cache_key = (*key(predecessor), *key(successor), vault)
+    if cache_key not in accepted:
+        accepted[cache_key] = _supersede_accepted(predecessor, successor, holdings, vault)
+    return accepted[cache_key]
+
+
+def _supersede_accepted(
+    predecessor: ScannedRecord,
+    successor: ScannedRecord,
+    holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
+    vault: str | None,
+) -> bool:
+    """Whether the supersede verb's pairing guard accepts *successor* for *predecessor*.
+
+    Chain members are read as the verb reads them: from *vault* alone when the printed
+    command carries ``--vault``, else from the first vault holding the record. A copy
+    that cannot be parsed ends the chain there, as it does in the verb.
+    """
+    def sidecar(rec: ScannedRecord) -> dict:
+        data = dict(rec.sidecar) if isinstance(rec.sidecar, dict) else {}
+        if not isinstance(data.get("supersedes"), list):
+            data.pop("supersedes", None)
+        return data
+
+    def load(record_id: str) -> dict | None:
+        kind, _, name = record_id.partition("/")
+        for held_in, rec in holdings.get((kind, name), ()):
+            if vault is None or held_in == vault:
+                return sidecar(rec) if rec is not None else None
+        return None
+
+    return not guards.evaluate_supersede_pairing(
+        predecessor_id=f"{predecessor.kind}/{predecessor.name}",
+        predecessor=sidecar(predecessor),
+        successor_id=f"{successor.kind}/{successor.name}",
+        successor=sidecar(successor),
+        load_sidecar=load,
+    )
+
+
+def _relates_to(record: ScannedRecord, other: ScannedRecord) -> bool:
+    return any(
+        ref.field.startswith("related ") and parsed == (other.kind, other.name)
+        for ref, parsed, _ in references.resolved_references(record)
     )
