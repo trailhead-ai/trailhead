@@ -480,3 +480,127 @@ def test_reseeding_an_existing_workspace_keeps_what_it_recorded(sc):
     }
     assert manifests["wrapped"]["task_wrapper"] == sc.wrapper_json()
     assert "task_wrapper" not in manifests["bare"]
+
+
+# ---------------------------------------------------------------------------
+# A workspace that records a wrapper also writes it to task-wrapper.json beside
+# its manifest. A manifest that cannot be read is rebuilt, and the wrapper comes
+# from that sidecar; an unreadable sidecar is the only refusal.
+# ---------------------------------------------------------------------------
+
+_BAD_SIDECARS = ["{not json", "[]", "", '{"task_wrapper": 3}']
+
+
+def _manifest_path(sc):
+    (path,) = list(sc.state.rglob("manifest.json"))
+    return path
+
+
+def _seed(sc, wrapper):
+    from camp.group.config import load_group
+    from camp.provision.provision import seed_pending_workspace
+
+    group = load_group(sc.cfg / "groups" / "g.toml")
+    seed_pending_workspace(group, "s1", env=sc.env_with(wrapper))
+    return group
+
+
+def test_creation_writes_the_wrapper_to_a_private_sidecar_beside_the_manifest(sc):
+    _seed(sc, sc.wrapper_json())
+    sidecar = _manifest_path(sc).parent / "task-wrapper.json"
+    assert json.loads(sidecar.read_text()) == {"task_wrapper": sc.wrapper_json()}
+    assert sidecar.stat().st_mode & 0o777 == 0o600
+
+
+def test_an_unwrapped_creation_writes_no_sidecar(sc):
+    _seed(sc, None)
+    assert not (_manifest_path(sc).parent / "task-wrapper.json").exists()
+
+
+def test_reseeding_over_a_truncated_manifest_carries_the_wrapper_from_the_sidecar(sc):
+    group = _seed(sc, sc.wrapper_json())
+    path = _manifest_path(sc)
+    path.write_text("{ truncated")
+
+    from camp.provision.provision import seed_pending_workspace
+
+    seed_pending_workspace(group, "s1", env=sc.base_env)
+    assert json.loads(path.read_text())["task_wrapper"] == sc.wrapper_json()
+
+
+def test_reseeding_over_a_truncated_manifest_with_no_sidecar_records_no_wrapper(sc):
+    group = _seed(sc, None)
+    path = _manifest_path(sc)
+    path.write_text("{ truncated")
+
+    from camp.provision.provision import seed_pending_workspace
+
+    seed_pending_workspace(group, "s1", env=sc.base_env)
+    assert "task_wrapper" not in json.loads(path.read_text())
+
+
+def test_reconcile_over_a_truncated_manifest_runs_its_steps_through_the_sidecar_wrapper(sc):
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task()
+    group = _seed(sc, sc.wrapper_json())
+    path = _manifest_path(sc)
+    path.write_text("{ truncated")
+
+    reconcile_worktree(group, "s1", env=sc.base_env)
+    assert len(sc.wrapper_log()) == 2
+    assert (sc.marks / "ran-m1").exists() and (sc.marks / "ran-m2").exists()
+    assert json.loads(path.read_text())["task_wrapper"] == sc.wrapper_json()
+
+
+@pytest.mark.parametrize("text", _BAD_SIDECARS)
+def test_reseeding_refuses_a_truncated_manifest_whose_sidecar_is_unreadable(sc, text):
+    from camp.group.manifest import ManifestError
+    from camp.provision.provision import seed_pending_workspace
+
+    group = _seed(sc, sc.wrapper_json())
+    path = _manifest_path(sc)
+    sidecar = path.parent / "task-wrapper.json"
+    path.write_text("{ truncated")
+    sidecar.write_text(text)
+
+    with pytest.raises(ManifestError) as info:
+        seed_pending_workspace(group, "s1", env=sc.base_env)
+    assert str(path) in str(info.value) and str(sidecar) in str(info.value)
+    assert path.read_text() == "{ truncated"
+
+
+@pytest.mark.parametrize("text", _BAD_SIDECARS)
+def test_reconcile_refuses_a_truncated_manifest_whose_sidecar_is_unreadable_and_runs_no_step(sc, text):
+    from camp.group.manifest import ManifestError
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task()
+    group = _seed(sc, sc.wrapper_json())
+    path = _manifest_path(sc)
+    sidecar = path.parent / "task-wrapper.json"
+    path.write_text("{ truncated")
+    sidecar.write_text(text)
+
+    with pytest.raises(ManifestError) as info:
+        reconcile_worktree(group, "s1", env=sc.base_env)
+    assert str(path) in str(info.value) and str(sidecar) in str(info.value)
+    assert path.read_text() == "{ truncated"
+    assert not (sc.marks / "ran-m1").exists() and not (sc.marks / "ran-m2").exists()
+
+
+def test_reconcile_creating_a_workspace_writes_the_wrapper_sidecar_that_survives_a_truncated_manifest(sc):
+    from camp.group.config import load_group
+    from camp.provision.reconcile import reconcile_worktree
+
+    sc.define_task(required=False)
+    (sc.marks / "require-gate").write_text("")
+    group = load_group(sc.cfg / "groups" / "g.toml")
+    reconcile_worktree(group, "s1", env={**sc.base_env, VAR: sc.wrapper_json()})
+    path = _manifest_path(sc)
+    assert json.loads((path.parent / "task-wrapper.json").read_text()) == {"task_wrapper": sc.wrapper_json()}
+
+    path.write_text("{ truncated")
+    (sc.marks / "gate").write_text("")
+    reconcile_worktree(group, "s1", env=sc.base_env)
+    assert len(sc.wrapper_log()) == 4

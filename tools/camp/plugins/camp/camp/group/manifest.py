@@ -57,7 +57,9 @@ Schema (v1):
         # The raw CAMP_TASK_WRAPPER text (a JSON array of strings) read when
         # the workspace was created; every later run of the workspace's steps
         # wraps them with it. Absent when the workspace has none. Read via
-        # task_wrapper_of; rebuilds preserve it via carry_forward_task_wrapper.
+        # task_wrapper_of. The same value is kept in task-wrapper.json beside
+        # the manifest (provision.recorded_wrapper), so a manifest that has to be
+        # rebuilt keeps it.
         "task_wrapper": "<raw JSON array text, or absent>",
     }
 """
@@ -450,12 +452,6 @@ def task_wrapper_of(manifest: dict[str, Any]) -> Any:
     still returned, so the runner fails closed on it rather than running bare.
     """
     return manifest.get(TASK_WRAPPER_KEY)
-
-
-def carry_forward_task_wrapper(manifest_data: dict[str, Any], prior: Any) -> None:
-    """Preserve a recorded wrapper across a manifest rebuild; never sets one."""
-    if prior is not None:
-        manifest_data.setdefault(TASK_WRAPPER_KEY, prior)
 
 
 def merge_member_tasks(member: dict[str, Any], tasks: dict[str, Any]) -> None:
