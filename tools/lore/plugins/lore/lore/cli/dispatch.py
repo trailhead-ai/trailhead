@@ -26,6 +26,7 @@ from . import (
     signing,
     sync,
     task,
+    validate,
     vault,
 )
 from ..argparse_util import find_subparsers_action
@@ -121,6 +122,7 @@ def build_parser() -> argparse.ArgumentParser:
     session.add_session_subparser(sub)
     signing.add_signing_subparser(sub)
     health.add_health_subparser(sub)
+    validate.add_validate_subparser(sub)
 
     return parser
 

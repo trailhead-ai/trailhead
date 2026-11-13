@@ -157,6 +157,7 @@ FIXTURES = {
     "resolve take-file": lambda e: (
         ["resolve", "take-file", "task/by-hand.md", "--local", "--vault", "ro"], None),
     "health": lambda e: (["health", "--vault", "ro"], None),
+    "validate": lambda e: (["validate", "--vault", "ro"], None),
     "areas": lambda e: (["areas"], None),
     "reindex": lambda e: (["reindex"], None),
     "search": lambda e: (["search", "kind:task"], None),
