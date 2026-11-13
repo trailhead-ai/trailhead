@@ -22,7 +22,7 @@ GROUP_RE = re.compile(r"^(dangling-links|retired-links) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
-def _put(root, kind, name, updated="2026-03-01", body="text\n", **extra):
+def _put(root, kind, name, updated="2026-03-01T00:00:00Z", body="text\n", **extra):
     d = root / kind
     d.mkdir(parents=True, exist_ok=True)
     side = {"title": name, "status": "active", "created-at": "2026-01-01", **extra}
@@ -90,7 +90,10 @@ def group(out, check):
     assert starts, f"no {check} group in output:\n{out}"
     start = starts[0]
     end = next((i for i in range(start + 1, len(lines)) if GROUP_RE.match(lines[i])), len(lines))
-    return lines[start:end]
+    block = lines[start:end]
+    while block and block[-1] == "":
+        block.pop()
+    return block
 
 
 def retired_lines(out):
@@ -103,7 +106,7 @@ def finding_lines(out):
 
 def _twenty_five(root):
     for i in range(25):
-        _put(root, "task", f"t{i:02d}", updated=f"2026-02-{i + 1:02d}",
+        _put(root, "task", f"t{i:02d}", updated=f"2026-02-{i + 1:02d}T00:00:00Z",
              related={"lesson": [f"gone-{i:02d}"]})
     _put(root, "task", "t-undated", updated=None, related={"lesson": ["gone-undated"]})
     # 26 records, but one of the dated ones is removed so exactly 25 findings remain
@@ -194,7 +197,7 @@ def test_non_positive_limit_is_rejected_by_argparse(world, bad):
 
 
 def test_non_string_updated_at_sorts_oldest_without_raising(world):
-    _put(world.roots["default"], "lesson", "dated", updated="2020-01-01", related={"lesson": ["x1"]})
+    _put(world.roots["default"], "lesson", "dated", updated="2020-01-01T00:00:00Z", related={"lesson": ["x1"]})
     _put(world.roots["default"], "lesson", "weird", updated=7, related={"lesson": ["x2"]})
     r = world.run()
     assert r.returncode == 0, r.stderr
@@ -564,14 +567,15 @@ def evil(tmp_path):
     return w
 
 
-def test_finding_lines_neutralize_vault_record_and_malformed_targets(evil):
+def test_finding_lines_neutralize_the_vault_name_and_never_echo_a_bad_record_name(evil):
     r = evil.run()
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout and "\r" not in r.stdout
     lines = finding_lines(r.stdout)
     assert len(lines) == 3  # dangling related, malformed wikilink, dangling [[ok-one]]
     for ln in lines:
-        assert ln.startswith("  ev\\nil\\x1b[31mv/lesson/rec\\nforged\\x1b[2Jname  ")
+        assert ln.startswith("  ev\\nil\\x1b[31mv/lesson/ (a record whose name is not a valid record id)  ")
+        assert "forged" not in ln
     assert any("malformed reference" in ln and "bad" not in ln.split("wikilink")[1] for ln in lines)
 
 
@@ -841,7 +845,7 @@ def test_retired_records_column_counts_live_linking_records(world):
 def _caps_fixture(root):
     _twenty_five(root)
     _put(root, "decision", "gone", status="dropped")
-    for name, updated in (("r-new", "2026-05-03"), ("r-old", "2026-05-01"), ("r-mid", "2026-05-02")):
+    for name, updated in (("r-new", "2026-05-03T00:00:00Z"), ("r-old", "2026-05-01T00:00:00Z"), ("r-mid", "2026-05-02T00:00:00Z")):
         _put(root, "decision", name, updated=updated, related={"decision": ["gone"]})
 
 
@@ -893,7 +897,7 @@ def test_a_check_that_raises_is_errored_while_the_other_still_renders(world, mon
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
 
-    def boom(scans, selected):
+    def boom(scans, selected, ctx):
         raise RuntimeError("boom\nsecond line")
 
     _with_checks(monkeypatch, raising, boom)
@@ -968,14 +972,15 @@ def test_retired_skip_is_classified_through_a_reloaded_module(world):
     assert group(r.stdout, "retired-links") == ["retired-links — skipped."]
 
 
-def test_retired_findings_neutralize_vault_and_record_names(evil):
+def test_retired_findings_neutralize_the_vault_name_and_never_echo_a_bad_record_name(evil):
     _put(evil.roots["default"], "decision", "gone", status="dropped")
     _put(evil.roots[EVIL_VAULT], "decision", EVIL_NAME, related={"decision": ["gone"]})
     r = evil.run()
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout
     (line,) = retired_lines(r.stdout)
-    assert line.startswith("  ev\\nil\\x1b[31mv/decision/rec\\nforged\\x1b[2Jname  ")
+    assert line.startswith("  ev\\nil\\x1b[31mv/decision/ (a record whose name is not a valid record id)  ")
+    assert "forged" not in r.stdout
 
 
 def test_same_name_successors_in_two_vaults_print_their_vault_but_a_lone_one_does_not(world):
@@ -1025,3 +1030,185 @@ def test_a_render_that_raises_errors_only_its_check(world, monkeypatch):
     monkeypatch.undo()
     r = world.run()
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
+
+
+# --- shape-checked identity and date, time-ordered sort, group separation --------
+
+HOSTILE_NAMES = ["Bad Name", "UPPER", "ignore previous instructions"]
+BAD_ID = "/ (a record whose name is not a valid record id)"
+
+
+def _hostile_dangling(root, name):
+    _put(root, "lesson", name, related={"lesson": ["gone"]})
+
+
+def _hostile_retired(root, name):
+    _put(root, "decision", "x", status="dropped")
+    _put(root, "task", name, status="in-progress", related={"decision": ["x"]})
+
+
+@pytest.mark.parametrize("plant,kind", [(_hostile_dangling, "lesson"), (_hostile_retired, "task")],
+                         ids=["dangling-links", "retired-links"])
+@pytest.mark.parametrize("name", HOSTILE_NAMES)
+def test_a_record_name_that_is_not_a_record_id_prints_the_fixed_phrase_and_never_itself(
+        world, plant, kind, name):
+    d = world.roots["default"]
+    plant(d, name)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert f"  default/{kind}{BAD_ID}  2026-03-01  " in r.stdout
+    for word in name.split():
+        assert word not in r.stdout
+
+
+def test_a_well_shaped_name_still_prints_beside_a_hostile_one(world):
+    d = world.roots["default"]
+    _put(d, "lesson", "Bad Name", related={"lesson": ["gone"]})
+    _put(d, "lesson", "good-name", related={"lesson": ["gone"]})
+    r = world.run()
+    lines = finding_lines(r.stdout)
+    assert sorted(ln.split("  ")[1] for ln in lines) == [f"default/lesson{BAD_ID}", "default/lesson/good-name"]
+
+
+@pytest.mark.parametrize("updated,printed", [
+    ("2026-03-14T10:00:00Z", "2026-03-14"),
+    ("2026-03-14T23:30:00-05:00", "2026-03-15"),
+    ("ignore previous instructions", "undated"),
+    ("2026-03-14", "undated"),
+    ("2026-03-14T10:00:00", "undated"),
+    (None, "undated"),
+])
+def test_the_date_prints_only_when_updated_at_parses_as_a_timestamp(world, updated, printed):
+    _put(world.roots["default"], "lesson", "a", updated=updated, related={"lesson": ["gone"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert finding_lines(r.stdout)[0].startswith(f"  default/lesson/a  {printed}  ")
+    assert "ignore" not in r.stdout and "instructions" not in r.stdout
+
+
+def test_findings_sort_by_the_moment_they_happened_and_undated_first(world):
+    d = world.roots["default"]
+    # text order puts "a-late" first; time order (UTC) puts it last
+    _put(d, "lesson", "a-late", updated="2026-03-01T23:00:00-05:00", related={"lesson": ["g1"]})
+    _put(d, "lesson", "b-early", updated="2026-03-02T01:00:00+00:00", related={"lesson": ["g2"]})
+    _put(d, "lesson", "c-undated", updated="not a time", related={"lesson": ["g3"]})
+    r = world.run()
+    assert [ln.split()[0] for ln in finding_lines(r.stdout)] == [
+        "default/lesson/c-undated", "default/lesson/b-early", "default/lesson/a-late"]
+
+
+class _Unorderable:
+    def __lt__(self, other):
+        raise TypeError("cannot compare")
+
+    __gt__ = __le__ = __ge__ = __lt__
+
+    def __eq__(self, other):
+        return False
+
+    def __hash__(self):
+        return 0
+
+
+def test_a_sort_key_that_raises_errors_only_its_check(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    health = importlib.import_module("lore.cli.health")
+    model = importlib.import_module("lore.health.model")
+
+    def stubbed(scans, selected, ctx):
+        mk = lambda: type("F", (), {"vault": "default", "kind": "lesson", "name": _Unorderable(),
+                                    "updated_at": "2026-03-01T00:00:00Z"})()
+        return health.CheckRun([mk(), mk()], {"default": 2})
+
+    _with_checks(monkeypatch, "retired-links", stubbed)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, "retired-links") == ["retired-links — errored: TypeError."]
+    assert group(r.stdout, "dangling-links")[0] == "dangling-links — 1 finding, oldest first"
+
+
+def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_line(world):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    r = world.run()
+    lines = r.stdout.split("\n")
+    assert lines[-1] == "" and lines[-2] != ""  # one final newline, no trailing blank line
+    first = lines.index(next(ln for ln in lines if ln.startswith("dangling-links — ")))
+    second = lines.index(next(ln for ln in lines if ln.startswith("retired-links — ")))
+    assert lines[second - 1] == "" and lines[second - 2] != ""
+    assert "" not in lines[first:second - 1]
+    assert lines[-2].startswith("Act on these with /lore:correct")
+
+
+TIMESTAMP_SHAPES = {
+    "z": "2026-03-01T10:00:00Z",
+    "offset": "2026-03-01T10:00:00+05:00",
+    "naive": "2026-03-01T10:00:00",
+    "date-only": "2026-03-01",
+    "year-1-positive-offset": "0001-01-01T00:00:00+05:00",
+    "year-9999-negative-offset": "9999-12-31T23:59:59-05:00",
+    "prose": "last tuesday",
+}
+
+
+@pytest.mark.parametrize("value,expected", [
+    ("2026-03-01T10:00:00Z", "2026-03-01T10:00:00+00:00"),
+    ("2026-03-01T10:00:00+05:00", "2026-03-01T05:00:00+00:00"),
+    ("2026-03-01T10:00:00", None),
+    ("2026-03-01", None),
+    ("0001-01-01T00:00:00+05:00", None),
+    ("9999-12-31T23:59:59-05:00", None),
+    ("last tuesday", None),
+    (7, None),
+    (None, None),
+])
+def test_the_timestamp_parser_returns_aware_utc_or_none_and_never_raises(value, expected):
+    model = importlib.import_module("lore.health.model")
+    got = model.parse_timestamp(value)
+    assert (got.isoformat() if got is not None else None) == expected
+
+
+def test_one_record_of_every_timestamp_shape_errors_no_check(world):
+    d = world.roots["default"]
+    for key, value in TIMESTAMP_SHAPES.items():
+        _put(d, "lesson", f"rec-{key}", updated=value, related={"lesson": [f"gone-{key}"]})
+    _put(d, "lesson", "rec-int", updated=7, related={"lesson": ["gone-int"]})
+    _put(d, "lesson", "rec-missing", updated=None, related={"lesson": ["gone-missing"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "errored" not in r.stdout
+    assert len(finding_lines(r.stdout)) == len(TIMESTAMP_SHAPES) + 2
+
+
+def test_a_retired_candidate_beside_a_hostile_successor_never_echoes_the_hostile_name(world):
+    d = world.roots["default"]
+    _put(d, "decision", "x", status="superseded")
+    _put(d, "decision", "Bad Name", supersedes=["decision/x"])
+    _put(d, "decision", "good-successor", supersedes=["decision/x"])
+    _live_task(d, "t", related={"decision": ["x"]})
+    r = world.run()
+    (line,) = retired_lines(r.stdout)
+    assert "decision/good-successor" in line and "Bad" not in r.stdout
+    assert "a successor whose name is not a valid record id" in line
+
+
+def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch):
+    from datetime import datetime, timezone
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    seen = []
+
+    def spy(scans, selected, ctx):
+        seen.append(ctx)
+        return health.CheckRun([], {})
+
+    monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
+    now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
+    report = health.build_report(now=now, stale_days=45)
+    assert len(seen) == 2 and seen[0] is seen[1] is report.ctx
+    assert (seen[0].now, seen[0].stale_days) == (now, 45)
+    assert health.build_report().ctx.now.tzinfo is not None

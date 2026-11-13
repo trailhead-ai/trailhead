@@ -18,6 +18,15 @@ lines of a bad wikilink, or the entry positions of a bad sidecar entry
 (:func:`_malformed_evidence`). The index line counts the records the index would
 hold, sessions included, on every form it prints.
 
+Record identity: a finding opens with ``<vault>/<kind>/<name>`` and the date. The
+name is printed only when it is shaped like a record id (the shape
+``health.references.resolve`` accepts, no slash); a name from disk that is not
+prints as ``<vault>/<kind>/ (a record whose name is not a valid record id)`` and
+no part of it is echoed. The date is the UTC date of ``updated-at`` when that
+parses as a timestamp with an offset (:func:`..health.model.parse_timestamp`),
+otherwise ``undated``. Findings sort by that parsed point in time, undated
+first, and groups are separated by one blank line.
+
 Output safety: every vault name, record id, field, target, skip reason, config
 error and ``--vault`` echo is untrusted (a vault synced from elsewhere never had
 its names validated, and OS error text carries paths). Each is passed through
@@ -36,14 +45,18 @@ import shlex
 import sys
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from ..health import dangling as dangling_mod
+from ..health import references as references_mod
 from ..health import retired as retired_mod
 from ..health import scan as scan_mod
-from ..health.model import VaultScan
+from ..health.model import VaultScan, parse_timestamp
 from .record import _printable
 
 DEFAULT_LIMIT = 20
+DEFAULT_STALE_DAYS = 30
+BAD_NAME = "a record whose name is not a valid record id"
 
 INDEX_MATCH = "match"
 INDEX_MISMATCH = "mismatch"
@@ -85,6 +98,17 @@ class IndexLine:
     reason: str | None = None
 
 
+@dataclass(frozen=True)
+class RunContext:
+    """What every check runner is given besides the scans: the clock and the staleness window.
+
+    ``now`` is an aware UTC datetime; ``stale_days`` is the window in days.
+    """
+
+    now: datetime
+    stale_days: int
+
+
 @dataclass
 class Section:
     """One check's outcome.
@@ -113,6 +137,7 @@ class HealthReport:
     outside_root: dict[str, int]
     index: IndexLine
     sections: list[Section]
+    ctx: RunContext
 
 
 @dataclass(frozen=True)
@@ -128,17 +153,20 @@ class CheckRun:
 class Check:
     """One registry entry.
 
-    ``run(scans, selected)`` runs the check and classifies its result through the
-    check's own module at call time. ``render(finding)`` is one finding's line.
+    ``run(scans, selected, ctx)`` runs the check and classifies its result through
+    the check's own module at call time. ``render(finding)`` is one finding's line.
     ``skip_reason`` ends the sentence saying why a skipped check could not judge
     a target. ``action`` is the line that names what acts on the findings.
+    ``heading_note(section, ctx)``, when set, returns text appended to the group
+    heading in parentheses, or ``None`` for no note.
     """
 
     name: str
-    run: Callable[[Sequence[VaultScan], Collection[str]], CheckRun]
+    run: Callable[[Sequence[VaultScan], Collection[str], RunContext], CheckRun]
     render: Callable[[object], str]
     skip_reason: str
     action: str
+    heading_note: Callable[[Section, RunContext], str | None] | None = None
 
 
 def _safe(value: object) -> str:
@@ -167,8 +195,13 @@ def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[s
     return f"{noun} {names} {state}, {tail}"
 
 
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
+
+
 def _sort_key(f):
-    return (f.updated_at or "", f.vault, f.kind, f.name)
+    """Undated first, then by the point in time ``updated_at`` names."""
+    when = parse_timestamp(f.updated_at)
+    return (when is not None, when or _EARLIEST, f.vault, f.kind, f.name)
 
 
 def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
@@ -201,23 +234,26 @@ def _check_run(result, skipped: type, completed: type) -> CheckRun:
 # Each runner classifies through the module that produced the result, looked up
 # at call time: an in-place reload of that module replaces its classes, and a
 # name bound at import would then name a stale class.
-def _run_dangling(scans, selected) -> CheckRun:
+def _run_dangling(scans, selected, ctx) -> CheckRun:
     return _check_run(dangling_mod.check_dangling(scans, selected),
                       dangling_mod.DanglingSkipped, dangling_mod.DanglingResult)
 
 
-def _run_retired(scans, selected) -> CheckRun:
+def _run_retired(scans, selected, ctx) -> CheckRun:
     return _check_run(retired_mod.check_retired(scans, selected),
                       retired_mod.RetiredSkipped, retired_mod.RetiredResult)
 
 
-def build_report(only: str | None = None, *, env=None) -> HealthReport:
+def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
+                 stale_days: int = DEFAULT_STALE_DAYS) -> HealthReport:
     """Scan every configured vault, run every check, and gather the result as data.
 
     Every vault is scanned even when *only* narrows the report, so a target in
     another vault still resolves. A check that raises is recorded as errored and
-    does not stop the others.
+    does not stop the others. Every runner gets one :class:`RunContext`, built from
+    *now* (the current UTC time when ``None``) and *stale_days*.
     """
+    ctx = RunContext(now if now is not None else datetime.now(timezone.utc), stale_days)
     every = scan_mod.resolve_vaults()
     if only is not None:
         scan_mod.resolve_vaults(only)
@@ -228,7 +264,7 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
     sections: list[Section] = []
     for check in CHECKS:
         try:
-            run = check.run(scans, selected)
+            run = check.run(scans, selected, ctx)
             findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
             lines = [] if findings is None else [check.render(f) for f in findings]
         except Exception as exc:  # noqa: BLE001 - one check's failure must not take the report down
@@ -259,6 +295,7 @@ def build_report(only: str | None = None, *, env=None) -> HealthReport:
         outside_root={s.vault: s.skipped_escaping for s in chosen if s.skipped_escaping},
         index=_index_line(chosen, env=env),
         sections=sections,
+        ctx=ctx,
     )
 
 
@@ -313,11 +350,23 @@ def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
 
 
 def _when(f) -> str:
-    return _safe(f.updated_at[:10]) if f.updated_at else "undated"
+    when = parse_timestamp(f.updated_at)
+    return when.date().isoformat() if when is not None else "undated"
+
+
+def _well_shaped(name: str) -> bool:
+    return "/" not in name and references_mod.resolve(name, None) is not None
+
+
+def _record_id(vault: str | None, kind: str, name: str) -> str:
+    """``[vault/]kind/name``, or the fixed phrase in the name's place when it is not record-id shaped."""
+    head = f"{_safe(vault)}/" if vault is not None else ""
+    tail = _safe(name) if _well_shaped(name) else f" ({BAD_NAME})"
+    return f"{head}{_safe(kind)}/{tail}"
 
 
 def _ident(f) -> str:
-    return f"{_safe(f.vault)}/{_safe(f.kind)}/{_safe(f.name)}"
+    return _record_id(f.vault, f.kind, f.name)
 
 
 def _dangling_line(f: dangling_mod.Finding) -> str:
@@ -340,8 +389,7 @@ def _qualified(items, *, kind_name) -> list[str]:
     out = []
     for i in items:
         k, n = kind_name(i)
-        prefix = f"{_safe(i.vault)}/" if counts[(k, n)] > 1 else ""
-        out.append(f"{prefix}{_safe(k)}/{_safe(n)}")
+        out.append(_record_id(i.vault if counts[(k, n)] > 1 else None, k, n))
     return out
 
 
@@ -439,12 +487,13 @@ def render(report: HealthReport, limit: int | None, vault_arg: str | None) -> li
     lines += _index_lines(report.index)
     lines.append("")
 
-    for sec in report.sections:
-        lines += _group(sec, limit, vault_arg)
+    groups = [_group(sec, limit, vault_arg, report.ctx) for sec in report.sections]
+    for i, g in enumerate(groups):
+        lines += ([""] if i else []) + g
     return lines
 
 
-def _group(sec: Section, limit: int | None, vault_arg: str | None) -> list[str]:
+def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunContext) -> list[str]:
     name = sec.check.name
     if sec.error is not None:
         return [f"{name} — errored: {_safe(sec.error)}."]
@@ -454,7 +503,9 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None) -> list[str]:
     if not findings:
         return [f"{name} — no findings."]
     total = len(findings)
-    out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"]
+    note = sec.check.heading_note(sec, ctx) if sec.check.heading_note else None
+    out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"
+           + (f" ({_safe(note)})" if note else "")]
     shown = findings if limit is None else findings[:limit]
     out += sec.lines[:len(shown)]
     rest = total - len(shown)

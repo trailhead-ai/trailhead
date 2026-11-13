@@ -3,6 +3,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+
+def parse_timestamp(value: object) -> datetime | None:
+    """*value* as an aware UTC datetime, or ``None``; never raises.
+
+    ``None`` for anything that is not an ISO-8601 string carrying a time and an
+    offset: a non-string, prose, a date with no time, a timestamp with no
+    offset, or one whose UTC conversion overflows. The health report reads every
+    ``updated-at`` through this, so a synced vault's stray value costs one date,
+    never a check.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
+            return None
+        return parsed.astimezone(timezone.utc)
+    except (ValueError, OverflowError):
+        return None
 
 
 @dataclass(frozen=True)
