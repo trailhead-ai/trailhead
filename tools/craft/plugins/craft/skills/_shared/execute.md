@@ -238,8 +238,8 @@ it comes after a write: it ends `stuck` or `needs-a-decision`.
    and appends this run's block together. Otherwise append one `## Unattended run` block after the
    existing body. The block is shaped as the unattended contract fixes: `**Format:** 1`,
    `**Rituals:** execute (0 calls decided unattended)`, `**Checkpoint:** entered`, an empty
-   `**Decisions:**` list, `**Parked questions:** none`, and **no** `**Outcome:**` line. Leave every
-   earlier block as it is.
+   `**Decisions:**` list, `**Parked questions:** none`, and **no** `**Outcome:**` line. Apart from
+   the takeover's close, leave every earlier block as it is.
 7. **Re-read the record** straight after the write. Count only the blocks with no `**Outcome:**`
    line other than this run's own, the last one, which the write just made, and only those that sit
    after the latest block step 5 read, the one this run took over or followed. An older outcome-less
