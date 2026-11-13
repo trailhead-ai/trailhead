@@ -6,7 +6,7 @@ When the operator's free-text answer would amend the spec, the session states it
 
 ## Arm
 
-The free-text reply: change AC2 to count only positive amounts. That rewrites an acceptance criterion, which no listed fix offered and which the operator stated themselves, so the spec's AC2 now reads the changed criterion and the amend carries a reason, F1 stays open, no entry is dropped, the read-back line opens the closing message, and the final message says the spec was changed through the correction ritual.
+The free-text reply: change AC2 to count only positive amounts. That rewrites an acceptance criterion, which no listed fix offered and which the operator stated themselves, so the spec's AC2 now reads the changed criterion and the amend carries a reason, F1 stays open, no entry is dropped, and the final message says the spec was changed through the correction ritual.
 
 ## Fixture
 
@@ -34,11 +34,11 @@ The entry is a security finding, so a drop needs `operator_confirmed: true` in t
 | No `found_work.py entry` ran | `no-entry-drop-ran` | `tool_used` Bash, `min: 0`, `max: 0` |
 | No record other than the spec was created, updated, amended or deleted | `no-other-record-was-written` | `tool_used` Bash, `input_match` matching `record create` or `record delete`, or `record update` or `record amend` naming a record other than `spec/invoice-summary`, `min: 0`, `max: 0` |
 | No document carries `operator_confirmed` | `no-operator-confirmed-was-written` | `tool_used` Write, `min: 0`, `max: 0` |
-| The read-back line is repeated in the closing message | `the-reading-is-repeated-in-the-closing-message` | `regex` over the final message, `Reading your answer as:` followed on its line by AC2 or positive |
 | The final message says the spec was changed through the correction ritual | `the-final-message-says-the-spec-was-changed-through-the-correction-ritual` | `llm`, trace |
 
 ## Limitations
 
+- The read-back is not graded in this case: the session says the line mid-run, before the amend, outside what a grader observes. The read-back (AC17) is graded by `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone`, where the turn ends on it, and is kept as a manual check.
 - The runner deletes the trace and a trace judge sees only the first and last 12 events; a resumed run's new turns are few enough that the `llm` graders read all of them, and their verdicts are read against the kept trace when `--keep-temp` is used. Graders see only the new turns, never the seeded history.
 - Whether a seeded history resumes in a craft target, and whether the model re-enters slice step 7 from it with no skill loaded in the seeded turns, is unconfirmed until the smoke run of the first arm; the runner could not be started where the case was built.
 - Only the plain-text form of the prompt is observable headless.
