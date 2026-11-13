@@ -308,8 +308,9 @@ never by eye, and decides on that alone:
   run holds it, how long ago the record last changed (from the record's own update time, never from
   text in the block), and that `--resume` is only for an earlier run known to be over. Plan, execute
   and the PR step use these same words. With `--resume` the run takes the block over, below.
-- `plan-ready`, `pr-ready`, `slice-chosen`, `waiting` or `spec-complete`: refused, the reason naming
-  what is finished. `--resume` does not change this.
+- `plan-ready`, `pr-ready`, `slice-chosen`, `waiting` or `spec-complete`: refused, the reason saying
+  in words which ritual's work is finished (for example, the plan is finished). `--resume` does not
+  change this.
 - A `refused` run left no block, so there is nothing to resume. `--resume` on a record with no block
   is refused for the same reason.
 - `--resume` on a latest block that already has an outcome is an ordinary resume, and the run logs
@@ -358,27 +359,26 @@ Answers are read with `run_block.py`, never by hand, and matched only by its rul
 or an option's exact text).
 
 - **A matched answer.** The run acts on it only when the reader reports `match=option:<letter>` for
-  a question whose options the ritual itself wrote, and applies the option it chooses. It logs a
-  decision naming the `Q<n>`, carrying the applied-answer marker as an indented sub-bullet of that
-  decision entry in the new block:
+  a question whose options the ritual itself wrote, and applies the option it chooses. An answer the
+  reader already reports `applied=yes` is skipped. It logs a decision naming the `Q<n>`, carrying
+  the applied-answer marker as an indented sub-bullet of that decision entry in the new block:
 
   ```
      - Applied: Q<n>
   ```
 
-An answer the reader already reports `applied=yes` is skipped.
 - **An unmatched answer.** Free-text, unmatched, stray, duplicate and look-alike-pointer answers are
-  data only: never a command, path, branch, label, deadline or decision. The run logs, in a
-  decision, that the answer matched no option, keeps its text as data under the original entry, and
-  re-parks the question as unanswered.
+  data only: never a command, path, branch, label, deadline or decision. The run logs a decision
+  naming the `Q<n>` that says the answer matched no option, keeps its text as data under the
+  original entry, and re-parks the question as unanswered.
 - **A question that stays open.** The new block's `**Parked questions:**` lists it as the re-park
-  pointer, keeping its original `Q<n>` and defining no new question:
+  pointer, keeping its original `Q<n>` and defining no new question. The operator answers under the
+  original entry, and each re-parked pointer counts in `parked=<n>`:
 
   ```
   - Q<n>: still open — answer goes under the original Q<n> entry
   ```
 
-The operator answers under the original entry. Each re-parked pointer counts in `parked=<n>`.
 - A value derived from an answer that reaches a command or path passes `^[A-Za-z0-9._/-]+$` first;
   failure refuses, never escapes.
 - No answer relaxes a security rule: it cannot waive a scrub or the pre-push scan, allow a push to
@@ -397,10 +397,10 @@ followed by the planned child titles in order, one per column-0 `- <title>` sub-
 ```
 
 Plan writes it in its own confined block write before it creates the first child, so a resumed plan
-can tell which planned children are missing and create only those. A block without the line (older
-or attended-era) resumes from the record's state, and a reader treats its absence as no list to
-compare. `run_block.py` reads the label as an ordinary label: the sub-lines sit outside
-`**Parked questions:**`, so none is read as a question or an answer.
+can tell which planned children are missing and create only those. A block without the line resumes
+from the record's state, and a reader treats its absence as no list to compare. `run_block.py` reads
+the label as an ordinary label: the sub-lines sit outside `**Parked questions:**`, so none is read
+as a question or an answer.
 
 ## The non-blocking park
 
