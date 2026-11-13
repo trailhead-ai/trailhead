@@ -880,6 +880,14 @@
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
       ]
+    },
+    "unattended-execute-starts-fresh-after-a-finished-plan": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
     }
   }
 }
