@@ -146,9 +146,9 @@ this document is exactly as written and no unattended branch applies.
   It says an earlier run whose block has no outcome is over; it changes nothing else.
 - **Scope.** This section covers entry, the refusals, the resumed run, the run block, the inline
   refine, the branch cut and the workspace preflight, the loop stops, the end-phase stops, and the
-  hand-off at the close. A claimed run whose latest block ended `needs-a-decision` or `stuck` is
-  resumed, as [Resumed run](#resumed-run) says, through [Resuming a run](#resuming-a-run) and the
-  `in-progress` bullet of [Determine the task shape](#determine-the-task-shape).
+  hand-off at the close. A claimed run whose latest block ended `needs-a-decision` or `stuck` in
+  execute is resumed, as [Resumed run](#resumed-run) says, through [Resuming a run](#resuming-a-run)
+  and the `in-progress` bullet of [Determine the task shape](#determine-the-task-shape).
 
 ### Entry and refusals
 
@@ -189,7 +189,8 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
    - status `dropped` or `superseded`: `the record is already closed`;
    - then read the body's blocks with `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py`, never by eye
      (save the body to a temp file and feed it by stdin redirect), and decide on its
-     `latest-outcome:` line, as the unattended contract's "Resume" section fixes:
+     `latest-outcome:` and `latest-ritual:` lines, as the unattended contract's "Resume" section
+     fixes:
      - `run_block.py` refuses the body:
        `the run block cannot be read (<reason-code>); fix the block by hand`, the code passing the
        reason-code rule of [End-phase stops](#end-phase-stops);
@@ -198,13 +199,21 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      - no block at all, a `craft/branch` label present, an attended claim:
        `the run was claimed attended; resume it attended`;
      - no block at all, no label: a fresh run;
-     - `none`, no `--resume`: `another run holds the record, its latest block has no outcome (the
-       record last changed <age> ago, from the record's own update time); --resume is only for an
+     - `none`, no `--resume`: `the latest run block has no outcome so another run holds it; the
+       record last changed <age> ago, from the record's own update time; --resume is only for an
        earlier run known to be over`;
      - `none`, with `--resume`: resumed, taking the block over at step 6;
-     - `needs-a-decision` or `stuck`: resumed, without `--resume`; given it, the run logs the flag;
+     - `needs-a-decision` or `stuck`: resumed, without `--resume`, when `latest-ritual:` is
+       `execute`; given the flag, the run logs it. When it names any other ritual, refused:
+       `the latest run stopped in <ritual>; run <ritual> to resume it`, naming the ritual in words.
+       When it is `none`: `the latest run block names no ritual, so the stopped ritual cannot be
+       told; read the block and finish it by hand`;
+     - `slice-chosen`: a fresh run, since slice's work is finished and an attended plan came
+       between;
      - `plan-ready` on a record with no `craft/branch` label: a fresh run, since plan's work is
        finished and execute is the next ritual;
+     - `plan-ready` on a record with a `craft/branch` label: `the slice was claimed attended after
+       the unattended plan; resume it attended`;
      - `pr-ready`: `the build is finished; the PR step continues it, not execute`;
      - any other outcome: `the latest run block already ended with <outcome>, so <the ritual it
        names>'s work is finished; read it before running again`, naming the ritual in words.

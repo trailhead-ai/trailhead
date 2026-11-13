@@ -298,19 +298,25 @@ open, is picked up again, and every ritual that resumes points here for the rule
 
 ### Whether a run resumes
 
-The ritual reads the record's **latest** block with `run_block.py` (its `latest-outcome:` line),
-never by eye, and decides on that alone:
+The ritual reads the record's **latest** block with `run_block.py` (its `latest-outcome:` and
+`latest-ritual:` lines), never by eye, and decides on those alone. Rituals run in this order: slice,
+plan, execute, the PR step.
 
-- `needs-a-decision` or `stuck`: resumed, without `--resume`. The run appends its own new block and
-  leaves the earlier one as it is.
+- `needs-a-decision` or `stuck`: resumed, without `--resume`, and only by the ritual the block was
+  written in (Which ritual resumes below). The run appends its own new block and leaves the earlier
+  one as it is.
 - No outcome: held by another run, live or interrupted, so it is refused unless `--resume` is given.
-  The refusal reason says, in words on the one line: the latest run block has no outcome so another
-  run holds it, how long ago the record last changed (from the record's own update time, never from
-  text in the block), and that `--resume` is only for an earlier run known to be over. Plan, execute
-  and the PR step use these same words. With `--resume` the run takes the block over, below.
-- `plan-ready`, `pr-ready`, `slice-chosen`, `waiting` or `spec-complete`: refused, the reason saying
-  in words which ritual's work is finished (for example, the plan is finished). `--resume` does not
-  change this.
+  The refusal reason is, in these words on the one line: `the latest run block has no outcome so
+  another run holds it; the record last changed <age> ago, from the record's own update time;
+  --resume is only for an earlier run known to be over`. Plan, execute and the PR step use exactly
+  these words. With `--resume` the run takes the block over, below.
+- `slice-chosen`, `plan-ready` or `pr-ready`, each the finished outcome of one ritual (slice, plan
+  and the PR step respectively): written by an **earlier** ritual than the one running, it means a
+  fresh run, which appends its own new block and leaves the earlier one as it is. Written by the
+  running ritual itself or by a later one, it is refused, the reason saying in words which ritual's
+  work is finished (for example, the plan is finished). `--resume` does not change this.
+- `waiting` or `spec-complete`: spec outcomes, refused, the reason saying in words which ritual's
+  work is finished. `--resume` does not change this.
 - A `refused` run left no block, so there is nothing to resume. `--resume` on a record with no block
   is refused for the same reason.
 - `--resume` on a latest block that already has an outcome is an ordinary resume, and the run logs
@@ -322,12 +328,21 @@ command to paste.
 
 ### Which ritual resumes
 
-The ritual that resumes is the one the stopped run was in, minus any that finished, and each refusal
-and `needs-a-decision` reason restates this in words: plan alone for a stopped slice-and-plan
-session (slice's part is finished); execute, with `--then-pr`, for a stopped execute; the PR step
-alone once execute has closed the slice. Where the run continues comes from the record's state, as
-each ritual defines it; `**Checkpoint:**` is a progress note only, so a block written without a
-marker resumes the same way.
+Only the ritual that `latest-ritual:` names resumes a `needs-a-decision` or `stuck` block: the last
+ritual on the latest block's `**Rituals:**` line, which is the ritual the stopped run was in. A
+stopped slice-and-plan session therefore resumes in plan alone (slice's part is finished); a stopped
+execute resumes in execute, with `--then-pr`; a stopped PR step resumes in the PR step, which is the
+ritual `pull_request` names. Any other ritual refuses, the reason naming in words which ritual to
+run to resume it (for example, the latest run stopped in plan; run plan to resume it). This holds
+for a block parked after children were created and for a block execute left stuck on a claimed
+build: the ritual that did not stop there never builds on it. `--resume` does not change this.
+
+A block with no `**Rituals:**` line reports `none`. The stopped ritual cannot then be told, so every
+ritual refuses it, the reason saying in words that the latest run block names no ritual and that the
+block is to be read and finished by hand.
+
+Where the run continues comes from the record's state, as each ritual defines it; `**Checkpoint:**`
+is a progress note only, so a block written without a marker resumes the same way.
 
 ### Taking over an outcome-less block
 
@@ -398,9 +413,11 @@ followed by the planned child titles in order, one per column-0 `- <title>` sub-
 
 Plan writes it in its own confined block write before it creates the first child, so a resumed plan
 can tell which planned children are missing and create only those. A block without the line resumes
-from the record's state, and a reader treats its absence as no list to compare. `run_block.py` reads
-the label as an ordinary label: the sub-lines sit outside `**Parked questions:**`, so none is read
-as a question or an answer.
+from the record's state, and a reader treats its absence as no list to compare. `run_block.py`
+reports the marker of the most recent block that carries one (`planned-tasks-block:` and the
+`planned-task:` lines), so a later block that lacks it does not hide it. It reads the label as an
+ordinary label: the sub-lines sit outside `**Parked questions:**`, so none is read as a question or
+an answer.
 
 ## The non-blocking park
 
