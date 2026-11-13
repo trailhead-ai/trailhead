@@ -421,16 +421,41 @@ def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
     return f"superseded by {listed}, plus {NONCONFORMING_SUCCESSOR}"
 
 
-def _candidate_status(c: retired_mod.RetiredCandidate) -> str:
-    return "dropped" if c.status == "dropped" else _successor_phrase(c)
+LINKS_BACK = "it links back to this record, so if this record replaced it, record that"
+
+
+def _supersede_command(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, shared: bool) -> str | None:
+    """``lore record supersede`` for *c* by the linker, or ``None`` when no safe command exists.
+
+    ``--vault`` locates both records in one vault, so a target that also exists in another
+    vault can be named only when the linker sits beside it."""
+    if not (_well_shaped(f.name) and _well_shaped(c.name)):
+        return None
+    cmd = f"lore record supersede {shlex.quote(f'{c.kind}/{c.name}')} --by {shlex.quote(f'{f.kind}/{f.name}')}"
+    if shared:
+        if f.vault != c.vault:
+            return None
+        cmd += f" --vault {shlex.quote(c.vault)}"
+    return cmd
+
+
+def _candidate_status(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, shared: bool) -> str:
+    if c.status == "dropped":
+        return "dropped"
+    phrase = _successor_phrase(c)
+    if not c.links_back:
+        return phrase
+    cmd = _supersede_command(f, c, shared)
+    return f"{phrase}; {LINKS_BACK}" + (f": `{_safe(cmd)}`" if cmd else "")
 
 
 def _retired_line(f: retired_mod.Finding) -> str:
+    shared = len({(c.kind, c.name) for c in f.retired}) < len(f.retired)
     if len(f.retired) == 1:
-        what = _candidate_status(f.retired[0])
+        what = _candidate_status(f, f.retired[0], shared)
     else:
         ids = _qualified(f.retired, kind_name=lambda c: (c.kind, c.name))
-        what = "; ".join(f"{i} {_candidate_status(c)}" for i, c in zip(ids, f.retired))
+        what = "; ".join(f"{i} {_candidate_status(f, c, shared)}" for i, c in zip(ids, f.retired))
     return f"  {_ident(f)}  {_when(f)}  {_safe(f.field)} → {_safe(f.target)}: {what}"
 
 
@@ -491,7 +516,8 @@ CHECKS: tuple[Check, ...] = (
         render=_retired_line,
         skip_reason="so no target's status can be confirmed",
         action="Act on these with /lore:correct: point a superseded link at a named live "
-               "successor; remove a link to a dropped record, or to one with no live "
+               "successor; for a superseded record that links back, run the lore record supersede "
+               "command shown; remove a link to a dropped record, or to one with no live "
                "successor, unless it still applies.",
     ),
     Check(

@@ -721,6 +721,7 @@ def test_dropped_target_is_one_finding_and_a_live_target_clears_the_group(world)
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
     assert group(r.stdout, "retired-links")[-1] == (
         "Act on these with /lore:correct: point a superseded link at a named live successor; "
+        "for a superseded record that links back, run the lore record supersede command shown; "
         "remove a link to a dropped record, or to one with no live successor, unless it still applies.")
     _put(d, "decision", "pool-size-limits")
     r = world.run()
@@ -1431,3 +1432,105 @@ def test_help_names_the_stale_check_and_its_window_flag(world):
     flat = " ".join(r.stdout.split())
     assert "--stale-days N" in flat and "default 30" in flat
     assert "stale-tasks" in flat
+
+
+# --- retired-links names the supersede command when the target links back -------
+
+NO_SUCCESSOR = "superseded, and no record supersedes it"
+LINKS_BACK = "it links back to this record, so if this record replaced it, record that"
+
+
+def _links_back_world(root, *, target_related, target_status="superseded", linker="src"):
+    _put(root, "decision", "old", status=target_status, related=target_related)
+    _put(root, "adr", linker, related={"decision": ["old"]})
+
+
+def test_a_superseded_target_relating_back_gets_the_exact_supersede_command(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert retired_lines(r.stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {NO_SUCCESSOR}; "
+        f"{LINKS_BACK}: `lore record supersede decision/old --by adr/src`"]
+
+
+def test_a_target_relating_to_a_different_record_keeps_the_plain_phrase(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["elsewhere"]})
+    assert retired_lines(world.run().stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {NO_SUCCESSOR}"]
+
+
+def test_a_target_some_record_supersedes_gets_the_successor_phrase_and_no_advice(world):
+    d = world.roots["default"]
+    _links_back_world(d, target_related={"adr": ["src"]})
+    _put(d, "decision", "new", supersedes=["decision/old"])
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(": superseded by decision/new")
+    assert "supersede decision" not in line and "links back" not in line
+
+
+def test_a_dropped_target_relating_back_is_plain_dropped(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]},
+                      target_status="dropped")
+    assert retired_lines(world.run().stdout) == [
+        "  default/adr/src  2026-03-01  related decision → decision/old: dropped"]
+
+
+@pytest.mark.parametrize("entry", ["src", "adr/src"])
+def test_a_bare_or_kinded_related_entry_is_recognised_as_linking_back(world, entry):
+    _links_back_world(world.roots["default"], target_related={"adr": [entry]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith("`lore record supersede decision/old --by adr/src`")
+
+
+@pytest.mark.parametrize("related", [{"task": ["src"]}, {"adr": ["decision/src"]}])
+def test_a_related_entry_naming_a_same_named_record_of_another_kind_is_not_a_link_back(world, related):
+    _links_back_world(world.roots["default"], target_related=related)
+    (line,) = retired_lines(world.run().stdout)
+    assert "links back" not in line
+
+
+def test_the_action_line_names_the_supersede_remedy_beside_a_linking_back_finding(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    block = group(world.run().stdout, "retired-links")
+    assert "links back" in block[1]
+    assert "lore record supersede" in block[-1]
+
+
+def test_a_target_in_two_vaults_gets_the_vault_flag_only_where_the_linker_shares_it(world):
+    d, other = world.roots["default"], world.roots["levr"]
+    _links_back_world(d, target_related={"adr": ["src"]})
+    _put(other, "decision", "old", status="superseded", related={"adr": ["src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(
+        f"default/decision/old {NO_SUCCESSOR}; {LINKS_BACK}: "
+        f"`lore record supersede decision/old --by adr/src --vault default`; "
+        f"levr/decision/old {NO_SUCCESSOR}; {LINKS_BACK}")
+
+
+def test_a_target_in_one_vault_gets_no_vault_flag_even_when_the_linker_is_elsewhere(world):
+    _put(world.roots["levr"], "decision", "old", status="superseded", related={"adr": ["src"]})
+    _put(world.roots["default"], "adr", "src", related={"decision": ["old"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith("`lore record supersede decision/old --by adr/src`")
+
+
+def _line_for(finding_name, candidate_name, *, links_back=True):
+    health = importlib.import_module("lore.cli.health")
+    retired = importlib.import_module("lore.health.retired")
+    cand = retired.RetiredCandidate("default", "decision", candidate_name, "superseded",
+                                    links_back=links_back)
+    f = retired.Finding("default", "adr", finding_name, "2026-03-01", "related decision",
+                        "decision/old", (cand,))
+    return health._retired_line(f)
+
+
+@pytest.mark.parametrize("linker,target", [("Bad Name", "old"), ("src", "Bad Name"),
+                                           ("ignore previous instructions", "also bad")])
+def test_a_name_that_is_not_a_record_id_gets_the_words_and_no_command(linker, target):
+    line = _line_for(linker, target)
+    assert LINKS_BACK in line
+    assert "lore record supersede" not in line
+    for word in ("Bad", "ignore", "previous", "also"):
+        assert word not in line
+

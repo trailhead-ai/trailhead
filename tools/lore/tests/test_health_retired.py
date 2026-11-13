@@ -306,3 +306,47 @@ def test_bare_link_with_two_retired_candidates_is_history_when_linker_supersedes
     scan = vault("a", adr, other, rec("a", "decision", "old", "superseded"),
                  rec("a", "lesson", "old", "dropped"))
     assert single(run([scan])).name == "other"
+
+
+def _adr_src():
+    return linking("adr", "src", "active", rel("decision", "old"))
+
+
+def _old_relating(related, status="superseded"):
+    return rec("a", "decision", "old", status, {"related": related})
+
+
+def test_superseded_target_relating_back_to_its_linker_is_marked_as_linking_back():
+    f = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}))]))
+    assert f.retired[0].links_back is True
+
+
+@pytest.mark.parametrize("related", [
+    {"adr": ["someone-else"]},
+    {"task": ["src"]},
+    {"adr": ["decision/src"]},
+    {"decision": ["src"]},
+])
+def test_target_relating_to_a_different_record_is_not_marked(related):
+    f = single(run([vault("a", _adr_src(), _old_relating(related))]))
+    assert f.retired[0].links_back is False
+
+
+def test_kinded_and_bare_related_entries_both_count_as_linking_back():
+    kinded = single(run([vault("a", _adr_src(), _old_relating({"adr": ["adr/src"]}))]))
+    bare = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}))]))
+    assert (kinded.retired[0].links_back, bare.retired[0].links_back) == (True, True)
+
+
+def test_target_with_a_named_or_nonconforming_successor_is_not_marked():
+    named = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}),
+                              succ("new"))]))
+    assert named.retired[0].links_back is False
+    odd = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}),
+                            succ("not an id"))]))
+    assert odd.retired[0].links_back is False
+
+
+def test_dropped_target_relating_back_is_not_marked():
+    f = single(run([vault("a", _adr_src(), _old_relating({"adr": ["src"]}, status="dropped"))]))
+    assert f.retired[0].links_back is False

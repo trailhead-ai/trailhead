@@ -37,7 +37,9 @@ class RetiredCandidate:
 
     ``successors`` are the record-id-shaped successors, sorted by kind, name and
     vault; ``nonconforming_successors`` counts the rest, whose names are never
-    carried. Both are empty for a dropped candidate.
+    carried. Both are empty for a dropped candidate. ``links_back`` is set on a
+    superseded candidate with no successor at all whose own ``related`` entries
+    name the linking record.
     """
 
     vault: str
@@ -46,6 +48,7 @@ class RetiredCandidate:
     status: str
     successors: tuple[Successor, ...] = ()
     nonconforming_successors: int = 0
+    links_back: bool = False
 
 
 @dataclass(frozen=True)
@@ -112,7 +115,7 @@ def check_retired(
                 if any(key(record) in {key(r) for r in candidates.superseded_by(c.kind, c.name)}
                        for c in found if status(c) == "superseded"):
                     continue
-                retired = tuple(_candidate(c, candidates) for c in sorted(found, key=key))
+                retired = tuple(_candidate(c, candidates, record) for c in sorted(found, key=key))
                 result.findings.append(
                     Finding(
                         record.vault, record.kind, record.name, record.updated_at,
@@ -123,7 +126,9 @@ def check_retired(
     return result
 
 
-def _candidate(record: ScannedRecord, candidates: references.CandidateIndex) -> RetiredCandidate:
+def _candidate(
+    record: ScannedRecord, candidates: references.CandidateIndex, linker: ScannedRecord
+) -> RetiredCandidate:
     state = status(record)
     assert state is not None
     successors: list[Successor] = []
@@ -139,6 +144,18 @@ def _candidate(record: ScannedRecord, candidates: references.CandidateIndex) -> 
             else:
                 successors.append(Successor(s.vault, s.kind, s.name, status(s)))
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
+    links_back = (
+        state == "superseded" and not successors and not nonconforming
+        and _relates_to(record, linker)
+    )
     return RetiredCandidate(
-        record.vault, record.kind, record.name, state, tuple(successors), nonconforming
+        record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
+        links_back,
+    )
+
+
+def _relates_to(record: ScannedRecord, other: ScannedRecord) -> bool:
+    return any(
+        ref.field.startswith("related ") and parsed == (other.kind, other.name)
+        for ref, parsed, _ in references.resolved_references(record)
     )
