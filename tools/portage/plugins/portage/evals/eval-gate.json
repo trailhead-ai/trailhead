@@ -108,6 +108,13 @@
         "agents/monitor.md"
       ]
     },
+    "unattended-pr-step-starts-fresh-after-a-finished-plan": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md",
+        "agents/monitor.md"
+      ]
+    },
     "unattended-pr-step-stops-at-ready": {
       "measures": [
         "skills/pull_request/SKILL.md",
