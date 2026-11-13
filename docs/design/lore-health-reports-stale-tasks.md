@@ -1,0 +1,172 @@
+# lore health reports stale tasks
+
+The rendered surface of `lore health`'s third check, `stale-tasks`, and of the changes this check
+brings to the rest of the report. The report stays read-only, with the same commands, flags and
+exit contract as before (`docs/design/lore-health-reports-dangling-links-across-every-vault.md`,
+`docs/design/lore-health-reports-links-to-dropped-or-superseded-records.md`). This document fixes
+only what changes: a third check and its window, how a finding names its record and its date, a
+blank line between groups, and the advice for a superseded record that links back to its linker.
+
+## What the check judges
+
+An **unfinished task** is judged: a task whose status is `open`, `ready`, `in-progress` or
+`blocked`. No other record is judged, and a session never is. "Records checked" in the summary
+counts the unfinished tasks judged.
+
+A judged task is reported, once, when either holds:
+
+- **It has gone stale.** Its last-updated time (`updated-at`) is earlier than the start of the
+  staleness window: the run's current time minus the window. A task updated inside the window is
+  not reported on age. A last-updated time in the future is inside the window.
+- **It is tied to a retired spec.** One of its references (a `related spec` entry, or a body
+  `[[wikilink]]` outside code) resolves to a spec, and every spec it can resolve to, in any
+  configured vault, is `dropped` or `superseded`. Such a task is reported whatever its last update.
+
+A task that meets both is still one finding, naming both reasons. A task whose last-updated time is
+missing or does not parse as a timestamp is reported as having no readable last-updated time: the
+check cannot show it is fresh, and a task nobody can date is the kind of task the report exists to
+surface.
+
+The **staleness window** is 30 days unless the run sets another with `--stale-days N`, a positive
+whole number of days. The window in force is printed in the check's group heading, so a run with a
+different window cannot be read as the default.
+
+The check is skipped for every vault when any vault was not fully read, on the same rule and with
+the same reason as the other checks: a spec's status cannot be confirmed in a vault that was not
+read.
+
+## Layout changes
+
+1. **The summary** gains a third row per vault, `stale-tasks`, after `retired-links`.
+2. **The groups** gain a third group, `stale-tasks`, last. Its findings are listed oldest first by
+   last update, a task with no readable last-updated time first of all, at most 20 unless more were
+   asked for. Its action line names what acts on the findings.
+3. **A blank line separates each group from the next**, as in every example below. The report ends
+   on the last group's action line, with no trailing blank line.
+
+The order is the same in every check: oldest first by the date printed on the line. A last-updated
+time is compared as a point in time, so two timestamps written with different offsets sort by when
+they happened, not by their text.
+
+## How a finding names its record and its date
+
+Every finding line, in every check, opens with the record and a date. Both are read from files any
+synced vault can write, so both are printed only when they have the expected shape:
+
+- The record is printed as `<vault>/<kind>/<name>` when its name has the shape of a record id.
+  A record whose name does not is printed as `<vault>/<kind>/` followed by the fixed phrase
+  `(a record whose name is not a valid record id)`; its name is never echoed.
+- The date is the record's last update as `YYYY-MM-DD` when its `updated-at` parses as a
+  timestamp, and `undated` otherwise. No part of an unparseable value is echoed.
+
+## Advice for a superseded record that links back
+
+A link to a superseded record that no record supersedes is usually a supersession that was never
+recorded: the linking record replaced the target, and the target's own `related` list points back
+at it. When the target relates back to the linking record, the finding says so and names the
+command that records the supersession, instead of leaving only the advice to remove the link:
+
+```
+  trailhead/adr/notes-are-records  2026-06-02  related decision → decision/notes-policy: superseded, and no record supersedes it; it links back to this record, so if this record replaced it, record that: lore record supersede decision/notes-policy --by adr/notes-are-records
+```
+
+The `retired-links` action line names that remedy beside the existing ones.
+
+## State — No stale tasks
+
+Every vault was read and no unfinished task is stale or tied to a retired spec:
+
+```
+lore health — 2 vaults
+
+vault       check           records  findings  skipped
+default     dangling-links  1,204    0         no
+default     retired-links   212      0         no
+default     stale-tasks     18       0         no
+trailhead   dangling-links  4,511    0         no
+trailhead   retired-links   1,630    0         no
+trailhead   stale-tasks     402      0         no
+
+Records read match the index (sessions included): 6,402 read, 6,402 indexed.
+
+dangling-links — no findings.
+
+retired-links — no findings.
+
+stale-tasks — no findings (window: 30 days).
+```
+
+## State — One stale task
+
+A finding names the task, its last update, and how long ago that was in whole days:
+
+```
+stale-tasks — 1 finding, oldest first (window: 30 days)
+  trailhead/task/migrate-the-billing-cron  2026-08-02  last updated 103 days ago
+Act on these: resume a task that still applies with /craft:execute, or drop it with a note saying why (lore record update task/<name> --status dropped --diff).
+```
+
+## State — Stale tasks beyond the cap
+
+Past 20 findings, the group stops and counts the rest, as every check does:
+
+```
+stale-tasks — 412 findings, oldest first (window: 30 days)
+  default/task/import-notes-from-old-wiki  2024-11-02  last updated 741 days ago
+  …  (20 lines)
+  392 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
+Act on these: resume a task that still applies with /craft:execute, or drop it with a note saying why (lore record update task/<name> --status dropped --diff).
+```
+
+## State — Task linked to a dropped or superseded spec
+
+The finding names the retired spec and its status, whatever the task's age. A recent task tied to a
+retired spec, and an old one that is also stale on age, each print one line:
+
+```
+  trailhead/task/export-as-csv  2026-11-10  linked to spec/streaming-export, which is dropped
+  trailhead/task/export-as-xlsx  2026-07-01  last updated 135 days ago; linked to spec/streaming-export, which is superseded
+```
+
+A task tied to several retired specs names up to three, then `and N more`.
+
+## State — Staleness window set by the operator
+
+`--stale-days 90` changes which tasks are stale on age, and the heading says which window was used.
+A task tied to a retired spec is reported under any window:
+
+```
+stale-tasks — 37 findings, oldest first (window: 90 days)
+```
+
+`--stale-days` takes a positive whole number; anything else is refused before the report runs, as
+`--limit` is.
+
+## State — Task with no readable last-updated time
+
+A task whose `updated-at` is missing or not a timestamp is listed first, undated:
+
+```
+  default/task/sketch-the-sync-design  undated  no readable last-updated time
+```
+
+## State — Check skipped because a vault could not be read
+
+When any vault could not be fully read, every check is skipped on every row, each with the reason
+naming that vault, and each group is one line:
+
+```
+vault       check           records  findings  skipped
+default     dangling-links  —        —         yes: vault scratch could not be read, so no target can be confirmed missing
+default     retired-links   —        —         yes: vault scratch could not be read, so no target's status can be confirmed
+default     stale-tasks     —        —         yes: vault scratch could not be read, so no spec's status can be confirmed
+scratch     dangling-links  —        —         yes: its directory could not be read
+scratch     retired-links   —        —         yes: its directory could not be read
+scratch     stale-tasks     —        —         yes: its directory could not be read
+
+dangling-links — skipped.
+
+retired-links — skipped.
+
+stale-tasks — skipped.
+```
