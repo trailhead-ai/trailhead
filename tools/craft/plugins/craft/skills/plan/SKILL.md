@@ -77,8 +77,9 @@ unattended first and plan the slice that comes out; for a task that is not a sli
 attended.
 
 **Entry: the record's latest block.** Once the checks pass, still before anything is written, read
-the parent through `run_block.py` and decide on its `latest-outcome:` by `_shared/unattended.md`
-(Resume, Whether a run resumes), whose refusal words this skill uses as written:
+the parent through `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` and decide on its `latest-outcome:`
+by `_shared/unattended.md` (Resume, Whether a run resumes), whose refusal words this skill uses as
+written:
 
 - No outcome, and this session's own `/craft:slice --then-plan` pass did not open it: refused as
   `outcome: refused task/<parent-name> parked=0 — <why>; <what to run instead>` unless `--resume` is

@@ -180,16 +180,16 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      `the slice has no child tasks; plan it first`;
    - a standalone `ready` record whose node lacks the `(runnable)` marker:
      `a task it depends on is unfinished; finish that task first`.
-5. **Claim and status.** Refuse each of these, in this order. The specific stops come before the
-   generic claimed one, because a push failure, a block and a close all leave `craft/branch` in
-   place and would otherwise always read as "already claimed":
+5. **Claim and status.** Refuse each of these, in this order. The label and status stops come before
+   the block is read, because a push failure, a block and a close all leave `craft/branch` in place
+   and a block alone would not tell them apart:
    - a `craft/push=failed` label: `an earlier push failed; settle it by hand and clear the label`;
    - status `blocked`: `the record is blocked; clear the block first`;
    - status `done`: `the slice is already built; the PR step resumes it, not execute`;
    - status `dropped` or `superseded`: `the record is already closed`;
-   - then read the body's blocks with `run_block.py`, never by eye (save the body to a temp file and
-     feed it by stdin redirect), and decide on its `latest-outcome:` line, as the unattended
-     contract's "Resume" section fixes:
+   - then read the body's blocks with `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py`, never by eye
+     (save the body to a temp file and feed it by stdin redirect), and decide on its
+     `latest-outcome:` line, as the unattended contract's "Resume" section fixes:
      - `run_block.py` refuses the body:
        `the run block cannot be read (<reason-code>); fix the block by hand`, the code passing the
        reason-code rule of [End-phase stops](#end-phase-stops);
@@ -206,7 +206,8 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      - `plan-ready` on a record with no `craft/branch` label: a fresh run, since plan's work is
        finished and execute is the next ritual;
      - `pr-ready`: `the build is finished; the PR step continues it, not execute`;
-     - any other outcome: `the latest run block already ended; read it before running again`.
+     - any other outcome: `the latest run block already ended with <outcome>, so <the ritual it
+       names>'s work is finished; read it before running again`, naming the ritual in words.
 
 A resumed run whose record carries no `craft/branch` label (the run died before its claim) starts as
 a fresh run does: the branch is cut and the claim made.
@@ -241,11 +242,12 @@ is acted on. What execute adds:
 
 1. **Log the resume.** One decision: which earlier block it follows and how that block ended, and
    whether `--resume` was given.
-2. **Read the answers.** Run `run_block.py` over the body read in step 7 and apply each answer as
-   the shared contract's Reading answers says, logging each applied one with its `- Applied: Q<n>`
-   sub-bullet. Read this run's own block fresh before applying an option's change to any record, as
-   well as before each block write, so a taken-over run stops before it changes anything. An option
-   is applied by making its change first and then logging the decision that carries the marker.
+2. **Read the answers.** Run `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` over the body read in step
+   7 and apply each answer as the shared contract's Reading answers says, logging each applied one
+   with its `- Applied: Q<n>` sub-bullet. Read this run's own block fresh before applying an
+   option's change to any record, as well as before each block write, so a taken-over run stops
+   before it changes anything. An option is applied by making its change first and then logging the
+   decision that carries the marker.
    - **A parked invalidated assumption kept inside the slice** is applied as [Loop
      stops](#loop-stops) does for a routine one: the child the option names is updated as options 1
      and 3 of [Handling Assumption-Prover Status](#handling-assumption-prover-status) prescribe.
@@ -259,10 +261,10 @@ is acted on. What execute adds:
      build ends `outcome: needs-a-decision task/<name> parked=<n>`, with no reason after it, the
      block's outcome and checkpoint written first and the final message reporting the re-parked
      pointers as a report, not a question.
-3. **Sweep the workspace** in the target repository before the first dispatch of this run, with
-   `git -C <repo> status --porcelain`. Any line it prints (a modified, staged, deleted or untracked
-   path) ends the run: the block logs one decision naming the paths, then `**Outcome:** stuck` and
-   the checkpoint are written, and the line is
+3. **Sweep the workspace** before the first dispatch of this run, in every repo the [Workspace
+   preflight](#workspace-preflight) enumerates, with `git -C <repo> status --porcelain`. Any line it
+   prints (a modified, staged, deleted or untracked path) ends the run: the block logs one decision
+   naming the paths, then `**Outcome:** stuck` and the checkpoint are written, and the line is
    `outcome: stuck task/<name> parked=<n> — the workspace holds uncommitted changes; the paths are listed above; settle them by hand and run again`.
    The final message lists the paths above that line and nothing of any file's contents or diff. A
    path that fails `^[A-Za-z0-9._/-]+$` is counted, never named. Nothing is committed, stashed,
@@ -472,7 +474,7 @@ edit.
 - **A `<reason-code>` written into an outcome line or a block** is a token the script printed on a
   `reason-code:` line and matches `^[a-z0-9-]{1,64}$`; anything else is written as the fixed word
   `unrecognised`. The script's `reason:` text is never copied. This holds for every `<reason-code>`
-  below and in [Phase 6](#phase-6-close-and-completion-report).
+  in this section and in [Phase 6](#phase-6-close-and-completion-report).
 - **Manual-check discharge (Phase 6)** asks nothing and never writes an attestation. Each covered
   criterion whose recorded method is `manual-check` and that has no attestation takes the "Not yet"
   path of [Phase 6](#phase-6-close-and-completion-report): draft `check` and `how` from the
