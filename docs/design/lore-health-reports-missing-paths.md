@@ -33,13 +33,16 @@ Before the lookup, a trailing location is taken off: a line suffix (`:198`, `:12
 printed path is the candidate as written, so the operator can find it in the record.
 
 A path is **reported** when it is absent from the default branch of **every** one of the vault's
-repositories, as a file or as a directory. A record naming the same missing path twice is one
+repositories, as a file or as a directory. A path beneath a submodule in any of them counts as
+present, because the submodule's own contents are not read. A record naming the same missing path twice is one
 finding for that path, located at its first appearance.
 
 ## Which repositories a vault has
 
 A vault's repositories are every member repository (`repo_root`) of every camp group whose
-`[[lore_scopes]]` binding names that vault. A group that binds two vaults lends its repositories
+`[[lore_scopes]]` binding names that vault. A `repo_root` written with `~` or as a relative path is
+resolved against the home directory or the group file's own directory, never the current directory.
+A repository shared by several vaults is read once per run. A group that binds two vaults lends its repositories
 to both; a vault bound by two groups gets the repositories of both.
 
 When camp is not installed, no group binds the vault, or the groups cannot be read, the vault has
@@ -56,16 +59,23 @@ tree:
 2. When none exists, the local default branch: `main`, otherwise `master`, and the report says the
    local branch was used.
 
-The check names each repository it read, under the group heading, with the branch and the time of
-the last fetch (the modification time of the repository's `FETCH_HEAD`, in UTC to the minute), or
-`no fetch recorded` when the repository has never fetched. A stale fetch is visible, not hidden.
+The check names each repository it read, under the group heading and grouped by vault, with the
+branch, the time of the last fetch in UTC to the minute and how many days ago that was, or
+`no fetch recorded` when the repository has never fetched. The last fetch is the newest
+`FETCH_HEAD` across the repository and all its linked worktrees, since a fetch made from a camp
+worktree writes that worktree's own `FETCH_HEAD`. This time is a convenience for judging
+staleness, not a guarantee: a stale fetch is visible, not hidden, and the action line says to fetch
+first when a repository line is old.
 
-A repository whose directory is missing, is not a git repository, or has none of the branches
-above **cannot be read**. Absence can then not be confirmed across every repository, so the check
+A repository whose directory is missing, is not a git repository, has none of the branches above,
+or whose git call fails (git missing, a timeout, an over-large tree, an ownership refusal)
+**cannot be read**. Absence can then not be confirmed across every repository, so the check
 is skipped for that vault, naming the repository.
 
 No value from a record reaches git. The check lists each repository's tree once
-(`git ls-tree -r -t --name-only`) and compares paths in memory.
+(`git ls-tree -r -t --name-only`) and compares paths in memory. Git runs with its inherited
+`GIT_*` environment removed, with no prompts, no optional locks and no lazy fetch, and under a
+timeout.
 
 ## Skipping one vault, running another
 
@@ -97,7 +107,10 @@ The path is printed between backticks, through the same control-character escape
 through.
 
 The action line: `Act on these with /lore:correct: point the record at where the code now lives,
-or, if the feature it describes was removed, drop or supersede the record.`
+or, if the feature it describes was removed, drop or supersede the record. If a repository line
+above is old, fetch it first; a path added on a branch not yet merged clears once it merges.`
+
+`body line N` counts lines of the record's body, the text `lore record show` prints.
 
 ## State — No missing paths
 
@@ -113,17 +126,17 @@ trailhead  missing-paths   590      0         no
 …
 
 missing-paths — no findings.
-  repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC
-  repository outpost: origin/main, last fetched 2026-11-13 14:53 UTC
+  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
+  trailhead: repository outpost: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
 ```
 
 ## State — One missing path
 
 ```
 missing-paths — 1 finding, oldest first
-  repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC
+  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
   trailhead/decision/camp-pane-ownership  2026-08-21  body line 14: `tools/camp/plugins/camp/camp/launch/panes.py` is on no repository's default branch
-Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record.
+Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
 ```
 
 ## State — Many missing paths, capped
@@ -132,10 +145,10 @@ Past 20 findings, the group stops and counts the rest, as every check does:
 
 ```
 missing-paths — 143 findings, oldest first
-  repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC
+  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
   …  (20 lines)
   123 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
-Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record.
+Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
 ```
 
 ## State — Skipped, no repository for the vault
@@ -144,20 +157,21 @@ A vault no camp group binds is skipped on its own row; the others still run:
 
 ```
 vault      check           records  findings  skipped
-default    missing-paths   —        —         yes: no repository is known for this vault (no camp group binds it)
+default    missing-paths   —        —         yes: no repository is known for this vault (no camp group binds it); bind it with [[lore_scopes]] in a camp group
 trailhead  missing-paths   590      3         no
 ```
 
 When camp is not installed, or its group config cannot be read, the reason says that instead:
 `yes: no repository is known for this vault (camp is not installed)` or
-`yes: no repository is known for this vault (camp's group config could not be read)`.
+`yes: no repository is known for this vault (camp's group config could not be read); run camp
+status to see why`.
 
 ## State — Local default branch used, no remote-tracking branch
 
 A repository with no remote-tracking default branch is read at its local one, and the line says so:
 
 ```
-  repository lookout: local main (no remote-tracking default branch), last fetched 2026-11-12 11:26 UTC
+  trailhead: repository lookout: local main (no remote-tracking default branch), last fetched 2026-11-12 11:26 UTC (1 day ago)
 ```
 
 ## State — Repository unreadable
@@ -167,11 +181,16 @@ repository; its line in the group says why:
 
 ```
 vault      check           records  findings  skipped
-trailhead  missing-paths   —        —         yes: repository outpost could not be read, so no path can be confirmed missing
+trailhead  missing-paths   —        —         yes: repository outpost could not be read, so no path can be confirmed missing; clone or repair it, or remove it from the camp group
 
 missing-paths — skipped.
+  trailhead: repository outpost: could not be read (its directory does not exist)
 ```
 
-The reasons are `its directory does not exist`, `it is not a git repository` and `it has no
-default branch`. A repository path from camp's config is printed through the escaper, like every
+The repository lines stay in a group that skipped every vault, so the reason is visible beside the
+check, not only in the summary.
+
+The reasons are `its directory does not exist`, `it is not a git repository`, `it has no
+default branch` and `git could not read it`. A vault that was not fully read is skipped with the
+same reason the other checks give for it. A repository path from camp's config is printed through the escaper, like every
 other value.
