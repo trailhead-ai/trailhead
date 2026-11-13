@@ -116,7 +116,6 @@ _SEPARATORS_RE = re.compile("[  \u0085\v\f]")
 
 @dataclass
 class Question:
-    n: int
     block: int
     options: dict[str, str] = field(default_factory=dict)
     answer: str | None = None
@@ -270,7 +269,7 @@ def build_report(text: str) -> str:
                 continue
             if n in questions:
                 raise Refusal(f"Q{n} is defined more than once", "duplicate-question", 1)
-            current = questions[n] = Question(n=n, block=block.index)
+            current = questions[n] = Question(block=block.index)
             order.append(n)
             nearest = f"Q{n}"
 
@@ -280,8 +279,8 @@ def build_report(text: str) -> str:
 
     out = [
         f"blocks: {len(blocks)}",
-        f"latest-outcome: {_flat(outcome) if blocks and outcome else 'none'}",
-        f"latest-checkpoint: {_flat(checkpoint) if blocks and checkpoint else 'none'}",
+        f"latest-outcome: {_flat(outcome) if outcome else 'none'}",
+        f"latest-checkpoint: {_flat(checkpoint) if checkpoint else 'none'}",
         f"highest-q: Q{max(order)}" if order else "highest-q: none",
     ]
     for n in order:
