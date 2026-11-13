@@ -17,15 +17,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 from . import references
-from .model import ScannedRecord, VaultScan
-
-RETIRED_STATUSES = ("dropped", "superseded")
-_LIVE_STATUSES = {
-    "decision": ("active",),
-    "adr": ("active",),
-    "area": ("active",),
-    "task": ("open", "ready", "in-progress", "blocked"),
-}
+from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
 
 
 @dataclass(frozen=True)
@@ -104,7 +96,7 @@ def check_retired(
             continue
         judged = 0
         for record in s.records:
-            if not _is_live(record):
+            if not is_live(record):
                 continue
             judged += 1
             for ref, parsed, target in references.resolved_references(record):
@@ -115,12 +107,12 @@ def check_retired(
                     continue
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
-                if not all(_status(c) in RETIRED_STATUSES for c in found):
+                if not all(status(c) in RETIRED_STATUSES for c in found):
                     continue
-                if any(_key(record) in {_key(r) for r in candidates.superseded_by(c.kind, c.name)}
-                       for c in found if _status(c) == "superseded"):
+                if any(key(record) in {key(r) for r in candidates.superseded_by(c.kind, c.name)}
+                       for c in found if status(c) == "superseded"):
                     continue
-                retired = tuple(_candidate(c, candidates) for c in sorted(found, key=_key))
+                retired = tuple(_candidate(c, candidates) for c in sorted(found, key=key))
                 result.findings.append(
                     Finding(
                         record.vault, record.kind, record.name, record.updated_at,
@@ -131,35 +123,22 @@ def check_retired(
     return result
 
 
-def _status(record: ScannedRecord) -> str | None:
-    status = record.sidecar.get("status") if isinstance(record.sidecar, dict) else None
-    return status if isinstance(status, str) else None
-
-
-def _is_live(record: ScannedRecord) -> bool:
-    return _status(record) in _LIVE_STATUSES.get(record.kind, ())
-
-
-def _key(record: ScannedRecord) -> tuple[str, str, str]:
-    return record.kind, record.name, record.vault
-
-
 def _candidate(record: ScannedRecord, candidates: references.CandidateIndex) -> RetiredCandidate:
-    status = _status(record)
-    assert status is not None
+    state = status(record)
+    assert state is not None
     successors: list[Successor] = []
     nonconforming = 0
-    if status == "superseded":
+    if state == "superseded":
         seen: set[tuple[str, str, str]] = set()
         for s in candidates.superseded_by(record.kind, record.name):
-            if _key(s) in seen:
+            if key(s) in seen:
                 continue
-            seen.add(_key(s))
+            seen.add(key(s))
             if references.resolve(f"{s.kind}/{s.name}", None) is None:
                 nonconforming += 1
             else:
-                successors.append(Successor(s.vault, s.kind, s.name, _status(s)))
+                successors.append(Successor(s.vault, s.kind, s.name, status(s)))
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
     return RetiredCandidate(
-        record.vault, record.kind, record.name, status, tuple(successors), nonconforming
+        record.vault, record.kind, record.name, state, tuple(successors), nonconforming
     )

@@ -26,6 +26,16 @@ def parse_timestamp(value: object) -> datetime | None:
         return None
 
 
+RETIRED_STATUSES = ("dropped", "superseded")
+UNFINISHED_TASK_STATUSES = ("open", "ready", "in-progress", "blocked")
+LIVE_STATUSES = {
+    "decision": ("active",),
+    "adr": ("active",),
+    "area": ("active",),
+    "task": UNFINISHED_TASK_STATUSES,
+}
+
+
 @dataclass(frozen=True)
 class ScannedRecord:
     """One record read from disk: sidecar parsed, body decoded."""
@@ -36,6 +46,22 @@ class ScannedRecord:
     updated_at: str | None
     sidecar: dict
     body: str
+
+
+def status(record: ScannedRecord) -> str | None:
+    """The record's stored status, or ``None`` when it has no string status."""
+    value = record.sidecar.get("status") if isinstance(record.sidecar, dict) else None
+    return value if isinstance(value, str) else None
+
+
+def is_live(record: ScannedRecord) -> bool:
+    """Whether the record's status counts as live for its kind; an unrecognised status is not."""
+    return status(record) in LIVE_STATUSES.get(record.kind, ())
+
+
+def key(record: ScannedRecord) -> tuple[str, str, str]:
+    """The record's ``(kind, name, vault)``, for sorting and set membership."""
+    return record.kind, record.name, record.vault
 
 
 @dataclass(frozen=True)

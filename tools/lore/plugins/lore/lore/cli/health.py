@@ -1,8 +1,9 @@
 """``lore health`` — a read-only report of vault health, one check at a time.
 
 The checks, in the order they print, are ``dangling-links`` (references that
-point at no record) and ``retired-links`` (live records that link to dropped or
-superseded records). The command builds a plain-data :class:`HealthReport` from
+point at no record), ``retired-links`` (live records that link to dropped or
+superseded records) and ``stale-tasks`` (unfinished tasks not updated within the
+staleness window, ``--stale-days``, or tied to a dropped or superseded spec). The command builds a plain-data :class:`HealthReport` from
 the scan of every configured vault and the registry of checks (:data:`CHECKS`),
 then renders it: one summary row per vault per check, then one findings group
 per check, each with its own ``--limit`` cap and action line. Nothing is
@@ -11,7 +12,8 @@ written: no record, no lock, no index.
 Each check runs inside its own exception boundary: one that raises is reported
 as ``errored: <error type>`` on its rows and in its group, every other check
 still renders, and the exit status stays 0. A later check is one more entry in
-:data:`CHECKS`.
+:data:`CHECKS`. The window and the clock reach every check through one
+:class:`RunContext`; the clock is injectable through ``build_report(now=)``.
 
 A malformed reference is reported with where it sits, never its text: the body
 lines of a bad wikilink, or the entry positions of a bad sidecar entry
@@ -51,11 +53,13 @@ from ..health import dangling as dangling_mod
 from ..health import references as references_mod
 from ..health import retired as retired_mod
 from ..health import scan as scan_mod
-from ..health.model import VaultScan, parse_timestamp
+from ..health import stale as stale_mod
+from ..health.model import RETIRED_STATUSES, VaultScan, parse_timestamp
 from .record import _printable
 
 DEFAULT_LIMIT = 20
 DEFAULT_STALE_DAYS = 30
+MAX_STALE_DAYS = 36_500
 BAD_NAME = "a record whose name is not a valid record id"
 
 INDEX_MATCH = "match"
@@ -157,8 +161,9 @@ class Check:
     the check's own module at call time. ``render(finding)`` is one finding's line.
     ``skip_reason`` ends the sentence saying why a skipped check could not judge
     a target. ``action`` is the line that names what acts on the findings.
-    ``heading_note(section, ctx)``, when set, returns text appended to the group
-    heading in parentheses, or ``None`` for no note.
+    ``heading_note(section, ctx)``, when set, returns text appended verbatim to the
+    group heading (after ``oldest first``, or after ``no findings``), or ``None``
+    for none. It is called for any check that ran, with or without findings.
     """
 
     name: str
@@ -242,6 +247,11 @@ def _run_dangling(scans, selected, ctx) -> CheckRun:
 def _run_retired(scans, selected, ctx) -> CheckRun:
     return _check_run(retired_mod.check_retired(scans, selected),
                       retired_mod.RetiredSkipped, retired_mod.RetiredResult)
+
+
+def _run_stale(scans, selected, ctx) -> CheckRun:
+    return _check_run(stale_mod.check_stale(scans, selected, now=ctx.now, window_days=ctx.stale_days),
+                      stale_mod.StaleSkipped, stale_mod.StaleResult)
 
 
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
@@ -400,7 +410,7 @@ def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
     named = []
     ids = _qualified(c.successors, kind_name=lambda s: (s.kind, s.name))
     for s, ident in list(zip(c.successors, ids))[:MAX_NAMED_SUCCESSORS]:
-        mark = f" (itself {s.status})" if s.status in retired_mod.RETIRED_STATUSES else ""
+        mark = f" (itself {s.status})" if s.status in RETIRED_STATUSES else ""
         named.append(f"{ident}{mark}")
     rest = len(c.successors) - len(named)
     listed = ", ".join(named) + f" and {_num(rest)} more" if rest else _and_list(named)
@@ -424,6 +434,47 @@ def _retired_line(f: retired_mod.Finding) -> str:
     return f"  {_ident(f)}  {_when(f)}  {_safe(f.field)} → {_safe(f.target)}: {what}"
 
 
+MAX_NAMED_SPECS = 3
+STALE_ACTION = (
+    "Act on these: if the work already landed, mark the task done; if it still applies, "
+    "resume it with /craft:execute; if it was abandoned, drop it with a note saying why "
+    "(lore record update task/<name> --status dropped --diff). "
+    "The id is task/<name>, without the vault prefix."
+)
+
+
+def _spec_phrase(specs: Sequence[stale_mod.RetiredSpec]) -> str:
+    ids = _qualified(specs, kind_name=lambda s: ("spec", s.name))
+    named = [f"{i}, which is {_safe(s.status)}" for s, i in list(zip(specs, ids))[:MAX_NAMED_SPECS]]
+    rest = len(specs) - len(named)
+    return "; ".join(named) + (f" and {_num(rest)} more" if rest else "")
+
+
+def _stale_line(f: stale_mod.Finding) -> str:
+    reasons = []
+    if f.undated:
+        reasons.append("no readable last-updated time")
+    if f.age_days is not None:
+        reasons.append(f"last updated {_num(f.age_days)} days ago")
+    if f.retired_specs:
+        reasons.append(f"linked to {_spec_phrase(f.retired_specs)}")
+    return f"  {_ident(f)}  {_when(f)}  {_safe(f.status)}  {'; '.join(reasons)}"
+
+
+def _stale_note(sec: Section, ctx: RunContext) -> str:
+    window = f" (window: {ctx.stale_days} days)"
+    counts = {"undated": 0, "tied to a retired spec": 0, "stale on age": 0}
+    for f in sec.findings or ():
+        reason = ("undated" if f.undated
+                  else "tied to a retired spec" if f.retired_specs else "stale on age")
+        counts[reason] += 1
+    parts = [f"{_num(n)} {reason}" for reason, n in
+             (("stale on age", counts["stale on age"]),
+              ("tied to a retired spec", counts["tied to a retired spec"]),
+              ("undated", counts["undated"])) if n]
+    return window + (": " + ", ".join(parts) if parts else "")
+
+
 # The checks, in the order they print. A new check is one more entry.
 CHECKS: tuple[Check, ...] = (
     Check(
@@ -442,6 +493,14 @@ CHECKS: tuple[Check, ...] = (
         action="Act on these with /lore:correct: point a superseded link at a named live "
                "successor; remove a link to a dropped record, or to one with no live "
                "successor, unless it still applies.",
+    ),
+    Check(
+        name="stale-tasks",
+        run=_run_stale,
+        render=_stale_line,
+        skip_reason="so no spec's status can be confirmed",
+        action=STALE_ACTION,
+        heading_note=_stale_note,
     ),
 )
 
@@ -500,12 +559,12 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunConte
     findings = sec.findings
     if findings is None:
         return [f"{name} — skipped."]
-    if not findings:
-        return [f"{name} — no findings."]
-    total = len(findings)
     note = sec.check.heading_note(sec, ctx) if sec.check.heading_note else None
+    if not findings:
+        return [f"{name} — no findings{_safe(note) if note else ''}."]
+    total = len(findings)
     out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"
-           + (f" ({_safe(note)})" if note else "")]
+           + (_safe(note) if note else "")]
     shown = findings if limit is None else findings[:limit]
     out += sec.lines[:len(shown)]
     rest = total - len(shown)
@@ -537,7 +596,7 @@ def cmd_health(args) -> int:
     only = args.vault
     limit = None if args.all else args.limit
     try:
-        report = build_report(only)
+        report = build_report(only, stale_days=args.stale_days)
         _emit(render(report, limit, only), sys.stdout)
         return 0
     except scan_mod.HealthResolutionError as exc:
@@ -558,16 +617,28 @@ def _positive_int(text: str) -> int:
     return value
 
 
+def _stale_days(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid whole number of days: {text!r}") from None
+    if not 1 <= value <= MAX_STALE_DAYS:
+        raise argparse.ArgumentTypeError(f"must be from 1 to {MAX_STALE_DAYS:,} days, got {value}")
+    return value
+
+
 def add_health_subparser(sub) -> None:
     """Register the ``health`` command parser."""
     p = sub.add_parser(
         "health",
-        help="Report dangling and retired links, across every vault (read-only)",
+        help="Report dangling links, retired links and stale tasks, across every vault (read-only)",
         description=(
-            "Read every record in every configured vault and run two checks. "
+            "Read every record in every configured vault and run three checks. "
             "dangling-links reports references (related, supersedes, depends-on, parent, "
             "[[wikilinks]]) that point at no record in any vault. retired-links reports "
-            "live records that link to a dropped or superseded record. Read-only. "
+            "live records that link to a dropped or superseded record. stale-tasks reports "
+            "unfinished tasks not updated within the staleness window, or linked to a "
+            "dropped or superseded spec. Read-only. "
             "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
             "unknown --vault) or fails unexpectedly."
@@ -577,6 +648,9 @@ def add_health_subparser(sub) -> None:
                    help="Report only this vault; targets are still looked up in every vault")
     p.add_argument("--limit", type=_positive_int, default=DEFAULT_LIMIT, metavar="N",
                    help=f"Show up to N findings per check (default {DEFAULT_LIMIT})")
+    p.add_argument("--stale-days", type=_stale_days, default=DEFAULT_STALE_DAYS, metavar="N",
+                   help=f"Staleness window for tasks, 1 to {MAX_STALE_DAYS:,} days "
+                        f"(default {DEFAULT_STALE_DAYS})")
     p.add_argument("--all", action="store_true", default=False,
                    help="Show every finding (wins over --limit)")
     p.set_defaults(func=cmd_health)

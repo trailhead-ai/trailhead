@@ -16,9 +16,9 @@ import pytest
 
 from conftest import load_script, run_cli, write_vault_config
 
-ROW_RE = re.compile(r"^(\S+)\s+(dangling-links|retired-links)\s+(\S+)\s+(\S+)\s+(.*)$")
-CHECKS = ("dangling-links", "retired-links")
-GROUP_RE = re.compile(r"^(dangling-links|retired-links) — ")
+ROW_RE = re.compile(r"^(\S+)\s+(dangling-links|retired-links|stale-tasks)\s+(\S+)\s+(\S+)\s+(.*)$")
+CHECKS = ("dangling-links", "retired-links", "stale-tasks")
+GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
@@ -928,7 +928,7 @@ def _unreadable_world(world):
 def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     r = _unreadable_world(world)
     assert r.returncode == 0, r.stderr
-    assert len(all_rows(r.stdout)) == 6
+    assert len(all_rows(r.stdout)) == 9
     for v in ("default", "trailhead"):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
         assert rows(r.stdout, "retired-links")[v][2] == (
@@ -1133,6 +1133,7 @@ def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_
     d = world.roots["default"]
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+    _put(d, "task", "old", status="open", updated="2020-01-01T00:00:00Z")
     r = world.run()
     lines = r.stdout.split("\n")
     assert lines[-1] == "" and lines[-2] != ""  # one final newline, no trailing blank line
@@ -1140,7 +1141,9 @@ def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_
     second = lines.index(next(ln for ln in lines if ln.startswith("retired-links — ")))
     assert lines[second - 1] == "" and lines[second - 2] != ""
     assert "" not in lines[first:second - 1]
-    assert lines[-2].startswith("Act on these with /lore:correct")
+    third = lines.index(next(ln for ln in lines if ln.startswith("stale-tasks — ")))
+    assert lines[third - 1] == "" and lines[third - 2].startswith("Act on these with /lore:correct")
+    assert lines[-2] == ACTION
 
 
 TIMESTAMP_SHAPES = {
@@ -1209,6 +1212,222 @@ def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch
     monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
     now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
     report = health.build_report(now=now, stale_days=45)
-    assert len(seen) == 2 and seen[0] is seen[1] is report.ctx
+    assert len(seen) == 3 and seen[0] is seen[1] is seen[2] is report.ctx
     assert (seen[0].now, seen[0].stale_days) == (now, 45)
     assert health.build_report().ctx.now.tzinfo is not None
+
+
+# --- the stale-tasks check ------------------------------------------------------
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+STALE_NOW = datetime(2026, 11, 1, 12, 0, tzinfo=timezone.utc)
+ACTION = ("Act on these: if the work already landed, mark the task done; if it still applies, "
+          "resume it with /craft:execute; if it was abandoned, drop it with a note saying why "
+          "(lore record update task/<name> --status dropped --diff). "
+          "The id is task/<name>, without the vault prefix.")
+
+
+def _days_ago(n, now=STALE_NOW):
+    return (now - timedelta(days=n)).isoformat()
+
+
+def _stale_put(root, name, days=1, status="open", **extra):
+    _put(root, "task", name, status=status, updated=None if days is None else _days_ago(days), **extra)
+
+
+def _stale_run(world, monkeypatch, *, limit=None, now=STALE_NOW, **kw):
+    """The rendered report text, ``now`` injected through ``build_report``."""
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    return "\n".join(health.render(health.build_report(now=now, **kw), limit, None))
+
+
+def _stale_group(out):
+    return group(out, "stale-tasks")
+
+
+def test_default_window_reports_a_31_day_task_and_not_a_29_day_one(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "old-one", 31)
+    _stale_put(d, "new-one", 29)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:-1] == ["  default/task/old-one  2026-10-01  open  last updated 31 days ago"]
+    assert rows(out, "stale-tasks")["default"] == ("2", "1", "no")
+
+
+def test_stale_days_90_reports_a_91_day_task_and_not_a_31_day_one(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "ninety-one", 91)
+    _stale_put(d, "thirty-one", 31)
+    out = _stale_run(world, monkeypatch, stale_days=90)
+    assert [ln.split()[0] for ln in _stale_group(out)[1:-1]] == ["default/task/ninety-one"]
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 1 finding, oldest first (window: 90 days): 1 stale on age")
+
+
+def test_the_exact_window_start_is_not_stale(world, monkeypatch):
+    _stale_put(world.roots["default"], "edge", 30)
+    assert _stale_group(_stale_run(world, monkeypatch)) == ["stale-tasks — no findings (window: 30 days)."]
+
+
+def test_stale_wiring_through_cmd_health_has_no_clock_seam(world):
+    d = world.roots["default"]
+    now = datetime.now(timezone.utc)
+    _put(d, "task", "ancient", status="open", updated=(now - timedelta(days=400)).isoformat())
+    _put(d, "task", "today", status="open", updated=now.isoformat())
+    for args, window in (((), 30), (("--stale-days", "365"), 365)):
+        r = world.run(*args)
+        assert r.returncode == 0, r.stderr
+        lines = _stale_group(r.stdout)
+        assert lines[0] == f"stale-tasks — 1 finding, oldest first (window: {window} days): 1 stale on age"
+        assert [ln.split()[0] for ln in lines[1:-1]] == ["default/task/ancient"]
+    r = world.run("--stale-days", "500")
+    assert _stale_group(r.stdout) == ["stale-tasks — no findings (window: 500 days)."]
+
+
+@pytest.mark.parametrize("bad", ["0", "-1", "abc", "36501", "1.5"])
+def test_stale_days_outside_one_to_36500_is_refused_before_the_report(world, bad):
+    r = world.run("--stale-days", bad)
+    assert r.returncode == 2
+    assert "lore health —" not in r.stdout
+
+
+def test_stale_days_36500_runs(world):
+    _put(world.roots["default"], "task", "t", status="open", updated="2026-03-01T00:00:00Z")
+    r = world.run("--stale-days", "36500")
+    assert r.returncode == 0, r.stderr
+    assert _stale_group(r.stdout) == ["stale-tasks — no findings (window: 36500 days)."]
+
+
+def test_each_line_shows_the_status_after_the_date(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "waiting", 40, status="blocked")
+    _stale_put(d, "idle", 50, status="open")
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:3] == [
+        "  default/task/idle  2026-09-12  open  last updated 50 days ago",
+        "  default/task/waiting  2026-09-22  blocked  last updated 40 days ago"]
+
+
+def test_a_task_tied_to_a_retired_spec_names_it_whatever_its_age(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "spec", "streaming-export", status="dropped")
+    _put(d, "spec", "old-plan", status="superseded")
+    _stale_put(d, "export-as-csv", 1, status="ready", related={"spec": ["streaming-export"]})
+    _stale_put(d, "export-as-xlsx", 135, status="blocked", body="[[old-plan]]\n")
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 2 findings, oldest first (window: 30 days): 2 tied to a retired spec")
+    assert _stale_group(out)[1:3] == [
+        "  default/task/export-as-xlsx  2026-06-19  blocked  last updated 135 days ago; "
+        "linked to spec/old-plan, which is superseded",
+        "  default/task/export-as-csv  2026-10-31  ready  linked to spec/streaming-export, which is dropped"]
+
+
+def test_a_task_tied_to_several_specs_names_three_then_counts_the_rest(world, monkeypatch):
+    d = world.roots["default"]
+    for n in "abcde":
+        _put(d, "spec", f"spec-{n}", status="dropped")
+    _stale_put(d, "t", 1, related={"spec": [f"spec-{n}" for n in "abcde"]})
+    (line,) = _stale_group(_stale_run(world, monkeypatch))[1:-1]
+    assert line.endswith(
+        "linked to spec/spec-a, which is dropped; spec/spec-b, which is dropped; "
+        "spec/spec-c, which is dropped and 2 more")
+
+
+def test_the_breakdown_counts_a_task_once_undated_before_retired_before_age(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "spec", "s", status="dropped")
+    _stale_put(d, "undated-and-tied", None, related={"spec": ["s"]})
+    _stale_put(d, "old-and-tied", 99, related={"spec": ["s"]})
+    _stale_put(d, "just-old", 99)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[0] == (
+        "stale-tasks — 3 findings, oldest first (window: 30 days): "
+        "1 stale on age, 1 tied to a retired spec, 1 undated")
+    assert _stale_group(out)[1] == (
+        "  default/task/undated-and-tied  undated  open  no readable last-updated time; "
+        "linked to spec/s, which is dropped")
+
+
+def test_undated_tasks_list_first_and_the_group_ends_on_the_action_line(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "ancient", 900)
+    _stale_put(d, "undated", None)
+    out = _stale_run(world, monkeypatch)
+    lines = _stale_group(out)
+    assert lines[1] == "  default/task/undated  undated  open  no readable last-updated time"
+    assert lines[2].startswith("  default/task/ancient  ")
+    assert lines[-1] == ACTION
+
+
+def test_finished_tasks_decisions_and_sessions_are_never_reported(world, monkeypatch):
+    d = world.roots["default"]
+    for st in ("done", "dropped", "superseded"):
+        _stale_put(d, f"t-{st}", 900, status=st)
+    _put(d, "decision", "dec", updated=_days_ago(900))
+    _put(d, "session", "sess", status="open", updated=_days_ago(900))
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out) == ["stale-tasks — no findings (window: 30 days)."]
+    assert rows(out, "stale-tasks")["default"] == ("0", "0", "no")
+
+
+def test_the_cap_applies_to_the_stale_group_and_counts_its_rest(world, monkeypatch):
+    d = world.roots["default"]
+    for i in range(5):
+        _stale_put(d, f"t{i}", 100 + i)
+    out = _stale_run(world, monkeypatch, limit=2)
+    lines = _stale_group(out)
+    assert lines[0].startswith("stale-tasks — 5 findings, oldest first (window: 30 days)")
+    assert len(lines) == 1 + 2 + 1 + 1
+    assert lines[3] == "  3 more. Run `lore health --all` to see every finding, or `--limit <n>` for more."
+
+
+def test_an_unreadable_vault_skips_the_stale_check_naming_the_vault_and_leaves_the_others(world):
+    r = _unreadable_world(world)
+    assert rows(r.stdout, "stale-tasks")["default"][2] == (
+        "yes: vault levr could not be read, so no spec's status can be confirmed")
+    assert rows(r.stdout, "stale-tasks")["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — skipped."]
+
+
+def test_a_raising_stale_check_leaves_the_other_checks_standing(world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+
+    def boom(scans, selected, ctx):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, run=boom) if c.name == "stale-tasks" else c for c in health.CHECKS))
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    r = world.run()
+    assert group(r.stdout, "stale-tasks") == ["stale-tasks — errored: RuntimeError."]
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+
+
+def test_report_survives_an_in_place_reload_of_the_stale_check(world):
+    d = world.roots["default"]
+    _put(d, "task", "t", status="open", updated="2020-01-01T00:00:00Z")
+    assert world.run().returncode == 0
+    load_script("lore.health.stale")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, "stale-tasks")["default"] == ("1", "1", "no")
+    assert len(_stale_group(r.stdout)) == 3
+
+
+def test_a_stale_finding_on_a_bad_record_name_never_echoes_it(world, monkeypatch):
+    d = world.roots["default"]
+    _stale_put(d, "Bad_Name", 99)
+    out = _stale_run(world, monkeypatch)
+    assert "Bad_Name" not in out
+    assert _stale_group(out)[1].startswith("  default/task/ (a record whose name is not a valid record id)  ")
+
+
+def test_help_names_the_stale_check_and_its_window_flag(world):
+    r = world.run("--help")
+    flat = " ".join(r.stdout.split())
+    assert "--stale-days N" in flat and "default 30" in flat
+    assert "stale-tasks" in flat
