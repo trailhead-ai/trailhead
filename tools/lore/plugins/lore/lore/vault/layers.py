@@ -14,6 +14,7 @@ This module provides:
 import dataclasses
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 
 
@@ -198,10 +199,12 @@ def load_camp_groups(
     groups_dir: "Path | None" = None,
     *,
     import_camp=None,
+    env: Mapping[str, str] | None = None,
 ) -> CampGroups:
     """Load every camp group config under ``groups_dir`` through one guarded camp import.
 
-    ``groups_dir`` defaults to ``trailhead.paths.config_dir("camp") / "groups"``.
+    ``groups_dir`` defaults to ``trailhead.paths.config_dir("camp") / "groups"``,
+    resolved against *env* (the process environment when ``None``).
     Never raises for a missing or broken camp: an unimportable trailhead or camp is
     ``CAMP_ABSENT``; a ``GroupConfigError``, ``OSError`` or ``UnicodeDecodeError``
     while reading is ``CONFIG_UNREADABLE`` (``load_group`` only wraps TOML decode
@@ -224,7 +227,7 @@ def load_camp_groups(
             import trailhead.paths as _paths
         except ImportError:
             return CampGroups(reason=CAMP_ABSENT)
-        groups_dir = _paths.config_dir("camp") / "groups"
+        groups_dir = _paths.config_dir("camp", env=None if env is None else dict(env)) / "groups"
 
     try:
         configs = _gc.load_all_groups(groups_dir)  # [] if dir absent

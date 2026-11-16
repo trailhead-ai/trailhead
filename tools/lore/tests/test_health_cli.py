@@ -1768,6 +1768,8 @@ def _git(repo, *args):
 
 
 class Bound:
+    _bare = ("nope", "gone\x1b[2Jrepo")
+
     def __init__(self, world, tmp_path):
         self.world, self.tmp_path = world, tmp_path
 
@@ -1790,6 +1792,11 @@ class Bound:
         for scope, vault in zip(("team", "repo", "suite", "product"), vaults):
             text += f'\n[[lore_scopes]]\nscope = "{scope}"\nname = {json.dumps(vault)}\n'
         (gd / f"{group}.toml").write_text(text, encoding="utf-8")
+
+    def where(self, name):
+        """How a repository named *name* under tmp_path (``repos/`` unless it is bare) prints."""
+        path = self.tmp_path / name if name in self._bare else self.tmp_path / "repos" / name
+        return str(path.resolve()).replace("\x1b", "\\x1b")
 
     def all_to(self, *roots):
         self.bind("g", VAULTS, roots)
@@ -1822,7 +1829,7 @@ def test_a_committed_path_is_not_reported(mp, world):
     assert rows(r.stdout, "missing-paths")["default"] == ("1", "0", "no")
     assert group(r.stdout, "missing-paths") == (
         ["missing-paths — no findings."]
-        + [f"  {v}: repository alpha: origin/main, no fetch recorded" for v in VAULTS])
+        + [f"  {v}: repository {mp.where('alpha')}: origin/main, no fetch recorded" for v in VAULTS])
 
 
 def test_an_absent_path_is_one_finding_with_its_location_and_the_action_line(mp, world):
@@ -1833,7 +1840,7 @@ def test_an_absent_path_is_one_finding_with_its_location_and_the_action_line(mp,
     assert rows(r.stdout, "missing-paths")["default"] == ("1", "1", "no")
     assert group(r.stdout, "missing-paths") == (
         ["missing-paths — 1 finding, oldest first"]
-        + [f"  {v}: repository alpha: origin/main, no fetch recorded" for v in VAULTS]
+        + [f"  {v}: repository {mp.where('alpha')}: origin/main, no fetch recorded" for v in VAULTS]
         + [f"  default/decision/d  2026-03-01  body line 1: `tools/lore/gone.py` {MISSING_TAIL}",
            MP_ACTION])
 
@@ -1872,7 +1879,7 @@ def test_a_vault_no_group_binds_is_skipped_on_its_row_while_a_bound_vault_is_jud
     assert got["trailhead"] == ("1", "1", "no")
     assert group(r.stdout, "missing-paths") == [
         "missing-paths — 1 finding, oldest first",
-        "  trailhead: repository alpha: origin/main, no fetch recorded",
+        f"  trailhead: repository {mp.where('alpha')}: origin/main, no fetch recorded",
         f"  trailhead/decision/d  2026-03-01  body line 1: `tools/lore/gone.py` {MISSING_TAIL}",
         MP_ACTION]
 
@@ -1905,7 +1912,7 @@ def test_a_repository_with_only_a_local_main_prints_the_local_branch_line(mp, wo
     _decision_naming(world.roots["default"], "d", "tools/lore/x.py")
     r = world.run()
     assert group(r.stdout, "missing-paths")[1] == (
-        "  default: repository alpha: local main (no remote-tracking default branch), no fetch recorded")
+        f"  default: repository {mp.where('alpha')}: local main (no remote-tracking default branch), no fetch recorded")
     assert rows(r.stdout, "missing-paths")["default"] == ("1", "0", "no")
 
 
@@ -1915,10 +1922,10 @@ def test_a_missing_repository_directory_skips_its_vault_and_names_it_while_other
     mp.bind("b", ["trailhead", "levr"], [good])
     r = world.run()
     got = rows(r.stdout, "missing-paths")
-    assert got["default"] == ("—", "—", "yes: repository nope could not be read, so no path can be "
+    assert got["default"] == ("—", "—", f"yes: repository {mp.where('nope')} could not be read, so no path can be "
                               "confirmed missing; clone or repair it, or remove it from the camp group")
     assert got["trailhead"] == ("0", "0", "no") and got["levr"] == ("0", "0", "no")
-    assert "  default: repository nope: could not be read (its directory does not exist)" in group(
+    assert f"  default: repository {mp.where('nope')}: could not be read (its directory does not exist)" in group(
         r.stdout, "missing-paths")
 
 
@@ -1927,24 +1934,29 @@ def test_the_repository_lines_stay_when_every_vault_is_skipped(mp, world):
     r = world.run()
     assert group(r.stdout, "missing-paths") == (
         ["missing-paths — skipped."]
-        + [f"  {v}: repository nope: could not be read (its directory does not exist)" for v in VAULTS])
+        + [f"  {v}: repository {mp.where('nope')}: could not be read (its directory does not exist)" for v in VAULTS])
 
 
 @pytest.mark.parametrize("make,reason", [
     ("file", "it is not a git repository"),
     ("empty", "it has no default branch"),
+    ("no-git", "git could not read it"),
 ])
-def test_each_unreadable_repository_reason_is_worded_for_a_person(mp, world, make, reason):
+def test_each_unreadable_repository_reason_is_worded_for_a_person(mp, world, monkeypatch, make, reason):
     path = mp.tmp_path / "repos" / "odd"
     path.parent.mkdir(parents=True)
-    if make == "file":
-        path.mkdir()
-    else:
-        path.mkdir()
+    path.mkdir()
+    if make != "file":
         subprocess.run(["git", "init", "-q", str(path)], check=True)
+    if make == "no-git":
+        build_history(path, [{"id": "c", "branch": "main", "files": {"a": "a"}}])
+        no_git = mp.tmp_path / "no-git-bin"
+        no_git.mkdir()
+        monkeypatch.setenv("PATH", str(no_git))
     mp.all_to(path)
     r = world.run()
-    assert f"  default: repository odd: could not be read ({reason})" in group(r.stdout, "missing-paths")
+    assert f"  default: repository {mp.where('odd')}: could not be read ({reason})" in group(
+        r.stdout, "missing-paths")
 
 
 def test_a_vault_not_fully_read_skips_dangling_links_for_all_but_missing_paths_only_for_itself(mp, world):
@@ -2001,7 +2013,7 @@ def test_the_fetch_age_is_counted_in_whole_days_against_the_injected_clock(
     os.utime(fetch_head, (stamp, stamp))
     mp.bind("g", ["default"], [repo])
     out = _stale_run(world, monkeypatch, now=MP_NOW)
-    assert f"  default: repository alpha: origin/main, last fetched {printed}" in group(out, "missing-paths")
+    assert f"  default: repository {mp.where('alpha')}: origin/main, last fetched {printed}" in group(out, "missing-paths")
 
 
 def test_a_vault_whose_groups_cannot_be_read_or_whose_camp_is_missing_says_which(mp, world, monkeypatch):
@@ -2021,6 +2033,24 @@ def test_a_vault_whose_groups_cannot_be_read_or_whose_camp_is_missing_says_which
     assert absent == ("—", "—", "yes: no repository is known for this vault (camp is not installed)")
 
 
+def test_two_repositories_sharing_a_name_print_as_distinct_paths(mp, world):
+    one = mp.repo("same", {"tools/lore/x.py": "x\n"})
+    other = mp.tmp_path / "elsewhere" / "same"
+    other.parent.mkdir()
+    shutil.copytree(one, other)
+    shutil.rmtree(one)
+    mp.bind("a", ["default"], [other])
+    mp.bind("b", ["trailhead"], [mp.tmp_path / "repos" / "same"])
+    r = world.run()
+    lines = _repo_lines(r.stdout)
+    assert f"  default: repository {other.resolve()}: origin/main, no fetch recorded" in lines
+    assert f"  trailhead: repository {(mp.tmp_path / 'repos' / 'same').resolve()}: could not be read " \
+        "(its directory does not exist)" in lines
+    assert rows(r.stdout, "missing-paths")["trailhead"][2] == (
+        f"yes: repository {(mp.tmp_path / 'repos' / 'same').resolve()} could not be read, so no path can be "
+        "confirmed missing; clone or repair it, or remove it from the camp group")
+
+
 def test_a_hostile_repository_name_and_path_print_escaped(mp, world):
     hostile = mp.repo("re\x1bpo", {"tools/lore/x.py": "x\n"})
     mp.bind("a", ["default", "trailhead"], [hostile])
@@ -2031,8 +2061,9 @@ def test_a_hostile_repository_name_and_path_print_escaped(mp, world):
     r = world.run()
     assert r.returncode == 0, r.stderr
     assert "\x1b" not in r.stdout and "\u202e" not in r.stdout
-    assert "  default: repository re\\x1bpo: origin/main, no fetch recorded" in group(r.stdout, "missing-paths")
-    assert "repository gone\\x1b[2Jrepo could not be read" in rows(r.stdout, "missing-paths")["levr"][2]
+    hostile_at, gone_at = mp.where("re\x1bpo"), mp.where("gone\x1b[2Jrepo")
+    assert f"  default: repository {hostile_at}: origin/main, no fetch recorded" in group(r.stdout, "missing-paths")
+    assert f"repository {gone_at} could not be read" in rows(r.stdout, "missing-paths")["levr"][2]
     assert _mp_findings(r.stdout) == [
         f"  default/decision/d  2026-03-01  body line 1: `tools/lore/gone.py` {MISSING_TAIL}",
         f"  default/decision/d  2026-03-01  body line 1: `tools/lore/rtl\\u202e.py` {MISSING_TAIL}"]
@@ -2106,6 +2137,37 @@ def test_the_views_are_read_once_per_repository_and_given_the_reports_env(mp, wo
     assert calls[0][1] is env
 
 
+def _groups_under(config_home, root):
+    groups = config_home / "camp" / "groups"
+    groups.mkdir(parents=True)
+    (groups / "g.toml").write_text(
+        '[group]\nname = "g"\n'
+        f'\n[[members]]\nname = "m"\nrepo_root = {json.dumps(str(root))}\n'
+        '\n[[lore_scopes]]\nscope = "team"\nname = "trailhead"\n')
+
+
+def test_the_groups_binding_a_vault_come_from_the_reports_env_not_the_process(mp, world, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    mine = tmp_path / "report-cfg"
+    _groups_under(mine, repo)
+    _health_env(world, monkeypatch)
+    views = health._repository_views(["trailhead"], env={**os.environ, "XDG_CONFIG_HOME": str(mine)})
+    assert [r.root for r in views["trailhead"]] == [repo.resolve()]
+
+
+def test_a_group_the_process_environment_names_does_not_bind_a_report_run_with_another_env(
+        mp, world, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    _groups_under(world.cfg, repo)
+    _health_env(world, monkeypatch)
+    elsewhere = tmp_path / "empty-cfg"
+    elsewhere.mkdir()
+    views = health._repository_views(["trailhead"], env={**os.environ, "XDG_CONFIG_HOME": str(elsewhere)})
+    assert views["trailhead"] == "unbound"
+
+
 def test_only_the_selected_vaults_repositories_are_read(mp, world, monkeypatch):
     a, b = mp.repo("alpha", {"tools/x.py": "x\n"}), mp.repo("beta", {"tools/y.py": "y\n"})
     mp.bind("ga", ["trailhead"], [a])
@@ -2156,8 +2218,7 @@ def test_the_report_writes_nothing_to_vaults_state_config_or_any_repository(mp, 
     assert _snapshot(*world.roots.values(), world.state, world.cfg, repo) == before
 
 
-def test_help_describes_four_checks_and_per_vault_skipping(world):
-    r = world.run("--help")
-    flat = " ".join(r.stdout.split())
-    assert "four checks" in flat and "missing-paths" in flat
-    assert "skipped for one vault" in flat
+def test_help_names_every_registered_check(world):  # inert-gate: allow wiring: help lists the CHECKS registry
+    health = importlib.import_module("lore.cli.health")
+    flat = "".join(world.run("--help").stdout.split())  # argparse may wrap at a hyphen
+    assert [c.name for c in health.CHECKS if c.name not in flat] == []

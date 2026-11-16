@@ -63,7 +63,7 @@ tree:
 2. When none exists, the local default branch: `main`, otherwise `master`, and the report says the
    local branch was used.
 
-The check names each repository it read, under the group heading and grouped by vault, with the
+The check names each repository it read by its full path (two repositories can share a directory name), under the group heading and grouped by vault, with the
 branch, the time of the last fetch in UTC to the minute and how many days ago that was, or
 `no fetch recorded` when the repository has never fetched. The last fetch is the newest
 `FETCH_HEAD` across the repository and all its linked worktrees, since a fetch made from a camp
@@ -78,7 +78,8 @@ or whose git call fails (git missing, a timeout, an over-large tree, an ownershi
 is skipped for that vault, naming the repository.
 
 No value from a record reaches git. The check lists each repository's tree once
-(`git ls-tree -r -t --name-only`) and compares paths in memory. Git runs with its inherited
+(`git ls-tree -r -t -z <ref>`, without `--name-only` so each entry's type shows a submodule
+gitlink) and compares paths in memory. Git runs with its inherited
 `GIT_*` environment removed, with no prompts, no optional locks and no lazy fetch, and under a
 timeout.
 
@@ -137,15 +138,15 @@ trailhead  missing-paths   590      0         no
 …
 
 missing-paths — no findings.
-  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
-  trailhead: repository outpost: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
+  trailhead: repository /home/dev/camp/trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
+  trailhead: repository /home/dev/camp/outpost: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
 ```
 
 ## State — One missing path
 
 ```
 missing-paths — 1 finding, oldest first
-  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
+  trailhead: repository /home/dev/camp/trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
   trailhead/decision/camp-pane-ownership  2026-08-21  body line 14: `tools/camp/plugins/camp/camp/launch/panes.py` is on no repository's default branch
 Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
 ```
@@ -156,7 +157,7 @@ Past 20 findings, the group stops and counts the rest, as every check does:
 
 ```
 missing-paths — 143 findings, oldest first
-  trailhead: repository trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
+  trailhead: repository /home/dev/camp/trailhead: origin/main, last fetched 2026-11-13 14:53 UTC (0 days ago)
   …  (20 lines)
   123 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
 Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
@@ -182,7 +183,7 @@ status to see why`.
 A repository with no remote-tracking default branch is read at its local one, and the line says so:
 
 ```
-  trailhead: repository lookout: local main (no remote-tracking default branch), last fetched 2026-11-12 11:26 UTC (1 day ago)
+  trailhead: repository /home/dev/camp/lookout: local main (no remote-tracking default branch), last fetched 2026-11-12 11:26 UTC (1 day ago)
 ```
 
 ## State — Repository unreadable
@@ -192,10 +193,10 @@ repository; its line in the group says why:
 
 ```
 vault      check           records  findings  skipped
-trailhead  missing-paths   —        —         yes: repository outpost could not be read, so no path can be confirmed missing; clone or repair it, or remove it from the camp group
+trailhead  missing-paths   —        —         yes: repository /home/dev/camp/outpost could not be read, so no path can be confirmed missing; clone or repair it, or remove it from the camp group
 
 missing-paths — skipped.
-  trailhead: repository outpost: could not be read (its directory does not exist)
+  trailhead: repository /home/dev/camp/outpost: could not be read (its directory does not exist)
 ```
 
 The repository lines stay in a group that skipped every vault, so the reason is visible beside the

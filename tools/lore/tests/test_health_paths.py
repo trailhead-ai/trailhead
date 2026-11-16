@@ -161,6 +161,24 @@ def test_tilde_fence_and_longer_fence():
     assert missing(run([rec(body)], repo(*TREE))) == ["tools/c.py"]
 
 
+def test_backtick_run_followed_by_backticks_on_its_line_opens_no_fence():
+    body = "```tools/keep.py``` then text\nmiddle\n`tools/gone.py`\n"
+    result = run([rec(body)], repo(*TREE))
+    assert [(f.number, f.path) for f in result.findings] == [(3, "tools/gone.py")]
+
+
+def test_a_backtick_fence_with_an_info_string_still_opens_a_fence():
+    body = "```python\n`tools/gone.py`\n```\n"
+    assert run([rec(body)], repo(*TREE)).findings == []
+
+
+@pytest.mark.parametrize("separator", ["\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"])
+def test_only_a_newline_ends_a_body_line(separator):
+    body = f"a{separator}b\n`tools/gone.py`\n"
+    result = run([rec(body)], repo(*TREE))
+    assert [(f.number, f.path) for f in result.findings] == [(2, "tools/gone.py")]
+
+
 def test_double_backtick_span_is_not_candidate():
     assert run([rec("``tools/gone.py``")], repo(*TREE)).findings == []
 

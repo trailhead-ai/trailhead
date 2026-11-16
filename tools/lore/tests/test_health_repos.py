@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import stat
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -467,6 +468,19 @@ def test_a_git_that_outlasts_the_timeout_is_git_failed(tmp_path):
     assert reason_of(r, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=0.5) == repos.GIT_FAILED
 
 
+def test_a_git_wrapper_whose_child_holds_the_pipe_still_times_out(tmp_path):
+    r = make_repo(tmp_path / "r", {"main": {"a": "a"}})
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "git"
+    shim.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+    started = time.monotonic()
+    reason = reason_of(r, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=0.5)
+    assert reason == repos.GIT_FAILED
+    assert time.monotonic() - started < 10
+
+
 def test_a_tree_larger_than_the_output_cap_is_git_failed_and_a_larger_cap_reads_it(tmp_path):
     files = {f"dir/file-{i:03}.txt": "x" for i in range(50)}
     r = make_repo(tmp_path / "r", {"main": files})
@@ -574,17 +588,26 @@ def test_a_failing_git_after_the_ref_resolved_is_git_failed(tmp_path):
     assert reason_of(r, env=env) == repos.GIT_FAILED
 
 
-def test_reading_never_fetches(tmp_path):
-    remote, clone = clone_of(tmp_path)
-    before = git(clone, "for-each-ref")
+def test_reading_a_partial_clone_never_fetches_its_missing_trees(tmp_path):
+    remote = tmp_path / "remote.git"
+    make_bare_remote(remote)
+    build_history(remote, [{"id": "c1", "branch": "main", "files": {"a.txt": "a"}}])
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--filter=tree:0", "--no-checkout", f"file://{remote}", str(clone)],
+        check=True,
+    )
     build_history(
         remote,
         [{"id": "c2", "branch": "main", "parents": ["refs/heads/main"], "files": {"new.txt": "n"}}],
     )
-    remote_refs = git(remote, "for-each-ref")
-    v = view_of(clone)
-    assert "new.txt" not in v.paths and "a.txt" in v.paths
-    assert git(clone, "for-each-ref") == before
-    assert git(remote, "for-each-ref") == remote_refs
-    assert v.fetched_at is None
+    refs = git(clone, "for-each-ref")
+    objects = git(clone, "count-objects", "-v")
+    packs = sorted(p.name for p in (clone / ".git" / "objects" / "pack").iterdir())
+    assert reason_of(clone) == repos.GIT_FAILED
+    assert git(clone, "for-each-ref") == refs
+    assert git(clone, "count-objects", "-v") == objects
+    assert sorted(p.name for p in (clone / ".git" / "objects" / "pack").iterdir()) == packs
     assert not (clone / ".git" / "FETCH_HEAD").exists()

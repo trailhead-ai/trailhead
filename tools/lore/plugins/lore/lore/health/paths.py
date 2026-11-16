@@ -163,14 +163,14 @@ def _tails(path: str):
 
 def _candidates(record: ScannedRecord):
     fence: str | None = None
-    for number, line in enumerate(record.body.splitlines(), start=1):
+    for number, line in enumerate(record.body.split("\n"), start=1):
         opener = _FENCE.match(line)
         if fence is not None:
             if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence) \
                     and not line.strip().strip(fence[0]):
                 fence = None
             continue
-        if opener:
+        if opener and not (opener.group(1)[0] == "`" and "`" in line[opener.end():]):
             fence = opener.group(1)
             continue
         for match in _INLINE_CODE.finditer(line):

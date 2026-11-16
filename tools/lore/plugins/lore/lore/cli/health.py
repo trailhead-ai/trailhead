@@ -91,7 +91,7 @@ def _repository_views(selected: Sequence[str], *, env=None) -> dict[str, str | t
 
     Only the repositories of *selected* vaults are read, each distinct root once.
     """
-    bound = repos_mod.vault_repositories(selected)
+    bound = repos_mod.vault_repositories(selected, env=env)
     read = repos_mod.read_repositories((r for b in bound.values() for r in b.roots), env=env)
     return {v: b.reason if b.reason is not None else tuple(read[r] for r in b.roots)
             for v, b in bound.items()}
@@ -321,7 +321,7 @@ def _paths_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], skip) -> st
     if skip.reason == paths_mod.NOT_FULLY_READ:
         return _skip_reason(scan, scans, (scan.vault,), PATHS_SKIP_TAIL)
     if skip.root is not None:
-        return (f"repository {skip.root.name} could not be read, {PATHS_SKIP_TAIL}; "
+        return (f"repository {_safe(skip.root)} could not be read, {PATHS_SKIP_TAIL}; "
                 "clone or repair it, or remove it from the camp group")
     return _NO_REPOSITORIES[skip.reason]
 
@@ -606,7 +606,7 @@ def _missing_line(f: paths_mod.MissingPath) -> str:
 
 
 def _repository_line(vault: str, item, now: datetime) -> str:
-    head = f"  {_safe(vault)}: repository {_safe(item.root.name)}: "
+    head = f"  {_safe(vault)}: repository {_safe(item.root)}: "
     if isinstance(item, repos_mod.Unreadable):
         return f"{head}could not be read ({_UNREADABLE_WHY[item.reason]})"
     branch = _safe(item.branch)

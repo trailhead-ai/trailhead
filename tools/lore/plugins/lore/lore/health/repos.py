@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import tempfile
 import threading
@@ -155,6 +156,7 @@ def vault_repositories(
     *,
     groups_dir: Path | None = None,
     import_camp: Callable[[], tuple] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> dict[str, VaultRepositories]:
     """Map each of *vault_names* to its repository roots, or to the reason it has none.
 
@@ -162,11 +164,11 @@ def vault_repositories(
     compared after ``/`` normalization, as vault election does); every member of
     the group is then a repository of that vault. A relative ``repo_root`` resolves
     against the directory of the group's TOML and ``~`` against ``HOME``, never
-    against the cwd. ``groups_dir`` defaults to camp's; ``import_camp`` is the camp
+    against the cwd. ``groups_dir`` defaults to camp's, resolved against *env*; ``import_camp`` is the camp
     import seam of :func:`lore.vault.layers.load_camp_groups`.
     """
     names = list(vault_names)
-    loaded = layers.load_camp_groups(groups_dir, import_camp=import_camp)
+    loaded = layers.load_camp_groups(groups_dir, import_camp=import_camp, env=env)
     if loaded.reason is not None:
         return {n: VaultRepositories((), loaded.reason) for n in names}
 
@@ -239,6 +241,7 @@ class _Git:
                     stdout=subprocess.PIPE,
                     stderr=err,
                     env=self.env,
+                    start_new_session=True,
                 )
             except OSError as exc:
                 raise _GitFailed(str(exc)) from exc
@@ -252,7 +255,7 @@ class _Git:
                     state["size"] += len(block)
                     if state["size"] > self.max_output_bytes:
                         state["over"] = True
-                        proc.kill()
+                        _kill_group(proc)
                         return
                     chunks.append(block)
 
@@ -261,7 +264,7 @@ class _Git:
             try:
                 proc.wait(timeout=self.timeout)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                _kill_group(proc)
                 proc.wait()
                 reader.join()
                 raise _GitFailed("timed out") from None
@@ -275,6 +278,14 @@ class _Git:
         if proc.returncode not in ok:
             raise _GitFailed(stderr)
         return proc.returncode, b"".join(chunks)
+
+
+def _kill_group(proc: subprocess.Popen) -> None:
+    """Kill git and anything it started, so no child can hold its stdout open."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
 
 
 def _git_env(base: Mapping[str, str] | None, root: Path) -> dict[str, str]:
