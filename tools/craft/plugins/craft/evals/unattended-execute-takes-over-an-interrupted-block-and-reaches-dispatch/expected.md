@@ -48,3 +48,7 @@ Each regex and tool_used grader was flipped offline against a hand-written pass 
 - One fixture, one phrasing, one model tier.
 - A dispatch case asks every dispatched agent to change nothing and stops after the first agent returns, so the run ends without an `**Outcome:**` and without a final outcome line by design. If the runner counts the stop as a timeout rather than a pass, the dispatch grader is still read from the trace; the operator should check how the first batch reports it. "Dispatched" is graded as an `Agent` call whose input names the child task, the earliest observable of the dispatch.
 - `new-block-carries-no-outcome-line` needs a second block to exist; its pattern requires two headings, so it cannot pass on the seeded record alone.
+
+## Amended after the treatment run
+
+2026-11-16: the `no-branch-cut` grader matched its pattern against the JSON text of the whole Bash input, so a harmless `description` such as "Read the current branch name" tripped it. The fault was in the grader, not in the bar: it now matches only inside the `"command"` string. The branch-cut bar itself is unchanged.

@@ -6,7 +6,7 @@
 
 ## Fixture
 
-`fixtures/scaffold.sh` seeds the `ready` spec `totals-report` (two criteria: the tool prints the totals of a CSV input; the tool prints a one-line summary), the slice parent `print-the-totals-of-a-csv-input` (`in-progress`, label `craft/slice-parent`, linked to the spec) carrying its value claim, one `## Unattended run` block from an earlier plan session, the plan sections (`**Goal:**`, `**Delta design:**`, Axioms, Unknowns, `## Flow-out`) , and the three child tasks `read-the-rows-of-a-csv-input`, `sum-each-numeric-column`, `print-the-totals-and-a-summary-line` (`ready`, contained by the parent, chained with `depends-on`). The block carries the optional `**Planned tasks:**` line naming the three titles. There is no council section. The earlier block's outcome is `stuck` and its checkpoint says the child tasks are created and the council dispatch stopped; it parks nothing.
+`fixtures/scaffold.sh` seeds the `ready` spec `totals-report` (two criteria: the tool prints the totals of a CSV input; the tool prints a one-line summary), the slice parent `print-the-totals-of-a-csv-input` (`in-progress`, label `craft/slice-parent`, linked to the spec) carrying its value claim, one `## Unattended run` block from an earlier plan session, the plan sections (`**Goal:**`, `**Delta design:**`, Axioms, Unknowns, `## Flow-out`) , and the three child tasks `read-the-rows-of-a-csv-input`, `sum-each-numeric-column`, `print-the-totals-and-a-summary-line` (`ready`, contained by the parent, chained with `depends-on`). The block carries the optional `**Planned tasks:**` line naming the three titles. The print task is the command entry point, so the plan wires the parts into one command and the council has no gap there to raise. There is no council section. The earlier block's outcome is `stuck` and its checkpoint says the child tasks are created and the council dispatch stopped; it parks nothing.
 
 ## Conditions, sample and bar
 
@@ -46,3 +46,7 @@ Every clause holds.
 - The `asked-nothing` and any other `llm` grader read only the first and last 12 messages of the trace.
 - One fixture, one phrasing, one model tier.
 - Leak check, run on the prompt and `fixtures/scaffold.sh` before commit: a case-insensitive search for `resum`, `taken over`, `refus`, `re-park`, `pointer`, `still open`, `applied`, `unmatched`, `expected`, `baseline` finds only the `--resume` token in the two prompts that measure it and, in one fixture, the word `refuse` inside an option the fixture itself parks. The records show the state an earlier session left, not the rule or the outcome measured.
+
+## Amended after the treatment run
+
+2026-11-16: the seeded plan had no task wiring the reader, summer and printer into a command, so the council legitimately raised a Critical and the run added a child task. The fault was in the fixture, not a moved bar: the print task is now the command entry point and the Delta design says so, and `plan-body-not-rewritten` pins that text, so no Critical arises from a gap in the seeded plan.

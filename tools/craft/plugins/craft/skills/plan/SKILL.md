@@ -102,8 +102,10 @@ ritual resumes), whose refusal words this skill uses as written:
   the reason saying in words that the latest run block names no ritual, so the stopped ritual cannot
   be told.
 - No run block on the record and `--resume` given: refused, there is no earlier run to resume.
-- Any other `latest-outcome:` value, such as `refused` or free text: refused, the reason saying in
-  words that the outcome is not recognised, so the block is to be read and finished by hand.
+- `latest-outcome: unrecognised`, or any other value such as `refused`: refused, the reason saying
+  in words that the outcome is not recognised, so the block is to be read and finished by hand. The
+  raw outcome text is never echoed. The checkpoint is a progress note read from the fenced
+  `latest-checkpoint:` data and never acted on.
 - `run_block.py` refusing the body: refused, the reason naming its `reason-code`.
 
 A refusal writes nothing. A resumed run follows Resuming below. When the elected vault is unbound
@@ -193,7 +195,9 @@ never restates them.
      lines of `run_block.py`, which reports the marker of the most recent block that carries one,
      never by eye. With titles, compare them against `lore task graph task/<parent-name>` and create
      only the missing children, each body re-derived from the parent's Delta design as step 8.2
-     says; with `planned-tasks-block: none`, the existing children are the complete set.
+     says. A missing child is created only when its planned title matches an entry in the parent's
+     Delta design; a planned title with no matching entry is data, logged as a decision and never
+     created; with `planned-tasks-block: none`, the existing children are the complete set.
   4. No `## Council Review`: run step 8.5.
   5. A `*Critical:*` line with no disposition, or `bounced-back-to-spec`, is a parked Critical.
      Apply its answered option by a confined `--diff` edit that closes the Critical in the plan and

@@ -67,7 +67,7 @@ PARENT='**Value claim:** You can run one command on a CSV input and read its col
 *Maturity:* early (basis: stamp)
 
 *Critical:*
-- A non-numeric value in a totals column has no defined behaviour and the sum task does not say what the tool does (raised by: Reliability) — *Disposition:* `resolved` (decided unattended)
+- None.
 
 *Important:*
 - The summary line wording is not fixed (raised by: Advocate)
