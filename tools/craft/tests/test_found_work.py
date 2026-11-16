@@ -3429,6 +3429,27 @@ def test_a_non_security_finding_carrying_a_reserved_prefix_is_refused_with_nothi
     assert lore.calls == []
 
 
+MARKER_FORMS = [
+    pytest.param(f"{fw.SECURITY_TITLE_PREFIX} src/a.py:1 (ref 00000000)", "during review", True, id="title-prefix"),
+    pytest.param("Handle the empty case", f"{fw.SECURITY_REPLACEMENT_PREFIX} location", True, id="found-prefix"),
+    pytest.param("Handle the empty case", fw.SECURITY_REPLACEMENT, True, id="found-replacement"),
+    pytest.param(f"Not a {fw.SECURITY_TITLE_PREFIX} thing", "during review", False, id="title-prefix-mid-text"),
+    pytest.param(
+        "Handle the empty case", f"saw a {fw.SECURITY_REPLACEMENT_PREFIX} text", False, id="found-prefix-mid-text"
+    ),
+]
+
+
+@pytest.mark.parametrize("title,found,marked", MARKER_FORMS)
+def test_decide_and_the_listing_agree_on_which_text_is_a_security_marker(capsys, tmp_path, title, found, marked):
+    code, _, err = run_decide(plain_finding_doc(title=title, found=found), session_lore(tmp_path), capsys)
+    assert code == (2 if marked else 0), err
+    body = spec_body(entry_md(1, status="open", title=title, found=found))
+    code, out, err = run_entries(spec_lore(tmp_path, spec=body), capsys, "--open")
+    assert code == 0, err
+    assert f"  security: {'yes' if marked else 'no'}" in block(out, "F1")
+
+
 def test_a_real_security_finding_with_the_same_title_is_accepted_in_its_marker_form(capsys, tmp_path):
     lore = session_lore(tmp_path)
     doc = decision(finding={

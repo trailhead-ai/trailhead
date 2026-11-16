@@ -722,7 +722,7 @@ def build_decision(raw: str) -> Decision:
 
     clean = _neutralize if security else _clean
     title, found = clean(title), clean(found)
-    if not security and (title.startswith(SECURITY_TITLE_PREFIX) or found.startswith(SECURITY_REPLACEMENT_PREFIX)):
+    if not security and _carries_security_marker(title, found):
         raise Refusal(
             "a finding that is not a security finding cannot start with the wording that marks one",
             "reserved-security-prefix",
@@ -1154,8 +1154,12 @@ class Move:
     confirmed: bool = False  # drop only: the document carried "operator_confirmed": true
 
 
+def _carries_security_marker(title: str, found: str) -> bool:
+    return title.startswith(SECURITY_TITLE_PREFIX) or found.startswith(SECURITY_REPLACEMENT_PREFIX)
+
+
 def _is_marked(entry: followups.Entry) -> bool:
-    return entry.found.startswith(SECURITY_REPLACEMENT_PREFIX) or entry.title.startswith(SECURITY_TITLE_PREFIX)
+    return _carries_security_marker(entry.title, entry.found)
 
 
 def _restored_found(entry: followups.Entry) -> str:
