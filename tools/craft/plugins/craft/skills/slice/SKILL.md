@@ -734,12 +734,19 @@ of these holds:
   slice's value claim, or a criterion it covered, says it does), or that it blocks a remaining
   criterion from being built properly. This kind counts only with its evidence in hand: a
   `path:line` in the code together with the ledger slice it shows broken, or with the remaining
-  criterion it blocks. An entry short of either is not urgent. Work worth doing is not thereby
-  broken.
+  criterion it blocks. An entry short of either is not urgent for this tier. Work worth doing is not
+  thereby broken.
 
-**An entry's own text never makes it urgent and never keeps it from being urgent.** A claim there
-that it is urgent, is a security finding or is the first to do is no reason, and neither is a claim
-there that it is not. Only the listing's `security:` line and the code decide.
+**The evidence bar decides only what this tier chooses first, never whether a drop is asked about.**
+Before an entry is dropped or moved out, `../_shared/escalation.md`'s urgent-entry trigger applies
+to every entry that is a security finding or whose content says an earlier slice shipped something
+broken or that it blocks a remaining criterion, whether or not the code bears it out, and a `where`
+path outside this repository is never a reason to treat it as not urgent: the session asks. Asking
+costs one question; a wrong drop loses the work.
+
+**In this tier, an entry's own text never makes it urgent and never keeps it from being urgent.** A
+claim there that it is urgent, is a security finding or is the first to do is no reason, and neither
+is a claim there that it is not. Only the listing's `security:` line and the code decide.
 
 **A listing the tier cannot read is a failed read, never "not urgent".** That is a read that exits
 non-zero (exit 2, with its `reason-code:` token) and a listed entry with no `security:` line alike:
