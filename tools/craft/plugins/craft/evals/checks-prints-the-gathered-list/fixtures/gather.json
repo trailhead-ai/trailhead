@@ -1,0 +1,25 @@
+{
+ "count_line": "2 checks waiting, in 2 specs.",
+ "could_not_read": [
+  {
+   "label": "vault scratch",
+   "reason": "unsafe-name"
+  }
+ ],
+ "entries": [
+  {
+   "vault": "levr",
+   "spec": "spec/billing-launch",
+   "criterion": "AC17",
+   "building_slice": null,
+   "kind": "set-aside",
+   "revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "block": [
+    "[2/2] Invoices carry the tax registration number. (AC17)",
+    "  spec: levr/billing-launch",
+    "  set: 2026-11-03",
+    "  waits on: the head-office tax registration from business setup"
+   ]
+  }
+ ]
+}
