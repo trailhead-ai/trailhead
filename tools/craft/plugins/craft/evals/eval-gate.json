@@ -238,13 +238,15 @@
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
       "measures": [
         "skills/slice/SKILL.md",
-        "skills/_shared/escalation.md"
+        "skills/_shared/escalation.md",
+        "scripts/found_work.py"
       ]
     },
     "slice-asks-before-dropping-an-urgent-entry": {
       "measures": [
         "skills/_shared/escalation.md",
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "scripts/found_work.py"
       ]
     },
     "slice-asks-before-dropping-an-urgent-entry-with-a-planted-credential": {
@@ -262,17 +264,20 @@
     "unattended-slice-names-the-remedy-for-an-entry-a-slice-failed-to-build": {
       "measures": [
         "skills/slice/SKILL.md",
-        "skills/_shared/escalation.md"
+        "skills/_shared/escalation.md",
+        "scripts/found_work.py"
       ]
     },
     "slice-chooses-an-urgent-entry-ahead-of-the-criteria": {
       "measures": [
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "scripts/found_work.py"
       ]
     },
     "unattended-slice-names-the-remedy-for-an-urgent-entry-a-slice-failed-to-build": {
       "measures": [
-        "skills/slice/SKILL.md"
+        "skills/slice/SKILL.md",
+        "scripts/found_work.py"
       ]
     },
     "slice-carries-out-a-free-text-answer-to-its-question": {
