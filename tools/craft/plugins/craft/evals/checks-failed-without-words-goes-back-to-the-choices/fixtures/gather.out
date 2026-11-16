@@ -1,0 +1,9 @@
+1 check waiting, in 1 spec.
+
+[1/1] Exports include the invoice total. (AC2)
+  spec: levr/export-invoices
+  built by: task/export-csv
+  set: 2026-11-02
+  check: Open the exported CSV and confirm the total column
+  how: export from the Billing page with a test invoice
+  changed existing behaviour: no

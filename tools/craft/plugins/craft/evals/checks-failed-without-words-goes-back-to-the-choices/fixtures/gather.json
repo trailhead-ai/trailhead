@@ -1,0 +1,23 @@
+{
+ "count_line": "1 check waiting, in 1 spec.",
+ "could_not_read": [],
+ "entries": [
+  {
+   "vault": "levr",
+   "spec": "spec/export-invoices",
+   "criterion": "AC2",
+   "building_slice": "task/export-csv",
+   "kind": "pending-check",
+   "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "block": [
+    "[1/1] Exports include the invoice total. (AC2)",
+    "  spec: levr/export-invoices",
+    "  built by: task/export-csv",
+    "  set: 2026-11-02",
+    "  check: Open the exported CSV and confirm the total column",
+    "  how: export from the Billing page with a test invoice",
+    "  changed existing behaviour: no"
+   ]
+  }
+ ]
+}

@@ -1,0 +1,37 @@
+{
+ "count_line": "1 check and 1 set-aside criterion waiting, in 2 specs.",
+ "could_not_read": [],
+ "entries": [
+  {
+   "vault": "levr",
+   "spec": "spec/billing-launch",
+   "criterion": "AC17",
+   "building_slice": null,
+   "kind": "set-aside",
+   "revision": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+   "block": [
+    "[1/2] Invoices carry the tax registration number. (AC17)",
+    "  spec: levr/billing-launch",
+    "  set: 2026-11-01",
+    "  waits on: the head-office tax registration from business setup"
+   ]
+  },
+  {
+   "vault": "levr",
+   "spec": "spec/export-invoices",
+   "criterion": "AC2",
+   "building_slice": "task/export-csv",
+   "kind": "pending-check",
+   "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "block": [
+    "[2/2] Exports include the invoice total. (AC2)",
+    "  spec: levr/export-invoices",
+    "  built by: task/export-csv",
+    "  set: 2026-11-02",
+    "  check: Open the exported CSV and confirm the total column",
+    "  how: export from the Billing page with a test invoice",
+    "  changed existing behaviour: no"
+   ]
+  }
+ ]
+}

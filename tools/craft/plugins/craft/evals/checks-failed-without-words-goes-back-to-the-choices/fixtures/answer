@@ -1,0 +1,27 @@
+#!/bin/sh
+d=$(dirname "$0")
+n=$(cat "$d/answer.count" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$d/answer.count"
+vault= spec= crit= slice= ans= base= wf=
+while [ $# -gt 1 ]; do
+  case "$1" in
+    --vault) vault=$2 ;;
+    --spec) spec=$2 ;;
+    --criterion) crit=$2 ;;
+    --slice) slice=$2 ;;
+    --answer) ans=$2 ;;
+    --base) base=$2 ;;
+    --words-file) wf=$2 ;;
+  esac
+  shift 2
+done
+words=$(cat "$wf" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+echo "call $n: vault=$vault spec=$spec criterion=$crit slice=$slice answer=$ans base=$base words=$words" >> "$d/answer.log"
+rm -f "$wf"
+res=$(sed -n "${n}p" "$d/answer.script")
+case "$res" in
+  stale) echo "checklist-answer: reason-code: stale" >&2; exit 1 ;;
+  refuse:*) echo "checklist-answer: reason-code: ${res#refuse:}" >&2; exit 1 ;;
+  *) echo "saved: $crit $ans" ;;
+esac

@@ -1,0 +1,40 @@
+{
+ "count_line": "2 checks waiting, in 2 specs.",
+ "could_not_read": [],
+ "entries": [
+  {
+   "vault": "levr",
+   "spec": "spec/export-invoices",
+   "criterion": "AC2",
+   "building_slice": "task/export-csv",
+   "kind": "pending-check",
+   "revision": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+   "block": [
+    "[1/2] Exports include the invoice total. (AC2)",
+    "  spec: levr/export-invoices",
+    "  built by: task/export-csv",
+    "  set: 2026-11-02",
+    "  check: Open the exported CSV and confirm the total column",
+    "  how: export from the Billing page with a test invoice",
+    "  changed existing behaviour: no"
+   ]
+  },
+  {
+   "vault": "levr",
+   "spec": "spec/billing-launch",
+   "criterion": "AC9",
+   "building_slice": "task/tax-lines",
+   "kind": "pending-check",
+   "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "block": [
+    "[2/2] Invoices show a tax line. (AC9)",
+    "  spec: levr/billing-launch",
+    "  built by: task/tax-lines",
+    "  set: 2026-11-03",
+    "  check: Open a test invoice and confirm a tax line is printed",
+    "  how: create an invoice for a UK address in test mode",
+    "  changed existing behaviour: no"
+   ]
+  }
+ ]
+}
