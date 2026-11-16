@@ -687,6 +687,17 @@ def test_symlinked_top_level_folder_is_not_descended(world, tmp_path):
     assert "outside-secret" not in r.stdout + r.stderr
 
 
+def test_real_folder_whose_pair_files_are_symlinks_is_not_misfiled(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    outside = tmp_path / "outside-files"
+    _pair(outside)
+    (d / "lessons").mkdir()
+    (d / "lessons" / "x.md").symlink_to(outside / "x.md")
+    (d / "lessons" / "x.json").symlink_to(outside / "x.json")
+    r = world.run("--path", str(d))
+    assert (r.returncode, r.stdout) == (0, "")
+
+
 def test_misfiled_folder_name_with_a_control_character_is_escaped(world, tmp_path):
     d = _vault_with_lesson(tmp_path)
     _pair(d / "bad\x1b[31mdir")
