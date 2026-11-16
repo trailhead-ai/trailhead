@@ -70,6 +70,7 @@ def _run(root: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
 def _vault(tmp_path: Path) -> Path:
     tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "core-vault").mkdir()
+    (tmp_path / "tools" / "t" / "plugins" / "p").mkdir(parents=True)
     return tmp_path
 
 
@@ -281,6 +282,7 @@ def test_a_symlinked_core_vault_is_a_finding(tmp_path):
     (real / "note.md").write_text(f"mail {EMAIL}\n", encoding="utf-8")
     repo = tmp_path / "repo"
     repo.mkdir()
+    (repo / "tools" / "t" / "plugins" / "p").mkdir(parents=True)
     (repo / "core-vault").symlink_to(real, target_is_directory=True)
 
     result = _run(repo)
@@ -878,7 +880,7 @@ def test_the_documented_placeholder_is_not_a_pointer(tmp_path):
         "trailhead core show ../outside/x",
         "trailhead core show Adr/real",
         "trailhead core show adr/real_two",
-        "trailhead core show adr",
+        "trailhead core show adr/",
         "trailhead core show adr/missing.md",
         "trailhead core show adr/Missing",
         "trailhead core show adr/foo_bar",
@@ -1096,3 +1098,158 @@ def test_a_readme_beside_nothing_still_passes_the_no_records_carve_out(tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "ok: core vault holds no records yet" in _lines(result)
+
+
+def _ship_at(root: Path, rel: str, text: str) -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_clean_deep_shipped_path_is_printed_verbatim_on_a_pointer_finding(tmp_path):
+    root = _vault(tmp_path)
+    rel = "tools/craft/plugins/craft/skills/_shared/slice.md"
+    _ship_at(root, rel, "trailhead core show adr/missing\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"{rel}:1:pointer-missing:adr/missing" in _lines(result)
+
+
+def test_a_shipped_path_that_trips_the_deny_list_only_across_segments_is_redacted(tmp_path):
+    root = _vault(tmp_path)
+    left, right = "Orchid", "Quartz"
+    _ship_at(root, f"tools/t/plugins/p/{left.lower()}/{right.lower()}.md", "trailhead core show adr/missing\n")
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(f"{left}.?{right}\n", encoding="utf-8")
+
+    result = _run(root, "--denylist", str(denylist))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "<redacted-path>:1:pointer-missing:adr/missing" in _lines(result)
+    _no_echo(result, left.lower() + right.lower())
+
+
+def test_misplaced_record_pairs_are_findings_beside_a_valid_record(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _record(root / "core-vault" / "blob", "sub", "deep")
+    _write(root, "top.md", "text\n")
+    _write(root, "top.json", "{}")
+
+    result = _run(root)
+
+    lines = _lines(result)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/top.md:0:unvalidated-record" in lines
+    assert "core-vault/blob/sub/deep.md:0:unvalidated-record" in lines
+    assert not any("adr/real.md" in line for line in lines)
+
+
+def test_a_valid_record_alone_is_not_an_unvalidated_record(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not any("unvalidated-record" in line for line in _lines(result))
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+@pytest.mark.parametrize("locked", ["tools/x", "tools/x/plugins"])
+def test_an_unreadable_tool_or_plugins_folder_is_exit_2(tmp_path, locked):
+    root = _vault(tmp_path)
+    (root / "tools" / "x" / "plugins" / "y").mkdir(parents=True)
+    target = root / locked
+    target.chmod(0)
+    try:
+        result = _run(root)
+    finally:
+        target.chmod(0o755)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert any(line.startswith("gate could not run:") and "listing a tools/ folder" in line for line in _lines(result))
+    assert not any(line.startswith("pointers:") for line in _lines(result))
+
+
+def test_a_repo_root_with_no_plugins_is_exit_2(tmp_path):
+    (tmp_path / "core-vault").mkdir()
+
+    result = _run(tmp_path)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert any(line.startswith("gate could not run:") for line in _lines(result))
+    assert not any(line.startswith("pointers:") for line in _lines(result))
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "run trailhead core show to read the record",
+        "trailhead core show <id> prints it",
+        "trailhead core show $id",
+        "trailhead core show {record_id}",
+        "trailhead core show `<kind>/<name>`",
+        'trailhead core show "adr/real"',
+        "trailhead core show `adr/real`",
+        "trailhead core show [adr/real]",
+        "trailhead core show (adr/real)",
+        "trailhead core show 'adr/real'.",
+    ],
+    ids=["prose", "angle", "dollar", "brace", "wrapped", "dquote", "backtick", "bracket", "paren", "squote"],
+)
+def test_prose_placeholders_and_wrapped_valid_pointers_are_not_invalid(tmp_path, token):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _ship(root, "doc.md", token + "\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not any("pointer-invalid" in line for line in _lines(result))
+
+
+@pytest.mark.parametrize("wrap", ["{}", "`{}`", '"{}"', "[{}]"], ids=["bare", "backtick", "dquote", "bracket"])
+def test_a_wrapped_pointer_is_still_checked_for_existence(tmp_path, wrap):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "trailhead core show " + wrap.format("adr/absent") + "\n")
+
+    result = _run(root)
+
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/absent" in _lines(result)
+
+
+@pytest.mark.parametrize("attempt", ["Lesson/Foo_Bar", "`Lesson/Foo_Bar`", "adr/a/b"], ids=["bare", "wrapped", "deep"])
+def test_a_malformed_attempted_id_still_fails(tmp_path, attempt):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "trailhead core show " + attempt + "\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "tools/t/plugins/p/doc.md:1:pointer-invalid" in _lines(result)
+
+
+@pytest.mark.parametrize("pin", ["actions/checkout@v4.1.0", "pytest@8.3.2", "pkg@1.2.3-rc.1"])
+def test_a_version_pin_is_not_an_email(tmp_path, pin):
+    root = _vault(tmp_path)
+    _write(root, "note.md", f"pin {pin} here\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "domain", ["example.org", "mail.example.co", "ex.io"], ids=["two-label", "three-label", "two-letter-final"]
+)
+def test_a_runtime_built_email_is_still_an_email(tmp_path, domain):
+    root = _vault(tmp_path)
+    _write(root, "note.md", "mail " + "bo" + "b" + "@" + domain + " now\n")
+
+    result = _run(root)
+
+    assert "core-vault/note.md:1:email" in _lines(result)

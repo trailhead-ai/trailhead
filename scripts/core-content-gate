@@ -8,23 +8,27 @@ classes: `email`, `commit-id`, `home-path`, `credential`, and `deny-list`.
 A finding prints as `<relpath>:<lineno>:<class>` (a deny-list finding as
 `deny-list#<line number in the list>`) and never carries the matched text, a
 deny-list line, or a regex error message, on stdout or stderr. A path
-component that itself trips a class prints as `<redacted-name>`.
+component that itself trips a class prints as `<redacted-name>`; a path whose joined form trips
+the deny-list prints as `<redacted-path>`.
 
 2. Validation. Runs this checkout's `lore validate --path <repo-root>/core-vault` with an
 environment fenced away from the caller's lore config and vaults. It passes when the
 validator reports nothing, or when the only finding is the vault-level `no-records` (it
 prints `ok: core vault holds no records yet`, unless some `<n>.md` sits beside `<n>.json` anywhere
-under core-vault, which is an `unvalidated-record` finding). Every other finding fails and is relayed
+under core-vault). On every run a `<n>.md` beside `<n>.json` not at exactly `<kind>/<n>` depth is an
+`unvalidated-record` finding). Every other finding fails and is relayed
 as the validator printed it, unless that line trips a scrub class, in which case it is cut
 to `<record id or vault>: <code>`. A validator that exits other than 0 or 1, cannot be run,
 or prints a line this parser does not recognise is exit 2.
 
 3. Pointer check. Scans the text files under `<repo-root>/tools/*/plugins/*` for
-`trailhead core show <token>` (the `<kind>/<name>` placeholder is skipped). A token the
+`trailhead core show <token>`. Surrounding quotes, backticks and brackets are stripped; a token
+with no `/` (prose) or one starting `<`, `$` or `{` (a placeholder) is skipped. A `/`-bearing token the
 `trailhead core show` grammar refuses is `<relpath>:<lineno>:pointer-invalid` (the token is not
 printed). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
 regular files that resolve inside `core-vault/` is `<relpath>:<lineno>:pointer-missing:<id>`.
-Prints `pointers: <N> checked in <M> files`, M being the text files scanned.
+Prints `pointers: <N> checked in <M> files`, M being the text files scanned. A repo root with no
+`tools/*/plugins/*` folder, or one of those levels that cannot be listed, is exit 2.
 
 `--repo-root` selects only the content to check. `capture_scan` is always
 imported from this script's own checkout.
@@ -83,7 +87,7 @@ REDACTED_PATH = "<redacted-path>"
 NO_DENYLIST_NOTICE = "no deny-list supplied; generic patterns only"
 _COULD_NOT_RUN = "gate could not run:"
 
-_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
 _COMMIT_ID = re.compile(
     r"(?<![0-9A-Za-z_])(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,40}(?![0-9A-Za-z_])"
 )
@@ -101,8 +105,9 @@ _VALIDATOR_FINDING = re.compile(r"(?P<vault>\S+)(?: (?P<record>\S+))?: (?P<code>
 # Mirrors `_RECORD_ID` in trailhead/core_vault.py; a test holds the two in agreement.
 _RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
 _POINTER = re.compile(r"trailhead core show[ \t]+(?P<token>\S+)")
-_PLACEHOLDER = re.compile(r"<[^<>\s]+>/<[^<>\s]+>")
 _TRAILING_PUNCTUATION = ".,;:!?)]}'\"`*"
+_LEADING_PUNCTUATION = "([`'\"*"
+_NOT_AN_ID_START = ("<", "$", "{")
 
 
 class GateCannotRun(Exception):
@@ -192,7 +197,8 @@ def _redact(text: str, denylist: list[tuple[int, re.Pattern]]) -> str:
 
 def _display(relparts: tuple[str, ...], denylist: list[tuple[int, re.Pattern]]) -> str:
     shown = "/".join(_redact(part, denylist) for part in relparts)
-    if REDACTED_NAME in shown or not scrub_line("/".join(relparts), denylist=denylist):
+    joined = "/".join(relparts)
+    if REDACTED_NAME in shown or not any(pattern.search(joined) for _, pattern in denylist):
         return shown
     if relparts[0] != CORE_DIR:
         return REDACTED_PATH
@@ -336,12 +342,12 @@ def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], finding
             f"lore validate exited {returncode} but printed {len(parsed)} findings; "
             "run `lore validate --path core-vault` by hand"
         )
-    if not parsed:
-        return
-    if all(code == _NO_RECORDS and record is None for _, record, code in parsed):
-        unvalidated = _record_shaped_pairs(root)
-        for rel in unvalidated:
-            findings.add(_display((CORE_DIR, *rel), denylist), 0, "unvalidated-record")
+    no_records_only = bool(parsed) and all(code == _NO_RECORDS and record is None for _, record, code in parsed)
+    pairs = _record_shaped_pairs(root)
+    unvalidated = pairs if no_records_only else [rel for rel in pairs if len(rel) != 2]
+    for rel in unvalidated:
+        findings.add(_display((CORE_DIR, *rel), denylist), 0, "unvalidated-record")
+    if no_records_only:
         if not unvalidated:
             print(NO_RECORDS_OK)
         return
@@ -359,10 +365,34 @@ def _is_regular_inside(path: Path, anchor: Path) -> bool:
     return True
 
 
+def _subdirs(path: Path) -> list[Path]:
+    try:
+        with os.scandir(path) as entries:
+            return sorted(Path(entry.path) for entry in entries if entry.is_dir())
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError as exc:
+        raise GateCannotRun(
+            f"{exc.strerror or type(exc).__name__} listing a tools/ folder; check permissions on tools/*/plugins"
+        ) from None
+
+
+def _plugin_dirs(root: Path) -> list[Path]:
+    plugins = [
+        plugin
+        for tool in _subdirs(root / "tools")
+        for plugin in _subdirs(tool / "plugins")
+        if not plugin.is_symlink()
+    ]
+    if not plugins:
+        raise GateCannotRun(
+            "no tools/*/plugins/* folder under the repo root; pass --repo-root pointing at a checkout that ships plugins"
+        )
+    return plugins
+
+
 def _pointer_files(root: Path):
-    for plugin in sorted(root.glob("tools/*/plugins/*")):
-        if plugin.is_symlink() or not plugin.is_dir():
-            continue
+    for plugin in _plugin_dirs(root):
         for dirpath, dirnames, filenames in os.walk(plugin, onerror=_raise):
             dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) / d).is_symlink())
             for name in sorted(filenames):
@@ -386,11 +416,10 @@ def check_pointers(root: Path, denylist: list[tuple[int, re.Pattern]], findings:
         shown = _display(path.relative_to(root).parts, denylist)
         for lineno, line in _numbered_lines(text):
             for match in _POINTER.finditer(line):
-                token = match["token"]
-                if _PLACEHOLDER.match(token):
+                record_id = match["token"].lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION)
+                if record_id.startswith(_NOT_AN_ID_START) or "/" not in record_id:
                     continue
                 checked += 1
-                record_id = token.rstrip(_TRAILING_PUNCTUATION)
                 if _RECORD_ID.fullmatch(record_id) is None:
                     findings.add(shown, lineno, "pointer-invalid")
                     continue
