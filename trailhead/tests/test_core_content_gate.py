@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -25,6 +26,7 @@ FINGERPRINT = "0123456789abcdef" * 2 + "01234567"
 SHA256 = "0123456789abcdef" * 4
 CREDENTIAL = "gh" + "p_" + "A1b2" * 9
 DENY_TERM = "Orchid" + "Quartz"
+REDACTED = "<redacted-name>"
 
 # class label, offending text
 CASES = {
@@ -61,6 +63,7 @@ def _run(root: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
 
 
 def _vault(tmp_path: Path) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "core-vault").mkdir()
     return tmp_path
 
@@ -424,6 +427,130 @@ def test_an_unexpected_exception_is_exit_2_not_a_traceback(tmp_path):
     assert result.returncode == 2
     assert any(line.startswith("gate could not run:") for line in _lines(result))
     assert "Traceback" not in result.stderr
+
+
+def _no_echo(result, token: str) -> None:
+    out = result.stdout + result.stderr
+    assert [s for s in _substrings(token) if s in out] == []
+
+
+def _deny(tmp_path: Path) -> list[str]:
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(DENY_TERM + "\n", encoding="utf-8")
+    return ["--denylist", str(denylist)]
+
+
+def test_a_deny_list_term_in_a_filename_is_never_echoed(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, f"note-{DENY_TERM.swapcase()}.md", f"commit {COMMIT}\n")
+
+    result = _run(root, *_deny(tmp_path))
+
+    assert result.returncode == 1
+    assert "core-vault/<redacted-name>:1:commit-id" in _lines(result)
+    _no_echo(result, DENY_TERM)
+
+
+def test_a_deny_list_term_in_a_filename_is_not_echoed_in_annotations(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, f"note-{DENY_TERM.swapcase()}.md", f"commit {COMMIT}\n")
+
+    result = _run(root, *_deny(tmp_path), GITHUB_ACTIONS="true")
+
+    assert result.returncode == 1
+    assert "::error file=core-vault/<redacted-name>,line=1::commit-id" in _lines(result)
+    _no_echo(result, DENY_TERM)
+
+
+def test_a_deny_list_term_in_an_undecodable_filename_is_not_echoed_in_exit_2(tmp_path):
+    root = _vault(tmp_path / "r")
+    (root / "core-vault" / f"note-{DENY_TERM.swapcase()}.bin").write_bytes(b"caf\xe9\n")
+
+    result = _run(root, *_deny(tmp_path))
+
+    assert result.returncode == 2
+    assert any(line.startswith("gate could not run:") and REDACTED in line for line in _lines(result))
+    _no_echo(result, DENY_TERM)
+
+
+@pytest.mark.parametrize("case", ["email", "home-drive-backslash", "credential", "commit-id"])
+def test_a_filename_that_trips_a_class_is_itself_a_finding(tmp_path, case):
+    cls, token = CASES[case]
+    root = _vault(tmp_path / "r")
+    name = token
+    _write(root, f"sub/{name}.md", "clean\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"core-vault/sub/{REDACTED}:0:{cls}" in _lines(result)
+    _no_echo(result, name)
+
+
+def test_a_filename_holding_a_deny_list_term_is_itself_a_finding(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, f"{DENY_TERM}.md", "clean\n")
+
+    result = _run(root, *_deny(tmp_path))
+
+    assert result.returncode == 1
+    assert f"core-vault/{REDACTED}:0:deny-list#1" in _lines(result)
+
+
+def test_a_clean_filename_with_clean_content_still_passes(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, "sub/plain-name.md", "clean\n")
+
+    assert _run(root, *_deny(tmp_path)).returncode == 0
+
+
+def test_a_hostile_filename_yields_one_well_formed_annotation_per_finding(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, "a\n::error::injected,x.md", f"commit {COMMIT}\n")
+
+    result = _run(root, GITHUB_ACTIONS="true")
+
+    assert result.returncode == 1
+    annotations = [line for line in _lines(result) if line.startswith("::error")]
+    assert annotations == ["::error file=core-vault/a%0A%3A%3Aerror%3A%3Ainjected%2Cx.md,line=1::commit-id"]
+    assert [
+        line for line in _lines(result) if line.startswith("::") and not line.startswith("::warning")
+    ] == annotations
+
+
+def test_a_percent_in_a_filename_is_escaped_in_the_annotation(tmp_path):
+    root = _vault(tmp_path / "r")
+    _write(root, "100%.md", f"commit {COMMIT}\n")
+
+    result = _run(root, GITHUB_ACTIONS="true")
+
+    assert "::error file=core-vault/100%25.md,line=1::commit-id" in _lines(result)
+
+
+def test_a_missing_capture_scan_is_exit_2_not_a_traceback(tmp_path):
+    scripts = tmp_path / "checkout" / "scripts"
+    scripts.mkdir(parents=True)
+    gate = scripts / "core-content-gate"
+    gate.write_bytes(_GATE.read_bytes())
+    root = _vault(tmp_path / "r")
+
+    result = subprocess.run(
+        [sys.executable, str(gate), "--repo-root", str(root)], capture_output=True, text=True, timeout=120, env=_env()
+    )
+
+    assert result.returncode == 2
+    assert any(line.startswith("gate could not run:") for line in _lines(result))
+    assert "Traceback" not in result.stderr
+
+
+def test_the_scrub_functions_apply_a_supplied_deny_list():
+    gate = _load_gate()
+    denylist = [(4, re.compile(DENY_TERM, re.IGNORECASE))]
+
+    assert gate.scrub_line(f"a {DENY_TERM.upper()}", denylist=denylist) == ["deny-list#4"]
+    assert gate.scrub_line("plain", denylist=denylist) == []
+    assert gate.scrub_line(f"a {DENY_TERM}") == []
+    assert gate.scrub_text(f"ok\n{DENY_TERM}", denylist=denylist) == [(2, "deny-list#4")]
 
 
 def _load_gate():

@@ -47,7 +47,13 @@ from pathlib import Path
 _CHECKOUT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_CHECKOUT / "tools" / "craft" / "plugins" / "craft" / "scripts"))
 
-import capture_scan  # noqa: E402
+try:
+    import capture_scan  # noqa: E402
+except Exception as _exc:  # noqa: BLE001 - reported as exit 2 by main(), never a traceback
+    capture_scan = None
+    _IMPORT_FAILURE: str | None = type(_exc).__name__
+else:
+    _IMPORT_FAILURE = None
 
 CORE_DIR = "core-vault"
 REDACTED_NAME = "<redacted-name>"
@@ -80,12 +86,14 @@ class Findings:
         return 1 if self.items else 0
 
 
-def scrub_line(line: str, *, json_stream: bool = False) -> list[str]:
+def scrub_line(
+    line: str, *, json_stream: bool = False, denylist: list[tuple[int, re.Pattern]] | None = None
+) -> list[str]:
     """Class labels the line trips, each once, never the matched text."""
-    return [label for label, _ in _scrub(line, json_stream=json_stream)]
+    return [label for label, _ in _scrub(line, json_stream=json_stream, denylist=denylist)]
 
 
-def _scrub(text: str, *, json_stream: bool, denylist: list[re.Pattern] | None = None):
+def _scrub(text: str, *, json_stream: bool, denylist: list[tuple[int, re.Pattern]] | None = None):
     """(label, lineno) pairs for `text`. Matched text is dropped here."""
     hits: list[tuple[str, int]] = []
     for lineno, line in enumerate(text.splitlines() or [""], start=1):
@@ -106,8 +114,10 @@ def _scrub(text: str, *, json_stream: bool, denylist: list[re.Pattern] | None = 
     return hits
 
 
-def scrub_text(text: str, *, json_stream: bool = False) -> list[tuple[int, str]]:
-    return [(lineno, label) for label, lineno in _scrub(text, json_stream=json_stream)]
+def scrub_text(
+    text: str, *, json_stream: bool = False, denylist: list[tuple[int, re.Pattern]] | None = None
+) -> list[tuple[int, str]]:
+    return [(lineno, label) for label, lineno in _scrub(text, json_stream=json_stream, denylist=denylist)]
 
 
 def load_denylist(path: Path) -> list[tuple[int, re.Pattern]]:
@@ -135,11 +145,24 @@ def load_denylist(path: Path) -> list[tuple[int, re.Pattern]]:
     return patterns
 
 
-def _display(relparts: tuple[str, ...]) -> str:
-    return "/".join(REDACTED_NAME if scrub_line(part) else part for part in relparts)
+def _display(relparts: tuple[str, ...], denylist: list[tuple[int, re.Pattern]]) -> str:
+    return "/".join(REDACTED_NAME if scrub_line(part, denylist=denylist) else part for part in relparts)
+
+
+def _one_line(text: str) -> str:
+    return text.replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_data(text: str) -> str:
+    return text.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def _escape_property(text: str) -> str:
+    return _escape_data(text).replace(":", "%3A").replace(",", "%2C")
 
 
 def _decode(path: Path, shown: str) -> str:
+    shown = _one_line(shown)
     try:
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError:
@@ -171,13 +194,15 @@ def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], finding
         for name in sorted(dirnames + filenames):
             full = Path(dirpath) / name
             if full.is_symlink():
-                findings.add(_display((*here.parts, name)), 0, "symlink")
+                findings.add(_display((*here.parts, name), denylist), 0, "symlink")
+            for label in scrub_line(name, denylist=denylist):
+                findings.add(_display((*here.parts, name), denylist), 0, label)
         dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
         for name in sorted(filenames):
             full = Path(dirpath) / name
             if full.is_symlink():
                 continue
-            shown = _display((*here.parts, name))
+            shown = _display((*here.parts, name), denylist)
             text = _decode(full, shown)
             for label, lineno in _scrub(text, json_stream=full.suffix == ".json", denylist=denylist):
                 findings.add(shown, lineno, label)
@@ -185,9 +210,9 @@ def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], finding
 
 def _emit(findings: Findings, github: bool) -> None:
     for relpath, lineno, label in findings.items:
-        print(f"{relpath}:{lineno}:{label}")
+        print(f"{_one_line(relpath)}:{lineno}:{label}")
         if github:
-            print(f"::error file={relpath},line={lineno}::{label}")
+            print(f"::error file={_escape_property(relpath)},line={lineno}::{_escape_data(label)}")
 
 
 def run(root: Path, denylist_path: str | None, github: bool, summary: str | None) -> int:
@@ -214,6 +239,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--denylist", default=os.environ.get("CORE_CONTENT_DENYLIST") or None)
     args = parser.parse_args(argv)
     try:
+        if _IMPORT_FAILURE:
+            raise GateCannotRun(
+                f"capture_scan could not be imported ({_IMPORT_FAILURE}); "
+                "run the gate from a full checkout that has tools/craft/plugins/craft/scripts"
+            )
         return run(
             Path(args.repo_root),
             args.denylist,
