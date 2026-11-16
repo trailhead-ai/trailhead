@@ -5630,3 +5630,66 @@ on the false-condition fixture all 5 branch runs loaded the branch file anyway a
 should not have. The verdict, per-cell counts and the decision asked for are in that folder's `expected.md`
 `## Verdict` block. Runs used the direct runner from an unsandboxed terminal.
 
+
+## Resume where the last run stopped (2026-11-16)
+
+Runner settings: `--ablation none`, `claude-opus-5-5`, `--scaffold`, 3 runs, `-j 3`. The grants are exactly the `runner` block. Runner 2.1.325 on Linux, outside the session's sandbox. Each case ran as its own invocation. The baseline ran on a detached checkout of the unedited prose, with each case's scaffold as committed.
+
+Prose fingerprints (`git hash-object`):
+
+| File | Baseline | Final |
+|---|---|---|
+| `skills/_shared/unattended.md` | `cc88b177369e688d84fc03e4217e784415c31a91` | `0400e1f2b9109bdde549543e683756b906d33317` |
+| `skills/_shared/execute.md` | `c0147861797560101c878efefee307791cc29596` | `05d26f024adf9761324d53e3e641157622ed610a` |
+| `skills/execute/SKILL.md` | `585fbc43a6e5bcf256279aba315e3859e23e95d2` | `b66567af2dc6b99fc585eb3dc9e08cbf45b87ad9` |
+| `skills/plan/SKILL.md` | `671a0e682c5804e6f4a911404662bf1f338c6d47` | `c1505121d30da03a556811160de9242ae6583a64` |
+| `scripts/run_block.py` | `3a480e1bf828dcb742321e0a2e7271ecf00f60c8` | `ba4bd67e947cf026e736ab7f58a1a7494c857803` |
+| `skills/slice/SKILL.md`, `skills/_shared/refine.md` | unchanged | unchanged |
+
+What changed: plan and execute read the latest run block through `run_block.py` and resume a `stuck` or `needs-a-decision` run, take over an outcome-less one only on `--resume`, and refuse a finished or unrecognised one. An earlier ritual's finished outcome starts a fresh run. Answered questions are applied and logged, unanswered ones are re-parked as pointers, and plan creates only the planned children that are missing.
+
+### Resume cases, red to bar
+
+Each scored 3 of 3 at 1.0 on the final prose. Baseline scores are per run.
+
+| Case | Baseline |
+|---|---|
+| `unattended-plan-resumes-with-an-answered-critical` | 0.93 x3 |
+| `unattended-plan-refuses-an-outcome-less-block` | 0.30, 0.23, 0.30 |
+| `unattended-plan-takes-over-an-interrupted-block` | 0.84, 0.53, 0.84 |
+| `unattended-plan-refuses-a-finished-block` | 0.50, 0.28, 0.50 |
+| `unattended-execute-binds-the-unbound-default-vault` | 0.75 x3 |
+| `unattended-execute-parks-a-correction-and-continues` | 0.77 x3 |
+| `unattended-execute-refuses-an-outcome-less-block` | 0.91 x3 |
+| `unattended-execute-reparks-an-unanswered-question` | 0.61 x3 |
+| `unattended-execute-resumes-after-stuck` | 0.57 x3 |
+| `unattended-execute-resumes-an-interrupted-run-on-request` | 0.69, 0.76, 0.76 |
+| `unattended-execute-resumes-with-an-answered-assumption` | 0.28 x3 |
+| `unattended-execute-stops-when-taken-over` | 0.66 x3 |
+| `unattended-execute-takes-over-an-interrupted-block-and-reaches-dispatch` | 0.28 x3 |
+
+Two cases were added after the baseline checkout and have no baseline: `unattended-execute-starts-fresh-after-a-finished-plan` and `unattended-execute-refuses-a-block-stopped-in-plan`, both 3 of 3 at 1.0.
+
+### Below the bar
+
+Eleven cases missed in the first batch and took the one permitted rerun, with `--keep-temp` so the rerun's traces were kept. Results are batch 1, then the rerun.
+
+| Case | Baseline | Final, batch 1 / rerun | Reading |
+|---|---|---|---|
+| `plan-keeps-an-earlier-run-section` | 1 x3 | 0.8, 1, 1 / 1, 1, 1 | at bar on the rerun |
+| `unattended-execute-refuses-an-unplanned-slice` | 1 x3 | 1, 1, 0.88 / 1, 1, 1 | at bar on the rerun. The one `no-git-command-issued` miss repeats the earlier fix pass's; its trace was not kept, so whether the bare `\bgit\b` pattern matched a description or a real call is unknown |
+| `unattended-plan-reparks-an-unanswered-question` | 0.73, 0.80, 0.73 | 0.93 x3 / 0.93, 1, 1 | every record and outcome grader passes in 6 of 6; `asked-nothing` fails 4 of 6 |
+| `unattended-plan-reparks-an-unmatched-answer` | 0.66, 0.86, 0.66 | 0.93 x3 / 0.93 x3 | every record and outcome grader passes in 6 of 6; `asked-nothing` fails 6 of 6 |
+| `unattended-plan-parks-a-correction-at-the-end` | 0.64, 0.64, 0.57 | 1, 0.85, 0.92 / 1, 0.92, 0.92 | `q1-is-the-correction` missed once in batch 1 (no trace); otherwise `asked-nothing` only |
+| `unattended-plan-resumes-after-stuck` | 0.91, 0.75, 0.91 | 1, 0.91, 1 / 1, 0.91, 1 | `plan-body-not-rewritten` once in batch 1 (no trace); `asked-nothing` once in the rerun |
+| `unattended-plan-resumes-an-interrupted-run-on-request` | 0.83, 0.75, 0.83 | 1, 1, 0.91 / 0.91, 1, 1 | `existing-child-untouched` once in batch 1 (no trace); `asked-nothing` once in the rerun |
+| `unattended-plan-creates-only-the-missing-planned-children` | 0.71, 0.78, 0.78 | 1, 0.92, 0.92 / 1, 0.92, 0.92 | `plan-body-not-rewritten` in 2 of 6. The traced one is not a resume rewrite: the resumed run created only the missing child, convened the council as the case expects, and closed a council Critical by appending a rule to the Delta design, which plan allows. The grader cannot tell that edit from a rewrite |
+| `unattended-plan-parks-a-spec-change` | 1, 1, 0.91 | 1, 0.91, 0.91 / 0.91, 1, 0.91 | `asked-nothing` 3 of 6; `q1-has-two-options-each-with-a-cost-and-a-progress-line` once in the rerun, where option (a) stated its cost without the word "costs" (the baseline missed the same grader once) |
+| `unattended-slice-then-plan-ends-plan-ready` | 0.92, 1, 0.84 | 0.84, 0.69, 1 / 0.84, 1, 1 | below bar in the baseline too. One batch 1 run ended `stuck` on `agent-instruction-file-unreadable` at the council; two misses are judge graders skipped on the runner's cost ceiling |
+| `unattended-execute-decides-surviving-findings` | 1, 0.63, 1 | 1, 0.63, 1 / 0.63, 1, 1 | the same four graders miss in one run of every batch, baseline included. In the traced run `found_work.py decide` reported `written` twice, yet the session log has no decision line. Not moved by this change |
+
+Readings:
+- The `asked-nothing` judge splits on near-identical final messages, in the baseline as in the final prose. The messages it fails end `needs-a-decision`, name the re-parked question and its options, say the answer goes under the original entry on the record, and contain no question mark. Its `expected.md` files record it as an operator-accepted limitation; these batches show it does fail headless runs, and not on the behaviour it names.
+- No case regressed against the baseline on a record or outcome grader that the final prose was meant to hold.
+
+Spend at runner list price plus judge votes: about 207.3 USD for the baseline (craft and portage), 257.1 for the final batch, 64.1 for the rerun.
