@@ -1868,7 +1868,9 @@ stops](#end-phase-stops) says.
 non-goals or acceptance criteria, cannot be undone, or lies outside the rule's allowed actions is
 not decided by the table. The routine decisions on the other findings of the pass are made and
 logged first, then the session puts the blocking prompt the rule defines about that finding and ends
-its turn, writing nothing about it until the answer arrives.
+its turn, writing nothing about it until the answer arrives. The stop holds even when whoever
+started the build asked it to carry on through later phases or to give the completion report: those
+wait for the answer, and the question is the last thing the turn says.
 
 **When no one is there to answer.** A build run by a calling skill whose own procedure text says
 "run Phase 6 as a no-ask close" (the driver's build phase, and a slice pass's stuck close, which
