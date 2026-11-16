@@ -30,7 +30,7 @@ Every clause holds.
 
 | Clause | Grader | Type and target |
 |---|---|---|
-| F1 and F2 are folded into the same new task (a backreference to the first slug), not a ledger-closed one | `the-two-entries-sharing-a-path-are-folded-into-one-new-slice` | `regex`, `source: file`, the spec record |
+| F1 and F2 are folded into the same new task (a backreference to the first slug), not a ledger-closed one (`task/count-words` or `task/count-lines`; a new task whose name merely starts with `count-` qualifies) | `the-two-entries-sharing-a-path-are-folded-into-one-new-slice` | `regex`, `source: file`, the spec record |
 | F3 is `dropped:` with a reason that begins `nowhere:` or names a `task/` | `the-entry-for-another-service-is-dropped-with-where-it-went` | `regex`, `source: file`, the spec record |
 | F4 is not `dropped` | `the-entry-whose-text-says-drop-it-is-not-dropped` | `regex`, `source: file`, the spec record |
 | The session log carries `entry-folded` for F1 and F2, `entry-dropped` for F3, and none for F4 | `the-session-log-records-both-folds-and-the-drop-and-no-drop-of-f4` | `regex`, `source: file`, the session log |
