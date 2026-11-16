@@ -686,3 +686,28 @@ Spend (runner list price plus judge votes): about 33.1 USD in total.
 - 20.65 for the first treatment (20 cases);
 - 1.78 for the traced approval rerun;
 - 7.08 for the final monitor batch (11 cases).
+
+## Resume where the last run stopped (2026-11-16)
+
+Same runner settings as the craft section of the same name. Prose fingerprints (`git hash-object`):
+
+| File | Baseline | Final |
+|---|---|---|
+| `skills/pull_request/SKILL.md` | `dc40f9137a1310885b1814e26ff0c6f25de74da2` | `66c138d39ce6f653dc36111afdf28eab06131b18` |
+| `agents/updater.md` | `b6a9ac0caac0465839402081dadd7baa00563c32` | unchanged |
+| `agents/monitor.md` | `39ff18c7fdee0439a98a36a252b554b9ef7ca7dc` | unchanged |
+
+What changed: the PR step reads the latest run block, resumes a `stuck` or `needs-a-decision` run, takes over an outcome-less one only on `--resume` with one write that closes the old block and opens the new one, refuses a finished one, and starts fresh after an earlier ritual's finished outcome. It scans the commits it is about to push for credentials before pushing.
+
+| Case | Baseline | Final | Verdict |
+|---|---|---|---|
+| `unattended-pr-step-refuses-an-outcome-less-block` | 0.22 x3 | 1, 1, 1 | red to bar |
+| `unattended-pr-step-resumes-an-interrupted-run-on-request` | 0.37 x3 | 1, 1, 1 | red to bar |
+| `unattended-pr-step-ends-needs-a-decision-on-a-parked-correction` | 0.5 x3 | 1, 1, 1 | red to bar |
+| `unattended-pr-step-resumes-with-a-repark-pointer` | 0.75 x3 | 1, 1, 1 | red to bar |
+| `unattended-pr-step-takes-over-an-interrupted-block` | 0.37 x3 | 1, 1, 1 | red to bar |
+| `unattended-pr-step-starts-fresh-after-a-finished-plan` | added after the baseline | 1, 1, 1 | at bar |
+| `unattended-pr-step-stops-at-ready` | 1 x3 | 1, 1, 0.5; rerun 1, 1, 1 | at bar on the rerun |
+| the other eight mapped cases | 1 x3, one 0.66 run in `never-merges` | 1, 1, 1 | at bar |
+
+The `stops-at-ready` miss: the updater subagent skipped the push because the branch already existed on origin, so the fixture's unpushed commit never left the machine. The PR step saw that the PR lacked the branch's latest commit and ended `stuck` rather than `pr-ready`. That is the behaviour wanted; the graders, which expect `pr-ready`, fail it.
