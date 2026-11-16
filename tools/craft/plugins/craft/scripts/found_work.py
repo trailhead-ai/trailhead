@@ -1683,8 +1683,8 @@ def _read_stdin(stdin: str | None) -> str:
         raise Refusal("stdin is not valid UTF-8", "non-utf8-stdin")
 
 
-# refusals that exit 2 rather than 1: the document was well-formed JSON text that must not be acted on.
-_EXIT_2_REFUSALS = frozenset({"reserved-security-prefix", "non-utf8-stdin"})
+# reason-codes that exit EXIT_CAPTURE_FAILED rather than EXIT_REFUSED, whatever the subcommand.
+_EXIT_2_REFUSALS = frozenset({"session-unreadable", "reserved-security-prefix", "non-utf8-stdin"})
 
 
 def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> int:
@@ -1727,9 +1727,7 @@ def main(argv=None, *, stdin: str | None = None, runner=None, handlers=None) -> 
         print(f"reason-code: {r.reason_code}", file=sys.stderr)
         if args is not None and r.reason_code in _LOOKUP_EXIT_CODES.get(args.command, ()):
             return EXIT_LOOKUP_FAILED
-        if r.reason_code == "session-unreadable" or r.reason_code in _EXIT_2_REFUSALS:
-            return EXIT_CAPTURE_FAILED
-        return EXIT_REFUSED
+        return EXIT_CAPTURE_FAILED if r.reason_code in _EXIT_2_REFUSALS else EXIT_REFUSED
 
 
 if __name__ == "__main__":

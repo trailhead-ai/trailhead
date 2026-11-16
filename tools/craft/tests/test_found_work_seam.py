@@ -74,16 +74,10 @@ class Seam:
         shim.write_text(f"#!/bin/sh\n{body}\n")
         shim.chmod(0o755)
 
-    def script(self, *args, stdin=None, cwd=None):
+    def script(self, *args, stdin=None, cwd=None, text=True):
         return subprocess.run(
             [sys.executable, str(_SCRIPT), *args],
-            capture_output=True, text=True, env=self.env, input=stdin, cwd=cwd or str(self.tmp_path),
-        )
-
-    def script_bytes(self, *args, stdin: bytes):
-        return subprocess.run(
-            [sys.executable, str(_SCRIPT), *args], capture_output=True, env=self.env, input=stdin,
-            cwd=str(self.tmp_path),
+            capture_output=True, text=text, env=self.env, input=stdin, cwd=cwd or str(self.tmp_path),
         )
 
     def decide(self, doc, *args, cwd=None):
@@ -1100,11 +1094,11 @@ def _tree(seam):
 
 
 def _decide_bytes(seam, raw: bytes):
-    return seam.script_bytes("decide", "--session", "build", "--session-id", SID, stdin=raw)
+    return seam.script("decide", "--session", "build", "--session-id", SID, stdin=raw, text=False)
 
 
 def _entry_bytes(seam, raw: bytes):
-    return seam.script_bytes("entry", "--session", "build", "--session-id", SID, "--vault", "default", stdin=raw)
+    return seam.script("entry", "--session", "build", "--session-id", SID, "--vault", "default", stdin=raw, text=False)
 
 
 @pytest.mark.parametrize("run,doc", [

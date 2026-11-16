@@ -3414,24 +3414,14 @@ def plain_finding_doc(**finding):
 
 
 @pytest.mark.parametrize("field,value", [
-    ("title", f"{fw.SECURITY_TITLE_PREFIX} src/a.py:1 (ref 00000000)"),
-    ("found", f"{fw.SECURITY_REPLACEMENT_PREFIX} location"),
+    pytest.param("title", f"{fw.SECURITY_TITLE_PREFIX} src/a.py:1 (ref 00000000)", id="title"),
+    pytest.param("found", f"{fw.SECURITY_REPLACEMENT_PREFIX} location", id="found"),
+    pytest.param("title", f"\u200b{fw.SECURITY_TITLE_PREFIX} src/a.py:1", id="title-behind-invisible-characters"),
+    pytest.param("found", f"  \u200b{fw.SECURITY_REPLACEMENT_PREFIX} location", id="found-behind-invisible-characters"),
 ])
 def test_a_non_security_finding_carrying_a_reserved_prefix_is_refused_with_nothing_captured(
     capsys, tmp_path, field, value
 ):
-    lore = session_lore(tmp_path)
-    code, out, err = run_decide(plain_finding_doc(**{field: value}), lore, capsys)
-    assert code == 2
-    assert reason_of(err) == "reserved-security-prefix"
-    assert lore.calls == []
-
-
-@pytest.mark.parametrize("field,value", [
-    ("title", f"\u200b{fw.SECURITY_TITLE_PREFIX} src/a.py:1"),
-    ("found", f"  \u200b{fw.SECURITY_REPLACEMENT_PREFIX} location"),
-])
-def test_a_reserved_prefix_hidden_behind_invisible_characters_is_refused(capsys, tmp_path, field, value):
     lore = session_lore(tmp_path)
     code, _, err = run_decide(plain_finding_doc(**{field: value}), lore, capsys)
     assert code == 2
