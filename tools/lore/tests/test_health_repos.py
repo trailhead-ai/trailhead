@@ -670,3 +670,40 @@ def test_reading_a_partial_clone_never_fetches_its_missing_trees(tmp_path):
     assert git(clone, "count-objects", "-v") == objects
     assert sorted(p.name for p in (clone / ".git" / "objects" / "pack").iterdir()) == packs
     assert not (clone / ".git" / "FETCH_HEAD").exists()
+
+
+# ---------------------------------------------------------------------------
+# read_repository: never fetches, never executes
+# ---------------------------------------------------------------------------
+
+
+def _object_files(repo: Path) -> set[str]:
+    objects = repo / ".git" / "objects"
+    return {str(p.relative_to(objects)) for p in objects.rglob("*") if p.is_file()}
+
+
+def test_a_treeless_clone_with_a_hostile_ssh_remote_is_unreadable_and_runs_and_fetches_nothing(tmp_path):
+    remote = tmp_path / "remote.git"
+    make_bare_remote(remote)
+    build_history(remote, [{"id": "c1", "branch": "main", "files": {"a.txt": "a"}}])
+    git(remote, "symbolic-ref", "HEAD", "refs/heads/main")
+    git(remote, "config", "uploadpack.allowFilter", "true")
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", "--filter=tree:0", "--no-checkout", f"file://{remote}", str(clone)],
+        check=True,
+    )
+    marker = tmp_path / "marker"
+    ssh = tmp_path / "evil-ssh"
+    ssh.write_text(f"#!/bin/sh\ntouch {marker}\nexit 1\n")
+    ssh.chmod(0o755)
+    git(clone, "config", "remote.origin.url", "ssh://evil.invalid/repo.git")
+    git(clone, "config", "core.sshCommand", str(ssh))
+    before = _object_files(clone)
+
+    result = repos.read_repository(clone)
+
+    assert isinstance(result, repos.Unreadable)
+    assert result.reason == repos.GIT_FAILED
+    assert not marker.exists()
+    assert _object_files(clone) == before

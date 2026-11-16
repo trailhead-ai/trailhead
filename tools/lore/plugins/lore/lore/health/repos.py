@@ -30,7 +30,12 @@ stdin, a timeout and an output cap, in an environment with every inherited
 ``GIT_*`` variable removed and ``GIT_OPTIONAL_LOCKS=0``, ``GIT_NO_LAZY_FETCH=1``
 and ``GIT_TERMINAL_PROMPT=0`` set. Discovery cannot climb above the root
 (``GIT_CEILING_DIRECTORIES`` is the root's parent), so a plain directory inside
-another repository is not that repository. Nothing here fetches. The one ref name
+another repository is not that repository. Nothing here fetches or executes, and
+that rests on two layers that each hold alone: ``GIT_NO_LAZY_FETCH=1`` stops a
+repository with missing objects from fetching them, and ``-c protocol.allow=never
+-c core.sshCommand=false`` on every call (command-line config outranks the
+repository's) refuses any transport and any planted ssh command on a git that
+ignores the variable. The one ref name
 git reports back (``origin/HEAD``'s target) must match
 :data:`_ORIGIN_REF` with no ``..`` before it goes back to git, as a fully
 qualified ref after ``--end-of-options``; otherwise the next fallback is tried.
@@ -243,7 +248,7 @@ class _Git:
         with tempfile.TemporaryFile() as err:
             try:
                 proc = subprocess.Popen(
-                    ["git", "-C", str(self.root), *args],
+                    ["git", "-C", str(self.root), *_HARDENING, *args],
                     stdin=subprocess.DEVNULL,
                     stdout=subprocess.PIPE,
                     stderr=err,
@@ -298,6 +303,15 @@ def _kill_group(proc: subprocess.Popen, killpg: Callable[[int, int], None]) -> N
         killpg(proc.pid, signal.SIGKILL)
     except OSError:
         pass
+
+
+# Command-line config outranks the repository's own, so a planted remote or
+# ``core.sshCommand`` cannot be honoured. ``-c`` (not ``GIT_CONFIG_COUNT``) because
+# it works on every git, not only 2.31 and later.
+_HARDENING = (
+    "-c", "protocol.allow=never",
+    "-c", "core.sshCommand=false",
+)
 
 
 def _git_env(base: Mapping[str, str] | None, root: Path) -> dict[str, str]:
