@@ -155,11 +155,38 @@ Not saved: AC32 in levr/billing-and-entitlements-launch — your words look like
 Reword them and answer again.
 ```
 
-The reasons are a closed set, one fixed sentence per code the answer script emits: the words look
-like a credential, the words are too long, a failed answer needs words, the entry is not a pending
-check, the entry could not be found, the criterion is already closed, the spec is in a shared vault
-the check list cannot answer yet, a name is not a safe value, the spec could not be read, the write
-failed, and this lore is too old to make a guarded write (`trailhead update`).
+The reasons are a closed set, one fixed sentence per code the answer script emits. A sentence may
+cover a group of codes, and names each code it covers:
+
+- `stale`: the spec changed after the list was read; handled by its own state above.
+- `entry-not-waiting`: the entry was already answered elsewhere; nothing was saved, and the walk
+  moves on.
+- `credential-shaped-words` and `credential-shaped-text`: your words look like a credential. Reword
+  them and answer again.
+- `words-too-long` and `field-too-long`: your words are too long. Shorten them and answer again.
+- `words-required` and `answer-words-required`: a failed check needs a description of what went
+  wrong.
+- `entry-not-found` and `removed-entry`: the check is no longer on that spec.
+- `answer-not-pending-check` and `unknown-kind`: that entry is not a pending check, so it cannot be
+  answered here.
+- `close-refused`: the criterion is already closed.
+- `shared-vault`: the spec is in a shared vault the check list cannot answer yet.
+- `unsafe-name` and `bad-building-slice`: a name in the entry is not a safe value.
+- `spec-unreadable`: the spec could not be read, because lore is missing or did not answer at the
+  writer's probe or read.
+- `write-failed`: the write to the spec failed.
+- `lore-too-old`: this lore is too old to make a guarded write (`trailhead update`).
+- `invalid-arguments`, `answer-missing`, `answer-status-invalid`, `answer-not-dated-today`,
+  `answer-adds-entry`, `more-than-one-answer`, `invalid-today` and `unknown-status`: the save
+  request was malformed, which is a fault in the check list and not in the operator's answer.
+- `entry-changed`, `history-rewritten` and `change-outside-waiting`: the save would have changed
+  more than the operator's answer.
+- `bad-changed-behaviour`, `bad-entry-line`, `control-characters`, `duplicate-entry`,
+  `duplicate-field`, `duplicate-heading`, `malformed-date`, `malformed-prior-section`,
+  `masked-content`, `missing-changed-behaviour`, `missing-check`, `missing-history`, `missing-how`,
+  `missing-waits-on`, `section-not-at-end`, `unexpected-field`, `unmarked-prose`,
+  `unterminated-fence` and `unterminated-masked-region`: the spec's waiting section is not in a
+  shape the check list can safely edit; fix it by hand.
 
 ## State — walk-through stopped part way
 

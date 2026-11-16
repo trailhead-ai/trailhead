@@ -2,5 +2,5 @@
 type: tool_used
 tool: Bash
 min: 0
-max: 1
+max: 2
 ---
