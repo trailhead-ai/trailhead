@@ -9,14 +9,16 @@ rituals call it instead of reading blocks in prose. The body comes on stdin, nev
 
 Block boundaries. A block opens at a line that is exactly `## Unattended run` and runs to the next
 heading of any level or the end of the body. Lines inside a fenced code block (``` or ~~~) are never
-parsed, so an example block in a document is not a block. A label is a line that begins `**Name:**`
+parsed, so an example block in a document is not a block. A body that ends inside a fence after a
+line exactly `## Unattended run` opened in it is refused `unparsable-block`, since the fence would
+hide that block. A label is a line that begins `**Name:**`
 at column 0; a section runs from its label to the next label.
 
 Report, on stdout, exit 0. Every line starts with its own token; none starts with `outcome:` or `#`:
 
     blocks: <n>
-    latest-outcome: <kind>|none            the LAST block's `**Outcome:**`, never an earlier block's
-    latest-checkpoint: <text>|none
+    latest-outcome: <kind>|unrecognised|none   the LAST block's `**Outcome:**`, never an earlier block's
+    latest-checkpoint: none                or `latest-checkpoint:` then the data fence below
     latest-ritual: <name>|none             the LAST ritual named on the last block's `**Rituals:**` line
     highest-q: Q<n>|none                   highest Q number carried by any question, pointer or look-alike
     planned-tasks-block: <k>|none          the most recent block carrying a `**Planned tasks:**` marker
@@ -28,6 +30,13 @@ Report, on stdout, exit 0. Every line starts with its own token; none starts wit
     stray-answer: block=<k> after=Q<n>|none   then the data fence below
 
 `block=<k>` is the 1-based block. One `question:` line per Q defined, in record order.
+
+Outcome. `<kind>` is one of plan-ready, pr-ready, slice-chosen, waiting, spec-complete, stuck,
+needs-a-decision, refused. Any other non-empty value reports `unrecognised`; the raw text is never
+printed. No `**Outcome:**` reports `none`.
+
+Checkpoint. The checkpoint text is vault data: with a checkpoint, `latest-checkpoint:` stands alone
+on its line and the text follows in the data fence; without one the line is `latest-checkpoint: none`.
 
 Rituals. `**Rituals:**` is a comma-separated list of `<name> (<tally>)`; `latest-ritual` is the last
 name, which is one of slice, plan, execute, pull_request. A block with no such line reports `none`.
@@ -61,11 +70,12 @@ look-alike pointer line (the text after it is the stray text, the nearest questi
 
 Match. An answer is `match=option:<letter>` only when it is exactly an option letter in parentheses,
 such as `(a)`, or exactly the text of one option on the question's `  - Options:` sub-bullet
+(read only while the question has no answer; an Options line after the answer is ignored)
 (`(a) <text> — costs <cost>; (b) ...`; the text is what precedes ` — costs`). Anything else is
 `match=unmatched`. An unanswered question is `match=none`.
 
 Question entries. In the `**Parked questions:**` section an entry is a column-0 line `- Q<n>: ...`
-(whitespace around `-`, `Q<n>` and `:` is tolerated, so two entries differing only in whitespace are
+(`<n>` is one to four ASCII digits; whitespace around `-`, `Q<n>` and `:` is tolerated, so two entries differing only in whitespace are
 the same Q). A Q defined twice, in one block or two, is refused `duplicate-question`, unless the
 second is a pointer or a look-alike (below).
 
@@ -92,7 +102,7 @@ Refusals, on stderr as `run_block.py: reason: ...` then `run_block.py: reason-co
 stdout. Exit 2 when stdin cannot be read as a body: `empty-stdin`, `non-utf8-stdin`,
 `stdin-too-large`. Exit 1 when the body is read but refused: `duplicate-question`,
 `unparsable-block` (a `**Format:**` other than 1, a second `**Outcome:**`, `**Checkpoint:**` or
-`**Rituals:**` in a block, an unknown or unparsable `**Rituals:**` line, or a `- Q` entry in `**Parked questions:**` that is not `- Q<digits>:`).
+`**Rituals:**` in a block, an unknown or unparsable `**Rituals:**` line, a body ending inside a fence that hides a block, or a `- Q` entry in `**Parked questions:**` that is not `- Q<1-4 ASCII digits>:`).
 """
 
 from __future__ import annotations
@@ -117,13 +127,23 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _LABEL_RE = re.compile(r"^\*\*([^*:]+):\*\*\s*(.*)$")
 _ANSWER = "**Answer:**"
 _MISPLACED_ANSWER_RE = re.compile(r"^\s*(?:-\s+)?\*\*Answer:\*\*(.*)$")
-_ENTRY_RE = re.compile(r"^-\s+Q(\d+)\s*:(.*)$")
+_ENTRY_RE = re.compile(r"^-\s+Q([0-9]{1,4})\s*:(.*)$")
 _BAD_ENTRY_RE = re.compile(r"^-\s+Q")
-_POINTER_RE = re.compile(r"^- Q(\d+): still open — answer goes under the original Q(\d+) entry$")
-_APPLIED_RE = re.compile(r"^\s+- Applied: Q(\d+)$")
+_POINTER_RE = re.compile(r"^- Q([0-9]{1,4}): still open — answer goes under the original Q([0-9]{1,4}) entry$")
+_APPLIED_RE = re.compile(r"^\s+- Applied: Q([0-9]{1,4})$")
 _OPTIONS_RE = re.compile(r"^\s+-\s+Options:\s*(.*)$")
 _OPTION_SPLIT_RE = re.compile(r"(?:^|;\s+)\(([a-z])\)\s+")
 _LETTER_RE = re.compile(r"^\(([a-z])\)$")
+_OUTCOMES = (
+    "plan-ready",
+    "pr-ready",
+    "slice-chosen",
+    "waiting",
+    "spec-complete",
+    "stuck",
+    "needs-a-decision",
+    "refused",
+)
 _RITUALS = ("slice", "plan", "execute", "pull_request")
 _RITUAL_ENTRY_RE = re.compile(r"^([a-z_]+) \([^()]*\)$")
 _SEPARATORS_RE = re.compile("[  \u0085\v\f]")
@@ -156,11 +176,15 @@ def _split_blocks(text: str) -> list[Block]:
     blocks: list[Block] = []
     current: Block | None = None
     fence: str | None = None
+    hidden_block = False
     for no, raw in enumerate(text.replace("\r\n", "\n").replace("\r", "\n").split("\n"), start=1):
         m = _FENCE_RE.match(raw)
         if fence is not None:
             if m and m.group(1)[0] == fence[0] and len(m.group(1)) >= len(fence):
                 fence = None
+                hidden_block = False
+            elif _BLOCK_RE.match(raw):
+                hidden_block = True
             continue
         if m:
             fence = m.group(1)
@@ -174,6 +198,8 @@ def _split_blocks(text: str) -> list[Block]:
             continue
         if current is not None:
             current.lines.append((no, raw))
+    if fence is not None and hidden_block:
+        raise Refusal("the body ends inside a fenced code block that hides a block", "unparsable-block", 1)
     return blocks
 
 
@@ -277,7 +303,7 @@ def build_report(text: str) -> str:
                 continue
             if raw.strip() == "" or raw[:1].isspace():
                 opt = _OPTIONS_RE.match(raw)
-                if opt and current is not None:
+                if opt and current is not None and current.answer is None:
                     current.options = _parse_options(opt.group(1))
                 continue
             if not raw.startswith("-"):
@@ -316,8 +342,8 @@ def build_report(text: str) -> str:
 
     out = [
         f"blocks: {len(blocks)}",
-        f"latest-outcome: {_flat(outcome) if outcome else 'none'}",
-        f"latest-checkpoint: {_flat(checkpoint) if checkpoint else 'none'}",
+        f"latest-outcome: {_outcome(outcome)}",
+        *_checkpoint_lines(checkpoint),
         f"latest-ritual: {ritual or 'none'}",
         f"highest-q: Q{max(order + mentioned)}" if order or mentioned else "highest-q: none",
         f"planned-tasks-block: {planned[0]}" if planned else "planned-tasks-block: none",
@@ -341,6 +367,18 @@ def build_report(text: str) -> str:
     for block_index, after, value in strays:
         out.extend([f"stray-answer: block={block_index} after={after}", *_fenced(value)])
     return "\n".join(out) + "\n"
+
+
+def _outcome(value: str | None) -> str:
+    if not value:
+        return "none"
+    return value if value in _OUTCOMES else "unrecognised"
+
+
+def _checkpoint_lines(value: str | None) -> list[str]:
+    if not value:
+        return ["latest-checkpoint: none"]
+    return ["latest-checkpoint:", *_fenced(_flat(value))]
 
 
 def _fenced(value: str) -> list[str]:
