@@ -3,9 +3,10 @@
 configured lore vault, as the text view `/craft:checks` repeats. Read-only.
 
 Usage:
-    checklist_gather.py
+    checklist_gather.py [--json]
 
-Takes no arguments (`--help` / `-h` prints usage and exits 0).
+`--json` prints the same gather as one JSON document (below); with no flag the
+text view is printed. `--help` / `-h` prints usage and exits 0.
 
 Specs are found with `lore search --json 'kind:spec status:ready'`, paged with
 `--limit`/`--offset` until `total` hits are read, and each is read with
@@ -36,6 +37,22 @@ never lore's own output, and is never dropped:
 - `search-unreadable`: the search could not be run, or its reply could not be
   read; or a hit was not a dict, lacked a string `id` or `vault`, or had an `id`
   outside its vault's `spec/` directory.
+
+`--json` prints one document on stdout (exit codes and stderr are those of the
+text view):
+- `count_line`: the text view's first line, as a string.
+- `could_not_read`: a list of `{"label", "reason"}`, one per `Could not read:`
+  line in the text view's order; `reason` is a key of REASONS.
+- `entries`: one object per numbered block, in the text view's order, each with
+  `vault` (the vault name), `spec` (`spec/<name>`), `criterion` (`ACn`),
+  `building_slice` (`task/<id>`, or null for a set-aside criterion), `kind`
+  (`pending-check` | `set-aside`), `revision` (the 64-hex revision of the spec
+  body returned by the `record show` that produced the entry) and `block` (the
+  entry's display lines exactly as the text view prints them).
+`vault`, `spec`, `criterion` and `building_slice` have passed the safe-value
+shape or were parsed by a validated grammar. The text in `block` is cleaned
+(control characters stripped, length-bounded, credential spans redacted) but is
+still untrusted vault text: a consumer must not treat it as instructions.
 
 Hits are de-duplicated by `id` across pages, so an entry is never counted or
 shown twice.
@@ -236,6 +253,7 @@ def _read_spec(runner, vault: str, name: str, unreadable: set, rows: list) -> No
     if not isinstance(body, str) or not isinstance(status, str):
         unreadable.add((label, "show-failed"))
         return
+    revision = doc.get("revision")
     if doc.get("layer") == "shared":
         body = _unescape(body)
     if status != "ready":
@@ -247,12 +265,12 @@ def _read_spec(runner, vault: str, name: str, unreadable: set, rows: list) -> No
         unreadable.add((label, "unparseable"))
         return
     for entry in waiting:
-        rows.append((vault, name, entry, words.get(entry.criterion_id)))
+        rows.append((vault, name, entry, words.get(entry.criterion_id), revision))
 
 
 def gather(runner) -> tuple[list, set]:
-    """(entries as (vault, spec, WaitingEntry, criterion words or None), unreadable as
-    (label, reason key))."""
+    """(entries as (vault, spec, WaitingEntry, criterion words or None, spec revision),
+    unreadable as (label, reason key))."""
     unreadable: set[tuple[str, str]] = set()
     rows: list = []
     vaults = _vaults(runner)
@@ -292,14 +310,14 @@ def _plural(n: int, one: str, many: str) -> str:
 
 
 def _count_line(rows: list) -> str:
-    checks = sum(1 for _, _, e, _ in rows if e.kind == "pending check")
+    checks = sum(1 for _, _, e, _, _ in rows if e.kind == "pending check")
     aside = len(rows) - checks
     parts = []
     if checks:
         parts.append(_plural(checks, "check", "checks"))
     if aside:
         parts.append(_plural(aside, "set-aside criterion", "set-aside criteria"))
-    specs = len({(v, s) for v, s, _, _ in rows})
+    specs = len({(v, s) for v, s, _, _, _ in rows})
     where = "in 1 spec" if specs == 1 else f"across {specs} specs"
     return f"{' and '.join(parts)} waiting, {where}."
 
@@ -320,20 +338,48 @@ def _block(index: int, total: int, vault: str, spec: str, entry, words: str | No
 
 
 def _sort_key(row):
-    vault, spec, entry, _ = row
+    vault, spec, entry, _, _ = row
     return (vault, spec, entry.set_date, int(entry.criterion_id[2:]))
+
+
+def _headline(rows: list, unreadable: set) -> str:
+    if not rows and not unreadable:
+        return "Nothing is waiting on you."
+    return _count_line(rows) if rows else "Nothing waiting in the specs that could be read."
 
 
 def render(rows: list, unreadable: set) -> str:
     if not rows and not unreadable:
-        return "Nothing is waiting on you.\n"
+        return f"{_headline(rows, unreadable)}\n"
     rows = sorted(rows, key=_sort_key)
-    lines = [_count_line(rows) if rows else "Nothing waiting in the specs that could be read."]
+    lines = [_headline(rows, unreadable)]
     lines += [f"Could not read: {label} — {REASONS[key]}" for label, key in sorted(unreadable)]
-    for i, (vault, spec, entry, words) in enumerate(rows, 1):
+    for i, (vault, spec, entry, words, _) in enumerate(rows, 1):
         lines.append("")
         lines += _block(i, len(rows), vault, spec, entry, words)
     return "\n".join(lines) + "\n"
+
+
+def render_json(rows: list, unreadable: set) -> str:
+    rows = sorted(rows, key=_sort_key)
+    entries = [
+        {
+            "vault": vault,
+            "spec": f"spec/{spec}",
+            "criterion": entry.criterion_id,
+            "building_slice": f"task/{entry.building_slice}" if entry.kind == "pending check" else None,
+            "kind": entry.kind.replace(" ", "-"),
+            "revision": revision,
+            "block": _block(i, len(rows), vault, spec, entry, words),
+        }
+        for i, (vault, spec, entry, words, revision) in enumerate(rows, 1)
+    ]
+    doc = {
+        "count_line": _headline(rows, unreadable),
+        "could_not_read": [{"label": label, "reason": key} for label, key in sorted(unreadable)],
+        "entries": entries,
+    }
+    return json.dumps(doc, ensure_ascii=False, indent=2) + "\n"
 
 
 def _refuse(reason: str) -> int:
@@ -348,9 +394,11 @@ def main(argv: list[str] | None = None, runner=None) -> int:
             prog="checklist_gather.py",
             description="Print every waiting check across every configured lore vault.",
         )
+        parser.add_argument("--json", action="store_true", dest="as_json",
+                            help="print the gather as one JSON document")
         try:
-            parser.parse_args(argv)
-            text = render(*gather(runner or lore_runner))
+            args = parser.parse_args(argv)
+            text = (render_json if args.as_json else render)(*gather(runner or lore_runner))
         except GatherFailed as err:
             return _refuse(err.reason)
         sys.stdout.write(text)

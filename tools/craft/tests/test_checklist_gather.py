@@ -830,6 +830,122 @@ def test_an_argument_is_refused_as_invalid_arguments(capsys, shelf):
     assert code == 2 and cap.out == "" and "reason-code: invalid-arguments" in cap.err
 
 
+# --- --json: the same gather as one document ---------------------------------
+
+
+def go_json(capsys, lore):
+    code = cg.main(["--json"], lore)
+    cap = capsys.readouterr()
+    return code, json.loads(cap.out), cap.err
+
+
+def revision_of(lore, vault, name):
+    r = lore(["record", "show", "--json", "--vault", vault, f"spec/{name}"])
+    lore.calls.pop()
+    return json.loads(r.stdout)["revision"]
+
+
+def two_vault_shelf(shelf):
+    lore = shelf("beta", "alpha")
+    add(lore, "beta", "bb", spec_body(pending("AC32", slice_="s-beta", check="beta-check"),
+                                      set_aside("AC17", waits="beta-wait")))
+    add(lore, "alpha", "aa", spec_body(pending("AC32", slice_="s-alpha", check="alpha-check"),
+                                       set_aside("AC17", waits="alpha-wait")))
+    return lore
+
+
+def test_json_lists_each_entry_in_the_text_views_order_with_keys_and_its_specs_revision(capsys, shelf):
+    lore = two_vault_shelf(shelf)
+    _, text, _ = go(capsys, lore)
+    code, doc, _ = go_json(capsys, lore)
+    assert code == 0
+    assert doc["count_line"] == text.splitlines()[0] == "2 checks and 2 set-aside criteria waiting, across 2 specs."
+    assert doc["could_not_read"] == []
+    rev = {("alpha", "aa"): revision_of(lore, "alpha", "aa"), ("beta", "bb"): revision_of(lore, "beta", "bb")}
+    assert rev[("alpha", "aa")] != rev[("beta", "bb")]
+    assert [{k: e[k] for k in ("vault", "spec", "criterion", "building_slice", "kind", "revision")}
+            for e in doc["entries"]] == [
+        {"vault": "alpha", "spec": "spec/aa", "criterion": "AC32", "building_slice": "task/s-alpha",
+         "kind": "pending-check", "revision": rev[("alpha", "aa")]},
+        {"vault": "alpha", "spec": "spec/aa", "criterion": "AC17", "building_slice": None,
+         "kind": "set-aside", "revision": rev[("alpha", "aa")]},
+        {"vault": "beta", "spec": "spec/bb", "criterion": "AC32", "building_slice": "task/s-beta",
+         "kind": "pending-check", "revision": rev[("beta", "bb")]},
+        {"vault": "beta", "spec": "spec/bb", "criterion": "AC17", "building_slice": None,
+         "kind": "set-aside", "revision": rev[("beta", "bb")]},
+    ]
+    assert all(len(e["revision"]) == 64 for e in doc["entries"])
+
+
+def test_json_blocks_are_the_text_views_lines_in_the_text_views_order(capsys, shelf):
+    lore = two_vault_shelf(shelf)
+    _, text, _ = go(capsys, lore)
+    _, doc, _ = go_json(capsys, lore)
+    blocks = text.split("\n\n")[1:]
+    assert ["\n".join(e["block"]) + "\n" for e in doc["entries"][:-1]] == [b + "\n" for b in blocks[:-1]]
+    assert "\n".join(doc["entries"][-1]["block"]) + "\n" == blocks[-1]
+    assert doc["entries"][0]["block"][0].startswith("[1/4] ")
+
+
+def test_changing_one_specs_body_changes_only_its_entries_revision(capsys, shelf):
+    lore = two_vault_shelf(shelf)
+    _, before, _ = go_json(capsys, lore)
+    r = lore(["record", "update", "--vault", "alpha", "spec/aa", "--base", revision_of(lore, "alpha", "aa")],
+             spec_body(pending("AC32", slice_="s-alpha", check="alpha-check-edited"),
+                       set_aside("AC17", waits="alpha-wait")))
+    assert r.returncode == 0, r.stderr
+    _, after, _ = go_json(capsys, lore)
+    revs = lambda doc, vault: {e["revision"] for e in doc["entries"] if e["vault"] == vault}
+    assert revs(after, "beta") == revs(before, "beta") and len(revs(after, "beta")) == 1
+    assert len(revs(after, "alpha")) == 1 and revs(after, "alpha") != revs(before, "alpha")
+
+
+def test_json_names_an_unreadable_spec_with_the_text_views_reason_and_lists_no_entry_for_it(capsys, shelf):
+    lore = shelf("alpha")
+    good_spec(lore)
+    add(lore, "alpha", "bad", "## Waiting\n\nloose prose\n")
+    _, text, _ = go(capsys, lore)
+    code, doc, _ = go_json(capsys, lore)
+    assert code == 0
+    assert doc["could_not_read"] == [{"label": "alpha/bad", "reason": "unparseable"}]
+    assert could_not_read("alpha/bad", "unparseable") in text.splitlines()
+    assert {e["spec"] for e in doc["entries"]} == {"spec/good"}
+
+
+def test_json_with_nothing_waiting_has_the_text_views_line_and_no_entries(capsys, shelf):
+    lore = shelf("alpha")
+    add(lore, "alpha", "one", spec_body())
+    code, doc, _ = go_json(capsys, lore)
+    assert (code, doc["count_line"], doc["entries"], doc["could_not_read"]) == (
+        0, "Nothing is waiting on you.", [], [])
+
+
+def test_json_block_is_cleaned_identically_to_the_text_view(capsys, shelf):
+    hostile = f"see \x1b[31mred\x1b[0m \u202eevil {SECRET} end"
+    lore = shelf("alpha")
+    add(lore, "alpha", "s", spec_body(
+        pending(check=hostile, how=hostile), set_aside("AC17", waits=hostile),
+        criteria={"AC32": hostile, "AC17": hostile}))
+    _, text, _ = go(capsys, lore)
+    _, doc, _ = go_json(capsys, lore)
+    joined = "\n".join(line for e in doc["entries"] for line in e["block"])
+    assert "\x1b" not in joined and "\u202e" not in joined and SECRET not in joined
+    assert joined.count("[REDACTED]") >= 5
+    pending_entry = next(e for e in doc["entries"] if e["kind"] == "pending-check")
+    assert "  check: see [31mred[0m evil [REDACTED] end" in pending_entry["block"]
+    for e in doc["entries"]:
+        assert "\n".join(e["block"]) in text
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]])
+def test_lore_missing_exits_2_identically_with_and_without_json(capsys, monkeypatch, flags):
+    monkeypatch.setenv("PATH", "")
+    code = cg.main(flags)
+    cap = capsys.readouterr()
+    assert (code, cap.out) == (2, "")
+    assert cap.err == "reason-code: lore-missing\n"
+
+
 # --- seam: the script as a subprocess against the real lore CLI ---------------
 
 
