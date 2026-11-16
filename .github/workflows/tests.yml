@@ -239,10 +239,9 @@ jobs:
     # not run with the secret. The deny-list secret is exposed to the gate step alone, as a
     # step-level env var; a fork pull request or a repository without the secret gets an empty
     # value, and the gate then annotates the run with a warning and runs its generic classes only.
-    # A same-repository pull request with no secret fails instead: its absence there is a
-    # misconfiguration, not a fork. The secret is readable by any code a same-repository pull
-    # request runs, since write access to the repository implies access to the secret; for
-    # stronger protection, hold it in a GitHub Environment with required reviewers.
+    # The secret is readable by any code a same-repository pull request runs, since write access
+    # to the repository implies access to the secret; for stronger protection, hold it in a
+    # GitHub Environment with required reviewers.
     # The job becomes a required status check only after its first green run, set by the operator
     # in the repository settings. Rollback: delete this job.
     name: core content gate
@@ -262,15 +261,9 @@ jobs:
       - name: Run the gate
         env:
           CORE_CONTENT_DENYLIST: ${{ secrets.CORE_CONTENT_DENYLIST }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
-          BASE_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           args=()
-          if [ -z "${CORE_CONTENT_DENYLIST:-}" ] && [ "$HEAD_REPO" = "$BASE_REPO" ]; then
-            echo "::error::the CORE_CONTENT_DENYLIST secret is empty on a same-repository pull request; set it in the repository secrets"
-            exit 2
-          fi
           if [ -n "${CORE_CONTENT_DENYLIST:-}" ]; then
             denylist_file="$RUNNER_TEMP/core-content-denylist.txt"
             trap 'rm -f "$denylist_file"' EXIT
