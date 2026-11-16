@@ -6,7 +6,7 @@
 
 ## Fixture
 
-`fixtures/scaffold.sh` seeds the `ready` spec `totals-report` (two criteria: the tool prints the totals of a CSV input; the tool prints a one-line summary), the slice parent `print-the-totals-of-a-csv-input` (`in-progress`, label `craft/slice-parent`, linked to the spec) carrying its value claim, one `## Unattended run` block from an earlier plan session, the plan sections (`**Goal:**`, `**Delta design:**`, Axioms, Unknowns, `## Flow-out`) and a `## Council Review`, and the three child tasks `read-the-rows-of-a-csv-input`, `sum-each-numeric-column`, `print-the-totals-and-a-summary-line` (`ready`, contained by the parent, chained with `depends-on`). The block carries the optional `**Planned tasks:**` line naming the three titles. The earlier block has no outcome (checkpoint `council review written`), parks nothing, and the single Critical in the council section is already `resolved`. The prompt runs `/craft:plan task/print-the-totals-of-a-csv-input --unattended --resume`.
+`fixtures/scaffold.sh` seeds the `ready` spec `totals-report` (two criteria: the tool prints the totals of a CSV input; the tool prints a one-line summary), the slice parent `print-the-totals-of-a-csv-input` (`in-progress`, label `craft/slice-parent`, linked to the spec) carrying its value claim, one `## Unattended run` block from an earlier plan session, the plan sections (`**Goal:**`, `**Delta design:**`, Axioms, Unknowns, `## Flow-out`) and a `## Council Review`, and the three child tasks `read-the-rows-of-a-csv-input`, `sum-each-numeric-column`, `print-the-totals-and-a-summary-line` (`ready`, contained by the parent, chained with `depends-on`). The block carries the optional `**Planned tasks:**` line naming the three titles. The earlier block has no outcome (checkpoint `council review written`), parks nothing, and the council section lists no Critical (an Important and a Minor remain, neither needing a disposition). The prompt runs `/craft:plan task/print-the-totals-of-a-csv-input --unattended --resume`.
 
 ## Conditions, sample and bar
 
@@ -47,3 +47,7 @@ Every clause holds.
 - The `asked-nothing` and any other `llm` grader read only the first and last 12 messages of the trace.
 - One fixture, one phrasing, one model tier.
 - Leak check, run on the prompt and `fixtures/scaffold.sh` before commit: a case-insensitive search for `resum`, `taken over`, `refus`, `re-park`, `pointer`, `still open`, `applied`, `unmatched`, `expected`, `baseline` finds only the `--resume` token in the two prompts that measure it and, in one fixture, the word `refuse` inside an option the fixture itself parks. The records show the state an earlier session left, not the rule or the outcome measured.
+
+## Amended after the treatment run
+
+2026-11-16: the seeded council section carried a Critical marked `resolved (decided unattended)` that the plan did not actually resolve, so the seed was not honestly closed. The fault was in the fixture, not a moved bar: the council section now lists no Critical.

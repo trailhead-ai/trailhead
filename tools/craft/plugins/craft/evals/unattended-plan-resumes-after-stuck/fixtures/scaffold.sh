@@ -47,7 +47,7 @@ PARENT='**Value claim:** You can run one command on a CSV input and read its col
 
 **Goal:** A single command prints the column totals of a CSV input and a one-line summary on the terminal.
 
-**Delta design:** A small standard-library Python module in three parts: a reader that yields the rows of a CSV input, a summer that adds each numeric column, and a printer that writes the totals and the one-line summary to the terminal. The parts are separate tasks so each is tested on its own.
+**Delta design:** A small standard-library Python module in three parts: a reader that yields the rows of a CSV input, a summer that adds each numeric column, and a printer that writes the totals and the one-line summary to the terminal. The parts are separate tasks so each is tested on its own. The print task is the command entry point: run with a CSV path, it calls the reader and the summer and prints their result.
 
 **Given Axioms (ground truth this plan rests on):**
 - Operators read the output on the terminal (spec/totals-report, Problem).
@@ -76,9 +76,9 @@ CHILD1='**Delivers:** `totals.py` gains `sum_columns(rows)`, which returns the s
 **Files:** `totals.py`; `test_totals.py`
 '
 printf '%s\n' "$CHILD1" | ./lore record create --kind task --title 'Sum each numeric column' --status ready --parent print-the-totals-of-a-csv-input --depends-on read-the-rows-of-a-csv-input >/dev/null
-CHILD2='**Delivers:** `totals.py` gains `print_totals(sums)`, which prints one line for each total and then a one-line summary.
+CHILD2='**Delivers:** `totals.py` gains `print_totals(sums)`, which prints one line for each total and then a one-line summary, and a `main()` entry point so `python totals.py <csv>` reads the rows, sums the columns and prints the totals and the summary.
 
-**Test contract:** two sums print two total lines and one summary line.
+**Test contract:** two sums print two total lines and one summary line; running `main()` on a CSV path of two numeric columns prints the same.
 
 **Files:** `totals.py`; `test_totals.py`
 '

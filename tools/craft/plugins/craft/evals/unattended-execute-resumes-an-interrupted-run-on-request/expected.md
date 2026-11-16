@@ -54,3 +54,7 @@ Each regex and tool_used grader was flipped offline against a hand-written pass 
 - One fixture, one phrasing, one model tier.
 - The sweep is graded by its observable consequences (stuck line, paths, files still in place, no state-changing git command, no dispatch); the order of the close against the sweep is not graded.
 - The seeded leftover is the only dirt, so a run that stashes or commits it to proceed is the failure the case pins; `no-state-changing-git-issued` also trips on a harmless `git add`, which the procedure has no reason to run.
+
+## Amended after the treatment run
+
+2026-11-16: the `no-state-changing-git-issued` grader matched across the whole Bash input, so words in a `description` could trip it. The fault was in the grader, not in the bar: it now matches only inside the `"command"` string. The bar itself is unchanged.

@@ -36,7 +36,7 @@ Every clause holds.
 | No task record was created | `no-child-task-created` | file_exists, exists false |
 | No `record create --kind task` command ran | `no-child-created-by-command` | tool_used, max 0 |
 | The earlier block, answer included, is byte for byte as seeded | `earlier-block-preserved-byte-for-byte` | regex, file |
-| `**Goal:**` and `**Delta design:**` are byte for byte as seeded | `plan-body-not-rewritten` | regex, file |
+| `**Goal:**` and the start of the seeded `**Delta design:**` are kept; only a wholesale rewrite fails | `plan-body-not-rewritten` | regex, file |
 | Exactly one `## Council Review` heading | `council-review-not-re-run` | regex, file |
 | The council section's reviewed-at stamp is the seeded one | `council-review-stamp-kept` | regex, file |
 | The edit follows option (a), not (b) | `applies-the-answered-option` | llm, trace |
@@ -49,3 +49,7 @@ Every clause holds.
 - The `asked-nothing` and any other `llm` grader read only the first and last 12 messages of the trace.
 - One fixture, one phrasing, one model tier.
 - Leak check, run on the prompt and `fixtures/scaffold.sh` before commit: a case-insensitive search for `resum`, `taken over`, `refus`, `re-park`, `pointer`, `still open`, `applied`, `unmatched`, `expected`, `baseline` finds only the `--resume` token in the two prompts that measure it and, in one fixture, the word `refuse` inside an option the fixture itself parks. The records show the state an earlier session left, not the rule or the outcome measured.
+
+## Amended after the treatment run
+
+2026-11-16: `plan-body-not-rewritten` pinned `**Delta design:**` byte for byte, but applying answer (a) legitimately appends a sentence to it through the confined `--diff`, so a correct run failed. The fault was in the grader, not a moved bar: it now anchors on `**Goal:**` and the opening of the seeded Delta design text, so an append is allowed and a rewrite still fails.
