@@ -85,7 +85,8 @@ INDEX_UNCONFIRMED = "unconfirmed"
 _scan_vault = scan_mod.scan_vault
 
 
-def _read_repository_views(selected: Sequence[str], *, env=None) -> dict[str, str | tuple]:
+# Seam: the report build reads repositories only through this.
+def _repository_views(selected: Sequence[str], *, env=None) -> dict[str, str | tuple]:
     """Per selected vault: the reason it has no repositories, or its repositories as read.
 
     Only the repositories of *selected* vaults are read, each distinct root once.
@@ -94,10 +95,6 @@ def _read_repository_views(selected: Sequence[str], *, env=None) -> dict[str, st
     read = repos_mod.read_repositories((r for b in bound.values() for r in b.roots), env=env)
     return {v: b.reason if b.reason is not None else tuple(read[r] for r in b.roots)
             for v, b in bound.items()}
-
-
-# Seam: the report build reads repositories only through this.
-_repository_views = _read_repository_views
 
 
 @dataclass

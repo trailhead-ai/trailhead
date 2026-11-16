@@ -159,9 +159,10 @@ class CampGroups:
     or camp cannot be imported, ``CONFIG_UNREADABLE`` when a group TOML is
     malformed, unreadable or not UTF-8. ``error`` is the underlying exception for
     ``CONFIG_UNREADABLE``. ``resolve`` is camp's ``camp.group.resolve`` module
-    (``None`` unless camp imported) and ``confinement_errors`` the exception
-    types its ``resolve_from_cwd`` raises, so a caller resolving a cwd uses the
-    same import this loader made.
+    (``None`` unless camp imported), ``resolution_error`` and
+    ``confinement_error`` the exception types its ``resolve_from_cwd`` raises,
+    and ``config_error`` camp's ``GroupConfigError``, so a caller resolving a
+    cwd uses the same import this loader made.
     """
 
     configs: tuple[dict, ...] = ()
@@ -274,16 +275,15 @@ def resolve_active_group_config(
     if loaded.reason == CAMP_ABSENT:
         return None
     if loaded.reason == CONFIG_UNREADABLE:
-        if isinstance(loaded.error, loaded.config_error):
-            print(
-                f"lore: camp group config error; degrading to {degrade_target}: {loaded.error}",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                f"lore: cannot read camp group config; degrading to {degrade_target}: {loaded.error}",
-                file=sys.stderr,
-            )
+        what = (
+            "camp group config error"
+            if isinstance(loaded.error, loaded.config_error)
+            else "cannot read camp group config"
+        )
+        print(
+            f"lore: {what}; degrading to {degrade_target}: {loaded.error}",
+            file=sys.stderr,
+        )
         return None
 
     group_configs = list(loaded.configs)

@@ -86,7 +86,7 @@ def reason_of(root, **kw):
 
 
 # ---------------------------------------------------------------------------
-# load_camp_groups (the loader extracted from vault/layers.py)
+# load_camp_groups (the camp group loader in vault/layers.py)
 # ---------------------------------------------------------------------------
 
 
