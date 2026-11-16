@@ -18,6 +18,8 @@
       "Bash(printf *)",
       "Bash(*/scripts/migration_bar.py)",
       "Bash(*/scripts/migration_bar.py *)",
+      "Bash(*/scripts/run_block.py)",
+      "Bash(*/scripts/run_block.py *)",
       "Bash(*/scripts/pending_check.py *)",
       "Bash(*/scripts/set_aside.py *)",
       "Bash(*/scripts/observation_gate.py)",
