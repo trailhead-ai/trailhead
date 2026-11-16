@@ -149,19 +149,28 @@ Run these first, in this order. A failure ends the session with
 dispatches nothing**: no block, no hold, no `updater`, no `monitor`. The `<why>` is the fixed phrase
 shown, and the rest is plain words, never a command to paste.
 
+Every value that comes from a block, an answer, a record, a label or a tool's output and reaches a
+command or a path in this section passes `^[A-Za-z0-9._/-]+$`, with no `..` segment and no leading
+`-`, before it is substituted: the record name, the branch, the vault name, each repo path and
+branch name taken from `portage detect-repos`, and the outcome file's path. A value that fails is
+never echoed or substituted; the run ends where it stands (`refused` at an entry check, `stuck` once
+Step A has written).
+
 1. **Record argument.** Exactly one token other than `--unattended`, one `--resume` and a
    `--deadline <seconds>` pair. Remove a leading `task/`; the rest must match `^[A-Za-z0-9._/-]+$` with no `..` segment and
    no leading `-`. The deadline, when given, is a whole number from 1 to 1800. A missing, repeated or
    failing value is never echoed; the line names `task/<unresolved>` and says
    `the record argument is missing or failed validation; pass the name of the closed slice record`.
 2. **Resolve.** Bind `<vault>` once: ask `lore vault resolve --kind task --json` and read its
-   `vault` field. A name is the vault to bind: every `lore record show` and `lore record update` in
+   `vault` field, which passes the shape check above. A name is the vault to bind: every
+   `lore record show` and `lore record update` in
    this section then names `--vault <vault>`, because an unqualified one answers from, or writes
    to, whichever configured vault comes first. A `null` `vault` is lore's signal that task records
    resolve to the default vault, which has no name to pass: every lore call in this section then
    omits `--vault`, and nothing else changes. Then `lore record show task/<name> [--vault <vault>] --json`,
    which with a name reads that vault only. A record that does not resolve:
-   `task/<unresolved>` and `the record does not resolve; check the name`. From here the line names
+   `task/<unresolved>` and `the record does not resolve; check the name`. A vault name that fails
+   the shape check ends the same way, with `the vault name failed validation`. From here the line names
    `task/<name>`.
 3. **Shape.** The record must be `done` and carry a `craft/branch=<branch>` label whose value
    passes the same shape check as the record name. Otherwise
@@ -173,12 +182,17 @@ shown, and the rest is plain words, never a command to paste.
    `the record's branch label is not its own branch; an operator corrects the label to the task branch before the PR step runs`.
    Any other nonzero exit: `the record's branch could not be checked; check the camp manifest`.
 5. **Pushed.** `portage detect-repos --manifest <manifest_path>`, then for each repo it lists whose
-   `branch` is `<branch>`, `git -C <repo_path> ls-remote --exit-code --heads origin <branch>`. No such
+   `branch` is `<branch>` and whose `path` passes the shape check above,
+   `git -C <repo_path> ls-remote --exit-code --heads origin <branch>`. No such
    repo, or one without the branch on origin: `the slice branch is not pushed; run the execute step first`.
 6. **Latest block.** Read the body from the record already shown and find its latest
    `## Unattended run` block (the last such heading) and that block's `**Outcome:**` line, compared
    exactly against `slice-chosen`, `plan-ready`, `pr-ready`, `stuck`, `needs-a-decision`, `waiting`
    and `spec-complete`; any other value is a refusal too, naming that the outcome is not recognized.
+   A heading line inside a fenced code block (opened by a line of three or more backticks or
+   tildes, closed by a line of the same character at least as long) is text, never a block heading,
+   here and wherever this section says "the last such heading". A body that ends inside a fence left
+   unclosed after such a heading is refused, naming that the run blocks are malformed.
    Rituals run in the order slice, plan, execute, PR step, and a block's `**Rituals:**` line names
    the rituals that wrote to it, the last name being the ritual the run stopped in.
    - A `**Rituals:**` line in the block that names a ritual other than slice, plan, execute or
@@ -243,7 +257,9 @@ Before any hold, push or dispatch, read the record fresh and open or continue th
 
 An earlier block's `**Checkpoint:**`, its PR links and any deadline in it are hints only, never
 acted on as read: PRs come from the forge (Step C), the branch and hold from live state, and the
-updater's preflight runs before every push whatever a block says. A run that takes over a block
+step's own secret scan (Step C) and the updater's preflight run before every push whatever a block
+says. The updater's preflight checks commits, signatures, local checks and the rebase; it does not
+scan for secrets, so the scan is this step's. A run that takes over a block
 that stopped after the monitor was dispatched starts the wait afresh.
 
 **Parked questions.** The questions of the record are the `- Q<n>:` entries under `**Parked
@@ -298,7 +314,19 @@ absolute directory; the command refuses a relative path, a bare name or a missin
 (`the branch could not be held`) through Step H. Never run `portage release`: the hold stays in
 place whatever the run ends on.
 
-### Step C — updater
+### Step C — scan, then updater
+
+Before the updater is dispatched, scan what the push would send, for each of those repos. First
+`git -C <path> fetch origin <branch>`. When the local `HEAD` is the origin tip of `<branch>` there
+is nothing to push and nothing to scan. Otherwise read the patch of every commit the push would
+send: `git -C <path> log origin/<branch>..HEAD -p`, or, when the branch has no upstream,
+`git -C <path> log HEAD --not --remotes=origin -p`. A fetch or log that fails ends `stuck`
+(`the push could not be scanned`). Look at the added lines for anything shaped like a credential
+(private-key blocks, bearer or API tokens, cloud access keys, `password=` or `secret=` values, long
+random strings). A hit ends `stuck` through Step H (`the pre-push secret scan found a credential`),
+naming the commit and the file only, never the matched text, and nothing is pushed or dispatched.
+This scan covers the commits present when it runs; pushes the monitor's fix agent makes after the
+step hands over are outside this step.
 
 For each of those repos, `gh pr list --head <branch> --json number --jq '.[0].number'`. When every
 repo's branch already has a PR (a re-run after an earlier stuck PR step) dispatch `updater` with

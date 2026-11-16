@@ -6,7 +6,7 @@ The unattended branch of `skills/pull_request/SKILL.md` (`create --unattended ta
 
 ## Fixture
 
-the same scaffold as `unattended-pr-step-refuses-an-outcome-less-block` (`RECORD_STATE=closed`, no PR yet); the prompt adds the `--resume` token. The corpus's shared `evals/pr-step-scaffold.sh` builds the rest (a repo whose slice branch is pushed to a bare origin, a camp manifest and group TOML, `./gh`, `./git` and `./portage` stand-ins, a seeded lore vault with a `./lore` wrapper holding `task/count-words`, a `done` slice parent with `craft/slice-parent` and `craft/branch=count-words` labels); its parameters are in `fixtures/params`. The stand-in `./portage` records any `merge` call to `merge.log` and `hold` calls to `portage.log`. Nothing here sits beside `expected.md` where a run can read it: the run directory holds the scaffolded tree only.
+the shared scaffold with `RECORD_STATE=pr-step-interrupted` (no PR yet): the seeded block has no outcome, its rituals are execute and pull_request, and its checkpoint is `pr step entered`; the prompt adds the `--resume` token. The corpus's shared `evals/pr-step-scaffold.sh` builds the rest (a repo whose slice branch is pushed to a bare origin, a camp manifest and group TOML, `./gh`, `./git` and `./portage` stand-ins, a seeded lore vault with a `./lore` wrapper holding `task/count-words`, a `done` slice parent with `craft/slice-parent` and `craft/branch=count-words` labels); its parameters are in `fixtures/params`. The stand-in `./portage` records any `merge` call to `merge.log` and `hold` calls to `portage.log`. Nothing here sits beside `expected.md` where a run can read it: the run directory holds the scaffolded tree only.
 
 ## Conditions, sample and bar
 
@@ -28,3 +28,7 @@ FAIL. The unedited skill's entry check 1 allows exactly one token besides `--una
 - One fixture, one phrasing, one model tier for the runner; the dispatched updater and monitor run on their own pins.
 - The real `wait-for-actionable`, `gh` and `merge` are stand-ins, so this measures the skill's entry checks, block writes, wait and mapping, not the CI watch.
 - Sandbox accommodations carried in every prompt (single-line commands, `pr_body_file`) are the same as the corpus's other unattended PR-step cases.
+
+## Amended after the treatment run (2026-11-16)
+
+The seeded block's `**Rituals:**` line now ends with `pull_request (0 calls decided unattended)` (`RECORD_STATE=pr-step-interrupted` in the shared scaffold). The fixture was out of step with the PR step's latest-block rules: a block whose last ritual is execute is routed back to execute, so the step correctly refused it. The case is about the PR step taking over its own interrupted run, and the seeded block now says so. The bar is unchanged.
