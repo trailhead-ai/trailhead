@@ -621,14 +621,6 @@ def _vault_with_lesson(tmp_path, name="v"):
     return d
 
 
-def test_misfiled_folder_is_one_finding_with_a_kind_suggestion(world, tmp_path):
-    d = _vault_with_lesson(tmp_path)
-    _pair(d / "lessons")
-    r = world.run("--path", str(d))
-    assert r.returncode == 1
-    assert lines(r) == ["path: misfiled-folder: lessons holds records but is not a kind folder; did you mean lesson?"]
-
-
 def test_removing_the_misfiled_folder_exits_zero_silently(world, tmp_path):
     d = _vault_with_lesson(tmp_path)
     r = world.run("--path", str(d))
@@ -721,4 +713,5 @@ def test_misfiled_folder_suggests_a_kind_only_when_one_is_near(world, tmp_path, 
     d = _vault_with_lesson(tmp_path)
     _pair(d / folder)
     r = world.run("--path", str(d))
+    assert r.returncode == 1
     assert lines(r) == [f"path: misfiled-folder: {folder} holds records but is not a kind folder{suffix}"]

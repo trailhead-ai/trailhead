@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.machinery
 import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -52,14 +53,18 @@ def _env(**extra: str) -> dict[str, str]:
     return env
 
 
-def _run(root: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
+def _run_in(checkout: Path, root: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, str(_GATE), "--repo-root", str(root), *args],
+        [sys.executable, str(checkout / "scripts" / "core-content-gate"), "--repo-root", str(root), *args],
         capture_output=True,
         text=True,
         timeout=120,
         env=_env(**env),
     )
+
+
+def _run(root: Path, *args: str, **env: str) -> subprocess.CompletedProcess:
+    return _run_in(_REPO_ROOT, root, *args, **env)
 
 
 def _vault(tmp_path: Path) -> Path:
@@ -83,6 +88,25 @@ def _substrings(text: str, minimum: int = 6):
     for i in range(len(text)):
         for j in range(i + minimum, len(text) + 1):
             yield text[i:j]
+
+
+def _no_echo(result, token: str) -> None:
+    out = result.stdout + result.stderr
+    assert [s for s in _substrings(token) if s in out] == []
+
+
+def _deny(tmp_path: Path) -> list[str]:
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(DENY_TERM + "\n", encoding="utf-8")
+    return ["--denylist", str(denylist)]
+
+
+def _load_gate():
+    loader = importlib.machinery.SourceFileLoader("core_content_gate_under_test", str(_GATE))
+    spec = importlib.util.spec_from_loader(loader.name, loader)
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -128,23 +152,18 @@ def test_no_echo_of_matched_text_or_its_substrings(tmp_path, case):
     result = _run(root)
 
     assert result.returncode == 1
-    out = result.stdout + result.stderr
-    assert f"core-vault/note.md:1:{cls}" in out
-    echoed = [s for s in _substrings(token) if s in out]
-    assert echoed == []
+    assert f"core-vault/note.md:1:{cls}" in result.stdout + result.stderr
+    _no_echo(result, token)
 
 
 def test_no_echo_of_a_deny_list_term(tmp_path):
     root = _vault(tmp_path)
     _write(root, "note.md", f"mentions {DENY_TERM}\n")
-    denylist = tmp_path / "deny.txt"
-    denylist.write_text(DENY_TERM + "\n", encoding="utf-8")
 
-    result = _run(root, "--denylist", str(denylist))
+    result = _run(root, *_deny(tmp_path))
 
     assert result.returncode == 1
-    out = result.stdout + result.stderr
-    assert [s for s in _substrings(DENY_TERM) if s in out] == []
+    _no_echo(result, DENY_TERM)
 
 
 @pytest.mark.seam_real
@@ -224,24 +243,19 @@ def test_a_64_hex_digest_is_not_a_commit_id(tmp_path):
     assert not [line for line in _lines(result) if line.endswith(":commit-id")]
 
 
-def test_a_utf16_file_is_exit_2(tmp_path):
-    root = _vault(tmp_path)
-    (root / "core-vault" / "note.md").write_bytes(f"mail {EMAIL}\n".encode("utf-16"))
-
-    result = _run(root)
-
-    assert result.returncode == 2
-    assert any(line.startswith("gate could not run:") for line in _lines(result))
-
-
 @pytest.mark.parametrize(
-    "payload",
-    [b"\x89PNG\r\n\x1a\n\x00\x00\xff\xfe", b"valid text\x00with a NUL\n", b"caf\xe9\n"],
-    ids=["not-utf8", "nul-in-utf8", "latin1"],
+    "name, payload",
+    [
+        ("note.md", f"mail {EMAIL}\n".encode("utf-16")),
+        ("image.bin", b"\x89PNG\r\n\x1a\n\x00\x00\xff\xfe"),
+        ("image.bin", b"valid text\x00with a NUL\n"),
+        ("image.bin", b"caf\xe9\n"),
+    ],
+    ids=["utf16", "not-utf8", "nul-in-utf8", "latin1"],
 )
-def test_a_binary_file_is_exit_2(tmp_path, payload):
+def test_a_file_that_is_not_utf8_text_is_exit_2(tmp_path, name, payload):
     root = _vault(tmp_path)
-    (root / "core-vault" / "image.bin").write_bytes(payload)
+    (root / "core-vault" / name).write_bytes(payload)
 
     result = _run(root)
 
@@ -294,9 +308,8 @@ def test_a_filename_holding_an_email_is_redacted(tmp_path):
     result = _run(root)
 
     assert result.returncode == 1
-    out = result.stdout + result.stderr
     assert "core-vault/sub/<redacted-name>:1:commit-id" in _lines(result)
-    assert [s for s in _substrings(EMAIL) if s in out] == []
+    _no_echo(result, EMAIL)
 
 
 def test_a_clean_filename_is_printed_as_is(tmp_path):
@@ -388,7 +401,7 @@ def test_a_bad_deny_list_is_exit_2_without_printing_the_list(tmp_path, kind):
     assert result.returncode == 2
     out = result.stdout + result.stderr
     assert any(line.startswith("gate could not run:") for line in out.splitlines())
-    assert [s for s in _substrings(DENY_TERM) if s in out] == []
+    _no_echo(result, DENY_TERM)
     assert "unterminated" not in out and "missing )" not in out
 
 
@@ -429,36 +442,22 @@ def test_an_unexpected_exception_is_exit_2_not_a_traceback(tmp_path):
     assert "Traceback" not in result.stderr
 
 
-def _no_echo(result, token: str) -> None:
-    out = result.stdout + result.stderr
-    assert [s for s in _substrings(token) if s in out] == []
-
-
-def _deny(tmp_path: Path) -> list[str]:
-    denylist = tmp_path / "deny.txt"
-    denylist.write_text(DENY_TERM + "\n", encoding="utf-8")
-    return ["--denylist", str(denylist)]
-
-
-def test_a_deny_list_term_in_a_filename_is_never_echoed(tmp_path):
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        ({}, "core-vault/<redacted-name>:1:commit-id"),
+        ({"GITHUB_ACTIONS": "true"}, "::error file=core-vault/<redacted-name>,line=1::commit-id"),
+    ],
+    ids=["plain", "annotation"],
+)
+def test_a_deny_list_term_in_a_filename_is_never_echoed(tmp_path, env, expected):
     root = _vault(tmp_path / "r")
     _write(root, f"note-{DENY_TERM.swapcase()}.md", f"commit {COMMIT}\n")
 
-    result = _run(root, *_deny(tmp_path))
+    result = _run(root, *_deny(tmp_path), **env)
 
     assert result.returncode == 1
-    assert "core-vault/<redacted-name>:1:commit-id" in _lines(result)
-    _no_echo(result, DENY_TERM)
-
-
-def test_a_deny_list_term_in_a_filename_is_not_echoed_in_annotations(tmp_path):
-    root = _vault(tmp_path / "r")
-    _write(root, f"note-{DENY_TERM.swapcase()}.md", f"commit {COMMIT}\n")
-
-    result = _run(root, *_deny(tmp_path), GITHUB_ACTIONS="true")
-
-    assert result.returncode == 1
-    assert "::error file=core-vault/<redacted-name>,line=1::commit-id" in _lines(result)
+    assert expected in _lines(result)
     _no_echo(result, DENY_TERM)
 
 
@@ -528,15 +527,11 @@ def test_a_percent_in_a_filename_is_escaped_in_the_annotation(tmp_path):
 
 
 def test_a_missing_capture_scan_is_exit_2_not_a_traceback(tmp_path):
-    scripts = tmp_path / "checkout" / "scripts"
-    scripts.mkdir(parents=True)
-    gate = scripts / "core-content-gate"
-    gate.write_bytes(_GATE.read_bytes())
-    root = _vault(tmp_path / "r")
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts").mkdir(parents=True)
+    (checkout / "scripts" / "core-content-gate").write_bytes(_GATE.read_bytes())
 
-    result = subprocess.run(
-        [sys.executable, str(gate), "--repo-root", str(root)], capture_output=True, text=True, timeout=120, env=_env()
-    )
+    result = _run_in(checkout, _vault(tmp_path / "r"))
 
     assert result.returncode == 2
     assert any(line.startswith("gate could not run:") for line in _lines(result))
@@ -551,14 +546,6 @@ def test_the_scrub_functions_apply_a_supplied_deny_list():
     assert gate.scrub_line("plain", denylist=denylist) == []
     assert gate.scrub_line(f"a {DENY_TERM}") == []
     assert gate.scrub_text(f"ok\n{DENY_TERM}", denylist=denylist) == [(2, "deny-list#4")]
-
-
-def _load_gate():
-    loader = importlib.machinery.SourceFileLoader("core_content_gate_under_test", str(_GATE))
-    spec = importlib.util.spec_from_loader(loader.name, loader)
-    module = importlib.util.module_from_spec(spec)
-    loader.exec_module(module)
-    return module
 
 
 @pytest.mark.parametrize(
@@ -591,8 +578,6 @@ _CAPTURE_SCAN_REL = Path("tools/craft/plugins/craft/scripts/capture_scan.py")
 
 
 def _sidecar(kind: str, name: str, **extra) -> str:
-    import json
-
     return json.dumps(
         {
             "kind": kind,
@@ -636,16 +621,6 @@ def _fake_checkout(tmp_path: Path, lore: str | None) -> Path:
         wrapper.parent.mkdir(parents=True)
         wrapper.write_text(lore, encoding="utf-8")
     return checkout
-
-
-def _run_in(checkout: Path, root: Path, **env: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        [sys.executable, str(checkout / "scripts" / "core-content-gate"), "--repo-root", str(root)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=_env(**env),
-    )
 
 
 def test_a_core_record_with_an_unparseable_sidecar_fails_with_the_validators_line(tmp_path):
@@ -708,10 +683,8 @@ def test_a_validator_line_carrying_a_leak_is_relayed_cut_down(tmp_path, leak):
     root = _vault(tmp_path)
     token = COMMIT if leak == "commit-id" else DENY_TERM.lower()
     _core_record(root, "blob", "src", body=f"see [[blob/{token}]]\n")
-    denylist = tmp_path / "deny.txt"
-    denylist.write_text(f"{DENY_TERM}\n", encoding="utf-8")
 
-    result = _run(root, "--denylist", str(denylist), GITHUB_ACTIONS="true")
+    result = _run(root, *_deny(tmp_path), GITHUB_ACTIONS="true")
 
     assert result.returncode == 1, result.stdout + result.stderr
     assert "blob/src: missing-target" in _lines(result)
@@ -967,10 +940,8 @@ def test_a_pointer_whose_files_are_symlinks_to_files_outside_core_vault_fails(tm
 def test_a_pointer_id_holding_a_deny_list_term_is_not_echoed(tmp_path):
     root = _vault(tmp_path)
     _ship(root, "doc.md", f"trailhead core show adr/{DENY_TERM.lower()}\n")
-    denylist = tmp_path / "deny.txt"
-    denylist.write_text(f"{DENY_TERM}\n", encoding="utf-8")
 
-    result = _run(root, "--denylist", str(denylist), GITHUB_ACTIONS="true")
+    result = _run(root, *_deny(tmp_path), GITHUB_ACTIONS="true")
 
     assert result.returncode == 1
     assert f"tools/t/plugins/p/doc.md:1:pointer-missing:{REDACTED}" in _lines(result)
