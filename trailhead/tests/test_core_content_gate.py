@@ -862,25 +862,39 @@ def test_a_record_with_only_one_of_its_two_files_is_a_missing_pointer(tmp_path):
     assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/half" in _lines(result)
 
 
-@pytest.mark.parametrize(
-    "text",
-    [
-        "trailhead core show <kind>/<name>",
-        "trailhead core show ../outside/x",
-        "trailhead core show Adr/real",
-        "trailhead core show adr/real_two",
-        "trailhead core show adr",
-    ],
-    ids=["placeholder", "traversal", "uppercase", "underscore-tail", "no-name"],
-)
-def test_text_the_runtime_grammar_refuses_is_not_a_pointer(tmp_path, text):
+def test_the_documented_placeholder_is_not_a_pointer(tmp_path):
     root = _vault(tmp_path)
-    _ship(root, "doc.md", text + "\n")
+    _ship(root, "doc.md", "trailhead core show <kind>/<name>\nand a bare `trailhead core show`\n")
 
     result = _run(root)
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "pointers: 0 checked in 1 files" in _lines(result)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "trailhead core show ../outside/x",
+        "trailhead core show Adr/real",
+        "trailhead core show adr/real_two",
+        "trailhead core show adr",
+        "trailhead core show adr/missing.md",
+        "trailhead core show adr/Missing",
+        "trailhead core show adr/foo_bar",
+    ],
+    ids=["traversal", "uppercase", "underscore-tail", "no-name", "md-suffix", "capital-name", "underscore"],
+)
+def test_a_pointer_the_runtime_grammar_refuses_is_a_finding(tmp_path, text):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "intro\n" + text + "\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "tools/t/plugins/p/doc.md:2:pointer-invalid" in _lines(result)
+    assert "pointers: 1 checked in 1 files" in _lines(result)
+    assert text.split("show ")[1] not in result.stdout + result.stderr
 
 
 def test_the_gate_and_the_runtime_agree_on_the_id_grammar():
@@ -1004,3 +1018,81 @@ def test_a_pointer_whose_file_is_a_symlink_staying_inside_core_vault_still_fails
     result = _run(root)
 
     assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/real" in _lines(result)
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores directory permissions")
+def test_an_unreadable_plugin_folder_is_exit_2(tmp_path):
+    root = _vault(tmp_path)
+    locked = root / "tools" / "x" / "plugins" / "x" / "locked"
+    locked.mkdir(parents=True)
+    (locked / "doc.md").write_text("trailhead core show adr/missing\n", encoding="utf-8")
+    locked.chmod(0)
+    try:
+        result = _run(root)
+    finally:
+        locked.chmod(0o755)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert any(line.startswith("gate could not run:") for line in _lines(result))
+    assert "pointer-missing" not in result.stdout
+
+
+def test_a_line_number_counts_only_newlines(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "a.md", "one\x0c\u2028\x85two\r\nthree " + EMAIL + "\n")
+
+    result = _run(root)
+
+    assert "core-vault/a.md:2:email" in _lines(result)
+
+
+@pytest.mark.parametrize("env", [{}, {"GITHUB_ACTIONS": "true"}], ids=["plain", "github"])
+def test_a_deny_term_spanning_a_path_separator_is_not_echoed(tmp_path, env):
+    root = _vault(tmp_path)
+    left, right = "Orchid", "Quartz"
+    _write(root, f"{left.lower()}/{right.lower()}.md", EMAIL + "\n")
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(f"{left}.?{right}\n", encoding="utf-8")
+
+    result = _run(root, "--denylist", str(denylist), **env)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/<redacted-path>" in result.stdout
+    _no_echo(result, left.lower() + right.lower())
+
+
+def test_a_misnested_record_pair_blocks_the_no_records_pass(tmp_path):
+    root = _vault(tmp_path)
+    _record(root / "core-vault" / "blob", "sub", "y")
+    lore = _OK_LORE
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/blob/sub/y.md:0:unvalidated-record" in _lines(result)
+    assert "ok: core vault holds no records yet" not in _lines(result)
+
+
+def test_a_record_pair_directly_in_core_vault_blocks_the_no_records_pass(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "y.md", "text\n")
+    _write(root, "y.json", "{}")
+    checkout = _fake_checkout(tmp_path, _OK_LORE)
+
+    result = _run_in(checkout, root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/y.md:0:unvalidated-record" in _lines(result)
+
+
+def test_a_readme_beside_nothing_still_passes_the_no_records_carve_out(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "README.md", "# core\n")
+    _write(root, "notes/lone.md", "no sidecar\n")
+    checkout = _fake_checkout(tmp_path, _OK_LORE)
+
+    result = _run_in(checkout, root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok: core vault holds no records yet" in _lines(result)

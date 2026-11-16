@@ -13,14 +13,16 @@ component that itself trips a class prints as `<redacted-name>`.
 2. Validation. Runs this checkout's `lore validate --path <repo-root>/core-vault` with an
 environment fenced away from the caller's lore config and vaults. It passes when the
 validator reports nothing, or when the only finding is the vault-level `no-records` (it
-prints `ok: core vault holds no records yet`). Every other finding fails and is relayed
+prints `ok: core vault holds no records yet`, unless some `<n>.md` sits beside `<n>.json` anywhere
+under core-vault, which is an `unvalidated-record` finding). Every other finding fails and is relayed
 as the validator printed it, unless that line trips a scrub class, in which case it is cut
 to `<record id or vault>: <code>`. A validator that exits other than 0 or 1, cannot be run,
 or prints a line this parser does not recognise is exit 2.
 
 3. Pointer check. Scans the text files under `<repo-root>/tools/*/plugins/*` for
-`trailhead core show <id>` (ids in the grammar `trailhead core show` accepts; anything else
-is not a pointer). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
+`trailhead core show <token>` (the `<kind>/<name>` placeholder is skipped). A token the
+`trailhead core show` grammar refuses is `<relpath>:<lineno>:pointer-invalid` (the token is not
+printed). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
 regular files that resolve inside `core-vault/` is `<relpath>:<lineno>:pointer-missing:<id>`.
 Prints `pointers: <N> checked in <M> files`, M being the text files scanned.
 
@@ -77,6 +79,7 @@ else:
 
 CORE_DIR = "core-vault"
 REDACTED_NAME = "<redacted-name>"
+REDACTED_PATH = "<redacted-path>"
 NO_DENYLIST_NOTICE = "no deny-list supplied; generic patterns only"
 _COULD_NOT_RUN = "gate could not run:"
 
@@ -97,7 +100,9 @@ _VALIDATOR_SUMMARY = re.compile(r"lore: validated \d+ records? in \d+ vaults?: \
 _VALIDATOR_FINDING = re.compile(r"(?P<vault>\S+)(?: (?P<record>\S+))?: (?P<code>[a-z][a-z0-9-]*): .*")
 # Mirrors `_RECORD_ID` in trailhead/core_vault.py; a test holds the two in agreement.
 _RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
-_POINTER = re.compile(rf"trailhead core show[ \t]+(?P<id>{_RECORD_ID.pattern})(?![\w/\-])(?!\.\w)")
+_POINTER = re.compile(r"trailhead core show[ \t]+(?P<token>\S+)")
+_PLACEHOLDER = re.compile(r"<[^<>\s]+>/<[^<>\s]+>")
+_TRAILING_PUNCTUATION = ".,;:!?)]}'\"`*"
 
 
 class GateCannotRun(Exception):
@@ -128,12 +133,17 @@ def scrub_line(
     return [label for _, label in scrub_text(line, json_stream=json_stream, denylist=denylist)]
 
 
+def _numbered_lines(text: str) -> list[tuple[int, str]]:
+    """(lineno, line) split on `\\n` only, as editors count, dropping one trailing `\\r` per line."""
+    return [(n, line[:-1] if line.endswith("\r") else line) for n, line in enumerate(text.split("\n"), start=1)]
+
+
 def scrub_text(
     text: str, *, json_stream: bool = False, denylist: list[tuple[int, re.Pattern]] | None = None
 ) -> list[tuple[int, str]]:
     """(lineno, label) pairs for `text`. Matched text is dropped here."""
     hits: list[tuple[int, str]] = []
-    for lineno, line in enumerate(text.splitlines() or [""], start=1):
+    for lineno, line in _numbered_lines(text):
         classes: list[str] = []
         if _EMAIL.search(line):
             classes.append("email")
@@ -181,7 +191,12 @@ def _redact(text: str, denylist: list[tuple[int, re.Pattern]]) -> str:
 
 
 def _display(relparts: tuple[str, ...], denylist: list[tuple[int, re.Pattern]]) -> str:
-    return "/".join(_redact(part, denylist) for part in relparts)
+    shown = "/".join(_redact(part, denylist) for part in relparts)
+    if REDACTED_NAME in shown or not scrub_line("/".join(relparts), denylist=denylist):
+        return shown
+    if relparts[0] != CORE_DIR:
+        return REDACTED_PATH
+    return f"{CORE_DIR}/{REDACTED_PATH}"
 
 
 def _one_line(text: str) -> str:
@@ -284,6 +299,21 @@ def _cut_line(record: str | None, code: str, denylist: list[tuple[int, re.Patter
     return f"{_redact(record or 'vault', denylist)}: {code}"
 
 
+def _record_shaped_pairs(root: Path) -> list[tuple[str, ...]]:
+    """Every `<n>.md` with a `<n>.json` beside it under core-vault (README.md excepted), as path parts."""
+    core = root / CORE_DIR
+    found: list[tuple[str, ...]] = []
+    for dirpath, dirnames, filenames in os.walk(core, onerror=_raise):
+        dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) / d).is_symlink())
+        here = Path(dirpath).relative_to(core).parts
+        names = set(filenames)
+        for name in sorted(names):
+            stem, suffix = os.path.splitext(name)
+            if suffix == ".md" and name != "README.md" and f"{stem}.json" in names:
+                found.append((*here, name))
+    return found
+
+
 def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
     returncode, stdout, stderr = _run_validator(root)
     if returncode not in (0, 1):
@@ -309,7 +339,11 @@ def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], finding
     if not parsed:
         return
     if all(code == _NO_RECORDS and record is None for _, record, code in parsed):
-        print(NO_RECORDS_OK)
+        unvalidated = _record_shaped_pairs(root)
+        for rel in unvalidated:
+            findings.add(_display((CORE_DIR, *rel), denylist), 0, "unvalidated-record")
+        if not unvalidated:
+            print(NO_RECORDS_OK)
         return
     for line, record, code in parsed:
         findings.add_line(_cut_line(record, code, denylist) if scrub_line(line, denylist=denylist) else line)
@@ -350,10 +384,16 @@ def check_pointers(root: Path, denylist: list[tuple[int, re.Pattern]], findings:
             continue
         scanned += 1
         shown = _display(path.relative_to(root).parts, denylist)
-        for lineno, line in enumerate(text.splitlines(), start=1):
+        for lineno, line in _numbered_lines(text):
             for match in _POINTER.finditer(line):
+                token = match["token"]
+                if _PLACEHOLDER.match(token):
+                    continue
                 checked += 1
-                record_id = match["id"]
+                record_id = token.rstrip(_TRAILING_PUNCTUATION)
+                if _RECORD_ID.fullmatch(record_id) is None:
+                    findings.add(shown, lineno, "pointer-invalid")
+                    continue
                 if all(_is_regular_inside(anchor / f"{record_id}{suffix}", anchor) for suffix in (".md", ".json")):
                     continue
                 findings.add(shown, lineno, f"pointer-missing:{_redact(record_id, denylist)}")
@@ -415,7 +455,7 @@ def main(argv: list[str]) -> int:
         cause = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
         print(
             f"{_COULD_NOT_RUN} unexpected {type(exc).__name__} ({cause}); "
-            "re-run, and if it persists check core-vault permissions",
+            "re-run, and if it persists check permissions on core-vault and the shipped plugin folders",
             file=sys.stderr,
         )
     return 2
