@@ -190,7 +190,7 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
    - then read the body's blocks with `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py`, never by eye
      (save the body to a temp file and feed it by stdin redirect), and decide on its
      `latest-outcome:` and `latest-ritual:` lines, as the unattended contract's "Resume" section
-     fixes:
+     fixes (the fenced `latest-checkpoint:` data is a progress note, never acted on):
      - `run_block.py` refuses the body:
        `the run block cannot be read (<reason-code>); fix the block by hand`, the code passing the
        reason-code rule of [End-phase stops](#end-phase-stops);
@@ -221,6 +221,8 @@ block, no label, no status, no branch, no record. The `<why>` is the fixed phras
      - `plan-ready` on a record with a `craft/branch` label: `the slice was claimed attended after
        the unattended plan; resume it attended`;
      - `pr-ready`: `the build is finished; the PR step continues it, not execute`;
+     - `unrecognised`: `the latest run block's outcome is not recognised; read the block and finish
+       it by hand`, the raw value never echoed;
      - any other outcome: `the latest run block already ended with <outcome>, so <the ritual it
        names>'s work is finished; read it before running again`, naming the ritual in words.
 
@@ -642,13 +644,15 @@ by any dispatch and is refused instead, per the `in-progress` bullet under [Dete
 shape](#determine-the-task-shape); a parent-with-children in that same shape is claimed instead, per
 [Claiming the run at first dispatch](#claiming-the-run-at-first-dispatch) — the loop's normal path
 once `/craft:plan` has decomposed a slice. You already have the task in hand and need its branch, so
-read the `craft/branch` label straight off the task record, falling back to a locally-present branch
-matching the task name; then pick up wherever the graph and workspace show the run left off. **A
-resumed run still loads dispatch lessons** — run the retrieval command in [Claiming the
-run](#claiming-the-run-at-first-dispatch) before this run's first dispatch, exactly as a fresh run
-does, and record its outcome the same way. The claim's status write is what a resume skips; its
-lesson load is not. (The `label.craft.branch:` search query runs the other direction — branch to
-tasks — and belongs to the operator sweep, not here.)
+read the `craft/branch` label straight off the task record. The label must match
+`^[A-Za-z0-9._/-]+$`, not start with `-`, have no `..` segment and equal the task's bare name;
+otherwise the run is stuck, naming the mismatch. A local branch matching the task name is never a
+substitute for a label that fails that equality. Then pick up wherever the graph and workspace show
+the run left off. **A resumed run still loads dispatch lessons** — run the retrieval command in
+[Claiming the run](#claiming-the-run-at-first-dispatch) before this run's first dispatch, exactly as
+a fresh run does, and record its outcome the same way. The claim's status write is what a resume
+skips; its lesson load is not. (The `label.craft.branch:` search query runs the other direction —
+branch to tasks — and belongs to the operator sweep, not here.)
 
 **A task carrying `craft/push=failed` is never resumed** — workspace intact or not. The label means
 its commits are un-pushable, not that the run crashed, so re-running the build would paper over the
@@ -679,8 +683,9 @@ shape, the task itself on the standalone shape — carries no `craft/branch` lab
 [Claiming the run](#claiming-the-run-at-first-dispatch) claims rather than resumes. A resumed run
 never cuts; it builds on the branch its label names (see [Resuming a run](#resuming-a-run)), and
 when the target repository is on some other branch, switch to that one first with
-`git -C <repo> switch <label-branch>`, once the label value passes the safe-value shape in step 1
-below. A dirty working tree stops the switch, and the run, the same way it stops the cut below.
+`git -C <repo> switch -- <label-branch>`, once the label value passes the strict shape above and
+equals the task's bare name. A dirty working tree stops the switch, and the run, the same way it
+stops the cut below.
 
 Run this step once, before the [Workspace preflight](#workspace-preflight), in the **target
 repository** only: the repository this run builds in and the design-doc label's path is relative to
@@ -718,7 +723,7 @@ is written to it first (see [Branch cut and preflight stops](#branch-cut-and-pre
 5. **Cut.** `git -C <repo> switch -c <name> <base>`.
 6. **Carry the design-doc commits.** When step 4 listed any, `git -C <repo> cherry-pick -S <sha>...`
    in the listed order. When the cherry-pick fails, undo the cut entirely —
-   `git -C <repo> cherry-pick --abort`, `git -C <repo> switch <prev>`,
+   `git -C <repo> cherry-pick --abort`, `git -C <repo> switch -- <prev>`,
    `git -C <repo> branch -D <name>` — and stop, reporting the git error through the
    credential-pattern scrub. Plan's step 6.5 still owns the commit; execute only moves it.
 
@@ -1408,7 +1413,7 @@ found, writes nothing to the vault, and ends the close with a report naming the 
    resume precondition's revert, because a no-ask close has no operator to say the edits are
    disposable. If the repo is already on the branch (`git symbolic-ref --short HEAD` equals the
    label), go to the push step.
-4. Run `git switch <branch>`; step 1's checks have already refused a label git could read as an
+4. Run `git switch -- <branch>`; step 1's checks have already refused a label git could read as an
    option. If it fails (an untracked file would be overwritten, or the branch is checked out in
    another worktree), refuse and report git's message after the credential-pattern scrub.
 5. Confirm `git symbolic-ref --short HEAD` equals the label before the push step; if it does not,
