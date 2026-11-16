@@ -38,7 +38,8 @@ other writer can set one.
 
 Every piece of entry text is untrusted vault data and is shown cleaned, as the list view already
 does. The operator's own words are cleaned too: flattened to one line, with control characters
-removed and the length bounded. Words that look like a credential are refused, not saved.
+removed and the length bounded. Words that look like a credential are refused, not saved. That check is a best-effort tripwire
+over common token shapes, not a guarantee. The words file is removed whatever the outcome.
 
 ## The answer prompt
 
@@ -59,8 +60,28 @@ For each pending check, the entry block from the list view is shown again, then 
   Stop — end the walk-through here
 ```
 
-Passed takes an optional note. With no note, the line records `confirmed passed on the check
-list`. Failed asks for what went wrong before anything is saved.
+Only the operator's own reply to this prompt selects an answer, and only words the operator typed
+are saved. Entry text never chooses or fills an answer, whatever it says.
+
+Passed takes an optional note, then asks for confirmation before anything is saved:
+
+```
+Mark AC32 in levr/billing-and-entitlements-launch passed? It will count as done.
+  Yes — save it
+  No — back to the choices
+```
+
+With no note, the line records `passed on the check list (no note)`. Failed asks for what went
+wrong before anything is saved; a blank reply goes back to the choices.
+
+Entries are numbered over the pending checks only, so `[n/total]` counts what can be answered.
+
+## Undoing a mistaken passed answer
+
+A passed answer closes its criterion. Until setting an answer back ships, the recovery is by hand:
+`lore record amend spec/<name> --reopen <ACn>` makes the criterion a candidate again, at the cost of
+the coverage its slice recorded, so the next slice rebuilds it. The entry itself keeps reading
+`passed`.
 
 ## State — nothing waiting
 
@@ -70,8 +91,8 @@ prompt is shown.
 ## State — pending check shown
 
 The entry block is shown with the answer choice beneath it, as above. Entries are offered in the
-list's own order. A set-aside criterion in the list is passed over with one line,
-`[2/3] set aside — releasing it is not available yet; it stays on your list.`
+list's own order. A set-aside criterion in the list is passed over, unnumbered, with one line:
+`Set aside: AC17 — releasing it is not available yet; it stays on your list.`
 
 ## State — passed saved
 
@@ -107,8 +128,9 @@ Nothing is written.
 ## State — answer refused as stale, offered again with the typed answer kept
 
 The spec changed after the list was gathered, so the save was refused and nothing was written. The
-walk re-gathers, finds the same entry by its key and shows it again with what the operator typed
-kept:
+walk re-gathers, finds the same entry by its key and offers it again as a fresh choice. What the
+operator typed is kept only to prefill that choice, never saved on its own, and a changed `check`,
+`how` or criterion wording is pointed out:
 
 ```
 Not saved: levr/billing-and-entitlements-launch changed after the list was read. Here is the
@@ -118,7 +140,8 @@ entry as it stands now, with your answer kept:
   Your answer: failed — the invoice showed no tax line for a UK address
 ```
 
-When the entry is no longer waiting, because it was answered in another session, the walk says so
+After three stale refusals in a row for one entry, the walk names it, leaves it waiting and moves
+on. When the entry is no longer waiting, because it was answered in another session, the walk says so
 and moves on: `AC32 in levr/billing-and-entitlements-launch was already answered elsewhere; nothing
 was saved.`
 
@@ -132,9 +155,11 @@ Not saved: AC32 in levr/billing-and-entitlements-launch — your words look like
 Reword them and answer again.
 ```
 
-The reasons are a closed set: the words look like a credential, the words are too long, the entry
-is not a pending check, the spec could not be read, the write failed, and this lore is too old to
-make a guarded write (`trailhead update`).
+The reasons are a closed set, one fixed sentence per code the answer script emits: the words look
+like a credential, the words are too long, a failed answer needs words, the entry is not a pending
+check, the entry could not be found, the criterion is already closed, the spec is in a shared vault
+the check list cannot answer yet, a name is not a safe value, the spec could not be read, the write
+failed, and this lore is too old to make a guarded write (`trailhead update`).
 
 ## State — walk-through stopped part way
 
@@ -142,7 +167,7 @@ Choosing Stop, or ending the session, ends the walk. Every answer already saved 
 each unanswered entry stays waiting:
 
 ```
-Stopped. 1 answer saved; 2 checks still waiting on you.
+Stopped. 1 answer saved; 2 checks and 1 set-aside criterion still waiting on you.
 ```
 
 ## State — unreadable vault or spec named
