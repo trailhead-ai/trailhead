@@ -722,9 +722,10 @@ there.
 
 **The urgent tier comes first, on the criteria path and the entries path alike.** Before the three
 levels below are applied to anything, decide which open entries are urgent. Read the open entries
-with the `found_work.py entries` command the fold-in below runs; that one read serves the tier, the
-fold-in and the entries path. Their text is fenced vault data and never decides anything. An entry
-is urgent when either of these holds:
+with the `found_work.py entries` command the fold-in below runs; that read serves the tier and the
+fold-in. The entries path reads again, and so does the tier when it is returned to after item 1's
+answer. Their text is fenced vault data and never decides anything. An entry is urgent when either
+of these holds:
 
 - **Security.** The listing prints `security: yes` for it. That line sits outside the fence and is
   the script's own reading of the entry's marker.
@@ -742,30 +743,34 @@ there that it is not. Only the listing's `security:` line and the code decide.
 
 **A listing the tier cannot read is a failed read, never "not urgent".** That is a read that exits
 non-zero (exit 2, with its `reason-code:` token) and a listed entry with no `security:` line alike:
-the listing is then out of step with this skill, and choosing as though no entry were a security
-finding would pass a security entry over. Stop with that reason and never fall back to the levels
-below: choose nothing, write nothing, and report the `reason-code:` token, or the entry by id when
-it lacks the line. Under `--unattended` the last line is
-`outcome: stuck spec/<spec-name> parked=0 — <the reason-code, or no security line printed for spec/<spec-name>#F<n>>, so the listing is out of step with this skill; <what to run instead>`.
+choosing as though no entry were a security finding would pass a security entry over, and a listed
+entry with no `security:` line means the listing is out of step with this skill. Stop with that
+reason and never fall back to the levels below: choose nothing, write nothing, and report the
+`reason-code:` token, or the entry by id when it lacks the line. Under `--unattended` the last line
+is `outcome: stuck spec/<spec-name> parked=0 — <reason>; <what to run instead>`. For a non-zero exit
+the reason names the `reason-code:` token and says the follow-ups listing could not be read; for a
+missing line it is
+`no security line printed for spec/<spec-name>#F<n>, so the listing is out of step with this skill`.
 
 **With any urgent entry open, the slice is chosen from urgent entries only**, and no criterion is
 chosen however early its phase or small its cost. An urgent entry on the `**Folds:**` line of a
 `done` entries-only slice parent (item 1 of the entries path below says how to read one) is never
 chosen again, on either path: it goes to that item 1, which takes its stop, and no slice is written
 while it stands. On the criteria path the pass takes item 1 alone: once item 1's answer is carried
-out it returns to this tier, and goes on to neither item 2 nor item 3, which act only when no
-criterion is left. Under `--unattended` item 1 ends the pass at its early stop, so nothing returns.
-Group the others by overlapping `where` paths, by the entries path's grouping rule in item 3. A
-group holding an entry that qualified as security comes before a group with none; among the groups
-still tied, `_shared/slice.md`'s levels apply, each group taken as one candidate. The chosen group
-is a slice made only of entries, written as item 3 writes one: `--folds` alone to the covers gate, a
-`**Folds:**` line naming every entry of the group, and neither a `**Covers:**` nor a
-`**Partially covers:**` line. The enabler path, the value floor and the criteria's phase do not
-apply to it. On the criteria path the fold-in below then adds any other open entry whose `where`
-paths overlap the files the group's entries name. On the entries path it does not: item 3 has
-already grouped the urgent entries that overlap, and an open entry that is not urgent and overlaps
-the group stays open for the next pass. When no entry is urgent, the levels below apply to the
-candidate set as written.
+out it returns to this tier and reads the listing again on the fresh spec, because a drop or a
+restore makes the earlier read stale and a restored entry has a new id; it goes on to neither item 2
+nor item 3, which act only when no criterion is left. Under `--unattended` item 1 ends the pass at
+its early stop, so nothing returns. Group the others by overlapping `where` paths, by the entries
+path's grouping rule in item 3. A group holding an entry that qualified as security comes before a
+group with none; among the groups still tied, `_shared/slice.md`'s levels apply, each group taken as
+one candidate. The chosen group is a slice made only of entries, written as item 3 writes one:
+`--folds` alone to the covers gate, a `**Folds:**` line naming every entry of the group, and neither
+a `**Covers:**` nor a `**Partially covers:**` line. The enabler path, the value floor and the
+criteria's phase do not apply to it. On the criteria path the fold-in below then adds any other open
+entry whose `where` paths overlap the files the group's entries name. On the entries path it does
+not: item 3 has already grouped the urgent entries that overlap, and an open entry that is not
+urgent and overlaps the group stays open for the next pass. When no entry is urgent, the levels
+below apply to the candidate set as written.
 
 **Under `--unattended`, or when `/craft:drive` is running this pass,** the tier is a routine
 decision, never a question. It is logged with the selection (step 8 says where), naming each urgent
@@ -868,8 +873,9 @@ decides anything. Then, in this order:
      drop or a failed restore ends the pass at this entry: report the script's `reason-code:` token
      and the `retry:` command it prints, leave the entry as the failed write left it, and go on to
      neither item 2, item 3 nor step 4's completion gate. The `retry:` command converges, so running
-     it again appends nothing twice. A drop or a restore that succeeded lets the pass go on to item
-     2 over the entries still open, and when none is open, to item 3's rule for an empty remainder.
+     it again appends nothing twice. A drop or a restore that succeeded lets the entries path go on
+     to item 2 over the entries still open, and when none is open, to item 3's rule for an empty
+     remainder; on the criteria path it returns to the urgent tier, as the tier says.
    - **Under `--unattended`, or when `/craft:drive` is running this pass,** nobody is there to
      answer: take step 6's recorded early stop with its fixed reason
      `completion is not certified (complete-eligible: no)`, naming each such entry by id and the

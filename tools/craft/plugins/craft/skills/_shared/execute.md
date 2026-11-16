@@ -380,8 +380,8 @@ edit.
   numbered decision in the block records the failure: `Question:` names the call, `Choice:` says it
   failed with its exit code, and `Reasoning:` carries the finding or reason line the script printed
   (the scrubbed finding on exit `2`, the `reason-code:` line on `1` or `3`; on an exit `2` that
-  prints no finding, `reserved-security-prefix` or `non-utf8-stdin`, the `reason-code:` line),
-  scrubbed and flattened like every block entry and without the `retry:` line. Then the block's
+  prints no finding (`reason-code: non-utf8-stdin`), the `reason-code:` line), scrubbed and
+  flattened like every block entry and without the `retry:` line. Then the block's
   `**Outcome:** stuck` and checkpoint are written, the close is not made, and the line is `outcome:
   stuck task/<name> parked=<n> — the follow-up entries folded into this task could not be settled;
   read the run block, then settle them by hand and run again`. Neither the block, the report nor the
