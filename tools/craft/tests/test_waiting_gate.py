@@ -486,3 +486,146 @@ def test_control_character_line_copied_from_another_entry_of_the_prior_is_refuse
         pending(check="open the page\x1f"), pending("AC8", "b", check="open the page\x1f")
     )
     refused(check(proposed, prior, tmp_path), "control-characters")
+
+
+# --- the answer path ---------------------------------------------------------
+
+sys.path.insert(0, str(GATE.parent))
+from datetime import date  # noqa: E402
+
+import waiting_gate  # noqa: E402
+from gate_plumbing import Refusal  # noqa: E402
+
+ANSWER_DAY = date.fromisoformat(TODAY)
+WAITING = (("2026-11-02", "waiting", "needs a human eye"),)
+
+
+def answered(*lines, ac="AC7", slice_="a", base_hist=WAITING):
+    return pending(ac, slice_, hist=base_hist + tuple(lines))
+
+
+def answer_code(proposed, prior, today=ANSWER_DAY):
+    try:
+        waiting_gate.certify_answer(prior, proposed, today)
+    except Refusal as r:
+        return r.reason_code
+    return None
+
+
+@pytest.mark.parametrize(
+    "line",
+    [(TODAY, "passed", "looked right"), (TODAY, "failed", "button missing"), (TODAY, "passed", "")],
+    ids=["passed", "failed", "passed-no-words"],
+)
+def test_one_answer_to_a_waiting_pending_check_certifies_on_the_answer_path(tmp_path, line):
+    proposed = with_section(answered(line))
+    assert answer_code(proposed, PRIOR_ONE) is None
+    refused(check(proposed, PRIOR_ONE, tmp_path), "status-transition")
+    with pytest.raises(Refusal) as e:
+        waiting_gate.certify(PRIOR_ONE, proposed)
+    assert e.value.reason_code == "status-transition"
+
+
+def test_an_answer_beside_other_entries_certifies(tmp_path):
+    prior = with_section(pending(), aside(), pending("AC8", "b"))
+    proposed = with_section(answered((TODAY, "passed", "ok")), aside(), pending("AC8", "b"))
+    assert answer_code(proposed, prior) is None
+
+
+def test_two_entries_answered_in_one_body():
+    prior = with_section(pending(), pending("AC8", "b"))
+    proposed = with_section(
+        answered((TODAY, "passed", "ok")), answered((TODAY, "passed", "ok"), ac="AC8", slice_="b")
+    )
+    assert answer_code(proposed, prior) == "more-than-one-answer"
+
+
+def test_two_lines_appended_to_one_entry():
+    proposed = with_section(answered((TODAY, "failed", "broke"), (TODAY, "passed", "fixed")))
+    assert answer_code(proposed, PRIOR_ONE) == "more-than-one-answer"
+
+
+def test_answer_to_a_set_aside_entry():
+    prior = with_section(aside())
+    proposed = with_section(aside(hist=(("2026-11-02", "waiting", "blocked"), (TODAY, "passed", "ok"))))
+    assert answer_code(proposed, prior) == "answer-not-pending-check"
+
+
+@pytest.mark.parametrize("latest", ["passed", "failed"])
+def test_answer_to_an_already_answered_entry(latest):
+    prior = with_section(pending(hist=WAITING + (("2026-11-03", latest, "earlier"),)))
+    proposed = with_section(
+        answered((TODAY, "passed", "again"), base_hist=WAITING + (("2026-11-03", latest, "earlier"),))
+    )
+    assert answer_code(proposed, prior) == "entry-not-waiting"
+
+
+@pytest.mark.parametrize("status", ["released", "waiting"])
+def test_answer_that_is_not_passed_or_failed(status):
+    proposed = with_section(answered((TODAY, status, "words")))
+    assert answer_code(proposed, PRIOR_ONE) == "answer-status-invalid"
+
+
+@pytest.mark.parametrize("day", ["2026-11-04", "2026-11-06"], ids=["yesterday", "tomorrow"])
+def test_answer_not_dated_today(day):
+    proposed = with_section(answered((day, "passed", "ok")))
+    assert answer_code(proposed, PRIOR_ONE) == "answer-not-dated-today"
+
+
+def test_the_answer_date_is_the_one_the_caller_passes():
+    proposed = with_section(answered((TODAY, "passed", "ok")))
+    assert answer_code(proposed, PRIOR_ONE, date(2026, 11, 6)) == "answer-not-dated-today"
+
+
+def test_failed_answer_with_empty_words():
+    proposed = with_section(answered((TODAY, "failed", "")))
+    assert answer_code(proposed, PRIOR_ONE) == "answer-words-required"
+
+
+def test_credential_shaped_words():
+    proposed = with_section(answered((TODAY, "failed", f"leaked {SECRET}")))
+    assert answer_code(proposed, PRIOR_ONE) == "credential-shaped-text"
+
+
+def test_control_character_in_the_words():
+    proposed = with_section(answered((TODAY, "failed", "bad\x07bell")))
+    assert answer_code(proposed, PRIOR_ONE) == "control-characters"
+
+
+def test_line_over_the_length_limit():
+    proposed = with_section(answered((TODAY, "failed", "w" * waiting_gate.MAX_LINE_CHARS)))
+    assert answer_code(proposed, PRIOR_ONE) == "field-too-long"
+
+
+def test_change_outside_waiting_with_an_answer():
+    proposed = with_section(answered((TODAY, "passed", "ok"))).replace("prose", "edited prose")
+    assert answer_code(proposed, PRIOR_ONE) == "change-outside-waiting"
+
+
+def test_new_entry_on_the_answer_path():
+    proposed = with_section(pending(), pending("AC8", "b"))
+    assert answer_code(proposed, PRIOR_ONE) == "answer-adds-entry"
+
+
+def test_body_with_no_answer_on_the_answer_path():
+    assert answer_code(PRIOR_ONE, PRIOR_ONE) == "answer-missing"
+
+
+def test_answer_with_a_changed_field_keeps_entry_changed():
+    proposed = with_section(
+        pending(check="another", hist=WAITING + ((TODAY, "passed", "ok"),))
+    )
+    assert answer_code(proposed, PRIOR_ONE) == "entry-changed"
+
+
+def test_answer_with_rewritten_history_keeps_history_rewritten():
+    proposed = with_section(
+        pending(hist=(("2026-11-02", "waiting", "reworded"), (TODAY, "passed", "ok")))
+    )
+    assert answer_code(proposed, PRIOR_ONE) == "history-rewritten"
+
+
+def test_answer_with_a_removed_entry_keeps_removed_entry():
+    prior = with_section(pending(), pending("AC8", "b"))
+    proposed = with_section(answered((TODAY, "passed", "ok")))
+    assert answer_code(proposed, prior) == "removed-entry"

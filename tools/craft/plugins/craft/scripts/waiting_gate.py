@@ -2,6 +2,12 @@
 """Waiting gate — certifies a proposed write to a spec's `## Waiting` section
 against the body it was composed from.
 
+Two paths share one set of checks. The command line and `certify` allow no status
+transition. `certify_answer` is the in-process path the check-list answer writer
+(`checklist_answer.py`) owns: it additionally accepts exactly one new dated
+`passed` or `failed` history line appended to one existing waiting pending check,
+and refuses new entries.
+
 Usage:
     waiting_gate.py --prior <path> < proposed-body
 
@@ -20,6 +26,9 @@ grow through it. It refuses a proposed body that:
     - drops, reorders or edits a prior history line
     - appends any history line to an existing entry
     - changes an existing entry's check, how, changed behaviour or waits on
+    (answer path only, besides the above: an answer must be the single new line on
+    one waiting pending check, `passed` or `failed`, dated the `today` passed in,
+    with words for `failed`; a new entry or a body with no answer is refused)
     - adds an entry whose history is not exactly one `waiting` line
     - carries a `## Waiting` line longer than `MAX_LINE_CHARS`
     - adds an entry whose text is credential-shaped
@@ -47,7 +56,8 @@ Exit codes:
        `reason-code:` tokens: removed-entry, history-rewritten,
        status-transition, entry-changed, new-entry-not-waiting, field-too-long,
        credential-shaped-text, control-characters, masked-content, future-date,
-       change-outside-waiting, section-not-at-end, plus the parser's own codes
+       change-outside-waiting, section-not-at-end, the answer-path codes
+       (`ANSWER_REASON_CODES`), plus the parser's own codes
        (`waiting.REASON_CODES`).
     2  could not certify — empty-stdin, non-utf8-stdin, stdin-too-large,
        unterminated-masked-region, unreadable-prior, malformed-prior,
@@ -94,6 +104,26 @@ def _today() -> date:
         raise Refusal(f"{TODAY_ENV} is not an ISO date (YYYY-MM-DD)", "invalid-today", 2)
 
 
+ANSWER_MISSING = "answer-missing"
+ANSWER_ADDS_ENTRY = "answer-adds-entry"
+MORE_THAN_ONE_ANSWER = "more-than-one-answer"
+ANSWER_NOT_PENDING_CHECK = "answer-not-pending-check"
+ENTRY_NOT_WAITING = "entry-not-waiting"
+ANSWER_STATUS_INVALID = "answer-status-invalid"
+ANSWER_NOT_DATED_TODAY = "answer-not-dated-today"
+ANSWER_WORDS_REQUIRED = "answer-words-required"
+ANSWER_REASON_CODES = (
+    ANSWER_MISSING,
+    ANSWER_ADDS_ENTRY,
+    MORE_THAN_ONE_ANSWER,
+    ANSWER_NOT_PENDING_CHECK,
+    ENTRY_NOT_WAITING,
+    ANSWER_STATUS_INVALID,
+    ANSWER_NOT_DATED_TODAY,
+    ANSWER_WORDS_REQUIRED,
+)
+
+
 def _label(entry: waiting.WaitingEntry) -> str:
     if entry.building_slice is None:
         return f"{entry.criterion_id} (set aside)"
@@ -114,7 +144,9 @@ def _check_status_transitions(old: waiting.WaitingEntry, new: waiting.WaitingEnt
         )
 
 
-def _check_existing(old: waiting.WaitingEntry, new: waiting.WaitingEntry) -> None:
+def _check_existing(
+    old: waiting.WaitingEntry, new: waiting.WaitingEntry, answering: bool
+) -> None:
     label = _label(old)
     if new.history[: len(old.history)] != old.history:
         raise Refusal(
@@ -123,7 +155,8 @@ def _check_existing(old: waiting.WaitingEntry, new: waiting.WaitingEntry) -> Non
             "history-rewritten",
             1,
         )
-    _check_status_transitions(old, new)
+    if not answering:
+        _check_status_transitions(old, new)
     for field in ("check", "how", "changed_behaviour", "waits_on"):
         if getattr(old, field) != getattr(new, field):
             name = field.replace("_", " ")
@@ -167,6 +200,66 @@ def _check_new(entry: waiting.WaitingEntry, today: date) -> None:
             f"new entry {label} is dated after today — date its history line today "
             "or earlier",
             "future-date",
+            1,
+        )
+
+
+def _check_answers(
+    answers: list[tuple[waiting.WaitingEntry, waiting.WaitingEntry]], today: date
+) -> None:
+    if not answers:
+        raise Refusal(
+            "the proposed body carries no answer — append one dated 'passed' or 'failed' "
+            "line to one waiting pending check",
+            ANSWER_MISSING,
+            1,
+        )
+    if len(answers) > 1 or len(answers[0][1].history) - len(answers[0][0].history) > 1:
+        raise Refusal(
+            "the proposed body answers more than one check or adds more than one line — "
+            "answer exactly one check with one line",
+            MORE_THAN_ONE_ANSWER,
+            1,
+        )
+    old, new = answers[0]
+    label = _label(old)
+    if old.kind != "pending check":
+        raise Refusal(
+            f"entry {label} is not a pending check — only a pending check takes an answer",
+            ANSWER_NOT_PENDING_CHECK,
+            1,
+        )
+    if old.status != "waiting":
+        raise Refusal(
+            f"entry {label} is not waiting (latest status '{old.status}') — only a waiting "
+            "check takes an answer",
+            ENTRY_NOT_WAITING,
+            1,
+        )
+    when, status, words = new.history[-1]
+    if status not in ("passed", "failed"):
+        raise Refusal(
+            f"entry {label} was given a '{status}' line — an answer is 'passed' or 'failed'",
+            ANSWER_STATUS_INVALID,
+            1,
+        )
+    if when != today.isoformat():
+        raise Refusal(
+            f"the answer to {label} is not dated today — date it {today.isoformat()}",
+            ANSWER_NOT_DATED_TODAY,
+            1,
+        )
+    if status == "failed" and not words:
+        raise Refusal(
+            f"a 'failed' answer to {label} needs words saying what failed",
+            ANSWER_WORDS_REQUIRED,
+            1,
+        )
+    if _scrub_credential_shaped(words) != words:
+        raise Refusal(
+            f"the answer to {label} has credential-shaped text in its history words — "
+            "remove the secret and describe it instead",
+            "credential-shaped-text",
             1,
         )
 
@@ -246,7 +339,7 @@ def _check_raw_lines(prior_body: str, proposed: str) -> None:
             )
 
 
-def _certify(prior_body: str, proposed: str) -> None:
+def _certify(prior_body: str, proposed: str, answering: bool, today: date | None) -> None:
     if _ends_inside_masked_region(markdown_section.split_body(proposed)[0]):
         raise Refusal(
             "the proposed body ends inside an open fenced code block or HTML comment — "
@@ -283,6 +376,7 @@ def _certify(prior_body: str, proposed: str) -> None:
     _check_raw_lines(prior_body, proposed)
 
     by_key = {e.key: e for e in entries}
+    answers = []
     for old in prior_entries:
         new = by_key.get(old.key)
         if new is None:
@@ -292,13 +386,25 @@ def _certify(prior_body: str, proposed: str) -> None:
                 "removed-entry",
                 1,
             )
-        _check_existing(old, new)
+        _check_existing(old, new, answering)
+        if len(new.history) > len(old.history):
+            answers.append((old, new))
 
     prior_keys = {e.key for e in prior_entries}
-    today = _today()
-    for entry in entries:
-        if entry.key not in prior_keys:
-            _check_new(entry, today)
+    if answering:
+        if any(e.key not in prior_keys for e in entries):
+            raise Refusal(
+                "the proposed body adds an entry — the answer path only answers an "
+                "existing check",
+                ANSWER_ADDS_ENTRY,
+                1,
+            )
+        _check_answers(answers, today)
+    else:
+        today = _today()
+        for entry in entries:
+            if entry.key not in prior_keys:
+                _check_new(entry, today)
 
     if waiting.excise_section(prior_body) != waiting.excise_section(proposed):
         raise Refusal(
@@ -320,7 +426,17 @@ def certify(prior_body: str, proposed: str) -> None:
     """Certify `proposed` against `prior_body`: returns None when every rule above
     holds, raises `gate_plumbing.Refusal` (carrying the reason code and exit code the
     CLI would print) otherwise. The entry point for writers that certify in-process."""
-    _certify(prior_body, proposed)
+    _certify(prior_body, proposed, False, None)
+
+
+def certify_answer(prior_body: str, proposed: str, today: date) -> None:
+    """Certify `proposed` as one operator answer to `prior_body`: it differs from the
+    prior only by one new dated `passed`/`failed` history line appended to one existing
+    waiting pending check, dated `today` (the caller computes it once; the clock
+    variable is not read here). Returns None when every rule holds, raises
+    `gate_plumbing.Refusal` otherwise, with a code from `ANSWER_REASON_CODES` for the
+    answer-specific refusals or any code `certify` raises."""
+    _certify(prior_body, proposed, True, today)
 
 
 def main(argv: list[str]) -> int:
