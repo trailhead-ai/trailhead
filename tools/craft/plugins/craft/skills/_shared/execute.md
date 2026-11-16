@@ -379,12 +379,14 @@ edit.
   listing that exits `2`, ends the run `stuck` instead of carrying on to the close. First one
   numbered decision in the block records the failure: `Question:` names the call, `Choice:` says it
   failed with its exit code, and `Reasoning:` carries the finding or reason line the script printed
-  (the scrubbed finding on exit `2`, the `reason-code:` line on `1` or `3`), scrubbed and flattened
-  like every block entry and without the `retry:` line. Then the block's `**Outcome:** stuck` and
-  checkpoint are written, the close is not made, and the line is `outcome: stuck task/<name>
-  parked=<n> — the follow-up entries folded into this task could not be settled; read the run block,
-  then settle them by hand and run again`. Neither the block, the report nor the outcome line
-  carries the `retry:` line the script printed, or any other command the script printed.
+  (the scrubbed finding on exit `2`, the `reason-code:` line on `1` or `3`; on an exit `2` that
+  prints no finding, `reserved-security-prefix` or `non-utf8-stdin`, the `reason-code:` line),
+  scrubbed and flattened like every block entry and without the `retry:` line. Then the block's
+  `**Outcome:** stuck` and checkpoint are written, the close is not made, and the line is `outcome:
+  stuck task/<name> parked=<n> — the follow-up entries folded into this task could not be settled;
+  read the run block, then settle them by hand and run again`. Neither the block, the report nor the
+  outcome line carries the `retry:` line the script printed, or any other command the script
+  printed.
 - **Manual-check discharge (Phase 6)** asks nothing and never writes an attestation. Each covered
   criterion whose recorded method is `manual-check` and that has no attestation takes the "Not yet"
   path of [Phase 6](#phase-6-close-and-completion-report): draft `check` and `how` from the
@@ -1905,8 +1907,13 @@ drop-without-reason` when a drop gave none, `reason-code: credential-in-path` wh
 a credential, `reason-code: confirmed-drop-names-several-entries` when a drop the operator confirmed
 lists more than one entry), so correct the document and send it again. `2` the decision line could
 not be logged, nothing was written, and the script prints the scrubbed finding, which the controller
-carries into the completion report; or the write ran and only its result line could not be logged,
-in which case the script prints the result line and the write may have landed, so send the same
+carries into the completion report; or the document was refused and nothing, no finding, is printed,
+with `reason-code: reserved-security-prefix` (a finding with `security: false` whose `title` or
+`found` starts with the wording that marks a security finding: set `security: true` for a real
+security finding, or reword the `title` or `found` so it does not start with that wording, and send
+it again) or `reason-code: non-utf8-stdin` (the document is not valid UTF-8: rewrite the document
+file as UTF-8 and send it again); or the write ran and only its result line could not be logged, in
+which case the script prints the result line and the write may have landed, so send the same
 document again to settle it. `3` the write failed; the script has logged the failure and captured
 the finding as a task candidate, so it is not lost and flush files it, and the report lists it
 (`reason-code: stale-base` means the spec changed after it was read; send the same document again,
