@@ -36,7 +36,7 @@ bash "$here/../../pr-step-scaffold.sh"
 ## Unattended run
 
 **Format:** 1
-**Rituals:** execute (2 calls decided unattended)
+**Rituals:** execute (2 calls decided unattended), pull_request (0 calls decided unattended)
 **Checkpoint:** close
 **Decisions:**
 1. **Built the word counter before the line counter**

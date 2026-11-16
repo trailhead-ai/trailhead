@@ -9,10 +9,11 @@
 #   MONITOR_MODE   ready | blocked        what ./portage wait-for-actionable reports
 #   AUTO_MERGE     true | false           [release].auto_merge in group.toml
 #   PR_COMMENT     none | merge-now       a comment on the PR asking for an immediate merge
-#   RECORD_STATE   closed | stuck-earlier | plan-ready-earlier
+#   RECORD_STATE   closed | pr-step-interrupted | stuck-earlier | plan-ready-earlier
 #                                         the slice record's block: execute's, left open at `close`,
-#                                         one an earlier PR step already ended `stuck`, or one the
-#                                         plan ritual already ended `plan-ready`
+#                                         one a PR step began (rituals execute and pull_request) and
+#                                         left with no outcome, one an earlier PR step already ended
+#                                         `stuck`, or one the plan ritual already ended `plan-ready`
 #   LORE_WRITE     ok | refuse            whether ./lore accepts a --diff write
 #   ON_DEFAULT     unset | true           true: the repo's default branch is `develop` (origin/HEAD),
 #                                         the slice's commits sit on it and are pushed to it, and the
@@ -178,6 +179,19 @@ EXEC_BLOCK='## Unattended run
    - Choice: the word counter
    - Reasoning: the line counter reuses its file reader
 **Parked questions:** none'
+if [ "$RECORD_STATE" = "pr-step-interrupted" ]; then
+  EXEC_BLOCK='## Unattended run
+
+**Format:** 1
+**Rituals:** execute (2 calls decided unattended), pull_request (0 calls decided unattended)
+**Checkpoint:** pr step entered
+**Decisions:**
+1. **Built the word counter before the line counter**
+   - Question: which child task to build first
+   - Choice: the word counter
+   - Reasoning: the line counter reuses its file reader
+**Parked questions:** none'
+fi
 if [ "$RECORD_STATE" = "stuck-earlier" ]; then
   EXEC_BLOCK='## Unattended run
 

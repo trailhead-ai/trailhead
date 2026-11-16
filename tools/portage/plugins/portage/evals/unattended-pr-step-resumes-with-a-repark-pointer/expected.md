@@ -28,3 +28,7 @@ FAIL. The unedited skill's entry check 1 refuses the `--resume` token with `outc
 - One fixture, one phrasing, one model tier for the runner; the dispatched updater and monitor run on their own pins.
 - The real `wait-for-actionable`, `gh` and `merge` are stand-ins, so this measures the skill's entry checks, block writes, wait and mapping, not the CI watch.
 - Sandbox accommodations carried in every prompt (single-line commands, `pr_body_file`) are the same as the corpus's other unattended PR-step cases.
+
+## Amended after the treatment run (2026-11-16)
+
+Block 2 (the interrupted block carrying the re-park pointer) now has `**Rituals:** execute (2 calls decided unattended), pull_request (0 calls decided unattended)`. The fixture was out of step with the PR step's latest-block rules: with execute as the last ritual the step routes the block back to execute, so `--resume` was refused. With the PR step as the last ritual it takes the block over, closing it `stuck` as taken over and appending block 3, which ends `pr-ready`; the pass condition is unchanged, and `exactly-three-blocks` still describes that outcome. The bar is unchanged.

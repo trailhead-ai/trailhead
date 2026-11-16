@@ -2,5 +2,5 @@ PR_STATE=none
 MONITOR_MODE=ready
 AUTO_MERGE=false
 PR_COMMENT=none
-RECORD_STATE=closed
+RECORD_STATE=pr-step-interrupted
 LORE_WRITE=ok
