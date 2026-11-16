@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import stat
+import signal
 import subprocess
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -232,6 +234,18 @@ def test_a_tilde_root_expands_against_home(tmp_path):
     write_group(gd, "g1", ["~/code/r"], [("repo", "v")])
     got = repos.vault_repositories(["v"], groups_dir=gd)
     assert got["v"].roots == (Path(os.environ["HOME"], "code", "r").resolve(),)
+
+
+def test_a_tilde_root_expands_against_the_given_env_not_the_process_home(tmp_path, monkeypatch):
+    process_home = tmp_path / "process-home"
+    env_home = tmp_path / "env-home"
+    process_home.mkdir()
+    env_home.mkdir()
+    monkeypatch.setenv("HOME", str(process_home))
+    gd = tmp_path / "groups"
+    write_group(gd, "g1", ["~/code/r"], [("repo", "v")])
+    got = repos.vault_repositories(["v"], groups_dir=gd, env={"HOME": str(env_home)})
+    assert got["v"].roots == ((env_home / "code" / "r").resolve(),)
 
 
 def test_a_relative_root_resolves_against_the_toml_dir_not_the_cwd(tmp_path, monkeypatch):
@@ -479,6 +493,51 @@ def test_a_git_wrapper_whose_child_holds_the_pipe_still_times_out(tmp_path):
     reason = reason_of(r, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=0.5)
     assert reason == repos.GIT_FAILED
     assert time.monotonic() - started < 10
+
+
+def test_a_git_that_exits_cleanly_but_leaves_a_child_holding_the_pipe_still_times_out(tmp_path):
+    r = make_repo(tmp_path / "r", {"main": {"a": "a"}})
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "git"
+    shim.write_text("#!/bin/sh\nsleep 30 &\nexit 0\n")
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+    started = time.monotonic()
+    reason = reason_of(r, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=0.5)
+    assert reason == repos.GIT_FAILED
+    assert time.monotonic() - started < 10
+
+
+def _kill_then_refuse(pid, sig):
+    try:
+        os.killpg(pid, sig)
+    except ProcessLookupError:
+        pass
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_a_kill_the_os_refuses_does_not_escape_on_the_timeout_path(tmp_path):
+    r = make_repo(tmp_path / "r", {"main": {"a": "a"}})
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    shim = bin_dir / "git"
+    shim.write_text("#!/bin/sh\nexec sleep 5\n")
+    shim.chmod(shim.stat().st_mode | stat.S_IXUSR)
+    reason = reason_of(
+        r, env={"PATH": f"{bin_dir}:/usr/bin:/bin"}, timeout=0.5, killpg=_kill_then_refuse
+    )
+    assert reason == repos.GIT_FAILED
+
+
+def test_a_kill_the_os_refuses_does_not_kill_the_drain_thread_on_the_output_cap(
+    tmp_path, monkeypatch
+):
+    files = {f"dir/file-{i:03}.txt": "x" for i in range(50)}
+    r = make_repo(tmp_path / "r", {"main": files})
+    escaped = []
+    monkeypatch.setattr(threading, "excepthook", lambda args: escaped.append(args))
+    assert reason_of(r, max_output_bytes=200, killpg=_kill_then_refuse) == repos.GIT_FAILED
+    assert escaped == []
 
 
 def test_a_tree_larger_than_the_output_cap_is_git_failed_and_a_larger_cap_reads_it(tmp_path):

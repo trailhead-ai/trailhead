@@ -4,7 +4,8 @@ Two questions, no record text ever reaching git:
 
 * :func:`vault_repositories` -- which repository roots belong to each vault, read
   from the camp groups whose ``[[lore_scopes]]`` name that vault (every member of
-  such a group is one of the vault's repositories). A vault with none carries a
+  such a group is one of the vault's repositories; a ``~`` in a ``repo_root``
+  follows the ``HOME`` of the given env). A vault with none carries a
   reason: ``camp-absent`` (trailhead or camp cannot be imported),
   ``config-unreadable`` (a group TOML is malformed or unreadable) or ``unbound``
   (no group names it). It never raises for a missing or broken camp.
@@ -45,6 +46,7 @@ import signal
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -144,8 +146,12 @@ class Unreadable:
 # ---------------------------------------------------------------------------
 
 
-def _member_root(raw: str, toml_path: str) -> Path:
-    path = Path(os.path.expanduser(raw))
+def _member_root(raw: str, toml_path: str, env: Mapping[str, str] | None) -> Path:
+    home = None if env is None else env.get("HOME")
+    if home and (raw == "~" or raw.startswith("~/")):
+        path = Path(home, raw[2:])
+    else:
+        path = Path(os.path.expanduser(raw))
     if not path.is_absolute() and toml_path:
         path = Path(toml_path).parent / path
     return path.resolve()
@@ -163,8 +169,8 @@ def vault_repositories(
     A group binds a vault when one of its ``[[lore_scopes]]`` names it (names
     compared after ``/`` normalization, as vault election does); every member of
     the group is then a repository of that vault. A relative ``repo_root`` resolves
-    against the directory of the group's TOML and ``~`` against ``HOME``, never
-    against the cwd. ``groups_dir`` defaults to camp's, resolved against *env*; ``import_camp`` is the camp
+    against the directory of the group's TOML and ``~`` against ``HOME`` of *env*
+    (the process's when *env* is None), never against the cwd. ``groups_dir`` defaults to camp's, resolved against *env*; ``import_camp`` is the camp
     import seam of :func:`lore.vault.layers.load_camp_groups`.
     """
     names = list(vault_names)
@@ -176,7 +182,7 @@ def vault_repositories(
     for cfg in loaded.configs:
         bound = {normalize_vault_name(ls["name"]) for ls in cfg.get("lore_scopes", [])}
         members = [
-            _member_root(m["repo_root"], cfg.get("_toml_path", ""))
+            _member_root(m["repo_root"], cfg.get("_toml_path", ""), env)
             for m in cfg.get("members", [])
         ]
         for name in names:
@@ -224,6 +230,7 @@ class _Git:
     env: dict[str, str]
     timeout: float
     max_output_bytes: int
+    killpg: Callable[[int, int], None] = os.killpg
 
     def run(self, *args: str, ok: tuple[int, ...] = (0,)) -> tuple[int, bytes]:
         """Run ``git -C <root> <args>``; return (exit code, stdout) for an exit in *ok*.
@@ -255,20 +262,25 @@ class _Git:
                     state["size"] += len(block)
                     if state["size"] > self.max_output_bytes:
                         state["over"] = True
-                        _kill_group(proc)
+                        _kill_group(proc, self.killpg)
                         return
                     chunks.append(block)
 
             reader = threading.Thread(target=drain, daemon=True)
             reader.start()
+            deadline = time.monotonic() + self.timeout
             try:
                 proc.wait(timeout=self.timeout)
             except subprocess.TimeoutExpired:
-                _kill_group(proc)
+                _kill_group(proc, self.killpg)
                 proc.wait()
                 reader.join()
                 raise _GitFailed("timed out") from None
-            reader.join()
+            reader.join(max(0.0, deadline - time.monotonic()))
+            if reader.is_alive():
+                _kill_group(proc, self.killpg)
+                reader.join()
+                raise _GitFailed("timed out")
             if proc.stdout is not None:
                 proc.stdout.close()
             if state["over"]:
@@ -280,11 +292,11 @@ class _Git:
         return proc.returncode, b"".join(chunks)
 
 
-def _kill_group(proc: subprocess.Popen) -> None:
+def _kill_group(proc: subprocess.Popen, killpg: Callable[[int, int], None]) -> None:
     """Kill git and anything it started, so no child can hold its stdout open."""
     try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
+        killpg(proc.pid, signal.SIGKILL)
+    except OSError:
         pass
 
 
@@ -366,6 +378,7 @@ def read_repository(
     env: Mapping[str, str] | None = None,
     timeout: float = GIT_TIMEOUT_SECONDS,
     max_output_bytes: int = MAX_TREE_BYTES,
+    killpg: Callable[[int, int], None] = os.killpg,
 ) -> Repository | Unreadable:
     """Read *root*'s default branch without fetching, or say why it cannot be read.
 
@@ -376,7 +389,7 @@ def read_repository(
     root = Path(root)
     if not root.is_dir():
         return Unreadable(root, MISSING)
-    git = _Git(root, _git_env(env, root), timeout, max_output_bytes)
+    git = _Git(root, _git_env(env, root), timeout, max_output_bytes, killpg)
     try:
         try:
             _, out = git.run("rev-parse", "--git-common-dir")
