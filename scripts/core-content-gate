@@ -1,12 +1,28 @@
 #!/usr/bin/env python3
 """core-content-gate — refuse core-vault content that is not fit to publish.
 
-Scans every file under `<repo-root>/core-vault/`, sidecars included, for five
+One run does three checks under one exit code.
+
+1. Content scrub. Scans every file under `<repo-root>/core-vault/`, sidecars included, for five
 classes: `email`, `commit-id`, `home-path`, `credential`, and `deny-list`.
 A finding prints as `<relpath>:<lineno>:<class>` (a deny-list finding as
 `deny-list#<line number in the list>`) and never carries the matched text, a
 deny-list line, or a regex error message, on stdout or stderr. A path
 component that itself trips a class prints as `<redacted-name>`.
+
+2. Validation. Runs this checkout's `lore validate --path <repo-root>/core-vault` with an
+environment fenced away from the caller's lore config and vaults. It passes when the
+validator reports nothing, or when the only finding is the vault-level `no-records` (it
+prints `ok: core vault holds no records yet`). Every other finding fails and is relayed
+as the validator printed it, unless that line trips a scrub class, in which case it is cut
+to `<record id or vault>: <code>`. A validator that exits other than 0 or 1, cannot be run,
+or prints a line this parser does not recognise is exit 2.
+
+3. Pointer check. Scans the text files under `<repo-root>/tools/*/plugins/*` for
+`trailhead core show <id>` (ids in the grammar `trailhead core show` accepts; anything else
+is not a pointer). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
+regular files that resolve inside `core-vault/` is `<relpath>:<lineno>:pointer-missing:<id>`.
+Prints `pointers: <N> checked in <M> files`, M being the text files scanned.
 
 `--repo-root` selects only the content to check. `capture_scan` is always
 imported from this script's own checkout.
@@ -21,7 +37,8 @@ Exit codes:
   0  clean
   1  one or more findings (a symlink anywhere in core-vault is a `symlink`
      finding at line 0; it is never followed)
-  2  the gate could not certify the content: no core-vault folder, a deny-list
+  2  the gate could not certify the content: no core-vault folder, a validator that
+     cannot be trusted (see above), a deny-list
      that is missing, unreadable, empty of patterns or holds an invalid regex,
      a file that does not decode as strict UTF-8 (a binary or UTF-16 file), or
      any unexpected exception. Every such line starts `gate could not run:` and
@@ -41,7 +58,10 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import stat
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 _CHECKOUT = Path(__file__).resolve().parents[1]
@@ -69,6 +89,17 @@ _HOME_PATH = re.compile(
 )
 
 
+_LORE_WRAPPER = Path("tools") / "lore" / "plugins" / "lore" / "bin" / "lore"
+LORE_TIMEOUT_SECONDS = 120
+_NO_RECORDS = "no-records"
+NO_RECORDS_OK = "ok: core vault holds no records yet"
+_VALIDATOR_SUMMARY = re.compile(r"lore: validated \d+ records? in \d+ vaults?: \d+ findings?(?: \(.*\))?")
+_VALIDATOR_FINDING = re.compile(r"(?P<vault>\S+)(?: (?P<record>\S+))?: (?P<code>[a-z][a-z0-9-]*): .*")
+# Mirrors `_RECORD_ID` in trailhead/core_vault.py; a test holds the two in agreement.
+_RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
+_POINTER = re.compile(rf"trailhead core show[ \t]+(?P<id>{_RECORD_ID.pattern})(?![\w/\-])(?!\.\w)")
+
+
 class GateCannotRun(Exception):
     """The gate cannot certify the content; the message is `cause; remedy`."""
 
@@ -78,12 +109,16 @@ class Findings:
 
     def __init__(self) -> None:
         self.items: list[tuple[str, int, str]] = []
+        self.relayed: list[str] = []
 
     def add(self, relpath: str, lineno: int, label: str) -> None:
         self.items.append((relpath, lineno, label))
 
+    def add_line(self, line: str) -> None:
+        self.relayed.append(line)
+
     def exit_code(self) -> int:
-        return 1 if self.items else 0
+        return 1 if self.items or self.relayed else 0
 
 
 def scrub_line(
@@ -208,7 +243,131 @@ def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], finding
                 findings.add(shown, lineno, label)
 
 
+def _fenced_env(home: str) -> dict[str, str]:
+    env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "LC_CTYPE") if k in os.environ}
+    env.update(
+        HOME=home,
+        XDG_CONFIG_HOME=f"{home}/config",
+        XDG_STATE_HOME=f"{home}/state",
+        XDG_CACHE_HOME=f"{home}/cache",
+        XDG_DATA_HOME=f"{home}/data",
+        LORE_PUBLISH_DISABLE="1",
+    )
+    return env
+
+
+def _run_validator(root: Path) -> tuple[int, str, str]:
+    wrapper = _CHECKOUT / _LORE_WRAPPER
+    if not wrapper.is_file():
+        raise GateCannotRun(f"{_LORE_WRAPPER} is missing from this checkout; run the gate from a full checkout")
+    with tempfile.TemporaryDirectory(prefix="core-gate-lore-") as home:
+        try:
+            done = subprocess.run(
+                ["bash", str(wrapper), "validate", "--path", str(root / CORE_DIR)],
+                capture_output=True,
+                env=_fenced_env(home),
+                cwd=home,
+                timeout=LORE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise GateCannotRun("lore validate could not be run; check that bash and python3 are available") from None
+    try:
+        return done.returncode, done.stdout.decode("utf-8"), done.stderr.decode("utf-8")
+    except UnicodeDecodeError:
+        raise GateCannotRun(
+            "lore validate printed non-UTF-8 output; run `lore validate --path core-vault` by hand"
+        ) from None
+
+
+def _cut_line(record: str | None, code: str, denylist: list[tuple[int, re.Pattern]]) -> str:
+    who = record or "vault"
+    if scrub_line(who, denylist=denylist):
+        who = REDACTED_NAME
+    return f"{who}: {code}"
+
+
+def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    returncode, stdout, stderr = _run_validator(root)
+    if returncode not in (0, 1):
+        raise GateCannotRun(
+            f"lore validate exited {returncode}; run `lore validate --path core-vault` by hand to see why"
+        )
+    parsed: list[tuple[str, str | None, str, str]] = []
+    for line in (stdout + stderr).splitlines():
+        if not line.strip() or _VALIDATOR_SUMMARY.fullmatch(line):
+            continue
+        found = _VALIDATOR_FINDING.fullmatch(line) if line in stdout.splitlines() else None
+        if found is None:
+            raise GateCannotRun(
+                "lore validate printed a line this gate does not recognise; "
+                "update the parser in scripts/core-content-gate or run `lore validate --path core-vault` by hand"
+            )
+        parsed.append((line, found["record"], found["vault"], found["code"]))
+    if (returncode == 0) != (not parsed):
+        raise GateCannotRun(
+            f"lore validate exited {returncode} but printed {len(parsed)} findings; "
+            "run `lore validate --path core-vault` by hand"
+        )
+    if not parsed:
+        return
+    if all(code == _NO_RECORDS and record is None for _, record, _, code in parsed):
+        print(NO_RECORDS_OK)
+        return
+    for line, record, _, code in parsed:
+        findings.add_line(_cut_line(record, code, denylist) if scrub_line(line, denylist=denylist) else line)
+
+
+def _is_regular_inside(path: Path, anchor: Path) -> bool:
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        path.resolve(strict=True).relative_to(anchor)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _pointer_files(root: Path):
+    for plugin in sorted(root.glob("tools/*/plugins/*")):
+        if plugin.is_symlink() or not plugin.is_dir():
+            continue
+        for dirpath, dirnames, filenames in os.walk(plugin, onerror=lambda exc: (_ for _ in ()).throw(exc)):
+            dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) / d).is_symlink())
+            for name in sorted(filenames):
+                full = Path(dirpath) / name
+                if not full.is_symlink():
+                    yield full
+
+
+def check_pointers(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    anchor = root.resolve() / CORE_DIR
+    checked = scanned = 0
+    for path in _pointer_files(root):
+        raw = path.read_bytes()
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if "\x00" in text:
+            continue
+        scanned += 1
+        shown = _display(path.relative_to(root).parts, denylist)
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            for match in _POINTER.finditer(line):
+                checked += 1
+                record_id = match["id"]
+                if all(_is_regular_inside(anchor / f"{record_id}{suffix}", anchor) for suffix in (".md", ".json")):
+                    continue
+                shown_id = REDACTED_NAME if scrub_line(record_id, denylist=denylist) else record_id
+                findings.add(shown, lineno, f"pointer-missing:{shown_id}")
+    print(f"pointers: {checked} checked in {scanned} files")
+
+
 def _emit(findings: Findings, github: bool) -> None:
+    for line in findings.relayed:
+        print(_one_line(line))
+        if github:
+            print(f"::error file={CORE_DIR}::{_escape_data(line)}")
     for relpath, lineno, label in findings.items:
         print(f"{_one_line(relpath)}:{lineno}:{label}")
         if github:
@@ -229,6 +388,9 @@ def run(root: Path, denylist_path: str | None, github: bool, summary: str | None
                 with open(summary, "a", encoding="utf-8") as fh:
                     fh.write(f"{NO_DENYLIST_NOTICE}\n")
     check_core_vault(root, denylist, findings)
+    if not (root / CORE_DIR).is_symlink():
+        check_validation(root, denylist, findings)
+    check_pointers(root, denylist, findings)
     _emit(findings, github)
     return findings.exit_code()
 

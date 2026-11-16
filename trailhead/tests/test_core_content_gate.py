@@ -582,3 +582,454 @@ def test_the_repos_own_core_vault_passes_the_gate():
     result = _run(_REPO_ROOT)
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+# --- validation and pointer check -------------------------------------------
+
+_VALIDATOR_REL = Path("tools/lore/plugins/lore/bin/lore")
+_CAPTURE_SCAN_REL = Path("tools/craft/plugins/craft/scripts/capture_scan.py")
+
+
+def _sidecar(kind: str, name: str, **extra) -> str:
+    import json
+
+    return json.dumps(
+        {
+            "kind": kind,
+            "title": name,
+            "status": "active",
+            "created-at": "2026-01-01T00:00:00Z",
+            "updated-at": "2026-03-01T00:00:00Z",
+            **extra,
+        }
+    )
+
+
+def _record(base: Path, kind: str, name: str, body: str = "text\n", **extra) -> None:
+    folder = base / kind
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.md").write_text(body, encoding="utf-8")
+    (folder / f"{name}.json").write_text(_sidecar(kind, name, **extra), encoding="utf-8")
+
+
+def _core_record(root: Path, kind: str, name: str, body: str = "text\n", **extra) -> None:
+    _record(root / "core-vault", kind, name, body, **extra)
+
+
+def _ship(root: Path, rel: str, text: str) -> Path:
+    path = root / "tools" / "t" / "plugins" / "p" / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def _fake_checkout(tmp_path: Path, lore: str | None) -> Path:
+    """A checkout holding the gate, capture_scan and a stand-in lore wrapper (None: no lore at all)."""
+    checkout = tmp_path / "checkout"
+    (checkout / "scripts").mkdir(parents=True)
+    (checkout / "scripts" / "core-content-gate").write_bytes(_GATE.read_bytes())
+    scan = checkout / _CAPTURE_SCAN_REL
+    scan.parent.mkdir(parents=True)
+    scan.write_bytes((_REPO_ROOT / _CAPTURE_SCAN_REL).read_bytes())
+    if lore is not None:
+        wrapper = checkout / _VALIDATOR_REL
+        wrapper.parent.mkdir(parents=True)
+        wrapper.write_text(lore, encoding="utf-8")
+    return checkout
+
+
+def _run_in(checkout: Path, root: Path, **env: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [sys.executable, str(checkout / "scripts" / "core-content-gate"), "--repo-root", str(root)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=_env(**env),
+    )
+
+
+def test_a_core_record_with_an_unparseable_sidecar_fails_with_the_validators_line(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "blob", "torn")
+    (root / "core-vault" / "blob" / "torn.json").write_text("{not json", encoding="utf-8")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert any(line.startswith("path blob/torn: sidecar-malformed: ") for line in _lines(result))
+
+
+def test_a_related_link_that_exists_only_outside_core_vault_is_missing_target(tmp_path):
+    root = _vault(tmp_path)
+    _record(tmp_path / "elsewhere", "blob", "outside")
+    _core_record(root, "blob", "src", related={"blob": ["outside"]})
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert any(line.startswith("path blob/src: missing-target: ") for line in _lines(result))
+
+
+def test_a_readme_only_core_vault_passes_and_says_so(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "README.md", "# core\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok: core vault holds no records yet" in _lines(result)
+
+
+def test_records_only_in_a_misfiled_folder_fail_with_both_codes(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "lessons", "good")
+
+    result = _run(root)
+
+    codes = {line.split(": ")[1] for line in _lines(result) if line.startswith("path")}
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert {"misfiled-folder", "no-records"} <= codes
+    assert "ok: core vault holds no records yet" not in _lines(result)
+
+
+def test_a_valid_record_with_a_valid_link_passes(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "blob", "target")
+    _core_record(root, "blob", "src", body="see [[blob/target]]\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok: core vault holds no records yet" not in _lines(result)
+
+
+@pytest.mark.parametrize("leak", ["commit-id", "deny-term"])
+def test_a_validator_line_carrying_a_leak_is_relayed_cut_down(tmp_path, leak):
+    root = _vault(tmp_path)
+    token = COMMIT if leak == "commit-id" else DENY_TERM.lower()
+    _core_record(root, "blob", "src", body=f"see [[blob/{token}]]\n")
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(f"{DENY_TERM}\n", encoding="utf-8")
+
+    result = _run(root, "--denylist", str(denylist), GITHUB_ACTIONS="true")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "blob/src: missing-target" in _lines(result)
+    _no_echo(result, token)
+
+
+def test_a_validator_line_carrying_an_email_is_relayed_cut_down(tmp_path):
+    lore = f"#!/bin/sh\necho 'path blob/src: missing-target: related → {EMAIL}'\nexit 1\n"
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"), GITHUB_ACTIONS="true")
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "blob/src: missing-target" in _lines(result)
+    _no_echo(result, EMAIL)
+
+
+def test_a_record_id_that_itself_trips_a_class_is_redacted_in_the_cut_line(tmp_path):
+    lore = f"#!/bin/sh\necho 'path blob/{COMMIT}: missing-target: related → {EMAIL}'\nexit 1\n"
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"))
+
+    assert f"{REDACTED}: missing-target" in _lines(result)
+    _no_echo(result, COMMIT)
+
+
+def test_a_clean_validator_line_is_relayed_whole(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "blob", "src", body="see [[blob/absent]]\n")
+
+    result = _run(root)
+
+    assert "path blob/src: missing-target: wikilink → blob/absent: no such record" in _lines(result)
+
+
+_OK_LORE = (
+    "#!/bin/sh\n"
+    "echo 'path: no-records: the directory holds no records'\n"
+    "echo 'lore: validated 0 records in 1 vaults: 1 findings (no-records 1)'\n"
+    "exit 1\n"
+)
+
+
+def test_the_stand_in_lore_with_only_no_records_passes(tmp_path):
+    checkout = _fake_checkout(tmp_path, _OK_LORE)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"))
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ok: core vault holds no records yet" in _lines(result)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    ["path: misfiled-folder: lessons holds records", "path blob/x: invalid-sidecar: bad"],
+    ids=["vault-level", "record-level"],
+)
+def test_no_records_plus_any_other_code_fails(tmp_path, extra):
+    summary = "lore: validated 0 records in 1 vaults: 2 findings"
+    lore = f"#!/bin/sh\necho 'path: no-records: x'\necho '{extra}'\necho '{summary}'\nexit 1\n"
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "ok: core vault holds no records yet" not in _lines(result)
+
+
+def test_a_record_level_no_records_line_is_not_the_carve_out(tmp_path):
+    lore = "#!/bin/sh\necho 'path blob/x: no-records: x'\nexit 1\n"
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"))
+
+    assert result.returncode == 1, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "lore",
+    [
+        "#!/bin/sh\necho 'path: no-records: x'\nexit 2\n",
+        "#!/bin/sh\necho 'path: no-records: x'\nexit 127\n",
+        "#!/bin/sh\nexit 127\n",
+        None,
+        "#!/bin/sh\necho 'something unexpected'\nexit 1\n",
+        "#!/bin/sh\nexit 1\n",
+        "#!/bin/sh\necho 'path: no-records: x'\nexit 0\n",
+        "#!/bin/sh\nsleep 0\nprintf 'path: no-records: x\\n\\377\\n'\nexit 1\n",
+    ],
+    ids=[
+        "exit-2",
+        "exit-127",
+        "not-runnable",
+        "missing",
+        "unrecognised",
+        "exit-1-no-lines",
+        "exit-0-with-finding",
+        "undecodable",
+    ],
+)
+def test_a_validator_that_cannot_be_trusted_is_gate_exit_2(tmp_path, lore):
+    checkout = _fake_checkout(tmp_path, lore)
+
+    result = _run_in(checkout, _vault(tmp_path / "r"))
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert any(line.startswith("gate could not run:") for line in _lines(result))
+    assert "Traceback" not in result.stderr
+
+
+def test_lore_runs_with_a_fenced_environment(tmp_path):
+    seen = tmp_path / "seen.txt"
+    lore = f"#!/bin/sh\nenv > '{seen}'\necho 'path: no-records: x'\nexit 1\n"
+    checkout = _fake_checkout(tmp_path, lore)
+    home = tmp_path / "live-home"
+
+    result = _run_in(
+        checkout,
+        _vault(tmp_path / "r"),
+        HOME=str(home),
+        XDG_CONFIG_HOME=str(home / "cfg"),
+        LORE_VAULT="/live/vault",
+        LORE_GROUPS_DIR="/live/groups",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    seen_env = dict(line.split("=", 1) for line in seen.read_text().splitlines() if "=" in line)
+    assert not any(k.startswith("LORE_") and k != "LORE_PUBLISH_DISABLE" for k in seen_env)
+    assert seen_env["HOME"] != str(home)
+    assert seen_env["XDG_CONFIG_HOME"] != str(home / "cfg")
+
+
+def test_a_shipped_pointer_to_a_missing_record_fails(tmp_path):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "intro\nrun `trailhead core show adr/missing` now\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "tools/t/plugins/p/doc.md:2:pointer-missing:adr/missing" in _lines(result)
+
+
+def test_a_shipped_pointer_to_an_existing_record_passes_and_is_counted(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _ship(root, "doc.md", "run trailhead core show adr/real.\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 1 checked in 1 files" in _lines(result)
+
+
+def test_the_count_covers_every_text_file_scanned_and_skips_binaries(tmp_path):
+    root = _vault(tmp_path)
+    _ship(root, "a.md", "nothing here\n")
+    _ship(root, "sub/b.txt", "nothing here either\n")
+    (root / "tools" / "t" / "plugins" / "p" / "blob.bin").write_bytes(b"\x00\x01trailhead core show adr/x\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 0 checked in 2 files" in _lines(result)
+
+
+def test_a_record_with_only_one_of_its_two_files_is_a_missing_pointer(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "half")
+    (root / "core-vault" / "adr" / "half.json").unlink()
+    _ship(root, "doc.md", "trailhead core show adr/half\n")
+
+    result = _run(root)
+
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/half" in _lines(result)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "trailhead core show <kind>/<name>",
+        "trailhead core show ../outside/x",
+        "trailhead core show Adr/real",
+        "trailhead core show adr/real_two",
+        "trailhead core show adr",
+    ],
+    ids=["placeholder", "traversal", "uppercase", "underscore-tail", "no-name"],
+)
+def test_text_the_runtime_grammar_refuses_is_not_a_pointer(tmp_path, text):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", text + "\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 0 checked in 1 files" in _lines(result)
+
+
+def test_the_gate_and_the_runtime_agree_on_the_id_grammar():
+    from trailhead import core_vault
+
+    gate = _load_gate()
+    corpus = [
+        "adr/real",
+        "adr/a-b-c",
+        "a1/b2",
+        "adr/0-lead",
+        "adr/-lead",
+        "Adr/x",
+        "adr/X",
+        "adr",
+        "adr/",
+        "/x",
+        "1adr/x",
+        "adr/x/y",
+        "adr/x_y",
+        "adr/x.y",
+        "../x/y",
+        "adr/..",
+        "",
+        "adr/x\n",
+    ]
+
+    for candidate in corpus:
+        assert bool(gate._RECORD_ID.fullmatch(candidate)) == bool(core_vault._RECORD_ID.fullmatch(candidate)), candidate
+
+
+def test_a_pointer_through_a_symlinked_kind_folder_leaving_core_vault_fails(tmp_path):
+    root = _vault(tmp_path)
+    _record(tmp_path / "outside", "adr", "real")
+    (root / "core-vault" / "adr").symlink_to(tmp_path / "outside" / "adr")
+    _ship(root, "doc.md", "trailhead core show adr/real\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/real" in _lines(result)
+
+
+def test_a_pointer_whose_files_are_symlinks_to_files_outside_core_vault_fails(tmp_path):
+    root = _vault(tmp_path)
+    _record(tmp_path / "outside", "adr", "real")
+    (root / "core-vault" / "adr").mkdir()
+    for suffix in (".md", ".json"):
+        (root / "core-vault" / "adr" / f"real{suffix}").symlink_to(tmp_path / "outside" / "adr" / f"real{suffix}")
+    _ship(root, "doc.md", "trailhead core show adr/real\n")
+
+    result = _run(root)
+
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/real" in _lines(result)
+
+
+def test_a_pointer_id_holding_a_deny_list_term_is_not_echoed(tmp_path):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", f"trailhead core show adr/{DENY_TERM.lower()}\n")
+    denylist = tmp_path / "deny.txt"
+    denylist.write_text(f"{DENY_TERM}\n", encoding="utf-8")
+
+    result = _run(root, "--denylist", str(denylist), GITHUB_ACTIONS="true")
+
+    assert result.returncode == 1
+    assert f"tools/t/plugins/p/doc.md:1:pointer-missing:{REDACTED}" in _lines(result)
+    _no_echo(result, DENY_TERM.lower())
+
+
+def test_a_pointer_finding_is_annotated_under_github_actions(tmp_path):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "trailhead core show adr/missing\n")
+
+    result = _run(root, GITHUB_ACTIONS="true")
+
+    assert "::error file=tools/t/plugins/p/doc.md,line=1::pointer-missing%3Aadr/missing" not in _lines(result)
+    assert "::error file=tools/t/plugins/p/doc.md,line=1::pointer-missing:adr/missing" in _lines(result)
+
+
+def test_a_relayed_validator_line_is_annotated_under_github_actions(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "blob", "src", body="see [[blob/absent]]\n")
+
+    result = _run(root, GITHUB_ACTIONS="true")
+
+    annotations = [line for line in _lines(result) if line.startswith("::error")]
+    assert any("blob/src: missing-target" in line for line in annotations)
+
+
+def test_a_scrub_finding_and_a_pointer_finding_are_both_reported_in_one_run(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "note.md", f"mail {EMAIL}\n")
+    _ship(root, "doc.md", "trailhead core show adr/missing\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1
+    assert "core-vault/note.md:1:email" in _lines(result)
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/missing" in _lines(result)
+
+
+def test_a_scrub_finding_a_validator_finding_and_a_pointer_finding_are_all_reported(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "blob", "src", body=f"mail {EMAIL} [[blob/absent]]\n")
+    _ship(root, "doc.md", "trailhead core show adr/missing\n")
+
+    result = _run(root)
+
+    lines = _lines(result)
+    assert result.returncode == 1
+    assert "core-vault/blob/src.md:1:email" in lines
+    assert any(line.startswith("path blob/src: missing-target") for line in lines)
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/missing" in lines
+
+
+def test_a_pointer_whose_file_is_a_symlink_staying_inside_core_vault_still_fails(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "other")
+    for suffix in (".md", ".json"):
+        (root / "core-vault" / "adr" / f"real{suffix}").symlink_to(f"other{suffix}")
+    _ship(root, "doc.md", "trailhead core show adr/real\n")
+
+    result = _run(root)
+
+    assert "tools/t/plugins/p/doc.md:1:pointer-missing:adr/real" in _lines(result)
