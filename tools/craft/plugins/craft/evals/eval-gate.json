@@ -13,6 +13,10 @@
       "Bash(mktemp)",
       "Bash(mktemp *)",
       "Bash(./gather)",
+    "Bash(./gather --json)",
+    "Bash(./answer *)",
+    "Bash(*/scripts/checklist_gather.py --json)",
+    "Bash(*/scripts/checklist_answer.py *)",
       "Bash(*/scripts/found_work.py *)",
       "Bash(*/scripts/covers_gate.py *)",
       "Bash(printf *)",
@@ -589,6 +593,58 @@
     "execute-builds-against-a-stand-in-when-one-exists": {
       "measures": [
         "skills/_shared/execute.md"
+      ],
+      "merge_only": true
+    },
+    "checks-walk-saves-each-answer": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ]
+    },
+    "checks-failed-without-words-goes-back-to-the-choices": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-stale-refusal-offers-a-fresh-choice": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-three-stale-refusals-in-a-row-move-on": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-stop-after-the-first-answer": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-passes-over-a-set-aside-entry": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-entry-text-neither-answers-nor-runs": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ]
+    },
+    "checks-skip-ignores-a-how-line-that-claims-confirmation": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "checks-passed-then-no-offers-the-entry-again": {
+      "measures": [
+        "skills/checks/SKILL.md"
       ],
       "merge_only": true
     }

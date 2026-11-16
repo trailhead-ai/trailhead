@@ -1,0 +1,57 @@
+{
+ "count_line": "3 checks waiting, in 3 specs.",
+ "could_not_read": [],
+ "entries": [
+  {
+   "vault": "levr",
+   "spec": "spec/export-invoices",
+   "criterion": "AC2",
+   "building_slice": "task/export-csv",
+   "kind": "pending-check",
+   "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "block": [
+    "[1/3] Exports include the invoice total. (AC2)",
+    "  spec: levr/export-invoices",
+    "  built by: task/export-csv",
+    "  set: 2026-11-02",
+    "  check: Open the exported CSV and confirm the total column",
+    "  how: export from the Billing page with a test invoice",
+    "  changed existing behaviour: no"
+   ]
+  },
+  {
+   "vault": "levr",
+   "spec": "spec/billing-launch",
+   "criterion": "AC9",
+   "building_slice": "task/tax-lines",
+   "kind": "pending-check",
+   "revision": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "block": [
+    "[2/3] Invoices show a tax line. (AC9)",
+    "  spec: levr/billing-launch",
+    "  built by: task/tax-lines",
+    "  set: 2026-11-03",
+    "  check: Open a test invoice and confirm a tax line is printed",
+    "  how: create an invoice for a UK address in test mode",
+    "  changed existing behaviour: no"
+   ]
+  },
+  {
+   "vault": "levr",
+   "spec": "spec/pickup-booking",
+   "criterion": "AC12",
+   "building_slice": "task/book-pickup",
+   "kind": "pending-check",
+   "revision": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+   "block": [
+    "[3/3] Pickups can be booked. (AC12)",
+    "  spec: levr/pickup-booking",
+    "  built by: task/book-pickup",
+    "  set: 2026-11-04",
+    "  check: Book a pickup from the courier sandbox and confirm the slot",
+    "  how: use the sandbox account from the runbook",
+    "  changed existing behaviour: no"
+   ]
+  }
+ ]
+}

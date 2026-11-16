@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: checks-passed-then-no-offers-the-entry-again
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
