@@ -1,0 +1,236 @@
+#!/usr/bin/env python3
+"""core-content-gate — refuse core-vault content that is not fit to publish.
+
+Scans every file under `<repo-root>/core-vault/`, sidecars included, for five
+classes: `email`, `commit-id`, `home-path`, `credential`, and `deny-list`.
+A finding prints as `<relpath>:<lineno>:<class>` (a deny-list finding as
+`deny-list#<line number in the list>`) and never carries the matched text, a
+deny-list line, or a regex error message, on stdout or stderr. A path
+component that itself trips a class prints as `<redacted-name>`.
+
+`--repo-root` selects only the content to check. `capture_scan` is always
+imported from this script's own checkout.
+
+Usage:
+  scripts/core-content-gate [--repo-root DIR] [--denylist PATH]
+
+`--denylist` defaults to `$CORE_CONTENT_DENYLIST`. With none, the gate says so
+and runs its generic classes only.
+
+Exit codes:
+  0  clean
+  1  one or more findings (a symlink anywhere in core-vault is a `symlink`
+     finding at line 0; it is never followed)
+  2  the gate could not certify the content: no core-vault folder, a deny-list
+     that is missing, unreadable, empty of patterns or holds an invalid regex,
+     a file that does not decode as strict UTF-8 (a binary or UTF-16 file), or
+     any unexpected exception. Every such line starts `gate could not run:` and
+     ends with what to do next. Exit 2 never means "fine".
+
+Under `GITHUB_ACTIONS` each finding is also emitted as a `::error` annotation,
+and a run without a deny-list emits a `::warning::` and a `$GITHUB_STEP_SUMMARY`
+line.
+
+Other checks extend this script by calling `scrub_line` / `scrub_text` (class
+hits, never matched text) and adding to one `Findings` accumulator, so one exit
+code covers them all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+from pathlib import Path
+
+_CHECKOUT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_CHECKOUT / "tools" / "craft" / "plugins" / "craft" / "scripts"))
+
+import capture_scan  # noqa: E402
+
+CORE_DIR = "core-vault"
+REDACTED_NAME = "<redacted-name>"
+NO_DENYLIST_NOTICE = "no deny-list supplied; generic patterns only"
+_COULD_NOT_RUN = "gate could not run:"
+
+_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)+")
+_COMMIT_ID = re.compile(
+    r"(?<![0-9A-Za-z_])(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,40}(?![0-9A-Za-z_])"
+)
+_HOME_PATH = re.compile(
+    r"(?<![\w.~\-])(?:/home/[^/\s]+|/Users/[^/\s]+|/root(?![\w\-])|[A-Za-z]:[\\/]Users[\\/][^\\/\s]+)"
+)
+
+
+class GateCannotRun(Exception):
+    """The gate cannot certify the content; the message is `cause; remedy`."""
+
+
+class Findings:
+    """Every check adds here; `exit_code` is the one verdict."""
+
+    def __init__(self) -> None:
+        self.items: list[tuple[str, int, str]] = []
+
+    def add(self, relpath: str, lineno: int, label: str) -> None:
+        self.items.append((relpath, lineno, label))
+
+    def exit_code(self) -> int:
+        return 1 if self.items else 0
+
+
+def scrub_line(line: str, *, json_stream: bool = False) -> list[str]:
+    """Class labels the line trips, each once, never the matched text."""
+    return [label for label, _ in _scrub(line, json_stream=json_stream)]
+
+
+def _scrub(text: str, *, json_stream: bool, denylist: list[re.Pattern] | None = None):
+    """(label, lineno) pairs for `text`. Matched text is dropped here."""
+    hits: list[tuple[str, int]] = []
+    for lineno, line in enumerate(text.splitlines() or [""], start=1):
+        classes: list[str] = []
+        if _EMAIL.search(line):
+            classes.append("email")
+        if _COMMIT_ID.search(line):
+            classes.append("commit-id")
+        if _HOME_PATH.search(line):
+            classes.append("home-path")
+        for finding in capture_scan.scan_text(line, json_stream=json_stream):
+            if capture_scan.is_credential_class(finding.cls) and "credential" not in classes:
+                classes.append("credential")
+        hits.extend((label, lineno) for label in classes)
+        for number, pattern in denylist or []:
+            if pattern.search(line):
+                hits.append((f"deny-list#{number}", lineno))
+    return hits
+
+
+def scrub_text(text: str, *, json_stream: bool = False) -> list[tuple[int, str]]:
+    return [(lineno, label) for label, lineno in _scrub(text, json_stream=json_stream)]
+
+
+def load_denylist(path: Path) -> list[tuple[int, re.Pattern]]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise GateCannotRun(
+            "the deny-list file does not exist; fix the --denylist path or $CORE_CONTENT_DENYLIST"
+        ) from None
+    except (OSError, UnicodeDecodeError):
+        raise GateCannotRun("the deny-list file cannot be read as UTF-8; check its permissions and encoding") from None
+    patterns: list[tuple[int, re.Pattern]] = []
+    for number, line in enumerate(raw.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            patterns.append((number, re.compile(stripped, re.IGNORECASE)))
+        except re.error:
+            raise GateCannotRun(f"the deny-list holds an invalid regex at line {number}; fix that line") from None
+    if not patterns:
+        raise GateCannotRun(
+            "the deny-list holds no patterns (only comments or blank lines); add patterns or drop the deny-list"
+        )
+    return patterns
+
+
+def _display(relparts: tuple[str, ...]) -> str:
+    return "/".join(REDACTED_NAME if scrub_line(part) else part for part in relparts)
+
+
+def _decode(path: Path, shown: str) -> str:
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        raise GateCannotRun(
+            f"{shown} is not strict UTF-8 text (a binary or UTF-16 file); "
+            "remove it from core-vault or re-save it as UTF-8"
+        ) from None
+    if "\x00" in text:
+        raise GateCannotRun(f"{shown} holds NUL bytes (a binary file); remove it from core-vault")
+    return text
+
+
+def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    core = root / CORE_DIR
+    if core.is_symlink():
+        findings.add(CORE_DIR, 0, "symlink")
+        return
+    if not core.is_dir():
+        raise GateCannotRun(
+            f"{CORE_DIR}/ does not exist under the repo root; pass --repo-root pointing at a checkout that has it"
+        )
+
+    def onerror(exc: OSError) -> None:
+        raise exc
+
+    for dirpath, dirnames, filenames in os.walk(core, onerror=onerror):
+        here = Path(dirpath).relative_to(root)
+        dirnames.sort()
+        for name in sorted(dirnames + filenames):
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                findings.add(_display((*here.parts, name)), 0, "symlink")
+        dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
+        for name in sorted(filenames):
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                continue
+            shown = _display((*here.parts, name))
+            text = _decode(full, shown)
+            for label, lineno in _scrub(text, json_stream=full.suffix == ".json", denylist=denylist):
+                findings.add(shown, lineno, label)
+
+
+def _emit(findings: Findings, github: bool) -> None:
+    for relpath, lineno, label in findings.items:
+        print(f"{relpath}:{lineno}:{label}")
+        if github:
+            print(f"::error file={relpath},line={lineno}::{label}")
+
+
+def run(root: Path, denylist_path: str | None, github: bool, summary: str | None) -> int:
+    findings = Findings()
+    denylist: list[tuple[int, re.Pattern]] = []
+    if denylist_path:
+        denylist = load_denylist(Path(denylist_path))
+        print(f"deny-list: {len(denylist)} patterns loaded")
+    else:
+        print(NO_DENYLIST_NOTICE)
+        if github:
+            print(f"::warning::{NO_DENYLIST_NOTICE}; set the CORE_CONTENT_DENYLIST secret to add the private terms")
+            if summary:
+                with open(summary, "a", encoding="utf-8") as fh:
+                    fh.write(f"{NO_DENYLIST_NOTICE}\n")
+    check_core_vault(root, denylist, findings)
+    _emit(findings, github)
+    return findings.exit_code()
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Content gate for the core-vault folder.")
+    parser.add_argument("--repo-root", default=str(_CHECKOUT), help="repo whose core-vault/ is checked")
+    parser.add_argument("--denylist", default=os.environ.get("CORE_CONTENT_DENYLIST") or None)
+    args = parser.parse_args(argv)
+    try:
+        return run(
+            Path(args.repo_root),
+            args.denylist,
+            bool(os.environ.get("GITHUB_ACTIONS")),
+            os.environ.get("GITHUB_STEP_SUMMARY"),
+        )
+    except GateCannotRun as exc:
+        print(f"{_COULD_NOT_RUN} {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - any failure to scan is "could not certify", never a finding
+        cause = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+        print(
+            f"{_COULD_NOT_RUN} unexpected {type(exc).__name__} ({cause}); "
+            "re-run, and if it persists check core-vault permissions",
+            file=sys.stderr,
+        )
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
