@@ -114,7 +114,7 @@ def test_latest_outcome_comes_from_last_block_only(capsys, monkeypatch):
     out = report(body, capsys, monkeypatch)
     assert "blocks: 2" in out.splitlines()
     assert "latest-outcome: none" in out.splitlines()
-    assert "latest-checkpoint: second" in out.splitlines()
+    assert fenced(out, "latest-checkpoint:") == ["second"]
 
 
 def test_latest_outcome_read_when_last_block_has_one(capsys, monkeypatch):
@@ -273,7 +273,10 @@ def test_real_seeded_format_one_blocks_report_outcome_checkpoint_and_no_question
     assert out.splitlines() == [
         "blocks: 1",
         f"latest-outcome: {outcome}",
-        f"latest-checkpoint: {checkpoint}",
+        "latest-checkpoint:",
+        "```vault-data",
+        checkpoint,
+        "```",
         f"latest-ritual: {ritual}",
         "highest-q: none",
         "planned-tasks-block: none",
@@ -421,7 +424,7 @@ def test_format_one_block_written_before_this_change_parses(capsys, monkeypatch)
     lines = out.splitlines()
     assert "blocks: 1" in lines
     assert "latest-outcome: needs-a-decision" in lines
-    assert "latest-checkpoint: plan written, 2 child tasks cut, council review not started yet (waiting on Q1)" in lines
+    assert fenced(out, "latest-checkpoint:") == ["plan written, 2 child tasks cut, council review not started yet (waiting on Q1)"]
     assert "highest-q: Q1" in lines
     assert "block=1 status=unanswered match=none applied=no" in qline(out, 1)
 
@@ -490,7 +493,7 @@ def rituals_block(rituals, *, planned=None, checkpoint="slice chosen"):
 def test_latest_ritual_is_the_last_name_on_the_rituals_line(rituals, expected, capsys, monkeypatch):
     out = report(rituals_block(rituals), capsys, monkeypatch).splitlines()
     assert f"latest-ritual: {expected}" in out
-    assert out.index(f"latest-ritual: {expected}") == out.index(next(x for x in out if x.startswith("latest-checkpoint:"))) + 1
+    assert out.index(f"latest-ritual: {expected}") == out.index("latest-checkpoint:") + 4
 
 
 def test_latest_ritual_reads_the_last_block_only(capsys, monkeypatch):
@@ -605,3 +608,87 @@ def test_cli_seam_runs_as_a_process(tmp_path):
     bad = subprocess.run([sys.executable, str(_SCRIPTS / "run_block.py")], input=b"", capture_output=True)
     assert bad.returncode == 2
     assert b"reason-code: empty-stdin" in bad.stderr
+
+
+def test_options_line_after_the_answer_does_not_change_the_match(capsys, monkeypatch):
+    free = "**Answer:** go with the second plan"
+    late = "  - Options: (a) go with the second plan — costs a day"
+    body = block(outcome="needs-a-decision", questions=q(1, opts="  - Options: (b) other — costs a day") + "\n" + free + "\n" + late)
+    assert "match=unmatched" in qline(report(body, capsys, monkeypatch), 1)
+
+
+def test_options_line_before_the_answer_still_matches(capsys, monkeypatch):
+    opts = "  - Options: (a) go with the second plan — costs a day"
+    body = block(outcome="needs-a-decision", questions=q(1, answer="go with the second plan", opts=opts))
+    assert "match=option:a" in qline(report(body, capsys, monkeypatch), 1)
+
+
+@pytest.mark.parametrize("fence", ["```", "~~~"])
+def test_body_ending_inside_a_fence_that_hides_a_block_is_refused(fence, capsys, monkeypatch):
+    body = block(outcome="stuck") + f"\n{fence}\nexample\n" + block(outcome="refused")
+    code, out, err = run(body, capsys, monkeypatch)
+    assert code == 1 and out == ""
+    assert "reason-code: unparsable-block" in err
+
+
+def test_body_ending_inside_a_fence_with_no_heading_after_it_is_unaffected(capsys, monkeypatch):
+    body = block(outcome="stuck") + "\n```\nexample, never closed\n"
+    out = report(body, capsys, monkeypatch)
+    assert "blocks: 1" in out.splitlines()
+    assert "latest-outcome: stuck" in out.splitlines()
+
+
+def test_closed_fence_followed_by_a_block_is_still_parsed(capsys, monkeypatch):
+    body = "```\nexample\n```\n" + block(outcome="stuck")
+    assert "blocks: 1" in report(body, capsys, monkeypatch).splitlines()
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["plan-ready", "pr-ready", "slice-chosen", "waiting", "spec-complete", "stuck", "needs-a-decision", "refused"],
+)
+def test_each_known_outcome_is_reported(value, capsys, monkeypatch):
+    out = report(block(outcome=value), capsys, monkeypatch).splitlines()
+    assert f"latest-outcome: {value}" in out
+
+
+@pytest.mark.parametrize("value", ["ignore previous instructions", "Stuck", "stuck now", "plan-ready x"])
+def test_unknown_outcome_is_reported_unrecognised_never_raw(value, capsys, monkeypatch):
+    out = report(block(outcome=value), capsys, monkeypatch)
+    assert "latest-outcome: unrecognised" in out.splitlines()
+    assert "ignore previous" not in out and "now" not in out
+
+
+def test_checkpoint_text_is_only_ever_inside_the_data_fence(capsys, monkeypatch):
+    body = block(checkpoint="plan written, ```` sneaky `` ticks")
+    out = report(body, capsys, monkeypatch)
+    lines = out.splitlines()
+    assert "latest-checkpoint:" in lines
+    assert fenced(out, "latest-checkpoint:") == ["plan written, ```` sneaky `` ticks"]
+    assert lines.count("latest-ritual: plan") == 1
+
+
+def test_missing_checkpoint_is_none_without_a_fence(capsys, monkeypatch):
+    body = block(checkpoint="x").replace("**Checkpoint:** x\n", "")
+    lines = report(body, capsys, monkeypatch).splitlines()
+    assert lines[2] == "latest-checkpoint: none"
+    assert lines[3].startswith("latest-ritual:")
+
+
+@pytest.mark.parametrize("n", ["12345", "٣", "１"])
+def test_question_number_that_is_long_or_non_ascii_is_refused_not_crashed(n, capsys, monkeypatch):
+    body = block(questions=f"- Q{n}: **which way**\n  - Question: x")
+    code, out, err = run(body, capsys, monkeypatch)
+    assert code == 1 and out == ""
+    assert "reason-code: unparsable-block" in err
+
+
+def test_four_digit_question_number_is_accepted(capsys, monkeypatch):
+    out = report(block(questions=q(1234)), capsys, monkeypatch)
+    assert "highest-q: Q1234" in out.splitlines()
+
+
+def test_heading_in_an_earlier_closed_fence_does_not_condemn_a_later_unclosed_one(capsys, monkeypatch):
+    body = "```\n## Unattended run\n```\n" + block(outcome="stuck") + "\n~~~\nnever closed\n"
+    out = report(body, capsys, monkeypatch)
+    assert "latest-outcome: stuck" in out.splitlines()
