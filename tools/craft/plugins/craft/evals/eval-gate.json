@@ -265,6 +265,16 @@
         "skills/_shared/escalation.md"
       ]
     },
+    "slice-chooses-an-urgent-entry-ahead-of-the-criteria": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "unattended-slice-names-the-remedy-for-an-urgent-entry-a-slice-failed-to-build": {
+      "measures": [
+        "skills/slice/SKILL.md"
+      ]
+    },
     "slice-carries-out-a-free-text-answer-to-its-question": {
       "measures": [
         "skills/_shared/escalation.md",

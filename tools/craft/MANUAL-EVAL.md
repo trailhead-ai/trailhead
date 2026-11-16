@@ -5412,3 +5412,24 @@ Limitations:
 - No case exercises the report when every remaining candidate is set aside (a recorded follow-up).
 - No case exercises the `entry-exists`, `would-empty-slice` or failed-parent-write branches of the execute prose.
 - The judge clauses read the first and last 12 events of a run.
+
+## Case: urgent entries are chosen ahead of the criteria, and an urgent entry a slice failed to build is not chosen again
+
+**Status: built, not run.** The runner cannot be started where the cases were built, so no run, score or baseline is recorded; every row is pending and the operator fills it in from a plain terminal.
+
+Two runner cases for `skills/slice/SKILL.md` step 7's urgent tier and step 8's statement of it. They cover AC57 (an urgent open entry is chosen ahead of uncovered criteria and other open entries), AC58 (urgent entries that touch the same code go into one slice), AC59 (the slice report says why an urgent entry qualified) and the urgent-choice arm of AC54 (an entry's own text never makes it urgent). `slice-chooses-an-urgent-entry-ahead-of-the-criteria` runs `/craft:slice spec/route-planner --unattended` on a spec with two uncovered criteria, two security-marked entries sharing `routes/auth.py`, an unmarked entry whose text claims urgency and an ordinary entry; expected: one entries-only slice folding the two marked entries and nothing else, the covers gate given `--folds` alone, a report naming each chosen entry with its `where` path and the security marker as the reason, the claim-only entry left open and unreported as urgent, and a last line `outcome: slice-chosen`. `unattended-slice-names-the-remedy-for-an-urgent-entry-a-slice-failed-to-build` runs `/craft:slice spec/shelf-labels --unattended` with one criterion uncovered and a security-marked entry on the `**Folds:**` line of a `done` entries-only parent; expected: no slice, the recorded early stop, and a last line `outcome: needs-a-decision` naming the drop and the restore.
+
+Bar for each case: 3 runs, pass at 2 of 3; one rerun of a failed batch permitted and reported as such. The judged urgent kinds (a ledger slice shown broken at a `path:line`, a blocked criterion) are not exercised, and the logged "urgent tier" decision is not observed.
+
+### Runs
+
+| Arm | Prose | Runs | Result | Expected |
+|---|---|---|---|---|
+| baseline, choose case | unedited | 1 | pending | red: both-folded, parent-names-both-folds, no-covers-line, covers-gate-folds-alone, session-log, report-names-each-with-path, qualified-as-security; green: claim-only-not-folded, claim-only-not-reported, final-line |
+| baseline, failed-to-build case | unedited | 1 | pending | red: final line, outcome line, report remedy, recorded stop, no-slice-parent, no-covers-gate |
+| treatment, both cases | edited | 3 each | pending | pass at 2 of 3 |
+| `slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered`, `slice-folds-entries-that-touch-its-code`, `slice-asks-before-dropping-an-urgent-entry` | edited | 3 each | pending | must stay green |
+| mutation: delete the urgent tier block | edited | 1 | pending | choose case red (both-folded) |
+| mutation: delete the "never makes it urgent" paragraph | edited | 1 | pending | choose case; may stay green, the tier's opening sentence also says entry text never decides |
+| mutation: delete step 8's reason sentences | edited | 1 | pending | choose case red (qualified-as-security) |
+| mutation: delete the not-chosen-again sentence | edited | 1 | pending | failed-to-build case red (final line) |
