@@ -325,6 +325,7 @@ def test_the_read_is_the_ref_not_the_working_tree(tmp_path):
 def test_a_file_only_on_a_local_branch_ahead_of_origin_main_is_not_in_the_view(tmp_path):
     r = make_repo(tmp_path / "r", {"main": {"a.txt": "a"}}, remote_tracking=("main",))
     build_history(r, [{"id": "wip", "branch": "wip", "parents": ["refs/remotes/origin/main"], "files": {"wip.txt": "w"}}])
+    git(r, "symbolic-ref", "HEAD", "refs/heads/wip")
     v = view_of(r)
     assert "a.txt" in v.paths and "wip.txt" not in v.paths
 
@@ -494,6 +495,22 @@ def test_a_hostile_origin_head_is_not_used_and_the_next_fallback_is_read(tmp_pat
     v = view_of(r)
     assert v.ref == "refs/remotes/origin/main"
     assert "real.txt" in v.paths and "secret.txt" not in v.paths
+
+
+@pytest.mark.parametrize(
+    "ref, safe",
+    [
+        ("refs/remotes/origin/trunk", True),
+        ("refs/remotes/origin/feature/x.y-z", True),
+        ("refs/remotes/origin/../../heads/secret", False),
+        ("refs/remotes/origin/a..b", False),
+        ("refs/remotes/origin/HEAD", False),
+        ("refs/remotes/upstream/main", False),
+        ("refs/remotes/origin/-x y", False),
+    ],
+)
+def test_the_origin_ref_shape_check_decides_what_may_reach_git(ref, safe):
+    assert repos._safe_origin_ref(ref) is safe
 
 
 def test_an_inherited_git_dir_pointing_elsewhere_does_not_change_what_is_read(tmp_path):
