@@ -8,7 +8,8 @@ classes: `email`, `commit-id`, `home-path`, `credential`, and `deny-list`.
 A finding prints as `<relpath>:<lineno>:<class>` (a deny-list finding as
 `deny-list#<line number in the list>`) and never carries the matched text, a
 deny-list line, or a regex error message, on stdout or stderr. A path
-component that itself trips a class prints as `<redacted-name>`; a path whose joined form trips
+component that itself trips a class prints as `<redacted-name>`; a line longer than
+`MAX_LINE_LENGTH` is a `line-too-long` finding and is not scanned further; a path whose joined form trips
 the deny-list prints as `<redacted-path>`.
 
 2. Validation. Runs this checkout's `lore validate --path <repo-root>/core-vault` with an
@@ -17,12 +18,16 @@ validator reports nothing, or when the only finding is the vault-level `no-recor
 prints `ok: core vault holds no records yet`, unless some `<n>.md` sits beside `<n>.json` anywhere
 under core-vault). On every run a `<n>.md` beside `<n>.json` not at exactly `<kind>/<n>` depth is an
 `unvalidated-record` finding). Every other finding fails and is relayed
-as the validator printed it, unless that line trips a scrub class, in which case it is cut
-to `<record id or vault>: <code>`. A validator that exits other than 0 or 1, cannot be run,
+as `<vault> <record>: <code>` and never with the validator's free-text detail, which can carry
+sidecar values. A `<n>.md` beside `<n>.json` at `<kind>/<n>` depth whose id does not fit the
+record-id grammar is an `unvalidated-record` finding. A validator that exits other than 0 or 1, cannot be run,
 or prints a line this parser does not recognise is exit 2.
 
 3. Pointer check. Scans the text files under `<repo-root>/tools/*/plugins/*` for
-`trailhead core show <token>`. Surrounding quotes, backticks and brackets are stripped; a token
+`trailhead core show <token>`, any whitespace (newlines included) allowed between the words; the
+finding's line is the one where the pointer starts. A file with a text extension that is not strict
+UTF-8 is exit 2; other undecodable files are skipped. Symlinked tool, plugins and plugin folders
+are not walked. Surrounding quotes, backticks and brackets are stripped; a token
 with no `/` (prose) or one starting `<`, `$` or `{` (a placeholder) is skipped. A `/`-bearing token the
 `trailhead core show` grammar refuses is `<relpath>:<lineno>:pointer-invalid` (the token is not
 printed). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
@@ -84,10 +89,11 @@ else:
 CORE_DIR = "core-vault"
 REDACTED_NAME = "<redacted-name>"
 REDACTED_PATH = "<redacted-path>"
+MAX_LINE_LENGTH = 10_000
 NO_DENYLIST_NOTICE = "no deny-list supplied; generic patterns only"
 _COULD_NOT_RUN = "gate could not run:"
 
-_EMAIL = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+_EMAIL = re.compile(r"(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
 _COMMIT_ID = re.compile(
     r"(?<![0-9A-Za-z_])(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,40}(?![0-9A-Za-z_])"
 )
@@ -104,7 +110,11 @@ _VALIDATOR_SUMMARY = re.compile(r"lore: validated \d+ records? in \d+ vaults?: \
 _VALIDATOR_FINDING = re.compile(r"(?P<vault>\S+)(?: (?P<record>\S+))?: (?P<code>[a-z][a-z0-9-]*): .*")
 # Mirrors `_RECORD_ID` in trailhead/core_vault.py; a test holds the two in agreement.
 _RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
-_POINTER = re.compile(r"trailhead core show[ \t]+(?P<token>\S+)")
+_POINTER = re.compile(r"trailhead\s+core\s+show\s+(?P<token>\S+)")
+_TEXT_SUFFIXES = frozenset(
+    {".md", ".json", ".py", ".sh", ".bash", ".zsh", ".toml", ".yaml", ".yml", ".txt", ".cfg", ".ini", ".rst",
+     ".js", ".mjs", ".ts", ".html", ".css", ".xml", ".csv", ".jsonl"}
+)
 _TRAILING_PUNCTUATION = ".,;:!?)]}'\"`*"
 _LEADING_PUNCTUATION = "([`'\"*"
 _NOT_AN_ID_START = ("<", "$", "{")
@@ -149,6 +159,9 @@ def scrub_text(
     """(lineno, label) pairs for `text`. Matched text is dropped here."""
     hits: list[tuple[int, str]] = []
     for lineno, line in _numbered_lines(text):
+        if len(line) > MAX_LINE_LENGTH:
+            hits.append((lineno, "line-too-long"))
+            continue
         classes: list[str] = []
         if _EMAIL.search(line):
             classes.append("email")
@@ -195,18 +208,29 @@ def _redact(text: str, denylist: list[tuple[int, re.Pattern]]) -> str:
     return REDACTED_NAME if scrub_line(text, denylist=denylist) else text
 
 
+def _home_shaped(relparts: tuple[str, ...]) -> bool:
+    """A `home/<name>`, `Users/<name>` or `root` folder step anywhere in the path, as a leading `/` would read it."""
+    parts = relparts[1:] if relparts and relparts[0] == CORE_DIR else relparts
+    return any(_HOME_PATH.match("/" + "/".join(parts[i:])) for i in range(len(parts)))
+
+
 def _display(relparts: tuple[str, ...], denylist: list[tuple[int, re.Pattern]]) -> str:
     shown = "/".join(_redact(part, denylist) for part in relparts)
     joined = "/".join(relparts)
-    if REDACTED_NAME in shown or not any(pattern.search(joined) for _, pattern in denylist):
+    if REDACTED_NAME in shown or not (
+        _home_shaped(relparts) or any(pattern.search(joined) for _, pattern in denylist)
+    ):
         return shown
     if relparts[0] != CORE_DIR:
         return REDACTED_PATH
     return f"{CORE_DIR}/{REDACTED_PATH}"
 
 
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f]")
+
+
 def _one_line(text: str) -> str:
-    return text.replace("\r", "%0D").replace("\n", "%0A")
+    return _CONTROL.sub(lambda m: f"%{ord(m[0]):02X}", text)
 
 
 def _escape_data(text: str) -> str:
@@ -252,7 +276,10 @@ def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], finding
             full = Path(dirpath) / name
             if full.is_symlink():
                 findings.add(_display((*here.parts, name), denylist), 0, "symlink")
-            for label in scrub_line(name, denylist=denylist):
+            labels = scrub_line(name, denylist=denylist)
+            if _home_shaped((*here.parts, name)) and not _home_shaped(here.parts):
+                labels.append("home-path")
+            for label in dict.fromkeys(labels):
                 findings.add(_display((*here.parts, name), denylist), 0, label)
         dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
         for name in sorted(filenames):
@@ -301,8 +328,9 @@ def _run_validator(root: Path) -> tuple[int, str, str]:
         ) from None
 
 
-def _cut_line(record: str | None, code: str, denylist: list[tuple[int, re.Pattern]]) -> str:
-    return f"{_redact(record or 'vault', denylist)}: {code}"
+def _cut_line(vault: str, record: str | None, code: str, denylist: list[tuple[int, re.Pattern]]) -> str:
+    who = _redact(vault, denylist) + (f" {_redact(record, denylist)}" if record else "")
+    return f"{who}: {code}"
 
 
 def _record_shaped_pairs(root: Path) -> list[tuple[str, ...]]:
@@ -318,6 +346,11 @@ def _record_shaped_pairs(root: Path) -> list[tuple[str, ...]]:
             if suffix == ".md" and name != "README.md" and f"{stem}.json" in names:
                 found.append((*here, name))
     return found
+
+
+def _is_validated_shape(rel: tuple[str, ...]) -> bool:
+    """`<kind>/<name>.md` at depth two whose id fits the record-id grammar the validator is trusted to cover."""
+    return len(rel) == 2 and _RECORD_ID.fullmatch(f"{rel[0]}/{os.path.splitext(rel[1])[0]}") is not None
 
 
 def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
@@ -336,7 +369,7 @@ def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], finding
                 "lore validate printed a line this gate does not recognise; "
                 "update the parser in scripts/core-content-gate or run `lore validate --path core-vault` by hand"
             )
-        parsed.append((line, found["record"], found["code"]))
+        parsed.append((found["vault"], found["record"], found["code"]))
     if (returncode == 0) != (not parsed):
         raise GateCannotRun(
             f"lore validate exited {returncode} but printed {len(parsed)} findings; "
@@ -344,15 +377,15 @@ def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], finding
         )
     no_records_only = bool(parsed) and all(code == _NO_RECORDS and record is None for _, record, code in parsed)
     pairs = _record_shaped_pairs(root)
-    unvalidated = pairs if no_records_only else [rel for rel in pairs if len(rel) != 2]
+    unvalidated = pairs if no_records_only else [rel for rel in pairs if not _is_validated_shape(rel)]
     for rel in unvalidated:
         findings.add(_display((CORE_DIR, *rel), denylist), 0, "unvalidated-record")
     if no_records_only:
         if not unvalidated:
             print(NO_RECORDS_OK)
         return
-    for line, record, code in parsed:
-        findings.add_line(_cut_line(record, code, denylist) if scrub_line(line, denylist=denylist) else line)
+    for vault, record, code in parsed:
+        findings.add_line(_cut_line(vault, record, code, denylist))
 
 
 def _is_regular_inside(path: Path, anchor: Path) -> bool:
@@ -367,8 +400,10 @@ def _is_regular_inside(path: Path, anchor: Path) -> bool:
 
 def _subdirs(path: Path) -> list[Path]:
     try:
+        if path.is_symlink():
+            return []
         with os.scandir(path) as entries:
-            return sorted(Path(entry.path) for entry in entries if entry.is_dir())
+            return sorted(Path(entry.path) for entry in entries if entry.is_dir(follow_symlinks=False))
     except (FileNotFoundError, NotADirectoryError):
         return []
     except OSError as exc:
@@ -382,7 +417,6 @@ def _plugin_dirs(root: Path) -> list[Path]:
         plugin
         for tool in _subdirs(root / "tools")
         for plugin in _subdirs(tool / "plugins")
-        if not plugin.is_symlink()
     ]
     if not plugins:
         raise GateCannotRun(
@@ -405,27 +439,32 @@ def check_pointers(root: Path, denylist: list[tuple[int, re.Pattern]], findings:
     anchor = root.resolve() / CORE_DIR
     checked = scanned = 0
     for path in _pointer_files(root):
-        raw = path.read_bytes()
+        shown = _display(path.relative_to(root).parts, denylist)
         try:
-            text = raw.decode("utf-8")
+            text = path.read_bytes().decode("utf-8")
+            readable = "\x00" not in text
         except UnicodeDecodeError:
-            continue
-        if "\x00" in text:
+            readable = False
+        if not readable:
+            if path.suffix.lower() in _TEXT_SUFFIXES:
+                raise GateCannotRun(
+                    f"{_one_line(shown)} is a text file that is not strict UTF-8 (or holds NUL bytes), so its pointers "
+                    "cannot be checked; re-save it as UTF-8"
+                )
             continue
         scanned += 1
-        shown = _display(path.relative_to(root).parts, denylist)
-        for lineno, line in _numbered_lines(text):
-            for match in _POINTER.finditer(line):
-                record_id = match["token"].lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION)
-                if record_id.startswith(_NOT_AN_ID_START) or "/" not in record_id:
-                    continue
-                checked += 1
-                if _RECORD_ID.fullmatch(record_id) is None:
-                    findings.add(shown, lineno, "pointer-invalid")
-                    continue
-                if all(_is_regular_inside(anchor / f"{record_id}{suffix}", anchor) for suffix in (".md", ".json")):
-                    continue
-                findings.add(shown, lineno, f"pointer-missing:{_redact(record_id, denylist)}")
+        for match in _POINTER.finditer(text):
+            lineno = text.count("\n", 0, match.start()) + 1
+            record_id = match["token"].lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION)
+            if record_id.startswith(_NOT_AN_ID_START) or "/" not in record_id:
+                continue
+            checked += 1
+            if _RECORD_ID.fullmatch(record_id) is None:
+                findings.add(shown, lineno, "pointer-invalid")
+                continue
+            if all(_is_regular_inside(anchor / f"{record_id}{suffix}", anchor) for suffix in (".md", ".json")):
+                continue
+            findings.add(shown, lineno, f"pointer-missing:{_redact(record_id, denylist)}")
     print(f"pointers: {checked} checked in {scanned} files")
 
 

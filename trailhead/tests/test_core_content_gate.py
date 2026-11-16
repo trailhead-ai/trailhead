@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -633,7 +634,7 @@ def test_a_core_record_with_an_unparseable_sidecar_fails_with_the_validators_lin
     result = _run(root)
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert any(line.startswith("path blob/torn: sidecar-malformed: ") for line in _lines(result))
+    assert "path blob/torn: sidecar-malformed" in _lines(result)
 
 
 def test_a_related_link_that_exists_only_outside_core_vault_is_missing_target(tmp_path):
@@ -644,7 +645,7 @@ def test_a_related_link_that_exists_only_outside_core_vault_is_missing_target(tm
     result = _run(root)
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert any(line.startswith("path blob/src: missing-target: ") for line in _lines(result))
+    assert "path blob/src: missing-target" in _lines(result)
 
 
 def test_a_readme_only_core_vault_passes_and_says_so(tmp_path):
@@ -689,7 +690,7 @@ def test_a_validator_line_carrying_a_leak_is_relayed_cut_down(tmp_path, leak):
     result = _run(root, *_deny(tmp_path), GITHUB_ACTIONS="true")
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "blob/src: missing-target" in _lines(result)
+    assert "path blob/src: missing-target" in _lines(result)
     _no_echo(result, token)
 
 
@@ -700,7 +701,7 @@ def test_a_validator_line_carrying_an_email_is_relayed_cut_down(tmp_path):
     result = _run_in(checkout, _vault(tmp_path / "r"), GITHUB_ACTIONS="true")
 
     assert result.returncode == 1, result.stdout + result.stderr
-    assert "blob/src: missing-target" in _lines(result)
+    assert "path blob/src: missing-target" in _lines(result)
     _no_echo(result, EMAIL)
 
 
@@ -710,17 +711,19 @@ def test_a_record_id_that_itself_trips_a_class_is_redacted_in_the_cut_line(tmp_p
 
     result = _run_in(checkout, _vault(tmp_path / "r"))
 
-    assert f"{REDACTED}: missing-target" in _lines(result)
+    assert f"path {REDACTED}: missing-target" in _lines(result)
     _no_echo(result, COMMIT)
 
 
-def test_a_clean_validator_line_is_relayed_whole(tmp_path):
+def test_a_clean_validator_line_is_relayed_as_vault_record_and_code_only(tmp_path):
     root = _vault(tmp_path)
     _core_record(root, "blob", "src", body="see [[blob/absent]]\n")
 
     result = _run(root)
 
-    assert "path blob/src: missing-target: wikilink → blob/absent: no such record" in _lines(result)
+    lines = _lines(result)
+    assert "path blob/src: missing-target" in lines
+    assert not any("blob/absent" in line for line in lines)
 
 
 _OK_LORE = (
@@ -1253,3 +1256,221 @@ def test_a_runtime_built_email_is_still_an_email(tmp_path, domain):
     result = _run(root)
 
     assert "core-vault/note.md:1:email" in _lines(result)
+
+
+_GATE_MODULE = None
+
+
+def _gate():
+    global _GATE_MODULE
+    if _GATE_MODULE is None:
+        _GATE_MODULE = _load_gate()
+    return _GATE_MODULE
+
+
+def test_a_line_longer_than_the_cap_is_a_finding_and_is_scanned_fast():
+    gate = _gate()
+    line = "x" * 200_000
+
+    started = time.monotonic()
+    hits = gate.scrub_text(line + "\nsecond\n")
+    elapsed = time.monotonic() - started
+
+    assert hits == [(1, "line-too-long")]
+    assert elapsed < 2
+
+
+def test_the_cap_binds_at_its_edge():
+    gate = _gate()
+    at_cap = " " * (gate.MAX_LINE_LENGTH - len(EMAIL)) + EMAIL
+    over_cap = " " + at_cap
+
+    assert gate.scrub_text(at_cap) == [(1, "email")]
+    assert gate.scrub_text(over_cap) == [(1, "line-too-long")]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "x" * 80_000,
+        "a@" * 40_000,
+        "a@" + "a." * 40_000,
+        "1" * 80_000,
+        "ab-" * 30_000,
+        "/home/" * 15_000,
+        "a" * 80_000 + "1",
+    ],
+    ids=["no-at", "many-ats", "dotted-domain", "digits", "hex-dashes", "home-prefixes", "hex-then-digit"],
+)
+def test_no_class_regex_is_quadratic_on_a_long_line(monkeypatch, line):
+    gate = _gate()
+    monkeypatch.setattr(gate, "MAX_LINE_LENGTH", 10**9)
+
+    started = time.monotonic()
+    gate.scrub_line(line)
+
+    assert time.monotonic() - started < 1.5
+
+
+def test_a_long_line_in_core_vault_fails_the_gate_with_the_finding(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "big.md", "x" * 200_000 + "\n")
+
+    result = _run(root)
+
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/big.md:1:line-too-long" in _lines(result)
+
+
+def test_a_stray_non_utf8_byte_in_a_shipped_text_file_is_exit_2_naming_the_file(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _ship(root, "skills/x/SKILL.md", "ok\n")
+    (root / "tools/t/plugins/p/skills/x/SKILL.md").write_bytes(b"trailhead core show adr/absent \xff\n")
+
+    result = _run(root)
+
+    assert result.returncode == 2, result.stdout + result.stderr
+    assert "tools/t/plugins/p/skills/x/SKILL.md" in result.stderr
+    assert "pointers:" not in result.stdout
+    assert "adr/absent" not in result.stderr
+
+
+def test_a_non_utf8_binary_asset_in_a_plugin_is_still_skipped(tmp_path):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "plain\n")
+    (root / "tools/t/plugins/p/logo.png").write_bytes(b"\x89PNG\xff\xfe\x00")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 0 checked in 1 files" in _lines(result)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "trailhead  core show adr/absent",
+        "trailhead\tcore\t\tshow\tadr/absent",
+        "trailhead core\nshow adr/absent",
+        "trailhead\ncore\nshow\nadr/absent",
+    ],
+    ids=["double-space", "tabs", "newline-mid", "newlines"],
+)
+def test_pointer_whitespace_may_be_any_run_including_newlines(tmp_path, text):
+    root = _vault(tmp_path)
+    _ship(root, "doc.md", "one\ntwo\n" + text + "\n")
+
+    result = _run(root)
+
+    assert "tools/t/plugins/p/doc.md:3:pointer-missing:adr/absent" in _lines(result)
+
+
+def test_a_wrapped_pointer_to_an_existing_record_passes_and_is_counted(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _ship(root, "doc.md", "trailhead core\n  show adr/real\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 1 checked in 1 files" in _lines(result)
+
+
+def test_a_depth_two_record_pair_with_an_invalid_name_is_flagged_beside_a_valid_record(tmp_path):
+    root = _vault(tmp_path)
+    _core_record(root, "adr", "real")
+    _core_record(root, "lesson", "Bad_Name")
+    _core_record(root, "lesson", "fine-name")
+
+    result = _run(root)
+
+    lines = _lines(result)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "core-vault/lesson/Bad_Name.md:0:unvalidated-record" in lines
+    assert not any("fine-name" in line for line in lines)
+
+
+def test_an_invalid_status_value_in_a_sidecar_is_not_echoed_by_the_relayed_line(tmp_path):
+    root = _vault(tmp_path)
+    value = "zz" + "-leaky-" + "marker"
+    _core_record(root, "blob", "x", status=value)
+
+    result = _run(root)
+
+    lines = _lines(result)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "path blob/x: invalid-sidecar" in lines
+    assert value not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("char", ["\x1b", "\x07", "\x7f", "\x9b", "\x00"], ids=["esc", "bel", "del", "c1-csi", "nul"])
+def test_every_control_character_in_a_displayed_name_is_escaped(tmp_path, char):
+    root = _vault(tmp_path)
+    try:
+        _write(root, f"note{char}x.md", f"see {EMAIL}\n")
+    except (ValueError, OSError):
+        pytest.skip("the filesystem refuses this name")
+
+    result = _run(root)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert char not in out
+    assert f"core-vault/note%{ord(char):02X}x.md:1:email" in _lines(result)
+
+
+@pytest.mark.parametrize("where", ["tool", "plugins", "plugin"])
+def test_a_symlinked_tool_plugins_or_plugin_folder_is_not_walked(tmp_path, where):
+    root = _vault(tmp_path / "r")
+    outside = tmp_path / "elsewhere"
+    (outside / "plugins" / "q").mkdir(parents=True)
+    (outside / "plugins" / "q" / "doc.md").write_text("trailhead core show adr/absent\n", encoding="utf-8")
+    if where == "tool":
+        (root / "tools" / "x").symlink_to(outside)
+    elif where == "plugins":
+        (root / "tools" / "y").mkdir()
+        (root / "tools" / "y" / "plugins").symlink_to(outside / "plugins")
+    else:
+        (root / "tools" / "t" / "plugins" / "z").symlink_to(outside / "plugins" / "q")
+    _ship(root, "own.md", "clean\n")
+
+    result = _run(root)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "pointers: 0 checked in 1 files" in _lines(result)
+
+
+def test_a_home_shaped_folder_inside_core_vault_is_a_redacted_home_path_finding(tmp_path):
+    root = _vault(tmp_path)
+    user = "ann" + "abel"
+    _write(root, f"ho{'me'}/{user}/n.txt", "clean\n")
+
+    result = _run(root)
+
+    out = result.stdout + result.stderr
+    assert result.returncode == 1, out
+    assert "core-vault/<redacted-path>:0:home-path" in _lines(result)
+    assert user not in out
+
+
+def test_a_users_shaped_folder_beneath_another_folder_is_flagged_and_its_contents_redacted(tmp_path):
+    root = _vault(tmp_path)
+    user = "bob" + "bie"
+    _write(root, f"docs/Us{'ers'}/{user}/n.txt", f"see {EMAIL}\n")
+
+    result = _run(root)
+
+    out = result.stdout + result.stderr
+    assert _lines(result).count("core-vault/<redacted-path>:0:home-path") == 1
+    assert "core-vault/<redacted-path>:1:email" in _lines(result)
+    assert user not in out
+
+
+def test_a_clean_deep_core_path_is_printed_verbatim(tmp_path):
+    root = _vault(tmp_path)
+    _write(root, "docs/guides/deep/n.md", f"see {EMAIL}\n")
+
+    result = _run(root)
+
+    assert "core-vault/docs/guides/deep/n.md:1:email" in _lines(result)
