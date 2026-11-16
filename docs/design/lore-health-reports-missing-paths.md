@@ -23,17 +23,21 @@ A candidate is treated as a path only when all of these hold:
 - It is one token: no whitespace, no control character, at most 300 characters.
 - It does not start with a home, root or variable marker (`~`, `/`, `$`, `%`), and is not a URL
   (anything carrying `://`, or starting `mailto:`).
-- It is not a glob pattern: no `*`, `?`, `[` or `{`.
+- It is not a glob pattern or a placeholder: no `*`, `?`, `[`, `{`, `<` or `>`.
 - Its first segment is a top-level entry of one of the vault's repositories, read from the same
   branch the check reads (below). `lore health` in a decision's prose is not a path; `tools/lore`
   is, in a vault whose repository has a top-level `tools`.
 
-Before the lookup, a trailing location is taken off: a line suffix (`:198`, `:12:4`), a line anchor
-(`#L40`, `#L40-L52`), a pytest node suffix (`::TestThing::test_case`) and a trailing `/`. The
+Before the lookup, a trailing location is taken off: a line suffix (`:198`, `:12:4`, `:42-50`,
+`:17,35`), an anchor (`#L40`, `#L40-L52`, `#symbol`), a pytest node suffix (`::TestThing::test_case`) and a trailing `/`. The
 printed path is the candidate as written, so the operator can find it in the record.
 
 A path is **reported** when it is absent from the default branch of **every** one of the vault's
-repositories, as a file or as a directory. A path beneath a submodule in any of them counts as
+repositories, as a file or as a directory, and is not the tail of a path that is there. A record
+often writes a path relative to a package inside the repository (`src/step-up.ts` for
+`services/auth/src/step-up.ts`); such a path counts as present when it matches the end of a real
+path from a directory boundary. The cost is that a deleted path is missed when another package
+still holds the same tail. A path beneath a submodule in any of them counts as
 present, because the submodule's own contents are not read. A record naming the same missing path twice is one
 finding for that path, located at its first appearance.
 
@@ -63,7 +67,8 @@ The check names each repository it read, under the group heading and grouped by 
 branch, the time of the last fetch in UTC to the minute and how many days ago that was, or
 `no fetch recorded` when the repository has never fetched. The last fetch is the newest
 `FETCH_HEAD` across the repository and all its linked worktrees, since a fetch made from a camp
-worktree writes that worktree's own `FETCH_HEAD`. This time is a convenience for judging
+worktree writes that worktree's own `FETCH_HEAD`. The age is whole days, rounded down, and never
+negative (a fetch time ahead of the clock reads `0 days ago`); one day reads `1 day ago`. This time is a convenience for judging
 staleness, not a guarantee: a stale fetch is visible, not hidden, and the action line says to fetch
 first when a repository line is old.
 
@@ -86,7 +91,13 @@ the check ran on reads `no` with its counts, so a clean run reads differently fr
 The other three checks keep their all-or-nothing rule.
 
 The group lists findings from the vaults it ran on. When it ran on no vault at all, the group is
-the one line `missing-paths — skipped.`, as for any skipped check.
+the one line `missing-paths — skipped.`, as for any skipped check, followed by the repository lines
+(below). Only the repositories of the vaults the report covers are read: `--vault` narrows what is
+read as well as what is judged.
+
+If the check itself fails, or the repositories cannot be read at all, its rows read
+`errored: <error type>` for every vault and its group is the one line
+`missing-paths — errored: <error type>.`; the other three checks render and the exit status stays 0.
 
 ## Layout changes
 

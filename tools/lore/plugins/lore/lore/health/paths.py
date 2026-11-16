@@ -13,17 +13,21 @@ sidecar list (located by 1-based position; a non-list is ignored and a non-strin
 entry is skipped, but still occupies its position). A candidate is dropped unless
 it is one token of at most :data:`MAX_PATH_CHARS` characters with no whitespace or
 control characters, does not start with ``~``, ``/``, ``$`` or ``%``, holds no
-``://``, does not start ``mailto:`` and holds none of ``* ? [ {``. Printed paths
+``://``, does not start ``mailto:`` and holds none of ``* ? [ { < >`` (a ``<name>`` is a placeholder, not a path). Printed paths
 are record text, so the one-token, bounded shape is what keeps them printable.
 
-**Suffixes** are stripped before lookup: ``::...``, ``#L...``, ``:N`` / ``:N:M``
-and a trailing ``/``. The finding prints the candidate as written.
+**Suffixes** are stripped before lookup: ``::...``, ``#...``, a line suffix (``:N``,
+``:N:M``, ``:N-M``, ``:N,M`` and combinations) and a trailing ``/``. The finding prints the candidate as written.
 
 **Gate and judgement:** the stripped candidate is a path only when its first
 segment is a top-level entry of one of the vault's repositories (so ``lore health``
 or ``config.toml`` are prose, not paths). It is reported when
 :meth:`~lore.health.repos.Repository.contains` is false for every repository, which
-counts a path beneath a submodule gitlink as present. One finding per record per
+counts a path beneath a submodule gitlink as present, and it is not the tail, from a
+directory boundary, of a path on any repository (a path a record writes relative to a
+package inside the repository, ``src/x.ts`` for ``services/auth/src/x.ts``, is present
+when that tail exists; a deleted one is then missed only if another package holds the
+same tail). One finding per record per
 distinct path, at its first location.
 
 **Skips are per vault**, and a skipped vault has no judged count and no findings
@@ -57,8 +61,8 @@ MAX_PATH_CHARS = 300
 
 _INLINE_CODE = re.compile(r"(?<!`)`([^`\n]+)`(?!`)")
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-_FORBIDDEN = re.compile(r"[\s\x00-\x1f\x7f*?\[{]")
-_LINE_SUFFIX = re.compile(r":\d+(?::\d+)?$")
+_FORBIDDEN = re.compile(r"[\s\x00-\x1f\x7f*?\[{<>]")
+_LINE_SUFFIX = re.compile(r":\d+(?:[-,:]\d+)*$")
 
 
 @dataclass(frozen=True)
@@ -107,12 +111,13 @@ def check_missing_paths(
             continue
         repositories: Sequence[Repository] = repos[scan.vault]  # type: ignore[assignment]
         top_level = frozenset().union(*(r.top_level for r in repositories))
+        tails = frozenset(t for r in repositories for p in r.paths for t in _tails(p))
         judged = 0
         for record in scan.records:
             if record.kind not in JUDGED_KINDS or not is_live(record):
                 continue
             judged += 1
-            result.findings.extend(_missing(record, top_level, repositories))
+            result.findings.extend(_missing(record, top_level, tails, repositories))
         result.judged[scan.vault] = judged
     return result
 
@@ -131,7 +136,8 @@ def _skip(scan: VaultScan, view: str | Sequence[Repository | Unreadable] | None)
 
 
 def _missing(
-    record: ScannedRecord, top_level: frozenset[str], repositories: Sequence[Repository]
+    record: ScannedRecord, top_level: frozenset[str], tails: frozenset[str],
+    repositories: Sequence[Repository],
 ) -> list[MissingPath]:
     found: list[MissingPath] = []
     seen: set[str] = set()
@@ -140,10 +146,19 @@ def _missing(
         if bare is None or bare.split("/", 1)[0] not in top_level or bare in seen:
             continue
         seen.add(bare)
-        if not any(r.contains(bare) for r in repositories):
+        if bare not in tails and not any(r.contains(bare) for r in repositories):
             found.append(MissingPath(record.vault, record.kind, record.name,
                                      record.updated_at, location, number, written))
     return found
+
+
+def _tails(path: str):
+    """*path* and each tail of it that starts at a directory boundary."""
+    yield path
+    start = path.find("/") + 1
+    while start:
+        yield path[start:]
+        start = path.find("/", start) + 1
 
 
 def _candidates(record: ScannedRecord):
@@ -178,6 +193,6 @@ def _bare_path(written: str) -> str | None:
         or written.startswith("mailto:")
     ):
         return None
-    bare = written.split("::", 1)[0].split("#L", 1)[0]
+    bare = written.split("::", 1)[0].split("#", 1)[0]
     bare = _LINE_SUFFIX.sub("", bare).rstrip("/")
     return bare or None

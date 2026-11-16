@@ -90,7 +90,7 @@ def test_first_segment_in_any_repository_opens_gate():
 @pytest.mark.parametrize("text", [
     "~/x", "/etc/x", "$HOME/x", "%APPDATA%/x", "https://x/y", "tools/a://b",
     "tools/*.py", "tools/{a,b}", "tools/a?.py", "tools/[a].py", "mailto:tools/x",
-    "tools/a b.py", "tools/" + "x" * 300,
+    "tools/a b.py", "tools/" + "x" * 300, "tools/<name>/", "tools/_shared/<doc>.md", "tools/a>b.py",
 ])
 def test_exclusion_never_reported(text):
     assert run([rec(f"`{text}`")], repo(*TREE)).findings == []
@@ -124,6 +124,10 @@ def test_boundary_300_characters_is_a_candidate():
     ("tools/lore/scan.py:198", "tools/lore/scan.py"),
     ("tools/lore/scan.py:198:7", "tools/lore/scan.py"),
     ("tools/lore/scan.py#L40-L52", "tools/lore/scan.py"),
+    ("tools/lore/scan.py:42-50", "tools/lore/scan.py"),
+    ("tools/lore/scan.py:17,35", "tools/lore/scan.py"),
+    ("tools/lore/scan.py:9-12,40", "tools/lore/scan.py"),
+    ("tools/lore/scan.py#scan_vault", "tools/lore/scan.py"),
     ("tools/lore/test_x.py::TestA::test_b", "tools/lore/test_x.py"),
     ("tools/lore/", "tools/lore"),
 ])
@@ -135,6 +139,9 @@ def test_suffix_stripped_resolves_present(written, bare):
     ("tools/lore/gone.py:198", "tools/lore/gone.py"),
     ("tools/lore/gone.py:198:7", "tools/lore/gone.py"),
     ("tools/lore/gone.py#L40-L52", "tools/lore/gone.py"),
+    ("tools/lore/gone.py:42-50", "tools/lore/gone.py"),
+    ("tools/lore/gone.py:17,35", "tools/lore/gone.py"),
+    ("tools/lore/gone.py#gone_symbol", "tools/lore/gone.py"),
     ("tools/lore/gone.py::TestA::test_b", "tools/lore/gone.py"),
     ("tools/gonedir/", "tools/gonedir"),
 ])
@@ -250,3 +257,27 @@ def test_vault_not_fully_read_skipped():
 def test_unselected_vault_not_judged():
     result = run([rec("`tools/gone.py`")], repo(*TREE), selected=())
     assert result.findings == [] and result.judged == {} and result.skipped == {}
+
+
+PACKAGED = ("src/index.ts", "services/auth/src/step-up.ts", "services/auth/test/step-up.test.ts",
+            "services/auth/mysrc/lib.ts", "apps/web/src/worker.ts")
+
+
+@pytest.mark.parametrize("written", ["src/step-up.ts", "test/step-up.test.ts", "src/worker.ts",
+                                     "services/auth/src/step-up.ts", "auth/src/step-up.ts"])
+def test_a_path_written_relative_to_a_package_resolves_when_it_is_the_tail_of_a_real_path(written):
+    assert run([rec(f"`{written}`")], repo(*PACKAGED, "test/other.test.ts")).findings == []
+
+
+@pytest.mark.parametrize("written", ["src/gone.ts", "src/tep-up.ts", "src/lib.ts", "test/gone.test.ts"])
+def test_a_relative_path_that_is_no_tail_of_any_real_path_is_still_reported(written):
+    assert missing(run([rec(f"`{written}`")], repo(*PACKAGED, "test/other.test.ts"))) == [written]
+
+
+def test_a_tail_must_start_at_a_directory_boundary():
+    assert missing(run([rec("`src/lib.ts`")], repo(*PACKAGED))) == ["src/lib.ts"]
+
+
+def test_a_tail_in_another_repository_of_the_vault_resolves():
+    r2 = repo("services/auth/src/step-up.ts", root="/r/two")
+    assert run([rec("`src/step-up.ts`")], repo("src/index.ts"), r2).findings == []
