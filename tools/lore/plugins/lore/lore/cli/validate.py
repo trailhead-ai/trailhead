@@ -25,7 +25,9 @@ Record codes: ``sidecar-malformed``, ``sidecar-unreadable``, ``body-unreadable``
 kinds the target exists under), ``not-a-record-id`` (a body line or entry
 position, never the text) (links). Vault codes: ``vault-missing``,
 ``vault-unreadable``, ``records-outside-vault`` (a count, never a path),
-``no-records`` (``--path`` only) and ``links-not-checked`` (names the vault that
+``no-records`` (``--path`` only), ``misfiled-folder`` (a top-level folder not named for a kind
+that directly holds a ``<n>.md`` beside ``<n>.json``; names the folder, and the kind it may have
+meant) and ``links-not-checked`` (names the vault that
 was not fully read, so no link could be confirmed missing). Vault-level findings
 are reported for every vault in the checked or resolution set. Every line is
 escaped through the shared control-character escaper, since record names, field

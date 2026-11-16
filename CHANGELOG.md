@@ -5,6 +5,11 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+- `lore validate` now fails with a `misfiled-folder` finding for a top-level vault folder that is
+  not named for a record kind but directly holds a record (`<n>.md` beside `<n>.json`), such as
+  `lessons/` beside `lesson/`, and suggests the kind it may have meant. Nested pairs
+  (`sites/<slug>/index.md`), folders with no direct pair and symlinked folders are not reported.
+  `lore health` is unchanged.
 - `camp env attach local/NAME` (also `<self_name>/NAME`, or a bare name found only on this
   machine) now attaches an environment running on this machine: a background relay, started
   by camp itself with no sshd and no third-party tool, holds each standard port on 127.0.0.1

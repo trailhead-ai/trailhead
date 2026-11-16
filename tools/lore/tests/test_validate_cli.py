@@ -604,3 +604,110 @@ def test_path_naming_the_real_directory_still_runs(world, tmp_path):
     real = tmp_path / "real-dir"
     _put(real, "lesson", "bad", status="nonsense")
     assert world.run("--path", str(real)).returncode == 1
+
+
+# --- misfiled-folder ---------------------------------------------------------
+
+
+def _pair(folder, name="x"):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{name}.md").write_text("text\n")
+    (folder / f"{name}.json").write_text("{}")
+
+
+def _vault_with_lesson(tmp_path, name="v"):
+    d = tmp_path / name
+    _put(d, "lesson", "good")
+    return d
+
+
+def test_misfiled_folder_is_one_finding_with_a_kind_suggestion(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    _pair(d / "lessons")
+    r = world.run("--path", str(d))
+    assert r.returncode == 1
+    assert lines(r) == ["path: misfiled-folder: lessons holds records but is not a kind folder; did you mean lesson?"]
+
+
+def test_removing_the_misfiled_folder_exits_zero_silently(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    r = world.run("--path", str(d))
+    assert (r.returncode, r.stdout) == (0, "")
+
+
+def test_nested_pairs_and_non_record_folders_are_not_misfiled(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    _pair(d / "sites" / "my-site", "index")
+    (d / "sites" / "page.html").write_text("<html></html>")
+    (d / "outpost").mkdir()
+    (d / "outpost" / "config.json").write_text("{}")
+    (d / ".git").mkdir()
+    r = world.run("--path", str(d))
+    assert (r.returncode, r.stdout) == (0, "")
+
+
+def test_path_whose_only_records_are_misfiled_reports_both_findings(world, tmp_path):
+    d = tmp_path / "only"
+    _pair(d / "lessons")
+    r = world.run("--path", str(d))
+    assert r.returncode == 1
+    assert [ln.split(": ")[:2] for ln in lines(r)] == [
+        ["path", "misfiled-folder"],
+        ["path", "no-records"],
+    ]
+
+
+def test_configured_vault_with_no_flag_reports_the_misfiled_folder(world):
+    root = world.roots["default"]
+    _put(root, "lesson", "good")
+    _pair(root / "lessons")
+    r = world.run()
+    assert r.returncode == 1
+    assert lines(r) == [
+        "default: misfiled-folder: lessons holds records but is not a kind folder; did you mean lesson?"
+    ]
+
+
+def test_vault_flag_reports_the_misfiled_folder(two):
+    root = two.roots["other"]
+    _put(root, "lesson", "good")
+    _pair(root / "lessons")
+    r = two.run("--vault", "other")
+    assert r.returncode == 1
+    assert lines(r) == ["other: misfiled-folder: lessons holds records but is not a kind folder; did you mean lesson?"]
+
+
+def test_symlinked_top_level_folder_is_not_descended(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    outside = tmp_path / "outside-secret-dir"
+    _pair(outside)
+    (d / "lessons").symlink_to(outside)
+    r = world.run("--path", str(d))
+    assert (r.returncode, r.stdout) == (0, "")
+    assert "outside-secret" not in r.stdout + r.stderr
+
+
+def test_misfiled_folder_name_with_a_control_character_is_escaped(world, tmp_path):
+    d = _vault_with_lesson(tmp_path)
+    _pair(d / "bad\x1b[31mdir")
+    r = world.run("--path", str(d))
+    assert r.returncode == 1
+    assert "\x1b" not in r.stdout
+    assert lines(r) == ["path: misfiled-folder: bad\\x1b[31mdir holds records but is not a kind folder"]
+
+
+@pytest.mark.parametrize(
+    "folder, suffix",
+    [
+        ("lessons", "; did you mean lesson?"),
+        ("tsk", "; did you mean task?"),
+        ("tasks", "; did you mean task?"),
+        ("specz", "; did you mean spec?"),
+        ("zebra", ""),
+    ],
+)
+def test_misfiled_folder_suggests_a_kind_only_when_one_is_near(world, tmp_path, folder, suffix):
+    d = _vault_with_lesson(tmp_path)
+    _pair(d / folder)
+    r = world.run("--path", str(d))
+    assert lines(r) == [f"path: misfiled-folder: {folder} holds records but is not a kind folder{suffix}"]
