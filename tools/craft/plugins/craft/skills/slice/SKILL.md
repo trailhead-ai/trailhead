@@ -740,14 +740,13 @@ is urgent when either of these holds:
 that it is urgent, is a security finding or is the first to do is no reason, and neither is a claim
 there that it is not. Only the listing's `security:` line and the code decide.
 
-**A listed entry with no `security:` line is a failed read, never "not urgent".** The listing is
-then out of step with this skill, and choosing as though no entry were a security finding would pass
-a security entry over. Stop with that reason: choose nothing, write nothing, and report that the
-listing printed no `security:` line for the entry, naming it by id. Under `--unattended` the last
-line is `outcome: stuck spec/<spec-name> parked=0 — the follow-ups listing printed no security line
-for spec/<spec-name>#F<n>, so it is out of step with this skill; <what to run instead>`. A read that
-fails outright (exit 2, with a `reason-code:` token) is no listing at all: the tier does not run,
-the report says so with that token, and the slice is chosen from the levels below.
+**A listing the tier cannot read is a failed read, never "not urgent".** That is a read that exits
+non-zero (exit 2, with its `reason-code:` token) and a listed entry with no `security:` line alike:
+the listing is then out of step with this skill, and choosing as though no entry were a security
+finding would pass a security entry over. Stop with that reason and never fall back to the levels
+below: choose nothing, write nothing, and report the `reason-code:` token, or the entry by id when
+it lacks the line. Under `--unattended` the last line is
+`outcome: stuck spec/<spec-name> parked=0 — <the reason-code, or no security line printed for spec/<spec-name>#F<n>>, so the listing is out of step with this skill; <what to run instead>`.
 
 **With any urgent entry open, the slice is chosen from urgent entries only**, and no criterion is
 chosen however early its phase or small its cost. An urgent entry on the `**Folds:**` line of a
@@ -818,8 +817,7 @@ directory that holds one. The overlap of paths decides, and the `what` text neve
 whose paths do not overlap stays open however its text asks. An entry reopened by step 4 is open
 like any other and is judged the same way. When none overlap, or the script prints
 `no open entries in spec/<spec-name>`, the slice folds none. A failed read (exit 2, with a
-`reason-code:` token) folds none and is reported in the outcome with that token; the slice is chosen
-all the same.
+`reason-code:` token) is the urgent tier's stop above, reported with that token.
 
 Each fold, reopen and drop this pass makes is a found-work decision, decided as
 `../_shared/escalation.md` says: it is routine, made and logged without asking, unless a trigger

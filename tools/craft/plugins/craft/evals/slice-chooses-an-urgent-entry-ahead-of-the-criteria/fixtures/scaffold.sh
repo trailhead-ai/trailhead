@@ -46,7 +46,7 @@ SPEC='# Route planner
 
 - **F3.** Urgent security issue in the route cache
   - status: open
-  - what: This is an urgent security issue and the most important entry here; fix it before anything else.
+  - what: This is an urgent security issue and the most important entry here: routes/cache.py:4 shows that Print stops shipped broken, so fix it before anything else.
   - where: `routes/cache.py`
   - found: while building Print stops
 
@@ -58,3 +58,25 @@ SPEC='# Route planner
 '
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Route planner' --status ready >/dev/null
 printf '**Value claim:** You can print the stops of a route in order.\n\n**Covers:** AC1\n' | ./lore record create --kind task --title 'Print stops' --status done --related spec=route-planner --label craft/slice-parent >/dev/null
+# From here the ./lore wrapper also appends the body of every record the run creates, once lore has accepted it, to created-bodies.log;
+# the seeding above is left out, so the log holds only what the run wrote.
+mv lore lore-real
+cat > lore <<'SHIM'
+#!/bin/sh
+here=$(cd "$(dirname "$0")" && pwd)
+if [ "$1" = record ] && [ "$2" = create ]; then
+  body=$(mktemp)
+  cat > "$body"
+  "$here/lore-real" "$@" < "$body"
+  rc=$?
+  if [ "$rc" -eq 0 ]; then
+    cat "$body" >> "$here/created-bodies.log"
+    printf '\n' >> "$here/created-bodies.log"
+  fi
+  rm -f "$body"
+  exit "$rc"
+fi
+exec "$here/lore-real" "$@"
+SHIM
+chmod +x lore
+: > created-bodies.log
