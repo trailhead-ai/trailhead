@@ -146,6 +146,103 @@ _CAMP_PLUGIN_ROOT: Path | None = (
 )
 
 
+CAMP_ABSENT = "camp-absent"
+CONFIG_UNREADABLE = "config-unreadable"
+
+
+@dataclasses.dataclass(frozen=True)
+class CampGroups:
+    """The camp group configs under one groups dir, or why there are none.
+
+    ``reason`` is ``None`` when the configs were read (``configs`` may still be
+    empty: no groups dir, or no ``.toml`` in it), ``CAMP_ABSENT`` when trailhead
+    or camp cannot be imported, ``CONFIG_UNREADABLE`` when a group TOML is
+    malformed, unreadable or not UTF-8. ``error`` is the underlying exception for
+    ``CONFIG_UNREADABLE``. ``resolve`` is camp's ``camp.group.resolve`` module
+    (``None`` unless camp imported) and ``confinement_errors`` the exception
+    types its ``resolve_from_cwd`` raises, so a caller resolving a cwd uses the
+    same import this loader made.
+    """
+
+    configs: tuple[dict, ...] = ()
+    reason: "str | None" = None
+    error: "Exception | None" = None
+    resolve: object = None
+    resolution_error: "type[Exception] | None" = None
+    confinement_error: "type[Exception] | None" = None
+    config_error: "type[Exception] | None" = None
+
+
+def _import_camp_groups():
+    """The default camp import seam: bootstrap trailhead, then import camp's group modules.
+
+    Returns ``(config_module, resolve_module)``; raises ``ImportError`` or
+    ``SystemExit`` when trailhead or camp is unavailable. The bootstrap runs
+    BEFORE the camp import because camp internally does ``import trailhead.paths``.
+    """
+    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
+        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
+
+    from _bootstrap import ensure_trailhead_importable
+
+    ensure_trailhead_importable()
+
+    import camp.group.config as _gc
+    import camp.group.resolve as _gr
+
+    return _gc, _gr
+
+
+def load_camp_groups(
+    groups_dir: "Path | None" = None,
+    *,
+    import_camp=None,
+) -> CampGroups:
+    """Load every camp group config under ``groups_dir`` through one guarded camp import.
+
+    ``groups_dir`` defaults to ``trailhead.paths.config_dir("camp") / "groups"``.
+    Never raises for a missing or broken camp: an unimportable trailhead or camp is
+    ``CAMP_ABSENT``; a ``GroupConfigError``, ``OSError`` or ``UnicodeDecodeError``
+    while reading is ``CONFIG_UNREADABLE`` (``load_group`` only wraps TOML decode
+    errors, so a permission or encoding failure would otherwise escape).
+    ``import_camp`` is the import seam: a callable returning
+    ``(camp.group.config, camp.group.resolve)`` and raising ``ImportError`` /
+    ``SystemExit`` when camp is unavailable.
+
+    ``ModuleNotFoundError`` from the lazy ``import trailhead.paths`` inside
+    ``resolve_from_cwd`` is deliberately not caught by any caller: it can occur
+    only if the bootstrap above failed to run, which is a programming error.
+    """
+    try:
+        _gc, _gr = (import_camp or _import_camp_groups)()
+    except (ImportError, SystemExit):
+        return CampGroups(reason=CAMP_ABSENT)
+
+    if groups_dir is None:
+        try:
+            import trailhead.paths as _paths
+        except ImportError:
+            return CampGroups(reason=CAMP_ABSENT)
+        groups_dir = _paths.config_dir("camp") / "groups"
+
+    try:
+        configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
+    except (_gc.GroupConfigError, OSError, UnicodeDecodeError) as exc:
+        return CampGroups(
+            reason=CONFIG_UNREADABLE,
+            error=exc,
+            resolve=_gr,
+            config_error=_gc.GroupConfigError,
+        )
+    return CampGroups(
+        configs=tuple(configs),
+        resolve=_gr,
+        resolution_error=_gr.GroupResolutionError,
+        confinement_error=_gr.GroupConfinementError,
+        config_error=_gc.GroupConfigError,
+    )
+
+
 def resolve_active_group_config(
     groups_dir: "Path | None",
     cwd: Path,
@@ -156,68 +253,46 @@ def resolve_active_group_config(
     """Resolve ``cwd`` to the active camp group's config dict, or ``None``.
 
     Shared by the read path (shared-vault discovery) and the write path
-    (group-default scope routing): performs the lazy, guarded camp import and
-    the cwd->group resolution once, returning the matching group's raw config
-    dict (as produced by ``load_group``, including the ``_toml_path`` key) or
-    ``None`` so callers can project their own slice.
+    (group-default scope routing): loads the groups through
+    :func:`load_camp_groups` and does the cwd->group resolution once, returning
+    the matching group's raw config dict (as produced by ``load_group``,
+    including the ``_toml_path`` key) or ``None`` so callers can project their
+    own slice.
 
     Returns ``None`` on every degradation: ``groups_dir`` absent, trailhead or
     camp unimportable, the group config unreadable/malformed, an invalid
     configured group name, an overlap, or no group matching ``cwd``. A clean
     no-match is silent; an overlap, an unreadable/malformed config, or an
     invalid group name prints a warning naming ``degrade_target`` first.
-
-    ``ModuleNotFoundError`` from the lazy ``import trailhead.paths`` inside
-    ``resolve_from_cwd`` is deliberately NOT caught: it can occur only if the
-    bootstrap guard below failed to run, which is a programming error to fix,
-    not a runtime condition to swallow (swallowing it would silently disable all
-    group resolution). The guard runs BEFORE the camp import because camp
-    internally does ``import trailhead.paths``. ``camp_state_dir`` is forwarded
-    to ``resolve_from_cwd`` so resolution stays isolated in tests.
+    ``camp_state_dir`` is forwarded to ``resolve_from_cwd`` so resolution stays
+    isolated in tests.
     """
     if groups_dir is None:
         return None
 
-    if _CAMP_PLUGIN_ROOT is not None and str(_CAMP_PLUGIN_ROOT) not in sys.path:
-        sys.path.insert(0, str(_CAMP_PLUGIN_ROOT))
-
-    try:
-        from _bootstrap import ensure_trailhead_importable
-
-        ensure_trailhead_importable()
-    except (ImportError, SystemExit):
-        return None  # trailhead unavailable
-
-    try:
-        import camp.group.config as _gc
-        import camp.group.resolve as _gr
-        from camp.group.config import GroupConfigError
-        from camp.group.resolve import (
-            GroupConfinementError,
-            GroupResolutionError,
-        )
-    except ImportError:
-        return None  # camp absent
-
-    try:
-        group_configs = _gc.load_all_groups(groups_dir)  # [] if dir absent
-    except GroupConfigError as exc:
-        print(
-            f"lore: camp group config error; degrading to {degrade_target}: {exc}",
-            file=sys.stderr,
-        )
-        return None  # malformed config
-    except (OSError, UnicodeDecodeError) as exc:
-        # load_group only wraps TOMLDecodeError; an unreadable (permission) or
-        # non-UTF-8 group TOML would otherwise crash the caller. Degrade instead.
-        print(
-            f"lore: cannot read camp group config; degrading to {degrade_target}: {exc}",
-            file=sys.stderr,
-        )
+    loaded = load_camp_groups(groups_dir)
+    if loaded.reason == CAMP_ABSENT:
+        return None
+    if loaded.reason == CONFIG_UNREADABLE:
+        if isinstance(loaded.error, loaded.config_error):
+            print(
+                f"lore: camp group config error; degrading to {degrade_target}: {loaded.error}",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"lore: cannot read camp group config; degrading to {degrade_target}: {loaded.error}",
+                file=sys.stderr,
+            )
         return None
 
+    group_configs = list(loaded.configs)
     if not group_configs:
         return None
+
+    _gr = loaded.resolve
+    GroupResolutionError = loaded.resolution_error
+    GroupConfinementError = loaded.confinement_error
 
     try:
         group_name, _slug = _gr.resolve_from_cwd(
