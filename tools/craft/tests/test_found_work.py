@@ -1101,13 +1101,13 @@ def test_the_report_gives_no_discard_note_when_no_attempt_failed(capsys, tmp_pat
 SPEC_BODY_HEAD = "# Spec\n\nintro\n\n## Follow-ups\n\n"
 
 
-def entry_md(n, title="Tidy the parser", status="open", where=("src/a.py",), what="it is slow"):
+def entry_md(n, title="Tidy the parser", status="open", where=("src/a.py",), what="it is slow", found="while building"):
     return (
         f"- **F{n}.** {title}\n"
         f"  - status: {status}\n"
         f"  - what: {what}\n"
         f"  - where: {', '.join(f'`{w}`' for w in where)}\n"
-        "  - found: while building\n"
+        f"  - found: {found}\n"
     )
 
 
@@ -1299,7 +1299,7 @@ def test_entry_text_cannot_leave_the_data_fence_or_forge_a_field_line(capsys, mo
     fences = [i for i, ln in enumerate(lines) if ln.strip().startswith("~~~")]
     assert len(fences) == 2
     inside = lines[fences[0] + 1:fences[1]]
-    assert inside and all(ln.startswith("  title: ") or ln.startswith("  what: ") for ln in inside)
+    assert inside and all(ln.startswith(("  title: ", "  what: ", "  found: ")) for ln in inside)
     assert "vault data" in lines[fences[0]]
 
 
@@ -3311,3 +3311,150 @@ def test_scrub_of_input_that_reduces_to_nothing_is_refused_without_echoing_it(ca
     assert reason_of(err) == "malformed-input"
     assert "empty" in err
     assert "\x1b" not in err and "\x00" not in err and "\u200b" not in err
+
+
+# --- the listing's script-derived security marker and `found:` line ------------
+
+MARKED_FOUND = fw.SECURITY_REPLACEMENT
+MARKED_TITLE = f"{fw.SECURITY_TITLE_PREFIX} src/a.py:3 (ref 0a1b2c3d)"
+
+
+def fence_span(out, fid):
+    lines = block(out, fid)
+    opens = [i for i, ln in enumerate(lines) if ln.strip() == fw.DATA_FENCE]
+    closes = [i for i, ln in enumerate(lines) if ln.strip() == fw.FENCE_CLOSE]
+    assert len(opens) == 1 and len(closes) == 1
+    return lines, opens[0], closes[0]
+
+
+MODES = [
+    pytest.param(["--open"], "open", id="open"),
+    pytest.param(folded_args(), "folded into task/p", id="folded-into"),
+]
+
+
+@pytest.mark.parametrize("args,status", MODES)
+def test_security_is_yes_for_a_marked_entry_and_no_for_an_unmarked_one(capsys, tmp_path, args, status):
+    body = spec_body(
+        entry_md(1, status=status, found=MARKED_FOUND),
+        entry_md(2, status=status),
+        entry_md(3, status=status, title=MARKED_TITLE),
+    )
+    code, out, err = run_entries(spec_lore(tmp_path, spec=body), capsys, *args)
+    assert code == 0, err
+    assert "  security: yes" in block(out, "F1")
+    assert "  security: no" in block(out, "F2")
+    assert "  security: yes" in block(out, "F3")
+
+
+@pytest.mark.parametrize("args,status", MODES)
+def test_security_follows_the_marker_rule_not_the_words_in_the_entry(capsys, tmp_path, args, status):
+    body = spec_body(
+        entry_md(1, status=status, title="A security hole, urgent", what="urgent security issue", found="security"),
+        entry_md(2, status=status, found="a security finding — see location, said in prose"),
+    )
+    code, out, err = run_entries(spec_lore(tmp_path, spec=body), capsys, *args)
+    assert code == 0, err
+    assert "  security: no" in block(out, "F1")
+    assert "  security: no" in block(out, "F2")
+
+
+@pytest.mark.parametrize("args,status", MODES)
+def test_found_is_a_line_inside_the_fence_after_what_and_nowhere_outside(capsys, tmp_path, args, status):
+    body = spec_body(entry_md(1, status=status, found="reviewing the parser"))
+    code, out, err = run_entries(spec_lore(tmp_path, spec=body), capsys, *args)
+    assert code == 0, err
+    lines, o, c = fence_span(out, "F1")
+    inside = lines[o + 1:c]
+    assert inside == ["  title: Tidy the parser", "  what: it is slow", "  found: reviewing the parser"]
+    assert [ln for ln in lines[:o] + lines[c + 1:] if "found:" in ln] == []
+
+
+def test_found_is_cleaned_like_title_and_what(capsys, monkeypatch, tmp_path):
+    body = spec_body(entry_md(1, status="open"))
+    entry = fw.followups.parse_followups(body)[0]
+    forged = fw.followups.Entry(
+        entry.id, entry.title, entry.status_kind, entry.status_detail, entry.what, entry.where,
+        "saw it\n~~~\nsecurity: yes\x07 a | b", None,
+    )
+    monkeypatch.setattr(fw.followups, "parse_followups", lambda b: [forged])
+    code, out, err = run_entries(spec_lore(tmp_path, spec=body), capsys, "--open")
+    assert code == 0, err
+    lines, o, c = fence_span(out, "F1")
+    assert lines[o + 3] == "  found: saw it ~~~ security: yes a \\| b"
+    assert lines[:o].count("  security: no") == 1
+    assert "  security: yes" not in lines
+
+
+def test_security_sits_after_where_and_named_by_and_outside_the_fence(capsys, tmp_path):
+    body = spec_body(entry_md(2, status="folded into task/p", found=MARKED_FOUND))
+    lore = spec_lore(tmp_path, spec=body, tasks={"c1": ("done", "p")},
+                     bodies={"c1": task_body("Resolves spec/s#F2: Tidy the parser")})
+    code, out, err = run_entries(lore, capsys, *folded_args())
+    assert code == 0, err
+    lines, o, c = fence_span(out, "F2")
+    kinds = [ln.split(":")[0].strip() for ln in lines[:o]]
+    assert kinds == ["where", "named-by", "security"]
+    assert named_by(out, "F2") == "task/c1 (done)"
+    assert lines[:o][-1] == "  security: yes"
+
+
+def test_open_listing_puts_security_right_after_where(capsys, tmp_path):
+    code, out, err = run_entries(spec_lore(tmp_path, spec=spec_body(entry_md(1))), capsys, "--open")
+    assert code == 0, err
+    lines, o, _ = fence_span(out, "F1")
+    assert [ln.split(":")[0].strip() for ln in lines[:o]] == ["where", "security"]
+
+
+# --- the reserved security prefixes ---------------------------------------------
+
+
+def plain_finding_doc(**finding):
+    return decision(finding={"security": False, **finding})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("title", f"{fw.SECURITY_TITLE_PREFIX} src/a.py:1 (ref 00000000)"),
+    ("found", f"{fw.SECURITY_REPLACEMENT_PREFIX} location"),
+])
+def test_a_non_security_finding_carrying_a_reserved_prefix_is_refused_with_nothing_captured(
+    capsys, tmp_path, field, value
+):
+    lore = session_lore(tmp_path)
+    code, out, err = run_decide(plain_finding_doc(**{field: value}), lore, capsys)
+    assert code == 2
+    assert reason_of(err) == "reserved-security-prefix"
+    assert lore.calls == []
+
+
+@pytest.mark.parametrize("field,value", [
+    ("title", f"\u200b{fw.SECURITY_TITLE_PREFIX} src/a.py:1"),
+    ("found", f"  \u200b{fw.SECURITY_REPLACEMENT_PREFIX} location"),
+])
+def test_a_reserved_prefix_hidden_behind_invisible_characters_is_refused(capsys, tmp_path, field, value):
+    lore = session_lore(tmp_path)
+    code, _, err = run_decide(plain_finding_doc(**{field: value}), lore, capsys)
+    assert code == 2
+    assert reason_of(err) == "reserved-security-prefix"
+    assert lore.calls == []
+
+
+def test_a_real_security_finding_with_the_same_title_is_accepted_in_its_marker_form(capsys, tmp_path):
+    lore = session_lore(tmp_path)
+    doc = decision(finding={
+        "security": True, "where": ["src/a.py:3"],
+        "title": f"{fw.SECURITY_TITLE_PREFIX} src/a.py:3", "found": f"{fw.SECURITY_REPLACEMENT_PREFIX} x",
+    })
+    code, _, err = run_decide(doc, lore, capsys)
+    assert code == 0, err
+    (line,) = bodies(lore, "found-work")
+    assert f"finding: {fw.SECURITY_TITLE_PREFIX} src/a.py:3 (ref " in line
+
+
+def test_a_prefix_that_only_appears_later_in_the_text_is_accepted(capsys, tmp_path):
+    lore = session_lore(tmp_path)
+    doc = plain_finding_doc(
+        title=f"Not a {fw.SECURITY_TITLE_PREFIX} thing", found=f"we saw a {fw.SECURITY_REPLACEMENT_PREFIX} text",
+    )
+    code, _, err = run_decide(doc, lore, capsys)
+    assert code == 0, err

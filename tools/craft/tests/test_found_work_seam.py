@@ -80,6 +80,12 @@ class Seam:
             capture_output=True, text=True, env=self.env, input=stdin, cwd=cwd or str(self.tmp_path),
         )
 
+    def script_bytes(self, *args, stdin: bytes):
+        return subprocess.run(
+            [sys.executable, str(_SCRIPT), *args], capture_output=True, env=self.env, input=stdin,
+            cwd=str(self.tmp_path),
+        )
+
     def decide(self, doc, *args, cwd=None):
         return self.script("decide", "--session", "build", "--session-id", SID, *args, stdin=json.dumps(doc), cwd=cwd)
 
@@ -1082,3 +1088,43 @@ def test_a_drop_naming_a_real_task_then_a_restore_land_through_lores_base_check_
     ]
     empty = seam.script("report", "--parent", "task/nobody", "--session", "slice", "--session-id", SID)
     assert empty.stdout.strip() == "The slice made no decisions about found work."
+
+
+# --- F14: stdin that is not UTF-8 is refused, never a traceback ----------------------
+
+BAD_UTF8 = b"\xff\xfe\x80 not utf-8"
+
+
+def _tree(seam):
+    return seam.records(), seam.session_text()
+
+
+def _decide_bytes(seam, raw: bytes):
+    return seam.script_bytes("decide", "--session", "build", "--session-id", SID, stdin=raw)
+
+
+def _entry_bytes(seam, raw: bytes):
+    return seam.script_bytes("entry", "--session", "build", "--session-id", SID, "--vault", "default", stdin=raw)
+
+
+@pytest.mark.parametrize("run,doc", [
+    (_decide_bytes, decision(finding={"title": "caf\u00e9"})),
+    (_entry_bytes, transition_doc("fold", ["F1"], "task/nobody", reason="caf\u00e9")),
+], ids=["decide", "entry"])
+def test_invalid_utf8_on_stdin_is_refused_with_a_reason_code_and_nothing_is_written(seam, run, doc):
+    make_spec(seam, SPEC_BODY + SECTION)
+    before = _tree(seam)
+    raw = json.dumps(doc, ensure_ascii=False).encode("utf-8")
+    assert "caf\u00e9".encode("utf-8") in raw
+    r = run(seam, raw.replace("caf\u00e9".encode("utf-8"), b"caf" + BAD_UTF8))
+    assert r.returncode == 2
+    assert "reason-code: non-utf8-stdin" in r.stderr.decode()
+    assert b"Traceback" not in r.stderr
+    assert _tree(seam) == before
+
+
+def test_valid_utf8_with_non_ascii_text_on_stdin_is_still_decided(seam):
+    raw = json.dumps(decision(finding={"title": "Handle the caf\u00e9 case"}), ensure_ascii=False).encode("utf-8")
+    r = _decide_bytes(seam, raw)
+    assert r.returncode == 0, r.stderr
+    assert "caf\u00e9" in "".join(found_work_lines(seam.session_text()))

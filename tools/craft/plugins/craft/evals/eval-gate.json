@@ -231,7 +231,8 @@
     "slice-folds-entries-that-touch-its-code": {
       "measures": [
         "skills/slice/SKILL.md",
-        "skills/_shared/escalation.md"
+        "skills/_shared/escalation.md",
+        "scripts/found_work.py"
       ]
     },
     "slice-chooses-and-drops-follow-up-entries-after-the-criteria-are-covered": {
@@ -291,7 +292,8 @@
     },
     "build-close-marks-folded-entries": {
       "measures": [
-        "skills/_shared/execute.md"
+        "skills/_shared/execute.md",
+        "scripts/found_work.py"
       ]
     },
     "council-synthesis-stands-down-a-waived-concern": {
