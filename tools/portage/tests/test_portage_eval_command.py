@@ -8,6 +8,8 @@ tests can observe a request mid-run. A started worker lives as long as the pytes
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
@@ -142,42 +144,103 @@ class Ws:
         return json.loads((self.req(request_id) / "results" / f"{case}.json").read_text())
 
 
-def _short_home():
-    base = Path.home() / ".cache"
-    home = base / ("e" + uuid.uuid4().hex[:4])
-    if len(str(home)) > 30:
-        pytest.skip("no home short enough for the runner's 51-character temp path outside /tmp")
-    (home / ".claude").mkdir(parents=True)
-    return home
+HOME_LIMIT = 30
+
+
+def _short_home(base=None):
+    base = Path.home() / ".cache" if base is None else base
+    for _ in range(64):
+        home = base / ("e" + uuid.uuid4().hex[:3])
+        if len(str(home)) > HOME_LIMIT:
+            pytest.fail(f"the throwaway home {home} is {len(str(home))} characters; the runner's "
+                        f"51-character temp path outside /tmp needs at most {HOME_LIMIT}")
+        try:
+            (home / ".claude").mkdir(parents=True)
+        except FileExistsError:
+            continue
+        return home
+    pytest.fail(f"no unused throwaway home under {base}")
 
 
 def _reap(ws):
-    ws.release()
+    groups = []
     if ws.eval_root.exists():
         for pidfile in ws.eval_root.glob("*/worker.pid"):
             try:
-                os.killpg(int(pidfile.read_text()), signal.SIGKILL)
-            except (ProcessLookupError, ValueError, PermissionError):
+                groups.append(int(pidfile.read_text()))
+            except ValueError:
                 pass
+    for pgid in groups:
+        try:
+            os.killpg(pgid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
     child = ws.ctl / "child.pid"
     if child.exists():
         try:
             os.kill(int(child.read_text()), signal.SIGKILL)
         except (ProcessLookupError, ValueError):
             pass
+    for pgid in groups:
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            try:
+                os.waitpid(pgid, os.WNOHANG)
+            except ChildProcessError:
+                pass
+            try:
+                os.killpg(pgid, 0)
+            except (ProcessLookupError, PermissionError):
+                break
+            time.sleep(0.01)
+
+
+@contextlib.contextmanager
+def _workspace(tmp_path, monkeypatch, capsys):
+    home = _short_home()
+    try:
+        for var in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "SANDBOX_RUNTIME"):
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("HOME", str(home))
+        w = Ws(tmp_path, home, capsys)
+        monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(w.stub))
+        try:
+            yield w
+        finally:
+            _reap(w)
+    finally:
+        shutil.rmtree(home, ignore_errors=True)
 
 
 @pytest.fixture
 def ws(tmp_path, monkeypatch, capsys):
-    home = _short_home()
-    for var in ("XDG_STATE_HOME", "XDG_CACHE_HOME", "CLAUDE_CONFIG_DIR", "SANDBOX_RUNTIME"):
-        monkeypatch.delenv(var, raising=False)
-    monkeypatch.setenv("HOME", str(home))
-    w = Ws(tmp_path, home, capsys)
-    monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(w.stub))
-    yield w
-    _reap(w)
-    shutil.rmtree(home, ignore_errors=True)
+    with _workspace(tmp_path, monkeypatch, capsys) as w:
+        yield w
+
+
+class TestThrowawayHome:
+    def test_a_home_that_fits_the_runner_temp_limit_is_created_and_usable(self):
+        home = _short_home()
+        try:
+            assert len(str(home)) <= HOME_LIMIT and (home / ".claude").is_dir()
+        finally:
+            shutil.rmtree(home, ignore_errors=True)
+
+    def test_a_home_too_long_for_the_runner_temp_limit_fails_naming_the_length_and_creates_nothing(
+            self, tmp_path):
+        base = tmp_path / ("x" * HOME_LIMIT)
+        with pytest.raises(pytest.fail.Exception, match=r"is \d+ characters") as raised:
+            _short_home(base)
+        assert f"is {len(str(base)) + 5} characters" in str(raised.value)
+        assert not base.exists()
+
+    def test_the_home_is_removed_when_the_test_using_it_fails(self, tmp_path, monkeypatch, capsys):
+        with pytest.raises(RuntimeError):
+            with _workspace(tmp_path, monkeypatch, capsys) as w:
+                home = w.home
+                assert home.exists()
+                raise RuntimeError("the test body failed")
+        assert not home.exists()
 
 
 class TestStart:
@@ -403,9 +466,9 @@ class TestWait:
         ws.wait(request_id)
         (ws.req(request_id) / "result.json").unlink()
         (ws.req(request_id) / "results" / "c2.json").unlink()
-        pidfile = ws.req(request_id) / "worker.pid"
-        pidfile.write_text(str(os.getpid()))
-        rc, out, _ = ws.wait(request_id, seconds=1)
+        with open(ws.req(request_id) / local.LOCK_NAME, "w") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            rc, out, _ = ws.wait(request_id, seconds=1)
         assert rc == 4 and "1 of 2 cases finished (c1)" in out
 
     @pytest.mark.parametrize("bad", ["local-nosuchrequest", "local-aaaaaaaaaaaa"])
@@ -499,6 +562,16 @@ class TestInterruptedWorker:
         assert out.count("not run: interrupted") == 2
         assert out.count("next step: resubmit") == 2
         assert "summary: 2 not run" in out
+
+    def test_a_dead_worker_whose_pid_is_now_a_live_unrelated_process_is_interrupted_not_running(self, ws):
+        ws.set("hold")
+        request_id = ws.started("c1")
+        until(lambda: ws.count("case-started-c1"))
+        os.kill(ws.worker_pid(request_id), signal.SIGKILL)
+        (ws.req(request_id) / "worker.pid").write_text(f"{os.getpid()}\n")
+        rc, out, _ = ws.wait(request_id, seconds=10)
+        assert rc == 3
+        assert "not run: interrupted" in out
 
     def test_a_killed_worker_keeps_the_cases_that_finished_before_it_died(self, ws):
         request_id = ws.started("c1")

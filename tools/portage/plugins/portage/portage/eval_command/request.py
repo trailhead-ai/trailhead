@@ -15,7 +15,7 @@ none::
     results/<case>.json   one case's result, written when that case is decided (below)
     result.json           {"schema_version": 1, "cases": [<case result>, ...]}, in request order,
                           written last and always: the request is finished exactly when it exists
-    worker.pid, worker.log   the local backend's worker (not part of the interface)
+    worker.pid, worker.log, worker.lock   the local backend's worker (not part of the interface)
 
 A case result::
 

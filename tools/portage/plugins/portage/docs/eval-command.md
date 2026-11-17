@@ -71,9 +71,13 @@ reason and a `next step:`.
 
 The worker runs the canary once per request (never cached or reused), then each case through the eval
 core. It writes `results/<case>.json` as each case is decided and always writes `result.json` last; every
-file is written to a temporary name and renamed into place. Its pid is in `worker.pid`, its output in
-`worker.log`. On SIGTERM it stops its runner's process group before exiting. `wait` treats a worker that
-is gone with no valid `result.json` as interrupted, so a dead worker is never reported as still running.
+file is written to a temporary name and renamed into place. Its output is in `worker.log` and its pid in
+`worker.pid`, which is informational only. The worker holds an exclusive lock on `worker.lock` in the
+request directory from before it starts until it exits; the kernel releases it however the worker ends.
+On SIGTERM it stops its runner's process group before exiting. `wait` asks for that lock without
+blocking: if it is granted the worker is gone, and with no valid `result.json` the unfinished cases are
+interrupted; if it is refused the worker is running. A dead worker is therefore never reported as still
+running, including when its pid has since been reused by another process.
 
 The runner binary is pinned with `PORTAGE_EVAL_RUNNER`, under the same validation as the eval gate. The
 runner's temp directories are placed under `$HOME/.cache/pegt` (never `XDG_CACHE_HOME`).

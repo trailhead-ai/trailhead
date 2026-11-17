@@ -2,8 +2,15 @@
 
 ``start_request`` creates the request (``request``), then spawns ``python -m
 portage.eval_command.local <request dir>`` as its own session with stdin closed and stdout/stderr
-in ``worker.log``, and records the pid in ``worker.pid``. The worker is deliberately detached: the
-eval gate's no-background rule does not apply to it. It is bounded by the per-case timeout.
+in ``worker.log``, and records the pid in ``worker.pid`` (informational: liveness never reads it). The
+worker is deliberately detached: the eval gate's no-background rule does not apply to it. It is
+bounded by the per-case timeout.
+
+Liveness is a lock, not a pid: ``start_request`` takes an exclusive ``flock`` on ``worker.lock`` in the
+request directory before the spawn and the worker inherits that open file, so the lock is held from
+before the worker's first instruction until the kernel releases it when the worker exits, however it
+exits. ``wait`` asks for the lock without blocking: granted means the worker is gone, refused means it
+is running. A recycled pid cannot hold it.
 
 The worker runs the sandbox-write canary through the eval core once for the request, never cached;
 when it does not pass every case is not run ``runner-broken`` and no case runner starts. Otherwise it
@@ -19,6 +26,7 @@ runner binary is validated by the gate's own ``PORTAGE_EVAL_RUNNER`` rules.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import signal
 import subprocess
@@ -32,6 +40,7 @@ from portage.eval_gate.run import _pin, _runner_override
 
 from . import request as req
 
+LOCK_NAME = "worker.lock"
 CASE_TIMEOUT_SECONDS = 540
 DEFAULT_WAIT_SECONDS = 110
 MAX_WAIT_SECONDS = 540
@@ -56,19 +65,28 @@ def worker_env(environ=None) -> dict[str, str]:
             if k not in _DROPPED_FROM_WORKER_ENV}
 
 
+def _take_lock(request_path: Path) -> int:
+    fd = os.open(request_path / LOCK_NAME, os.O_WRONLY | os.O_CREAT, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
 def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
     """Create a request and spawn its detached worker; return the identifier."""
     try:
         request_id, path = req.create_request(
             {"repo": repo, "plugin_root": plugin_root, "cases": cases})
         log = open(path / "worker.log", "ab")
+        lock = _take_lock(path)
         try:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "portage.eval_command.local", str(path)],
+                [sys.executable, "-m", "portage.eval_command.local", str(path), str(lock)],
                 env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
-                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True)
+                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+                pass_fds=(lock,))
         finally:
             log.close()
+            os.close(lock)
         (path / "worker.pid").write_text(f"{proc.pid}\n")
     except OSError as e:
         raise StartFailed(str(e)) from e
@@ -138,29 +156,26 @@ def _on_sigterm(signum, frame):
 
 def main(argv: list[str]) -> int:
     signal.signal(signal.SIGTERM, _on_sigterm)
+    if len(argv) > 1:
+        os.set_inheritable(int(argv[1]), False)
+    else:
+        _take_lock(Path(argv[0]))
     run_worker(Path(argv[0]))
     return 0
 
 
 def _worker_alive(request_path: Path) -> bool:
     try:
-        pid = int((request_path / "worker.pid").read_text())
-    except (OSError, ValueError):
-        return False
-    if pid <= 0:
+        fd = os.open(request_path / LOCK_NAME, os.O_RDONLY)
+    except OSError:
         return False
     try:
-        if os.waitpid(pid, os.WNOHANG)[0] == pid:
-            return False
-    except ChildProcessError:
-        pass
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
         return True
-    return True
+    finally:
+        os.close(fd)
+    return False
 
 
 def _finished(request_path: Path) -> list[dict] | None:
