@@ -106,14 +106,19 @@ def _leave_sandbox(args: argparse.Namespace) -> int:
         print("cause: this call ran inside the sandbox even though it went through the pinned shim; "
               "the sandbox exclusion for it is probably not installed on this host "
               "(run `chezmoi apply` and start a new session)")
-    shim = shim or request.default_shim()
-    if shim:
-        words = [shim, "start", "--plugin", args.plugin]
-        for case in args.cases:
-            words += ["--case", case]
-        if args.repo is not None:
-            words += ["--repo", os.path.abspath(args.repo)]
-        print(f"run outside the sandbox: {' '.join(shlex.quote(w) for w in words)}")
+    if not shim:
+        shim = request.default_shim()
+        if not (shim and os.path.isfile(shim) and os.access(shim, os.X_OK)):
+            print("the pinned portage-eval shim is not installed on this host, so there is no command to run "
+                  "outside the sandbox; run `trailhead update` with `claude` on PATH, then `chezmoi apply` "
+                  "and start a new session")
+            return 3
+    words = [shim, "start", "--plugin", args.plugin]
+    for case in args.cases:
+        words += ["--case", case]
+    if args.repo is not None:
+        words += ["--repo", os.path.abspath(args.repo)]
+    print(f"run outside the sandbox: {' '.join(shlex.quote(w) for w in words)}")
     return 3
 
 

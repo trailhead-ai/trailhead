@@ -669,6 +669,45 @@ class TestBackendChoice:
         assert "chezmoi apply" in out and "new session" in out
         assert f"{SHIM} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
 
+    def test_not_through_the_shim_with_the_default_shim_installed_prints_the_paste_ready_command(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
+        default = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
+        default.parent.mkdir(parents=True)
+        default.write_text("#!/bin/sh\nexit 0\n")
+        default.chmod(0o755)
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert f"run outside the sandbox: {default} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
+        assert "not installed" not in out
+
+    def test_not_through_the_shim_with_no_default_shim_says_it_is_not_installed_and_names_no_command(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
+        missing = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
+        assert not missing.exists()
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+        assert "next step: stop and report" in out.splitlines()
+        assert "not installed" in out and "trailhead update" in out
+        assert "claude" in out and "chezmoi apply" in out and "new session" in out
+        assert "run outside the sandbox:" not in out
+        assert str(missing) not in out
+
+    def test_a_default_shim_that_is_not_an_executable_file_is_treated_as_not_installed(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.delenv("PORTAGE_EVAL_SHIM", raising=False)
+        default = ws.home / ".local" / "state" / "trailhead" / "bin" / "portage-eval"
+        default.parent.mkdir(parents=True)
+        default.write_text("#!/bin/sh\nexit 0\n")
+        default.chmod(0o644)
+        _, out, _ = ws.main(*self._argv(ws))
+        assert "not installed" in out and "run outside the sandbox:" not in out
+
     def test_a_shim_path_with_a_space_is_quoted_in_the_command_to_paste(self, ws, monkeypatch):
         monkeypatch.setenv("SANDBOX_RUNTIME", "1")
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", "/home/a b/bin/portage-eval")
@@ -682,7 +721,7 @@ class TestBackendChoice:
         monkeypatch.setenv("PORTAGE_EVAL_SHIM", bad)
         rc, out, _ = ws.main(*self._argv(ws))
         assert rc == 3
-        assert "chezmoi apply" not in out
+        assert "cause:" not in out
         assert not re.search(rf"(^|\s){re.escape(bad)} start", out)
 
     def test_the_wait_command_names_the_absolute_shim_when_run_through_it(self, ws, monkeypatch):
