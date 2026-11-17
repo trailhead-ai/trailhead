@@ -2655,6 +2655,17 @@ class ClaudeCodeHarness(Harness):
         deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
         denied_reads = _profile_denied_reads(profile, config_dir, home)
+        # A ritual never prompts, so under dontAsk its file tools write only where an allow
+        # rule names: the roots its sandbox already lets Bash write, and Claude Code's own temp
+        # directory (the sandbox's TMPDIR), which is also a working directory so a command may
+        # read a file there. Edit denials still win over these.
+        work_temp = (
+            [Path(os.path.realpath(
+                source.get("CLAUDE_CODE_TMPDIR") or f"/tmp/claude-{os.getuid() if uid is None else uid}"
+            ))]
+            if ROLE_WORKSPACE in profile.paths
+            else []
+        )
         settings: dict = {
             "sandbox": {
                 "enabled": True,
@@ -2684,6 +2695,8 @@ class ClaudeCodeHarness(Harness):
             },
             "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
         }
+        if work_temp:
+            settings["permissions"]["allow"] = [f"Edit(/{r}/**)" for r in [*roots, *work_temp]]
         network: dict = {}
         if hosts:
             network["allowedDomains"] = list(hosts)
@@ -2747,7 +2760,7 @@ class ClaudeCodeHarness(Harness):
             argv.append("-p")
         argv += ["--settings", json.dumps(settings, sort_keys=True, separators=(",", ":"))]
         argv += ["--permission-mode", "dontAsk"]
-        for g in granted:
+        for g in [*granted, *work_temp]:
             argv += ["--add-dir", str(g)]
         if files:
             argv += ["--mcp-config", files[0].path, "--strict-mcp-config"]

@@ -2346,7 +2346,7 @@ def test_ritual_launch_writes_only_the_workspace_the_lore_state_and_the_cache(tm
 def test_ritual_launch_has_no_broker_allow_rules_and_an_empty_strict_mcp_config(tmp_path):
     env, ws = _ritual_ready(tmp_path)
     start = _ritual_start(env, ws)
-    assert "allow" not in _settings_of(start)["permissions"]
+    assert not [r for r in _settings_of(start)["permissions"].get("allow", []) if r.startswith("mcp__")]
     assert "--strict-mcp-config" in start.argv
     (file,) = start.files
     assert _flag_value(start.argv, "--mcp-config") == file.path
@@ -2398,6 +2398,33 @@ def test_cli_refuses_a_session_for_the_hub(tmp_path, monkeypatch, capsys):
     captured = capsys.readouterr()
     assert rc != 0 and captured.out == ""
     assert captured.err.startswith("trailhead: ") and "--session" in captured.err
+
+
+def test_ritual_file_tools_may_write_wherever_its_sandbox_lets_it_write(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    env["CLAUDE_CODE_TMPDIR"] = str(tmp_path / "cc-temp")
+    for workspace in (ws, _make_workspace(env, slug="ws2")):
+        settings = _settings_of(_ritual_start(env, workspace))
+        roots = [*settings["sandbox"]["filesystem"]["allowWrite"], os.path.realpath(tmp_path / "cc-temp")]
+        assert sorted(settings["permissions"]["allow"]) == sorted(f"Edit(/{r}/**)" for r in roots)
+        assert f"Edit(/{workspace}/**)" in settings["permissions"]["allow"]
+
+
+@pytest.mark.parametrize(
+    ("override", "uid", "expected"),
+    [("cc-temp", 1000, "cc-temp"), (None, 1000, "/tmp/claude-1000"), (None, 4242, "/tmp/claude-4242")],
+)
+def test_ritual_works_in_claude_codes_temp_dir_wherever_it_is(tmp_path, override, uid, expected):
+    env, ws = _ritual_ready(tmp_path)
+    env.pop("CLAUDE_CODE_TMPDIR", None)
+    if override is not None:
+        env["CLAUDE_CODE_TMPDIR"] = str(tmp_path / override)
+        expected = str(tmp_path / override)
+    expected = os.path.realpath(expected)
+    start = _ritual_start(env, ws, uid=uid)
+    added = [start.argv[i + 1] for i, a in enumerate(start.argv) if a == "--add-dir"]
+    assert expected in added
+    assert f"Edit(/{expected}/**)" in _settings_of(start)["permissions"]["allow"]
 
 
 def test_ritual_launch_never_prompts(tmp_path):
@@ -2756,7 +2783,7 @@ def test_the_ritual_can_read_the_composed_plugin_tree_and_never_write_it(tmp_pat
     composed = Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "composed" / "claude_code"
     argv = start.argv
     granted = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
-    assert granted == [str(composed)]
+    assert str(composed) in granted
     settings = _settings_of(start)
     assert str(composed) not in settings["sandbox"]["filesystem"]["allowWrite"]
     assert str(composed) in settings["sandbox"]["filesystem"]["denyWrite"]
