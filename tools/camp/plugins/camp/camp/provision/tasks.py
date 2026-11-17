@@ -98,6 +98,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from .wrapper import TaskWrapper, WrapperError, stray_message, wrapped_argv
+
 # Per-step subprocess timeout applied when a task doesn't set its own
 # timeout_seconds. Mirrors the FETCH_TIMEOUT_SECONDS precedent in
 # reconcile.py: an unresponsive step must fail its task rather than hang
@@ -191,6 +193,41 @@ def _run_argv(
     return True, ""
 
 
+def _launch_argv(
+    argv: list[str], wrapper: TaskWrapper | None, context: Mapping[str, Any]
+) -> list[str]:
+    """`argv` as it must actually be spawned: behind the task wrapper, if any.
+
+    Raises WrapperError when the wrapper cannot be applied — the caller records
+    the step failed with that message and never spawns the bare argv.
+    """
+    if wrapper is None:
+        return argv
+    if wrapper.stray:
+        raise WrapperError(stray_message())
+    return wrapped_argv(
+        wrapper.raw,
+        argv,
+        worktree=context["worktree"],
+        member=str(context.get("member", context.get("slug", ""))),
+    )
+
+
+def _run_wrapped(
+    argv: list[str],
+    wrapper: TaskWrapper | None,
+    context: Mapping[str, Any],
+    *,
+    cwd: str,
+    timeout: float,
+) -> tuple[bool, str]:
+    try:
+        launch = _launch_argv(argv, wrapper, context)
+    except WrapperError as exc:
+        return False, _cap_excerpt(str(exc))
+    return _run_argv(launch, cwd=cwd, timeout=timeout)
+
+
 def run_member_tasks(
     tasks: list[Mapping[str, Any]],
     phase: str,
@@ -198,6 +235,7 @@ def run_member_tasks(
     completed: Mapping[str, str],
     *,
     task_deadline_seconds: float | None = None,
+    wrapper: TaskWrapper | None = None,
 ) -> list[TaskResult]:
     """Run a member's tasks matching `phase`, in order.
 
@@ -217,6 +255,12 @@ def run_member_tasks(
     time (cleanup plus steps); exceeding it yields state="over-budget"
     instead of running the remaining steps. This never raises TaskError, even
     for a required task — see the module docstring.
+
+    `wrapper`, when given, wraps every step AND every retry cleanup (both run
+    arbitrary commands inside the member's worktree): the spawned argv is the
+    substituted wrapper followed by the step argv. A wrapper that cannot be
+    applied fails the step (or cleanup) with the reason as its stderr excerpt;
+    the unwrapped argv never runs. See camp.provision.wrapper.
     """
     results: list[TaskResult] = []
     member = str(context.get("member", context.get("slug", "<unknown>")))
@@ -244,7 +288,9 @@ def run_member_tasks(
         cleanup = task.get("cleanup")
         if prior_state == "failed" and cleanup:
             argv = substitute_step(cleanup, context)
-            ok, excerpt = _run_argv(argv, cwd=worktree, timeout=timeout)
+            ok, excerpt = _run_wrapped(
+                argv, wrapper, context, cwd=worktree, timeout=timeout
+            )
             if not ok:
                 failing_step = argv
                 stderr_excerpt = excerpt
@@ -262,7 +308,9 @@ def run_member_tasks(
                         break
                     step_timeout = min(timeout, remaining)
 
-                ok, excerpt = _run_argv(argv, cwd=worktree, timeout=step_timeout)
+                ok, excerpt = _run_wrapped(
+                    argv, wrapper, context, cwd=worktree, timeout=step_timeout
+                )
                 if not ok:
                     # A clamped step (step_timeout < its own timeout_seconds)
                     # that actually ran out the clock is a budget overrun, not

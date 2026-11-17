@@ -617,9 +617,11 @@ def _provision_member_and_flip(
         _tasks_map_from_results,
         _warn_optional_task_failures,
     )
+    from .recorded_wrapper import restore_manifest_wrapper
     from .tasks import TaskError
 
     name = member["name"]
+    restore_manifest_wrapper(mpath)
     completed = _completed_from_tasks_map(entry.get("tasks"))
     tasks_kwarg: dict[str, Any] | None = None
     try:
