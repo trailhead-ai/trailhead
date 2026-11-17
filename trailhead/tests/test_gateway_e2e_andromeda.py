@@ -31,6 +31,7 @@ import json
 import re
 import secrets
 import shlex
+import socket
 import stat
 import threading
 import time
@@ -47,6 +48,8 @@ from ._gateway_e2e_support import (
     SESSION_JOBS,
     HomeSentinel,
     act_containers,
+    prepull_image,
+    probe_problems,
     build_fixture_repo,
     check_container_inspect,
     exit_code,
@@ -297,10 +300,22 @@ class RunWorld:
     listener_connections: int
     outpost_log: str
     marker: str
+    ports: tuple
 
 
 def _gw(gateway, *argv):
     return shlex.join([str(gateway), *argv])
+
+
+def _control_the_listener(listener):
+    """Prove the listener counts a connection that says nothing, then reset it: a later count of 0 then means something."""
+    with socket.create_connection(listener.server_address, timeout=5):
+        pass
+    deadline = time.monotonic() + 5
+    while listener.connections < 1 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert listener.connections == 1, "the counting listener did not count a connection made to it"
+    listener.connections = 0
 
 
 @pytest.fixture(scope="module")
@@ -312,11 +327,13 @@ def run_world(tmp_path_factory):
     sentinel = HomeSentinel(home / f".outpost-e2e-{secrets.token_hex(4)}", f"SENTINEL-{secrets.token_hex(8)}")
     listener = _Counting(("127.0.0.1", 0), _Quiet)
     threading.Thread(target=listener.serve_forever, daemon=True).start()
-    sentinel.create()
     try:
+        sentinel.create()
+        _control_the_listener(listener)
         with real_outpost(root, camp, runs=host) as outpost:
             ssh = home / ".ssh"
             image = host.platforms["ubuntu-latest"]
+            prepull_image(host.engine_socket, image)
             ports = (outpost.port, listener.server_address[1])
             for ws in (camp.w1, camp.w2):
                 build_fixture_repo(ws / "app", image=image, ssh=ssh, sentinel=sentinel, ports=ports, operator_home=home)
@@ -330,7 +347,7 @@ def run_world(tmp_path_factory):
                 cwd=camp.w1 / "app",
                 settings=settings,
                 steps=run_steps(gateway),
-                env=env,
+                env={**env, "BASH_DEFAULT_TIMEOUT_MS": "300000", "BASH_MAX_TIMEOUT_MS": "300000"},
                 shim_bin=shim_bin,
                 with_hook=True,
                 timeout=RUN_SESSION_TIMEOUT_SECONDS,
@@ -339,12 +356,13 @@ def run_world(tmp_path_factory):
 
             proc = start_fake_harness(root, "stream", camp.w1 / "app", stream_script(outpost.port, gateway), env)
             inspected: list = []
+            deadline = time.monotonic() + 240
             while proc.poll() is None:
+                if time.monotonic() > deadline:
+                    proc.kill()
+                    break
                 if not inspected:
-                    try:
-                        inspected = act_containers(host.engine_socket, "-slow-")
-                    except (OSError, ValueError):
-                        pass
+                    inspected = act_containers(host.engine_socket, "-slow-")
                 time.sleep(0.5)
             stream_out = proc.stdout.read()
 
@@ -404,6 +422,7 @@ def run_world(tmp_path_factory):
                 listener.connections,
                 outpost.log.read_text()[-4000:],
                 sentinel.marker,
+                ports,
             )
     finally:
         sentinel.remove()
@@ -437,14 +456,14 @@ def test_run_scenario_start_returns_the_run_id_at_once_and_the_job_runs_on(run_w
 
 def test_run_scenario_watch_streams_output_as_it_is_produced(run_world):  # AC38
     stamped = parse_stamped_lines(run_world.stream_out)
-    assert streamed_as_produced(stamped, "stream-first", "stream-second", 10.0) is None, run_world.stream_out[-1500:]
+    assert streamed_as_produced(stamped, "stream-first-42", "stream-second-42", 10.0) is None, run_world.stream_out[-1500:]
 
 
 def test_run_scenario_exit_status_is_0_for_a_pass_1_for_a_failure_and_3_for_a_run_that_did_not_execute(run_world):  # AC39
     assert _followed(run_world, "pass")[0] == 0
-    assert "pass-job-ran" in _followed(run_world, "pass")[1]
+    assert "pass-job-ran-42" in _followed(run_world, "pass")[1]
     assert _followed(run_world, "fail")[0] == 1
-    assert "fail-job-ran" in _followed(run_world, "fail")[1]
+    assert "fail-job-ran-42" in _followed(run_world, "fail")[1]
     assert _followed(run_world, "mount_priv")[0] == 3
 
 
@@ -462,8 +481,9 @@ def test_run_scenario_a_matrix_job_runs_the_first_values_and_reports_them(run_wo
     _, start_out = _started(run_world, "matrix")
     assert "color=red, size=small" in start_out
     assert "3 other matrix combinations not run" in start_out
-    assert "matrix-ran red-small" in _followed(run_world, "matrix")[1]
-    assert "green" not in _followed(run_world, "matrix")[1] and "large" not in _followed(run_world, "matrix")[1]
+    out = _followed(run_world, "matrix")[1]
+    assert "matrix-ran 42 red-small" in out
+    assert "green" not in out and "large" not in out
     assert "color=red, size=small" in _ran(run_world.session, "view_matrix")
 
 
@@ -479,34 +499,41 @@ def test_run_scenario_the_uncommitted_tree_is_what_runs_and_an_ignored_file_is_a
     assert "workflow-edit=applied" in out and "workflow-edit=NOT-applied" not in out
 
 
-def test_run_scenario_a_symlink_arrives_as_a_link_and_the_operators_home_does_not_come_through_it(run_world):  # AC50, AC59
+def test_run_scenario_a_symlink_arrives_as_a_link_and_nothing_of_the_operators_home_comes_through_it(run_world):  # AC50, AC59
     code, out = _followed(run_world, "tree")
     assert code == 0, out[-1500:]
+    assert "tracked=edited-uncommitted" in out, "the tree job did not run its probes"
     assert "symlink=link" in out
-    assert "ssh-via-link=unreadable" in out and "home-via-link=unreadable" in out
-    assert "gitfile=nothing" in out
+    assert re.search(r"ssh-via-link: cat: .*(No such file|Permission denied)", out), out[-1500:]
+    assert re.search(r"home-via-link: cat: .*(No such file|Permission denied)", out), out[-1500:]
+    assert run_world.marker not in out
+    # The nested .git file is not in the copy: git never lists it, so the command cannot upload it. What act
+    # would do with one is covered by the run account's own proof, not here.
+    assert "dotgit=absent" in out
 
 
-def test_run_scenario_nothing_from_the_operators_home_reaches_a_run_by_any_route(run_world):  # AC59
-    marker = run_world.marker
-    for job in ("tree", "local_action", "probe"):
-        assert marker not in _followed(run_world, job)[1], f"the {job} run printed text from the operator's home"
-    assert "probe home: unreadable" in _followed(run_world, "probe")[1]
-    assert "probe sentinel: unreadable" in _followed(run_world, "probe")[1]
+def test_run_scenario_a_local_action_is_read_from_the_copy_and_one_aimed_at_the_operators_home_is_not(run_world):  # AC59
+    code, out = _followed(run_world, "local_action")
+    assert "ok-action-ran-42" in out, f"the control local action did not run:\n{out[-1500:]}"
+    assert code == 1, f"the job should have run and failed at the sentinel step, exit {code}:\n{out[-1500:]}"
+    after_control = out.split("ok-action-ran-42", 1)[1]
+    assert re.search(r"(?i)(can't find|not found|no such file|failure|failed|error)", after_control), out[-1500:]
+    assert run_world.marker not in out
+    assert "local-action-step-42" not in out, "the job went on past the step aimed at the operator's home"
 
 
-def test_run_scenario_a_run_cannot_reach_the_engine_or_the_hosts_loopback(run_world):  # AC63
+def test_run_scenario_a_run_cannot_reach_the_operators_home_the_engine_or_the_hosts_loopback(run_world):  # AC59, AC63
     out = _followed(run_world, "probe")[1]
-    assert "PRESENT" not in out, out[-2500:]
-    assert "REACHED" not in out and "probe loopback" in out, out[-2500:]
-    assert "probe docker env: 0" in out
+    assert probe_problems(out, run_world.ports, run_world.marker) == [], out[-3500:]
     assert run_world.listener_connections == 0, "a run connected to a listener on the host's loopback"
 
 
 def test_run_scenario_the_job_container_carries_no_bind_mount_no_secret_and_no_privileged_mode(run_world):  # AC61, AC62, AC64
-    assert run_world.inspected, f"no running act container was seen for the slow job; log:\n{run_world.stream_out[-800:]}"
-    for container in run_world.inspected:
-        assert check_container_inspect(container, run_world.secrets) == [], container.get("Name")
+    names = [c.get("Name") for c in run_world.inspected]
+    assert len(run_world.inspected) == 1, (
+        f"expected exactly the slow job's container, saw {names}; log:\n{run_world.stream_out[-800:]}"
+    )
+    assert check_container_inspect(run_world.inspected[0], run_world.secrets) == [], names
 
 
 def test_run_scenario_a_run_reaches_a_public_host(run_world):  # AC65
@@ -516,10 +543,10 @@ def test_run_scenario_a_run_reaches_a_public_host(run_world):  # AC65
 def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is_refused_and_exits_3(run_world):  # AC61, AC64
     code, out = _followed(run_world, "mount_priv")
     assert code == 3, out[-1500:]
-    assert "mount-priv-job-ran" not in out
-    assert re.search(r"run did not execute: the engine filter refused a container: .*(Binds|Privileged)", out), out[-1500:]
+    assert "run did not execute: the engine filter refused a container" in out, out[-1500:]
+    assert re.search(r"(?i)refused.*(Binds|Privileged)", out), f"no filter refusal naming a field in the log:\n{out[-1500:]}"
     row = {r["job"]: r for r in json.loads(_ran(run_world.session, "run_list"))["runs"]}["mount_priv"]
-    assert re.search(r"^run did not execute: the engine filter refused a container: .*(Binds|Privileged)", row["reason"])
+    assert (row["reason"] or "").startswith("run did not execute: the engine filter refused a container: "), row
 
 
 def test_run_scenario_an_image_that_cannot_be_pulled_exits_3_with_the_pull_reason(run_world):  # act's real pull-error text

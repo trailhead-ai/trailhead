@@ -27,6 +27,7 @@ import sys
 import time
 import tomllib
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -116,11 +117,13 @@ class RealOutpost:
             db.close()
 
     def runs(self) -> list[tuple[int, str, str, str, str | None, str | None]]:
-        """``(id, workspace, job, state, result, reason)`` of every run, in id order."""
+        """``(id, workspace, job, state, result, reason)`` of every run, in id order (no reason before runs could not execute)."""
         db = sqlite3.connect(f"file:{self.state / 'state.db'}?mode=ro", uri=True)
         try:
+            columns = {row[1] for row in db.execute("PRAGMA table_info(gateway_runs)")}
+            reason = "reason" if "reason" in columns else "NULL"
             return db.execute(
-                "SELECT id, workspace, job, state, result, reason FROM gateway_runs ORDER BY id"
+                f"SELECT id, workspace, job, state, result, {reason} FROM gateway_runs ORDER BY id"
             ).fetchall()
         finally:
             db.close()
@@ -659,7 +662,13 @@ def copy_operator_config(source: Path, dest_dir: Path) -> Path:
 
 @dataclass(frozen=True)
 class HomeSentinel:
-    """A world-readable folder in the operator's home holding text no run may ever show: only the home's mode keeps it out."""
+    """A world-readable folder in the operator's home holding text no run may ever show: only the home's mode keeps it out.
+
+    The scenario aims at it with a symlink, a ``./``-relative local action step, and a direct read from the
+    job. The ``HEAD`` and ``config`` files make it look like a git directory, but the nested ``.git`` file
+    that names it is never uploaded (git does not list it), so that route is covered by the run account's
+    own proof only.
+    """
 
     path: Path
     marker: str
@@ -689,12 +698,12 @@ jobs:
   pass:
     runs-on: ubuntu-latest
     steps:
-      - run: echo pass-job-ran
+      - run: echo "pass-job-ran-$((6*7))"
   fail:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          echo fail-job-ran
+          echo "fail-job-ran-$((6*7))"
           exit 1
   matrix:
     runs-on: ubuntu-latest
@@ -703,46 +712,52 @@ jobs:
         color: [red, green]
         size: [small, large]
     steps:
-      - run: echo "matrix-ran ${{ matrix.color }}-${{ matrix.size }}"
+      - run: echo "matrix-ran $((6*7)) ${{ matrix.color }}-${{ matrix.size }}"
   tree:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "workflow-edit=NOT-applied"
+      - run: echo "workflow-edit=NOT-ap""plied"
       - run: |
-          echo "event=${{ github.event_name }}"
+          echo "event=$GITHUB_EVENT_NAME"
           echo "tracked=$(cat tracked.txt)"
           echo "untracked=$(cat untracked.txt)"
-          if [ -e ignored.txt ]; then echo "ignored=present"; else echo "ignored=absent"; fi
-          if [ -L link-to-ssh ]; then echo "symlink=link"; else echo "symlink=not-a-link"; fi
-          if cat link-to-ssh/* >/dev/null 2>&1; then echo "ssh-via-link=READ"; else echo "ssh-via-link=unreadable"; fi
-          if cat link-to-home/secret.txt 2>/dev/null; then echo "home-via-link=READ"; else echo "home-via-link=unreadable"; fi
-          if git -C vendored config --list 2>/dev/null | grep -q @MARKER@; then echo "gitfile=READ"; else echo "gitfile=nothing"; fi
+          if [ -e ignored.txt ]; then echo "ignored=pre""sent"; else echo "ignored=ab""sent"; fi
+          if [ -L link-to-ssh ]; then echo "symlink=li""nk"; else echo "symlink=not-a-""link"; fi
+          echo "ssh-via-link: $(cat link-to-ssh/* 2>&1 | head -1)"
+          echo "home-via-link: $(cat link-to-home/secret.txt 2>&1 | head -1)"
+          if [ -e vendored/.git ]; then echo "dotgit=pre""sent"; else echo "dotgit=ab""sent"; fi
   local_action:
     runs-on: ubuntu-latest
     steps:
+      - uses: ./ok-action
       - uses: @LOCAL_ACTION@
-      - run: echo local-action-step-done
+      - run: echo "local-action-step-$((6*7))"
   probe:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          if ls "@HOME@" >/dev/null 2>&1; then echo "probe home: READ"; else echo "probe home: unreadable"; fi
-          if cat "@SENTINEL@/secret.txt" >/dev/null 2>&1; then echo "probe sentinel: READ"; else echo "probe sentinel: unreadable"; fi
+          echo "probe control: $(ls / | wc -l)"
+          if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; then echo "probe control public: re""ached"; else echo "probe control public: unre""ached"; fi
+          echo "probe home: $(ls "@HOME@" 2>&1 | head -1)"
+          echo "probe sentinel read: $(cat "@SENTINEL@/secret.txt" 2>&1 | head -1)"
           for s in /var/run/docker.sock /run/docker.sock @ENGINE@; do
-            if [ -e "$s" ]; then echo "probe engine socket $s: PRESENT"; else echo "probe engine socket $s: absent"; fi
+            if [ -e "$s" ]; then echo "probe engine socket $s: pre""sent"; else echo "probe engine socket $s: ab""sent"; fi
           done
-          echo "probe mounts naming a socket: $(grep -c 'sock' /proc/self/mountinfo || true)"
           echo "probe docker env: $(env | grep -ci docker || true)"
-          for h in 127.0.0.1 $(ip route 2>/dev/null | awk '/default/ {print $3}') 10.0.2.2 172.17.0.1 host.docker.internal; do
+          hex=$(awk '$2=="00000000" {print $3; exit}' /proc/net/route)
+          gw=""
+          if [ -n "$hex" ]; then gw=$(printf '%d.%d.%d.%d' 0x${hex:6:2} 0x${hex:4:2} 0x${hex:2:2} 0x${hex:0:2}); fi
+          echo "probe gateway: $gw"
+          for h in 127.0.0.1 $gw 10.0.2.2 172.17.0.1 host.docker.internal; do
             for p in @OUTPOST_PORT@ @LISTENER_PORT@; do
-              if timeout 3 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null; then echo "probe loopback $h:$p: REACHED"; else echo "probe loopback $h:$p: refused"; fi
+              if timeout 3 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null; then echo "probe loopback $h:$p: REA""CHED"; else echo "probe loopback $h:$p: ref""used"; fi
             done
           done
   public:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; then echo "public github.com:443: reached"; else echo "public github.com:443: unreachable"; fi
+          if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; then echo "public github.com:443: re""ached"; else echo "public github.com:443: unre""achable"; fi
   mount_priv:
     runs-on: ubuntu-latest
     container:
@@ -762,9 +777,18 @@ jobs:
   slow:
     runs-on: ubuntu-latest
     steps:
-      - run: echo stream-first
+      - run: echo "stream-first-$((6*7))"
       - run: sleep 20
-      - run: echo stream-second
+      - run: echo "stream-second-$((6*7))"
+"""
+
+OK_ACTION = """\
+name: ok
+runs:
+  using: composite
+  steps:
+    - run: echo "ok-action-ran-$((6*7))"
+      shell: bash
 """
 
 
@@ -783,7 +807,8 @@ def build_fixture_repo(
 ) -> Path:
     """A git repo whose working tree differs from its commit in every way a run must honour.
 
-    Committed: ``tracked.txt``, a ``.gitignore``, and the workflow whose ``tree`` job says the
+    Committed: ``tracked.txt``, a ``.gitignore``, ``ok-action`` (a local action that must run: the control for the
+    sentinel's), and the workflow whose ``tree`` job says the
     workflow edit was not applied. Then, uncommitted: ``tracked.txt`` edited, the workflow edited to say it
     was, an untracked file, an ignored file, symlinks to *ssh* and to the *sentinel* folder, and a
     nested folder whose ``.git`` file points into the sentinel folder.
@@ -792,7 +817,7 @@ def build_fixture_repo(
     env = make_hermetic_git_env(os.environ, path.parent)
     workflow_file = path / ".github" / "workflows" / "ci.yml"
     workflow_file.parent.mkdir(parents=True)
-    local_action = "../" * 12 + str(sentinel.path).lstrip("/")
+    local_action = "./" + "../" * 12 + str(sentinel.path).lstrip("/")
     workflow = (
         WORKFLOW.replace("@IMAGE@", image)
         .replace("@MARKER@", sentinel.marker)
@@ -804,13 +829,15 @@ def build_fixture_repo(
         .replace("@LISTENER_PORT@", str(ports[1]))
     )
     workflow_file.write_text(workflow)
+    (path / "ok-action").mkdir()
+    (path / "ok-action" / "action.yml").write_text(OK_ACTION)
     (path / "tracked.txt").write_text("committed\n")
     (path / ".gitignore").write_text("ignored.txt\n")
     _git(path, env, "init", "-q", "-b", "main")
     _git(path, env, "add", "-A")
     _git(path, env, "commit", "-q", "-m", "baseline")
     (path / "tracked.txt").write_text("edited-uncommitted\n")
-    workflow_file.write_text(workflow.replace("workflow-edit=NOT-applied", "workflow-edit=applied"))
+    workflow_file.write_text(workflow.replace('workflow-edit=NOT-ap""plied', 'workflow-edit=ap""plied'))
     (path / "untracked.txt").write_text("new-file\n")
     (path / "ignored.txt").write_text("ignored\n")
     (path / "link-to-ssh").symlink_to(ssh)
@@ -854,29 +881,6 @@ def streamed_as_produced(stamped: list[tuple[float, str]], early: str, late: str
     return None
 
 
-def check_container_inspect(inspect: dict, secrets: list[str]) -> list[str]:
-    """What a container's engine record shows reaching it from the host; secrets are named by variable, never printed."""
-    problems = []
-    host = inspect.get("HostConfig") or {}
-    mounts = [*(inspect.get("Mounts") or []), *(host.get("Mounts") or [])]
-    for m in mounts:
-        if m.get("Type") not in ("volume", "tmpfs"):
-            problems.append(f"{m.get('Type')} mount of {m.get('Source')} at {m.get('Destination')}")
-        if ".sock" in f"{m.get('Source', '')}{m.get('Destination', '')}":
-            problems.append(f"an engine or other socket is mounted at {m.get('Destination')}")
-    if host.get("Binds"):
-        problems.append(f"HostConfig.Binds is {host['Binds']}")
-    if host.get("Privileged"):
-        problems.append("the container is privileged")
-    for entry in (inspect.get("Config") or {}).get("Env") or []:
-        name, _, value = entry.partition("=")
-        if name in ("GITHUB_TOKEN", "SSH_AUTH_SOCK") and value:
-            problems.append(f"{name} is set in the container")
-        elif any(s and s in value for s in secrets):
-            problems.append(f"{name} holds a secret Outpost minted")
-    return problems
-
-
 # --- the run scenario: the session's steps -----------------------------------------------------------------
 
 RUN_SESSION_TIMEOUT_SECONDS = 900
@@ -916,15 +920,137 @@ def stream_script(port: int, gateway: Path) -> str:
 
 
 def act_containers(engine_socket: str, name_part: str) -> list[dict]:
-    """The engine's record of each running act container whose name contains *name_part*."""
-    status, body = engine_request(engine_socket, "GET", "/containers/json")
-    if status != 200:
+    """The engine's record of each running act container whose name contains *name_part*; empty when the engine will not say."""
+    try:
+        status, body = engine_request(engine_socket, "GET", "/containers/json")
+        if status != 200:
+            return []
+        found = []
+        for c in json.loads(body):
+            names = c.get("Names") or []
+            if any(n.startswith("/act-") and name_part in n for n in names):
+                status, detail = engine_request(engine_socket, "GET", f"/containers/{c['Id']}/json")
+                if status == 200:
+                    found.append(json.loads(detail))
+        return found
+    except (OSError, ValueError, http.client.HTTPException):
         return []
-    found = []
-    for c in json.loads(body):
-        names = c.get("Names") or []
-        if any(n.startswith("/act-") and name_part in n for n in names):
-            status, detail = engine_request(engine_socket, "GET", f"/containers/{c['Id']}/json")
-            if status == 200:
-                found.append(json.loads(detail))
-    return found
+
+
+def split_image_ref(ref: str) -> tuple[str, str]:
+    """``(name, tag or digest)`` as the engine's pull endpoint takes them."""
+    if "@" in ref:
+        name, digest = ref.split("@", 1)
+        last = name.rsplit("/", 1)[-1]
+        if ":" in last:
+            name = name[: -(len(last) - last.index(":"))]
+        return name, digest
+    last = ref.rsplit("/", 1)[-1]
+    if ":" in last:
+        name, tag = ref.rsplit(":", 1)
+        return name, tag
+    return ref, "latest"
+
+
+def pull_stream_error(body: bytes) -> str | None:
+    """The first error in an engine pull's progress stream (one JSON object per line), or None."""
+    for line in body.decode(errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and isinstance(event.get("error"), str):
+            return event["error"]
+    return None
+
+
+def prepull_image(engine_socket: str, ref: str) -> None:
+    """Pull the pinned job image through the run engine, so no job's time goes on the first download."""
+    name, tag = split_image_ref(ref)
+    status, body = engine_request(
+        engine_socket, "POST", f"/images/create?fromImage={urllib.parse.quote(name, safe='')}&tag={urllib.parse.quote(tag, safe='')}", timeout=900
+    )
+    error = pull_stream_error(body)
+    if status != 200 or error is not None:
+        raise AssertionError(f"the run engine could not pull {ref}: status {status}, {error or body[-300:]!r}")
+
+
+ENGINE_SOCKET_PATH = "/var/lib/outpost-runner-engine/docker.sock"
+SOCKETS_PROBED = ("/var/run/docker.sock", "/run/docker.sock", ENGINE_SOCKET_PATH)
+TARGETS_PROBED = ("127.0.0.1", "10.0.2.2", "172.17.0.1", "host.docker.internal")
+
+
+def probe_problems(log: str, ports: tuple[int, int], marker: str) -> list[str]:
+    """What is wrong with the ``probe`` job's log: a control that did not run, a probe that got in, or a line that is missing."""
+    problems = []
+
+    def line(pattern: str) -> re.Match | None:
+        return re.search(pattern, log)
+
+    control = line(r"probe control: (\d+)")
+    if control is None or int(control.group(1)) <= 0:
+        problems.append("the control (a listing of / that must be non-empty) did not run or listed nothing")
+    if line(r"probe control public: reached") is None:
+        problems.append("the public-host control did not print reached, so the connect probe cannot be trusted to detect a connection")
+    if line(r"probe home: ls: .*(No such file|Permission denied)") is None:
+        problems.append("the home read did not print a refusal from ls")
+    if line(r"probe sentinel read: cat: .*(No such file|Permission denied)") is None:
+        problems.append("the sentinel read did not print a refusal from cat")
+    for sock in SOCKETS_PROBED:
+        if line(rf"probe engine socket {re.escape(sock)}: absent") is None:
+            problems.append(f"engine socket {sock} was not reported absent")
+    if line(r"probe docker env: 0\b") is None:
+        problems.append("the docker env count was not 0 (or not printed)")
+    gateway = line(r"probe gateway: (\d+\.\d+\.\d+\.\d+)")
+    targets = list(TARGETS_PROBED)
+    if gateway is None:
+        problems.append("the job printed no gateway address to probe")
+    elif gateway.group(1) not in targets:
+        targets.append(gateway.group(1))
+    for host in targets:
+        for port in ports:
+            if line(rf"probe loopback {re.escape(host)}:{port}: refused") is None:
+                problems.append(f"{host}:{port} was not reported refused")
+    if marker in log:
+        problems.append("text from the operator's home appears in the log")
+    return problems
+
+
+
+
+def check_container_inspect(inspect: dict, secrets: list[str]) -> list[str]:
+    """What a container's engine record shows reaching it from the host; secrets are named by variable, never printed.
+
+    A record that is cut down proves nothing, so one without ``HostConfig`` or ``Config.Env``, without a volume
+    mount (act's job containers always have some), or with no secrets to look for, is itself a problem.
+    """
+    problems = []
+    host = inspect.get("HostConfig")
+    env = (inspect.get("Config") or {}).get("Env")
+    if not isinstance(host, dict):
+        problems.append("the record has no HostConfig")
+        host = {}
+    if not isinstance(env, list):
+        problems.append("the record has no Config.Env")
+        env = []
+    if not secrets:
+        problems.append("there are no secrets to look for in the environment")
+    mounts = [*(inspect.get("Mounts") or []), *(host.get("Mounts") or [])]
+    if not any(m.get("Type") == "volume" for m in mounts):
+        problems.append("the record shows no volume mount, so it may not be the whole record")
+    for m in mounts:
+        if m.get("Type") not in ("volume", "tmpfs"):
+            problems.append(f"{m.get('Type')} mount of {m.get('Source')} at {m.get('Destination')}")
+        if ".sock" in f"{m.get('Source', '')}{m.get('Destination', '')}":
+            problems.append(f"an engine or other socket is mounted at {m.get('Destination')}")
+    if host.get("Binds"):
+        problems.append(f"HostConfig.Binds is {host['Binds']}")
+    if host.get("Privileged"):
+        problems.append("the container is privileged")
+    for entry in env:
+        name, _, value = entry.partition("=")
+        if name in ("GITHUB_TOKEN", "SSH_AUTH_SOCK") and value:
+            problems.append(f"{name} is set in the container")
+        elif any(x and x in value for x in secrets):
+            problems.append(f"{name} holds a secret Outpost minted")
+    return problems
