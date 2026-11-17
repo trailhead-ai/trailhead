@@ -235,12 +235,13 @@ def wait(request_id: str, timeout_seconds: int) -> int:
     deadline = CLOCK() + timeout_seconds
     while True:
         finished = _finished(path)
-        if finished is None and not _worker_alive(path):
+        gone = finished is None and not _worker_alive(path)
+        if gone:
             finished = _finished(path)
         if finished is not None:
             return _render(request_id, finished, out)
         have = _case_files(path, cases)
-        if not _worker_alive(path):
+        if gone:
             return _render(request_id, [have.get(c["case"]) or req.not_run_case(
                 c["case"], c["runs"], req.INTERRUPTED) for c in cases], out)
         if CLOCK() >= deadline:

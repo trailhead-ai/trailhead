@@ -830,3 +830,26 @@ class TestTimedOutCase:
         rc, out, _ = ws.wait(request_id, seconds=5)
         assert rc == 3
         assert "not run: timeout" in out and "next step: resubmit" in out
+
+
+class TestWorkerFinishingDuringWait:
+    def test_a_result_written_between_the_liveness_checks_is_reported_not_interrupted(self, ws, monkeypatch):
+        request_id, path = request.create_request({
+            "repo": str(ws.repo), "plugin_root": "plugins/p",
+            "cases": [{"case": "c1", "runs": 1, "pass_at": 1, "runner": MAPPING["runner"]}]})
+        calls = []
+
+        def alive(request_path):
+            calls.append(request_path)
+            if len(calls) == 1:
+                return True
+            request.write_json(path / "result.json", {"schema_version": 1, "cases": [
+                local._write_case(path / "results", request.not_run_case("c1", 1, "runs-errored"))]})
+            return False
+
+        (path / "results").mkdir()
+        monkeypatch.setattr(local, "_worker_alive", alive)
+        monkeypatch.setattr(local, "POLL_SECONDS", 0.01)
+        rc, out, _ = ws.wait(request_id, seconds=5)
+        assert rc == 3
+        assert "not run: runs-errored" in out and "interrupted" not in out
