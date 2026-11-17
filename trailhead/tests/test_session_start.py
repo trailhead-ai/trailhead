@@ -1452,6 +1452,7 @@ def test_setup_sandbox_only_works_before_any_workspace_exists(tmp_path, monkeypa
     [
         (RITUAL_ROLE, ["--workspace", "WS"]),
         (RITUAL_ROLE, ["--prompt-file", "PROMPT"]),
+        (RITUAL_ROLE, ["--vault", "work"]),
         ("hub", []),
     ],
 )
@@ -2277,8 +2278,17 @@ def _ritual_roots(env, ws) -> tuple[str, str, str]:
     return tuple(str(p) for p in r.writable)  # workspace, lore-state, cache
 
 
-def _ritual_resolved(env, ws, profile=RITUAL_PROFILE, platform="linux"):
-    return resolve_profile(profile, "a", env=env, platform=platform, workspace=str(ws))
+RITUAL_VAULT = "work"
+
+
+def _lore_vault_dirs(env, *names) -> None:
+    for name in names:
+        (Path(env["LORE_STATE_DIR"]) / "vaults" / name).mkdir(parents=True, exist_ok=True)
+
+
+def _ritual_resolved(env, ws, profile=RITUAL_PROFILE, platform="linux", vault=RITUAL_VAULT):
+    _lore_vault_dirs(env, vault)
+    return resolve_profile(profile, "a", env=env, platform=platform, workspace=str(ws), vault=vault)
 
 
 def _ritual_user(env, ws, **extra) -> None:
@@ -2299,10 +2309,12 @@ def _ritual_ready(tmp_path, *, launch="default"):
     return env, ws
 
 
-def _ritual_start(env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, account=None, **extra):
+def _ritual_start(
+    env, ws, *, profile=RITUAL_PROFILE, platform="linux", prompt=None, account=None, vault=RITUAL_VAULT, **extra
+):
     extra.setdefault("session_dir", Path(env["OUTPOST_STATE_DIR"]).resolve() / "sessions" / "rit-1")
     return ClaudeCodeHarness().session_start(
-        _ritual_resolved(env, ws, profile, platform), ws, prompt,
+        _ritual_resolved(env, ws, profile, platform, vault), ws, prompt,
         interactive=False, account=account, env=env, platform=platform, **extra,
     )
 
@@ -2324,11 +2336,14 @@ def _other_account(env, name="b", launch="~/acct-b"):
     write_hub_config(HubConfig(name=f"Hub {name}", account=name, launch_account=launch), env=env, platform="linux")
 
 
-def _ritual_cli(monkeypatch, env, ws, *extra, session="rit-1"):
+def _ritual_cli(monkeypatch, env, ws, *extra, session="rit-1", vault=RITUAL_VAULT):
+    if vault is not None:
+        _lore_vault_dirs(env, vault)
     return _run_cli(
         monkeypatch, env,
         ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json",
-         *([f"--session={session}"] if session is not None else []), *extra],
+         *([f"--session={session}"] if session is not None else []),
+         *([f"--vault={vault}"] if vault is not None else []), *extra],
     )
 
 
@@ -3046,3 +3061,169 @@ def test_setup_sandbox_only_still_equals_the_full_ritual_sections_with_the_crede
     assert only == full
     assert str(Path(env["HOME"]).resolve() / ".ssh") in only["denied_reads"]
 
+
+
+# -- a ritual writes records only in its spec's vault (F29) -------------------
+
+
+def _vault_root_rules(env, vaults):
+    lore = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    return [lore / v for v in vaults]
+
+
+@pytest.mark.parametrize(
+    "named, denied",
+    [("a", ["b", "c"]), ("b", ["a", "c"]), ("c", ["a", "b"])],
+)
+def test_ritual_start_write_denies_every_vault_but_the_named_one(tmp_path, named, denied):
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "a", "b", "c")
+    settings = _settings_of(_ritual_start(env, ws, vault=named))
+    deny_write = settings["sandbox"]["filesystem"]["denyWrite"]
+    rules = settings["permissions"]["deny"]
+    for vault in _vault_root_rules(env, denied):
+        assert str(vault) in deny_write
+        assert f"Edit(/{vault})" in rules and f"Edit(/{vault}/**)" in rules
+    kept = _vault_root_rules(env, [named])[0]
+    assert str(kept) not in deny_write
+    assert f"Edit(/{kept}/**)" not in rules
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    assert str(lore) in settings["sandbox"]["filesystem"]["allowWrite"]
+    assert str(lore) not in deny_write and str(lore / "vaults") not in deny_write
+
+
+def test_ritual_start_denies_the_default_vault_when_another_is_named(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "default", "spec-vault")
+    deny_write = _settings_of(_ritual_start(env, ws, vault="spec-vault"))["sandbox"]["filesystem"]["denyWrite"]
+    assert str(Path(env["LORE_STATE_DIR"]).resolve() / "vaults" / "default") in deny_write
+
+
+def test_ritual_start_does_not_deny_a_symlinked_vault_entry_that_resolves_to_the_named_vault(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "a", "b")
+    vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    (vaults / "alias").symlink_to(vaults / "a")
+    deny_write = _settings_of(_ritual_start(env, ws, vault="a"))["sandbox"]["filesystem"]["denyWrite"]
+    assert str(vaults / "a") not in deny_write
+    assert str(vaults / "b") in deny_write
+
+
+def _hostile_vault_values(env):
+    vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    outside = Path(env["LORE_STATE_DIR"]).resolve().parent / "outside-vault"
+    outside.mkdir()
+    (vaults / "escape").symlink_to(outside)
+    (vaults / "alias-of-b").symlink_to(vaults / "b")
+    (vaults / "-odd").mkdir()
+    (vaults / "nest" / "deep").mkdir(parents=True)
+    return ["missing", "escape", "alias-of-b", "..", "-odd", "", "nest/deep", "work/../b"]
+
+
+@pytest.mark.parametrize("row", range(8))
+def test_cli_refuses_a_hostile_ritual_vault_and_writes_no_session_files(tmp_path, monkeypatch, capsys, row):
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "b")
+    value = _hostile_vault_values(env)[row]
+    rc = _run_cli(
+        monkeypatch, env,
+        ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json",
+         "--session=rit-1", f"--vault={value}"],
+    )
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert captured.err.startswith("trailhead: ") and "--vault" in captured.err
+    assert not (Path(env["OUTPOST_STATE_DIR"]) / "sessions" / "rit-1").exists()
+
+
+def test_cli_refuses_a_ritual_without_a_vault_and_names_the_fix(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    rc = _ritual_cli(monkeypatch, env, ws, vault=None)
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == ""
+    assert "--vault" in captured.err and "ritual" in captured.err
+
+
+def test_cli_ritual_start_with_a_vault_names_the_denied_vaults_in_its_settings(tmp_path, monkeypatch, capsys):
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "a", "b")
+    assert _ritual_cli(monkeypatch, env, ws, vault="a") == 0
+    out = json.loads(capsys.readouterr().out)
+    settings = json.loads(out["argv"][out["argv"].index("--settings") + 1])
+    vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    assert str(vaults / "b") in settings["sandbox"]["filesystem"]["denyWrite"]
+    assert str(vaults / "a") not in settings["sandbox"]["filesystem"]["denyWrite"]
+
+
+def test_cli_refuses_a_vault_for_the_hub(tmp_path, monkeypatch, capsys):
+    env, _ = _ritual_ready(tmp_path)
+    rc = _run_cli(monkeypatch, env, [*_HUB_ARGV, "--vault", "a"])
+    captured = capsys.readouterr()
+    assert rc != 0 and captured.out == "" and "--vault" in captured.err
+
+
+def test_the_hub_start_denies_no_vault_directory(tmp_path):
+    env = _fence(tmp_path)
+    _lore_vault_dirs(env, "a", "b")
+    lore = Path(env["LORE_STATE_DIR"]).resolve()
+    deny_write = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
+    for vault in ("a", "b"):
+        assert str(lore / "vaults" / vault) not in deny_write
+
+
+def _composed_craft_skill(tmp_path: Path, name: str) -> str:
+    from trailhead.capabilities import load_manifest
+    from trailhead.compose import apply_plan, compose_plan
+
+    manifest = load_manifest(Path(__file__).parent.parent.parent / "tools" / "craft" / "capabilities.toml")
+    dest = tmp_path / "composed"
+    apply_plan(compose_plan(manifest, {}, {name: None}, dest))
+    return (dest / "skills" / name / "SKILL.md").read_text()
+
+
+def _record_create_invocations(text: str) -> list[str]:
+    flat = re.sub(r"\\?\s*\n\s*", " ", text)
+    flat = re.sub(r"\s+", " ", flat)
+    return [m.group(0) for m in re.finditer(r"lore record create --kind.*?(?= < |`|$)", flat)]
+
+
+@pytest.mark.parametrize("skill, expected", [("slice", 1), ("plan", 3)])
+def test_the_composed_craft_skill_routes_every_record_create_through_the_spec_vault(tmp_path, skill, expected):
+    invocations = _record_create_invocations(_composed_craft_skill(tmp_path, skill))
+    assert len(invocations) == expected
+    for invocation in invocations:
+        assert "--vault <vault>" in invocation, invocation
+
+
+def test_the_record_create_scanner_flags_an_invocation_with_no_vault():
+    text = "```sh\nlore record create \\\n  --kind task --title 'x' --label l < <body>\n```"
+    assert _record_create_invocations(text) == ["lore record create --kind task --title 'x' --label l"]
+
+
+def _srt_run(settings_path: Path, command: str) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["srt", "-s", str(settings_path), "-c", command], capture_output=True, text=True, timeout=60
+    )
+
+
+@pytest.mark.seam_real
+def test_real_sandbox_refuses_a_write_into_a_vault_the_ritual_did_not_name(tmp_path):
+    if shutil.which("srt") is None:
+        pytest.skip("srt (the sandbox runtime) is not installed")
+    env, ws = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "a", "b")
+    fs = _settings_of(_ritual_start(env, ws, vault="a"))["sandbox"]["filesystem"]
+    srt_settings = tmp_path / "srt.json"
+    srt_settings.write_text(json.dumps({
+        "network": {"allowedDomains": [], "deniedDomains": []},
+        "filesystem": {"denyRead": [], "allowWrite": fs["allowWrite"], "denyWrite": fs["denyWrite"]},
+    }))
+    if _srt_run(srt_settings, "true").returncode != 0:
+        pytest.skip("the sandbox cannot start on this host")
+    vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
+    allowed = _srt_run(srt_settings, f"touch {vaults / 'a' / '.lore.lock'}")
+    denied = _srt_run(srt_settings, f"touch {vaults / 'b' / '.lore.lock'}")
+    assert allowed.returncode == 0, allowed.stderr
+    assert (vaults / "a" / ".lore.lock").exists()
+    assert denied.returncode != 0
+    assert not (vaults / "b" / ".lore.lock").exists()
