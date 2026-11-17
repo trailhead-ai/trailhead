@@ -5,8 +5,8 @@ on ``<request dir>``) as its own session, in the request directory, on the same 
 with its import path set to the portage plugin root and the repo root, as ``bin/_portage_eval.py`` does, so
 neither the caller's working directory nor ``PYTHONPATH`` nor user site-packages can supply code to it, with
 stdin closed and stdout/stderr in ``worker.log``, and records the pid in ``worker.pid`` (informational:
-liveness never reads it). The worker is deliberately detached: the eval gate's no-background rule does
-not apply to it. It is bounded by the per-case timeout.
+liveness never reads it, so a failed write is reported on stderr and the request still starts). The worker
+is deliberately detached: the eval gate's no-background rule does not apply to it. It is bounded by the per-case timeout.
 
 Liveness is a lock, not a pid: ``start_request`` takes an exclusive ``flock`` on ``worker.lock`` in the
 request directory before the spawn and the worker inherits that open file, so the lock is held from
@@ -19,7 +19,8 @@ when it does not pass every case is not run ``runner-broken`` and no case runner
 runs each case through the core with ``strict_tmp``, the runner temp base derived from ``HOME`` (never
 ``XDG_CACHE_HOME``), and writes ``results/<case>.json`` as each is decided. Whatever happens it ends by
 writing ``result.json``: a crash leaves the unfinished cases not run ``runner-broken``, SIGTERM (which
-also takes down the runner's process group, as the core's executor does on any exit) ``interrupted``.
+also takes down the runner's process group, as the core's executor does on any exit) ``interrupted``, or
+``could-not-leave-sandbox`` for a request started from inside the sandbox.
 
 ``wait`` polls until ``result.json`` is a whole, valid file or the bound passes. A worker that is gone
 with no valid ``result.json`` leaves its unfinished cases ``interrupted`` (exit 3, never 4), or
@@ -104,10 +105,18 @@ def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
         finally:
             log.close()
             os.close(lock)
-        (path / "worker.pid").write_text(f"{proc.pid}\n")
     except OSError as e:
         raise StartFailed(str(e)) from e
+    try:
+        (path / "worker.pid").write_text(f"{proc.pid}\n")
+    except OSError as e:
+        print(f"eval start: could not record the worker pid: {e}", file=sys.stderr)
     return request_id
+
+
+def _lost_reason(doc: dict) -> str:
+    """The reason for a case whose worker was lost: the sandbox kills a worker started from inside it."""
+    return req.COULD_NOT_LEAVE_SANDBOX if doc.get("started_in_sandbox") is True else req.INTERRUPTED
 
 
 def _write_case(results: Path, result: dict) -> dict:
@@ -130,7 +139,7 @@ def run_worker(request_path: Path, *, env: dict[str, str] | None = None, execute
     try:
         _run_cases(request_path, doc, results, env, execute, done)
     except Terminated:
-        unfinished = req.INTERRUPTED
+        unfinished = _lost_reason(doc)
     except Exception:
         traceback.print_exc()
     final = [done[c["case"]] if c["case"] in done
@@ -143,11 +152,11 @@ def _run_cases(request_path, doc, results, env, execute_fn, done) -> None:
                   strict_tmp=True)
     plugin_dir = Path(doc["repo"]) / doc["plugin_root"]
 
-    def broken_all(why: str, next_step: str | None = None) -> None:
+    def broken_all(why: str, cause: str | None = None) -> None:
         print(f"eval worker: {why}", file=sys.stderr)
         for c in doc["cases"]:
             done[c["case"]] = _write_case(
-                results, req.not_run_case(c["case"], c["runs"], req.RUNNER_BROKEN, next_step))
+                results, req.not_run_case(c["case"], c["runs"], req.RUNNER_BROKEN, cause=cause))
 
     try:
         canary = run_canary(work_dir=request_path, timeout_seconds=CASE_TIMEOUT_SECONDS, **common)
@@ -155,7 +164,7 @@ def _run_cases(request_path, doc, results, env, execute_fn, done) -> None:
         return broken_all(str(e))
     if canary["verdict"] != "pass":
         return broken_all(f"the canary did not pass ({canary['verdict']}, {canary['reason']})",
-                          req.RUN_TRAILHEAD_UPDATE if canary["reason"] == RUNNER_MISSING else None)
+                          req.RUNNER_MISSING_CAUSE if canary["reason"] == RUNNER_MISSING else None)
     for c in doc["cases"]:
         try:
             result = decide_case(
@@ -232,7 +241,7 @@ def _render(request_id: str, cases: list[dict], out) -> int:
         print(f"case {c['case']}: {label}", file=out)
         if c["verdict"] == "not-run":
             req.print_not_run_block(c.get("reason") or req.RUNNER_BROKEN, indent="  ", out=out,
-                                    next_step=c.get("next_step"))
+                                    next_step=c.get("next_step"), cause=c.get("cause"))
         for i, run in enumerate(c["runs"], 1):
             print(f"  run {i}: {_score(run)}", file=out)
     if any(c["verdict"] == "fail" for c in cases):
@@ -259,7 +268,7 @@ def wait(request_id: str, timeout_seconds: int) -> int:
             return _render(request_id, finished, out)
         have = _case_files(path, cases)
         if gone:
-            lost = req.COULD_NOT_LEAVE_SANDBOX if doc.get("started_in_sandbox") is True else req.INTERRUPTED
+            lost = _lost_reason(doc)
             return _render(request_id, [have.get(c["case"]) or req.not_run_case(
                 c["case"], c["runs"], lost) for c in cases], out)
         if CLOCK() >= deadline:

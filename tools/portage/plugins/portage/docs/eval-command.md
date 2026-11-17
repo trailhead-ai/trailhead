@@ -103,7 +103,8 @@ Still running at the bound, it prints the request, `running: <n> of <m> cases fi
 ## Not-run reasons and next steps
 
 A case that could not be decided is **not run**, never failed. Every not-run outcome prints a `not run:`
-reason and a `next step:`. The next step is `stop and report` for every reason except the rows marked
+reason and a `next step:`, which is always one of `retry later`, `resubmit` or `stop and report`; no not-run
+case carries `retry later`. The next step is `stop and report` for every reason except the rows marked
 below.
 
 | Reason | Cause | Next step |
@@ -111,14 +112,14 @@ below.
 | `could-not-leave-sandbox` | `start` ran sandboxed with no `--backend` (no request exists; printed by `start`), then the command to run outside the sandbox (above) | stop and report |
 | `could-not-leave-sandbox` | `wait` found the worker gone with no result for a request started with the sandbox marker set (`--backend local` from inside the sandbox) | stop and report |
 | `runner-broken` | the sandbox-write canary did not pass or could not run, the runner temp base is under `/tmp` or the temp path is over 51 characters, the request could not be created or started, or the worker crashed | stop and report |
-| `runner-broken`, canary reason `runner-missing` | the pinned runner binary is gone, so the canary could not run | **run trailhead update** |
+| `runner-broken`, canary reason `runner-missing` | the pinned runner binary is gone, so the canary could not run; a `cause:` line adds that `claude` must be on PATH and `trailhead update` run | stop and report |
 | `interrupted` | the worker died (or was terminated) before deciding the case | **resubmit** |
 | `runner-missing` | the runner binary vanished after the canary passed | stop and report |
 | `timeout` | the case ran out of time before it could be decided | **resubmit** |
 | `cost-cap`, `runner-error`, `runs-errored`, `harness-has-no-eval-runner` | the eval core could not decide the case | stop and report |
 
-The worker records each case's next step in its result file and `wait` prints the recorded one, so
-`run trailhead update` reaches the reader of `wait`. A failed canary makes every case `runner-broken`; no
+The worker records each case's next step in its result file and `wait` prints the recorded one and any
+`cause:` line, so the update hint for a missing runner reaches the reader of `wait`. A failed canary makes every case `runner-broken`; no
 case runner starts.
 
 ## The worker

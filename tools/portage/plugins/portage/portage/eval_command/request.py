@@ -21,16 +21,18 @@ none::
 A case result::
 
     {"case": str, "verdict": "pass" | "fail" | "not-run", "reason": null | <reason>,
-     "next_step": null | "stop and report" | "resubmit", "passed": int, "failed": int,
+     "next_step": null | "stop and report" | "resubmit", "cause": str (optional), "passed": int, "failed": int,
      "errored": int, "runs": [{"passed": bool, "errored": bool, "score": number | null,
                                "graders": [{"name": str, "passed": bool}, ...]}, ...]}
 
-``reason`` and ``next_step`` are set only for a not-run case. ``runner-broken`` (the canary did not
-pass, or the worker crashed) and every reason the eval core gives are followed by ``stop and
-report``, except a ``runner-broken`` whose pinned runner binary is gone, which is followed by
-``run trailhead update``, and the core's ``timeout``; ``interrupted`` (the worker died before deciding
-the case) and ``timeout`` are followed by ``resubmit``. ``could-not-leave-sandbox`` is printed by
-``start`` alone (no request exists).
+``reason`` and ``next_step`` are set only for a not-run case, and ``next_step`` is always one of
+``stop and report``, ``resubmit`` (and ``retry later``, which no not-run case carries). ``runner-broken``
+(the canary did not pass, or the worker crashed) and every reason the eval core gives are followed by
+``stop and report``, except the core's ``timeout``; ``interrupted`` (the worker died before deciding
+the case) and ``timeout`` are followed by ``resubmit``. A ``runner-broken`` whose pinned runner binary
+is gone also carries a ``cause`` naming the update that restores it, printed as a ``cause:`` line.
+``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists), or by ``wait`` for a
+request started from inside the sandbox whose worker is gone.
 """
 
 from __future__ import annotations
@@ -58,8 +60,9 @@ INTERRUPTED = "interrupted"
 COULD_NOT_LEAVE_SANDBOX = "could-not-leave-sandbox"
 STOP_AND_REPORT = "stop and report"
 RESUBMIT = "resubmit"
-RUN_TRAILHEAD_UPDATE = "run trailhead update"
-NEXT_STEPS = (STOP_AND_REPORT, RESUBMIT, RUN_TRAILHEAD_UPDATE)
+RUNNER_MISSING_CAUSE = ("the pinned runner binary is gone; put `claude` on PATH, then run "
+                        "`trailhead update`")
+NEXT_STEPS = (STOP_AND_REPORT, RESUBMIT)
 SHIM_ENV = "PORTAGE_EVAL_SHIM"
 SHIM_NAME = "portage-eval"
 VERDICTS = ("pass", "fail", "not-run")
@@ -110,17 +113,23 @@ def next_step_for(reason: str) -> str:
     return RESUBMIT if reason in (INTERRUPTED, TIMEOUT) else STOP_AND_REPORT
 
 
-def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None) -> dict:
-    return {**not_run(case, runs, reason), "next_step": next_step or next_step_for(reason)}
+def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None,
+                 cause: str | None = None) -> dict:
+    doc = {**not_run(case, runs, reason), "next_step": next_step or next_step_for(reason)}
+    return {**doc, "cause": cause} if cause else doc
 
 
-def print_not_run_block(reason: str, *, indent: str = "", out=None, next_step: str | None = None) -> None:
-    """The two lines every not-run outcome prints, whether from ``start`` or ``wait``.
+def print_not_run_block(reason: str, *, indent: str = "", out=None, next_step: str | None = None,
+                        cause: str | None = None) -> None:
+    """The lines every not-run outcome prints, whether from ``start`` or ``wait``: the reason, the next
+    step, and a ``cause:`` line when one was recorded.
 
     *next_step* (a recorded one, when it is a known step) replaces the one the reason implies."""
     out = out or sys.stdout
     print(f"{indent}not run: {reason}", file=out)
     print(f"{indent}next step: {next_step if next_step in NEXT_STEPS else next_step_for(reason)}", file=out)
+    if isinstance(cause, str) and cause:
+        print(f"{indent}cause: {cause}", file=out)
 
 
 def write_json(path: Path, doc: dict) -> None:

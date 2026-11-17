@@ -171,7 +171,7 @@ def _reap(ws):
         for pidfile in ws.eval_root.glob("*/worker.pid"):
             try:
                 groups.append(int(pidfile.read_text()))
-            except ValueError:
+            except (ValueError, OSError):
                 pass
     for pgid in groups:
         try:
@@ -740,16 +740,19 @@ class TestBackendChoice:
         assert rc == 4 and f"wait again: {SHIM} wait {request_id}" in out
         ws.release()
 
-    def test_a_runner_that_has_moved_since_the_shim_was_built_is_runner_broken_next_step_run_trailhead_update(
+    def test_a_runner_that_has_moved_since_the_shim_was_built_is_runner_broken_stop_and_report_with_the_update_cause(
             self, ws, monkeypatch, tmp_path):
         monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(tmp_path / "gone" / "claude"))
         request_id = ws.started("c1")
         rc, out, _ = ws.wait(request_id)
         assert rc == 3
-        assert "not run: runner-broken" in out and "next step: run trailhead update" in out
+        lines = out.splitlines()
+        assert "  not run: runner-broken" in lines and "  next step: stop and report" in lines
+        assert any(line.startswith("  cause:") and "trailhead update" in line for line in lines)
+        assert "next step: run trailhead update" not in out
         assert ws.count("canary-started") == 0
-        assert json.loads((ws.req(request_id) / "results" / "c1.json").read_text())[
-            "next_step"] == "run trailhead update"
+        recorded = json.loads((ws.req(request_id) / "results" / "c1.json").read_text())
+        assert recorded["next_step"] == "stop and report"
 
     def test_a_failing_canary_still_says_stop_and_report(self, ws):
         ws.set("canary-mode", "fail")
@@ -807,7 +810,7 @@ class TestPinnedShimEndToEnd:
         request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
         assert self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100").returncode == 0
 
-    def test_a_runner_moved_after_the_build_surfaces_as_runner_broken_with_run_trailhead_update(
+    def test_a_runner_moved_after_the_build_surfaces_as_runner_broken_stop_and_report_naming_trailhead_update(
             self, ws, tmp_path):
         shim = self._shim(ws, tmp_path)
         moved = tmp_path / "moved"
@@ -818,18 +821,21 @@ class TestPinnedShimEndToEnd:
         waited = self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100")
         assert waited.returncode == 3, (waited.stdout, waited.stderr)
         assert "not run: runner-broken" in waited.stdout
-        assert "next step: run trailhead update" in waited.stdout
+        assert "next step: stop and report" in waited.stdout
+        assert "cause:" in waited.stdout and "trailhead update" in waited.stdout
 
 
 class TestTimedOutCase:
-    def test_wait_prints_resubmit_as_the_next_step_of_a_case_that_timed_out(self, ws):
+    def test_a_case_that_runs_past_the_case_timeout_is_reported_not_run_timeout_next_step_resubmit(
+            self, ws, monkeypatch):
+        monkeypatch.setattr(local, "CASE_TIMEOUT_SECONDS", 1)
+        ws.set("hold")
         request_id, path = request.create_request({
             "repo": str(ws.repo), "plugin_root": "plugins/p",
             "cases": [{"case": "c1", "runs": 1, "pass_at": 1, "runner": MAPPING["runner"]}]})
-        results = path / "results"
-        results.mkdir()
-        timed_out = local._write_case(results, request.not_run_case("c1", 1, "timeout", None))
-        request.write_json(path / "result.json", {"schema_version": 1, "cases": [timed_out]})
+        local.run_worker(path, env={**os.environ})
+        recorded = json.loads((path / "results" / "c1.json").read_text())
+        assert (recorded["reason"], recorded["next_step"]) == ("timeout", "resubmit")
         rc, out, _ = ws.wait(request_id, seconds=5)
         assert rc == 3
         assert "not run: timeout" in out and "next step: resubmit" in out
@@ -881,6 +887,44 @@ class TestLocalBackendFromInsideTheSandbox:
         rc, out, _ = ws.wait(request_id, seconds=30)
         assert rc == 3
         assert out.count("not run: interrupted") == 2 and "could-not-leave-sandbox" not in out
+
+
+class TestTerminatedWorker:
+    @pytest.mark.parametrize("in_sandbox, reason, next_step", [
+        (True, "could-not-leave-sandbox", "stop and report"),
+        (False, "interrupted", "resubmit")])
+    def test_a_terminated_worker_marks_its_unfinished_cases_by_where_the_request_was_started(
+            self, ws, in_sandbox, reason, next_step):
+        _, path = request.create_request({
+            "repo": str(ws.repo), "plugin_root": "plugins/p", "started_in_sandbox": in_sandbox,
+            "cases": [{"case": c, "runs": 1, "pass_at": 1, "runner": MAPPING["runner"]}
+                      for c in ("c1", "c2")]})
+
+        def terminated(runner, cwd, timeout):
+            raise local.Terminated()
+
+        local.run_worker(path, env={**os.environ}, execute=terminated)
+        result = json.loads((path / "result.json").read_text())
+        assert [(c["case"], c["verdict"], c["reason"], c["next_step"]) for c in result["cases"]] == [
+            ("c1", "not-run", reason, next_step), ("c2", "not-run", reason, next_step)]
+
+
+class TestStartKeepsItsWorkerAccounted:
+    def test_a_worker_pid_that_cannot_be_written_does_not_turn_a_running_worker_into_a_failed_start(
+            self, ws, monkeypatch):
+        real = request.create_request
+
+        def with_unwritable_pid(doc):
+            request_id, path = real(doc)
+            (path / "worker.pid").mkdir()
+            return request_id, path
+
+        monkeypatch.setattr(local.req, "create_request", with_unwritable_pid)
+        rc, out, err = ws.start("c1")
+        assert rc == 0, (out, err)
+        request_id = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
 
 
 class TestWorkerImportIsolation:
