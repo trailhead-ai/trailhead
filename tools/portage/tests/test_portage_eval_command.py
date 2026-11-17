@@ -626,3 +626,153 @@ class TestRequestInterface:
         assert out == "not run: runner-broken\nnext step: stop and report\n"
         request.print_not_run_block("interrupted", indent="  ")
         assert capsys.readouterr().out == "  not run: interrupted\n  next step: resubmit\n"
+
+
+SHIM = "/home/someone/.local/state/trailhead/bin/portage-eval"
+
+
+class TestBackendChoice:
+    def _argv(self, ws, *extra):
+        return ["eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                "--case", "c2", *extra]
+
+    def test_the_sandbox_marker_with_no_backend_is_not_run_could_not_leave_sandbox_and_starts_nothing(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, err = ws.main(*self._argv(ws))
+        assert rc == 3, (out, err)
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+        assert "request:" not in out
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+        assert ws.count("canary-started") == 0
+
+    def test_without_the_marker_and_with_no_backend_the_request_runs_on_the_local_backend(self, ws):
+        rc, out, err = ws.main(*self._argv(ws))
+        assert rc == 0, (out, err)
+        request_id = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        assert json.loads((ws.req(request_id) / "request.json").read_text())["backend"] == "local"
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
+
+    def test_an_explicit_local_backend_runs_even_with_the_sandbox_marker(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        request_id = ws.started("c1")
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
+
+    def test_through_the_shim_the_message_names_the_cause_and_the_expanded_shim_command(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert "next step: stop and report" in out.splitlines()
+        assert "chezmoi apply" in out and "new session" in out
+        assert f"{SHIM} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
+
+    def test_a_shim_path_with_a_space_is_quoted_in_the_command_to_paste(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", "/home/a b/bin/portage-eval")
+        _, out, _ = ws.main(*self._argv(ws))
+        assert "'/home/a b/bin/portage-eval' start --plugin plugins/p" in out
+
+    @pytest.mark.parametrize("bad", ["portage-eval", "relative/portage-eval", "/x/y\nz", ""])
+    def test_a_shim_path_that_is_not_absolute_or_has_a_control_character_is_not_named(
+            self, ws, monkeypatch, bad):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", bad)
+        rc, out, _ = ws.main(*self._argv(ws))
+        assert rc == 3
+        assert "chezmoi apply" not in out
+        assert not re.search(rf"(^|\s){re.escape(bad)} start", out)
+
+    def test_the_wait_command_names_the_absolute_shim_when_run_through_it(self, ws, monkeypatch):
+        ws.set("hold")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        request_id = ws.started("c1")
+        rc, out, _ = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                             "--case", "c2", "--backend", "local")
+        second = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        assert f"wait: {SHIM} wait {second}" in out.splitlines()
+        rc, out, _ = ws.wait(request_id, seconds=1)
+        assert rc == 4 and f"wait again: {SHIM} wait {request_id}" in out
+        ws.release()
+
+    def test_a_runner_that_has_moved_since_the_shim_was_built_is_runner_broken_next_step_run_trailhead_update(
+            self, ws, monkeypatch, tmp_path):
+        monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(tmp_path / "gone" / "claude"))
+        request_id = ws.started("c1")
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 3
+        assert "not run: runner-broken" in out and "next step: run trailhead update" in out
+        assert ws.count("canary-started") == 0
+        assert json.loads((ws.req(request_id) / "results" / "c1.json").read_text())[
+            "next_step"] == "run trailhead update"
+
+    def test_a_failing_canary_still_says_stop_and_report(self, ws):
+        ws.set("canary-mode", "fail")
+        request_id = ws.started("c1")
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 3 and "next step: stop and report" in out
+
+
+class TestPinnedShimEndToEnd:
+    def _shim(self, ws, tmp_path):
+        from trailhead.install import build_cli_shims, resolve_cli_tools
+        from trailhead.pathint import resolve_shim_dir
+
+        stubbin = tmp_path / "stubbin"
+        stubbin.mkdir()
+        (stubbin / "claude").symlink_to(ws.stub)
+        env = {"HOME": str(ws.home), "PATH": f"{stubbin}:/usr/bin:/bin"}
+        build_cli_shims(resolve_cli_tools({"portage": True}), env=env)
+        return resolve_shim_dir(env=env) / "portage-eval"
+
+    def _run(self, shim, ws, *argv, marker=True):
+        import subprocess
+
+        env = {"HOME": str(ws.home), "PATH": "/usr/bin:/bin"}
+        if marker:
+            env["SANDBOX_RUNTIME"] = "1"
+        return subprocess.run([str(shim), *argv], capture_output=True, text=True, env=env, timeout=120)
+
+    def test_the_shim_starts_a_request_and_waits_for_its_verdict_with_the_stub_runner(self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                            "--case", "c1", "--backend", "local")
+        assert started.returncode == 0, started.stderr
+        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
+        assert f"wait: {shim} wait {request_id}" in started.stdout.splitlines()
+        waited = self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100")
+        assert waited.returncode == 0, (waited.stdout, waited.stderr)
+        assert "case c1: pass" in waited.stdout
+        assert ws.count("case-started-c1") == 1
+
+    def test_the_shim_with_the_sandbox_marker_and_no_backend_tells_the_session_to_stop(self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
+        assert proc.returncode == 3, (proc.stdout, proc.stderr)
+        assert "not run: could-not-leave-sandbox" in proc.stdout
+        assert f"{shim} start --plugin plugins/p --case c1 --repo {ws.repo}" in proc.stdout
+        assert "chezmoi apply" in proc.stdout
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+
+    def test_the_shim_without_the_marker_runs_locally_with_no_backend_flag(self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                            "--case", "c1", marker=False)
+        assert started.returncode == 0, started.stderr
+        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
+        assert self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100").returncode == 0
+
+    def test_a_runner_moved_after_the_build_surfaces_as_runner_broken_with_run_trailhead_update(
+            self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        moved = tmp_path / "moved"
+        ws.stub.rename(moved)
+        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                            "--case", "c1", "--backend", "local")
+        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
+        waited = self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100")
+        assert waited.returncode == 3, (waited.stdout, waited.stderr)
+        assert "not run: runner-broken" in waited.stdout
+        assert "next step: run trailhead update" in waited.stdout

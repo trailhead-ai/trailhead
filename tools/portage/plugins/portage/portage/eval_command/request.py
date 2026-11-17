@@ -26,7 +26,9 @@ A case result::
 
 ``reason`` and ``next_step`` are set only for a not-run case. ``runner-broken`` (the canary did not
 pass, or the worker crashed) and every reason the eval core gives are followed by ``stop and
-report``; ``interrupted`` (the worker died before deciding the case) is followed by ``resubmit``.
+report``, except a ``runner-broken`` whose pinned runner binary is gone, which is followed by
+``run trailhead update``; ``interrupted`` (the worker died before deciding the case) is followed by
+``resubmit``. ``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists).
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import string
 import sys
 from pathlib import Path
@@ -42,7 +45,7 @@ from pathlib import Path
 from portage.eval_core.run import not_run
 from portage.eval_gate.cache import ensure_private_dir
 from portage.eval_gate.run import atomic_write
-from trailhead.paths import state_dir
+from trailhead.paths import PathResolutionError, state_dir
 
 SCHEMA_VERSION = 1
 ID_PATTERN = re.compile(r"^local-[a-z0-9]{12}\Z")
@@ -50,8 +53,13 @@ _ID_ALPHABET = string.ascii_lowercase + string.digits
 
 RUNNER_BROKEN = "runner-broken"
 INTERRUPTED = "interrupted"
+COULD_NOT_LEAVE_SANDBOX = "could-not-leave-sandbox"
 STOP_AND_REPORT = "stop and report"
 RESUBMIT = "resubmit"
+RUN_TRAILHEAD_UPDATE = "run trailhead update"
+NEXT_STEPS = (STOP_AND_REPORT, RESUBMIT, RUN_TRAILHEAD_UPDATE)
+SHIM_ENV = "PORTAGE_EVAL_SHIM"
+SHIM_NAME = "portage-eval"
 VERDICTS = ("pass", "fail", "not-run")
 
 
@@ -74,23 +82,43 @@ def request_dir(request_id: str) -> Path:
     return eval_root() / request_id
 
 
+def shim_from_env(environ=None) -> str | None:
+    """The absolute path of the pinned shim this process was run through, ``None`` when it was not
+    run through one (or the value is not a plain absolute path)."""
+    value = (os.environ if environ is None else environ).get(SHIM_ENV)
+    if not value or not os.path.isabs(value) or any(ch in value for ch in "\n\r\0"):
+        return None
+    return value
+
+
+def default_shim() -> str | None:
+    """Where ``trailhead install`` puts the pinned shim on this host."""
+    try:
+        return str(state_dir("trailhead") / "bin" / SHIM_NAME)
+    except PathResolutionError:
+        return None
+
+
 def wait_command(request_id: str) -> str:
-    return f"portage eval wait {request_id}"
+    shim = shim_from_env()
+    return f"{shlex.quote(shim)} wait {request_id}" if shim else f"portage eval wait {request_id}"
 
 
 def next_step_for(reason: str) -> str:
     return RESUBMIT if reason == INTERRUPTED else STOP_AND_REPORT
 
 
-def not_run_case(case: str, runs: int, reason: str) -> dict:
-    return {**not_run(case, runs, reason), "next_step": next_step_for(reason)}
+def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None) -> dict:
+    return {**not_run(case, runs, reason), "next_step": next_step or next_step_for(reason)}
 
 
-def print_not_run_block(reason: str, *, indent: str = "", out=None) -> None:
-    """The two lines every not-run outcome prints, whether from ``start`` or ``wait``."""
+def print_not_run_block(reason: str, *, indent: str = "", out=None, next_step: str | None = None) -> None:
+    """The two lines every not-run outcome prints, whether from ``start`` or ``wait``.
+
+    *next_step* (a recorded one, when it is a known step) replaces the one the reason implies."""
     out = out or sys.stdout
     print(f"{indent}not run: {reason}", file=out)
-    print(f"{indent}next step: {next_step_for(reason)}", file=out)
+    print(f"{indent}next step: {next_step if next_step in NEXT_STEPS else next_step_for(reason)}", file=out)
 
 
 def write_json(path: Path, doc: dict) -> None:

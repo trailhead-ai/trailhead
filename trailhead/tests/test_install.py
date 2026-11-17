@@ -113,7 +113,9 @@ class TestDetectionDrivenInstall:
         }
 
     def test_clis_installed(self, tmp_path):
-        with _patched(detected=True) as m:
+        with _patched(detected=True) as m, patch(
+            "trailhead.install.resolve_eval_runner", return_value=tmp_path / "claude"
+        ):
             run_install(env=_env(tmp_path), quiet=True)
         cli_tools = m["pathint"].call_args[0][0]
         pinned = m["pathint"].call_args.kwargs["pinned_scripts"]
@@ -125,6 +127,7 @@ class TestDetectionDrivenInstall:
             "trailhead",
             "outpost-gateway",
             "trailhead-gateway-register",
+            "portage-eval",
         }
 
     def test_summary_prints_shellenv_hint(self, tmp_path, capsys):

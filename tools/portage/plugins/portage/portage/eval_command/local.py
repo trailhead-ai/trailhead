@@ -35,6 +35,7 @@ import time
 import traceback
 from pathlib import Path
 
+from portage.eval_core.run import RUNNER_MISSING
 from portage.eval_core import TmpBaseRefused, TmpPathTooLong, decide_case, execute, run_canary
 from portage.eval_gate.run import _pin, _runner_override
 
@@ -94,7 +95,7 @@ def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
 
 
 def _write_case(results: Path, result: dict) -> dict:
-    result = {**result, "next_step": (req.next_step_for(result["reason"])
+    result = {**result, "next_step": (result.get("next_step") or req.next_step_for(result["reason"])
                                       if result["verdict"] == "not-run" else None)}
     req.write_json(results / f"{result['case']}.json", result)
     return result
@@ -126,17 +127,19 @@ def _run_cases(request_path, doc, results, env, execute_fn, done) -> None:
                   strict_tmp=True)
     plugin_dir = Path(doc["repo"]) / doc["plugin_root"]
 
-    def broken_all(why: str) -> None:
+    def broken_all(why: str, next_step: str | None = None) -> None:
         print(f"eval worker: {why}", file=sys.stderr)
         for c in doc["cases"]:
-            done[c["case"]] = _write_case(results, req.not_run_case(c["case"], c["runs"], req.RUNNER_BROKEN))
+            done[c["case"]] = _write_case(
+                results, req.not_run_case(c["case"], c["runs"], req.RUNNER_BROKEN, next_step))
 
     try:
         canary = run_canary(work_dir=request_path, timeout_seconds=CASE_TIMEOUT_SECONDS, **common)
     except (TmpPathTooLong, TmpBaseRefused) as e:
         return broken_all(str(e))
     if canary["verdict"] != "pass":
-        return broken_all(f"the canary did not pass ({canary['verdict']}, {canary['reason']})")
+        return broken_all(f"the canary did not pass ({canary['verdict']}, {canary['reason']})",
+                          req.RUN_TRAILHEAD_UPDATE if canary["reason"] == RUNNER_MISSING else None)
     for c in doc["cases"]:
         try:
             result = decide_case(
@@ -212,7 +215,8 @@ def _render(request_id: str, cases: list[dict], out) -> int:
         label = {"pass": "pass", "fail": "fail", "not-run": "not run"}[c["verdict"]]
         print(f"case {c['case']}: {label}", file=out)
         if c["verdict"] == "not-run":
-            req.print_not_run_block(c.get("reason") or req.RUNNER_BROKEN, indent="  ", out=out)
+            req.print_not_run_block(c.get("reason") or req.RUNNER_BROKEN, indent="  ", out=out,
+                                    next_step=c.get("next_step"))
         for i, run in enumerate(c["runs"], 1):
             print(f"  run {i}: {_score(run)}", file=out)
     if any(c["verdict"] == "fail" for c in cases):

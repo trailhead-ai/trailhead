@@ -67,7 +67,16 @@ from trailhead.install_config import (
     resolve_config,
     resolve_config_path,
 )
-from trailhead.pathint import create_shims, repo_root, trailhead_bin_executable
+from trailhead.pathint import (
+    EVAL_SHIM_EXTRA_ENV,
+    PathIntegrationError,
+    PinnedShimOptions,
+    create_shims,
+    repo_root,
+    resolve_eval_runner,
+    resolve_shim_dir,
+    trailhead_bin_executable,
+)
 from trailhead.provenance import write_stamp
 from trailhead.paths import PathResolutionError
 from trailhead.wire import LockError, WireError, default_manifest_paths, wire, wire_lock
@@ -78,6 +87,7 @@ _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 _GATEWAY_BIN = _REPO_ROOT / "bin" / "outpost-gateway"
 _GATEWAY_SCRIPT = _REPO_ROOT / "bin" / "_outpost_gateway.py"
 _REGISTER_SCRIPT = _REPO_ROOT / "bin" / "_gateway_register.py"
+_EVAL_SCRIPT = _REPO_ROOT / "bin" / "_portage_eval.py"
 
 
 def resolve_cli_tools(cli_flags: dict[str, bool]) -> dict[str, Path]:
@@ -129,7 +139,8 @@ def build_cli_shims(
     (plus, when *outpost_enabled*, the ``outpost-gateway`` and ``trailhead-gateway-register``
     shims pinned to this interpreter, because the harness runs both outside its sandbox:
     the first as an excluded command, the second from the Outpost plugin's SessionStart
-    hook); the one shim build shared by ``trailhead install`` and ``trailhead update``.
+    hook), and, when portage's CLI is among *cli_tools*, the ``portage-eval`` shim pinned the same
+    way with the eval runner resolved now; the one shim build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
     disables every CLI builds no shims, and the repo's own binaries alone do not change that.
@@ -145,8 +156,25 @@ def build_cli_shims(
             script = default if root is None else root / "bin" / default.name
             if script.exists():
                 pinned[name] = script
+    options = {}
+    eval_script = _EVAL_SCRIPT if root is None else root / "bin" / _EVAL_SCRIPT.name
+    if "portage" in cli_tools and eval_script.exists():
+        try:
+            runner = resolve_eval_runner(env)
+        except PathIntegrationError as exc:
+            print(f"trailhead: {exc}; `portage-eval` was not built", file=sys.stderr)
+        else:
+            pinned["portage-eval"] = eval_script
+            options["portage-eval"] = PinnedShimOptions(
+                extra_env=EVAL_SHIM_EXTRA_ENV,
+                fixed_env={
+                    "PORTAGE_EVAL_RUNNER": str(runner),
+                    "PORTAGE_EVAL_SHIM": str(resolve_shim_dir(env=env) / "portage-eval"),
+                },
+            )
     return create_shims(
-        _with_own_binaries(cli_tools, root), str(shim_root), env=env, pinned_scripts=pinned
+        _with_own_binaries(cli_tools, root), str(shim_root), env=env, pinned_scripts=pinned,
+        pinned_options=options,
     ).shim_dir
 
 

@@ -42,8 +42,11 @@ match raises ``PathIntegrationError`` instead of emitting unsafe output.
 from __future__ import annotations
 
 import os
+import re
+import shutil
+import stat
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from trailhead.paths import ensure_dir, state_dir
@@ -87,6 +90,18 @@ class ShimDenylistError(Exception):
 # ---------------------------------------------------------------------------
 # Result type
 # ---------------------------------------------------------------------------
+
+
+@dataclass
+class PinnedShimOptions:
+    """What one pinned shim adds to the shared pinned environment.
+
+    ``extra_env``: variable names passed through when the caller has them set.
+    ``fixed_env``: variables the shim sets to a value fixed when it is built.
+    """
+
+    extra_env: tuple[str, ...] = ()
+    fixed_env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
@@ -171,6 +186,7 @@ def create_shims(
     *,
     env: dict[str, str] | None = None,
     pinned_scripts: dict[str, Path] | None = None,
+    pinned_options: dict[str, PinnedShimOptions] | None = None,
 ) -> ShimDirResult:
     """Create the trailhead-managed shim directory, one wrapper per tool.
 
@@ -187,12 +203,16 @@ def create_shims(
                         PYTHON* variables, cwd, user site or a venv's site-packages
                         can put code in front of it. Such a name need not be in
                         *wired_tools*.
+        pinned_options: Mapping of a pinned CLI name → the extra environment that
+                        shim carries (``PinnedShimOptions``); a name with no entry
+                        gets only the shared pinned environment.
 
     Raises:
         ShimDenylistError:    If any name matches the system-binary denylist.
         PathIntegrationError: If the shim dir cannot be created/written.
     """
     pinned_scripts = pinned_scripts or {}
+    pinned_options = pinned_options or {}
     for name in [*wired_tools, *pinned_scripts]:
         if name in _SHIM_DENYLIST:
             raise ShimDenylistError(
@@ -211,7 +231,7 @@ def create_shims(
             shims[name] = shim_path
         for name, script in pinned_scripts.items():
             shim_path = shim_dir / name
-            shim_path.write_text(_pinned_shim_content(name, script, trailhead_root))
+            shim_path.write_text(_pinned_shim_content(name, script, trailhead_root, pinned_options.get(name)))
             shim_path.chmod(0o700)
             shims[name] = shim_path
     except OSError as exc:
@@ -241,14 +261,60 @@ _PINNED_SHIM_ENV = ("HOME", "TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "XDG_STA
 _PINNED_SHIM_PATH = "/usr/bin:/bin"
 
 
-def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
+_ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+# What the ``portage-eval`` shim adds: the sandbox marker the command reads to tell a sandboxed
+# caller from an excluded one, and the identity and locale the runner needs. XDG_CACHE_HOME is
+# deliberately absent. The standard LC_* categories are listed because ``sh`` cannot pass a glob.
+EVAL_SHIM_EXTRA_ENV = (
+    "SANDBOX_RUNTIME", "USER", "LANG", "TERM", "LC_ALL", "LC_COLLATE", "LC_CTYPE", "LC_MESSAGES",
+    "LC_MONETARY", "LC_NUMERIC", "LC_TIME", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
+    "LC_MEASUREMENT", "LC_IDENTIFICATION",
+)
+EVAL_RUNNER_COMMAND = "claude"
+
+
+def resolve_eval_runner(env: dict[str, str]) -> Path:
+    """The absolute, symlink-resolved path of the eval runner binary, as ``PATH`` in *env* finds it.
+
+    Refuses (``PathIntegrationError`` naming why) a runner that is missing, not an executable
+    file, writable by group or others, or owned by another user: the same rules the eval
+    command applies to ``PORTAGE_EVAL_RUNNER`` when it runs.
+    """
+    found = shutil.which(EVAL_RUNNER_COMMAND, path=env.get("PATH"))
+    if found is None:
+        raise PathIntegrationError(
+            f"refused to build the portage-eval shim: no `{EVAL_RUNNER_COMMAND}` on PATH to pin as the eval runner"
+        )
+    real = Path(os.path.realpath(found))
+    if not (real.is_file() and os.access(real, os.X_OK)):
+        raise PathIntegrationError(
+            f"refused to build the portage-eval shim: the eval runner {real} is not an executable file"
+        )
+    info = real.stat()
+    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        raise PathIntegrationError(
+            f"refused to build the portage-eval shim: the eval runner {real} is writable by group or others"
+        )
+    if info.st_uid not in (0, os.geteuid()):
+        raise PathIntegrationError(
+            f"refused to build the portage-eval shim: the eval runner {real} is owned by another user"
+        )
+    return real
+
+
+def _pinned_shim_content(
+    name: str, script: Path, trailhead_root: str, options: PinnedShimOptions | None = None
+) -> str:
     """A ``/bin/sh`` shim running *script* on this process's interpreter, isolated.
 
     ``/bin/sh`` rather than ``env bash``, and ``/usr/bin/env`` by absolute path: neither
     may be looked up through PATH. The interpreter starts from an empty environment
     carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed PATH, so a loader variable
-    the session exported cannot reach it.
+    the session exported cannot reach it. *options* adds names passed through when set and
+    values fixed at build time, for the one shim that needs them.
     """
+    options = options or PinnedShimOptions()
     interpreter = os.path.realpath(sys.executable)
     for label, value in (
         ("the shim name", name),
@@ -257,12 +323,18 @@ def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
         ("the shim's interpreter path", interpreter),
     ):
         _reject_unsafe_for_eval(value, label=label)
-    passed = " ".join(f'${{{var}:+{var}="${var}"}}' for var in _PINNED_SHIM_ENV)
+    fixed = []
+    for var, value in options.fixed_env.items():
+        if not _ENV_NAME.match(var):
+            raise PathIntegrationError(f"refused to build the shim: {var!r} is not a variable name")
+        _reject_unsafe_for_eval(value, label=f"the shim's {var}")
+        fixed.append(f'{var}="{value}"')
+    passed = [f'${{{var}:+{var}="${var}"}}' for var in (*_PINNED_SHIM_ENV, *options.extra_env)]
+    assignments = " ".join([f'PATH="{_PINNED_SHIM_PATH}"', f'TRAILHEAD_ROOT="{trailhead_root}"', *fixed, *passed])
     return (
         "#!/bin/sh\n"
         f"# trailhead-managed shim for {name}\n"
-        f'exec /usr/bin/env -i PATH="{_PINNED_SHIM_PATH}" TRAILHEAD_ROOT="{trailhead_root}" '
-        f'{passed} "{interpreter}" -I -S "{script}" "$@"\n'
+        f'exec /usr/bin/env -i {assignments} "{interpreter}" -I -S "{script}" "$@"\n'
     )
 
 

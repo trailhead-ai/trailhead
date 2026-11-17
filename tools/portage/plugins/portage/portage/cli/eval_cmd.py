@@ -13,6 +13,11 @@ step. Exit 0 every case passed, 1 a case failed, 3 none failed and one not run, 
 (the command to wait again is printed), 2 refused: an identifier that is not ``local-`` plus 12
 lowercase letters or digits (never read as a path), an unknown request, or a bound outside 1..540.
 
+With no ``--backend``, a call whose environment carries ``SANDBOX_RUNTIME`` (the harness sets it in
+sandboxed calls only) is not run ``could-not-leave-sandbox``: nothing starts, exit 3, and the block is
+followed by the absolute pinned-shim command to run outside the sandbox. ``--backend local`` runs
+regardless; with no marker the local backend is the default.
+
 The entry points the shim dispatches to are ``cmd_start`` and ``cmd_wait``. The gate's pass cache
 and state directories are never read or written.
 """
@@ -20,6 +25,8 @@ and state directories are never read or written.
 from __future__ import annotations
 
 import argparse
+import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path, PurePosixPath
@@ -92,7 +99,27 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict]]:
     return repo, root, cases
 
 
+def _leave_sandbox(args: argparse.Namespace) -> int:
+    request.print_not_run_block(request.COULD_NOT_LEAVE_SANDBOX)
+    shim = request.shim_from_env()
+    if shim:
+        print("cause: this call ran inside the sandbox even though it went through the pinned shim; "
+              "the sandbox exclusion for it is probably not installed on this host "
+              "(run `chezmoi apply` and start a new session)")
+    shim = shim or request.default_shim()
+    if shim:
+        words = [shim, "start", "--plugin", args.plugin]
+        for case in args.cases:
+            words += ["--case", case]
+        if args.repo is not None:
+            words += ["--repo", os.path.abspath(args.repo)]
+        print(f"run outside the sandbox: {' '.join(shlex.quote(w) for w in words)}")
+    return 3
+
+
 def cmd_start(args: argparse.Namespace) -> int:
+    if args.backend is None and "SANDBOX_RUNTIME" in os.environ:
+        return _leave_sandbox(args)
     try:
         repo, root, cases = _plan(args)
     except request.Refused as e:
