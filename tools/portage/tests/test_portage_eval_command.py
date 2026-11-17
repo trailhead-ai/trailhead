@@ -816,3 +816,17 @@ class TestPinnedShimEndToEnd:
         assert waited.returncode == 3, (waited.stdout, waited.stderr)
         assert "not run: runner-broken" in waited.stdout
         assert "next step: run trailhead update" in waited.stdout
+
+
+class TestTimedOutCase:
+    def test_wait_prints_resubmit_as_the_next_step_of_a_case_that_timed_out(self, ws):
+        request_id, path = request.create_request({
+            "repo": str(ws.repo), "plugin_root": "plugins/p",
+            "cases": [{"case": "c1", "runs": 1, "pass_at": 1, "runner": MAPPING["runner"]}]})
+        results = path / "results"
+        results.mkdir()
+        timed_out = local._write_case(results, request.not_run_case("c1", 1, "timeout", None))
+        request.write_json(path / "result.json", {"schema_version": 1, "cases": [timed_out]})
+        rc, out, _ = ws.wait(request_id, seconds=5)
+        assert rc == 3
+        assert "not run: timeout" in out and "next step: resubmit" in out

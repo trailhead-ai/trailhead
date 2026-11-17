@@ -27,8 +27,9 @@ A case result::
 ``reason`` and ``next_step`` are set only for a not-run case. ``runner-broken`` (the canary did not
 pass, or the worker crashed) and every reason the eval core gives are followed by ``stop and
 report``, except a ``runner-broken`` whose pinned runner binary is gone, which is followed by
-``run trailhead update``; ``interrupted`` (the worker died before deciding the case) is followed by
-``resubmit``. ``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists).
+``run trailhead update``, and the core's ``timeout``; ``interrupted`` (the worker died before deciding
+the case) and ``timeout`` are followed by ``resubmit``. ``could-not-leave-sandbox`` is printed by
+``start`` alone (no request exists).
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ import string
 import sys
 from pathlib import Path
 
-from portage.eval_core.run import not_run
+from portage.eval_core.run import TIMEOUT, not_run
 from portage.eval_gate.cache import ensure_private_dir
 from portage.eval_gate.run import atomic_write
 from trailhead.paths import PathResolutionError, state_dir
@@ -105,7 +106,7 @@ def wait_command(request_id: str) -> str:
 
 
 def next_step_for(reason: str) -> str:
-    return RESUBMIT if reason == INTERRUPTED else STOP_AND_REPORT
+    return RESUBMIT if reason in (INTERRUPTED, TIMEOUT) else STOP_AND_REPORT
 
 
 def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None) -> dict:

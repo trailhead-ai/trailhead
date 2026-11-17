@@ -97,7 +97,7 @@ Still running at the bound, it prints the request, `running: <n> of <m> cases fi
 ## Not-run reasons and next steps
 
 A case that could not be decided is **not run**, never failed. Every not-run outcome prints a `not run:`
-reason and a `next step:`. The next step is `stop and report` for every reason except the three rows marked
+reason and a `next step:`. The next step is `stop and report` for every reason except the rows marked
 below.
 
 | Reason | Cause | Next step |
@@ -107,7 +107,8 @@ below.
 | `runner-broken`, canary reason `runner-missing` | the pinned runner binary is gone, so the canary could not run | **run trailhead update** |
 | `interrupted` | the worker died (or was terminated) before deciding the case | **resubmit** |
 | `runner-missing` | the runner binary vanished after the canary passed | stop and report |
-| `timeout`, `cost-cap`, `runner-error`, `runs-errored`, `harness-has-no-eval-runner` | the eval core could not decide the case | stop and report |
+| `timeout` | the case ran out of time before it could be decided | **resubmit** |
+| `cost-cap`, `runner-error`, `runs-errored`, `harness-has-no-eval-runner` | the eval core could not decide the case | stop and report |
 
 The worker records each case's next step in its result file and `wait` prints the recorded one, so
 `run trailhead update` reaches the reader of `wait`. A failed canary makes every case `runner-broken`; no
