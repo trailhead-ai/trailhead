@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import tempfile
@@ -228,15 +229,11 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
 
 
 def _run_start(job: str, workflow: str | None, port: int) -> int:
-    try:
-        top = tree_upload.top_level(Path.cwd())
-        workflow = workflow or tree_upload.workflow_defining(top, job)
-        spool = tempfile.TemporaryFile()
-    except tree_upload.TreeError as err:
-        raise _fail(str(err)) from None
-    with spool:
+    with tempfile.TemporaryFile() as spool:
         try:
-            tree_upload.write_tar(top, spool)
+            with tree_upload.top_level(Path(os.curdir)) as tree:
+                workflow = workflow or tree_upload.workflow_defining(tree, job)
+                tree_upload.write_tar(tree, spool)
         except tree_upload.TreeError as err:
             raise _fail(str(err)) from None
         size = spool.tell()
