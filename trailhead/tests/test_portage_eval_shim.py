@@ -153,11 +153,11 @@ class TestRunnerResolution:
         bindir = _stub_runner(tmp_path)
         assert resolve_eval_runner({"PATH": str(bindir)}) == bindir / "claude"
 
-    def test_a_link_owned_by_another_user_is_refused_naming_the_link(self, tmp_path, monkeypatch):
+    def test_a_link_owned_by_another_user_is_refused_naming_the_link(self, tmp_path):
         bindir = _stub_runner(tmp_path)
-        monkeypatch.setattr("trailhead.pathint.os.geteuid", lambda: (bindir / "claude").lstat().st_uid + 1)
+        other = (bindir / "claude").lstat().st_uid + 1
         with pytest.raises(PathIntegrationError, match=r"runner link .*claude is owned by another user"):
-            resolve_eval_runner({"PATH": str(bindir)})
+            resolve_eval_runner({"PATH": str(bindir)}, euid=other)
 
     def test_a_link_whose_target_others_can_write_is_refused_naming_the_target(self, tmp_path):
         bindir = _stub_runner(tmp_path, mode=0o775)
@@ -204,3 +204,59 @@ class TestRunnerResolution:
         assert not (shim_dir / "portage-eval").exists()
         err = capsys.readouterr().err
         assert "portage-eval" in err and "claude" in err
+
+
+class TestUnsafeRunnerPath:
+    @staticmethod
+    def _env_with_runner_in(tmp_path, dirname):
+        bindir = tmp_path / dirname
+        bindir.mkdir()
+        runner = bindir / "claude"
+        runner.write_text("#!/bin/sh\nexit 0\n")
+        runner.chmod(0o755)
+        return {**_env(tmp_path, bindir)}
+
+    @pytest.mark.parametrize("dirname", ["a$b", 'a"b', "a`b", "a\\b", "a\nb"])
+    def test_a_runner_path_that_would_break_out_of_the_shims_quoting_is_refused_naming_why(
+            self, tmp_path, dirname):
+        env = self._env_with_runner_in(tmp_path, dirname)
+        with pytest.raises(PathIntegrationError, match=r"eval runner .*unsafe character"):
+            resolve_eval_runner(env)
+
+    @pytest.mark.parametrize("dirname", ["a$b", 'a"b', "a`b", "a\\b", "a\nb"])
+    def test_a_build_with_such_a_runner_warns_and_skips_the_eval_shim_and_still_builds_the_others(
+            self, tmp_path, capsys, dirname):
+        env = self._env_with_runner_in(tmp_path, dirname)
+        shim_dir = build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        assert (shim_dir / "camp").exists() and (shim_dir / "outpost-gateway").exists()
+        assert not (shim_dir / "portage-eval").exists()
+        err = capsys.readouterr().err
+        assert "portage-eval" in err and "unsafe character" in err
+
+
+class TestKeptShim:
+    def _build_then_lose_the_runner(self, tmp_path):
+        env = _env(tmp_path)
+        shim_dir = build_cli_shims(_tools(), env=env)
+        before = (shim_dir / "portage-eval").read_text()
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        return {**env, "PATH": str(empty)}, shim_dir, before
+
+    def test_a_later_build_that_cannot_resolve_the_runner_says_the_earlier_shim_was_kept_and_the_remedy(
+            self, tmp_path, capsys):
+        env, shim_dir, before = self._build_then_lose_the_runner(tmp_path)
+        capsys.readouterr()
+        build_cli_shims(_tools(), env=env)
+        err = capsys.readouterr().err
+        assert (shim_dir / "portage-eval").read_text() == before
+        assert "kept" in err and "earlier runner" in err
+        assert "was not built" not in err
+        assert "`claude` on PATH" in err and "trailhead update" in err
+
+    def test_a_first_build_that_cannot_resolve_the_runner_still_says_it_was_not_built(self, tmp_path, capsys):
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        build_cli_shims(_tools(), env={**_env(tmp_path), "PATH": str(empty)})
+        err = capsys.readouterr().err
+        assert "`portage-eval` was not built" in err and "kept" not in err

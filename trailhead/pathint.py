@@ -274,23 +274,33 @@ EVAL_SHIM_EXTRA_ENV = (
 EVAL_RUNNER_COMMAND = "claude"
 
 
-def resolve_eval_runner(env: dict[str, str]) -> Path:
+def resolve_eval_runner(env: dict[str, str], *, euid: int | None = None) -> Path:
     """The absolute path of the eval runner as ``PATH`` in *env* finds it, links left unresolved.
 
     A link is pinned as found, so a retargeted link (an auto-update replacing the versioned file it
     points at) keeps working. Refuses (``PathIntegrationError`` naming why) a runner that is missing,
-    whose link or resolved target is owned by another user, or whose target is not an executable
-    file or is writable by group or others: the rules the eval command applies to
-    ``PORTAGE_EVAL_RUNNER`` when it runs, on the link and on what it resolves to. A link's own mode
-    bits carry no permission, so only its owner is checked.
+    whose path holds a character that would break out of the shim's quoted context, whose link or
+    resolved target is owned by another user, or whose target is not an executable file or is
+    writable by group or others. These are the rules ``PORTAGE_EVAL_RUNNER`` is held to, but not at
+    the same place: the request-time check (``eval_gate.run._runner_override``) validates only the
+    path as given, resolved to its target, so the link's own owner is checked here and nowhere
+    later. A link's own mode bits carry no permission, so only its owner is checked. *euid* is the
+    user whose ownership is trusted besides root (the process's effective user by default).
     """
+    euid = os.geteuid() if euid is None else euid
     found = shutil.which(EVAL_RUNNER_COMMAND, path=env.get("PATH"))
     if found is None:
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: no `{EVAL_RUNNER_COMMAND}` on PATH to pin as the eval runner"
         )
     pinned = Path(os.path.abspath(found))
-    if pinned.is_symlink() and pinned.lstat().st_uid not in (0, os.geteuid()):
+    for ch in _UNSAFE_SHELL_CHARS:
+        if ch in str(pinned):
+            raise PathIntegrationError(
+                f"refused to build the portage-eval shim: the eval runner path {pinned!r} contains an "
+                f"unsafe character ({ch!r}) that would break out of the shim's quoted context"
+            )
+    if pinned.is_symlink() and pinned.lstat().st_uid not in (0, euid):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner link {pinned} is owned by another user"
         )
@@ -304,7 +314,7 @@ def resolve_eval_runner(env: dict[str, str]) -> Path:
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is writable by group or others"
         )
-    if info.st_uid not in (0, os.geteuid()):
+    if info.st_uid not in (0, euid):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is owned by another user"
         )

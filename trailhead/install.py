@@ -162,7 +162,11 @@ def build_cli_shims(
         try:
             runner = resolve_eval_runner(env)
         except PathIntegrationError as exc:
-            print(f"trailhead: {exc}; `portage-eval` was not built", file=sys.stderr)
+            if (resolve_shim_dir(env=env) / "portage-eval").exists():
+                print(f"trailhead: {exc}; the existing `portage-eval` was kept as is and still points at its "
+                      "earlier runner; put `claude` on PATH, then run `trailhead update`", file=sys.stderr)
+            else:
+                print(f"trailhead: {exc}; `portage-eval` was not built", file=sys.stderr)
         else:
             pinned["portage-eval"] = eval_script
             options["portage-eval"] = PinnedShimOptions(

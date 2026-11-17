@@ -6,7 +6,8 @@ with its import path set to the portage plugin root and the repo root, as ``bin/
 neither the caller's working directory nor ``PYTHONPATH`` nor user site-packages can supply code to it, with
 stdin closed and stdout/stderr in ``worker.log``, and records the pid in ``worker.pid`` (informational:
 liveness never reads it, so a failed write is reported on stderr and the request still starts). The worker
-is deliberately detached: the eval gate's no-background rule does not apply to it. It is bounded by the per-case timeout.
+is deliberately detached: the eval gate's no-background rule does not apply to it. It is bounded by the
+per-case timeout.
 
 Liveness is a lock, not a pid: ``start_request`` takes an exclusive ``flock`` on ``worker.lock`` in the
 request directory before the spawn and the worker inherits that open file, so the lock is held from
