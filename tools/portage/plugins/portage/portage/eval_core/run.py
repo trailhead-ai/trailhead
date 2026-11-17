@@ -196,7 +196,7 @@ def not_run(case: str, n: int, reason: str) -> dict:
             "passed": 0, "failed": 0, "errored": n, "runs": []}
 
 
-def _read_json(path: Path) -> object:
+def read_json(path: Path) -> object:
     try:
         return json.loads(path.read_text())
     except (OSError, ValueError):
@@ -282,7 +282,7 @@ def _canary(work_dir: Path, request, override, timeout: float, env: dict[str, st
         code, killed, missing = execute_fn(runner, work_dir, timeout)
         if missing:
             return not_run(canary.CASE, 1, RUNNER_MISSING)
-        return {"case": canary.CASE, **_decide(_read_json(run_json), 1, 1, code, killed)}
+        return {"case": canary.CASE, **_decide(read_json(run_json), 1, 1, code, killed)}
 
 
 def run_canary(*, work_dir: Path, timeout_seconds: float, execute, resolve_runner, pin,
@@ -373,7 +373,7 @@ def _run_planned(plugin_dir, case, n, pass_at, runner_cfg, runs_dir, json_path, 
             return not_run(case, n, RUNNER_MISSING)
         if not asked:
             first_elapsed = clock() - call_start
-        doc = _read_json(json_path)
+        doc = read_json(json_path)
         runs = _runs_of(doc)
         segment = (runs or [])[:batch]
         segment += [{"error": "missing"}] * (batch - len(segment))

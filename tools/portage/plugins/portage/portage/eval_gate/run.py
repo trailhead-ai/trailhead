@@ -130,6 +130,7 @@ from portage.eval_core.run import (
     SANDBOX_UNWRITABLE,
     TmpBaseRefused,
     TmpPathTooLong,
+    not_run,
 )
 
 from . import cache as pass_cache
@@ -245,11 +246,11 @@ def run_case(
     plugin_dir = _plugin_dir(plan, entry)
     n, pass_at = entry["runs"], entry["pass_at"]
     if not _at_planned_head(plan):
-        return _record(state, case, _not_run(case, n, HEAD_MOVED))
+        return _record(state, case, not_run(case, n, HEAD_MOVED))
     if entry.get("case_removed") is True:
-        return _record(state, case, _not_run(case, n, CASE_REMOVED))
+        return _record(state, case, not_run(case, n, CASE_REMOVED))
     if entry.get("new_runner_grants") is True:
-        return _record(state, case, _not_run(case, n, CORPUS_NEW))
+        return _record(state, case, not_run(case, n, CORPUS_NEW))
     runner_cfg = entry["runner"]
 
     if env is None:
@@ -271,10 +272,10 @@ def run_case(
         return result
     except TmpPathTooLong as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
-        return _record(state, case, _not_run(case, n, SANDBOX_UNWRITABLE))
+        return _record(state, case, not_run(case, n, SANDBOX_UNWRITABLE))
     except TmpBaseRefused as e:
         print(f"eval-gate run: {e}", file=sys.stderr)
-        return _record(state, case, _not_run(case, n, RUNNER_ERROR))
+        return _record(state, case, not_run(case, n, RUNNER_ERROR))
 
 
 def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
@@ -297,9 +298,7 @@ def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_second
     result = core.decide_case(
         plugin_dir=plugin_dir, case=case, runs=n, pass_at=pass_at, runner=runner_cfg,
         output_dir=state / "runs", timeout_seconds=timeout_seconds, work_dir=state,
-        execute=lambda runner, cwd, timeout: _execute(runner, cwd, timeout),
-        resolve_runner=lambda env: _runner_override(env),
-        pin=lambda runner, override: _pin(runner, override),
+        execute=_execute, resolve_runner=_runner_override, pin=_pin,
         env=env, harnesses=harnesses, clock=clock, canary=cached_canary, label="eval-gate run")
     return _record(state, case, result)
 
@@ -312,12 +311,9 @@ def record_crash(state: Path, case: str) -> None:
         state = Path(state)
         check_state(state)
         _, entry = _load_case(state, case)
-        _record(state, case, _not_run(case, entry["runs"], RUNNER_ERROR))
+        _record(state, case, not_run(case, entry["runs"], RUNNER_ERROR))
     except Exception:
         pass
-
-
-_not_run = core.not_run
 
 
 def _ordered(result: dict) -> dict:
@@ -331,13 +327,6 @@ def _record(state: Path, case: str, result: dict) -> dict:
     ordered = {**_ordered(result), "cached": result.get("cached", False)}
     _write_result(state, case, ordered)
     return ordered
-
-
-def _read_json(path: Path) -> object:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
 
 
 def _trusted_uids() -> set[int]:

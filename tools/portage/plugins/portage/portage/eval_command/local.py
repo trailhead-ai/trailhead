@@ -35,7 +35,7 @@ import time
 import traceback
 from pathlib import Path
 
-from portage.eval_core.run import RUNNER_MISSING
+from portage.eval_core.run import RUNNER_MISSING, read_json
 from portage.eval_core import TmpBaseRefused, TmpPathTooLong, decide_case, execute, run_canary
 from portage.eval_gate.run import _pin, _runner_override
 
@@ -61,9 +61,8 @@ class Terminated(BaseException):
     pass
 
 
-def worker_env(environ=None) -> dict[str, str]:
-    return {k: v for k, v in (os.environ if environ is None else environ).items()
-            if k not in _DROPPED_FROM_WORKER_ENV}
+def worker_env() -> dict[str, str]:
+    return {k: v for k, v in os.environ.items() if k not in _DROPPED_FROM_WORKER_ENV}
 
 
 def _take_lock(request_path: Path) -> int:
@@ -104,7 +103,7 @@ def _write_case(results: Path, result: dict) -> dict:
 def run_worker(request_path: Path, *, env: dict[str, str] | None = None, execute=execute) -> None:
     """Run every case of the request and always write ``result.json``."""
     request_path = Path(request_path)
-    doc = req.read_json(request_path / "request.json")
+    doc = read_json(request_path / "request.json")
     cases = doc["cases"]
     results = request_path / "results"
     results.mkdir(mode=0o700, exist_ok=True)
@@ -182,14 +181,14 @@ def _worker_alive(request_path: Path) -> bool:
 
 
 def _finished(request_path: Path) -> list[dict] | None:
-    doc = req.read_json(request_path / "result.json")
+    doc = read_json(request_path / "result.json")
     return doc["cases"] if req.valid_result(doc) else None
 
 
 def _case_files(request_path: Path, cases: list[dict]) -> dict[str, dict]:
     found = {}
     for c in cases:
-        doc = req.read_json(request_path / "results" / f"{c['case']}.json")
+        doc = read_json(request_path / "results" / f"{c['case']}.json")
         if req.valid_case_result(doc) and doc["case"] == c["case"]:
             found[c["case"]] = doc
     return found
@@ -224,17 +223,16 @@ def _render(request_id: str, cases: list[dict], out) -> int:
     return 3 if any(c["verdict"] == "not-run" for c in cases) else 0
 
 
-def wait(request_id: str, timeout_seconds: int, *, out=None, clock=None, sleep=None) -> int:
+def wait(request_id: str, timeout_seconds: int) -> int:
     """Report a request: 0 all passed, 1 a case failed, 3 none failed and one not run, 4 still
     running when the bound passed. Raises ``Refused`` (exit 2) for an off-shape or unknown id."""
-    out = out or sys.stdout
-    clock, sleep = clock or CLOCK, sleep or SLEEP
+    out = sys.stdout
     path = req.request_dir(request_id)
-    doc = req.read_json(path / "request.json")
+    doc = read_json(path / "request.json")
     if not path.is_dir() or not isinstance(doc, dict) or not isinstance(doc.get("cases"), list):
         raise req.Refused(f"no request {request_id}")
     cases = doc["cases"]
-    deadline = clock() + timeout_seconds
+    deadline = CLOCK() + timeout_seconds
     while True:
         finished = _finished(path)
         if finished is None and not _worker_alive(path):
@@ -245,14 +243,14 @@ def wait(request_id: str, timeout_seconds: int, *, out=None, clock=None, sleep=N
         if not _worker_alive(path):
             return _render(request_id, [have.get(c["case"]) or req.not_run_case(
                 c["case"], c["runs"], req.INTERRUPTED) for c in cases], out)
-        if clock() >= deadline:
+        if CLOCK() >= deadline:
             names = ", ".join(c["case"] for c in cases if c["case"] in have)
             print(f"request: {request_id}", file=out)
             print(f"running: {len(have)} of {len(cases)} cases finished"
                   + (f" ({names})" if names else ""), file=out)
             print(f"wait again: {req.wait_command(request_id)}", file=out)
             return 4
-        sleep(max(0.0, min(POLL_SECONDS, deadline - clock())))
+        SLEEP(max(0.0, min(POLL_SECONDS, deadline - CLOCK())))
 
 
 if __name__ == "__main__":

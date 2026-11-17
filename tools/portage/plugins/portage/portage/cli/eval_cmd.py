@@ -33,8 +33,7 @@ from pathlib import Path, PurePosixPath
 
 from ..eval_command import local, request
 from ..eval_gate.mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
-
-MAPPING_FILE = "eval-gate.json"
+from ..eval_gate.select import MAPPING_NAME
 
 
 def add_eval_subparser(sub) -> None:
@@ -82,7 +81,7 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict]]:
     plugin_dir = repo / root
     if not plugin_dir.resolve().is_relative_to(repo):
         raise request.Refused(f"plugin root {root!r} leaves the repo")
-    mapping_file = plugin_dir / "evals" / MAPPING_FILE
+    mapping_file = plugin_dir / "evals" / MAPPING_NAME
     try:
         mapping = load_mapping(mapping_file.read_text(), str(mapping_file), plugin_root=plugin_dir,
                                evals_dir=plugin_dir / "evals")
@@ -106,7 +105,7 @@ def _leave_sandbox(args: argparse.Namespace) -> int:
         print("cause: this call ran inside the sandbox even though it went through the pinned shim; "
               "the sandbox exclusion for it is probably not installed on this host "
               "(run `chezmoi apply` and start a new session)")
-    if not shim:
+    else:
         shim = request.default_shim()
         if not (shim and os.path.isfile(shim) and os.access(shim, os.X_OK)):
             print("the pinned portage-eval shim is not installed on this host, so there is no command to run "

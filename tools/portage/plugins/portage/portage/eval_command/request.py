@@ -82,10 +82,10 @@ def request_dir(request_id: str) -> Path:
     return eval_root() / request_id
 
 
-def shim_from_env(environ=None) -> str | None:
+def shim_from_env() -> str | None:
     """The absolute path of the pinned shim this process was run through, ``None`` when it was not
     run through one (or the value is not a plain absolute path)."""
-    value = (os.environ if environ is None else environ).get(SHIM_ENV)
+    value = os.environ.get(SHIM_ENV)
     if not value or not os.path.isabs(value) or any(ch in value for ch in "\n\r\0"):
         return None
     return value
@@ -123,13 +123,6 @@ def print_not_run_block(reason: str, *, indent: str = "", out=None, next_step: s
 
 def write_json(path: Path, doc: dict) -> None:
     atomic_write(path, json.dumps(doc, indent=2) + "\n")
-
-
-def read_json(path: Path) -> object:
-    try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
-        return None
 
 
 def valid_case_result(doc: object) -> bool:
