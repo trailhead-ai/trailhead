@@ -57,6 +57,7 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
+from trailhead.ranger import read_outcome
 from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfig, HubConfigError, read_hub_config
 from trailhead.ranger.drive_groups import DriveGroupsError, drive_groups
 from trailhead.uninstall import run_uninstall
@@ -385,6 +386,23 @@ def _cmd_drive_groups(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_read_outcome(args: argparse.Namespace) -> int:
+    for ok, problem in (
+        (args.json, "prints JSON; pass --json"),
+        (read_outcome.valid_spec(args.spec), "--spec is not a spec name"),
+        (read_outcome.valid_vault(args.vault), "--vault is not a safe vault name"),
+    ):
+        if not ok:
+            print(f"trailhead: read-outcome: {problem}", file=sys.stderr)
+            return 2
+    env = dict(os.environ)
+    verdict = read_outcome.judge(
+        args.spec, args.vault, Path(args.output_file), show=read_outcome.lore_show(env)
+    )
+    print(json.dumps(verdict))
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="trailhead",
@@ -639,6 +657,15 @@ def _build_parser() -> argparse.ArgumentParser:
     drive_p.add_argument("--vault", required=True, help="Vault name the group must bind.")
     drive_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
+    outcome_p = subparsers.add_parser(
+        "read-outcome",
+        help="Judge a ritual session's captured output against the record it names (JSON verdict).",
+    )
+    outcome_p.add_argument("--spec", required=True, help="The drive's spec name.")
+    outcome_p.add_argument("--vault", required=True, help="Vault holding the spec's records.")
+    outcome_p.add_argument("--output-file", required=True, metavar="PATH", help="The session's captured final output.")
+    outcome_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
     broker_p = subparsers.add_parser(
         "broker-header",
         help="Print the Authorization header for a session's broker credentials (JSON, for a header helper).",
@@ -673,6 +700,7 @@ def main() -> int:
         "core": _cmd_core,
         "session-start": _cmd_session_start,
         "drive-groups": _cmd_drive_groups,
+        "read-outcome": _cmd_read_outcome,
         "broker-header": _cmd_broker_header,
         "gateway": _cmd_gateway,
     }
