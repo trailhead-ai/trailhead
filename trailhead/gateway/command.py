@@ -22,7 +22,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -228,14 +227,19 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
     return 3
 
 
-def _run_start(job: str, workflow: str | None, port: int) -> int:
-    with tempfile.TemporaryFile() as spool:
-        try:
-            with tree_upload.top_level(Path(os.curdir)) as tree:
-                workflow = workflow or tree_upload.workflow_defining(tree, job)
+def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | None) -> int:
+    try:
+        with tree_upload.top_level(Path(os.curdir), home=scratch_home) as tree:
+            workflow = workflow or tree_upload.workflow_defining(tree, job)
+            spool = tree.spool()
+            try:
                 tree_upload.write_tar(tree, spool)
-        except tree_upload.TreeError as err:
-            raise _fail(str(err)) from None
+            except BaseException:
+                spool.close()
+                raise
+    except tree_upload.TreeError as err:
+        raise _fail(str(err)) from None
+    with spool:
         size = spool.tell()
         spool.seek(0)
         token = _token(port)
@@ -304,9 +308,9 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _dispatch(args: argparse.Namespace, port: int) -> int:
+def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) -> int:
     if args.action == "start":
-        return _run_start(args.job, args.workflow, port)
+        return _run_start(args.job, args.workflow, port, scratch_home)
     if args.action == "watch":
         return _run_watch(args.id, args.exit_status, port)
     if args.action == "view":
@@ -314,10 +318,12 @@ def _dispatch(args: argparse.Namespace, port: int) -> int:
     return _run_list(args.json, port)
 
 
-def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT) -> int:
+def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home: Path | None = None) -> int:
+    """*scratch_home* is where ``run start`` makes its private upload folder; the default
+    is the operator's home from the password database."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        return _dispatch(args, port)
+        return _dispatch(args, port, scratch_home)
     except CommandError as err:
         print(err, file=sys.stderr)
     except outpost_http.OutpostUnreachable as err:

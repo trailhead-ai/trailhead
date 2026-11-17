@@ -383,7 +383,15 @@ def repo(tmp_path, hermetic_git_env):
 
 
 @pytest.fixture
-def cli(tmp_path, state, monkeypatch, capsys):
+def scratch_home(tmp_path):
+    """The operator home the command makes its private upload folder under."""
+    home = tmp_path / "scratch-home"
+    home.mkdir()
+    return home
+
+
+@pytest.fixture
+def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
     monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
     monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
     write_credential(state, "ws-test-1")
@@ -392,7 +400,7 @@ def cli(tmp_path, state, monkeypatch, capsys):
         if cwd is not None:
             monkeypatch.chdir(cwd)
         capsys.readouterr()
-        rc = command.main(list(argv), port=port)
+        rc = command.main(list(argv), port=port, scratch_home=scratch_home)
         out, err = capsys.readouterr()
         return rc, out, err
 
@@ -552,6 +560,28 @@ class TestRunStart:
         rc, _, err = cli(port, "run", "start", "build", cwd=repo)
         assert rc == 2
         assert f"Outpost is not reachable at 127.0.0.1:{port}" in err
+
+    def test_a_scratch_folder_reached_through_a_symlink_is_refused_before_anything_is_sent(
+        self, cli, repo, scratch_home, tmp_path
+    ):
+        writable = tmp_path / "session-writable"
+        writable.mkdir()
+        (scratch_home / ".local").symlink_to(writable)
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert (rc, out) == (2, "")
+        assert len(err.splitlines()) == 1 and "symlink" in err
+
+    def test_the_session_s_git_config_does_not_shape_the_upload(self, cli, repo, tmp_path):
+        excludes = tmp_path / "excludes"
+        excludes.write_text("untracked.txt\n")
+        git(repo, "config", "core.excludesFile", str(excludes))
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert "untracked.txt" in names
 
 
 class TestRunWatch:

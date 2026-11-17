@@ -205,9 +205,10 @@ def fixture_repo(tmp_path_factory):
     return repo, ssh, sentinel
 
 
-def _tar(repo: Path) -> tarfile.TarFile:
+def _tar(repo: Path, home: Path) -> tarfile.TarFile:
+    """The upload the gateway command builds of *repo*, its private folder made under *home*."""
     spool = tempfile.TemporaryFile()
-    tree_upload.write_tar(tree_upload.top_level(repo), spool)
+    tree_upload.write_tar(tree_upload.top_level(repo, home=home), spool)
     spool.seek(0)
     return tarfile.open(fileobj=spool)
 
@@ -216,22 +217,22 @@ def _text(tar: tarfile.TarFile, name: str) -> str:
     return tar.extractfile(name).read().decode()
 
 
-def test_the_upload_carries_the_uncommitted_edit_and_the_untracked_file(fixture_repo):
+def test_the_upload_carries_the_uncommitted_edit_and_the_untracked_file(fixture_repo, tmp_path):
     repo, _, _ = fixture_repo
-    tar = _tar(repo)
+    tar = _tar(repo, tmp_path)
     assert _text(tar, "tracked.txt").strip() == "edited-uncommitted"
     assert _text(tar, "untracked.txt").strip() == "new-file"
 
 
-def test_the_upload_leaves_out_the_ignored_file(fixture_repo):
+def test_the_upload_leaves_out_the_ignored_file(fixture_repo, tmp_path):
     repo, _, _ = fixture_repo
-    assert "ignored.txt" not in _tar(repo).getnames()
+    assert "ignored.txt" not in _tar(repo, tmp_path).getnames()
     assert (repo / "ignored.txt").exists()
 
 
-def test_the_upload_carries_the_uncommitted_workflow_change(fixture_repo):
+def test_the_upload_carries_the_uncommitted_workflow_change(fixture_repo, tmp_path):
     repo, _, _ = fixture_repo
-    workflow = _text(_tar(repo), ".github/workflows/ci.yml")
+    workflow = _text(_tar(repo, tmp_path), ".github/workflows/ci.yml")
     assert 'workflow-edit=ap""plied' in workflow and 'NOT-ap""plied' not in workflow
     committed = subprocess.run(
         ["git", "show", "HEAD:.github/workflows/ci.yml"], cwd=repo, capture_output=True, text=True, check=True
@@ -239,9 +240,9 @@ def test_the_upload_carries_the_uncommitted_workflow_change(fixture_repo):
     assert 'workflow-edit=NOT-ap""plied' in committed
 
 
-def test_the_symlinks_into_the_operators_home_travel_as_links_to_where_they_point(fixture_repo):
+def test_the_symlinks_into_the_operators_home_travel_as_links_to_where_they_point(fixture_repo, tmp_path):
     repo, ssh, sentinel = fixture_repo
-    tar = _tar(repo)
+    tar = _tar(repo, tmp_path)
     assert tar.getmember("link-to-ssh").issym() and tar.getmember("link-to-ssh").linkname == str(ssh)
     assert tar.getmember("link-to-home").issym() and tar.getmember("link-to-home").linkname == str(sentinel.path)
 
@@ -408,10 +409,10 @@ def test_a_secret_is_named_by_variable_and_never_printed():
 
 
 def test_the_control_action_is_in_the_upload_and_the_sentinel_action_is_a_dot_slash_reference_that_climbs_out(
-    fixture_repo,
+    fixture_repo, tmp_path
 ):
     repo, _, sentinel = fixture_repo
-    tar = _tar(repo)
+    tar = _tar(repo, tmp_path)
     assert "ok-action/action.yml" in tar.getnames()
     workflow = _text(tar, ".github/workflows/ci.yml")
     assert "- uses: ./ok-action\n" in workflow
