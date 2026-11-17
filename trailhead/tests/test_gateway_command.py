@@ -353,14 +353,11 @@ def view(**over):
 
 
 def git(cwd, *args):
-    subprocess.run(
-        ["git", "-c", "commit.gpgsign=false", "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
-        cwd=cwd, check=True, capture_output=True,
-    )
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
 @pytest.fixture
-def repo(tmp_path):
+def repo(tmp_path, hermetic_git_env):
     root = tmp_path / "repo"
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / "sub").mkdir()
