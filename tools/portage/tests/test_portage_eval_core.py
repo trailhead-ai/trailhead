@@ -155,15 +155,52 @@ class TestStrictTmp:
         env.fake(pool=_result([PASS, PASS, PASS], costUsd=0.1))
         long_base = {**os.environ, "XDG_CACHE_HOME": str(env.root / ("x" * 30))}
         with pytest.raises(TmpPathTooLong):
-            _call(env, strict_tmp=True, env=long_base)
+            _call(env, env=long_base)
         assert not env.started
 
     def test_the_canary_is_refused_on_a_path_over_51_characters(self, env):
         env.fake()
         long_base = {**os.environ, "XDG_CACHE_HOME": str(env.root / ("x" * 30))}
         with pytest.raises(TmpPathTooLong):
-            run_canary(work_dir=env.state, timeout_seconds=60, strict_tmp=True, execute=execute,
+            run_canary(work_dir=env.state, timeout_seconds=60, execute=execute,
                        resolve_runner=_no_override, pin=_no_pin, env=long_base)
+        assert not env.started
+
+
+class TestGateTempDirOrder:
+    def _long_cache(self, env):
+        cache = env.root / ("c" * 40)
+        env.mp.setenv("XDG_CACHE_HOME", str(cache))
+        return cache
+
+    def test_a_group_writable_base_that_is_also_too_long_is_a_runner_error(self, env):
+        base = self._long_cache(env) / "pegt"
+        base.mkdir(parents=True, mode=0o700)
+        base.chmod(0o770)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-error")
+        assert not env.started
+
+    def test_a_symlinked_base_that_is_also_too_long_is_a_runner_error(self, env):
+        base = self._long_cache(env) / "pegt"
+        base.parent.mkdir(parents=True)
+        real = env.root / "real"
+        real.mkdir(mode=0o700)
+        base.symlink_to(real)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-error")
+        assert not env.started
+
+    def test_a_valid_base_that_is_too_long_is_still_sandbox_unwritable(self, env):
+        self._long_cache(env)
+        env.fake(_result([PASS] * 3))
+        assert env.run() == 0
+        r = env.result()
+        assert (r["verdict"], r["reason"]) == ("not-run", "runner-sandbox-unwritable")
         assert not env.started
 
 

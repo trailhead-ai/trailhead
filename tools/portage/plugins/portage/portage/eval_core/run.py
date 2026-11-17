@@ -107,11 +107,6 @@ def _under_tmp(path: Path) -> bool:
 def _call_tmpdir(env: dict[str, str], strict_tmp: bool = False):
     """A private directory for one runner call, removed on exit."""
     base = _tmp_base_path(env)
-    length = len(str(base)) + 1 + _CALL_DIR_CHARS
-    if length > MAX_TMPDIR_CHARS:
-        raise TmpPathTooLong(
-            f"runner temp path would be {length} characters, over the {MAX_TMPDIR_CHARS} the "
-            f"runner's sandbox wrote through; set a shorter XDG_CACHE_HOME")
     if strict_tmp and _under_tmp(base):
         raise TmpBaseRefused(f"runner temp base {base} is under /tmp, where the runner's sandbox "
                              f"could not write; set XDG_CACHE_HOME outside /tmp")
@@ -119,6 +114,11 @@ def _call_tmpdir(env: dict[str, str], strict_tmp: bool = False):
         base = ensure_private_dir(base, "runner temp base")
     except ValueError as e:
         raise TmpBaseRefused(str(e)) from e
+    length = len(str(base)) + 1 + _CALL_DIR_CHARS
+    if length > MAX_TMPDIR_CHARS:
+        raise TmpPathTooLong(
+            f"runner temp path would be {length} characters, over the {MAX_TMPDIR_CHARS} the "
+            f"runner's sandbox wrote through; set a shorter XDG_CACHE_HOME")
     path = Path(tempfile.mkdtemp(prefix="", dir=base))
     try:
         yield path
