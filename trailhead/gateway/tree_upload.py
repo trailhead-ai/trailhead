@@ -4,8 +4,11 @@ Everything is read from the git top level of the folder the command runs in: the
 files git tracks (``--cached``) plus the ones it does not yet track and does not
 ignore (``--others --exclude-standard``), as they are on disk now. A path git lists
 that is gone from disk is skipped, as is anything that is not a regular file or a
-symlink, which covers submodules and nested repositories (a directory). A symlink
-is archived as a link with its target text and no content. Files are written into
+symlink, which covers submodules and nested repositories (a directory), and any
+entry below a folder that is a symlink: no path is followed through a symlink, so
+nothing outside the top level can be read. A symlink is archived as a link with its
+target text and no content. Git runs without the repository's own fsmonitor or hooks,
+and the folder the command runs in must lie inside the top level git reports. Files are written into
 the tar one at a time, never read whole into memory.
 """
 
@@ -26,18 +29,27 @@ class TreeError(Exception):
     """A one-line reason the working tree cannot be uploaded."""
 
 
+_HARDENED = ("--no-optional-locks", "-c", "core.fsmonitor=false", "-c", f"core.hooksPath={os.devnull}")
+_NOT_A_TREE = "this folder is not inside a git work tree"
+
+
 def _git(cwd: Path, *args: str) -> bytes:
+    """Run git the way an operator-side command must against a tree a session wrote:
+    no program the repository's own config names (an fsmonitor, a hook) may run."""
     try:
-        done = subprocess.run(["git", *args], cwd=cwd, capture_output=True, check=False)
+        done = subprocess.run(["git", *_HARDENED, *args], cwd=cwd, capture_output=True, check=False)
     except (FileNotFoundError, NotADirectoryError):
-        raise TreeError("this folder is not inside a git work tree") from None
+        raise TreeError(_NOT_A_TREE) from None
     if done.returncode != 0:
-        raise TreeError("this folder is not inside a git work tree")
+        raise TreeError(_NOT_A_TREE)
     return done.stdout
 
 
 def top_level(cwd: Path) -> Path:
-    return Path(os.fsdecode(_git(cwd, "rev-parse", "--show-toplevel").rstrip(b"\n")))
+    top = Path(os.fsdecode(_git(cwd, "rev-parse", "--show-toplevel").rstrip(b"\n")))
+    if not Path(os.path.realpath(cwd)).is_relative_to(os.path.realpath(top)):
+        raise TreeError("this folder is not inside the git top level its repository names")
+    return top
 
 
 def listed_paths(top: Path) -> list[str]:
@@ -45,26 +57,78 @@ def listed_paths(top: Path) -> list[str]:
     return list(dict.fromkeys(os.fsdecode(p) for p in raw.split(b"\0") if p))
 
 
+_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+def _descend(top_fd: int, parts: list[str]) -> int | None:
+    """An fd on the folder at *parts* below *top_fd*, or None when any step is
+    missing or is not a real folder (a symlink is never followed)."""
+    fd = os.dup(top_fd)
+    for name in parts:
+        try:
+            nxt = os.open(name, _DIR, dir_fd=fd)
+        except OSError:
+            os.close(fd)
+            return None
+        os.close(fd)
+        fd = nxt
+    return fd
+
+
+def _open_file(dir_fd: int, name: str) -> int | None:
+    """An fd on the regular file *name* in *dir_fd*, or None for anything else."""
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dir_fd)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        return None
+    return fd
+
+
 def write_tar(top: Path, out: BinaryIO) -> None:
-    with tarfile.open(fileobj=out, mode="w") as tar:
-        for rel in listed_paths(top):
-            path = top / rel
+    top_fd = os.open(top, _DIR)
+    try:
+        with tarfile.open(fileobj=out, mode="w") as tar:
+            for rel in listed_paths(top):
+                _add(tar, top_fd, rel)
+    finally:
+        os.close(top_fd)
+
+
+def _add(tar: tarfile.TarFile, top_fd: int, rel: str) -> None:
+    *folders, name = rel.split("/")
+    dir_fd = _descend(top_fd, folders)
+    if dir_fd is None:
+        return
+    try:
+        try:
+            st = os.lstat(name, dir_fd=dir_fd)
+        except OSError:
+            return
+        info = tarfile.TarInfo(rel)
+        info.mtime = int(st.st_mtime)
+        if stat.S_ISLNK(st.st_mode):
             try:
-                st = path.lstat()
-            except FileNotFoundError:
-                continue
-            info = tarfile.TarInfo(rel)
-            info.mtime = int(st.st_mtime)
-            if stat.S_ISLNK(st.st_mode):
-                info.type = tarfile.SYMTYPE
-                info.linkname = os.readlink(path)
-                info.mode = 0o777
-                tar.addfile(info)
-            elif stat.S_ISREG(st.st_mode):
-                info.size = st.st_size
-                info.mode = 0o755 if st.st_mode & stat.S_IXUSR else 0o644
-                with path.open("rb") as fh:
-                    tar.addfile(info, fh)
+                info.linkname = os.readlink(name, dir_fd=dir_fd)
+            except OSError:
+                return
+            info.type = tarfile.SYMTYPE
+            info.mode = 0o777
+            tar.addfile(info)
+            return
+        fd = _open_file(dir_fd, name)
+        if fd is None:
+            return
+        with os.fdopen(fd, "rb") as fh:
+            fst = os.fstat(fh.fileno())
+            info.size = fst.st_size
+            info.mtime = int(fst.st_mtime)
+            info.mode = 0o755 if fst.st_mode & stat.S_IXUSR else 0o644
+            tar.addfile(info, fh)
+    finally:
+        os.close(dir_fd)
 
 
 _JOBS_KEY = re.compile(r"^jobs\s*:\s*(#.*)?$")
@@ -95,17 +159,26 @@ def _job_ids(text: str) -> set[str]:
 
 def workflow_defining(top: Path, job: str) -> str:
     """The one workflow under ``.github/workflows/`` that defines *job*; refuses when none or several do."""
-    folder = top / WORKFLOWS_DIR
     found = []
-    for path in sorted(folder.glob("*.y*ml")) if folder.is_dir() else []:
-        if path.suffix not in (".yml", ".yaml") or not path.is_file():
-            continue
+    top_fd = os.open(top, _DIR)
+    try:
+        folder_fd = _descend(top_fd, WORKFLOWS_DIR.split("/"))
+    finally:
+        os.close(top_fd)
+    if folder_fd is not None:
         try:
-            text = path.read_text(errors="replace")
-        except OSError:
-            continue
-        if job in _job_ids(text):
-            found.append(f"{WORKFLOWS_DIR}/{path.name}")
+            for name in sorted(os.listdir(folder_fd)):
+                if not name.endswith((".yml", ".yaml")):
+                    continue
+                fd = _open_file(folder_fd, name)
+                if fd is None:
+                    continue
+                with os.fdopen(fd, "rb") as fh:
+                    text = fh.read().decode(errors="replace")
+                if job in _job_ids(text):
+                    found.append(f"{WORKFLOWS_DIR}/{name}")
+        finally:
+            os.close(folder_fd)
     if not found:
         raise TreeError(f"no workflow under {WORKFLOWS_DIR}/ defines job {job}; name one with --workflow")
     if len(found) > 1:
