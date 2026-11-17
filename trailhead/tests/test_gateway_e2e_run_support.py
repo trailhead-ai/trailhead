@@ -287,18 +287,21 @@ def test_outposts_reader_finds_the_jobs_their_labels_and_the_matrix_first_values
     assert all(plans[j]["runsOn"] == ["ubuntu-latest"] for j in JOBS - {"unmapped"})
 
 
-def test_the_container_jobs_name_the_image_the_host_maps_and_one_that_does_not_exist(fixture_repo):
-    repo, _, _ = fixture_repo
-    workflow = (repo / ".github/workflows/ci.yml").read_text()
-    assert f"image: {IMAGE}" in workflow
-    assert "--privileged" in workflow and "-v /:/host" in workflow
-    assert "container: docker.io/library/outpost-e2e-no-such-image" in workflow
-
-
-def test_the_probe_job_names_both_listeners_on_the_hosts_loopback(fixture_repo):
-    repo, _, _ = fixture_repo
-    workflow = (repo / ".github/workflows/ci.yml").read_text()
-    assert "7401" in workflow and "7402" in workflow
+def test_the_workflow_follows_the_image_and_the_ports_the_builder_is_given(tmp_path, fixture_repo):
+    _, ssh, sentinel = fixture_repo
+    other = build_fixture_repo(
+        tmp_path / "app-other",
+        image="registry.example/other-image:9",
+        ssh=ssh,
+        sentinel=sentinel,
+        ports=(8811, 8822),
+        operator_home=ssh.parent,
+    )
+    workflow = (other / ".github/workflows/ci.yml").read_text()
+    assert "image: registry.example/other-image:9" in workflow
+    assert f"image: {IMAGE}" not in workflow
+    assert "8811" in workflow and "8822" in workflow
+    assert "7401" not in workflow and "7402" not in workflow
 
 
 def test_a_second_repo_with_another_name_builds_beside_the_first(tmp_path, fixture_repo):
