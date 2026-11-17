@@ -2692,6 +2692,7 @@ class ClaudeCodeHarness(Harness):
                     else []
                 )
                 + [f"Bash({command})" for command in user.excluded_commands]
+                + [f"Skill({skill})" for skill in profile.profile.denied_skills]
             },
             "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
         }

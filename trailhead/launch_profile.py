@@ -404,6 +404,8 @@ class LaunchProfile:
     readable_roles: tuple[str, ...] = ()
     network_allowed_hosts: tuple[str, ...] = ()
     mcp_servers: tuple[str, ...] = ()
+    # Plugin skills the session may not invoke, by their qualified names (``plugin:skill``).
+    denied_skills: tuple[str, ...] = ()
     never_prompt: bool = True
     model: str | None = None
     effort: str | None = None
@@ -457,6 +459,9 @@ HUB_PROFILE = LaunchProfile(
     read_denied_roles=(ROLE_TOKEN_STORE,),
     network_allowed_hosts=(),
     mcp_servers=(BROKER_SERVER,),
+    # The hub drives a spec through the broker's drive tool, which runs the slice loop in its
+    # own workspace session; craft's driver would run that loop inside the hub instead.
+    denied_skills=("craft:drive",),
     never_prompt=True,
     model=None,
     effort="medium",

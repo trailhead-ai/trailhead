@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
 
 import pytest
@@ -2425,6 +2425,19 @@ def test_ritual_works_in_claude_codes_temp_dir_wherever_it_is(tmp_path, override
     added = [start.argv[i + 1] for i, a in enumerate(start.argv) if a == "--add-dir"]
     assert expected in added
     assert f"Edit(/{expected}/**)" in _settings_of(start)["permissions"]["allow"]
+
+
+@pytest.mark.parametrize("denied", [(), ("craft:drive",), ("craft:drive", "other:skill")])
+def test_the_skills_a_profile_denies_are_denied_to_its_session(tmp_path, denied):
+    env = _fence(tmp_path)
+    deny = _settings_of(_start(env, profile=replace(HUB_PROFILE, denied_skills=denied)))["permissions"]["deny"]
+    assert [r for r in deny if r.startswith("Skill(")] == [f"Skill({s})" for s in denied]
+
+
+def test_the_hub_drives_a_spec_through_outpost_never_the_in_session_driver(tmp_path):
+    hub = _settings_of(_start(_fence(tmp_path)))["permissions"]
+    assert "Skill(craft:drive)" in hub["deny"]
+    assert f"mcp__{CONTRACT['broker_server']}__{CONTRACT['drive_tool']}" in hub["allow"]
 
 
 def test_ritual_launch_never_prompts(tmp_path):
