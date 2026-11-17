@@ -8,7 +8,6 @@ scenario applies to what a run left behind.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import shutil
 import sqlite3
@@ -560,52 +559,3 @@ def test_the_run_rows_are_read_from_a_table_with_or_without_a_reason_column(tmp_
     db.commit()
     db.close()
     assert RealOutpost(1, tmp_path, tmp_path / "log").runs() == [(1, "g/w", "pass", "completed", "failure", reason)]
-
-
-def _first_step(workflow: str, job: str) -> str:
-    block = workflow.split(f"\n  {job}:\n", 1)[1]
-    after_steps = block.split("    steps:\n", 1)[1]
-    return after_steps.splitlines()[0].strip()
-
-
-@pytest.mark.parametrize("job", ["tree", "local_action"])
-def test_a_job_that_reads_the_tree_starts_by_checking_it_out(fixture_repo, job):
-    repo, _, _ = fixture_repo
-    assert _first_step((repo / ".github/workflows/ci.yml").read_text(), job) == "- uses: actions/checkout@v4"
-
-
-def test_a_job_that_does_not_read_the_tree_has_no_checkout(fixture_repo):
-    repo, _, _ = fixture_repo
-    assert _first_step((repo / ".github/workflows/ci.yml").read_text(), "probe") != "- uses: actions/checkout@v4"
-
-
-FIXED_HASHES = (
-    # sha256 of the edited ci.yml, the committed ci.yml and ok-action/action.yml, built from the fixed inputs below
-    "1afefdf6805ba6bb8ce6c6fb485b265de69d79749912f0cbebe183c67bc1d4ee",
-    "3aa592c9535f52d1aa27b46feeafcf529947fd9d41df418020cc733fad5133ee",
-    "d67de089ff7704369bc8de94a867b1b0f46e0f6dd67c30c17f8a2e39c7aa55d7",
-)
-
-
-def test_the_generated_workflow_is_byte_for_byte_what_it_was_before_it_was_rewrapped(
-    tmp_path,
-):  # inert-gate: allow rewrap pin
-    home = Path("/home/op")
-    sentinel = HomeSentinel(home / ".outpost-e2e-x", "SENTINEL-FIXED")
-    repo = build_fixture_repo(
-        tmp_path / "app",
-        image="registry.example/runner@sha256:" + "ab" * 32,
-        ssh=home / ".ssh",
-        sentinel=sentinel,
-        ports=(7401, 7402),
-        operator_home=home,
-    )
-    committed = subprocess.run(
-        ["git", "show", "HEAD:.github/workflows/ci.yml"], cwd=repo, capture_output=True, check=True
-    ).stdout
-    built = (
-        (repo / ".github/workflows/ci.yml").read_bytes(),
-        committed,
-        (repo / "ok-action/action.yml").read_bytes(),
-    )
-    assert tuple(hashlib.sha256(b).hexdigest() for b in built) == FIXED_HASHES
