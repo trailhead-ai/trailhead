@@ -540,13 +540,21 @@ def test_run_scenario_a_run_reaches_a_public_host(run_world):  # AC65
     assert "public github.com:443: reached" in _followed(run_world, "public")[1]
 
 
-def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is_refused_and_exits_3(run_world):  # AC61, AC64
+def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is_stopped_and_exits_3(run_world):  # AC61, AC64
+    """act's own container-options policy is the first layer and refuses the job before any container exists;
+    the engine filter is the second and would refuse the create. Either stopping it is correct, so the reason
+    may name either; the run must end as one that did not execute, exit 3.
+    """
     code, out = _followed(run_world, "mount_priv")
-    assert code == 3, out[-1500:]
-    assert "run did not execute: the engine filter refused a container" in out, out[-1500:]
-    assert re.search(r"(?i)refused.*(Binds|Privileged)", out), f"no filter refusal naming a field in the log:\n{out[-1500:]}"
     row = {r["job"]: r for r in json.loads(_ran(run_world.session, "run_list"))["runs"]}["mount_priv"]
-    assert (row["reason"] or "").startswith("run did not execute: the engine filter refused a container: "), row
+    act_layer = "run did not execute: act refused the job's container options"
+    filter_layer = "run did not execute: the engine filter refused a container: "
+    reason = row["reason"] or ""
+    assert code == 3 and reason.startswith((act_layer, filter_layer)), (
+        f"exit {code}, reason {reason!r}; the run's log:\n{out[-3000:]}"
+    )
+    assert "mount-priv-job-ran-42" not in out, "the job ran"
+    assert re.search(r"(?i)(--privileged|privileged|Binds|host bind mount)", out), f"the log names neither refused option:\n{out[-3000:]}"
 
 
 def test_run_scenario_an_image_that_cannot_be_pulled_exits_3_with_the_pull_reason(run_world):  # act's real pull-error text

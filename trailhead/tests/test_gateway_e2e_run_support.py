@@ -502,3 +502,20 @@ def test_the_run_rows_are_read_from_a_table_with_or_without_a_reason_column(tmp_
     db.commit()
     db.close()
     assert RealOutpost(1, tmp_path, tmp_path / "log").runs() == [(1, "g/w", "pass", "completed", "failure", reason)]
+
+
+def _first_step(workflow: str, job: str) -> str:
+    block = workflow.split(f"\n  {job}:\n", 1)[1]
+    after_steps = block.split("    steps:\n", 1)[1]
+    return after_steps.splitlines()[0].strip()
+
+
+@pytest.mark.parametrize("job", ["tree", "local_action"])
+def test_a_job_that_reads_the_tree_starts_by_checking_it_out(fixture_repo, job):
+    repo, _, _ = fixture_repo
+    assert _first_step((repo / ".github/workflows/ci.yml").read_text(), job) == "- uses: actions/checkout@v4"
+
+
+def test_a_job_that_does_not_read_the_tree_has_no_checkout(fixture_repo):
+    repo, _, _ = fixture_repo
+    assert _first_step((repo / ".github/workflows/ci.yml").read_text(), "probe") != "- uses: actions/checkout@v4"

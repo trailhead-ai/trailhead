@@ -716,6 +716,7 @@ jobs:
   tree:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: echo "workflow-edit=NOT-ap""plied"
       - run: |
           echo "event=$GITHUB_EVENT_NAME"
@@ -729,6 +730,7 @@ jobs:
   local_action:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - uses: ./ok-action
       - uses: @LOCAL_ACTION@
       - run: echo "local-action-step-$((6*7))"
@@ -764,7 +766,7 @@ jobs:
       image: @IMAGE@
       options: --privileged -v /:/host
     steps:
-      - run: echo mount-priv-job-ran
+      - run: echo "mount-priv-job-ran-$((6*7))"
   pull_missing:
     runs-on: ubuntu-latest
     container: docker.io/library/outpost-e2e-no-such-image-0000:never
