@@ -2402,29 +2402,11 @@ def test_cli_refuses_a_session_for_the_hub(tmp_path, monkeypatch, capsys):
 
 def test_ritual_file_tools_may_write_wherever_its_sandbox_lets_it_write(tmp_path):
     env, ws = _ritual_ready(tmp_path)
-    env["CLAUDE_CODE_TMPDIR"] = str(tmp_path / "cc-temp")
     for workspace in (ws, _make_workspace(env, slug="ws2")):
         settings = _settings_of(_ritual_start(env, workspace))
-        roots = [*settings["sandbox"]["filesystem"]["allowWrite"], os.path.realpath(tmp_path / "cc-temp")]
+        roots = settings["sandbox"]["filesystem"]["allowWrite"]
         assert sorted(settings["permissions"]["allow"]) == sorted(f"Edit(/{r}/**)" for r in roots)
         assert f"Edit(/{workspace}/**)" in settings["permissions"]["allow"]
-
-
-@pytest.mark.parametrize(
-    ("override", "uid", "expected"),
-    [("cc-temp", 1000, "cc-temp"), (None, 1000, "/tmp/claude-1000"), (None, 4242, "/tmp/claude-4242")],
-)
-def test_ritual_works_in_claude_codes_temp_dir_wherever_it_is(tmp_path, override, uid, expected):
-    env, ws = _ritual_ready(tmp_path)
-    env.pop("CLAUDE_CODE_TMPDIR", None)
-    if override is not None:
-        env["CLAUDE_CODE_TMPDIR"] = str(tmp_path / override)
-        expected = str(tmp_path / override)
-    expected = os.path.realpath(expected)
-    start = _ritual_start(env, ws, uid=uid)
-    added = [start.argv[i + 1] for i, a in enumerate(start.argv) if a == "--add-dir"]
-    assert expected in added
-    assert f"Edit(/{expected}/**)" in _settings_of(start)["permissions"]["allow"]
 
 
 @pytest.mark.parametrize("denied", [(), ("craft:drive",), ("craft:drive", "other:skill")])
@@ -2452,6 +2434,21 @@ def test_ritual_launch_guards_the_git_admin_files_of_lore_vaults(tmp_path):
     vault = _make_vault(env["LORE_STATE_DIR"], "default")
     deny = _settings_of(_ritual_start(env, ws))["sandbox"]["filesystem"]["denyWrite"]
     assert str(vault.resolve() / ".git" / "config") in deny
+
+
+@pytest.mark.parametrize("vaults", [(), ("default",), ("default", "team")])
+def test_ritual_file_tools_are_refused_wherever_its_sandbox_refuses_writes(tmp_path, vaults):
+    env, ws = _ritual_ready(tmp_path)
+    for name in vaults:
+        _make_vault(env["LORE_STATE_DIR"], name)
+    settings = _settings_of(_ritual_start(env, ws))
+    deny = settings["permissions"]["deny"]
+    denied_writes = settings["sandbox"]["filesystem"]["denyWrite"]
+    for name in vaults:
+        assert str(Path(env["LORE_STATE_DIR"]).resolve() / "vaults" / name / ".git" / "hooks") in denied_writes
+    assert str(ws / ".claude") in denied_writes
+    for path in denied_writes:
+        assert f"Edit(/{path})" in deny and f"Edit(/{path}/**)" in deny
 
 
 def test_ritual_reads_deny_the_token_store_the_operator_credential_and_every_other_account(tmp_path):
@@ -2796,7 +2793,7 @@ def test_the_ritual_can_read_the_composed_plugin_tree_and_never_write_it(tmp_pat
     composed = Path(env["TRAILHEAD_STATE_DIR"]).resolve() / "composed" / "claude_code"
     argv = start.argv
     granted = [argv[i + 1] for i, a in enumerate(argv) if a == "--add-dir"]
-    assert str(composed) in granted
+    assert granted == [str(composed)]
     settings = _settings_of(start)
     assert str(composed) not in settings["sandbox"]["filesystem"]["allowWrite"]
     assert str(composed) in settings["sandbox"]["filesystem"]["denyWrite"]
