@@ -312,6 +312,20 @@ class TestStart:
         rc, out, err = ws.start("c1", plugin="plugins/link")
         assert rc == 2 and "request:" not in out
 
+    @pytest.mark.parametrize("content", [json.dumps(MAPPING), json.dumps({"SECRET_KEY_NAME": "x"}), "{nope"])
+    def test_a_mapping_file_symlinked_out_of_the_repo_is_refused_before_it_is_read(
+            self, ws, tmp_path, content):
+        outside = tmp_path / "outside-mapping.json"
+        outside.write_text(content)
+        mapping = ws.repo / "plugins" / "p" / "evals" / "eval-gate.json"
+        mapping.unlink()
+        mapping.symlink_to(outside)
+        rc, out, err = ws.start("c1")
+        assert rc == 2 and "request:" not in out
+        assert "leaves the repo" in err
+        assert "SECRET_KEY_NAME" not in err and "nope" not in err
+        assert ws.count("canary-started") == 0
+
     def test_a_mapping_that_does_not_load_is_refused_naming_the_file(self, ws):
         (ws.repo / "plugins" / "p" / "evals" / "eval-gate.json").write_text("{nope")
         rc, out, err = ws.start("c1")

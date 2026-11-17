@@ -83,6 +83,8 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict]]:
     if not plugin_dir.resolve().is_relative_to(repo):
         raise request.Refused(f"plugin root {root!r} leaves the repo")
     mapping_file = plugin_dir / "evals" / MAPPING_NAME
+    if not mapping_file.resolve().is_relative_to(repo):
+        raise request.Refused(f"mapping file {MAPPING_NAME!r} leaves the repo")
     try:
         mapping = load_mapping(mapping_file.read_text(), str(mapping_file), plugin_root=plugin_dir,
                                evals_dir=plugin_dir / "evals")
