@@ -60,7 +60,7 @@ reason named, and the runs so far stay in ``runs``:
 
 The sandbox-write canary (``canary.py``) runs once per state directory before the first
 case, not once per batch, and is cached at ``<state>/canary.json`` — the same shape as a case result, with
-``case`` ``"sandbox-write"`` and a single run (runs 1, pass_at 1, same ``_decide``)::
+``case`` ``"sandbox-write"`` and a single run (runs 1, pass_at 1, same deciding)::
 
     {"case": "sandbox-write", "verdict": "pass" | "fail" | "not-run", "passed": int,
      "failed": int, "errored": int, "reason": null | <a reason code>, "runs": [...]}
@@ -115,37 +115,38 @@ whose name fails the mapping's shape; a plugin root that leaves the repo.
 from __future__ import annotations
 
 import json
-import math
 import os
-import signal
 import stat
 import subprocess
 import sys
-import shutil
 import tempfile
 import time
-from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
+
+from portage.eval_core import run as core
+from portage.eval_core.run import (
+    COST_CAP,
+    NO_RUNNER,
+    RUNNER_ERROR,
+    RUNNER_MISSING,
+    RUNNER_OVERRIDE_ENV,
+    RUNS_ERRORED,
+    SANDBOX_UNWRITABLE,
+    TIMEOUT,
+    TmpBaseRefused,
+    TmpPathTooLong,
+)
 
 from . import cache as pass_cache
 from . import canary
-from .cache import ensure_private_dir
 from .mapping import CASE_NAME
 
 DEFAULT_TIMEOUT_SECONDS = 540
 MAX_TIMEOUT_SECONDS = 540
 
-NO_RUNNER = "harness-has-no-eval-runner"
-RUNNER_MISSING = "runner-missing"
-TIMEOUT = "timeout"
-COST_CAP = "cost-cap"
-RUNNER_ERROR = "runner-error"
-RUNS_ERRORED = "runs-errored"
-SANDBOX_UNWRITABLE = "runner-sandbox-unwritable"
 CASE_REMOVED = "case-removed-on-branch"
 CORPUS_NEW = "corpus-new-on-branch"
 HEAD_MOVED = "head-moved"
-RUNNER_OVERRIDE_ENV = "PORTAGE_EVAL_RUNNER"
 
 
 class RunRefused(Exception):
@@ -169,50 +170,6 @@ def check_state(state: Path) -> None:
         raise RunRefused(f"state directory {state} is owned by another user")
     if st.st_mode & 0o777 != 0o700:
         raise RunRefused(f"state directory {state} must be mode 0700")
-
-
-MAX_TMPDIR_CHARS = 51
-_CALL_DIR_CHARS = 8
-
-
-class TmpBaseRefused(Exception):
-    pass
-
-
-class TmpPathTooLong(Exception):
-    pass
-
-
-def _tmp_base(env: dict[str, str]) -> Path:
-    xdg = env.get("XDG_CACHE_HOME")
-    if xdg and os.path.isabs(xdg):
-        cache = Path(xdg)
-    else:
-        home = env.get("HOME")
-        if not home or not os.path.isabs(home):
-            raise TmpBaseRefused("no usable XDG_CACHE_HOME or HOME for the runner temp directory")
-        cache = Path(home) / ".cache"
-    base = cache / "pegt"
-    try:
-        return ensure_private_dir(base, "runner temp base")
-    except ValueError as e:
-        raise TmpBaseRefused(str(e)) from e
-
-
-@contextmanager
-def _call_tmpdir(env: dict[str, str]):
-    """A private directory for one runner call, removed on exit."""
-    base = _tmp_base(env)
-    length = len(str(base)) + 1 + _CALL_DIR_CHARS
-    if length > MAX_TMPDIR_CHARS:
-        raise TmpPathTooLong(
-            f"runner temp path would be {length} characters, over the {MAX_TMPDIR_CHARS} the "
-            f"runner's sandbox wrote through; set a shorter XDG_CACHE_HOME")
-    path = Path(tempfile.mkdtemp(prefix="", dir=base))
-    try:
-        yield path
-    finally:
-        shutil.rmtree(path, ignore_errors=True)
 
 
 def _load_case(state: Path, case: str) -> tuple[dict, dict]:
@@ -251,68 +208,6 @@ def _at_planned_head(plan: dict) -> bool:
             and now.stdout.strip() == head and not dirty.stdout.strip())
 
 
-def _runs_of(doc: object) -> list[dict] | None:
-    try:
-        runs = doc["cases"][0]["arms"]["with"]  # type: ignore[index]
-    except (KeyError, IndexError, TypeError):
-        return None
-    if not isinstance(runs, list) or not all(isinstance(r, dict) for r in runs):
-        return None
-    return runs
-
-
-def _is_errored(run: dict) -> bool:
-    return run.get("error") is not None or bool(run.get("skippedPaidGraders"))
-
-
-def _passes(run: dict) -> bool:
-    score = run.get("score")
-    return isinstance(score, (int, float)) and score >= 1.0
-
-
-def _run_record(run: dict) -> dict:
-    graders = run.get("graders") if isinstance(run.get("graders"), list) else []
-    return {
-        "passed": not _is_errored(run) and _passes(run),
-        "errored": _is_errored(run),
-        "graders": [
-            {"name": g["name"], "passed": bool(g.get("passed"))}
-            for g in graders
-            if isinstance(g, dict) and isinstance(g.get("name"), str)
-        ],
-    }
-
-
-def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool,
-            asked: int | None = None) -> dict:
-    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far."""
-    asked = n if asked is None else asked
-    runs = _runs_of(doc)
-    records = [_run_record(r) for r in (runs or [])][:asked]
-    scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
-    passing = sum(1 for r in scored if _passes(r))
-    failing = len(scored) - passing
-    errored = asked - len(scored)
-    records += [{"passed": False, "errored": True, "graders": []}] * max(0, asked - len(records))
-    base = {"passed": passing, "failed": failing, "errored": errored, "runs": records}
-
-    if runs is not None and passing >= pass_at:
-        return {**base, "verdict": "pass", "reason": None}
-    if runs is not None and failing > n - pass_at:
-        return {**base, "verdict": "fail", "reason": None}
-    if killed:
-        reason = TIMEOUT
-    elif runs is None:
-        reason = RUNNER_ERROR
-    elif isinstance(doc, dict) and doc.get("partial") and doc.get("partialReason") == "cost_ceiling":
-        reason = COST_CAP
-    elif isinstance(doc, dict) and doc.get("partial") and doc.get("partialReason") == "auth_failed":
-        reason = RUNNER_ERROR
-    else:
-        reason = RUNS_ERRORED
-    return {**base, "verdict": "not-run", "reason": reason}
-
-
 def atomic_write(path: Path, text: str) -> None:
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
@@ -334,38 +229,7 @@ def _write_result(state: Path, case: str, result: dict) -> None:
     _write_json(results / f"{case}.json", result)
 
 
-def _execute(runner, state: Path, timeout: float) -> tuple[int | None, bool, bool]:
-    """Run the runner in its own session. Returns ``(exit_code, killed, missing)``.
-
-    The process group is killed and reaped on timeout and on any other exit from the wait,
-    an exception or interrupt included."""
-    try:
-        proc = subprocess.Popen(
-            runner.argv,
-            env=runner.env,
-            cwd=state,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-    except OSError:
-        return None, False, True
-    done = False
-    try:
-        try:
-            code = proc.wait(timeout=timeout)
-            done = True
-            return code, False, False
-        except subprocess.TimeoutExpired:
-            return None, True, False
-    finally:
-        if not done:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            proc.wait()
+_execute = core.execute
 
 
 def run_case(
@@ -404,24 +268,9 @@ def run_case(
 
         harnesses = detect_harnesses(env)
 
-    override = _runner_override(env)
-    if override is False:
-        print(f"eval-gate run: {RUNNER_OVERRIDE_ENV} must be an absolute path to an "
-              f"executable file that only you or root can write", file=sys.stderr)
-        return _record(state, case, _not_run(case, n, RUNNER_MISSING))
-
-    runs_dir = state / "runs"
-    runs_dir.mkdir(mode=0o700, exist_ok=True)
-    json_path = runs_dir / f"{case}.json"
-    json_path.unlink(missing_ok=True)
-
-    def request(**kw):
-        return harnesses[0].eval_runner(env=env, **kw) if harnesses else None
-
     try:
-        with _call_tmpdir(env) as case_tmp:
-            result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir,
-                                  json_path, timeout_seconds, request, override, env, case_tmp, clock)
+        result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_seconds,
+                              harnesses, env, clock)
         if key and _cache_key(plugin_dir, entry) == key:
             pass_cache.store(key, result, env)
         return result
@@ -440,88 +289,24 @@ def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
         return None
 
 
-def _first_batch(n: int, pass_at: int) -> int:
-    return max(1, min(pass_at, n - pass_at + 1, n))
+def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_seconds, harnesses,
+                 env, clock) -> dict:
+    def cached_canary(run_canary, timeout):
+        cached = canary.read_cached(state)
+        if cached is not None:
+            return cached
+        fresh = _ordered(run_canary(timeout))
+        _write_json(state / canary.CACHE_NAME, fresh)
+        return fresh
 
-
-def _valid_cost(doc: object) -> float | None:
-    cost = doc.get("costUsd") if isinstance(doc, dict) else None
-    if isinstance(cost, bool) or not isinstance(cost, (int, float)):
-        return None
-    return float(cost) if math.isfinite(cost) and cost >= 0 else None
-
-
-def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, runs_dir, json_path,
-                 timeout_seconds, request, override, env, case_tmp, clock=time.monotonic) -> dict:
-    cap = runner_cfg["max_cost_usd"]
-
-    def runner_for(batch: int, max_cost: float, json_out: Path, output_dir: Path):
-        return _pin(request(
-            tmpdir=case_tmp,
-            plugin_dir=plugin_dir,
-            case=case,
-            runs=batch,
-            model=runner_cfg["model"],
-            allow_tools=list(runner_cfg["allow_tools"]),
-            max_cost_usd=max_cost,
-            json_path=json_out,
-            output_dir=output_dir,
-        ), override)
-
-    batch = _first_batch(n, pass_at)
-    runner = runner_for(batch, cap, json_path, runs_dir / case)
-    if runner is None:
-        return _record(state, case, _not_run(case, n, NO_RUNNER))
-
-    started = clock()
-    gate = canary.read_cached(state)
-    if gate is None:
-        gate = _run_canary(state, request, override, min(canary.TIMEOUT_SECONDS, timeout_seconds), env)
-        _write_json(state / canary.CACHE_NAME, gate)
-    if gate["verdict"] != "pass":
-        reason = SANDBOX_UNWRITABLE if gate["verdict"] == "fail" else gate["reason"]
-        return _record(state, case, _not_run(case, n, reason))
-
-    merged: list[dict] = []
-    asked, spent, first_elapsed = 0, 0.0, 0.0
-    while True:
-        call_start = clock()
-        code, killed, missing = _execute(runner, state, max(1.0, timeout_seconds - (call_start - started)))
-        if missing:
-            return _record(state, case, _not_run(case, n, RUNNER_MISSING))
-        if not asked:
-            first_elapsed = clock() - call_start
-        doc = _read_json(json_path)
-        runs = _runs_of(doc)
-        segment = (runs or [])[:batch]
-        segment += [{"error": "missing"}] * (batch - len(segment))
-        merged += segment
-        asked += batch
-        view = {**(doc if isinstance(doc, dict) else {}), "cases": [{"arms": {"with": merged}}]}
-        decided = _decide(view, n, pass_at, code, killed, asked=asked)
-        if runs is None and decided["verdict"] == "not-run":
-            decided["reason"] = TIMEOUT if killed else RUNNER_ERROR
-        result = {"case": case, **decided}
-        if decided["verdict"] != "not-run" or decided["reason"] != RUNS_ERRORED:
-            return _record(state, case, result)
-        if all(_is_errored(r) for r in segment) or asked >= n:
-            return _record(state, case, result)
-
-        cost = _valid_cost(doc)
-        spent = cap if cost is None else spent + cost
-        left = round(cap - spent, 6)
-        if left <= 0:
-            return _record(state, case, {**result, "reason": COST_CAP})
-        time_left = timeout_seconds - (clock() - started)
-        if time_left < first_elapsed:
-            return _record(state, case, {**result, "reason": TIMEOUT})
-
-        need = min(pass_at - decided["passed"], n - pass_at + 1 - decided["failed"])
-        batch = max(1, min(need, n - asked))
-        json_path = runs_dir / case / f"batch-{asked}.json"
-        json_path.parent.mkdir(mode=0o700, exist_ok=True)
-        json_path.unlink(missing_ok=True)
-        runner = runner_for(batch, left, json_path, runs_dir / case / f"batch-{asked}")
+    result = core.decide_case(
+        plugin_dir=plugin_dir, case=case, runs=n, pass_at=pass_at, runner=runner_cfg,
+        output_dir=state / "runs", timeout_seconds=timeout_seconds, work_dir=state,
+        execute=lambda runner, cwd, timeout: _execute(runner, cwd, timeout),
+        resolve_runner=lambda env: _runner_override(env),
+        pin=lambda runner, override: _pin(runner, override),
+        env=env, harnesses=harnesses, clock=clock, canary=cached_canary, label="eval-gate run")
+    return _record(state, case, result)
 
 
 def record_crash(state: Path, case: str) -> None:
@@ -537,14 +322,14 @@ def record_crash(state: Path, case: str) -> None:
         pass
 
 
-def _not_run(case: str, n: int, reason: str) -> dict:
-    return {"case": case, "verdict": "not-run", "reason": reason,
-            "passed": 0, "failed": 0, "errored": n, "runs": []}
+_not_run = core.not_run
 
 
 def _ordered(result: dict) -> dict:
-    return {k: result[k] for k in
-            ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
+    ordered = {k: result[k] for k in
+               ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
+    ordered["runs"] = [{k: v for k, v in r.items() if k != "score"} for r in ordered["runs"]]
+    return ordered
 
 
 def _record(state: Path, case: str, result: dict) -> dict:
@@ -581,35 +366,3 @@ def _pin(runner, override: str | None):
     if runner is None or override is None:
         return runner
     return type(runner)(argv=[override, *runner.argv[1:]], env=runner.env)
-
-
-def _run_canary(state: Path, request, override: str | None, timeout: float,
-                env: dict[str, str]) -> dict:
-    run_json = state / canary.RUN_JSON
-    run_json.unlink(missing_ok=True)
-    with _call_tmpdir(env) as canary_tmp:
-        return _canary_result(state, request, override, timeout, run_json, canary_tmp)
-
-
-def _canary_result(state, request, override, timeout, run_json, canary_tmp) -> dict:
-    runner = _pin(request(
-        tmpdir=canary_tmp,
-        plugin_dir=canary.plugin_dir(),
-        case=canary.CASE,
-        runs=1,
-        model=canary.MODEL,
-        allow_tools=list(canary.ALLOW_TOOLS),
-        max_cost_usd=canary.MAX_COST_USD,
-        json_path=run_json,
-        output_dir=state / canary.RUN_OUTPUT,
-        eval_dir=canary.EVAL_DIR,
-    ), override)
-    if runner is None:
-        result = _not_run(canary.CASE, 1, NO_RUNNER)
-    else:
-        code, killed, missing = _execute(runner, state, timeout)
-        if missing:
-            result = _not_run(canary.CASE, 1, RUNNER_MISSING)
-        else:
-            result = {"case": canary.CASE, **_decide(_read_json(run_json), 1, 1, code, killed)}
-    return _ordered(result)
