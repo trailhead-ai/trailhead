@@ -23,7 +23,8 @@ before use: index versions 2 to 4 with SHA-1 names are read, and a split index (
 entries live in another file of the session's), a sparse index, and a skip-worktree
 ``.gitignore`` (whose patterns git would read from an object the copy does not
 have) refuse the upload, as does anything that does not parse (a SHA-256
-repository's index among them). The copy goes into a fresh private folder under
+repository's index among them), as does an index path over 4096 bytes, which also
+keeps the check linear in the index's size. The copy goes into a fresh private folder under
 ``<operator home>/.local/state/trailhead/gateway/uploads``, the home taken from the
 password database rather than ``HOME``. Every folder on that way is opened without
 following a symlink and must be owned by this user, and ``uploads`` must be closed
@@ -34,11 +35,17 @@ copied, so a file ignored only there is uploaded. Git is run from a fixed absolu
 path (no ``PATH`` lookup) with an environment built here and nothing inherited,
 ``GIT_DIR`` and ``GIT_INDEX_FILE`` at the private folder, its working folder the
 open top level, lazy fetching and prompting off, under a timeout and with its output
-written to a file capped by ``RLIMIT_FSIZE``. The private folder is removed when the
-tree is closed.
+written to a file capped by ``RLIMIT_FSIZE``. Git keeps every ignore pattern it reads
+in memory at many times the file's size, so on Linux its address space is capped
+(``RLIMIT_AS``, 1 GiB: far above what listing 100,000 entries takes), and on every
+platform (macOS enforces no such cap) the ``.gitignore`` files below the top level,
+found by a walk that follows no symlink and skips ``.git``, may add up to at most
+4 MiB before git is run. The private folder is removed when the tree is closed.
 
 **Archiving.** What is archived is the files git tracks plus the ones it does not
-track and does not ignore, as they are on disk now. A listed path that is not a
+track and does not ignore, as they are on disk now. The listing is read and archived
+a name at a time, so the ceilings below bound memory as well as the upload, and a
+conflicted path's index stages, which git lists one after another, are archived once. A listed path that is not a
 plain relative path (absolute, empty, ``.`` or ``..`` segments) refuses the whole
 upload. A path gone from disk is skipped, as is anything that is not a regular file
 or a symlink and any entry below a folder that is a symlink: no path is followed
@@ -62,11 +69,12 @@ import shutil
 import stat
 import struct
 import subprocess
+import sys
 import tarfile
 import tempfile
 import weakref
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO, Callable, Iterator
 
 WORKFLOWS_DIR = ".github/workflows"
 MAX_WORKFLOW_BYTES = 256 * 1024
@@ -75,6 +83,10 @@ MAX_UPLOAD_ENTRIES = 100_000
 MAX_INDEX_BYTES = 64 * 1024 * 1024
 MAX_LISTING_BYTES = 64 * 1024 * 1024
 GIT_TIMEOUT_SECONDS = 60.0
+MAX_GIT_MEMORY = 1024 * 1024 * 1024
+MAX_GITIGNORE_BYTES = 4 * 1024 * 1024
+MAX_PATH_BYTES = 4096
+MAX_FOLDER_DEPTH = 512
 GIT_PROGRAMS = ("/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git")
 SCRATCH_PARTS = (".local", "state", "trailhead", "gateway", "uploads")
 
@@ -88,6 +100,7 @@ _NOT_A_TREE = "this folder is not inside a git work tree"
 _DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 _FILE = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
 _UNREADABLE_INDEX = "the repository's index is not one this command can read"
+_LONG_PATH = f"the repository's index holds a path longer than {MAX_PATH_BYTES} bytes"
 _SCRATCH_CONFIG = f"""[core]
 \trepositoryformatversion = 0
 \tbare = false
@@ -120,9 +133,12 @@ class Tree:
         git_programs: tuple[str, ...],
         timeout: float,
         max_listing: int,
+        max_memory: int,
+        max_gitignore: int,
     ):
         self.fd, self.index, self.runner = fd, index, runner
         self.git_programs, self.timeout, self.max_listing = git_programs, timeout, max_listing
+        self.max_memory, self.max_gitignore = max_memory, max_gitignore
         self._home = home
         self._scratch: Path | None = None
         self._held: list[Path | None] = [None]
@@ -215,12 +231,12 @@ def _linked_git_dir(top_fd: int) -> int:
     named_dir = os.fsdecode(first[len(b"gitdir: ") :])
     try:
         git_fd = os.open(named_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=top_fd)
-    except OSError:
+    except (OSError, ValueError):
         raise TreeError(_NOT_OUR_WORKTREE) from None
     back = _small_file(git_fd, "gitdir")
     try:
         named = os.stat(os.fsdecode(back.split(b"\n", 1)[0]), dir_fd=git_fd) if back else None
-    except OSError:
+    except (OSError, ValueError):
         named = None
     if named is None or (named.st_dev, named.st_ino) != (link.st_dev, link.st_ino):
         os.close(git_fd)
@@ -332,13 +348,18 @@ def _walk_index(data: bytes) -> None:
             pos += 2
         if version == 4:
             strip, pos = _varint(data, pos)
-            nul = data.index(b"\0", pos)
+            nul = data.find(b"\0", pos, pos + MAX_PATH_BYTES + 1)
             if strip > len(name):
                 raise ValueError
-            name = name[: len(name) - strip] + data[pos:nul]
+            kept = len(name) - strip
+            if nul < 0 or kept + nul - pos > MAX_PATH_BYTES:
+                raise TreeError(_LONG_PATH)
+            name = name[:kept] + data[pos:nul]
             pos = nul + 1
         else:
-            nul = data.index(b"\0", pos)
+            nul = data.find(b"\0", pos, pos + MAX_PATH_BYTES + 1)
+            if nul < 0:
+                raise TreeError(_LONG_PATH)
             name = data[pos:nul]
             pos = start + ((nul - start + 8) & ~7)
         if pos > end:
@@ -370,6 +391,8 @@ def top_level(
     git_programs: tuple[str, ...] = GIT_PROGRAMS,
     timeout: float = GIT_TIMEOUT_SECONDS,
     max_listing: int = MAX_LISTING_BYTES,
+    max_memory: int = MAX_GIT_MEMORY,
+    max_gitignore: int = MAX_GITIGNORE_BYTES,
 ) -> Tree:
     """The git top level of *cwd*, opened once, with a checked copy of its index.
 
@@ -391,7 +414,15 @@ def top_level(
     finally:
         os.close(git_fd)
     return Tree(
-        top_fd, index, home=home, runner=runner, git_programs=git_programs, timeout=timeout, max_listing=max_listing
+        top_fd,
+        index,
+        home=home,
+        runner=runner,
+        git_programs=git_programs,
+        timeout=timeout,
+        max_listing=max_listing,
+        max_memory=max_memory,
+        max_gitignore=max_gitignore,
     )
 
 
@@ -450,7 +481,7 @@ def _git_program(candidates: tuple[str, ...]) -> str:
     raise TreeError(f"git is not installed at any of {', '.join(candidates)}")
 
 
-def _list(tree: Tree) -> bytes:
+def _list(tree: Tree) -> Iterator[bytes]:
     """``git ls-files`` for the open top level, run against the private copy of the index."""
     program = _git_program(tree.git_programs)
     scratch = tree.scratch()
@@ -468,11 +499,15 @@ def _list(tree: Tree) -> bytes:
         "GIT_TERMINAL_PROMPT": "0",
         "LC_ALL": "C",
     }
-    top_fd, cap = tree.fd, tree.max_listing
+    _check_ignore_files(tree.fd, tree.max_gitignore)
+    top_fd, cap, memory = tree.fd, tree.max_listing, tree.max_memory
+    bounds_memory = sys.platform.startswith("linux")
 
     def inside() -> None:
         os.fchdir(top_fd)
         resource.setrlimit(resource.RLIMIT_FSIZE, (cap, cap))
+        if bounds_memory:
+            resource.setrlimit(resource.RLIMIT_AS, (memory, memory))
 
     with open(scratch / "listing", "x+b") as out:
         try:
@@ -492,11 +527,65 @@ def _list(tree: Tree) -> bytes:
             raise TreeError("git could not be run to list the working tree") from None
         if done.returncode != 0:
             raise TreeError("git could not list the working tree")
+        if os.fstat(out.fileno()).st_size > cap:
+            raise TreeError(f"git listed more than {cap} bytes of paths")
         out.seek(0)
-        listing = out.read(cap + 1)
-    if len(listing) > cap:
-        raise TreeError(f"git listed more than {cap} bytes of paths")
-    return listing
+        yield from _split_names(out)
+
+
+def _split_names(listing: BinaryIO) -> Iterator[bytes]:
+    """The NUL-terminated names in *listing*, read a chunk at a time."""
+    tail = b""
+    while chunk := listing.read(1 << 16):
+        *names, tail = (tail + chunk).split(b"\0")
+        if len(tail) > MAX_PATH_BYTES:
+            raise TreeError(f"git listed a path longer than {MAX_PATH_BYTES} bytes")
+        yield from names
+    if tail:
+        yield tail
+
+
+def _check_ignore_files(top_fd: int, cap: int) -> None:
+    """Refuse when the ``.gitignore`` files below *top_fd* add up to more than *cap* bytes.
+
+    Git holds every pattern it reads in memory, many times the file's size, and only
+    Linux enforces the address-space limit put on it; this bounds what git can be given
+    to read on every platform. Folders are entered without following a symlink, and
+    ``.git`` folders are not entered.
+    """
+    total = 0
+    stack = [(os.dup(top_fd), None)]
+    try:
+        while stack:
+            fd, pending = stack[-1]
+            if pending is None:
+                pending = []
+                try:
+                    entries = list(os.scandir(fd))
+                except OSError:
+                    entries = []
+                for entry in entries:
+                    if entry.name == ".gitignore" and entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                        if total > cap:
+                            raise TreeError(f"the .gitignore files add up to more than {cap} bytes")
+                    elif entry.name != ".git" and entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.name)
+                stack[-1] = (fd, pending)
+            if not pending:
+                os.close(fd)
+                stack.pop()
+                continue
+            if len(stack) > MAX_FOLDER_DEPTH:
+                raise TreeError(f"folders nest deeper than {MAX_FOLDER_DEPTH} levels")
+            try:
+                child = os.open(pending.pop(), _DIR, dir_fd=fd)
+            except OSError:
+                continue
+            stack.append((child, None))
+    finally:
+        for fd, _ in stack:
+            os.close(fd)
 
 
 def _write_new_path(path: Path, data: bytes) -> None:
@@ -511,11 +600,18 @@ def _is_plain(rel: str) -> bool:
     return all(name not in ("", ".", "..") for name in rel.removesuffix("/").split("/"))
 
 
-def listed_paths(tree: Tree) -> list[str]:
-    paths = list(dict.fromkeys(os.fsdecode(p) for p in _list(tree).split(b"\0") if p))
-    if not all(_is_plain(rel) for rel in paths):
-        raise TreeError("git lists a path that is not a plain path inside the top level; the index was hand-edited")
-    return paths
+def listed_paths(tree: Tree) -> Iterator[str]:
+    """The paths git lists, as they arrive; a conflicted path's stages, which git lists
+    one after another, are given once."""
+    previous = None
+    for raw in _list(tree):
+        if not raw or raw == previous:
+            continue
+        previous = raw
+        rel = os.fsdecode(raw)
+        if not _is_plain(rel):
+            raise TreeError("git lists a path that is not a plain path inside the top level; the index was hand-edited")
+        yield rel
 
 
 def _descend(top_fd: int, parts: list[str]) -> int | None:
@@ -550,10 +646,9 @@ class _Budget:
 def write_tar(
     tree: Tree, out: BinaryIO, *, max_bytes: int = MAX_UPLOAD_BYTES, max_entries: int = MAX_UPLOAD_ENTRIES
 ) -> None:
-    paths = listed_paths(tree)
     budget = _Budget(max_bytes, max_entries)
     with tarfile.open(fileobj=out, mode="w") as tar:
-        for rel in paths:
+        for rel in listed_paths(tree):
             _add(tar, tree.fd, rel, budget)
 
 

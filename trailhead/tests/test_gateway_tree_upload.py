@@ -12,7 +12,9 @@ import io
 import os
 import pwd
 import subprocess
+import sys
 import tarfile
+import tracemalloc
 from pathlib import Path
 
 import pytest
@@ -564,3 +566,128 @@ class TestWorkflowSizeCap:
         self._workflow_of_size(repo, 256 * 1024 + 1)
         with pytest.raises(tree_upload.TreeError, match="no workflow"):
             tree_upload.workflow_defining(opened(repo, home), "build")
+
+
+def open_fds() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+class TestGitsMemoryIsBounded:
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="RLIMIT_AS is enforced on Linux only")
+    @pytest.mark.parametrize(("ignore_mib", "refused"), [(0, False), (4, True)])
+    def test_a_git_that_would_outgrow_its_memory_ceiling_is_refused(self, repo, home, ignore_mib, refused):
+        (repo / ".gitignore").write_text("a\n" * (ignore_mib * 1024 * 1024 // 2))
+        top = opened(repo, home, max_memory=64 * 1024 * 1024, max_gitignore=64 * 1024 * 1024)
+        with contextlib.ExitStack() as stack:
+            if refused:
+                stack.enter_context(pytest.raises(tree_upload.TreeError, match="^git could not list"))
+            out = io.BytesIO()
+            tree_upload.write_tar(top, out)
+            out.seek(0)
+            assert set(tarfile.open(fileobj=out).getnames()) == EXPECTED | {".gitignore"}
+
+    @pytest.mark.parametrize(("extra", "refused"), [(0, False), (1, True)])
+    def test_ignore_files_over_their_summed_cap_refuse_before_git_runs(self, repo, home, extra, refused):
+        (repo / ".gitignore").write_text("a\n" * 100)
+        (repo / "sub").mkdir()
+        (repo / "sub" / ".gitignore").write_text("b\n" * 50 + "c" * extra)
+        top = opened(repo, home, max_gitignore=300)
+        with contextlib.ExitStack() as stack:
+            if refused:
+                stack.enter_context(pytest.raises(tree_upload.TreeError, match="gitignore"))
+            out = io.BytesIO()
+            tree_upload.write_tar(top, out)
+            out.seek(0)
+            assert set(tarfile.open(fileobj=out).getnames()) == EXPECTED | {".gitignore", "sub/.gitignore"}
+
+    def test_an_ignore_file_below_a_symlinked_folder_is_not_counted(self, repo, outside, home):
+        (outside / "big").mkdir()
+        (outside / "big" / ".gitignore").write_text("x" * 1000)
+        (repo / "linked").symlink_to(outside / "big")
+        out = io.BytesIO()
+        tree_upload.write_tar(opened(repo, home, max_gitignore=500), out)
+        out.seek(0)
+        assert "linked" in tarfile.open(fileobj=out).getnames()
+
+    def test_an_ignore_file_inside_the_git_folder_is_not_counted(self, repo, home):
+        (repo / ".git" / ".gitignore").write_text("x" * 1000)
+        out = io.BytesIO()
+        tree_upload.write_tar(opened(repo, home, max_gitignore=500), out)
+        out.seek(0)
+        assert set(tarfile.open(fileobj=out).getnames()) == EXPECTED
+
+    def test_folders_nested_deeper_than_the_walk_allows_are_refused(self, repo, home):
+        (repo / Path(*["d"] * 600)).mkdir(parents=True)
+        with pytest.raises(tree_upload.TreeError, match="nest deeper"):
+            tar_of(repo, home)
+
+
+class TestIndexPathsAreBounded:
+    def _index_with_path_of(self, repo: Path, length: int, version: str) -> None:
+        folders = "d/" * ((length - 1) // 2)
+        path = folders + "x" * (length - len(folders))
+        assert len(path) == length
+        index_entry(repo, path, "deep\n")
+        git(repo, "update-index", "--index-version", version)
+
+    @pytest.mark.parametrize("version", ["2", "4"])
+    @pytest.mark.parametrize(("length", "refused"), [(4096, False), (4097, True)])
+    def test_an_index_path_over_4096_bytes_is_refused(self, repo, home, length, refused, version):
+        self._index_with_path_of(repo, length, version)
+        with contextlib.ExitStack() as stack:
+            if refused:
+                stack.enter_context(pytest.raises(tree_upload.TreeError, match="longer than 4096"))
+            assert set(tar_of(repo, home).getnames()) == EXPECTED
+
+
+class TestAGitdirLineWithANulByte:
+    def test_a_nul_in_the_dot_git_file_is_a_one_line_refusal(self, tmp_path, home):
+        folder = tmp_path / "w"
+        folder.mkdir()
+        (folder / ".git").write_bytes(b"gitdir: /tmp\0/x\n")
+        before = open_fds()
+        with pytest.raises(tree_upload.TreeError, match="not a worktree of this folder"):
+            opened(folder, home)
+        assert open_fds() == before
+
+    def test_a_nul_in_the_backlink_is_a_one_line_refusal_that_closes_what_it_opened(self, repo, tmp_path, home):
+        worktree = tmp_path / "linked"
+        git(repo, "worktree", "add", "-q", str(worktree))
+        backlink = repo / ".git" / "worktrees" / "linked" / "gitdir"
+        backlink.write_bytes(str(worktree / ".git").encode() + b"\0\n")
+        before = open_fds()
+        with pytest.raises(tree_upload.TreeError, match="not a worktree of this folder"):
+            opened(worktree, home)
+        assert open_fds() == before
+
+
+class TestTheListingIsStreamed:
+    def test_the_entry_ceiling_applies_as_names_arrive(self, repo, outside, home):
+        forge_index_entry(repo, "../operator-home/key")
+        for n in range(4):
+            (repo / f"untracked-{n}.txt").write_text("u\n")
+        with pytest.raises(tree_upload.TreeError, match="entries"):
+            tar_of(repo, home, max_entries=3)
+
+    def test_a_conflicted_path_is_archived_once(self, repo, home):
+        base = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
+        git(repo, "checkout", "-q", "-b", "theirs")
+        (repo / "plain.txt").write_text("theirs\n")
+        git(repo, "commit", "-q", "-am", "theirs")
+        git(repo, "checkout", "-q", base)
+        (repo / "plain.txt").write_text("ours\n")
+        git(repo, "commit", "-q", "-am", "ours")
+        subprocess.run(["git", "merge", "-q", "theirs"], cwd=repo, capture_output=True)
+        assert git(repo, "ls-files", "--stage", "plain.txt").count("\n") == 2
+        assert tar_of(repo, home).getnames().count("plain.txt") == 1
+
+    def test_a_long_listing_is_not_held_in_memory(self, repo, tmp_path, home):
+        names = script(tmp_path / "many-names-git", "/usr/bin/seq 1 100000 | /usr/bin/tr '\\n' '\\0'\n")
+        top = opened(repo, home, git_programs=(str(names),))
+        tracemalloc.start()
+        try:
+            tree_upload.write_tar(top, Counting())
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+        assert peak < 4 * 1024 * 1024
