@@ -147,6 +147,14 @@ Do not use `EnterPlanMode`/`ExitPlanMode` — plan mode forces plans into an eph
 and blocks the plan write described below. Instead, self-enforce the discipline: no implementation
 code until the user approves the written plan.
 
+**Every `lore record create` this skill runs passes `--vault <vault>`**, where `<vault>` is the
+vault the plan's spec lives in — the vault step 1 of Explore Context's found-work block names, or,
+when the plan has no found-work block, the `vault` field of `lore vault resolve --kind spec --json`
+(when that is null, the vault whose path in `lore vault ls` holds the spec). A create with no
+`--vault` is routed by the working directory, and a `--parent` create with no `--vault` lands in the
+`default` vault with a dangling parent; an unattended session may write records in its spec's vault
+only, so the create is refused outright anywhere else.
+
 ### 1. Explore Context
 
 - **Look for an upstream spec first.** If your project uses lore, check for a spec on this topic
@@ -350,7 +358,7 @@ is assigned, never after.
    ```sh
    TITLE="<capability>: <candidate>"
    SLUG="<capability-slug>"
-   lore record create --kind decision --title "$TITLE" \
+   lore record create --kind decision --title "$TITLE" --vault <vault> \
      --label "craft/prior-art=$SLUG" < <body-path>
    ```
 
@@ -612,7 +620,7 @@ that existing parent, exactly as the topic-rooted path does below.
 1. **Write the parent task.**
    - *Topic-rooted:* render craft's parent-task body template
      (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then feed it in —
-     `lore record create --kind task --title '<topic>' --status ready < <body-path>`, the body
+     `lore record create --kind task --title '<topic>' --status ready --vault <vault> < <body-path>`, the body
      written to a `mktemp` file with the file-writing tool and read by redirect. This stores the
      plan as a searchable lore `task` record, linkable from session notes and future planning.
      Before creating it, check whether the resolved spec already has an open slice parent — validate
@@ -647,7 +655,7 @@ that existing parent, exactly as the topic-rooted path does below.
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the parent
    (the slice parent, on the slice-rooted path) and ordered after any task it builds on — `lore
    record create --kind task --title '<task topic>' --status ready --parent <parent-name>
-   --depends-on <earlier-task-name> < <body-path>`, the body written to a `mktemp` file with the
+   --depends-on <earlier-task-name> --vault <vault> < <body-path>`, the body written to a `mktemp` file with the
    file-writing tool and read by redirect. Under `--unattended` this is required: the child body is
    plan text derived from vault and web material, so it is scrubbed first, flattened to labelled
    single lines where it is a ritual-written section (`_shared/unattended.md`), and the task topic

@@ -292,12 +292,20 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if not ritual and args.vault is not None:
+        print(
+            "trailhead: --vault belongs to the ritual role; a hub writes every vault of its account",
+            file=sys.stderr,
+        )
+        return 1
     env = dict(os.environ)
     launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
     session_dir = broker_mcp_config_path(args.session, env=env).parent if ritual else None
     config = read_hub_config(args.account, env=env)
     if ritual:
-        profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, workspace=args.workspace)
+        profile = resolve_profile(
+            RITUAL_PROFILE, args.account, env=env, workspace=args.workspace, vault=args.vault
+        )
         directory = profile.paths[ROLE_WORKSPACE]
     else:
         profile = resolve_profile(HUB_PROFILE, args.account, env=env)
@@ -351,11 +359,11 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
 
 
 def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) -> int:
-    refused = (args.workspace, args.prompt_file, args.broker_session, args.session)
+    refused = (args.workspace, args.prompt_file, args.broker_session, args.session, args.vault)
     if not ritual or any(value is not None for value in refused):
         print(
             "trailhead: --setup-sandbox-only belongs to the ritual role alone and takes no "
-            "--workspace, --prompt-file, --broker-session or --session",
+            "--workspace, --prompt-file, --broker-session, --session or --vault",
             file=sys.stderr,
         )
         return 1
@@ -640,6 +648,12 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="ID",
         default=None,
         help="Outpost's session id for a ritual; its session files land in that session's directory.",
+    )
+    session_p.add_argument(
+        "--vault",
+        metavar="NAME",
+        default=None,
+        help="The one lore vault a ritual may write records in (required for the ritual role); every other vault is write-denied.",
     )
     session_p.add_argument(
         "--setup-sandbox-only",
