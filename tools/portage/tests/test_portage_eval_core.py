@@ -4,7 +4,6 @@ score-free and within the gate's reason vocabulary."""
 
 from __future__ import annotations
 
-import copy
 import json
 import os
 import shutil

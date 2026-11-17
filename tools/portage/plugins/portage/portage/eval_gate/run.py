@@ -125,14 +125,9 @@ from pathlib import Path, PurePosixPath
 
 from portage.eval_core import run as core
 from portage.eval_core.run import (
-    COST_CAP,
-    NO_RUNNER,
     RUNNER_ERROR,
-    RUNNER_MISSING,
     RUNNER_OVERRIDE_ENV,
-    RUNS_ERRORED,
     SANDBOX_UNWRITABLE,
-    TIMEOUT,
     TmpBaseRefused,
     TmpPathTooLong,
 )

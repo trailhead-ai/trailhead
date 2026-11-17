@@ -679,7 +679,8 @@ class TestBackendChoice:
         default.chmod(0o755)
         rc, out, _ = ws.main(*self._argv(ws))
         assert rc == 3
-        assert f"run outside the sandbox: {default} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}" in out
+        expected = f"run outside the sandbox: {default} start --plugin plugins/p --case c1 --case c2 --repo {ws.repo}"
+        assert expected in out
         assert "not installed" not in out
 
     def test_not_through_the_shim_with_no_default_shim_says_it_is_not_installed_and_names_no_command(
