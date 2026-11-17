@@ -853,3 +853,28 @@ class TestWorkerFinishingDuringWait:
         rc, out, _ = ws.wait(request_id, seconds=5)
         assert rc == 3
         assert "not run: runs-errored" in out and "interrupted" not in out
+
+
+class TestLocalBackendFromInsideTheSandbox:
+    def _killed(self, ws):
+        ws.set("hold")
+        request_id = ws.started("c1", "c2")
+        until(lambda: ws.count("case-started-c1"))
+        os.kill(ws.worker_pid(request_id), signal.SIGKILL)
+        return request_id
+
+    def test_a_request_started_with_the_sandbox_marker_whose_worker_is_gone_is_could_not_leave_sandbox(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        request_id = self._killed(ws)
+        rc, out, _ = ws.wait(request_id, seconds=30)
+        assert rc == 3
+        assert out.count("not run: could-not-leave-sandbox") == 2
+        assert out.count("next step: stop and report") == 2
+        assert "interrupted" not in out and "resubmit" not in out
+
+    def test_a_request_started_without_the_marker_whose_worker_is_gone_is_still_interrupted(self, ws):
+        request_id = self._killed(ws)
+        rc, out, _ = ws.wait(request_id, seconds=30)
+        assert rc == 3
+        assert out.count("not run: interrupted") == 2 and "could-not-leave-sandbox" not in out

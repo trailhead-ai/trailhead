@@ -16,7 +16,8 @@ lowercase letters or digits (never read as a path), an unknown request, or a bou
 With no ``--backend``, a call whose environment carries ``SANDBOX_RUNTIME`` (the harness sets it in
 sandboxed calls only) is not run ``could-not-leave-sandbox``: nothing starts, exit 3, and the block is
 followed by the absolute pinned-shim command to run outside the sandbox. ``--backend local`` runs
-regardless; with no marker the local backend is the default.
+regardless, but a worker started that way from inside the sandbox is killed when the call returns and
+``wait`` reports it ``could-not-leave-sandbox``; with no marker the local backend is the default.
 
 The entry points the shim dispatches to are ``cmd_start`` and ``cmd_wait``. The gate's pass cache
 and state directories are never read or written.

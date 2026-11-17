@@ -20,7 +20,9 @@ writing ``result.json``: a crash leaves the unfinished cases not run ``runner-br
 also takes down the runner's process group, as the core's executor does on any exit) ``interrupted``.
 
 ``wait`` polls until ``result.json`` is a whole, valid file or the bound passes. A worker that is gone
-with no valid ``result.json`` leaves its unfinished cases ``interrupted`` (exit 3, never 4). The
+with no valid ``result.json`` leaves its unfinished cases ``interrupted`` (exit 3, never 4), or
+``could-not-leave-sandbox`` when ``request.json`` records that the request was started with the sandbox
+marker set: the sandbox kills a worker started from inside it when the call returns. The
 runner binary is validated by the gate's own ``PORTAGE_EVAL_RUNNER`` rules.
 """
 
@@ -75,7 +77,8 @@ def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
     """Create a request and spawn its detached worker; return the identifier."""
     try:
         request_id, path = req.create_request(
-            {"repo": repo, "plugin_root": plugin_root, "cases": cases})
+            {"repo": repo, "plugin_root": plugin_root, "cases": cases,
+             "started_in_sandbox": "SANDBOX_RUNTIME" in os.environ})
         log = open(path / "worker.log", "ab")
         lock = _take_lock(path)
         try:
@@ -242,8 +245,9 @@ def wait(request_id: str, timeout_seconds: int) -> int:
             return _render(request_id, finished, out)
         have = _case_files(path, cases)
         if gone:
+            lost = req.COULD_NOT_LEAVE_SANDBOX if doc.get("started_in_sandbox") is True else req.INTERRUPTED
             return _render(request_id, [have.get(c["case"]) or req.not_run_case(
-                c["case"], c["runs"], req.INTERRUPTED) for c in cases], out)
+                c["case"], c["runs"], lost) for c in cases], out)
         if CLOCK() >= deadline:
             names = ", ".join(c["case"] for c in cases if c["case"] in have)
             print(f"request: {request_id}", file=out)

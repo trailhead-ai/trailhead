@@ -10,8 +10,9 @@ build a pinned shim, `<home>/.local/state/trailhead/bin/portage-eval`, that the 
 sandbox. It accepts only `start` and `wait` (anything else is refused with exit 2) and runs them as
 `portage eval <verb> ...`. Call it bare, by its absolute path.
 
-The shim is built only when `claude` resolves on `PATH` to an executable file that is not group- or
-world-writable and is owned by root or the current user; that binary is pinned as `PORTAGE_EVAL_RUNNER`. When it
+The shim is built only when portage's CLI is enabled (`"portage"` in `cli_tools`) and `claude` resolves on
+`PATH` to an executable file that is not group- or world-writable and is owned by root or the current user;
+that binary is pinned as `PORTAGE_EVAL_RUNNER`. When it
 does not resolve, install and update print a warning (`portage-eval was not built`) and build no shim. The shim
 runs the command from a clean environment, passing through only `HOME`, the state-directory variables, the
 sandbox marker `SANDBOX_RUNTIME`, `USER`, `TERM`, and the locale variables; it fixes `PORTAGE_EVAL_RUNNER`
@@ -32,8 +33,11 @@ block it prints one of:
   `cause:` line saying the sandbox exclusion for it is probably not installed on this host (run
   `chezmoi apply` and start a new session), then the paste-ready command.
 
-`--backend local` runs regardless of the marker. With no marker the local backend is the default. The worker
-never inherits `SANDBOX_RUNTIME` or `XDG_CACHE_HOME`.
+A session does not pass `--backend local`: from inside the sandbox it would start a worker the sandbox kills when
+the call returns, and `wait` then reports the unfinished cases not run `could-not-leave-sandbox` (stop and
+report, exit 3) because `request.json` records that the request started with the marker set. `--backend local`
+is for a caller that is not sandboxed (the shim, a terminal), where it is also the default. The worker never
+inherits `SANDBOX_RUNTIME` or `XDG_CACHE_HOME`.
 
 ## start
 
@@ -102,7 +106,8 @@ below.
 
 | Reason | Cause | Next step |
 |--------|-------|-----------|
-| `could-not-leave-sandbox` | `start` ran sandboxed with no `--backend` (no request exists; printed by `start` only) | stop and report, then the command to run outside the sandbox (above) |
+| `could-not-leave-sandbox` | `start` ran sandboxed with no `--backend` (no request exists; printed by `start`), then the command to run outside the sandbox (above) | stop and report |
+| `could-not-leave-sandbox` | `wait` found the worker gone with no result for a request started with the sandbox marker set (`--backend local` from inside the sandbox) | stop and report |
 | `runner-broken` | the sandbox-write canary did not pass or could not run, the runner temp base is under `/tmp` or the temp path is over 51 characters, the request could not be created or started, or the worker crashed | stop and report |
 | `runner-broken`, canary reason `runner-missing` | the pinned runner binary is gone, so the canary could not run | **run trailhead update** |
 | `interrupted` | the worker died (or was terminated) before deciding the case | **resubmit** |
