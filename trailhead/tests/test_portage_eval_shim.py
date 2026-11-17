@@ -120,7 +120,7 @@ class TestEnvironment:
             self, tmp_path, monkeypatch):
         seen = _seen_by_interpreter(
             tmp_path, monkeypatch, "portage-eval", {**SESSION, "PORTAGE_EVAL_RUNNER": "/tmp/hostile"})
-        assert seen["PORTAGE_EVAL_RUNNER"] == str(tmp_path / "claude-2.1.999")
+        assert seen["PORTAGE_EVAL_RUNNER"] == str(tmp_path / "runner-bin" / "claude")
 
     def test_the_shim_tells_the_command_its_own_absolute_path(self, tmp_path, monkeypatch):
         seen = _seen_by_interpreter(tmp_path, monkeypatch, "portage-eval", SESSION)
@@ -149,9 +149,51 @@ class TestRunnerResolution:
         with pytest.raises(PathIntegrationError, match="writable"):
             resolve_eval_runner({"PATH": str(bindir)})
 
-    def test_a_runner_path_is_resolved_through_its_symlinks(self, tmp_path):
+    def test_a_runner_is_pinned_where_path_found_it_not_at_the_file_it_links_to(self, tmp_path):
         bindir = _stub_runner(tmp_path)
-        assert resolve_eval_runner({"PATH": str(bindir)}) == tmp_path / "claude-2.1.999"
+        assert resolve_eval_runner({"PATH": str(bindir)}) == bindir / "claude"
+
+    def test_a_link_owned_by_another_user_is_refused_naming_the_link(self, tmp_path, monkeypatch):
+        bindir = _stub_runner(tmp_path)
+        monkeypatch.setattr("trailhead.pathint.os.geteuid", lambda: (bindir / "claude").lstat().st_uid + 1)
+        with pytest.raises(PathIntegrationError, match=r"runner link .*claude is owned by another user"):
+            resolve_eval_runner({"PATH": str(bindir)})
+
+    def test_a_link_whose_target_others_can_write_is_refused_naming_the_target(self, tmp_path):
+        bindir = _stub_runner(tmp_path, mode=0o775)
+        with pytest.raises(PathIntegrationError, match=r"claude-2\.1\.999.*writable"):
+            resolve_eval_runner({"PATH": str(bindir)})
+
+    def test_the_pinned_runner_still_runs_after_the_link_is_retargeted_and_the_old_version_deleted(
+            self, tmp_path):
+        versions = tmp_path / "versions"
+        versions.mkdir()
+        for version in ("A", "B"):
+            (versions / version).write_text(f"#!/bin/sh\necho runner-{version}\n")
+            (versions / version).chmod(0o755)
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        (bindir / "claude").symlink_to(versions / "A")
+        env = {"HOME": str(tmp_path / "home"), "XDG_STATE_HOME": str(tmp_path / "state"),
+               "PATH": f"{bindir}:/usr/bin:/bin"}
+        dump = tmp_path / "seen"
+        fake = tmp_path / "fake-python"
+        fake.write_text(f'#!/bin/sh\n/usr/bin/env > "{dump}"\n')
+        fake.chmod(0o755)
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr("trailhead.pathint.sys.executable", str(fake))
+            build_cli_shims(_tools(), env=env)
+        (bindir / "claude").unlink()
+        (bindir / "claude").symlink_to(versions / "B")
+        (versions / "A").unlink()
+        shim = resolve_shim_dir(env=env) / "portage-eval"
+        proc = subprocess.run([str(shim), "start"], capture_output=True, text=True,
+                              env={"HOME": env["HOME"], "PATH": "/usr/bin:/bin"}, timeout=60)
+        assert proc.returncode == 0, proc.stderr
+        pinned = dict(line.split("=", 1) for line in dump.read_text().splitlines() if "=" in line)[
+            "PORTAGE_EVAL_RUNNER"]
+        ran = subprocess.run([pinned], capture_output=True, text=True, timeout=60)
+        assert ran.stdout.strip() == "runner-B"
 
     def test_a_build_that_cannot_resolve_the_runner_writes_no_eval_shim_and_says_why(self, tmp_path, capsys):
         empty = tmp_path / "empty"

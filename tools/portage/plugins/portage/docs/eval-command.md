@@ -12,7 +12,9 @@ sandbox. It accepts only `start` and `wait` (anything else is refused with exit 
 
 The shim is built only when portage's CLI is enabled (`"portage"` in `cli_tools`) and `claude` resolves on
 `PATH` to an executable file that is not group- or world-writable and is owned by root or the current user;
-that binary is pinned as `PORTAGE_EVAL_RUNNER`. When it
+that binary is pinned as `PORTAGE_EVAL_RUNNER` at the path `PATH` found it, not the file a link resolves to, so
+a runner whose versioned file is replaced by an update keeps working. Both the link (its owner) and its resolved
+target (executable file, owner, not group- or world-writable) are checked. When it
 does not resolve, install and update print a warning (`portage-eval was not built`) and build no shim. The shim
 runs the command from a clean environment, passing through only `HOME`, the state-directory variables, the
 sandbox marker `SANDBOX_RUNTIME`, `USER`, `TERM`, and the locale variables; it fixes `PORTAGE_EVAL_RUNNER`

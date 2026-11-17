@@ -275,18 +275,26 @@ EVAL_RUNNER_COMMAND = "claude"
 
 
 def resolve_eval_runner(env: dict[str, str]) -> Path:
-    """The absolute, symlink-resolved path of the eval runner binary, as ``PATH`` in *env* finds it.
+    """The absolute path of the eval runner as ``PATH`` in *env* finds it, links left unresolved.
 
-    Refuses (``PathIntegrationError`` naming why) a runner that is missing, not an executable
-    file, writable by group or others, or owned by another user: the same rules the eval
-    command applies to ``PORTAGE_EVAL_RUNNER`` when it runs.
+    A link is pinned as found, so a retargeted link (an auto-update replacing the versioned file it
+    points at) keeps working. Refuses (``PathIntegrationError`` naming why) a runner that is missing,
+    whose link or resolved target is owned by another user, or whose target is not an executable
+    file or is writable by group or others: the rules the eval command applies to
+    ``PORTAGE_EVAL_RUNNER`` when it runs, on the link and on what it resolves to. A link's own mode
+    bits carry no permission, so only its owner is checked.
     """
     found = shutil.which(EVAL_RUNNER_COMMAND, path=env.get("PATH"))
     if found is None:
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: no `{EVAL_RUNNER_COMMAND}` on PATH to pin as the eval runner"
         )
-    real = Path(os.path.realpath(found))
+    pinned = Path(os.path.abspath(found))
+    if pinned.is_symlink() and pinned.lstat().st_uid not in (0, os.geteuid()):
+        raise PathIntegrationError(
+            f"refused to build the portage-eval shim: the eval runner link {pinned} is owned by another user"
+        )
+    real = Path(os.path.realpath(pinned))
     if not (real.is_file() and os.access(real, os.X_OK)):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is not an executable file"
@@ -300,7 +308,7 @@ def resolve_eval_runner(env: dict[str, str]) -> Path:
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is owned by another user"
         )
-    return real
+    return pinned
 
 
 def _pinned_shim_content(
