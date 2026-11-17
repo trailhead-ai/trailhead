@@ -1,10 +1,12 @@
 """The local backend: a detached worker process per request, and ``wait`` over the request directory.
 
-``start_request`` creates the request (``request``), then spawns ``python -m
-portage.eval_command.local <request dir>`` as its own session with stdin closed and stdout/stderr
-in ``worker.log``, and records the pid in ``worker.pid`` (informational: liveness never reads it). The
-worker is deliberately detached: the eval gate's no-background rule does not apply to it. It is
-bounded by the per-case timeout.
+``start_request`` creates the request (``request``), then spawns the worker (``portage.eval_command.local``
+on ``<request dir>``) as its own session, in the request directory, on the same interpreter under ``-I -S``
+with its import path set to the portage plugin root and the repo root, as ``bin/_portage_eval.py`` does, so
+neither the caller's working directory nor ``PYTHONPATH`` nor user site-packages can supply code to it, with
+stdin closed and stdout/stderr in ``worker.log``, and records the pid in ``worker.pid`` (informational:
+liveness never reads it). The worker is deliberately detached: the eval gate's no-background rule does
+not apply to it. It is bounded by the per-case timeout.
 
 Liveness is a lock, not a pid: ``start_request`` takes an exclusive ``flock`` on ``worker.lock`` in the
 request directory before the spawn and the worker inherits that open file, so the lock is held from
@@ -37,6 +39,8 @@ import time
 import traceback
 from pathlib import Path
 
+import trailhead
+
 from portage.eval_core.run import RUNNER_MISSING, read_json
 from portage.eval_core import TmpBaseRefused, TmpPathTooLong, decide_case, execute, run_canary
 from portage.eval_gate.run import _pin, _runner_override
@@ -51,6 +55,10 @@ POLL_SECONDS = 0.25
 CLOCK = time.monotonic
 SLEEP = time.sleep
 
+_WORKER_BOOTSTRAP = (
+    "import sys; sys.path[:0] = [sys.argv.pop(1), sys.argv.pop(1)]; "
+    "from portage.eval_command.local import main; sys.exit(main(sys.argv[1:]))"
+)
 _PASSED_CANARY = {"case": "sandbox-write", "verdict": "pass"}
 _DROPPED_FROM_WORKER_ENV = ("XDG_CACHE_HOME", "SANDBOX_RUNTIME")
 
@@ -65,6 +73,12 @@ class Terminated(BaseException):
 
 def worker_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if k not in _DROPPED_FROM_WORKER_ENV}
+
+
+def _import_roots() -> list[str]:
+    """The repo root and the portage plugin root, the two roots ``bin/_portage_eval.py`` puts on the path."""
+    plugin_root = Path(__file__).resolve().parents[2]
+    return [str(Path(trailhead.__file__).resolve().parent.parent), str(plugin_root)]
 
 
 def _take_lock(request_path: Path) -> int:
@@ -83,9 +97,9 @@ def start_request(*, repo: str, plugin_root: str, cases: list[dict]) -> str:
         lock = _take_lock(path)
         try:
             proc = subprocess.Popen(
-                [sys.executable, "-m", "portage.eval_command.local", str(path), str(lock)],
-                env={**os.environ, "PYTHONPATH": os.pathsep.join(p for p in sys.path if p)},
-                stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
+                [sys.executable, "-I", "-S", "-c", _WORKER_BOOTSTRAP, *_import_roots(),
+                 str(path), str(lock)],
+                env=os.environ, cwd=path, stdin=subprocess.DEVNULL, stdout=log, stderr=log, start_new_session=True,
                 pass_fds=(lock,))
         finally:
             log.close()

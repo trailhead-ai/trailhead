@@ -144,6 +144,9 @@ class Ws:
         return json.loads((self.req(request_id) / "results" / f"{case}.json").read_text())
 
 
+# The runner's temp path outside /tmp is limited to 51 characters, so the throwaway HOME must be short:
+# pytest's tmp_path is too long, so it is made under the real ~/.cache and removed (runners killed
+# first) in the fixture's finally.
 HOME_LIMIT = 30
 
 
@@ -878,3 +881,20 @@ class TestLocalBackendFromInsideTheSandbox:
         rc, out, _ = ws.wait(request_id, seconds=30)
         assert rc == 3
         assert out.count("not run: interrupted") == 2 and "could-not-leave-sandbox" not in out
+
+
+class TestWorkerImportIsolation:
+    def test_a_request_started_from_a_directory_holding_decoy_modules_never_imports_them(
+            self, ws, tmp_path, monkeypatch):
+        decoy = tmp_path / "decoy-cwd"
+        marker = tmp_path / "imported-from-cwd"
+        for package in ("trailhead", "portage"):
+            (decoy / package).mkdir(parents=True)
+            (decoy / package / "__init__.py").write_text(f"open({str(marker)!r}, 'a').write({package!r})\n")
+        (decoy / "json.py").write_text(f"open({str(marker)!r}, 'a').write('json')\n")
+        monkeypatch.chdir(decoy)
+        monkeypatch.setenv("PYTHONPATH", str(decoy))
+        request_id = ws.started("c1")
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
+        assert not marker.exists()
