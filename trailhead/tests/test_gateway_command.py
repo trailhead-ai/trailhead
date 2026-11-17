@@ -402,9 +402,12 @@ def cli(tmp_path, state, monkeypatch, capsys):
     return call
 
 
+def start_request(stub):
+    return next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+
+
 def uploaded(stub):
-    post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
-    return tarfile.open(fileobj=io.BytesIO(post.raw))
+    return tarfile.open(fileobj=io.BytesIO(start_request(stub).raw))
 
 
 class TestRunStart:
@@ -465,7 +468,7 @@ class TestRunStart:
     def test_the_request_names_the_workflow_and_job_and_carries_the_bearer_token(self, cli, repo):
         with StubOutpost(token="t-123") as stub:
             cli(stub.port, "run", "start", "test", cwd=repo)
-            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+            post = start_request(stub)
         assert post.path == "/gateway/runs?workflow=.github%2Fworkflows%2Fci.yml&job=test"
         assert post.headers["authorization"] == "Bearer t-123"
         assert post.headers["content-length"] == str(len(post.raw))
@@ -498,7 +501,7 @@ class TestRunStart:
         (repo / ".github" / "workflows" / "lint.yaml").write_text(LINT_YML)
         with StubOutpost() as stub:
             cli(stub.port, "run", "start", "lint", cwd=repo)
-            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+            post = start_request(stub)
         assert "workflow=.github%2Fworkflows%2Flint.yaml&job=lint" in post.path
 
     def test_several_workflows_defining_the_job_are_refused(self, cli, repo):
@@ -522,7 +525,7 @@ class TestRunStart:
         (repo / ".github" / "workflows" / "lint.yml").write_text(LINT_YML.replace("lint:", "build:"))
         with StubOutpost() as stub:
             rc, _, err = cli(stub.port, "run", "start", "build", "--workflow", ".github/workflows/lint.yml", cwd=repo)
-            post = next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
+            post = start_request(stub)
         assert rc == 0, err
         assert "workflow=.github%2Fworkflows%2Flint.yml" in post.path
 

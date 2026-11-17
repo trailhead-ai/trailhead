@@ -711,6 +711,11 @@ class HomeSentinel:
         shutil.rmtree(self.path, ignore_errors=True)
 
 
+ENGINE_SOCKET_PATH = "/var/lib/outpost-runner-engine/docker.sock"
+SOCKETS_PROBED = ("/var/run/docker.sock", "/run/docker.sock", ENGINE_SOCKET_PATH)
+TARGETS_PROBED = ("127.0.0.1", "10.0.2.2", "172.17.0.1", "host.docker.internal")
+
+
 _CONNECT_CONTROL = (
     "if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; "
     'then echo "probe control public: re""ached"; '
@@ -783,7 +788,7 @@ jobs:
           @CONNECT_CONTROL@
           echo "probe home: $(ls "@HOME@" 2>&1 | head -1)"
           echo "probe sentinel read: $(cat "@SENTINEL@/secret.txt" 2>&1 | head -1)"
-          for s in /var/run/docker.sock /run/docker.sock @ENGINE@; do
+          for s in @SOCKETS@; do
             @SOCKET_PROBE@
           done
           echo "probe docker env: $(env | grep -ci docker || true)"
@@ -869,11 +874,10 @@ def build_fixture_repo(
     local_action = "./" + "../" * 12 + str(sentinel.path).lstrip("/")
     workflow = (
         WORKFLOW.replace("@IMAGE@", image)
-        .replace("@MARKER@", sentinel.marker)
         .replace("@LOCAL_ACTION@", local_action)
         .replace("@HOME@", str(operator_home))
         .replace("@SENTINEL@", str(sentinel.path))
-        .replace("@ENGINE@", "/var/lib/outpost-runner-engine/docker.sock")
+        .replace("@SOCKETS@", " ".join(SOCKETS_PROBED))
         .replace("@OUTPOST_PORT@", str(ports[0]))
         .replace("@LISTENER_PORT@", str(ports[1]))
     )
@@ -1030,11 +1034,6 @@ def prepull_image(engine_socket: str, ref: str) -> None:
     error = pull_stream_error(body)
     if status != 200 or error is not None:
         raise AssertionError(f"the run engine could not pull {ref}: status {status}, {error or body[-300:]!r}")
-
-
-ENGINE_SOCKET_PATH = "/var/lib/outpost-runner-engine/docker.sock"
-SOCKETS_PROBED = ("/var/run/docker.sock", "/run/docker.sock", ENGINE_SOCKET_PATH)
-TARGETS_PROBED = ("127.0.0.1", "10.0.2.2", "172.17.0.1", "host.docker.internal")
 
 
 def probe_problems(log: str, ports: tuple[int, int], marker: str) -> list[str]:
