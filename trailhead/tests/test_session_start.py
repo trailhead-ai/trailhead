@@ -3206,6 +3206,63 @@ def _srt_run(settings_path: Path, command: str) -> subprocess.CompletedProcess:
     )
 
 
+_PROBE_SETTINGS = {
+    "network": {"allowedDomains": [], "deniedDomains": []},
+    "filesystem": {"denyRead": [], "allowWrite": [], "denyWrite": []},
+}
+
+
+def _scrubbed_tail(stderr: str, home: str) -> str:
+    text = stderr.replace(home, "~") if home else stderr
+    return " ".join(text.split())[:300]
+
+
+def _sandbox_start_decision(probe, rendered, home=None):
+    """Decide skip / fail / run from two `(returncode, stderr)` start results.
+
+    `probe` ran a trivial command under a minimal known-good settings file, so a
+    failure means this host cannot start the sandbox at all (skip). `rendered` ran
+    the same trivial command under the ritual's rendered settings: once the probe
+    passed, a failure there is the rendered settings' fault (fail).
+    """
+    home = os.environ.get("HOME", "") if home is None else home
+    if probe[0] != 0:
+        return "skip", f"the sandbox cannot start on this host (rc={probe[0]}): {_scrubbed_tail(probe[1], home)}"
+    if rendered[0] != 0:
+        return "fail", f"the sandbox failed to start with the ritual's rendered settings (rc={rendered[0]}): {_scrubbed_tail(rendered[1], home)}"
+    return "run", ""
+
+
+def test_a_failed_probe_skips_and_the_reason_carries_its_rc_and_stderr():
+    action, reason = _sandbox_start_decision((1, "bwrap: setting up uid map: Permission denied"), (1, "x"))
+    assert action == "skip"
+    assert "rc=1" in reason and "Permission denied" in reason
+
+
+def test_a_failed_probe_skips_even_when_the_rendered_settings_start():
+    assert _sandbox_start_decision((2, "boom"), (0, ""))[0] == "skip"
+
+
+def test_the_probe_reason_truncates_long_stderr():
+    _, reason = _sandbox_start_decision((1, "e" * 5000), (1, ""))
+    assert len(reason) < 600
+
+
+def test_the_probe_reason_scrubs_the_home_directory():
+    _, reason = _sandbox_start_decision((1, "cannot open /home/someone/secret"), (1, ""), home="/home/someone")
+    assert "/home/someone" not in reason and "~/secret" in reason
+
+
+def test_a_passing_probe_with_rendered_settings_that_fail_to_start_fails():
+    action, reason = _sandbox_start_decision((0, ""), (1, "invalid settings: denyWrite"))
+    assert action == "fail"
+    assert "rc=1" in reason and "invalid settings" in reason
+
+
+def test_a_passing_probe_and_a_starting_render_runs():
+    assert _sandbox_start_decision((0, ""), (0, ""))[0] == "run"
+
+
 @pytest.mark.seam_real
 def test_real_sandbox_refuses_a_write_into_a_vault_the_ritual_did_not_name(tmp_path):
     if shutil.which("srt") is None:
@@ -3218,8 +3275,14 @@ def test_real_sandbox_refuses_a_write_into_a_vault_the_ritual_did_not_name(tmp_p
         "network": {"allowedDomains": [], "deniedDomains": []},
         "filesystem": {"denyRead": [], "allowWrite": fs["allowWrite"], "denyWrite": fs["denyWrite"]},
     }))
-    if _srt_run(srt_settings, "true").returncode != 0:
-        pytest.skip("the sandbox cannot start on this host")
+    probe_settings = tmp_path / "srt-probe.json"
+    probe_settings.write_text(json.dumps(_PROBE_SETTINGS))
+    probe = _srt_run(probe_settings, "true")
+    rendered = _srt_run(srt_settings, "true")
+    action, reason = _sandbox_start_decision((probe.returncode, probe.stderr), (rendered.returncode, rendered.stderr))
+    if action == "skip":
+        pytest.skip(reason)
+    assert action == "run", reason
     vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
     allowed = _srt_run(srt_settings, f"touch {vaults / 'a' / '.lore.lock'}")
     denied = _srt_run(srt_settings, f"touch {vaults / 'b' / '.lore.lock'}")
