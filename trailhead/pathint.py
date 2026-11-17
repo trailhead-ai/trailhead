@@ -242,12 +242,15 @@ _PINNED_SHIM_PATH = "/usr/bin:/bin"
 
 
 def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
-    """A ``/bin/sh`` shim running *script* on this process's interpreter, isolated.
+    """A ``/bin/bash -p`` shim running *script* on this process's interpreter, isolated.
 
-    ``/bin/sh`` rather than ``env bash``, and ``/usr/bin/env`` by absolute path: neither
-    may be looked up through PATH. The interpreter starts from an empty environment
-    carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed PATH, so a loader variable
-    the session exported cannot reach it.
+    The shell and ``/usr/bin/env`` are named by absolute path, so neither is looked up
+    through PATH. ``-p`` (privileged mode) makes bash ignore ``BASH_ENV``, ``ENV``,
+    ``SHELLOPTS``, ``BASHOPTS`` and exported functions, so no variable the session
+    sets on the command runs code in the shell before its one line; ``/bin/sh`` would
+    not do on macOS, where it is bash honouring ``SHELLOPTS``. The interpreter starts
+    from an empty environment carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed
+    PATH, so a loader variable the session exported cannot reach it.
     """
     interpreter = os.path.realpath(sys.executable)
     for label, value in (
@@ -259,7 +262,7 @@ def _pinned_shim_content(name: str, script: Path, trailhead_root: str) -> str:
         _reject_unsafe_for_eval(value, label=label)
     passed = " ".join(f'${{{var}:+{var}="${var}"}}' for var in _PINNED_SHIM_ENV)
     return (
-        "#!/bin/sh\n"
+        "#!/bin/bash -p\n"
         f"# trailhead-managed shim for {name}\n"
         f'exec /usr/bin/env -i PATH="{_PINNED_SHIM_PATH}" TRAILHEAD_ROOT="{trailhead_root}" '
         f'{passed} "{interpreter}" -I -S "{script}" "$@"\n'
