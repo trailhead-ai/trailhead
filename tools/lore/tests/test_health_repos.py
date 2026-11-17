@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import stat
-import signal
 import subprocess
 import threading
 import time
@@ -311,7 +310,10 @@ def test_a_remote_tracking_default_wins_over_a_local_main(tmp_path):
     r = make_repo(tmp_path / "r", {"main": {"m.txt": "m"}})
     git(r, "update-ref", "refs/remotes/origin/main", "refs/heads/main")
     git(r, "update-ref", "refs/heads/main", "refs/remotes/origin/main")
-    build_history(r, [{"id": "ahead", "branch": "main", "parents": ["refs/heads/main"], "files": {"local-only.txt": "x"}}])
+    build_history(
+        r,
+        [{"id": "ahead", "branch": "main", "parents": ["refs/heads/main"], "files": {"local-only.txt": "x"}}],
+    )
     v = view_of(r)
     assert v.ref == "refs/remotes/origin/main"
     assert "local-only.txt" not in v.paths
@@ -339,7 +341,10 @@ def test_the_read_is_the_ref_not_the_working_tree(tmp_path):
 
 def test_a_file_only_on_a_local_branch_ahead_of_origin_main_is_not_in_the_view(tmp_path):
     r = make_repo(tmp_path / "r", {"main": {"a.txt": "a"}}, remote_tracking=("main",))
-    build_history(r, [{"id": "wip", "branch": "wip", "parents": ["refs/remotes/origin/main"], "files": {"wip.txt": "w"}}])
+    build_history(
+        r,
+        [{"id": "wip", "branch": "wip", "parents": ["refs/remotes/origin/main"], "files": {"wip.txt": "w"}}],
+    )
     git(r, "symbolic-ref", "HEAD", "refs/heads/wip")
     v = view_of(r)
     assert "a.txt" in v.paths and "wip.txt" not in v.paths

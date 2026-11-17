@@ -175,8 +175,9 @@ def vault_repositories(
     compared after ``/`` normalization, as vault election does); every member of
     the group is then a repository of that vault. A relative ``repo_root`` resolves
     against the directory of the group's TOML and ``~`` against ``HOME`` of *env*
-    (the process's when *env* is None), never against the cwd. ``groups_dir`` defaults to camp's, resolved against *env*; ``import_camp`` is the camp
-    import seam of :func:`lore.vault.layers.load_camp_groups`.
+    (the process's when *env* is None), never against the cwd. ``groups_dir`` defaults
+    to camp's, resolved against *env*; ``import_camp`` is the camp import seam of
+    :func:`lore.vault.layers.load_camp_groups`.
     """
     names = list(vault_names)
     loaded = layers.load_camp_groups(groups_dir, import_camp=import_camp, env=env)

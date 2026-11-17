@@ -13,8 +13,8 @@ sidecar list (located by 1-based position; a non-list is ignored and a non-strin
 entry is skipped, but still occupies its position). A candidate is dropped unless
 it is one token of at most :data:`MAX_PATH_CHARS` characters with no whitespace or
 control characters, does not start with ``~``, ``/``, ``$`` or ``%``, holds no
-``://``, does not start ``mailto:`` and holds none of ``* ? [ { < >`` (a ``<name>`` is a placeholder, not a path). Printed paths
-are record text, so the one-token, bounded shape is what keeps them printable.
+``://``, does not start ``mailto:`` and holds none of ``* ? [ { < >`` (a ``<name>`` is a
+placeholder, not a path). Printed paths are record text, so the one-token, bounded shape is what keeps them printable.
 
 **Suffixes** are stripped before lookup: ``::...``, ``#...``, a line suffix (``:N``,
 ``:N:M``, ``:N-M``, ``:N,M`` and combinations) and a trailing ``/``. The finding prints the candidate as written.

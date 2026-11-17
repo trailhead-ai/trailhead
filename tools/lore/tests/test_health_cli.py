@@ -2013,7 +2013,8 @@ def test_the_fetch_age_is_counted_in_whole_days_against_the_injected_clock(
     os.utime(fetch_head, (stamp, stamp))
     mp.bind("g", ["default"], [repo])
     out = _stale_run(world, monkeypatch, now=MP_NOW)
-    assert f"  default: repository {mp.where('alpha')}: origin/main, last fetched {printed}" in group(out, "missing-paths")
+    expected = f"  default: repository {mp.where('alpha')}: origin/main, last fetched {printed}"
+    assert expected in group(out, "missing-paths")
 
 
 def test_a_vault_whose_groups_cannot_be_read_or_whose_camp_is_missing_says_which(mp, world, monkeypatch):
