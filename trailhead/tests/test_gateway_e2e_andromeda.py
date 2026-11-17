@@ -308,7 +308,10 @@ def _gw(gateway, *argv):
 
 
 def _control_the_listener(listener):
-    """Prove the listener counts a connection that says nothing, then reset it: a later count of 0 then means something."""
+    """Prove the listener counts a connection that says nothing, then reset it.
+
+    A later count of 0 then means something.
+    """
     with socket.create_connection(listener.server_address, timeout=5):
         pass
     deadline = time.monotonic() + 5
@@ -456,10 +459,14 @@ def test_run_scenario_start_returns_the_run_id_at_once_and_the_job_runs_on(run_w
 
 def test_run_scenario_watch_streams_output_as_it_is_produced(run_world):  # AC38
     stamped = parse_stamped_lines(run_world.stream_out)
-    assert streamed_as_produced(stamped, "stream-first-42", "stream-second-42", 10.0) is None, run_world.stream_out[-1500:]
+    assert streamed_as_produced(stamped, "stream-first-42", "stream-second-42", 10.0) is None, run_world.stream_out[
+        -1500:
+    ]
 
 
-def test_run_scenario_exit_status_is_0_for_a_pass_1_for_a_failure_and_3_for_a_run_that_did_not_execute(run_world):  # AC39
+def test_run_scenario_exit_status_is_0_for_a_pass_1_for_a_failure_and_3_for_a_run_that_did_not_execute(
+    run_world,
+):  # AC39
     assert _followed(run_world, "pass")[0] == 0
     assert "pass-job-ran-42" in _followed(run_world, "pass")[1]
     assert _followed(run_world, "fail")[0] == 1
@@ -499,7 +506,9 @@ def test_run_scenario_the_uncommitted_tree_is_what_runs_and_an_ignored_file_is_a
     assert "workflow-edit=applied" in out and "workflow-edit=NOT-applied" not in out
 
 
-def test_run_scenario_a_symlink_arrives_as_a_link_and_nothing_of_the_operators_home_comes_through_it(run_world):  # AC50, AC59
+def test_run_scenario_a_symlink_arrives_as_a_link_and_nothing_of_the_operators_home_comes_through_it(
+    run_world,
+):  # AC50, AC59
     code, out = _followed(run_world, "tree")
     assert code == 0, out[-1500:]
     assert "tracked=edited-uncommitted" in out, "the tree job did not run its probes"
@@ -512,7 +521,9 @@ def test_run_scenario_a_symlink_arrives_as_a_link_and_nothing_of_the_operators_h
     assert "dotgit=absent" in out
 
 
-def test_run_scenario_a_local_action_is_read_from_the_copy_and_one_aimed_at_the_operators_home_is_not(run_world):  # AC59
+def test_run_scenario_a_local_action_is_read_from_the_copy_and_one_aimed_at_the_operators_home_is_not(
+    run_world,
+):  # AC59
     code, out = _followed(run_world, "local_action")
     assert "ok-action-ran-42" in out, f"the control local action did not run:\n{out[-1500:]}"
     assert code == 1, f"the job should have run and failed at the sentinel step, exit {code}:\n{out[-1500:]}"
@@ -528,7 +539,9 @@ def test_run_scenario_a_run_cannot_reach_the_operators_home_the_engine_or_the_ho
     assert run_world.listener_connections == 0, "a run connected to a listener on the host's loopback"
 
 
-def test_run_scenario_the_job_container_carries_no_bind_mount_no_secret_and_no_privileged_mode(run_world):  # AC61, AC62, AC64
+def test_run_scenario_the_job_container_carries_no_bind_mount_no_secret_and_no_privileged_mode(
+    run_world,
+):  # AC61, AC62, AC64
     names = [c.get("Name") for c in run_world.inspected]
     assert len(run_world.inspected) == 1, (
         f"expected exactly the slow job's container, saw {names}; log:\n{run_world.stream_out[-800:]}"
@@ -540,7 +553,9 @@ def test_run_scenario_a_run_reaches_a_public_host(run_world):  # AC65
     assert "public github.com:443: reached" in _followed(run_world, "public")[1]
 
 
-def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is_stopped_and_exits_3(run_world):  # AC61, AC64
+def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is_stopped_and_exits_3(
+    run_world,
+):  # AC61, AC64
     """act's own container-options policy is the first layer and refuses the job before any container exists;
     the engine filter is the second and would refuse the create. Either stopping it is correct, so the reason
     may name either; the run must end as one that did not execute, exit 3.
@@ -554,14 +569,19 @@ def test_run_scenario_a_container_asking_for_a_host_mount_and_privileged_mode_is
         f"exit {code}, reason {reason!r}; the run's log:\n{out[-3000:]}"
     )
     assert "mount-priv-job-ran-42" not in out, "the job ran"
-    assert re.search(r"(?i)(--privileged|privileged|Binds|host bind mount)", out), f"the log names neither refused option:\n{out[-3000:]}"
+    assert re.search(r"(?i)(--privileged|privileged|Binds|host bind mount)", out), (
+        f"the log names neither refused option:\n{out[-3000:]}"
+    )
 
 
-def test_run_scenario_an_image_that_cannot_be_pulled_exits_3_with_the_pull_reason(run_world):  # act's real pull-error text
+def test_run_scenario_an_image_that_cannot_be_pulled_exits_3_with_the_pull_reason(
+    run_world,
+):  # act's real pull-error text
     code, out = _followed(run_world, "pull_missing")
     row = {r["job"]: r for r in json.loads(_ran(run_world.session, "run_list"))["runs"]}["pull_missing"]
     assert code == 3 and (row["reason"] or "").startswith("run did not execute: an image could not be pulled"), (
-        f"exit {code}, reason {row['reason']!r}; act's own log lines, which the executor's pull pattern is checked against:\n{out[-3000:]}"
+        f"exit {code}, reason {row['reason']!r}; act's own log lines, "
+        f"which the executor's pull pattern is checked against:\n{out[-3000:]}"
     )
 
 

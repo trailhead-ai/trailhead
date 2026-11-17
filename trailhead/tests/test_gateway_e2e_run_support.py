@@ -8,6 +8,7 @@ scenario applies to what a run left behind.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import sqlite3
@@ -59,7 +60,11 @@ def _config(tmp_path: Path, *, text: str | None = None) -> Path:
     folder = tmp_path / "runs"
     folder.mkdir(exist_ok=True)
     path = tmp_path / "config.toml"
-    path.write_text(text if text is not None else RUNS_TOML.replace("@ENGINE@", str(tmp_path / "engine.sock")).replace("@FOLDER@", str(folder)))
+    path.write_text(
+        text
+        if text is not None
+        else RUNS_TOML.replace("@ENGINE@", str(tmp_path / "engine.sock")).replace("@FOLDER@", str(folder))
+    )
     return path
 
 
@@ -73,7 +78,9 @@ def _proc(tmp_path: Path, pid: int, groups: list[int], gid: int = 1000) -> Path:
     return proc
 
 
-def _problems(tmp_path: Path, *, groups=(1000, GID), known=True, answers=lambda path: True, home_mode=0o750, config=None):
+def _problems(
+    tmp_path: Path, *, groups=(1000, GID), known=True, answers=lambda path: True, home_mode=0o750, config=None
+):
     home = tmp_path / "home"
     home.mkdir(exist_ok=True)
     home.chmod(home_mode)
@@ -172,7 +179,19 @@ def test_the_operators_runs_table_is_carried_over_exactly(tmp_path):
 
 # --- the fixture repo, through the real uploader and the real workflow reader ------------------------
 
-JOBS = {"pass", "fail", "matrix", "tree", "local_action", "probe", "public", "mount_priv", "pull_missing", "unmapped", "slow"}
+JOBS = {
+    "pass",
+    "fail",
+    "matrix",
+    "tree",
+    "local_action",
+    "probe",
+    "public",
+    "mount_priv",
+    "pull_missing",
+    "unmapped",
+    "slow",
+}
 
 
 @pytest.fixture(scope="module")
@@ -285,7 +304,9 @@ def test_the_probe_job_names_both_listeners_on_the_hosts_loopback(fixture_repo):
 
 def test_a_second_repo_with_another_name_builds_beside_the_first(tmp_path, fixture_repo):
     _, ssh, sentinel = fixture_repo
-    other = build_fixture_repo(tmp_path / "app2", image=IMAGE, ssh=ssh, sentinel=sentinel, ports=(1, 2), operator_home=ssh.parent)
+    other = build_fixture_repo(
+        tmp_path / "app2", image=IMAGE, ssh=ssh, sentinel=sentinel, ports=(1, 2), operator_home=ssh.parent
+    )
     assert tree_upload.workflow_defining(tree_upload.top_level(other), "pass") == ".github/workflows/ci.yml"
 
 
@@ -336,7 +357,14 @@ def _inspect(**over):
         "Name": "/act-ci-slow-0123",
         "Config": {"Env": ["PATH=/usr/bin", "GITHUB_TOKEN=", "RUNNER_OS=Linux"]},
         "HostConfig": {"Binds": None, "Privileged": False, "Mounts": None},
-        "Mounts": [{"Type": "volume", "Name": "act-toolcache", "Source": "/v/act-toolcache", "Destination": "/opt/hostedtoolcache"}],
+        "Mounts": [
+            {
+                "Type": "volume",
+                "Name": "act-toolcache",
+                "Source": "/v/act-toolcache",
+                "Destination": "/opt/hostedtoolcache",
+            }
+        ],
     }
     for path, value in over.items():
         node = body
@@ -358,7 +386,10 @@ def test_a_container_with_only_volumes_and_no_secret_is_clean():
         ({"HostConfig__Binds": ["/:/host"]}, "Binds"),
         ({"HostConfig__Privileged": True}, "privileged"),
         ({"HostConfig__Mounts": [{"Type": "bind", "Source": "/x", "Destination": "/y"}]}, "bind"),
-        ({"Mounts": [{"Type": "volume", "Source": "/run/docker.sock", "Destination": "/var/run/docker.sock"}]}, "socket"),
+        (
+            {"Mounts": [{"Type": "volume", "Source": "/run/docker.sock", "Destination": "/var/run/docker.sock"}]},
+            "socket",
+        ),
         ({"Config__Env": ["A=has-s3cret-inside"]}, "A"),
         ({"Config__Env": ["GITHUB_TOKEN=ghp_abc"]}, "GITHUB_TOKEN"),
         ({"Config__Env": ["SSH_AUTH_SOCK=/tmp/agent"]}, "SSH_AUTH_SOCK"),
@@ -374,7 +405,9 @@ def test_a_secret_is_named_by_variable_and_never_printed():
     assert all("s3cret" not in p for p in problems)
 
 
-def test_the_control_action_is_in_the_upload_and_the_sentinel_action_is_a_dot_slash_reference_that_climbs_out(fixture_repo):
+def test_the_control_action_is_in_the_upload_and_the_sentinel_action_is_a_dot_slash_reference_that_climbs_out(
+    fixture_repo,
+):
     repo, _, sentinel = fixture_repo
     tar = _tar(repo)
     assert "ok-action/action.yml" in tar.getnames()
@@ -387,7 +420,14 @@ def test_the_control_action_is_in_the_upload_and_the_sentinel_action_is_a_dot_sl
 def test_the_workflow_source_never_holds_a_token_the_scenario_asserts_on_the_log(fixture_repo):
     repo, _, sentinel = fixture_repo
     workflow = (repo / ".github/workflows/ci.yml").read_text()
-    for token in ("pass-job-ran-42", "fail-job-ran-42", "ok-action-ran-42", "stream-first-42", "stream-second-42", sentinel.marker):
+    for token in (
+        "pass-job-ran-42",
+        "fail-job-ran-42",
+        "ok-action-ran-42",
+        "stream-first-42",
+        "stream-second-42",
+        sentinel.marker,
+    ):
         assert token not in workflow + (repo / "ok-action/action.yml").read_text(), token
     for verdict in ("REACHED", "refused", "reached", "applied", "absent", "present", "=link"):
         assert verdict not in workflow, verdict
@@ -437,7 +477,15 @@ def test_a_probe_log_where_everything_was_refused_and_every_control_ran_has_no_p
         ({"replace": ("10.0.2.2:7401: refused", "10.0.2.2:7401: REACHED")}, "10.0.2.2:7401"),
         ({"drop": "172.17.0.1:7402"}, "172.17.0.1:7402"),
         ({"replace": ("socket /run/docker.sock: absent", "socket /run/docker.sock: present")}, "/run/docker.sock"),
-        ({"replace": ("probe home: ls: cannot access '/home/op': No such file or directory", "probe home: Documents")}, "home"),
+        (
+            {
+                "replace": (
+                    "probe home: ls: cannot access '/home/op': No such file or directory",
+                    "probe home: Documents",
+                )
+            },
+            "home",
+        ),
         ({"replace": ("secret.txt: No such file or directory", "secret.txt: ok")}, "sentinel"),
         ({"extra": f"\n| {MARKER}"}, "operator"),
         ({"replace": ("docker env: 0", "docker env: 2")}, "docker env"),
@@ -461,7 +509,10 @@ def test_the_gateway_the_job_found_is_probed_too():
 @pytest.mark.parametrize(
     ("ref", "parts"),
     [
-        ("ghcr.io/catthehacker/ubuntu:act-24.04@sha256:" + "ab" * 32, ("ghcr.io/catthehacker/ubuntu", "sha256:" + "ab" * 32)),
+        (
+            "ghcr.io/catthehacker/ubuntu:act-24.04@sha256:" + "ab" * 32,
+            ("ghcr.io/catthehacker/ubuntu", "sha256:" + "ab" * 32),
+        ),
         ("ghcr.io/x/y@sha256:" + "cd" * 32, ("ghcr.io/x/y", "sha256:" + "cd" * 32)),
         ("registry:5000/x/y:v1", ("registry:5000/x/y", "v1")),
         ("registry:5000/x/y", ("registry:5000/x/y", "latest")),
@@ -496,9 +547,16 @@ def test_a_container_record_that_is_cut_down_proves_nothing_and_is_a_problem():
 @pytest.mark.parametrize(("with_reason", "reason"), [(False, None), (True, "run did not execute: x")])
 def test_the_run_rows_are_read_from_a_table_with_or_without_a_reason_column(tmp_path, with_reason, reason):
     db = sqlite3.connect(tmp_path / "state.db")
-    db.execute("create table gateway_runs(id integer primary key, workspace text, job text, state text, result text"
-               + (", reason text" if with_reason else "") + ")")
-    db.execute("insert into gateway_runs values(1, 'g/w', 'pass', 'completed', 'failure'" + (f", '{reason}'" if with_reason else "") + ")")
+    db.execute(
+        "create table gateway_runs(id integer primary key, workspace text, job text, state text, result text"
+        + (", reason text" if with_reason else "")
+        + ")"
+    )
+    db.execute(
+        "insert into gateway_runs values(1, 'g/w', 'pass', 'completed', 'failure'"
+        + (f", '{reason}'" if with_reason else "")
+        + ")"
+    )
     db.commit()
     db.close()
     assert RealOutpost(1, tmp_path, tmp_path / "log").runs() == [(1, "g/w", "pass", "completed", "failure", reason)]
@@ -519,3 +577,35 @@ def test_a_job_that_reads_the_tree_starts_by_checking_it_out(fixture_repo, job):
 def test_a_job_that_does_not_read_the_tree_has_no_checkout(fixture_repo):
     repo, _, _ = fixture_repo
     assert _first_step((repo / ".github/workflows/ci.yml").read_text(), "probe") != "- uses: actions/checkout@v4"
+
+
+FIXED_HASHES = (
+    # sha256 of the edited ci.yml, the committed ci.yml and ok-action/action.yml, built from the fixed inputs below
+    "1afefdf6805ba6bb8ce6c6fb485b265de69d79749912f0cbebe183c67bc1d4ee",
+    "3aa592c9535f52d1aa27b46feeafcf529947fd9d41df418020cc733fad5133ee",
+    "d67de089ff7704369bc8de94a867b1b0f46e0f6dd67c30c17f8a2e39c7aa55d7",
+)
+
+
+def test_the_generated_workflow_is_byte_for_byte_what_it_was_before_it_was_rewrapped(
+    tmp_path,
+):  # inert-gate: allow rewrap pin
+    home = Path("/home/op")
+    sentinel = HomeSentinel(home / ".outpost-e2e-x", "SENTINEL-FIXED")
+    repo = build_fixture_repo(
+        tmp_path / "app",
+        image="registry.example/runner@sha256:" + "ab" * 32,
+        ssh=home / ".ssh",
+        sentinel=sentinel,
+        ports=(7401, 7402),
+        operator_home=home,
+    )
+    committed = subprocess.run(
+        ["git", "show", "HEAD:.github/workflows/ci.yml"], cwd=repo, capture_output=True, check=True
+    ).stdout
+    built = (
+        (repo / ".github/workflows/ci.yml").read_bytes(),
+        committed,
+        (repo / "ok-action/action.yml").read_bytes(),
+    )
+    assert tuple(hashlib.sha256(b).hexdigest() for b in built) == FIXED_HASHES

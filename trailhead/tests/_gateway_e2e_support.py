@@ -85,7 +85,10 @@ def outpost_checkout() -> Path:
 
 
 def trailhead_checkout() -> Path:
-    """The trailhead checkout whose gateway command the sessions run: ``TRAILHEAD_GATEWAY_E2E_TRAILHEAD``, else this one."""
+    """The trailhead checkout whose gateway command the sessions run.
+
+    ``TRAILHEAD_GATEWAY_E2E_TRAILHEAD``, else this one.
+    """
     path = Path(os.environ.get("TRAILHEAD_GATEWAY_E2E_TRAILHEAD") or REPO_ROOT)
     if not (path / "trailhead" / "gateway" / "command.py").is_file():
         raise AssertionError(f"no trailhead checkout at {path}; set TRAILHEAD_GATEWAY_E2E_TRAILHEAD")
@@ -117,7 +120,10 @@ class RealOutpost:
             db.close()
 
     def runs(self) -> list[tuple[int, str, str, str, str | None, str | None]]:
-        """``(id, workspace, job, state, result, reason)`` of every run, in id order (no reason before runs could not execute)."""
+        """``(id, workspace, job, state, result, reason)`` of every run, in id order.
+
+        The reason is None for a table from before runs could report one.
+        """
         db = sqlite3.connect(f"file:{self.state / 'state.db'}?mode=ro", uri=True)
         try:
             columns = {row[1] for row in db.execute("PRAGMA table_info(gateway_runs)")}
@@ -307,9 +313,7 @@ def install_shims(root: Path, outpost: RealOutpost) -> Path:
     """
     env = {"TRAILHEAD_STATE_DIR": str(root / "trailhead-state"), "HOME": str(root / "outpost-home")}
     with mock.patch("trailhead.pathint.sys.executable", str(register_port_interpreter(root / "interp", outpost.port))):
-        build_cli_shims(
-            resolve_cli_tools({"camp": True, "lore": True, "portage": True}), env=env, outpost_enabled=True
-        )
+        build_cli_shims(resolve_cli_tools({"camp": True, "lore": True, "portage": True}), env=env, outpost_enabled=True)
     bin_dir = root / "shims"
     bin_dir.mkdir()
     gateway = bin_dir / "outpost-gateway"
@@ -526,7 +530,9 @@ def load_runs_host(config_path: Path) -> RunsHost:
     try:
         doc = tomllib.loads(Path(config_path).read_text())
     except FileNotFoundError:
-        raise RunsConfigError(f"{config_path} does not exist: apply the dotfiles (chezmoi apply) on this host") from None
+        raise RunsConfigError(
+            f"{config_path} does not exist: apply the dotfiles (chezmoi apply) on this host"
+        ) from None
     except (OSError, ValueError) as err:
         raise RunsConfigError(f"{config_path} cannot be read: {err}") from None
     runs = doc.get("runs")
@@ -540,7 +546,9 @@ def load_runs_host(config_path: Path) -> RunsHost:
             str(runs["engine_socket"]), list(runs["act_command"]), Path(runs["runs_folder"]), dict(runs["platforms"])
         )
     except (KeyError, TypeError, ValueError) as err:
-        raise RunsConfigError(f"the [runs] table in {config_path} is incomplete ({type(err).__name__}: {err})") from None
+        raise RunsConfigError(
+            f"the [runs] table in {config_path} is incomplete ({type(err).__name__}: {err})"
+        ) from None
     if "ubuntu-latest" not in host.platforms:
         raise RunsConfigError(f"the [runs] platforms in {config_path} do not map ubuntu-latest, which the fixture uses")
     return host
@@ -615,8 +623,8 @@ def preflight_problems(
         if gid not in groups_of(pid, proc):
             uid = os.getuid()
             problems.append(
-                f"this process does not hold the {RUN_GROUP} group, so the Outpost it starts cannot open the run engine "
-                f"or write run copies. With lingering on, logging out does not refresh groups: run "
+                f"this process does not hold the {RUN_GROUP} group, so the Outpost it starts cannot open the run "
+                f"engine or write run copies. With lingering on, logging out does not refresh groups: run "
                 f"`sudo systemctl restart user@{uid}.service`, then open a new terminal and rerun"
             )
     if not ping(host.engine_socket):
@@ -628,15 +636,22 @@ def preflight_problems(
     if os.path.lexists(filter_sock):
         if ping(str(filter_sock)):
             problems.append(
-                f"{filter_sock} is already served, by your own Outpost running with [runs]; only one filter can bind it. "
+                f"{filter_sock} is already served, by your own Outpost running with [runs]; "
+                "only one filter can bind it. "
                 f"Stop the daemon for the run (`systemctl --user stop {OUTPOST_UNIT}`) and start it again afterwards "
                 f"(`systemctl --user start {OUTPOST_UNIT}`)"
             )
         else:
-            problems.append(f"{filter_sock} is a stale file left by a crashed Outpost, and a new Outpost refuses to start over it: rm {filter_sock}")
+            problems.append(
+                f"{filter_sock} is a stale file left by a crashed Outpost, and a new Outpost refuses to start over it: "
+                f"rm {filter_sock}"
+            )
     mode = stat.S_IMODE((home or Path(os.environ["HOME"])).stat().st_mode)
     if mode & 0o007:
-        problems.append(f"your home is {mode:04o}, which the run account could read: chmod 0750 it (scripts/provision-outpost-runner does)")
+        problems.append(
+            f"your home is {mode:04o}, which the run account could read: "
+            "chmod 0750 it (scripts/provision-outpost-runner does)"
+        )
     return problems
 
 
@@ -650,7 +665,10 @@ def require_run_host() -> RunsHost:
 
 
 def copy_operator_config(source: Path, dest_dir: Path) -> Path:
-    """The Outpost under test reads the operator's config as it is, so its ``[runs]`` is the operator's by construction."""
+    """The Outpost under test reads the operator's config as it is.
+
+    Its ``[runs]`` is therefore the operator's by construction.
+    """
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / "config.toml"
     shutil.copyfile(source, dest)
@@ -662,7 +680,9 @@ def copy_operator_config(source: Path, dest_dir: Path) -> Path:
 
 @dataclass(frozen=True)
 class HomeSentinel:
-    """A world-readable folder in the operator's home holding text no run may ever show: only the home's mode keeps it out.
+    """A world-readable folder in the operator's home holding text no run may ever show.
+
+    Only the home's mode keeps it out.
 
     The scenario aims at it with a symlink, a ``./``-relative local action step, and a direct read from the
     job. The ``HEAD`` and ``config`` files make it look like a git directory, but the nested ``.git`` file
@@ -690,6 +710,27 @@ class HomeSentinel:
     def remove(self) -> None:
         shutil.rmtree(self.path, ignore_errors=True)
 
+
+_CONNECT_CONTROL = (
+    "if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; "
+    'then echo "probe control public: re""ached"; '
+    'else echo "probe control public: unre""ached"; fi'
+)
+_SOCKET_PROBE = (
+    'if [ -e "$s" ]; '
+    'then echo "probe engine socket $s: pre""sent"; '
+    'else echo "probe engine socket $s: ab""sent"; fi'
+)
+_LOOPBACK_PROBE = (
+    'if timeout 3 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null; '
+    'then echo "probe loopback $h:$p: REA""CHED"; '
+    'else echo "probe loopback $h:$p: ref""used"; fi'
+)
+_PUBLIC_PROBE = (
+    "if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; "
+    'then echo "public github.com:443: re""ached"; '
+    'else echo "public github.com:443: unre""achable"; fi'
+)
 
 WORKFLOW = """\
 name: e2e
@@ -739,11 +780,11 @@ jobs:
     steps:
       - run: |
           echo "probe control: $(ls / | wc -l)"
-          if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; then echo "probe control public: re""ached"; else echo "probe control public: unre""ached"; fi
+          @CONNECT_CONTROL@
           echo "probe home: $(ls "@HOME@" 2>&1 | head -1)"
           echo "probe sentinel read: $(cat "@SENTINEL@/secret.txt" 2>&1 | head -1)"
           for s in /var/run/docker.sock /run/docker.sock @ENGINE@; do
-            if [ -e "$s" ]; then echo "probe engine socket $s: pre""sent"; else echo "probe engine socket $s: ab""sent"; fi
+            @SOCKET_PROBE@
           done
           echo "probe docker env: $(env | grep -ci docker || true)"
           hex=$(awk '$2=="00000000" {print $3; exit}' /proc/net/route)
@@ -752,14 +793,14 @@ jobs:
           echo "probe gateway: $gw"
           for h in 127.0.0.1 $gw 10.0.2.2 172.17.0.1 host.docker.internal; do
             for p in @OUTPOST_PORT@ @LISTENER_PORT@; do
-              if timeout 3 bash -c "exec 3<>/dev/tcp/$h/$p" 2>/dev/null; then echo "probe loopback $h:$p: REA""CHED"; else echo "probe loopback $h:$p: ref""used"; fi
+              @LOOPBACK_PROBE@
             done
           done
   public:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          if timeout 20 bash -c 'exec 3<>/dev/tcp/github.com/443' 2>/dev/null; then echo "public github.com:443: re""ached"; else echo "public github.com:443: unre""achable"; fi
+          @PUBLIC_PROBE@
   mount_priv:
     runs-on: ubuntu-latest
     container:
@@ -783,6 +824,12 @@ jobs:
       - run: sleep 20
       - run: echo "stream-second-$((6*7))"
 """
+WORKFLOW = (
+    WORKFLOW.replace("@CONNECT_CONTROL@", _CONNECT_CONTROL)
+    .replace("@SOCKET_PROBE@", _SOCKET_PROBE)
+    .replace("@LOOPBACK_PROBE@", _LOOPBACK_PROBE)
+    .replace("@PUBLIC_PROBE@", _PUBLIC_PROBE)
+)
 
 OK_ACTION = """\
 name: ok
@@ -870,7 +917,7 @@ def parse_stamped_lines(out: str) -> list[tuple[float, str]]:
 
 
 def streamed_as_produced(stamped: list[tuple[float, str]], early: str, late: str, gap: float) -> str | None:
-    """None when the first line holding *early* reached the reader at least *gap* seconds before the first holding *late*."""
+    """None when the first line holding *early* reached the reader *gap* seconds before the first holding *late*."""
     times = {}
     for needle in (early, late):
         arrived = [t for t, text in stamped if needle in text]
@@ -879,7 +926,9 @@ def streamed_as_produced(stamped: list[tuple[float, str]], early: str, late: str
         times[needle] = arrived[0]
     apart = times[late] - times[early]
     if apart < gap:
-        return f"{early!r} and {late!r} arrived together, {apart:.1f}s apart; the job wrote them at least {gap:.0f}s apart"
+        return (
+            f"{early!r} and {late!r} arrived together, {apart:.1f}s apart; the job wrote them at least {gap:.0f}s apart"
+        )
     return None
 
 
@@ -922,7 +971,10 @@ def stream_script(port: int, gateway: Path) -> str:
 
 
 def act_containers(engine_socket: str, name_part: str) -> list[dict]:
-    """The engine's record of each running act container whose name contains *name_part*; empty when the engine will not say."""
+    """The engine's record of each running act container whose name contains *name_part*.
+
+    Empty when the engine will not say.
+    """
     try:
         status, body = engine_request(engine_socket, "GET", "/containers/json")
         if status != 200:
@@ -970,7 +1022,10 @@ def prepull_image(engine_socket: str, ref: str) -> None:
     """Pull the pinned job image through the run engine, so no job's time goes on the first download."""
     name, tag = split_image_ref(ref)
     status, body = engine_request(
-        engine_socket, "POST", f"/images/create?fromImage={urllib.parse.quote(name, safe='')}&tag={urllib.parse.quote(tag, safe='')}", timeout=900
+        engine_socket,
+        "POST",
+        f"/images/create?fromImage={urllib.parse.quote(name, safe='')}&tag={urllib.parse.quote(tag, safe='')}",
+        timeout=900,
     )
     error = pull_stream_error(body)
     if status != 200 or error is not None:
@@ -983,7 +1038,10 @@ TARGETS_PROBED = ("127.0.0.1", "10.0.2.2", "172.17.0.1", "host.docker.internal")
 
 
 def probe_problems(log: str, ports: tuple[int, int], marker: str) -> list[str]:
-    """What is wrong with the ``probe`` job's log: a control that did not run, a probe that got in, or a line that is missing."""
+    """What is wrong with the ``probe`` job's log.
+
+    A control that did not run, a probe that got in, or a line that is missing.
+    """
     problems = []
 
     def line(pattern: str) -> re.Match | None:
@@ -993,7 +1051,10 @@ def probe_problems(log: str, ports: tuple[int, int], marker: str) -> list[str]:
     if control is None or int(control.group(1)) <= 0:
         problems.append("the control (a listing of / that must be non-empty) did not run or listed nothing")
     if line(r"probe control public: reached") is None:
-        problems.append("the public-host control did not print reached, so the connect probe cannot be trusted to detect a connection")
+        problems.append(
+            "the public-host control did not print reached, "
+            "so the connect probe cannot be trusted to detect a connection"
+        )
     if line(r"probe home: ls: .*(No such file|Permission denied)") is None:
         problems.append("the home read did not print a refusal from ls")
     if line(r"probe sentinel read: cat: .*(No such file|Permission denied)") is None:
@@ -1016,8 +1077,6 @@ def probe_problems(log: str, ports: tuple[int, int], marker: str) -> list[str]:
     if marker in log:
         problems.append("text from the operator's home appears in the log")
     return problems
-
-
 
 
 def check_container_inspect(inspect: dict, secrets: list[str]) -> list[str]:
