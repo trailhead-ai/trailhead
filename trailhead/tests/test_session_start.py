@@ -1217,6 +1217,10 @@ def _live_hub_run(tmp_path, tmux_root, commands_for, excluded=()):
     start = _start(env, interactive=False, prompt="go")
     paths = dict(home=home, lore=lore, vault=vault, cache=cache, outside=outside, token_store=token_store,
                  tmux_root=tmux_root, tmux_socket_dir=tmux_socket_dir)
+    for f in start.files:  # what Outpost writes before it runs the argv
+        Path(f.path).parent.mkdir(parents=True, exist_ok=True)
+        Path(f.path).write_text(f.content)
+        os.chmod(f.path, int(f.mode, 8))
     commands = commands_for(paths)
     url, seen, shutdown = _mock_anthropic(commands)
     try:
@@ -1238,7 +1242,7 @@ def _refused(result: dict) -> bool:
 
 
 @_LIVE_SKIP
-def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(tmp_path, tmux_root):
+def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(off_temp, tmux_root):
     def commands(p):
         return [
             f"echo x > {p['home']}/ok",
@@ -1253,7 +1257,7 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
             f"python3 -c \"print(open('{p['token_store']}/token').read())\"",
         ]
 
-    results, _, paths = _live_hub_run(tmp_path, tmux_root, commands)
+    results, _, paths = _live_hub_run(off_temp, tmux_root, commands)
     home_w, lore_w, cache_w, scratch_w, socket_w, outside_w, own_cfg, cat_tok, head_tok, py_tok = results
     assert not any(map(_refused, (home_w, lore_w, cache_w, scratch_w)))  # positive controls
     assert _refused(socket_w) and not (paths["tmux_socket_dir"] / "default").exists()
@@ -1268,9 +1272,9 @@ def test_live_hub_session_writes_only_its_roots_and_cannot_read_the_token_store(
 
 
 @_LIVE_SKIP
-def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_path, tmux_root):
+def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(off_temp, tmux_root):
     results, _, paths = _live_hub_run(
-        tmp_path, tmux_root, lambda p: [f"touch {p['home']}/excluded-ran"], excluded=["touch *"]
+        off_temp, tmux_root, lambda p: [f"touch {p['home']}/excluded-ran"], excluded=["touch *"]
     )
     assert _refused(results[0])
     assert not (paths["home"] / "excluded-ran").exists()
@@ -1278,7 +1282,7 @@ def test_live_hub_session_is_refused_a_command_the_user_runs_unsandboxed(tmp_pat
 
 @_LIVE_SKIP
 def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_records(
-    tmp_path, tmux_root
+    off_temp, tmux_root
 ):
     def commands(p):
         v = p["vault"]
@@ -1292,7 +1296,7 @@ def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_recor
             f"mkdir -p {p['lore']}/vaults/late/.git && echo x > {p['lore']}/vaults/late/.git/config",
         ]
 
-    results, _, paths = _live_hub_run(tmp_path, tmux_root, commands)
+    results, _, paths = _live_hub_run(off_temp, tmux_root, commands)
     record_w, msg_w, config_w, hook_w, info_w, move_w, late_w = results
     v = paths["vault"]
     assert not _refused(record_w) and (v / "record-ok.md").exists()
