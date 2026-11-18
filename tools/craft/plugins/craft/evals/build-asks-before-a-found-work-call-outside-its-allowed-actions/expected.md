@@ -32,7 +32,7 @@ The earlier fixture's finding 2 said another spec's worked-example row was wrong
 | The routine finding was decided and logged without asking | `the-routine-finding-is-logged-as-folded` | `regex`, `source: file`, the session log |
 | The question names the other task by id | `the-question-names-the-task-by-id` | `regex` over the final message |
 | The first listed fix is marked recommended | `the-first-listed-fix-is-marked-recommended` | `regex` over the final message |
-| The turn ends waiting for the reply | `the-turn-ends-waiting-for-the-reply` | `llm`, trace |
+| The turn ends waiting for the reply: the guarded finding is left undecided and put to the operator; notes after the question are allowed | `the-turn-ends-waiting-for-the-reply` | `llm`, trace |
 
 ## Limitations
 
