@@ -775,14 +775,111 @@ class TestBackendChoice:
         assert rc == 3 and "next step: stop and report" in out
 
 
+class TestRequireVersion:
+    def _argv(self, ws, version, *extra):
+        return ["eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                "--require-version", version, *extra]
+
+    def _nothing_created(self, ws):
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+        assert ws.count("canary-started") == 0
+
+    def test_a_required_version_above_this_commands_is_not_run_too_old_and_creates_nothing(self, ws):
+        have = request.EVAL_COMMAND_VERSION
+        rc, out, err = ws.main(*self._argv(ws, str(have + 1), "--backend", "local"))
+        assert rc == 3, (out, err)
+        lines = out.splitlines()
+        assert "not run: eval-command-too-old" in lines
+        assert "next step: stop and report" in lines
+        assert f"required version: {have + 1}" in lines
+        assert f"this command's version: {have}" in lines
+        assert "trailhead update" in out and "new session" in out
+        assert "request:" not in out
+        self._nothing_created(ws)
+
+    @pytest.mark.parametrize("delta", [0, -1, -2])
+    def test_a_required_version_at_or_below_this_commands_starts_the_request(self, ws, delta):
+        required = max(request.EVAL_COMMAND_VERSION + delta, 0)
+        rc, out, err = ws.main(*self._argv(ws, str(required), "--backend", "local"))
+        assert rc == 0, (out, err)
+        request_id = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
+
+    @pytest.mark.parametrize("value", ["abc", "-1", "2.0", "+2", " 2", "2 ", "2\n", "", "1" * 30,
+                                       "\u0662", "\u0661\u0662", "\uff12", "0x2"])
+    def test_a_value_that_is_not_plain_ascii_digits_is_refused_naming_it_and_creates_nothing(self, ws, value):
+        rc, out, err = ws.main(*self._argv(ws, value, "--backend", "local"))
+        assert rc == 2, (out, err)
+        assert repr(value) in err and "request:" not in out
+        self._nothing_created(ws)
+
+    def test_with_the_sandbox_marker_a_too_high_version_is_too_old_not_could_not_leave_sandbox(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, err = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION + 1)))
+        assert rc == 3, (out, err)
+        assert "not run: eval-command-too-old" in out.splitlines()
+        assert "could-not-leave-sandbox" not in out
+        self._nothing_created(ws)
+
+    def test_with_the_sandbox_marker_a_satisfied_version_is_still_could_not_leave_sandbox(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, _ = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION)))
+        assert rc == 3
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+
+    @pytest.mark.parametrize("version", ["1", "2", "001"])
+    def test_the_printed_outside_the_sandbox_command_carries_the_required_version(self, ws, monkeypatch, version):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main(*self._argv(ws, version, "--case", "c2"))
+        assert rc == 3
+        assert (f"run outside the sandbox: {SHIM} start --require-version {int(version)} --plugin plugins/p "
+                f"--case c1 --case c2 --repo {ws.repo}") in out.splitlines()
+
+    def test_the_printed_outside_the_sandbox_command_has_no_version_flag_when_none_was_given(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
+        assert rc == 3
+        printed = [line for line in out.splitlines() if line.startswith("run outside the sandbox:")]
+        assert printed == [f"run outside the sandbox: {SHIM} start --plugin plugins/p --case c1 --repo {ws.repo}"]
+
+
+class TestNextStepFor:
+    @pytest.mark.parametrize("reason", request.STOP_AND_REPORT_REASONS)
+    def test_every_stop_and_report_reason_is_followed_by_stop_and_report(self, reason):
+        assert request.next_step_for(reason) == request.STOP_AND_REPORT
+
+    @pytest.mark.parametrize("reason", [request.INTERRUPTED, "timeout"])
+    def test_interrupted_and_timeout_are_followed_by_resubmit(self, reason):
+        assert request.next_step_for(reason) == request.RESUBMIT
+
+    def test_a_reason_nobody_classified_is_followed_by_stop_and_report(self):
+        assert request.next_step_for("some-future-reason") == request.STOP_AND_REPORT
+
+    def test_every_not_run_reason_the_modules_define_is_classified_exactly_once(self):
+        from portage.eval_core import run as core_run
+        slug = re.compile(r"^[a-z]+(-[a-z]+)*\Z")
+        not_reasons = {"STOP_AND_REPORT", "RESUBMIT", "SHIM_NAME"}
+        defined = {v for mod in (core_run, request) for k, v in vars(mod).items()
+                   if k.isupper() and k not in not_reasons and isinstance(v, str) and slug.match(v)}
+        assert request.INTERRUPTED in defined and core_run.TIMEOUT in defined
+        for reason in sorted(defined):
+            count = (request.STOP_AND_REPORT_REASONS.count(reason)
+                     + request.RESUBMIT_REASONS.count(reason))
+            assert count == 1, (reason, count)
+
+
 class TestPinnedShimEndToEnd:
-    def _shim(self, ws, tmp_path):
+    def _shim(self, ws, tmp_path, runner=None):
         from trailhead.install import build_cli_shims, resolve_cli_tools
         from trailhead.pathint import resolve_shim_dir
 
         stubbin = tmp_path / "stubbin"
         stubbin.mkdir()
-        (stubbin / "claude").symlink_to(ws.stub)
+        (stubbin / "claude").symlink_to(ws.stub if runner is None else runner)
         env = {"HOME": str(ws.home), "PATH": f"{stubbin}:/usr/bin:/bin"}
         build_cli_shims(resolve_cli_tools({"portage": True}), env=env)
         return resolve_shim_dir(env=env) / "portage-eval"
@@ -807,6 +904,18 @@ class TestPinnedShimEndToEnd:
         assert "case c1: pass" in waited.stdout
         assert ws.count("case-started-c1") == 1
 
+    def test_the_shim_runs_an_uncommitted_edit_of_the_measured_prose_not_the_committed_one(self, ws, tmp_path):
+        _commit_repo(ws.repo)
+        (ws.repo / "plugins" / "p" / "skills" / "x.md").write_text("edited after the commit")
+        shim = self._shim(ws, tmp_path, runner=_recording_runner(ws, tmp_path))
+        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                            "--case", "c1", "--backend", "local")
+        assert started.returncode == 0, started.stderr
+        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
+        waited = self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100")
+        assert waited.returncode == 0, (waited.stdout, waited.stderr)
+        assert _recorded(ws, "c1")["files"]["skills/x.md"] == "edited after the commit"
+
     def test_the_shim_with_the_sandbox_marker_and_no_backend_tells_the_session_to_stop(self, ws, tmp_path):
         shim = self._shim(ws, tmp_path)
         proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
@@ -814,6 +923,14 @@ class TestPinnedShimEndToEnd:
         assert "not run: could-not-leave-sandbox" in proc.stdout
         assert f"{shim} start --plugin plugins/p --case c1 --repo {ws.repo}" in proc.stdout
         assert "chezmoi apply" in proc.stdout
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+
+    def test_the_shim_with_a_too_high_required_version_reports_too_old(self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                         "--require-version", str(request.EVAL_COMMAND_VERSION + 1))
+        assert proc.returncode == 3, (proc.stdout, proc.stderr)
+        assert "not run: eval-command-too-old" in proc.stdout.splitlines()
         assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
 
     def test_the_shim_without_the_marker_runs_locally_with_no_backend_flag(self, ws, tmp_path):
@@ -956,3 +1073,92 @@ class TestWorkerImportIsolation:
         rc, out, _ = ws.wait(request_id)
         assert rc == 0 and "case c1: pass" in out
         assert not marker.exists()
+
+
+GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def _git(repo, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+         *args], cwd=repo, check=True, capture_output=True, text=True,
+        env={**os.environ, **GIT_ENV}).stdout
+
+
+def _commit_repo(repo):
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "committed")
+
+
+def _recording_runner(ws, tmp_path):
+    """A runner that writes the plugin directory it was handed (every file's content) and its argv to
+    the control directory, one file per case, then behaves as the ordinary stub."""
+    script = tmp_path / "recording-runner"
+    script.write_text(f"""#!{sys.executable}
+import json, os, sys
+argv = sys.argv
+if "--eval-dir" not in argv:
+    case = argv[argv.index("--case") + 1]
+    plugin = argv[argv.index("plugin") + 2]
+    files = {{}}
+    for root, _, names in os.walk(plugin):
+        for n in names:
+            path = os.path.join(root, n)
+            files[os.path.relpath(path, plugin)] = open(path).read()
+    json.dump({{"argv": argv, "files": files}}, open(os.path.join({str(ws.ctl)!r}, "rec-" + case + ".json"), "w"))
+os.execv({str(ws.stub)!r}, argv)
+""")
+    script.chmod(0o755)
+    return script
+
+
+def _recorded(ws, case):
+    return json.loads(until(lambda: (ws.ctl / f"rec-{case}.json").exists() and (ws.ctl / f"rec-{case}.json"))
+                      .read_text())
+
+
+class TestDirtyWorkingTree:
+    @pytest.fixture
+    def rec(self, ws, tmp_path, monkeypatch):
+        monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(_recording_runner(ws, tmp_path)))
+        _commit_repo(ws.repo)
+        return ws
+
+    @pytest.mark.parametrize("edit, relpath, content", [
+        (False, "skills/x.md", "x"),
+        (True, "skills/x.md", "prose edited after the commit"),
+        (True, "skills/x.md", ""),
+        (True, "evals/c1/case.yaml", ""),
+        (True, "evals/c1/case.yaml", "name: [unclosed\n"),
+    ], ids=["clean", "edited-prose", "truncated-prose", "truncated-case", "garbled-case"])
+    def test_the_runner_is_handed_the_working_tree_as_it_stands_and_start_never_refuses_it(
+            self, rec, edit, relpath, content):
+        if edit:
+            (rec.repo / "plugins" / "p" / relpath).write_text(content)
+        assert bool(_git(rec.repo, "status", "--porcelain").strip()) is edit
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        assert _recorded(rec, "c1")["files"][relpath] == content
+
+    def test_a_request_runs_the_mapping_of_the_working_tree_not_the_committed_one(self, rec):
+        edited = {**MAPPING, "runner": {"model": "opus", "allow_tools": ["Read", "Grep"], "max_cost_usd": 3.0}}
+        (rec.repo / "plugins" / "p" / "evals" / "eval-gate.json").write_text(json.dumps(edited))
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        doc = json.loads((rec.req(request_id) / "request.json").read_text())
+        assert doc["cases"][0]["runner"] == edited["runner"]
+        argv = _recorded(rec, "c1")["argv"]
+        assert argv[argv.index("--model") + 1] == "opus"
+        grants = argv[argv.index("--allow-tools") + 1:]
+        assert grants[:2] == ["Read", "Grep"] and grants[2].startswith("-")
+
+    def test_a_request_with_an_unedited_mapping_carries_the_committed_grants(self, rec):
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        argv = _recorded(rec, "c1")["argv"]
+        assert argv[argv.index("--model") + 1] == "sonnet"
+        grants = argv[argv.index("--allow-tools") + 1:]
+        assert grants[0] == "Read" and grants[1].startswith("-")

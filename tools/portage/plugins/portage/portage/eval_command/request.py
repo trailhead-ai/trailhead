@@ -31,8 +31,13 @@ A case result::
 ``stop and report``, except the core's ``timeout``; ``interrupted`` (the worker died before deciding
 the case) and ``timeout`` are followed by ``resubmit``. A ``runner-broken`` whose pinned runner binary
 is gone also carries a ``cause`` naming the update that restores it, printed as a ``cause:`` line.
-``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists), or by ``wait`` for a
-request started from inside the sandbox whose worker is gone.
+``eval-command-too-old`` is printed by ``start`` alone, when ``--require-version N`` names a version
+above ``EVAL_COMMAND_VERSION`` (no request is created); it is followed by ``stop and report`` and every
+reason in ``STOP_AND_REPORT_REASONS``, the tuple that enumerates the known stop-and-report reasons, is;
+``next_step_for`` resubmits only the reasons in ``RESUBMIT_REASONS``, so any reason not in that set, one
+the module has never heard of included, is ``stop and report``. ``could-not-leave-sandbox`` is printed
+by ``start`` alone (no request exists), or by ``wait`` for a request started from inside the sandbox
+whose worker is gone.
 """
 
 from __future__ import annotations
@@ -46,22 +51,29 @@ import string
 import sys
 from pathlib import Path
 
-from portage.eval_core.run import TIMEOUT, not_run
+from portage.eval_core.run import (COST_CAP, NO_RUNNER, RUNNER_ERROR, RUNNER_MISSING, RUNS_ERRORED,
+                                    SANDBOX_UNWRITABLE, TIMEOUT, not_run)
 from portage.eval_gate.cache import ensure_private_dir
 from portage.eval_gate.run import atomic_write
 from trailhead.paths import PathResolutionError, state_dir
 
 SCHEMA_VERSION = 1
+EVAL_COMMAND_VERSION = 2
+REQUIRE_VERSION_PATTERN = re.compile(r"^[0-9]{1,6}\Z")
 ID_PATTERN = re.compile(r"^local-[a-z0-9]{12}\Z")
 _ID_ALPHABET = string.ascii_lowercase + string.digits
 
 RUNNER_BROKEN = "runner-broken"
 INTERRUPTED = "interrupted"
 COULD_NOT_LEAVE_SANDBOX = "could-not-leave-sandbox"
+EVAL_COMMAND_TOO_OLD = "eval-command-too-old"
 STOP_AND_REPORT = "stop and report"
 RESUBMIT = "resubmit"
 RUNNER_MISSING_CAUSE = ("the pinned runner binary is gone; put `claude` on PATH, then run "
                         "`trailhead update`")
+STOP_AND_REPORT_REASONS = (RUNNER_BROKEN, COULD_NOT_LEAVE_SANDBOX, EVAL_COMMAND_TOO_OLD, NO_RUNNER,
+                           RUNNER_MISSING, COST_CAP, RUNNER_ERROR, RUNS_ERRORED, SANDBOX_UNWRITABLE)
+RESUBMIT_REASONS = (INTERRUPTED, TIMEOUT)
 NEXT_STEPS = (STOP_AND_REPORT, RESUBMIT)
 SHIM_ENV = "PORTAGE_EVAL_SHIM"
 SHIM_NAME = "portage-eval"
@@ -110,7 +122,7 @@ def wait_command(request_id: str) -> str:
 
 
 def next_step_for(reason: str) -> str:
-    return RESUBMIT if reason in (INTERRUPTED, TIMEOUT) else STOP_AND_REPORT
+    return RESUBMIT if reason in RESUBMIT_REASONS else STOP_AND_REPORT
 
 
 def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None,
