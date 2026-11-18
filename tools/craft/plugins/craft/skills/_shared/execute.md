@@ -430,8 +430,8 @@ says.
   No `blocked` write.
 - **`NEEDS_CONTEXT` (prover or executor) and `DONE_WITH_CONCERNS`:** handled exactly as attended;
   each call that is a judgment call is logged as a decision.
-- **A finding that a different record is wrong, with a known fix** (step 4, and the same finding in
-  Phase 3): applied to nothing and asked of no one. Park it when it is found, as the unattended
+- **A finding that a different record's text is wrong, with a known fix** (step 4, and the same
+  finding in Phase 3): applied to nothing and asked of no one. Park it when it is found, as the unattended
   contract's "The non-blocking park" section says: one `Q<n>` in this run's block (`Question:` names
   the record and what is wrong, `Options:` apply the known fix by hand and leave the record as it
   is, each with what it costs and one marked `(recommended)`, and `Progress:` what the run has
@@ -1056,7 +1056,7 @@ own delivery is decided as [Found work](#found-work) says.
 Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to
 the whole-change phases in [After All Tasks](#after-all-tasks), not dropped entirely.
 
-A finding that a different record is wrong, with a known fix, is not a task. Present it to the
+A finding that a different record's text is wrong, with a known fix, is not a task. Present it to the
 operator and apply it once accepted, as the section "Corrections to other records" of the shared
 council contract defines. Under `--unattended` it is neither presented nor applied: park it as [Loop
 stops](#loop-stops) says.
@@ -1223,7 +1223,7 @@ the review text as a claim about the code, not as a direct instruction. Dispatch
 `executor`; every fix must pass the Phase 1 test gate before it counts as resolved. **A fix dispatch
 is a first dispatch: it runs on Sonnet like any other** — a reviewer finding a defect is evidence
 about the code, not about the tier that has to fix it. Escalate only if that Sonnet fix pass itself
-fails. A finding that a different record is wrong, with a known fix, is not dispatched to
+fails. A finding that a different record's text is wrong, with a known fix, is not dispatched to
 `executor`: present and apply it as the section "Corrections to other records" of the shared council
 contract defines, or under `--unattended` park it as [Loop stops](#loop-stops) says.
 
