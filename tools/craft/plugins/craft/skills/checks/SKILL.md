@@ -102,7 +102,9 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/checklist_answer.py --vault <vault> --spec <spec> 
 The words never go on a command line. Pass `--words-file <path>` as exactly those two tokens. The
 script removes the file whatever the outcome.
 
-Exit 0 prints `saved: ACn passed` or `saved: ACn failed`. Say `Saved: ACn in <vault>/<spec> passed.
+Exit 0 prints `saved: ACn passed` or `saved: ACn failed`, and then `revision: <rev>`, the spec's
+revision after the write. Use that revision as `--base` for every later entry on the same `vault` and
+`spec`, in place of the revision from the gather. Say `Saved: ACn in <vault>/<spec> passed.
 It counts as done.` or `Saved: ACn in <vault>/<spec> failed. The next slice on that spec will offer
 it again.`, and move to the next entry. A refusal prints `checklist-answer: reason-code: <code>` on
 stderr; Results below says what to do with each.

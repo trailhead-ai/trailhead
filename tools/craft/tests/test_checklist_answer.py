@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -187,7 +188,7 @@ def test_a_failed_answer_appends_the_dated_line_and_returns_the_criterion_to_the
 
     res = world.run(capsys, answer="failed", words="the banner showed 2, not 3")
 
-    assert (res.code, res.out) == (0, "saved: AC2 failed\n")
+    assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 failed")
     assert world.body == prior.replace(
         "  - 2026-11-08 waiting: set by slice\n\n- **AC3.**",
         "  - 2026-11-08 waiting: set by slice\n  - 2026-11-16 failed: the banner showed 2, not 3\n\n- **AC3.**")
@@ -208,7 +209,7 @@ def test_a_failed_answer_is_written_with_update_and_never_amend(world, capsys):
 def test_a_passed_answer_appends_the_line_and_closes_the_criterion_in_one_write(world, capsys):
     res = world.run(capsys, answer="passed", words="saw 3 on the banner")
 
-    assert (res.code, res.out) == (0, "saved: AC2 passed\n")
+    assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 passed")
     assert world.entry("AC2").history[-1] == (TODAY, "passed", "saw 3 on the banner")
     state, _ = world.criteria()
     assert state["closed"] == ["AC2"]
@@ -238,7 +239,7 @@ def test_words_at_the_length_limit_are_saved_and_one_over_is_refused(world, caps
     assert world.writes() == []
 
     saved = world.run(capsys, answer="failed", words=at_limit)
-    assert (saved.code, saved.out) == (0, "saved: AC2 failed\n")
+    assert (saved.code, saved.out.splitlines()[0]) == (0, "saved: AC2 failed")
     assert world.entry("AC2").history[-1][2] == at_limit
 
 
@@ -370,7 +371,7 @@ def test_today_is_computed_once_so_a_midnight_crossing_cannot_split_the_line_fro
 
     res = world.run(capsys, answer="failed")
 
-    assert (res.code, res.out) == (0, "saved: AC2 failed\n")
+    assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 failed")
     assert world.entry("AC2").history[-1][0] == "2026-11-16"
 
 
@@ -539,13 +540,79 @@ def test_the_words_file_is_removed_on_every_outcome(world, capsys, scenario):
 # --- two answers in turn ------------------------------------------------------
 
 
+def revision_line(res):
+    lines = res.out.splitlines()
+    assert len(lines) == 2 and lines[1].startswith("revision: "), res.out
+    return lines[1].removeprefix("revision: ")
+
+
+def test_a_save_prints_the_specs_new_revision_on_a_second_line(world, capsys):
+    before = world.revision
+
+    res = world.run(capsys, answer="failed")
+
+    assert res.code == 0, res.err
+    assert revision_line(res) == world.revision
+    assert revision_line(res) != before
+
+
+def test_a_passed_save_prints_the_specs_new_revision_too(world, capsys):
+    res = world.run(capsys, answer="passed", words="")
+
+    assert res.code == 0, res.err
+    assert revision_line(res) == world.revision
+
+
+def test_a_save_whose_revision_re_read_fails_still_stands_with_no_revision_line(world, capsys):
+    shows = []
+
+    def runner(argv, stdin=None):
+        if argv[:3] == ["record", "show", "--json"]:
+            shows.append(argv)
+            if len(shows) > 1:
+                return subprocess.CompletedProcess(argv, 1, "", "lore went away")
+        return world.lore(argv, stdin=stdin)
+
+    res = world.run(capsys, runner=runner)
+
+    assert (res.code, res.out) == (0, "saved: AC2 failed\n")
+    assert world.entry("AC2").status == "failed"
+
+
 def test_answering_two_entries_in_turn_with_the_returned_revisions_saves_both(world, capsys):
     first = world.run(capsys, criterion="AC2", answer="failed", words="no 3 on the banner")
     assert first.code == 0, first.err
-    second = world.run(capsys, criterion="AC3", answer="failed", words="the report did not open")
-    assert (second.code, second.out) == (0, "saved: AC3 failed\n")
+    second = world.run(capsys, criterion="AC3", answer="failed", words="the report did not open",
+                       base=revision_line(first))
+    assert (second.code, second.out.splitlines()[0]) == (0, "saved: AC3 failed")
     assert world.entry("AC2").history[-1][1:] == ("failed", "no 3 on the banner")
     assert world.entry("AC3").history[-1][1:] == ("failed", "the report did not open")
+
+
+
+# --- a write that landed ------------------------------------------------------
+
+
+@pytest.mark.parametrize("answer, argv_head, words", [("failed", ["record", "update"], "it broke"),
+                                                      ("passed", ["record", "amend"], "all good")])
+def test_a_write_lore_committed_and_then_reported_failing_is_saved(world, capsys, answer, argv_head, words):
+    inject_write(world.lore, argv_head, run_first=True, returncode=1, stderr="timed out after commit")
+
+    res = world.run(capsys, answer=answer, words=words)
+
+    assert (res.code, res.out.splitlines()[0]) == (0, f"saved: AC2 {answer}"), res.err
+    assert revision_line(res) == world.revision
+    assert world.entry("AC2").history[-1][1:] == (answer, words)
+
+
+def test_a_write_that_did_not_land_while_the_spec_moved_is_still_stale(world, capsys):
+    shown = world.show()
+    world.edit(lambda b: b.rstrip("\n") + "\n\n" + pending("AC1", slice_="other"))
+    world.lore.inject(["record", "show"], returncode=0, stdout=json.dumps(shown), times=1)
+
+    res = world.run(capsys, base=shown["revision"])
+
+    assert (res.code, res.reason) == (1, "stale")
 
 
 def test_a_second_answer_given_the_first_revision_is_stale(world, capsys):
@@ -554,3 +621,104 @@ def test_a_second_answer_given_the_first_revision_is_stale(world, capsys):
     second = world.run(capsys, criterion="AC3", base=base, words="x")
     assert (second.code, second.reason) == (1, "stale")
     assert world.entry("AC3").status == "waiting"
+
+
+# --- the words file is the one argparse read ----------------------------------
+
+
+def run_argv(world, capsys, argv):
+    world.lore.calls.clear()
+    code = ca.main(argv, world.lore)
+    cap = capsys.readouterr()
+    return Result(code, cap.out, cap.err)
+
+
+def answer_argv(world, *words_flags):
+    return ["--vault", world.vault, "--spec", world.spec, "--criterion", "AC2", "--slice", f"task/{SLICE}",
+            "--answer", "failed", "--base", world.revision, *words_flags]
+
+
+def test_the_equals_form_of_the_words_flag_is_read_and_removed(world, capsys):
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+
+    res = run_argv(world, capsys, answer_argv(world, f"--words-file={world.words_path}"))
+
+    assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 failed")
+    assert world.entry("AC2").history[-1][1:] == ("failed", "banner showed 2")
+    assert not world.words_path.exists()
+
+
+def test_a_repeated_words_flag_removes_the_file_that_was_read_and_only_that_one(world, capsys, tmp_path):
+    first = tmp_path / "first.txt"
+    first.write_text("from the first file", encoding="utf-8")
+    world.words_path.write_text("from the last file", encoding="utf-8")
+
+    res = run_argv(world, capsys, answer_argv(world, "--words-file", str(first), "--words-file",
+                                              str(world.words_path)))
+
+    assert res.code == 0, res.err
+    assert world.entry("AC2").history[-1][1:] == ("failed", "from the last file")
+    assert not world.words_path.exists()
+    assert first.read_text(encoding="utf-8") == "from the first file"
+
+
+@pytest.mark.parametrize("flag", ["--words", "--word"])
+def test_an_abbreviated_words_flag_is_refused_as_invalid_arguments(world, capsys, flag):
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+
+    res = run_argv(world, capsys, answer_argv(world, flag, str(world.words_path)))
+
+    assert (res.code, res.out, code_of(res.err)) == (2, "", "invalid-arguments")
+    assert world.writes() == []
+
+
+@pytest.mark.parametrize("form", ["split", "equals"])
+def test_a_words_file_is_removed_when_the_arguments_do_not_parse(world, capsys, form):
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+    flag = ["--words-file", str(world.words_path)] if form == "split" else [f"--words-file={world.words_path}"]
+
+    res = run_argv(world, capsys, ["--vault", world.vault, *flag])
+
+    assert (res.code, code_of(res.err)) == (2, "invalid-arguments")
+    assert not world.words_path.exists()
+
+
+# --- a words file that cannot be removed ----------------------------------------
+
+
+@pytest.fixture
+def locked_words(world, tmp_path):
+    if os.geteuid() == 0:
+        pytest.skip("root can remove a file from a read-only directory")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    world.words_path = locked / "words.txt"
+    yield world
+    locked.chmod(0o700)
+
+
+def lock(world):
+    world.words_path.parent.chmod(0o500)
+
+
+def test_a_save_stays_exit_0_when_the_words_file_cannot_be_removed(locked_words, capsys):
+    world = locked_words
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+    lock(world)
+
+    res = run_argv(world, capsys, answer_argv(world, "--words-file", str(world.words_path)))
+
+    assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 failed"), res.err
+    assert world.entry("AC2").status == "failed"
+
+
+def test_a_refusal_keeps_its_own_code_when_the_words_file_cannot_be_removed(locked_words, capsys):
+    world = locked_words
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+    lock(world)
+    argv = answer_argv(world, "--words-file", str(world.words_path))
+    argv[argv.index("AC2")] = "AC9"
+
+    res = run_argv(world, capsys, argv)
+
+    assert (res.code, code_of(res.err)) == (1, "entry-not-found")
