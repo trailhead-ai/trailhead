@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "kind": "adr",
+  "title": "Tests never read git history: no git log, git show or lookup by commit, and a past version a test needs is committed as a fixture",
+  "status": "active",
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead",
+  "related": {
+    "adr": [
+      "a-test-needs-an-input-it-can-vary",
+      "after-the-fact-tests-are-repair-only"
+    ]
+  }
+}

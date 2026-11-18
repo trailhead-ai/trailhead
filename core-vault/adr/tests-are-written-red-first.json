@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "kind": "adr",
+  "title": "Tests are written red first: TDD with a failing test first, a blast-radius run, and the full suite once at the end",
+  "status": "active",
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead",
+  "related": {
+    "adr": [
+      "after-the-fact-tests-are-repair-only"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "version": "v1",
+  "kind": "adr",
+  "title": "Presence and absence are not behaviour: asserting a file exists, hasattr or a removal does not test anything",
+  "status": "active",
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead",
+  "related": {
+    "adr": [
+      "a-test-executes-its-subject",
+      "a-test-needs-an-input-it-can-vary"
+    ]
+  }
+}
