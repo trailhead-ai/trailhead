@@ -95,8 +95,9 @@ or decided.
 1. Run `mktemp` alone and keep the path it prints.
 2. With the file-writing tool, write the operator's words into that path. Leave it empty for a
    Passed with no note.
-3. Run the answer script, with the entry's own `vault`, `spec`, `criterion`, `building_slice` and
-   `revision` (as `--base`) and the answer the operator chose:
+3. Run the answer script, with the entry's own `vault`, `spec`, `criterion` and `building_slice`,
+   its `revision` as `--base` (or the revision the last save on that spec printed), and the answer
+   the operator chose:
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/checklist_answer.py --vault <vault> --spec <spec> --criterion <criterion> --slice <building_slice> --answer passed|failed --base <revision> --words-file <path>
