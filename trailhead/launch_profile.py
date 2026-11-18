@@ -328,7 +328,7 @@ def _unnamed_vaults(vault: Path, env, platform) -> tuple[Path, ...]:
     root = _vaults_root(env, platform)
     if not root.is_dir():
         return ()
-    return tuple(p for p in sorted(root.iterdir()) if p.is_dir() and Path(os.path.realpath(p)) != vault)
+    return tuple(p for p in sorted(root.iterdir()) if p.is_dir() and not os.path.samefile(p, vault))
 
 
 def _expand_home(value: str, env: dict[str, str] | None) -> str:

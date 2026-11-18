@@ -3110,6 +3110,20 @@ def test_ritual_start_does_not_deny_a_symlinked_vault_entry_that_resolves_to_the
     assert str(vaults / "b") in deny_write
 
 
+def test_a_second_path_to_the_named_vault_does_not_get_the_named_vault_denied(tmp_path):
+    from trailhead.launch_profile import _unnamed_vaults
+
+    env, _ = _ritual_ready(tmp_path)
+    _lore_vault_dirs(env, "a", "b")
+    state = Path(env["LORE_STATE_DIR"]).resolve()
+    (tmp_path / "alias").symlink_to(state)
+    named_by_alias = tmp_path / "alias" / "vaults" / "a"
+    assert not os.path.samefile(named_by_alias, state / "vaults" / "b")
+    assert str(named_by_alias.resolve()) == str(state / "vaults" / "a")
+    denied = _unnamed_vaults(named_by_alias, env, "linux")
+    assert [p.name for p in denied] == ["b", RITUAL_VAULT]
+
+
 def _hostile_vault_values(env):
     vaults = Path(env["LORE_STATE_DIR"]).resolve() / "vaults"
     outside = Path(env["LORE_STATE_DIR"]).resolve().parent / "outside-vault"
