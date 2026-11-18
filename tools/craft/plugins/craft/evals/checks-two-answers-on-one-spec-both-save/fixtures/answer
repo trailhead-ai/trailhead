@@ -1,0 +1,36 @@
+#!/bin/sh
+# Stand-in for the real writer. Each save moves the spec to a new revision and prints it; a --base that is not
+# the spec's current revision is refused as stale and saves nothing, as the real writer does.
+d=$(dirname "$0")
+n=$(cat "$d/answer.count" 2>/dev/null || echo 0)
+n=$((n + 1))
+echo "$n" > "$d/answer.count"
+vault= spec= crit= slice= ans= base= wf=
+while [ $# -gt 1 ]; do
+  case "$1" in
+    --vault) vault=$2 ;;
+    --spec) spec=$2 ;;
+    --criterion) crit=$2 ;;
+    --slice) slice=$2 ;;
+    --answer) ans=$2 ;;
+    --base) base=$2 ;;
+    --words-file) wf=$2 ;;
+  esac
+  shift 2
+done
+words=$(cat "$wf" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//')
+rm -f "$wf"
+saves=$(grep -c 'result=saved' "$d/answer.log")
+case "$saves" in
+  0) current=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa; next=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd ;;
+  1) current=dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd; next=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee ;;
+  *) current=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee; next=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff ;;
+esac
+if [ "$base" != "$current" ]; then
+  echo "call $n: vault=$vault spec=$spec criterion=$crit slice=$slice answer=$ans base=$base words=$words result=stale" >> "$d/answer.log"
+  echo "checklist-answer: reason-code: stale" >&2
+  exit 1
+fi
+echo "call $n: vault=$vault spec=$spec criterion=$crit slice=$slice answer=$ans base=$base words=$words result=saved" >> "$d/answer.log"
+echo "saved: $crit $ans"
+echo "revision: $next"
