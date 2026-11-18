@@ -37,7 +37,8 @@ OUTCOME_KINDS = (
     "spec-complete",
     "refused",
 )
-_RECORD_NAME = r"[a-z0-9][a-z0-9-]*"
+MAX_NAME_LENGTH = 250
+_RECORD_NAME = rf"[a-z0-9][a-z0-9-]{{0,{MAX_NAME_LENGTH - 1}}}"
 RECORD_NAME_PATTERN = rf"^{_RECORD_NAME}$"
 SLICE_PARENT_LABEL = "craft/slice-parent"
 
@@ -53,7 +54,7 @@ _HEADING_RE = re.compile(r"#{1,6} ")
 _BLOCK_HEADING = "## Unattended run"
 _OUTCOME_FIELD_RE = re.compile(r"\*\*Outcome:\*\*[ \t]*(\S+)[ \t]*")
 
-Show = Callable[[str, "str | None"], "dict | None"]
+Show = Callable[[str, str], "dict | None"]
 
 
 def valid_spec(spec: str) -> bool:
@@ -69,15 +70,13 @@ def valid_vault(vault: str) -> bool:
 
 
 def lore_show(env: dict[str, str]) -> Show:
-    """A record lookup through the ``lore`` CLI; vault ``None`` scans every configured vault."""
+    """A record lookup through the ``lore`` CLI, confined to one named vault."""
 
-    def show(record_id: str, vault: str | None) -> dict | None:
+    def show(record_id: str, vault: str) -> dict | None:
         lore = shutil.which("lore", path=env.get("PATH", ""))
         if lore is None:
             return None
-        argv = [lore, "record", "show", record_id, "--json"]
-        if vault is not None:
-            argv.append(f"--vault={vault}")
+        argv = [lore, "record", "show", record_id, "--json", f"--vault={vault}"]
         try:
             proc = subprocess.run(
                 argv,
@@ -152,8 +151,7 @@ def _last_run_outcome(body: str) -> str | None:
 def _judge_task(kind: str, record_id: str, spec: str, vault: str, show: Show) -> dict:
     record = show(record_id, vault)
     if record is None:
-        found_elsewhere = show(record_id, None) is not None
-        return _stuck("record-outside-spec" if found_elsewhere else "record-unreadable", record_id)
+        return _stuck("record-unreadable", record_id)
     body, sidecar = record.get("body"), record.get("sidecar")
     if not isinstance(body, str) or not isinstance(sidecar, dict):
         return _stuck("record-unreadable", record_id)
@@ -182,7 +180,7 @@ def judge(spec: str, vault: str, output_file: Path, *, show: Show) -> dict:
     kind, record_kind, name = parsed.groups()
     record_id = f"{record_kind}/{name}"
     if kind == "stuck":
-        return _stuck("ritual-stuck", record_id)
+        return _stuck("ritual-stuck", record_id if show(record_id, vault) is not None else None)
     if record_kind == "spec":
         if name == spec and (kind in _BLOCKLESS_KINDS or kind == "needs-a-decision"):
             return _verdict(kind, record_id)

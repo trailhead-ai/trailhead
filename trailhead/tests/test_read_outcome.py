@@ -222,25 +222,50 @@ def test_a_line_outside_the_grammar_is_malformed(tmp_path, line):
     assert _judge(_write(tmp_path, line + "\n")) == _stuck("malformed-outcome")
 
 
-def test_a_record_name_of_200_valid_characters_is_accepted(tmp_path):
-    name = "a" + "b-" * 99 + "c"
-    assert len(name) == 200
-    out = _judge(_write(tmp_path, f"outcome: stuck task/{name} parked=0 — x; y\n"))
+def _name_of(length: int) -> str:
+    return "a" + "b" * (length - 1)
+
+
+def _known(*record_ids: str) -> _Records:
+    return _Records({(VAULT, rid): {"body": "", "sidecar": {}} for rid in record_ids})
+
+
+def test_a_record_name_of_250_characters_is_accepted(tmp_path):
+    name = _name_of(250)
+    out = _judge(_write(tmp_path, f"outcome: stuck task/{name} parked=0 — x; y\n"), _known(f"task/{name}"))
     assert out == _stuck("ritual-stuck", f"task/{name}")
 
 
+def test_a_record_name_of_251_characters_is_malformed(tmp_path):
+    name = _name_of(251)
+    out = _judge(_write(tmp_path, f"outcome: stuck task/{name} parked=0 — x; y\n"), _known(f"task/{name}"))
+    assert out == _stuck("malformed-outcome")
+
+
 def test_digits_and_hyphens_make_a_valid_name(tmp_path):
-    assert _judge(_write(tmp_path, "outcome: stuck task/0-a-9 parked=12\n")) == _stuck("ritual-stuck", "task/0-a-9")
+    out = _judge(_write(tmp_path, "outcome: stuck task/0-a-9 parked=12\n"), _known("task/0-a-9"))
+    assert out == _stuck("ritual-stuck", "task/0-a-9")
 
 
-def test_a_stuck_line_keeps_its_record_and_ritual_stuck(tmp_path):
-    out = _judge(_write(tmp_path, "outcome: stuck task/p parked=0 — x; y\n"))
+def test_a_stuck_line_keeps_a_record_that_resolves_in_the_drives_vault(tmp_path):
+    out = _judge(_write(tmp_path, "outcome: stuck task/p parked=0 — x; y\n"), _known("task/p"))
     assert out == _stuck("ritual-stuck", "task/p")
 
 
-def test_a_stuck_line_naming_the_spec_keeps_it(tmp_path):
-    out = _judge(_write(tmp_path, f"outcome: stuck spec/{SPEC} parked=2 — x; y\n"))
+def test_a_stuck_line_naming_the_spec_keeps_it_when_it_resolves(tmp_path):
+    out = _judge(_write(tmp_path, f"outcome: stuck spec/{SPEC} parked=2 — x; y\n"), _known(f"spec/{SPEC}"))
     assert out == _stuck("ritual-stuck", f"spec/{SPEC}")
+
+
+def test_a_stuck_line_drops_a_record_that_does_not_resolve(tmp_path):
+    out = _judge(_write(tmp_path, "outcome: stuck task/ghost parked=0 — x; y\n"))
+    assert out == _stuck("ritual-stuck", None)
+
+
+def test_a_stuck_line_drops_a_record_that_exists_only_in_another_vault(tmp_path):
+    world = _Records({("elsewhere", "task/p"): {"body": "", "sidecar": {}}})
+    out = _judge(_write(tmp_path, "outcome: stuck task/p parked=0 — x; y\n"), world)
+    assert out == _stuck("ritual-stuck", None)
 
 
 # --- records ----------------------------------------------------------------------------------
@@ -338,10 +363,16 @@ def test_a_task_without_the_slice_parent_label_is_outside_the_spec(tmp_path):
     assert out == _stuck("record-outside-spec", "task/p")
 
 
-def test_a_task_in_another_vault_is_outside_the_spec(tmp_path):
+def test_a_task_only_in_another_vault_is_judged_exactly_like_one_that_does_not_exist(tmp_path):
+    line = _write(tmp_path, "outcome: slice-chosen task/p parked=0\n")
+    elsewhere = _Records({("elsewhere", "task/p"): _task(_block("slice-chosen"))})
+    assert _judge(line, elsewhere) == _judge(line, _Records({})) == _stuck("record-unreadable", "task/p")
+
+
+def test_a_record_is_only_ever_looked_up_in_the_drives_vault(tmp_path):
     world = _Records({("elsewhere", "task/p"): _task(_block("slice-chosen"))})
-    out = _judge(_write(tmp_path, "outcome: slice-chosen task/p parked=0\n"), world)
-    assert out == _stuck("record-outside-spec", "task/p")
+    _judge(_write(tmp_path, "outcome: slice-chosen task/p parked=0\n"), world)
+    assert world.calls and {vault for _, vault in world.calls} == {VAULT}
 
 
 def test_a_record_that_does_not_exist_is_unreadable(tmp_path):
@@ -430,7 +461,7 @@ def test_the_session_text_never_changes_any_output(monkeypatch, capsys, tmp_path
     assert len(seen) == 1
     (out, err), = seen
     assert err == ""
-    assert out.count("\n") == 1 and json.loads(out)["record"] == record
+    assert out.count("\n") == 1 and json.loads(out)["record"] == (None if kind == "stuck" else record)
 
 
 def test_a_stuck_verdict_prints_exactly_one_json_object_and_exits_zero(monkeypatch, capsys, tmp_path):
@@ -534,8 +565,8 @@ def test_the_record_name_pattern_in_the_fixture_decides_what_the_command_accepts
     import re
 
     pattern = re.compile(json.loads(FIXTURE.read_text())["loop"]["record_name_pattern"])
-    for name in ("a", "a-b9", "0x", "Upper", "a_b", "-a", "a b", "..", "a" * 200):
-        verdict = _judge(_write(tmp_path, f"outcome: stuck task/{name} parked=0\n"))
+    for name in ("a", "a-b9", "0x", "Upper", "a_b", "-a", "a b", "..", "a" * 250, "a" * 251):
+        verdict = _judge(_write(tmp_path, f"outcome: stuck task/{name} parked=0\n"), _known(f"task/{name}"))
         assert (verdict["reason_code"] == "ritual-stuck") == bool(pattern.fullmatch(name)), name
 
 
@@ -615,5 +646,5 @@ def test_the_command_judges_against_records_in_a_real_lore_vault(monkeypatch, ca
 
     assert run("outcome: slice-chosen task/real-parent parked=0") == _ok("slice-chosen", "task/real-parent")
     assert run("outcome: plan-ready task/real-parent parked=0") == _stuck("record-mismatch", "task/real-parent")
-    assert run("outcome: slice-chosen task/stray-parent parked=0") == _stuck("record-outside-spec", "task/stray-parent")
+    assert run("outcome: slice-chosen task/stray-parent parked=0") == _stuck("record-unreadable", "task/stray-parent")
     assert run("outcome: slice-chosen task/ghost parked=0") == _stuck("record-unreadable", "task/ghost")
