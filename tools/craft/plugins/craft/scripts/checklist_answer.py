@@ -62,7 +62,9 @@ while probing or reading is `spec-unreadable`.
 from __future__ import annotations
 
 import argparse
+import os
 import re
+import stat
 import subprocess
 import sys
 import unicodedata
@@ -209,9 +211,35 @@ def _find_entry(body: str, criterion: str, slice_: str) -> waiting.WaitingEntry:
     return entry
 
 
-def _read_words(path: str) -> str:
+_MKTEMP_NAME = re.compile(r"tmp\.[A-Za-z0-9]{6,}")
+
+
+def _is_mktemp_file(st: os.stat_result) -> bool:
+    return stat.S_ISREG(st.st_mode) and st.st_uid == os.geteuid()
+
+
+def _mktemp_made(path: str) -> bool:
+    """Whether `path` is a plain file `mktemp` could have made for this user: a regular file (not a
+    symlink) owned by the current uid, named `tmp.` plus 6 or more letters or digits, directly in
+    `$TMPDIR` (else `/tmp`)."""
+    directory = os.environ.get("TMPDIR") or "/tmp"
+    parent, name = os.path.split(path)
+    if not _MKTEMP_NAME.fullmatch(name) or os.path.realpath(parent) != os.path.realpath(directory):
+        return False
     try:
-        with Path(path).open("rb") as f:
+        return _is_mktemp_file(os.lstat(path))
+    except OSError:
+        return False
+
+
+def _read_words(path: str) -> str:
+    if not _mktemp_made(path):
+        raise Refusal("--words-file must be the file mktemp made", "invalid-arguments", 2)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)
+        with os.fdopen(fd, "rb") as f:
+            if not _is_mktemp_file(os.fstat(f.fileno())):
+                raise OSError("not a regular file")
             raw = f.read(_MAX_WORDS_FILE_BYTES + 1)
         if len(raw) > _MAX_WORDS_FILE_BYTES:
             raise Refusal("the words are too long", "words-too-long", 1)
@@ -335,10 +363,10 @@ def _words_file_in(argv: list[str]) -> str | None:
 
 
 def _remove(path: str | None) -> None:
-    if path is None:
+    if path is None or not _mktemp_made(path):
         return
     try:
-        Path(path).unlink(missing_ok=True)
+        os.unlink(path)
     except OSError:
         pass
 

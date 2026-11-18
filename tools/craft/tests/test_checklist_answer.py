@@ -10,8 +10,10 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import signal
 import subprocess
 import sys
+import uuid
 from pathlib import Path
 
 import pytest
@@ -84,7 +86,7 @@ class World:
         assert r.returncode == 0, r.stderr
         self.spec = r.stdout.splitlines()[0]
         self.lore.calls.clear()
-        self.words_path = tmp_path / "words.txt"
+        self.words_path = tmp_path / "mktemp" / "tmp.words0001"
 
     def show(self):
         r = self.lore(["record", "show", "--json", "--vault", self.vault, self.spec])
@@ -157,6 +159,15 @@ class Result:
 def code_of(stderr):
     lines = [ln for ln in stderr.splitlines() if "reason-code:" in ln]
     return lines[-1].split("reason-code:", 1)[1].strip() if lines else None
+
+
+@pytest.fixture(autouse=True)
+def mktemp_dir(monkeypatch, tmp_path):
+    """The directory `mktemp` would use in this test: `$TMPDIR`."""
+    directory = tmp_path / "mktemp"
+    directory.mkdir()
+    monkeypatch.setenv("TMPDIR", str(directory))
+    return directory
 
 
 @pytest.fixture
@@ -694,7 +705,7 @@ def test_the_equals_form_of_the_words_flag_is_read_and_removed(world, capsys):
 
 
 def test_a_repeated_words_flag_removes_the_file_that_was_read_and_only_that_one(world, capsys, tmp_path):
-    first = tmp_path / "first.txt"
+    first = tmp_path / "mktemp" / "tmp.first0001"
     first.write_text("from the first file", encoding="utf-8")
     world.words_path.write_text("from the last file", encoding="utf-8")
 
@@ -732,12 +743,13 @@ def test_a_words_file_is_removed_when_the_arguments_do_not_parse(world, capsys, 
 
 
 @pytest.fixture
-def locked_words(world, tmp_path):
+def locked_words(world, tmp_path, monkeypatch):
     if os.geteuid() == 0:
         pytest.skip("root can remove a file from a read-only directory")
     locked = tmp_path / "locked"
     locked.mkdir()
-    world.words_path = locked / "words.txt"
+    monkeypatch.setenv("TMPDIR", str(locked))
+    world.words_path = locked / "tmp.words0001"
     yield world
     locked.chmod(0o700)
 
@@ -767,3 +779,145 @@ def test_a_refusal_keeps_its_own_code_when_the_words_file_cannot_be_removed(lock
     res = run_argv(world, capsys, argv)
 
     assert (res.code, code_of(res.err)) == (1, "entry-not-found")
+
+
+# --- the words file must be what mktemp made ----------------------------------
+
+
+def refused_unread(world, capsys, path, argv=None):
+    world.lore.calls.clear()
+    res = run_argv(world, capsys, argv or answer_argv(world, "--words-file", str(path)))
+    assert (res.code, res.out, code_of(res.err)) == (2, "", "invalid-arguments")
+    assert world.writes() == []
+    return res
+
+
+def test_a_words_file_outside_the_mktemp_directory_is_refused_and_left_alone(world, capsys, tmp_path):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    outside = elsewhere / "tmp.outside01"
+    outside.write_text("banner showed 2", encoding="utf-8")
+
+    refused_unread(world, capsys, outside)
+
+    assert outside.read_text(encoding="utf-8") == "banner showed 2"
+
+
+def test_a_symlink_in_the_mktemp_directory_is_refused_and_neither_link_nor_target_is_removed(
+    world, capsys, tmp_path, mktemp_dir
+):
+    target = tmp_path / "gitconfig"
+    target.write_text("[user]\n", encoding="utf-8")
+    link = mktemp_dir / "tmp.link0001"
+    link.symlink_to(target)
+
+    refused_unread(world, capsys, link)
+
+    assert link.is_symlink()
+    assert target.read_text(encoding="utf-8") == "[user]\n"
+
+
+@pytest.mark.parametrize("name", ["words.txt", "tmp.abc", "tmp.abc_def1", "xtmp.abcdef12", "tmp.abcdef12.bak"])
+def test_a_words_file_not_named_the_way_mktemp_names_it_is_refused_and_left_alone(world, capsys, mktemp_dir, name):
+    odd = mktemp_dir / name
+    odd.write_text("banner showed 2", encoding="utf-8")
+
+    refused_unread(world, capsys, odd)
+
+    assert odd.read_text(encoding="utf-8") == "banner showed 2"
+
+
+def test_a_words_file_named_like_mktemps_shortest_name_is_read(world, capsys, mktemp_dir):
+    world.words_path = mktemp_dir / "tmp.Ab3Xy9"
+
+    res = world.run(capsys)
+
+    assert res.code == 0, res.err
+    assert not world.words_path.exists()
+
+
+def test_a_fifo_in_the_mktemp_directory_is_refused_without_being_opened(world, capsys, mktemp_dir):
+    fifo = mktemp_dir / "tmp.fifo0001"
+    os.mkfifo(fifo)
+
+    def hung(*_):
+        raise AssertionError("the script blocked opening the FIFO")
+
+    signal.signal(signal.SIGALRM, hung)
+    signal.alarm(10)
+    try:
+        refused_unread(world, capsys, fifo)
+    finally:
+        signal.alarm(0)
+    assert fifo.exists()
+
+
+def test_a_directory_named_like_a_words_file_is_refused_and_left_alone(world, capsys, mktemp_dir):
+    directory = mktemp_dir / "tmp.dir00001"
+    directory.mkdir()
+
+    refused_unread(world, capsys, directory)
+
+    assert directory.is_dir()
+
+
+def test_a_words_file_owned_by_someone_else_is_refused_and_left_alone(world, capsys, monkeypatch):
+    world.words_path.write_text("banner showed 2", encoding="utf-8")
+    monkeypatch.setattr(ca.os, "geteuid", lambda: os.stat(world.words_path).st_uid + 1)
+
+    refused_unread(world, capsys, world.words_path)
+
+    assert world.words_path.read_text(encoding="utf-8") == "banner showed 2"
+
+
+@pytest.mark.parametrize("unset", [True, False])
+def test_an_unset_or_empty_tmpdir_means_slash_tmp(world, capsys, monkeypatch, unset):
+    if unset:
+        monkeypatch.delenv("TMPDIR")
+    else:
+        monkeypatch.setenv("TMPDIR", "")
+    name = f"tmp.{uuid.uuid4().hex}"
+    in_tmp = Path("/tmp") / name
+    in_tmp.write_text("banner showed 2", encoding="utf-8")
+    try:
+        res = run_argv(world, capsys, answer_argv(world, "--words-file", str(in_tmp)))
+        assert (res.code, res.out.splitlines()[0]) == (0, "saved: AC2 failed"), res.err
+        assert not in_tmp.exists()
+    finally:
+        in_tmp.unlink(missing_ok=True)
+
+
+def test_a_tmpdir_reached_through_a_symlink_is_compared_after_resolving_it(world, capsys, tmp_path, monkeypatch):
+    real = tmp_path / "real"
+    real.mkdir()
+    (tmp_path / "alias").symlink_to(real)
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "alias"))
+    words = real / "tmp.alias001"
+    words.write_text("banner showed 2", encoding="utf-8")
+
+    res = run_argv(world, capsys, answer_argv(world, "--words-file", str(words)))
+
+    assert res.code == 0, res.err
+    assert not words.exists()
+
+
+def test_an_unparseable_argv_naming_an_outside_path_removes_nothing(world, capsys, tmp_path):
+    outside = tmp_path / "keep.txt"
+    outside.write_text("precious", encoding="utf-8")
+
+    res = run_argv(world, capsys, ["--vault", world.vault, "--words-file", str(outside)])
+
+    assert (res.code, code_of(res.err)) == (2, "invalid-arguments")
+    assert outside.read_text(encoding="utf-8") == "precious"
+
+
+def test_a_garbage_base_with_an_outside_words_file_removes_nothing(world, capsys, tmp_path):
+    outside = tmp_path / "keep.txt"
+    outside.write_text("precious", encoding="utf-8")
+    argv = answer_argv(world, "--words-file", str(outside))
+    argv[argv.index("--base") + 1] = "0" * 64
+
+    res = run_argv(world, capsys, argv)
+
+    assert res.code != 0
+    assert outside.read_text(encoding="utf-8") == "precious"

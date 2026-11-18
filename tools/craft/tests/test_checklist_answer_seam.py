@@ -67,7 +67,10 @@ def test_a_gathered_entry_answered_passed_is_saved_closed_and_leaves_the_candida
     lore, env, spec = world
     gathered = json.loads(_run(env, "checklist_gather.py", "--json").stdout)
     (entry,) = gathered["entries"]
-    words = tmp_path / "words.txt"
+    mktemp_dir = tmp_path / "mktemp"
+    mktemp_dir.mkdir()
+    env["TMPDIR"] = str(mktemp_dir)
+    words = mktemp_dir / "tmp.seam0001"
     words.write_text("banner showed 3\n", encoding="utf-8")
 
     done = _run(env, "checklist_answer.py", "--vault", entry["vault"], "--spec", entry["spec"],
