@@ -197,6 +197,14 @@ each unanswered entry stays waiting:
 Stopped. 1 answer saved; 2 checks and 1 set-aside criterion still waiting on you.
 ```
 
+`Finished.` ends the same way when every entry has been passed over. After the count line, each entry
+left waiting after three stale refusals gets one line, so the operator learns at the end which checks
+kept changing under them; a walk with no such entry prints none:
+
+```
+AC2 in levr/billing-and-entitlements-launch changed three times while you answered; it is still waiting on you.
+```
+
 ## State — unreadable vault or spec named
 
 The list's `Could not read:` lines are shown above the walk exactly as the list view prints them.

@@ -2,7 +2,7 @@
 
 ## Under test
 
-After three stale refusals in a row for one entry the walk names it, leaves it waiting and moves on to the next; it makes no fourth attempt. The prose under test is `skills/checks/SKILL.md` (the walk-through after the list: the design in `docs/design/answer-pending-checks-on-the-check-list.md`). Operator replies cannot be given interactively: a headless eval session never offers `AskUserQuestion`, and the runner has no multi-turn driver. As in earlier cases (`close-defers-an-unconfirmed-check`), the prompt says the operator is not at the keyboard and gives their replies in their own words, in the order the walk asks for them. The skill's fallback, asking in plain text and reading the operator's typed reply as their choice when the choice prompt is unavailable, is what the scripted replies exercise. Stand-in scripts `./gather` and `./answer` replace the plugin's scripts: `./answer` appends one line per call to `answer.log` (keys, answer, `--base`, and the contents of the words file, which it then deletes) and returns the result scripted in `answer.script`. The graders read that log and the issued commands, not the wording of the final message.
+After three stale refusals in a row for one entry the walk names it, leaves it waiting and moves on to the next; it makes no fourth attempt. The prose under test is `skills/checks/SKILL.md` (the walk-through after the list: the design in `docs/design/answer-pending-checks-on-the-check-list.md`). Operator replies cannot be given interactively: a headless eval session never offers `AskUserQuestion`, and the runner has no multi-turn driver. As in earlier cases (`close-defers-an-unconfirmed-check`), the prompt says the operator is not at the keyboard and gives their replies in their own words, in the order the walk asks for them. The skill's fallback, asking in plain text and reading the operator's typed reply as their choice when the choice prompt is unavailable, is what the scripted replies exercise. Stand-in scripts `./gather` and `./answer` replace the plugin's scripts: `./answer` appends one line per call to `answer.log` (keys, answer, `--base`, and the contents of the words file, which it then deletes) and returns the result scripted in `answer.script`. The graders read that log and the issued commands, except the last one, which reads the end-of-walk summary: it names each entry left waiting after three stale refusals, one line each after the count line.
 
 ## Conditions, sample and bar
 
@@ -22,7 +22,7 @@ Every clause holds.
 | Call 3 is ac2 failed | `call-3-is-AC2-failed` | `regex` over `answer.log`: 'call 3: vault=levr spec=spec/[a-z-]+ criterion=AC2 slice=[^\n ]+ answer=failed base=ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff words=w three\n' |
 | Call 4 is the next entry | `call-4-is-the-next-entry` | `regex` over `answer.log`: 'call 4: vault=levr spec=spec/[a-z-]+ criterion=AC9 slice=[^\n ]+ answer=passed base=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb words=\n' |
 | No fourth attempt on the stale entry | `no-fourth-attempt-on-the-stale-entry` | `regex` over `answer.log` (must be absent): 'call 4: [^\n]*criterion=AC2' |
-| Stale entry is named and left waiting | `stale-entry-is-named-and-left-waiting` | `regex` over the last message: 'AC2[^\n]*waiting' |
+| Stale entry is named and left waiting | `stale-entry-is-named-and-left-waiting` | `regex` over the last message (the end-of-walk line for the stale entry): 'AC2[^\n]*waiting' |
 
 ## Limitations
 
