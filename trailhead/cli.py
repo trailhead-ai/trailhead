@@ -34,9 +34,14 @@ from trailhead.install_config import ConfigResolveError
 from trailhead.launch_profile import (
     BROKER_SCOPE,
     BROKER_SERVER,
+    DRIVE_GROUPS_OUTPUT_KEYS,
     HUB_PROFILE,
+    RITUAL_PROFILE,
+    RITUAL_ROLE,
+    ROLE_WORKSPACE,
     LaunchProfileError,
     broker_launch,
+    broker_mcp_config_path,
     hub_home,
     resolve_profile,
 )
@@ -52,7 +57,8 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
-from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfigError, read_hub_config
+from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfig, HubConfigError, read_hub_config
+from trailhead.ranger.drive_groups import DriveGroupsError, drive_groups
 from trailhead.uninstall import run_uninstall
 from trailhead.update import (
     FRESHNESS_WINDOW_SECONDS,
@@ -81,6 +87,7 @@ _TRAILHEAD_ERRORS = (
     OutpostLifecycleError,
     HubConfigError,
     LaunchProfileError,
+    DriveGroupsError,
 )
 
 _CURATED_HELP = """\
@@ -249,15 +256,51 @@ def _cmd_gateway(args: argparse.Namespace) -> int:
     return register_run(["--hook"] if args.hook else [])
 
 
+def _launch_account(config: HubConfig) -> str | None:
+    """The launch account an account's sessions bind; ``None`` for the harness's default one."""
+    return None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
+
+
 def _cmd_session_start(args: argparse.Namespace) -> int:
     if not args.json:
         print("trailhead: session-start prints JSON; pass --json", file=sys.stderr)
         return 1
+    ritual = args.role == RITUAL_ROLE
+    if args.setup_sandbox_only:
+        return _session_start_setup_sandbox_only(args, ritual)
+    if ritual and args.broker_session is not None:
+        print(
+            "trailhead: --broker-session is not accepted for the ritual role; "
+            "a ritual session has no broker",
+            file=sys.stderr,
+        )
+        return 1
+    if ritual != (args.workspace is not None):
+        print(
+            "trailhead: --workspace is required for the ritual role and refused for the hub"
+            if ritual
+            else "trailhead: --workspace belongs to the ritual role; a hub starts in its own home",
+            file=sys.stderr,
+        )
+        return 1
+    if ritual != (args.session is not None):
+        print(
+            "trailhead: --session is required for the ritual role and refused for the hub"
+            if ritual
+            else "trailhead: --session belongs to the ritual role; a hub names its session with --broker-session",
+            file=sys.stderr,
+        )
+        return 1
     env = dict(os.environ)
     launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
+    session_dir = broker_mcp_config_path(args.session, env=env).parent if ritual else None
     config = read_hub_config(args.account, env=env)
-    profile = resolve_profile(HUB_PROFILE, args.account, env=env)
-    directory = hub_home(args.account, env=env)
+    if ritual:
+        profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, workspace=args.workspace)
+        directory = profile.paths[ROLE_WORKSPACE]
+    else:
+        profile = resolve_profile(HUB_PROFILE, args.account, env=env)
+        directory = hub_home(args.account, env=env)
     prompt = None
     if args.prompt_file:
         try:
@@ -269,9 +312,15 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
     if not harnesses:
         print("trailhead: no harness detected; pass --harness", file=sys.stderr)
         return 1
-    launch_account = None if config.launch_account == DEFAULT_LAUNCH_ACCOUNT else config.launch_account
     start = harnesses[0].session_start(
-        profile, directory, prompt, interactive=not args.headless, account=launch_account, env=env, broker=launch
+        profile,
+        directory,
+        prompt,
+        interactive=not args.headless,
+        account=_launch_account(config),
+        env=env,
+        broker=launch,
+        session_dir=session_dir,
     )
     if start is None:
         print(
@@ -285,16 +334,54 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
         "env_unset": start.env_unset,
         "directory": str(directory),
     }
+    files = [{"path": f.path, "content": f.content, "mode": f.mode} for f in start.files]
+    if ritual:
+        output["files"] = files
+        output["setup_sandbox"] = start.setup_sandbox
     if launch is not None:
         output["broker"] = {
             "server": BROKER_SERVER,
             "scope": BROKER_SCOPE,
             "credential_path": launch.credential_path,
         }
-        output["files"] = [
-            {"path": f.path, "content": f.content, "mode": f.mode} for f in start.files
-        ]
+        output["files"] = files
     print(json.dumps(output))
+    return 0
+
+
+def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) -> int:
+    refused = (args.workspace, args.prompt_file, args.broker_session, args.session)
+    if not ritual or any(value is not None for value in refused):
+        print(
+            "trailhead: --setup-sandbox-only belongs to the ritual role alone and takes no "
+            "--workspace, --prompt-file, --broker-session or --session",
+            file=sys.stderr,
+        )
+        return 1
+    env = dict(os.environ)
+    config = read_hub_config(args.account, env=env)
+    profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, without_workspace=True)
+    harnesses = [get_harness(args.harness)] if args.harness else detect_harnesses(env)
+    if not harnesses:
+        print("trailhead: no harness detected; pass --harness", file=sys.stderr)
+        return 1
+    section = harnesses[0].setup_sandbox(profile, account=_launch_account(config), env=env)
+    if section is None:
+        print(
+            f"trailhead: harness {harnesses[0].name!r} cannot derive a setup sandbox; refusing",
+            file=sys.stderr,
+        )
+        return 1
+    print(json.dumps({"setup_sandbox": section}))
+    return 0
+
+
+def _cmd_drive_groups(args: argparse.Namespace) -> int:
+    if not args.json:
+        print("trailhead: drive-groups prints JSON; pass --json", file=sys.stderr)
+        return 1
+    groups = drive_groups(args.account, args.vault, env=dict(os.environ))
+    print(json.dumps({DRIVE_GROUPS_OUTPUT_KEYS[0]: groups}))
     return 0
 
 
@@ -514,7 +601,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "session-start",
         help="Print the argv and env to start a confined session for a role (never execs).",
     )
-    session_p.add_argument("--role", required=True, choices=["hub"], help="Role to start.")
+    session_p.add_argument("--role", required=True, choices=["hub", RITUAL_ROLE], help="Role to start.")
+    session_p.add_argument(
+        "--workspace", metavar="W", default=None, help="Camp workspace directory (ritual role only)."
+    )
     session_p.add_argument("--account", required=True, help="Account short name.")
     session_p.add_argument("--prompt-file", metavar="P", default=None, help="File holding the first prompt.")
     session_p.add_argument(
@@ -527,7 +617,27 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Outpost's session id; adds a broker section naming where its credentials live.",
     )
+    session_p.add_argument(
+        "--session",
+        metavar="ID",
+        default=None,
+        help="Outpost's session id for a ritual; its session files land in that session's directory.",
+    )
+    session_p.add_argument(
+        "--setup-sandbox-only",
+        action="store_true",
+        default=False,
+        help="Print only the ritual's setup_sandbox section; takes no workspace or prompt.",
+    )
     session_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
+    drive_p = subparsers.add_parser(
+        "drive-groups",
+        help="Print the camp groups on an account's launch account that bind a vault (JSON).",
+    )
+    drive_p.add_argument("--account", required=True, help="Account short name.")
+    drive_p.add_argument("--vault", required=True, help="Vault name the group must bind.")
+    drive_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
     broker_p = subparsers.add_parser(
         "broker-header",
@@ -562,6 +672,7 @@ def main() -> int:
         "outpost": _cmd_outpost,
         "core": _cmd_core,
         "session-start": _cmd_session_start,
+        "drive-groups": _cmd_drive_groups,
         "broker-header": _cmd_broker_header,
         "gateway": _cmd_gateway,
     }

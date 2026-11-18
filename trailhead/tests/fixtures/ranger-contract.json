@@ -14,5 +14,13 @@
   "broker_credential_dir_mode": "0700",
   "broker_credential_file_mode": "0600",
   "broker_credential_fields": ["client_id", "client_secret"],
-  "broker_session_id_pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+  "broker_session_id_pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$",
+  "drive_tool": "drive_spec",
+  "ritual_role": "ritual",
+  "sessions_tmux_socket": "outpost-sessions",
+  "ritual_session_pattern": "ritual-<hex>",
+  "task_wrapper_env": "CAMP_TASK_WRAPPER",
+  "task_wrapper_placeholders": ["{worktree}", "{member}"],
+  "setup_sandbox_keys": ["allowed_domains", "denied_domains", "denied_reads"],
+  "drive_groups_output_keys": ["groups"]
 }

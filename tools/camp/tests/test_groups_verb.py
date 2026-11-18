@@ -2,6 +2,9 @@
 
 - `camp groups --json` with two configured groups emits a JSON array of
   {"name": ..., "members": [<member names>]} sorted by name, exit 0.
+- Each entry also carries the group's `[launch] account` (null when it declares
+  none) and the sorted names of the vaults its `lore_scopes` and `shared_vaults`
+  bind.
 - Human mode prints exactly one line per group, `<name>: <members>`, in name
   order.
 - No groups configured: exit 0, `[]` / "no groups configured" — not an error.
@@ -26,6 +29,8 @@ import sys
 from pathlib import Path
 
 import pytest
+
+from ._helpers import run_camp
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]  # trailhead root
 _PLUGIN_DIR = _REPO_ROOT / "tools" / "camp" / "plugins" / "camp"
@@ -77,8 +82,8 @@ def test_camp_groups_json_lists_two_groups_sorted_by_name(tmp_path: Path) -> Non
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     data = json.loads(result.stdout)
     assert data == [
-        {"name": "alpha", "members": ["repo-a", "repo-b"]},
-        {"name": "zebra", "members": ["repo-z"]},
+        {"name": "alpha", "members": ["repo-a", "repo-b"], "account": None, "vaults": []},
+        {"name": "zebra", "members": ["repo-z"], "account": None, "vaults": []},
     ]
 
 
@@ -89,6 +94,36 @@ def test_camp_groups_json_no_groups_configured_is_empty_array(tmp_path: Path) ->
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
     assert json.loads(result.stdout) == []
+
+
+# ---------------------------------------------------------------------------
+# Launch account and bound vaults
+# ---------------------------------------------------------------------------
+
+
+def test_camp_groups_json_names_each_groups_account_and_vaults(tmp_path: Path) -> None:
+    env = _env(tmp_path)
+    groups_dir = Path(env["CAMP_CONFIG_DIR"]) / "groups"
+    _write_group(groups_dir, "plain", ["repo-p"])
+    (groups_dir / "named.toml").write_text(
+        '[group]\nname = "named"\n\n[[members]]\nname = "repo-n"\nrepo_root = "/tmp/fake-n"\n\n'
+        '[launch]\naccount = "~/.claude-work"\n'
+    )
+    (groups_dir / "two.toml").write_text(
+        '[group]\nname = "two"\n\n[[members]]\nname = "repo-t"\nrepo_root = "/tmp/fake-t"\n\n'
+        '[[lore_scopes]]\nscope = "product"\nname = "zeta"\n\n'
+        '[[lore_scopes]]\nscope = "team"\nname = "mid"\n\n'
+        '[[shared_vaults]]\nname = "beta"\nroot = "/tmp/beta"\n\n'
+        '[[shared_vaults]]\nname = "alpha"\nroot = "/tmp/alpha"\n'
+    )
+
+    result = run_camp(["groups", "--json"], env={**os.environ, **env})
+
+    assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
+    by_name = {g["name"]: g for g in json.loads(result.stdout)}
+    assert (by_name["plain"]["account"], by_name["plain"]["vaults"]) == (None, [])
+    assert (by_name["named"]["account"], by_name["named"]["vaults"]) == ("~/.claude-work", [])
+    assert (by_name["two"]["account"], by_name["two"]["vaults"]) == (None, ["alpha", "beta", "mid", "zeta"])
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +165,9 @@ def test_camp_groups_human_no_groups_configured_prints_plain_line(tmp_path: Path
 def _assert_degraded_to_good_only(result: subprocess.CompletedProcess) -> None:
     """The one good group still lists, the bad file is named, no traceback."""
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    assert json.loads(result.stdout) == [{"name": "good", "members": ["repo-a"]}]
+    assert json.loads(result.stdout) == [
+        {"name": "good", "members": ["repo-a"], "account": None, "vaults": []}
+    ]
     assert "bad.toml" in result.stderr
     assert "Traceback" not in result.stderr
 
@@ -180,7 +217,9 @@ def test_camp_groups_runs_without_resolved_group_or_cwd_context(tmp_path: Path) 
     result = _run_cli(["groups", "--json"], env=env, cwd=tmp_path)
 
     assert result.returncode == 0, f"stdout: {result.stdout}\nstderr: {result.stderr}"
-    assert json.loads(result.stdout) == [{"name": "alpha", "members": ["repo-a"]}]
+    assert json.loads(result.stdout) == [
+        {"name": "alpha", "members": ["repo-a"], "account": None, "vaults": []}
+    ]
 
 
 def test_camp_groups_lets_an_unexpected_loader_error_propagate(

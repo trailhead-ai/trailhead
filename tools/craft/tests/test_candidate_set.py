@@ -1826,6 +1826,31 @@ def test_a_released_or_passed_entry_excludes_nothing(status):
     assert t["waiting"] == "none"
 
 
+def _set_aside_entry(ac: str, status: str = "waiting") -> str:
+    lines = [
+        f"- **{ac}.** set aside",
+        "  - waits on: the vendor ships the API",
+        "  - 2026-11-02 waiting: set aside by a slice pass",
+    ]
+    if status != "waiting":
+        lines.append(f"  - 2026-11-03 {status}: the operator's words")
+    return "\n".join(lines)
+
+
+def test_a_waiting_set_aside_entry_removes_only_its_criterion_from_candidates_and_lists_it_as_waiting():
+    t = _waiting_run(_THREE, _AC1_COVERED, _set_aside_entry("AC2"))
+    assert t["candidates"] == "AC3"
+    assert t["waiting"] == "AC2"
+    assert t["covered"] == "AC1"
+    assert t["complete-eligible"] == "no"
+
+
+def test_a_released_set_aside_entry_leaves_its_criterion_a_candidate():
+    t = _waiting_run(_THREE, _AC1_COVERED, _set_aside_entry("AC2", "released"))
+    assert t["candidates"] == "AC2, AC3"
+    assert t["waiting"] == "none"
+
+
 def test_only_the_latest_history_line_decides_whether_an_entry_waits():
     reawakened = _waiting_entry("AC2", "failed") + "\n  - 2026-11-03 waiting: again"
     assert _waiting_run(_THREE, _AC1_COVERED, reawakened)["waiting"] == "AC2"

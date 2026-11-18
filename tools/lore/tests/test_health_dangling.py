@@ -28,10 +28,10 @@ def vault(name, *records, **kw):
     return s
 
 
-def run(scans, selected=None):
+def run(scans, selected=None, **kw):
     scans = list(scans)
     sel = {s.vault for s in scans} if selected is None else set(selected)
-    return dangling.check_dangling(scans, sel)
+    return dangling.check_dangling(scans, sel, **kw)
 
 
 def found(result):
@@ -376,3 +376,80 @@ def test_a_target_linked_twice_in_one_field_is_one_finding_and_in_two_fields_two
     assert len(run([vault("a", fields)]).findings) == 2
     body = rec("a", "lesson", "src", {"related": {"lesson": ["gone"]}}, "[[lesson/gone]] [[lesson/gone]]")
     assert sorted(f.field for f in run([vault("a", body)]).findings) == ["related lesson", "wikilink"]
+
+
+# --- wrong-kind links and session checking ---------------------------------
+
+
+def test_typed_wikilink_whose_target_exists_under_another_kind_names_that_kind():
+    a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"), rec("a", "decision", "x"))
+    (f,) = run([a]).findings
+    assert (f.target, f.exists_as) == ("adr/x", ("decision",))
+
+
+def test_related_entry_takes_its_kind_from_the_field_and_names_the_other_kind():
+    src = rec("a", "task", "src", {"related": {"adr": ["x"]}})
+    (f,) = run([vault("a", src, rec("a", "decision", "x"))]).findings
+    assert (f.field, f.target, f.exists_as) == ("related adr", "adr/x", ("decision",))
+
+
+def test_every_other_kind_holding_the_name_is_listed_sorted():
+    a = vault(
+        "a", rec("a", "lesson", "src", {}, "[[adr/x]]"),
+        rec("a", "task", "x"), rec("a", "decision", "x"), rec("a", "lesson", "x"),
+    )
+    (f,) = run([a]).findings
+    assert f.exists_as == ("decision", "lesson", "task")
+
+
+def test_other_kind_in_another_vault_counts():
+    a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
+    b = vault("b", rec("b", "decision", "x"))
+    (f,) = run([a, b], selected={"a"}).findings
+    assert f.exists_as == ("decision",)
+
+
+def test_missing_target_under_no_kind_has_empty_exists_as():
+    (f,) = run([vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"), rec("a", "decision", "y"))]).findings
+    assert f.exists_as == ()
+
+
+def test_bare_wikilink_resolving_under_another_kind_is_not_a_finding():
+    a = vault("a", rec("a", "lesson", "src", {}, "[[x]]"), rec("a", "decision", "x"))
+    assert run([a]).findings == []
+
+
+def test_bare_missing_wikilink_has_empty_exists_as():
+    (f,) = run([vault("a", rec("a", "lesson", "src", {}, "[[x]]"))]).findings
+    assert f.exists_as == ()
+
+
+def test_target_existing_only_as_unreadable_record_in_another_vault_is_not_reported():
+    a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]] [[lesson/y]]"))
+    b = vault("b")
+    b.unreadable.append(model.UnreadableRecord("b", "adr", "x", "sidecar-malformed"))
+    b.unreadable.append(model.UnreadableRecord("b", "lesson", "y", "oversize"))
+    assert run([a, b]).findings == []
+
+
+def test_other_kind_that_is_unreadable_is_not_named():
+    a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
+    a.unreadable.append(model.UnreadableRecord("a", "decision", "x", "oversize"))
+    (f,) = run([a]).findings
+    assert f.exists_as == ()
+
+
+def test_session_links_are_findings_only_when_sessions_are_included():
+    a = vault("a", rec("a", "session", "s1", {}, "[[adr/x]] [[gone]]"), rec("a", "decision", "x"))
+    assert run([a]).findings == []
+    res = run([a], include_sessions=True)
+    assert sorted((f.name, f.target, f.exists_as) for f in res.findings) == [
+        ("s1", "adr/x", ("decision",)),
+        ("s1", "gone", ()),
+    ]
+
+
+def test_including_sessions_counts_them_as_judged():
+    a = vault("a", rec("a", "session", "s1"), rec("a", "lesson", "l1"))
+    assert run([a]).judged == {"a": 1}
+    assert run([a], include_sessions=True).judged == {"a": 2}

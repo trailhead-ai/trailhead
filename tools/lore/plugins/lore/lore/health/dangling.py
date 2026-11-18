@@ -27,7 +27,9 @@ class Finding:
     reference) and is ``None`` when ``malformed``: the offending text is never
     carried, only ``locations`` -- every malformed spot in the field, in order and
     without repeats: body lines for ``wikilink``, 1-based entry positions for a
-    list field, empty for ``parent``.
+    list field, empty for ``parent``. ``exists_as`` is set only for a reference
+    that names a kind: the other kinds, sorted, under which a readable record of
+    that name exists.
     """
 
     vault: str
@@ -38,6 +40,7 @@ class Finding:
     target: str | None
     malformed: bool = False
     locations: tuple[int, ...] = ()
+    exists_as: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -56,9 +59,11 @@ class DanglingSkipped:
 
 
 def check_dangling(
-    scans: Sequence[VaultScan], selected: Collection[str]
+    scans: Sequence[VaultScan], selected: Collection[str], include_sessions: bool = False
 ) -> DanglingResult | DanglingSkipped:
-    """Check every selected vault's records against the records of all *scans*."""
+    """Check every selected vault's records against the records of all *scans*.
+
+    Session records are skipped unless *include_sessions*."""
     at_fault = tuple(s.vault for s in scans if not s.fully_read)
     if at_fault:
         return DanglingSkipped(at_fault)
@@ -71,7 +76,7 @@ def check_dangling(
             continue
         judged = 0
         for record in s.records:
-            if record.kind == SESSION_KIND:
+            if record.kind == SESSION_KIND and not include_sessions:
                 continue
             judged += 1
             malformed: dict[str, dict[int, None]] = {}
@@ -83,17 +88,32 @@ def check_dangling(
                     continue
                 found, unreadable = candidates.lookup(*parsed)
                 if not found and not unreadable:
-                    result.findings.append(_finding(record, ref.field, target))
+                    result.findings.append(
+                        _finding(record, ref.field, target, exists_as=_other_kinds(candidates, *parsed))
+                    )
             for field_label, locations in malformed.items():
                 result.findings.append(_finding(record, field_label, None, tuple(locations)))
         result.judged[s.vault] = judged
     return result
 
 
+def _other_kinds(
+    candidates: references.CandidateIndex, kind: str | None, name: str
+) -> tuple[str, ...]:
+    if kind is None:
+        return ()
+    readable, _ = candidates.lookup(None, name)
+    return tuple(sorted({r.kind for r in readable if r.kind != kind}))
+
+
 def _finding(
-    record: ScannedRecord, field_label: str, target: str | None, locations: tuple[int, ...] = ()
+    record: ScannedRecord,
+    field_label: str,
+    target: str | None,
+    locations: tuple[int, ...] = (),
+    exists_as: tuple[str, ...] = (),
 ) -> Finding:
     return Finding(
         record.vault, record.kind, record.name, record.updated_at, field_label, target,
-        malformed=target is None, locations=locations,
+        malformed=target is None, locations=locations, exists_as=exists_as,
     )

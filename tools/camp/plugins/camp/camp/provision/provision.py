@@ -32,13 +32,17 @@ from typing import Any
 
 from ..group.manifest import (
     ManifestError,
+    TASK_WRAPPER_KEY,
     carry_forward_owner,
     manifest_path_for,
     owner_of,
+    read_central_manifest,
     work_state_for_new_entry,
     workspace_dir,
     write_central_manifest,
 )
+from .recorded_wrapper import read_prior, record_sidecar, recorded_wrapper
+from .wrapper import resolve_wrapper
 
 # The camp binary this process was launched as — used to build the detached
 # `camp setup --background` argv. Resolved relative to the plugin root
@@ -149,7 +153,7 @@ def seed_pending_workspace(
     self-stamped default.
     """
     from . import reconcile
-    from ..group.manifest import read_central_manifest, reconcile_lock
+    from ..group.manifest import reconcile_lock
 
     group_name = group["group"]["name"]
     branch_pattern = group.get("branch_pattern", "worktree-{slug}")
@@ -169,22 +173,19 @@ def seed_pending_workspace(
 
         existing_states: dict[str, dict[str, Any]] = {}
         prior_owner: str | None = None
-        if mpath.is_file():
+        known = read_prior(mpath, env)
+        prior_manifest = known.manifest
+        if prior_manifest is not None:
+            for m in prior_manifest.get("members", []):
+                existing_states[m["name"]] = m
+            # A malformed workspace-level owner (owner_of's own
+            # validation, e.g. a non-string) must not also wipe the
+            # per-member existing_states above — the two reads are
+            # independent concerns.
             try:
-                prior = read_central_manifest(mpath)
-            except Exception:
-                prior = None
-            if prior is not None:
-                for m in prior.get("members", []):
-                    existing_states[m["name"]] = m
-                # A malformed workspace-level owner (owner_of's own
-                # validation, e.g. a non-string) must not also wipe the
-                # per-member existing_states above — the two reads are
-                # independent concerns.
-                try:
-                    prior_owner = owner_of(prior)
-                except ManifestError:
-                    prior_owner = None
+                prior_owner = owner_of(prior_manifest)
+            except ManifestError:
+                prior_owner = None
 
         member_entries: list[dict[str, Any]] = []
         for member in group["members"]:
@@ -221,6 +222,12 @@ def seed_pending_workspace(
             declared = owner if owner is not None else _declared_owner(env)
             if declared is not None:
                 manifest_data["owner"] = declared
+        # The environment's wrapper is recorded only when the workspace is created; a
+        # re-seed keeps the manifest's (or, for a manifest that cannot be read, the
+        # sidecar's) and records it again in both places.
+        if known.wrapper is not None:
+            manifest_data[TASK_WRAPPER_KEY] = known.wrapper
+        record_sidecar(mpath, known.wrapper)
         write_central_manifest(mpath, manifest_data)
     return mpath
 
@@ -371,9 +378,14 @@ def provision_member(
     context = reconcile._build_task_context(
         repo_root=repo_root, worktree=wt_path, slug=slug, member_name=member["name"]
     )
+    # An unreadable manifest or wrapper record raises (fail closed); only an absent
+    # manifest means nothing was recorded.
+    mpath = manifest_path_for(group_name, slug, env=env)
+    recorded = recorded_wrapper(mpath, read_central_manifest(mpath)) if mpath.exists() else None
     return run_member_tasks(
         reconcile._adapt_task_steps(member.get("tasks") or []),
         reconcile.PROVISION_PHASE,
         context,
         completed or {},
+        wrapper=resolve_wrapper(recorded, env),
     )

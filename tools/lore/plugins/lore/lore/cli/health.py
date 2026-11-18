@@ -1,14 +1,25 @@
 """``lore health`` — a read-only report of vault health, one check at a time.
 
-The checks, in the order they print, are ``dangling-links`` (references that
+The four checks, in the order they print, are ``dangling-links`` (references that
 point at no record), ``retired-links`` (live records that link to dropped or
-superseded records) and ``stale-tasks`` (unfinished tasks not updated within the
-staleness window, ``--stale-days``, or tied to a dropped or superseded spec).
-The command builds a plain-data :class:`HealthReport` from the scan of every
+superseded records), ``stale-tasks`` (unfinished tasks not updated within the
+staleness window, ``--stale-days``, or tied to a dropped or superseded spec) and
+``missing-paths`` (paths a live decision, ADR or area names that are on no
+repository's default branch). The command builds a plain-data :class:`HealthReport` from the scan of every
 configured vault and the registry of checks (:data:`CHECKS`), then renders it:
 one summary row per vault per check, then one findings group per check, each
 with its own ``--limit`` cap and action line. Nothing is written: no record, no
-lock, no index.
+lock, no index, and no repository (no fetch).
+
+The first three checks are all-or-nothing: one vault that could not be read skips
+them for every vault. ``missing-paths`` skips per vault (no repository bound, an
+unreadable repository, or the vault not fully read) and runs on the rest
+(:attr:`CheckRun.skipped`): a skipped vault's row reads ``yes: <reason>`` with ``—``
+counts, and only a check that skipped every selected vault prints ``skipped.``.
+The repository views it judges against are built once, in :func:`build_report`,
+through one seam (:data:`_repository_views`, which forwards ``env``) and reach every
+check on :class:`RunContext`; the group prints one line per repository read
+(:attr:`Section.repository_lines`), kept when every vault was skipped.
 
 Each check runs inside its own exception boundary: one that raises is reported
 as ``errored: <error type>`` on its rows and in its group, every other check
@@ -47,12 +58,14 @@ import argparse
 import shlex
 import sys
 from collections import Counter
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..health import dangling as dangling_mod
+from ..health import paths as paths_mod
 from ..health import references as references_mod
+from ..health import repos as repos_mod
 from ..health import retired as retired_mod
 from ..health import scan as scan_mod
 from ..health import stale as stale_mod
@@ -70,6 +83,18 @@ INDEX_UNCONFIRMED = "unconfirmed"
 
 # Seam: the report build reads vaults only through this.
 _scan_vault = scan_mod.scan_vault
+
+
+# Seam: the report build reads repositories only through this.
+def _repository_views(selected: Sequence[str], *, env=None) -> dict[str, str | tuple]:
+    """Per selected vault: the reason it has no repositories, or its repositories as read.
+
+    Only the repositories of *selected* vaults are read, each distinct root once.
+    """
+    bound = repos_mod.vault_repositories(selected, env=env)
+    read = repos_mod.read_repositories((r for b in bound.values() for r in b.roots), env=env)
+    return {v: b.reason if b.reason is not None else tuple(read[r] for r in b.roots)
+            for v, b in bound.items()}
 
 
 @dataclass
@@ -106,13 +131,19 @@ class IndexLine:
 
 @dataclass(frozen=True)
 class RunContext:
-    """What every check runner is given besides the scans: the clock and the staleness window.
+    """What every check runner is given besides the scans: the clock, the staleness window and the repositories.
 
     ``now`` is an aware UTC datetime; ``stale_days`` is the window in days.
+    ``repos`` is what the repository-view seam returned for the selected vaults
+    (per vault, a reason string or the repositories read), built once;
+    ``repos_error`` is the exception the seam raised, if it did, which the check
+    that needs the views raises again inside its own boundary.
     """
 
     now: datetime
     stale_days: int
+    repos: Mapping[str, str | Sequence] = field(default_factory=dict)
+    repos_error: Exception | None = None
 
 
 @dataclass
@@ -121,7 +152,8 @@ class Section:
 
     ``findings`` is ``None`` when the check was skipped or errored; ``lines`` is
     each finding rendered, in order. ``run`` is what the check returned, ``None`` when it raised and ``error`` holds the
-    error type name.
+    error type name. ``repository_lines`` are the lines printed under the heading
+    before the findings.
     """
 
     check: Check
@@ -130,6 +162,7 @@ class Section:
     error: str | None = None
     lines: list[str] = field(default_factory=list)
     note: str | None = None
+    repository_lines: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -149,11 +182,17 @@ class HealthReport:
 
 @dataclass(frozen=True)
 class CheckRun:
-    """What a check run produced: findings and per-vault judged counts, or the vaults at fault."""
+    """What a check run produced: findings and per-vault judged counts, or the vaults at fault.
+
+    ``skipped`` maps a vault the check did not judge to the reason, for a check that
+    can skip one vault and run on the others; ``findings`` is ``None`` only when
+    every selected vault was skipped.
+    """
 
     findings: list | None
     judged: dict[str, int]
     at_fault: tuple[str, ...] = ()
+    skipped: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -168,6 +207,9 @@ class Check:
     group heading (after ``oldest first``, or after ``no findings``), or ``None``
     for none. It is called for any check that ran, with or without findings, inside
     the check's exception boundary, and its result is stored on the section.
+    ``repository_lines(section, ctx)``, when set, returns the lines printed under
+    the heading before the findings, also inside the exception boundary, and is
+    called whether or not the check skipped.
     """
 
     name: str
@@ -176,6 +218,7 @@ class Check:
     skip_reason: str
     action: str
     heading_note: Callable[[Section, RunContext], str | None] | None = None
+    repository_lines: Callable[[Section, RunContext], list[str]] | None = None
 
 
 def _safe(value: object) -> str:
@@ -258,6 +301,41 @@ def _run_stale(scans, selected, ctx) -> CheckRun:
                       stale_mod.StaleSkipped, stale_mod.StaleResult)
 
 
+PATHS_SKIP_TAIL = "so no path can be confirmed missing"
+_NO_REPOSITORIES = {
+    repos_mod.UNBOUND: "no repository is known for this vault (no camp group binds it); "
+                       "bind it with [[lore_scopes]] in a camp group",
+    repos_mod.CAMP_ABSENT: "no repository is known for this vault (camp is not installed)",
+    repos_mod.CONFIG_UNREADABLE: "no repository is known for this vault "
+                                 "(camp's group config could not be read); run camp status to see why",
+}
+_UNREADABLE_WHY = {
+    repos_mod.MISSING: "its directory does not exist",
+    repos_mod.NOT_A_REPOSITORY: "it is not a git repository",
+    repos_mod.NO_DEFAULT_BRANCH: "it has no default branch",
+    repos_mod.GIT_FAILED: "git could not read it",
+}
+
+
+def _paths_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], skip) -> str:
+    if skip.reason == paths_mod.NOT_FULLY_READ:
+        return _skip_reason(scan, scans, (scan.vault,), PATHS_SKIP_TAIL)
+    if skip.root is not None:
+        return (f"repository {_safe(skip.root)} could not be read, {PATHS_SKIP_TAIL}; "
+                "clone or repair it, or remove it from the camp group")
+    return _NO_REPOSITORIES[skip.reason]
+
+
+def _run_paths(scans, selected, ctx) -> CheckRun:
+    if ctx.repos_error is not None:
+        raise ctx.repos_error
+    result = paths_mod.check_missing_paths(scans, selected, ctx.repos)
+    by_name = {s.vault: s for s in scans}
+    skipped = {v: _paths_skip_reason(by_name[v], by_name, skip) for v, skip in result.skipped.items()}
+    return CheckRun(None if skipped and not result.judged else list(result.findings),
+                    dict(result.judged), skipped=skipped)
+
+
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
                  stale_days: int = DEFAULT_STALE_DAYS) -> HealthReport:
     """Scan every configured vault, run every check, and gather the result as data.
@@ -265,15 +343,20 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
     Every vault is scanned even when *only* narrows the report, so a target in
     another vault still resolves. A check that raises is recorded as errored and
     does not stop the others. Every runner gets one :class:`RunContext`, built from
-    *now* (the current UTC time when ``None``) and *stale_days*.
+    *now* (the current UTC time when ``None``), *stale_days* and the repository
+    views of the selected vaults, read once through :data:`_repository_views` with *env*.
     """
-    ctx = RunContext(now if now is not None else datetime.now(timezone.utc), stale_days)
+    now = now if now is not None else datetime.now(timezone.utc)
     every = scan_mod.resolve_vaults()
     if only is not None:
         scan_mod.resolve_vaults(only)
     scans = [_scan_vault(name, root) for name, root in every]
     by_name = {s.vault: s for s in scans}
     selected = [s.vault for s in scans if only is None or s.vault == only]
+    try:
+        ctx = RunContext(now, stale_days, _repository_views(selected, env=env))
+    except Exception as exc:  # noqa: BLE001 - only missing-paths needs the views; it errors alone
+        ctx = RunContext(now, stale_days, repos_error=exc)
 
     sections: list[Section] = []
     for check in CHECKS:
@@ -284,6 +367,8 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
             section = Section(check, run, findings, lines=lines)
             if check.heading_note is not None:
                 section.note = check.heading_note(section, ctx)
+            if check.repository_lines is not None:
+                section.repository_lines = check.repository_lines(section, ctx)
         except Exception as exc:  # noqa: BLE001 - one check's failure must not take the report down
             sections.append(Section(check, None, error=type(exc).__name__))
             continue
@@ -295,6 +380,8 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
             name = sec.check.name
             if sec.error is not None:
                 rows.append(VaultRow(v, name, None, None, None, sec.error))
+            elif v in sec.run.skipped:
+                rows.append(VaultRow(v, name, None, None, sec.run.skipped[v]))
             elif sec.findings is None:
                 reason = _skip_reason(by_name[v], by_name, sec.run.at_fault, sec.check.skip_reason)
                 rows.append(VaultRow(v, name, None, None, reason))
@@ -513,6 +600,30 @@ def _stale_note(sec: Section, ctx: RunContext) -> str:
     return window + (": " + ", ".join(parts) if parts else "")
 
 
+def _missing_line(f: paths_mod.MissingPath) -> str:
+    return (f"  {_ident(f)}  {_when(f)}  {_safe(f.location)} {f.number}: "
+            f"`{_safe(f.path)}` is on no repository's default branch")
+
+
+def _repository_line(vault: str, item, now: datetime) -> str:
+    head = f"  {_safe(vault)}: repository {_safe(item.root)}: "
+    if isinstance(item, repos_mod.Unreadable):
+        return f"{head}could not be read ({_UNREADABLE_WHY[item.reason]})"
+    branch = _safe(item.branch)
+    where = f"local {branch} (no remote-tracking default branch)" if item.local else f"origin/{branch}"
+    if item.fetched_at is None:
+        return f"{head}{where}, no fetch recorded"
+    days = max(0, (now - item.fetched_at).days)
+    return (f"{head}{where}, last fetched {item.fetched_at:%Y-%m-%d %H:%M} UTC "
+            f"({_plural(days, 'day', 'days')} ago)")
+
+
+def _repository_lines(sec: Section, ctx: RunContext) -> list[str]:
+    return [_repository_line(vault, item, ctx.now)
+            for vault, view in ctx.repos.items() if not isinstance(view, str)
+            for item in view]
+
+
 # The checks, in the order they print. A new check is one more entry.
 CHECKS: tuple[Check, ...] = (
     Check(
@@ -540,6 +651,17 @@ CHECKS: tuple[Check, ...] = (
         skip_reason="so no spec's status can be confirmed",
         action=STALE_ACTION,
         heading_note=_stale_note,
+    ),
+    Check(
+        name="missing-paths",
+        run=_run_paths,
+        render=_missing_line,
+        skip_reason=PATHS_SKIP_TAIL,
+        action="Act on these with /lore:correct: point the record at where the code now lives, "
+               "or, if the feature it describes was removed, drop or supersede the record. "
+               "If a repository line above is old, fetch it first; a path added on a branch "
+               "not yet merged clears once it merges.",
+        repository_lines=_repository_lines,
     ),
 )
 
@@ -597,13 +719,13 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunConte
         return [f"{name} — errored: {_safe(sec.error)}."]
     findings = sec.findings
     if findings is None:
-        return [f"{name} — skipped."]
+        return [f"{name} — skipped.", *sec.repository_lines]
     note = sec.note
     if not findings:
-        return [f"{name} — no findings{_safe(note) if note else ''}."]
+        return [f"{name} — no findings{_safe(note) if note else ''}.", *sec.repository_lines]
     total = len(findings)
     out = [f"{name} — {_plural(total, 'finding', 'findings')}, oldest first"
-           + (_safe(note) if note else "")]
+           + (_safe(note) if note else ""), *sec.repository_lines]
     shown = findings if limit is None else findings[:limit]
     out += sec.lines[:len(shown)]
     rest = total - len(shown)
@@ -672,14 +794,18 @@ def add_health_subparser(sub) -> None:
     """Register the ``health`` command parser."""
     p = sub.add_parser(
         "health",
-        help="Report dangling links, retired links and stale tasks, across every vault (read-only)",
+        help="Report dangling links, retired links, stale tasks and missing paths, across every vault (read-only)",
         description=(
-            "Read every record in every configured vault and run three checks. "
+            "Read every record in every configured vault and run four checks. "
             "dangling-links reports references (related, supersedes, depends-on, parent, "
             "[[wikilinks]]) that point at no record in any vault. retired-links reports "
             "live records that link to a dropped or superseded record. stale-tasks reports "
             "unfinished tasks not updated within the staleness window, or linked to a "
-            "dropped or superseded spec. Read-only. "
+            "dropped or superseded spec. missing-paths reports paths a live decision, ADR or area "
+            "names that are on no default branch of the repositories its vault is bound to (by "
+            "[[lore_scopes]] in a camp group); it is skipped for one vault, not all, when that vault "
+            "has no repository, an unreadable one, or was not fully read. Read-only: nothing is "
+            "fetched. "
             "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
             "unknown --vault) or fails unexpectedly."

@@ -6,4 +6,6 @@ reviewed like source, and lore never writes to it.
 Install copies it into a directory trailhead owns, and that copy is what gets
 registered as a vault. Edits here reach the copy the next time install runs.
 
+Records here cite neither commit IDs nor file fingerprints, so a 7-to-40-character hex string fails `scripts/core-content-gate`.
+
 It holds no records yet.
