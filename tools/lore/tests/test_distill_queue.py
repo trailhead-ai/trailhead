@@ -245,6 +245,13 @@ def test_a_task_the_search_index_would_not_hold_does_not_link(missing):
     assert [i.name for i in res.deferred] == ["s"]
 
 
+def test_a_task_the_index_would_reject_for_a_reserved_label_key_still_links():
+    t = task("t", ["s"], labels={"related": "z"})
+    assert not scan_mod._IndexerProbe().holds("task", "t", t.sidecar, "")
+    res = queue(vault("a", spec("s", "planned"), t))
+    assert waiting_names(res) == ["s"] and res.deferred == ()
+
+
 def test_only_a_task_links_a_spec_not_another_kind_carrying_the_edge():
     other = rec("a", "lesson", "l", "active", **{"created-at": "x", "updated-at": "y", "related": {"spec": ["s"]}})
     res = queue(vault("a", spec("s", "planned"), other))
