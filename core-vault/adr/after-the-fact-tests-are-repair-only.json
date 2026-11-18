@@ -1,0 +1,19 @@
+{
+  "version": "v1",
+  "kind": "adr",
+  "title": "After-the-fact tests are repair only: post-hoc tests need a mutation check and are reported as repair, not as test-first coverage",
+  "status": "active",
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead",
+  "related": {
+    "adr": [
+      "tests-are-written-red-first",
+      "a-test-executes-its-subject"
+    ],
+    "area": [
+      "testing"
+    ]
+  }
+}
