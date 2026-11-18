@@ -639,6 +639,17 @@ def test_a_write_lore_committed_and_then_reported_failing_is_saved(world, capsys
     assert world.entry("AC2").history[-1][1:] == (answer, words)
 
 
+def test_a_landed_write_another_writer_changed_before_the_re_read_prints_no_revision_line(world, capsys):
+    inject_write(world.lore, ["record", "update"], run_first=True, returncode=1, stderr="timed out after commit",
+                 times=1)
+    runner = after_write(world, lambda b: b.rstrip("\n") + "\n\n" + pending("AC1", slice_="other"))
+
+    res = world.run(capsys, runner=runner, words="it broke")
+
+    assert (res.code, res.out) == (0, "saved: AC2 failed\n"), res.err
+    assert world.entry("AC2").history[-1][1:] == ("failed", "it broke")
+
+
 def test_a_write_that_did_not_land_while_the_spec_moved_is_still_stale(world, capsys):
     shown = world.show()
     world.edit(lambda b: b.rstrip("\n") + "\n\n" + pending("AC1", slice_="other"))

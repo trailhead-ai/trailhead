@@ -288,11 +288,12 @@ def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, prop
         ]
     done = sw.write_record(runner, argv, proposed)
     now = _reread(runner, vault, spec_id)
+    ours = now[1] if now and now[0].rstrip("\n") == proposed.rstrip("\n") else None
     if done is not None and done.returncode == 0:
-        return now[1] if now and now[0].rstrip("\n") == proposed.rstrip("\n") else None
+        return ours
     if now is not None:
         if _landed(now[0], entry, line):
-            return now[1]
+            return ours
         if now[1] != base:
             raise Refusal(f"{spec_id} changed after it was read", "stale", 1)
     text = done.stderr if done is not None else ""
