@@ -5703,3 +5703,14 @@ Each case was run on a copy of `skills/checks/SKILL.md` with the clause carrying
 **Cost.** About 40 USD in total, approximate. The kept runs sum to 24.3 USD from their `costUsd` fields (baseline 6.2, ten final runs 9.0, mutants 9.1). The overwritten runs add about 10 USD, estimated at about 0.8 USD per case-run-set for 13 sets (the 10 cases of step 2 and the 3 cases re-run in step 4), and about 5 USD went on void runs from the first in-session attempt, which could not execute commands.
 
 **Code-vs-document test** `tools/craft/tests/test_checks_answer_reason_codes.py`: every code in `checklist_answer.REASON_CODES` (49) must be named in backticks in the skill's `## Results` section and in the design doc's save-failed section. Red before the prose change (both documents missing codes; the design doc lacked `spec-unreadable`); green after. Mutations: removing the `spec-unreadable` sentence from the skill fails `test_every_reason_code_has_a_sentence_in_the_skill` (`['spec-unreadable']`); removing it from the design doc fails `test_every_reason_code_has_a_sentence_in_the_design_doc` (`['spec-unreadable']`); each restored with an empty diff.
+
+### After the whole-change review fixes (2026-11-18)
+
+The review found that a second answer on the same spec was refused `stale` by the operator's own first save, since every entry carried its spec's revision from the start of the walk. The answer script now prints the spec's new revision after a save, and the skill uses it as the base for later entries on that spec. The same pass narrowed who may supply the operator's replies and regrouped `field-too-long`. Run with `portage eval` (the local backend, outside the session sandbox), which stops a case at its 2-of-3 bar, so each line below is 2 runs.
+
+| Prose | `SKILL.md` fingerprint | Result |
+|---|---|---|
+| before the fixes | `3f21119e8333226adfdb4da423d840ec7fa7f847` | new case `checks-two-answers-on-one-spec-both-save` red, 0 of 2: `call-2-is-AC4-failed-with-the-returned-revision-and-saved`, `no-stale-refusal`, `summary-counts-both-answers-saved` and `summary-has-no-changed-after-the-list-was-read` failed in both runs |
+| after the fixes | `81a514bcf7d03a07ba662b1b7940ffd71b8ae26e` | all eleven `checks-*` cases green, 2 of 2 each |
+
+The new case's first run on the fixed prose scored 9 of 11 in both runs because its two final-message graders used an inline `(?i)`, which the runner's regex engine rejects; they now set `flags: i`, and the re-run is the green line above. The narrowed reply-source sentence has no case of its own: the eleven cases show it does not stop the operator's own scripted replies from counting, not that it stops another agent's. Cost 8.1 USD.
