@@ -47,7 +47,13 @@
       "output-not-captured": "The session's final output was not captured; read the session's own log and re-run the drive.",
       "outcome-unreadable": "The command that judges the session outcome could not run; run trailhead doctor, then re-run the drive.",
       "the execute leg is the next slice": "The plan is ready and the drive stops here; the build runs as the next slice, so start it from the slice record.",
-      "drive predates the loop": "This drive began before the loop existed and cannot continue; start a new drive for the spec."
+      "drive predates the loop": "This drive began before the loop existed and cannot continue; start a new drive for the spec.",
+      "refused": "The ritual declined to run; read the reason in its output and the spec, fix the cause, then release the drive and re-drive.",
+      "waiting": "The ritual is waiting on something outside the loop; resolve it, then release the drive and re-drive.",
+      "spec-complete": "The spec has no slice left to choose; release the drive, then distill the spec.",
+      "needs-a-decision": "The ritual needs a decision only the operator can make; read the record it names, decide, then release the drive and re-drive.",
+      "pr-ready": "The slice is ready for a pull request; open it with portage, merge it, then release the drive and re-drive for the next slice.",
+      "slice-chosen reported again on the plan step": "The plan session chose a slice instead of planning one; read its output to see why."
     }
   }
 }
