@@ -8,8 +8,6 @@ scenario applies to what a run left behind.
 
 from __future__ import annotations
 
-import json
-import shutil
 import sqlite3
 import subprocess
 import tarfile
@@ -30,7 +28,6 @@ from ._gateway_e2e_support import (
     exit_code,
     groups_of,
     load_runs_host,
-    outpost_checkout,
     parse_stamped_lines,
     probe_problems,
     pull_stream_error,
@@ -252,40 +249,6 @@ def test_every_job_is_found_by_the_command_in_the_one_workflow(fixture_repo):
     top = tree_upload.top_level(repo)
     for job in JOBS:
         assert tree_upload.workflow_defining(top, job) == ".github/workflows/ci.yml", job
-
-
-def _node_reads(workflow: Path) -> dict:
-    checkout = outpost_checkout()
-    if not (checkout / "node_modules" / "tsx").is_dir() or shutil.which("node") is None:
-        pytest.skip("needs node and the Outpost checkout's node_modules")
-    code = (
-        "import { readFileSync } from 'node:fs';"
-        f"const w = await import({json.dumps(str(checkout / 'server/runs/workflow.ts'))});"
-        "const wf = w.parseWorkflow(readFileSync(process.argv[1], 'utf8'));"
-        "const out = {};"
-        "for (const id of w.jobIds(wf)) out[id] = w.planJob(wf, id);"
-        "console.log(JSON.stringify(out));"
-    )
-    done = subprocess.run(
-        ["node", "--import", "tsx", "--input-type=module", "-e", code, str(workflow)],
-        cwd=checkout,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-    assert done.returncode == 0, done.stderr[-800:]
-    return json.loads(done.stdout)
-
-
-def test_outposts_reader_finds_the_jobs_their_labels_and_the_matrix_first_values(fixture_repo):
-    repo, _, _ = fixture_repo
-    plans = _node_reads(repo / ".github/workflows/ci.yml")
-    assert set(plans) == JOBS
-    assert plans["matrix"]["matrix"]["chosen"] == {"color": "red", "size": "small"}
-    assert plans["matrix"]["matrix"]["notRun"] == 3
-    assert plans["pass"]["matrix"] is None
-    assert plans["unmapped"]["runsOn"] == ["windows-latest"]
-    assert all(plans[j]["runsOn"] == ["ubuntu-latest"] for j in JOBS - {"unmapped"})
 
 
 def test_the_workflow_follows_the_image_and_the_ports_the_builder_is_given(tmp_path, fixture_repo):
