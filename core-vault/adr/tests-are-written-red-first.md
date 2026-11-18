@@ -36,3 +36,4 @@ Anyone given a slice to build is told to make the test fail first and to report 
 - A caller's suite catches a break the changed file's own tests could not see, because the blast radius includes callers.
 - Work that was not done red first is not presented as if it had been; see [[adr/after-the-fact-tests-are-repair-only]] for the one legitimate exception and how it is reported.
 - A failing test that fails for the wrong reason is fixed before any implementation is written.
+- Part of the area profile [[area/testing]].

@@ -11,6 +11,9 @@
     "adr": [
       "tests-are-written-red-first",
       "a-test-executes-its-subject"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

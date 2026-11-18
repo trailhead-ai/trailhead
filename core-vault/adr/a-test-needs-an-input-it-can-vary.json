@@ -11,6 +11,9 @@
     "adr": [
       "a-test-executes-its-subject",
       "presence-and-absence-are-not-behaviour"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

@@ -43,3 +43,4 @@ Never assert a removal. Do not test that a file does not exist, a symbol is unde
 - A refactor that renames or moves a symbol does not break tests, as long as the behaviour is intact.
 - When no consumer can be named that would break without the thing, the thing has no behaviour to test, and the better question is whether it should exist at all.
 - Related: [[adr/a-test-executes-its-subject]] states the general rule this one applies to existence, and [[adr/a-test-needs-an-input-it-can-vary]] covers tests whose subject has one possible answer.
+- Part of the area profile [[area/testing]].

@@ -34,3 +34,4 @@ The report names the work as repair. Post-hoc coverage that has passed a mutatio
 - Readers of a report can tell repair from test-first work, and weigh the evidence accordingly.
 - A test that cannot be made to fail is reworked or dropped, not kept to raise a coverage number.
 - It rests on [[adr/a-test-executes-its-subject]]: a mutation check fails to turn red exactly when the test never ran its subject.
+- Part of the area profile [[area/testing]].

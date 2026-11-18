@@ -10,6 +10,9 @@
   "related": {
     "adr": [
       "after-the-fact-tests-are-repair-only"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

@@ -1,0 +1,27 @@
+{
+  "version": "v1",
+  "kind": "area",
+  "title": "Testing: how tests are written, what they may assert, and how they stay fast",
+  "status": "active",
+  "keywords": [
+    "testing",
+    "tdd",
+    "mutation",
+    "snapshot",
+    "fixture"
+  ],
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead",
+  "related": {
+    "adr": [
+      "tests-are-written-red-first",
+      "a-test-executes-its-subject",
+      "a-test-needs-an-input-it-can-vary",
+      "presence-and-absence-are-not-behaviour",
+      "after-the-fact-tests-are-repair-only",
+      "tests-never-read-git-history"
+    ]
+  }
+}

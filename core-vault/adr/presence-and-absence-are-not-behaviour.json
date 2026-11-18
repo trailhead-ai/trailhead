@@ -11,6 +11,9 @@
     "adr": [
       "a-test-executes-its-subject",
       "a-test-needs-an-input-it-can-vary"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

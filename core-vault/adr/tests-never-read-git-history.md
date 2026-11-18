@@ -39,3 +39,4 @@ Examples, fixtures and test names in core content use words, never hex-looking s
 - A fixture costs a small file in the repository, and has to be updated by hand if the past format it captures is ever corrected.
 - Where a past version matters to the reader, the fixture's name says what it is, in words, rather than pointing at a commit.
 - Related: [[adr/a-test-needs-an-input-it-can-vary]] explains why the fixture test above also varies its input, and [[adr/after-the-fact-tests-are-repair-only]] describes saving a baseline copy of a file to restore after a mutation, which is also a file on disk and never a history lookup.
+- Part of the area profile [[area/testing]].

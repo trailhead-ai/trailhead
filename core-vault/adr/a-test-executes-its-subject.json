@@ -12,6 +12,9 @@
       "a-test-needs-an-input-it-can-vary",
       "presence-and-absence-are-not-behaviour",
       "after-the-fact-tests-are-repair-only"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

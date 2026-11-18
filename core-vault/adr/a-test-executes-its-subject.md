@@ -36,3 +36,4 @@ A test also needs an input it can vary. Where a unit has one possible output the
 - Tests about prose artifacts (skills, rules, prompts) go through their consumer, such as the loader or installer, instead of matching their wording.
 - A test that cannot name what would have to break for it to fail should be reworked or dropped rather than kept for coverage.
 - See also [[adr/a-test-needs-an-input-it-can-vary]] for varying the input, [[adr/presence-and-absence-are-not-behaviour]] for what a test may observe about existence, and [[adr/after-the-fact-tests-are-repair-only]] for how a mutation check exposes a test that never ran its subject.
+- Part of the area profile [[area/testing]].

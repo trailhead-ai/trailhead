@@ -11,6 +11,9 @@
     "adr": [
       "a-test-needs-an-input-it-can-vary",
       "after-the-fact-tests-are-repair-only"
+    ],
+    "area": [
+      "testing"
     ]
   }
 }

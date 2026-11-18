@@ -41,3 +41,4 @@ The seam-smoke exception: wiring has no input to vary and is still worth exactly
 - Changing a default, a vocabulary or an inventory no longer forces a matching edit in a test that only copied it.
 - Seam smokes stay allowed, but each one is a deliberate, marked exception, so the count of exemptions is a number a reviewer can read.
 - This builds on [[adr/a-test-executes-its-subject]]: running the subject is necessary, and varying its input is what makes the run mean something. Tests that only inspect existence are covered by [[adr/presence-and-absence-are-not-behaviour]].
+- Part of the area profile [[area/testing]].
