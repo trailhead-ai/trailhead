@@ -14,6 +14,7 @@ import sys
 from .. import locking
 from . import (
     areas,
+    distill_queue,
     flush,
     health,
     init,
@@ -123,6 +124,7 @@ def build_parser() -> argparse.ArgumentParser:
     signing.add_signing_subparser(sub)
     health.add_health_subparser(sub)
     validate.add_validate_subparser(sub)
+    distill_queue.add_distill_queue_subparser(sub)
 
     return parser
 
