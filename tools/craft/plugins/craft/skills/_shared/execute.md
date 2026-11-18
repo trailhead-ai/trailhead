@@ -431,12 +431,12 @@ says.
 - **`NEEDS_CONTEXT` (prover or executor) and `DONE_WITH_CONCERNS`:** handled exactly as attended;
   each call that is a judgment call is logged as a decision.
 - **A finding that a different record's text is wrong, with a known fix** (step 4, and the same
-  finding in Phase 3): applied to nothing and asked of no one. Park it when it is found, as the unattended
-  contract's "The non-blocking park" section says: one `Q<n>` in this run's block (`Question:` names
-  the record and what is wrong, `Options:` apply the known fix by hand and leave the record as it
-  is, each with what it costs and one marked `(recommended)`, and `Progress:` what the run has
-  finished), with no `**Answer:**` line, no write to that record and no outcome. The run carries on
-  with the loop. The block's parked questions go to the PR step, which counts them in its
+  finding in Phase 3): applied to nothing and asked of no one. Park it when it is found, as the
+  unattended contract's "The non-blocking park" section says: one `Q<n>` in this run's block
+  (`Question:` names the record and what is wrong, `Options:` apply the known fix by hand and leave
+  the record as it is, each with what it costs and one marked `(recommended)`, and `Progress:` what
+  the run has finished), with no `**Answer:**` line, no write to that record and no outcome. The run
+  carries on with the loop. The block's parked questions go to the PR step, which counts them in its
   `parked=<n>`, and the completion report names the count.
 - **Splitting, appending, and the step 5 writes** (metrics row, unknowns, design notes) are
   unchanged, except that each body or diff comes from a temp file per the contract's Record writes
@@ -1058,8 +1058,8 @@ own delivery is decided as [Found work](#found-work) says.
 Quality, style, and design review are explicitly out of scope for `drift-gate` — that's deferred to
 the whole-change phases in [After All Tasks](#after-all-tasks), not dropped entirely.
 
-A finding that a different record's text is wrong, with a known fix, is not a task. Present it to the
-operator and apply it once accepted, as the section "Corrections to other records" of the shared
+A finding that a different record's text is wrong, with a known fix, is not a task. Present it to
+the operator and apply it once accepted, as the section "Corrections to other records" of the shared
 council contract defines. Under `--unattended` it is neither presented nor applied: park it as [Loop
 stops](#loop-stops) says.
 
