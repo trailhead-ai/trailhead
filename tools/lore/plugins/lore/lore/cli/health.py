@@ -1,17 +1,20 @@
 """``lore health`` — a read-only report of vault health, one check at a time.
 
-The four checks, in the order they print, are ``dangling-links`` (references that
+The five checks, in the order they print, are ``dangling-links`` (references that
 point at no record), ``retired-links`` (live records that link to dropped or
 superseded records), ``stale-tasks`` (unfinished tasks not updated within the
 staleness window, ``--stale-days``, or tied to a dropped or superseded spec) and
 ``missing-paths`` (paths a live decision, ADR or area names that are on no
-repository's default branch). The command builds a plain-data :class:`HealthReport` from the scan of every
+repository's default branch) and ``distill-queue`` (finished specs waiting to be
+condensed into ADRs, decided by :func:`..health.distill_queue.build_distill_queue`, the
+one definition ``lore distill-queue`` shares; deferred specs, which no task links to, are
+counted in the heading rather than listed). The command builds a plain-data :class:`HealthReport` from the scan of every
 configured vault and the registry of checks (:data:`CHECKS`), then renders it:
 one summary row per vault per check, then one findings group per check, each
 with its own ``--limit`` cap and action line. Nothing is written: no record, no
 lock, no index, and no repository (no fetch).
 
-The first three checks are all-or-nothing: one vault that could not be read skips
+The first three checks, and ``distill-queue``, are all-or-nothing: one vault that could not be read skips
 them for every vault. ``missing-paths`` skips per vault (no repository bound, an
 unreadable repository, or the vault not fully read) and runs on the rest
 (:attr:`CheckRun.skipped`): a skipped vault's row reads ``yes: <reason>`` with ``—``
@@ -63,6 +66,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..health import dangling as dangling_mod
+from ..health import distill_queue as queue_mod
 from ..health import paths as paths_mod
 from ..health import references as references_mod
 from ..health import repos as repos_mod
@@ -186,13 +190,15 @@ class CheckRun:
 
     ``skipped`` maps a vault the check did not judge to the reason, for a check that
     can skip one vault and run on the others; ``findings`` is ``None`` only when
-    every selected vault was skipped.
+    every selected vault was skipped. ``deferred`` counts what the check set aside
+    without a finding, for its heading note.
     """
 
     findings: list | None
     judged: dict[str, int]
     at_fault: tuple[str, ...] = ()
     skipped: dict[str, str] = field(default_factory=dict)
+    deferred: int = 0
 
 
 @dataclass(frozen=True)
@@ -334,6 +340,54 @@ def _run_paths(scans, selected, ctx) -> CheckRun:
     skipped = {v: _paths_skip_reason(by_name[v], by_name, skip) for v, skip in result.skipped.items()}
     return CheckRun(None if skipped and not result.judged else list(result.findings),
                     dict(result.judged), skipped=skipped)
+
+
+@dataclass(frozen=True)
+class QueueFinding:
+    """A spec waiting to be distilled, shaped as the findings every check sorts and names."""
+
+    item: queue_mod.QueueItem
+    kind: str = "spec"
+
+    @property
+    def vault(self) -> str:
+        return self.item.vault
+
+    @property
+    def name(self) -> str:
+        return self.item.name
+
+    @property
+    def updated_at(self) -> str | None:
+        return self.item.updated_at
+
+
+DISTILL_SKIP_TAIL = "so no spec's ADR or tasks can be confirmed"
+
+
+def _run_distill(scans, selected, ctx) -> CheckRun:
+    result = queue_mod.build_distill_queue(scans)
+    if isinstance(result, queue_mod.DistillSkipped):
+        return CheckRun(None, {}, result.vaults)
+    assert isinstance(result, queue_mod.DistillQueue)
+    chosen = set(selected)
+    judged = {s.vault: sum(1 for r in s.records if r.kind == "spec") for s in scans if s.vault in chosen}
+    return CheckRun([QueueFinding(i) for i in result.waiting if i.vault in chosen], judged,
+                    deferred=sum(1 for i in result.deferred if i.vault in chosen))
+
+
+def _distill_line(f: QueueFinding) -> str:
+    i = f.item
+    text = f"  {_ident(f)}  {_when(f)}  {_safe(i.status)}  {_safe(i.reason)}"
+    return f"{text}; {_safe(i.adr_note)}" if i.adr_note else text
+
+
+def _distill_note(sec: Section, ctx: RunContext) -> str | None:
+    n = sec.run.deferred
+    if not n:
+        return None
+    return (f" ({_num(n)} deferred: no linked task; list them with lore distill-queue "
+            "and distill each with /craft:distill spec/<name>)")
 
 
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
@@ -663,6 +717,16 @@ CHECKS: tuple[Check, ...] = (
                "not yet merged clears once it merges.",
         repository_lines=_repository_lines,
     ),
+    Check(
+        name="distill-queue",
+        run=_run_distill,
+        render=_distill_line,
+        skip_reason=DISTILL_SKIP_TAIL,
+        action="Act on these with /craft:distill: a sweep takes every waiting spec, including any "
+               "not shown; /craft:distill spec/<name> takes one. "
+               "The id is spec/<name>, without the vault prefix.",
+        heading_note=_distill_note,
+    ),
 )
 
 
@@ -794,9 +858,9 @@ def add_health_subparser(sub) -> None:
     """Register the ``health`` command parser."""
     p = sub.add_parser(
         "health",
-        help="Report dangling links, retired links, stale tasks and missing paths, across every vault (read-only)",
+        help="Report dangling links, retired links, stale tasks, missing paths and specs waiting to be distilled, across every vault (read-only)",
         description=(
-            "Read every record in every configured vault and run four checks. "
+            "Read every record in every configured vault and run five checks. "
             "dangling-links reports references (related, supersedes, depends-on, parent, "
             "[[wikilinks]]) that point at no record in any vault. retired-links reports "
             "live records that link to a dropped or superseded record. stale-tasks reports "
@@ -804,7 +868,10 @@ def add_health_subparser(sub) -> None:
             "dropped or superseded spec. missing-paths reports paths a live decision, ADR or area "
             "names that are on no default branch of the repositories its vault is bound to (by "
             "[[lore_scopes]] in a camp group); it is skipped for one vault, not all, when that vault "
-            "has no repository, an unreadable one, or was not fully read. Read-only: nothing is "
+            "has no repository, an unreadable one, or was not fully read. distill-queue reports the "
+            "specs waiting to be distilled into ADRs, oldest first, to act on with /craft:distill; "
+            "specs no task links to are counted in its heading and listed by lore distill-queue; "
+            "it is skipped for every vault when any vault was not fully read. Read-only: nothing is "
             "fetched. "
             "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
