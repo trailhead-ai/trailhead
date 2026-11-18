@@ -82,9 +82,10 @@ record whose id could not be trusted.
 scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
 lands wherever the scan happens to hit first — which is not necessarily where the record lives.
 `--vault` disambiguates the record's CURRENT location; it is not the same flag as
-`--product`/`--team` on a `create`, which instead selects the DESTINATION vault (see step 1). Read
-each record's vault from the sidecar that `lore record show <record-id> --json` already returned
-during the queue pass, and pass it back as `--vault` on every update against that record.
+`--product`/`--team` on a `create`, which instead selects the DESTINATION vault (see step 1). A
+record's sidecar carries no vault field. For a spec the sweep queued, the vault is the part of its
+queue line before `/spec/`; carry it from there and pass it as `--vault` on every read and update
+against that spec.
 
 ## Sweep mode — building the queue
 
@@ -140,13 +141,17 @@ one that fails is never substituted, quoted or escaped in — refuse it loudly a
 
 ### 2. Read each queued spec's sidecar
 
+Split each queue line's `<vault>/spec/<name>` (after the shape check above) into the vault and
+`spec/<name>`, then read the spec with the vault passed explicitly:
+
 ```
-lore record show <spec-id> --json
+lore record show spec/<name> --json --vault <vault>
 ```
 
-Lore decided the queue; it does not return the scope fields the explicit-scope rule needs later, so
-read them here for each waiting spec and keep the output. Its `vault` is the one every later update
-passes as `--vault`.
+The printed `<vault>/spec/<name>` is not a record id and `lore record show` refuses it as not found;
+only `spec/<name>` is. Lore decided the queue; it does not return the scope fields the
+explicit-scope rule needs later, so read them here for each waiting spec and keep the output. Carry
+the `<vault>` from the queue line as `--vault` on every later read and update of that spec.
 
 ### 3. Resolve each queued spec's task tree
 
