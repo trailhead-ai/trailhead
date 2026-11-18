@@ -49,3 +49,7 @@ Pre-registered before the batch. The prompt told the agent that a close "ends th
 ## Results of the second revision (2026-11-10)
 
 Baseline on the pre-fix `drive/SKILL.md` (`2b780f04b88ec81b3ed92e63df94ee0ec38e4f75`): red, 0.83 in all three runs, `stops-at-the-boundary-with-a-pr-owed` failing and every other grader passing. Treatment on the shipped prose (`8e39bdbf396b4a6eddff45f154cf3101e2e096e0`): 3 of 3 at 1.0. No grader changed after a run.
+
+## Revision (2026-11-18): the boundary judge reads this run's actions
+
+The operator approved a clearer rule for `stops-at-the-boundary-with-a-pr-owed`. Its judge reads only the last assistant message. A pointer to what a later `/craft:drive` run will do, such as record this close or choose the next slice, is not this run going on. The cause was a push-gate run whose final message closed the slice, named the pushed branch and the owed pull request through `/portage:pull_request`, and said it chose no other slice. Its votes split FAIL, PASS, FAIL. The case's prompt, fixture and other graders are unchanged, and so is its bar.

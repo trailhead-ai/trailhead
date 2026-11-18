@@ -14,7 +14,7 @@
 - Limits: `allowed_tools: [Skill, Read, Glob, Grep, Agent, Write]`, `max_turns: 120`, `timeout_seconds: 1500`. The prompt asks for single-command Bash calls.
 - A run scores the fraction of graders that pass and passes only at 1.0. The case passes at 3 of 3 runs after the change. One rerun of a failed batch is permitted, stated here before any run, and a rerun-green is reported as such. A scaffold failure or timeout is an error, logged apart from graded fails. If the eval spend cap forces fewer runs than three, the run count is reported as run.
 - The baseline runs on the current, unedited prose (`skills/plan/SKILL.md`, `skills/_shared/unattended.md`) before any prose edit, with the case's scaffold exactly as committed.
-- A headless eval session never offers `AskUserQuestion`, so "asked nothing" is an `llm` trace grader that is not shown able to fail in a headless run (operator-accepted limitation); the outcome line and the record state are the primary evidence.
+- A headless eval session never offers `AskUserQuestion`, so "asked nothing" is an `llm` trace grader. It judges only the last assistant message and reads a question parked on the record as part of the report. No headless run has shown it failing on a real question (operator-accepted limitation); the outcome line and the record state are the primary evidence.
 - Record contents are graded with `source: file` from the vault files; `file_exists` and `target: files` see only files the agent created, never seeded records. `tool_used` counts Bash calls over the whole run. The regex dialect is JavaScript.
 - The run block, the plan and the council section are seeded as a sibling session left them. The plan sections sit between the block and the council section, as plan's full-body write leaves them, so a section boundary in the seeded record is a label, never a heading.
 
@@ -29,7 +29,7 @@ Every clause holds.
 | Clause | Grader | Type and target |
 |---|---|---|
 | A `## Council Review` with a members line is on the parent | `council-review-written` | regex, file |
-| `**Goal:**` and `**Delta design:**` are byte for byte as seeded | `plan-body-not-rewritten` | regex, file |
+| `**Goal:**` and `**Delta design:**` are byte for byte as seeded, except that sentences may follow the seeded design on its line (a council Critical closed by a design rule) | `plan-body-not-rewritten` | regex, file |
 | No task record was created | `no-child-task-created` | file_exists, exists false |
 | No `record create --kind task` command ran | `no-child-created-by-command` | tool_used, max 0 |
 | The earlier block is byte for byte as seeded | `earlier-block-preserved-byte-for-byte` | regex, file |
