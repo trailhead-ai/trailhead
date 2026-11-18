@@ -258,3 +258,36 @@ def test_trailhead_shim_shows_a_core_record_from_an_unrelated_cwd(source, env, l
     assert shown.returncode == 0, shown.stderr
     assert "CORE-BODY-MARK" in shown.stdout
     assert refused.returncode == 2
+
+
+# -- every shipped core record, against real lore ---------------------------
+
+CORE_SOURCE = REPO_ROOT / "core-vault"
+
+
+def test_every_shipped_core_record_reaches_both_read_paths(env, lore_ready, tmp_path):
+    mds = sorted(p for p in CORE_SOURCE.glob("*/*.md"))
+    pairs = [p for p in mds if p.with_suffix(".json").is_file()]
+    assert len(mds) == len(pairs), f"records without a sidecar: {[str(p) for p in mds if p not in pairs]}"
+    assert pairs, "the checkout's core-vault holds no records"
+
+    decoy = tmp_path / "decoy"
+    for md in pairs:
+        write_record(decoy, md.stem, "Decoy", "DECOY-BODY", kind=md.parent.name)
+    lore(env, "vault", "add", "decoy", "--scope", "team", "--path", str(decoy))
+    assert step(CORE_SOURCE, env).outcome == "registered"
+    installed = core_copy_dir(env).resolve()
+
+    for md in pairs:
+        kind, name = md.parent.name, md.stem
+        sidecar = json.loads(md.with_suffix(".json").read_text())
+        assert sidecar["created-by"] == "trailhead" and sidecar["updated-by"] == "trailhead", f"{kind}/{name}"
+
+        shown = _show(env, f"{kind}/{name}")
+        assert shown.code == 0, f"{kind}/{name}: {shown.stderr}"
+        assert sidecar["title"] in shown.stdout, f"{kind}/{name}"
+
+        hits = json.loads(lore(env, "search", "--json", name))["hits"]
+        mine = [h for h in hits if h["id"].endswith(f"{kind}/{name}") and Path(h["vault"]).resolve() == installed]
+        assert mine, f"{kind}/{name} not found in the installed core copy: {hits}"
+        assert mine[0]["shared"] == 0, f"{kind}/{name}: shared={mine[0]['shared']}"

@@ -1,0 +1,10 @@
+{
+  "version": "v1",
+  "kind": "adr",
+  "title": "A test executes its subject: it runs its subject, never inspects source or greps it",
+  "status": "active",
+  "created-at": "2026-11-17T09:00:00Z",
+  "updated-at": "2026-11-17T09:00:00Z",
+  "created-by": "trailhead",
+  "updated-by": "trailhead"
+}
