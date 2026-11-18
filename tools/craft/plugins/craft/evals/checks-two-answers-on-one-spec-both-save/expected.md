@@ -25,8 +25,8 @@ Every clause holds.
 | Call 2 is AC4 failed with the returned revision and saved | `call-2-is-AC4-failed-with-the-returned-revision-and-saved` | `regex` over `answer.log`: call 2 on AC4, `base=dddd…` (the revision call 1 printed), the second reply's words, `result=saved` |
 | No stale refusal | `no-stale-refusal` | `regex` over `answer.log` (must be absent): 'result=stale' |
 | No third call | `no-third-call` | `regex` over `answer.log` (must be absent): 'call 3' |
-| Summary counts both answers saved | `summary-counts-both-answers-saved` | `regex` over the final message: '(?i)2 answers? saved' |
-| No changed-after-the-list-was-read line | `summary-has-no-changed-after-the-list-was-read` | `regex` over the final message (must be absent): '(?i)changed after the list was read' |
+| Summary counts both answers saved | `summary-counts-both-answers-saved` | `regex` over the final message, case-insensitive: '2 answers? saved' |
+| No changed-after-the-list-was-read line | `summary-has-no-changed-after-the-list-was-read` | `regex` over the final message (must be absent), case-insensitive: 'changed after the list was read' |
 | Words written with the file tool | `words-written-with-the-file-tool` | `tool_used` over the issued commands: Write, at least 2 |
 | Words not on a command line | `words-not-on-a-command-line` | `tool_used` over the issued commands (must be absent): the two replies' words |
 

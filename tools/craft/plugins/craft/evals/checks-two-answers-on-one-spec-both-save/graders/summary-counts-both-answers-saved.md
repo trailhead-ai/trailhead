@@ -1,4 +1,5 @@
 ---
 type: regex
-pattern: '(?i)2 answers? saved'
+flags: i
+pattern: '2 answers? saved'
 ---
