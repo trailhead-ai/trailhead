@@ -77,9 +77,9 @@ from pathlib import Path
 
 from .mapping import CASE_NAME, valid_corpus_path
 from .select import TIERS
+from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
+
 from .run import (
-    NO_RUNNER,
-    RUNNER_MISSING,
     CASE_REMOVED,
     CORPUS_NEW,
     HEAD_MOVED,
