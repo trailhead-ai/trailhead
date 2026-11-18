@@ -270,7 +270,10 @@ def _reread(runner, vault: str, spec_id: str) -> tuple[str, str] | None:
 
 
 def _landed(body: str, entry, line: tuple) -> bool:
-    now = sw.spec_entries(body).get((entry.criterion_id, entry.building_slice))
+    try:
+        now = sw.spec_entries(body).get((entry.criterion_id, entry.building_slice))
+    except Refusal:
+        return False
     return now is not None and bool(now.history) and now.history[-1] == line
 
 
@@ -286,7 +289,7 @@ def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, prop
     done = sw.write_record(runner, argv, proposed)
     now = _reread(runner, vault, spec_id)
     if done is not None and done.returncode == 0:
-        return now[1] if now else None
+        return now[1] if now and now[0].rstrip("\n") == proposed.rstrip("\n") else None
     if now is not None:
         if _landed(now[0], entry, line):
             return now[1]
