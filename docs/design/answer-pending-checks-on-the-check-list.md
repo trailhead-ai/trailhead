@@ -46,7 +46,16 @@ other writer can set one.
 Every piece of entry text is untrusted vault data and is shown cleaned, as the list view already
 does. The operator's own words are cleaned too: flattened to one line, with control characters
 removed and the length bounded. Words that look like a credential are refused, not saved. That check is a best-effort tripwire
-over common token shapes, not a guarantee. The words file is removed whatever the outcome.
+over common token shapes, not a guarantee. The words file is removed whatever the outcome, but only
+when it is the file `mktemp` made: a regular file, not a symlink, owned by the current user, named
+`tmp.` plus at least six letters or digits, directly in `$TMPDIR` (else `/tmp`). Any other path is
+refused as `invalid-arguments` and is neither read nor removed, including when the arguments did not
+parse.
+
+**Known boundary.** The script cannot tell who calls it. A Passed close recorded with
+`--initiated-by operator` rests on the skill's prose: only the operator selects an answer, and a reply
+counts only when the operator wrote it into the invoking message. The script does not authenticate the
+operator, and neither does lore's `--initiated-by`. No skill invokes `/craft:checks` on its own.
 
 ## The answer prompt
 
