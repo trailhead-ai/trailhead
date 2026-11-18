@@ -74,7 +74,7 @@ def test_a_gathered_entry_answered_passed_is_saved_closed_and_leaves_the_candida
                 "--criterion", entry["criterion"], "--slice", entry["building_slice"], "--answer", "passed",
                 "--base", entry["revision"], "--words-file", str(words))
 
-    assert (done.returncode, done.stdout) == (0, "saved: AC2 passed\n"), done.stderr
+    assert (done.returncode, done.stdout.splitlines()[0]) == (0, "saved: AC2 passed"), done.stderr
     assert not words.exists()
     shown = json.loads(lore(["record", "show", "--json", "--vault", "default", spec]).stdout)
     assert "  - 2026-11-16 passed: banner showed 3\n" in shown["body"]

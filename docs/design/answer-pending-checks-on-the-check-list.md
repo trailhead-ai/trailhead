@@ -31,7 +31,12 @@ today, with the status the operator chose and the words they gave:
 - **Skip** writes nothing. The entry stays waiting.
 
 The `--base` revision is the one the operator was shown. If the spec changed after the list was
-gathered, lore refuses the write and nothing is saved. The answer script certifies every proposed
+gathered, lore refuses the write and nothing is saved. A save prints `saved: <ACn> <status>` and
+then `revision: <rev>`, the spec's revision after the write. The walk uses it as the `--base` for
+every later entry on the same spec, in place of the gather's revision, because the save itself moved
+the revision. A write that lore committed but then reported as failed counts as a save: the writer
+reads the spec again, and when the entry's last history line is the one it proposed, the answer was
+saved. The answer script certifies every proposed
 body through the waiting gate's answer path, which accepts exactly one new history line on one
 waiting pending check. The gate's command-line path still refuses every status change, so no
 other writer can set one.

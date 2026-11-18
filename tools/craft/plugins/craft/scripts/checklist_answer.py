@@ -8,7 +8,9 @@ Usage:
 The values are the ones `checklist_gather.py --json` prints for an entry (`vault`, `spec`,
 `criterion`, `building_slice`, `revision`). `--words-file` holds the operator's words; they
 never reach an argv. The file is the caller's to create and this script's to remove: it is
-deleted on every outcome, refusals included.
+deleted on every outcome, refusals included. The path removed is the one the parser read; when
+the arguments do not parse, the last `--words-file` in the argv. A failure to remove it changes
+no outcome.
 
 Order, which is the invariant:
 
@@ -39,9 +41,14 @@ Order, which is the invariant:
        refuses the write (any non-zero exit, a timeout, a missing lore) the spec is read
        again: a revision other than `--base` is `stale`; an unchanged revision and, for
        `passed`, lore text saying the criterion `is already closed` or `cannot be closed` is
-       `close-refused`; anything else is `write-failed`.
+       `close-refused`; anything else is `write-failed`. Before that classification the re-read
+       body is checked for a write that landed: the entry's last history line is the one just
+       proposed. A landed write is a save.
 
-Lore's own output is never printed. On success one line, `saved: <ACn> <status>`, exit 0.
+Lore's own output is never printed. On success the first line is `saved: <ACn> <status>` and
+the second is `revision: <rev>`, the spec's revision after the write, which the caller passes as
+`--base` for its next answer on the same spec; exit 0. When the spec cannot be read again the
+save stands and the revision line is left out.
 
 Exit codes: 0 saved; 1 refused (`EXIT_1_CODES`, and the gate's violations); 2 could not
 complete (`EXIT_2_CODES`, and the gate's could-not-certify codes). One `reason-code:` line
@@ -253,7 +260,22 @@ def _append_history(body: str, entry: waiting.WaitingEntry, line: str) -> str:
     return "\n".join(lines)
 
 
-def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, proposed: str) -> None:
+def _reread(runner, vault: str, spec_id: str) -> tuple[str, str] | None:
+    """(body, revision) of the spec as it now stands, or None when it cannot be read."""
+    try:
+        _, body, revision, _ = sw.read_record(runner, vault, spec_id, "spec-unreadable", personal_only=False)
+    except Refusal:
+        return None
+    return body, revision
+
+
+def _landed(body: str, entry, line: tuple) -> bool:
+    now = sw.spec_entries(body).get((entry.criterion_id, entry.building_slice))
+    return now is not None and bool(now.history) and now.history[-1] == line
+
+
+def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, proposed: str, line: tuple) -> str | None:
+    """The spec's revision after the write, or None when it could not be read again."""
     if answer == "failed":
         argv = sw.update_argv(spec_id, vault, base)
     else:
@@ -262,10 +284,14 @@ def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, prop
             "--initiated-by", "operator", "--reason", _CLOSE_REASON, "--base", base,
         ]
     done = sw.write_record(runner, argv, proposed)
+    now = _reread(runner, vault, spec_id)
     if done is not None and done.returncode == 0:
-        return
-    if sw.revision_changed(runner, vault, spec_id, base, "spec-unreadable"):
-        raise Refusal(f"{spec_id} changed after it was read", "stale", 1)
+        return now[1] if now else None
+    if now is not None:
+        if _landed(now[0], entry, line):
+            return now[1]
+        if now[1] != base:
+            raise Refusal(f"{spec_id} changed after it was read", "stale", 1)
     text = done.stderr if done is not None else ""
     if answer == "passed" and any(t in text for t in _CLOSE_REFUSED_TEXTS):
         raise Refusal(f"{entry.criterion_id} cannot be closed", "close-refused", 1)
@@ -284,36 +310,50 @@ def _answer(args, runner) -> int:
     today = waiting_gate._today()
     proposed = _append_history(body, entry, f"  - {today.isoformat()} {args.answer}: {words}")
     waiting_gate.certify_answer(body, proposed, today)
-    _write(runner, args.vault, spec_id, entry, args.answer, args.base, proposed)
+    new_revision = _write(
+        runner, args.vault, spec_id, entry, args.answer, args.base, proposed, (today.isoformat(), args.answer, words)
+    )
     print(f"saved: {entry.criterion_id} {args.answer}")
+    if new_revision is not None:
+        print(f"revision: {new_revision}")
     return 0
 
 
 def _words_file_in(argv: list[str]) -> str | None:
-    for i, token in enumerate(argv[:-1]):
-        if token == "--words-file":
-            return argv[i + 1]
-    return None
+    """The path after the last `--words-file`, for an argv that did not parse."""
+    found = None
+    for i, token in enumerate(argv):
+        if token == "--words-file" and i + 1 < len(argv):
+            found = argv[i + 1]
+        elif token.startswith("--words-file="):
+            found = token.split("=", 1)[1]
+    return found
+
+
+def _remove(path: str | None) -> None:
+    if path is None:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def main(argv: list[str], runner=None) -> int:
     runner = runner or gather.lore_runner
+    args = None
     try:
         try:
-            ap = _Parser(prog="checklist_answer.py", description=__doc__.splitlines()[0])
+            ap = _Parser(prog="checklist_answer.py", description=__doc__.splitlines()[0], allow_abbrev=False)
             for flag in ("--vault", "--spec", "--criterion", "--slice", "--base", "--words-file"):
                 ap.add_argument(flag, required=True)
             ap.add_argument("--answer", required=True, choices=_ANSWERS)
             args = ap.parse_args(argv)
             return _answer(args, runner)
         finally:
-            path = _words_file_in(argv)
-            if path is not None:
-                Path(path).unlink(missing_ok=True)
+            _remove(args.words_file if args is not None else _words_file_in(argv))
     except Refusal as r:
         return emit_refusal(PROG, r)
-    except OSError:
-        return emit_refusal(PROG, Refusal("the words file could not be removed", "invalid-arguments", 2))
 
 
 if __name__ == "__main__":
