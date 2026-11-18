@@ -108,7 +108,8 @@ script removes the file whatever the outcome.
 
 Exit 0 prints `saved: ACn passed` or `saved: ACn failed`, and then `revision: <rev>`, the spec's
 revision after the write. Use that revision as `--base` for every later entry on the same `vault` and
-`spec`, in place of the revision from the gather. Say `Saved: ACn in <vault>/<spec> passed.
+`spec`, in place of the revision from the gather; when a save printed no `revision:` line, or after a
+stale re-gather, use the revision from the most recent `--json` gather instead. Say `Saved: ACn in <vault>/<spec> passed.
 It counts as done.` or `Saved: ACn in <vault>/<spec> failed. The next slice on that spec will offer
 it again.`, and move to the next entry. A refusal prints `checklist-answer: reason-code: <code>` on
 stderr; Results below says what to do with each.
