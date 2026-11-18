@@ -75,9 +75,9 @@ such as `(a)`, or exactly the text of one option on the question's `  - Options:
 `match=unmatched`. An unanswered question is `match=none`.
 
 Question entries. In the `**Parked questions:**` section an entry is a column-0 line `- Q<n>: ...`
-(`<n>` is one to four ASCII digits; whitespace around `-`, `Q<n>` and `:` is tolerated, so two entries differing only in whitespace are
-the same Q). A Q defined twice, in one block or two, is refused `duplicate-question`, unless the
-second is a pointer or a look-alike (below).
+(`<n>` is one to four ASCII digits; whitespace around `-`, `Q<n>` and `:` is tolerated, so two entries
+differing only in whitespace are the same Q). A Q defined twice, in one block or two, is refused
+`duplicate-question`, unless the second is a pointer or a look-alike (below).
 
 Re-park pointer. A later block names an earlier question as still open with exactly one line:
 
@@ -102,7 +102,8 @@ Refusals, on stderr as `run_block.py: reason: ...` then `run_block.py: reason-co
 stdout. Exit 2 when stdin cannot be read as a body: `empty-stdin`, `non-utf8-stdin`,
 `stdin-too-large`. Exit 1 when the body is read but refused: `duplicate-question`,
 `unparsable-block` (a `**Format:**` other than 1, a second `**Outcome:**`, `**Checkpoint:**` or
-`**Rituals:**` in a block, an unknown or unparsable `**Rituals:**` line, a body ending inside a fence that hides a block, or a `- Q` entry in `**Parked questions:**` that is not `- Q<1-4 ASCII digits>:`).
+`**Rituals:**` in a block, an unknown or unparsable `**Rituals:**` line, a body ending inside a fence that
+hides a block, or a `- Q` entry in `**Parked questions:**` that is not `- Q<1-4 ASCII digits>:`).
 """
 
 from __future__ import annotations
