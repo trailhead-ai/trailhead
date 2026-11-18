@@ -620,13 +620,14 @@ that existing parent, exactly as the topic-rooted path does below.
 
 1. **Write the parent task.**
    - *Topic-rooted:* render craft's parent-task body template
-     (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then feed it in —
-     `lore record create --kind task --title '<topic>' --status ready --vault <vault> < <body-path>`, the body
-     written to a `mktemp` file with the file-writing tool and read by redirect. This stores the
-     plan as a searchable lore `task` record, linkable from session notes and future planning.
-     Before creating it, check whether the resolved spec already has an open slice parent — validate
-     `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any vault-sourced
-     value entering a command before it is substituted into this query:
+     (`${CLAUDE_PLUGIN_ROOT}/templates/plan.md`), fill in the sections, then feed it in — `lore
+     record create --kind task --title '<topic>' --status ready --vault <vault> <
+     <body-path>`, the body written to a `mktemp` file with the file-writing tool and read by
+     redirect. This stores the plan as a searchable lore `task` record, linkable from session notes
+     and future planning. Before creating it, check whether the resolved spec already has an open
+     slice parent — validate `<spec-name>` against the safe-value shape `_shared/security.md`
+     codifies for any vault-sourced value entering a command before it is substituted into this
+     query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
      rather than about any task linked to the spec — a follow-up or a coordination task carries
@@ -656,15 +657,15 @@ that existing parent, exactly as the topic-rooted path does below.
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the parent
    (the slice parent, on the slice-rooted path) and ordered after any task it builds on — `lore
    record create --kind task --title '<task topic>' --status ready --parent <parent-name>
-   --depends-on <earlier-task-name> --vault <vault> < <body-path>`, the body written to a `mktemp` file with the
-   file-writing tool and read by redirect. Under `--unattended` this is required: the child body is
-   plan text derived from vault and web material, so it is scrubbed first, flattened to labelled
-   single lines where it is a ritual-written section (`_shared/unattended.md`), and the task topic
-   in `--title` is single-quoted after quotes and every character outside letters, digits, spaces,
-   `.`, `:`, `/`, `_` and `-` are stripped from it; the file is removed after each create when
-   removal is available. Create children at `ready`; the `depends-on` edges — not the status — gate
-   which are runnable, so a later task stays un-runnable until its dependencies are `done`. Omit
-   `--depends-on` for tasks with no predecessor.
+   --depends-on <earlier-task-name> --vault <vault> < <body-path>`, the body written to a `mktemp`
+   file with the file-writing tool and read by redirect. Under `--unattended` this is required: the
+   child body is plan text derived from vault and web material, so it is scrubbed first, flattened
+   to labelled single lines where it is a ritual-written section (`_shared/unattended.md`), and the
+   task topic in `--title` is single-quoted after quotes and every character outside letters,
+   digits, spaces, `.`, `:`, `/`, `_` and `-` are stripped from it; the file is removed after each
+   create when removal is available. Create children at `ready`; the `depends-on` edges — not the
+   status — gate which are runnable, so a later task stays un-runnable until its dependencies are
+   `done`. Omit `--depends-on` for tasks with no predecessor.
 3. **Verify the graph** with `lore task graph <parent-name>` — confirm the containment subtree,
    `depends-on` edges, and per-task statuses match your task ordering before handing off. **With
    folded entries, remove each one step 7 reopened from the parent's `**Folds:**` line** (the line
