@@ -86,7 +86,11 @@ here as context about where you sit, not as steps to run.
 2. If setup is still in flight (pending), wait or run `camp setup`.
 3. Run `camp activate <member>` to activate a member — this prints its CLAUDE.md
    and marks it active for the session.
-4. Work in the activated member's worktree directory.
+4. Work in the activated member from the workspace root: run each member
+   command as `cd <member> && ...` within that one command, or use
+   `git -C <member> ...`. Never leave the shell sitting inside a member — a
+   sandbox rebuilt while it is there can make the member's git directory
+   read-only, and commits then fail.
 """
 
 
