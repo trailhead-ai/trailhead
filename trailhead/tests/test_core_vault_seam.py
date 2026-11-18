@@ -293,7 +293,7 @@ def test_every_shipped_core_record_reaches_both_read_paths(env, lore_ready, tmp_
         hits = json.loads(lore(env, "search", "--json", name))["hits"]
         mine = [h for h in hits if h["id"].endswith(f"{kind}/{name}") and Path(h["vault"]).resolve() == installed]
         assert mine, (
-            f"{kind}/{name} not found in the installed core copy: {hits}. Lore search matches the words of the "
-            "title and opening text, not the id, so every word of the slug may need to appear there"
+            f"{kind}/{name} not found in the installed core copy: {hits}. Lore search never matches the id: the "
+            "slug must appear as an exact phrase (words in order, adjacent) in the title, keywords or body"
         )
         assert mine[0]["shared"] == 0, f"{kind}/{name}: shared={mine[0]['shared']}"
