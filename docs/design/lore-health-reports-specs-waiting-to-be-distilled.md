@@ -22,7 +22,10 @@ A candidate is **excluded** when either holds:
   distillation, and the slices shipped since the loop resumed have never been distilled;
 - it carries a `related adr` edge whose ADR is `active`, `superseded` or `dropped`. An edge whose
   ADR is `draft`, cannot be found, or cannot be read does not exclude it: no decision is on record
-  yet. The ADR is looked up in the spec's own vault first, then in the configured vaults in order.
+  yet. The ADR is looked up in the spec's own vault first. When that vault does not hold it, every
+  other configured vault is looked in, and the edge excludes only when every copy found is
+  `active`, `superseded` or `dropped`; copies that disagree keep the spec waiting, so a same-named
+  ADR elsewhere cannot silently take a spec out of the queue.
 
 A candidate that is not excluded is **waiting to be distilled**. One with no task linked to it
 (no task in any configured vault carries a `related spec` entry naming it) is **deferred** instead:
@@ -50,10 +53,14 @@ A finding line names the spec, its last update, its status, and why it is waitin
 | `ready`, slice loop `complete` | `slice loop complete, not yet distilled` |
 | `ready`, slice loop `stopped` | `slice loop stopped, not yet distilled` |
 | `ready`, slice loop any other value | `slice loop closed, not yet distilled` |
-| `ready`, slice loop `complete`, annotated | `slice loop complete again since it was last distilled` |
+| `ready`, slice loop `complete`, annotated | `slice loop complete, previously distilled` |
 
 The label's value is printed only when it is `complete` or `stopped`; any other value is never
-echoed.
+echoed. A spec kept waiting despite a `related adr` edge says why, after the reason: `; its ADR is
+still draft`, `; its ADR could not be found`, or `; its ADR could not be read`.
+
+Every vault name, record id and reason is printed through the same control-character escaping and
+record-id shape rule the rest of `lore health` uses, in both the check and `lore distill-queue`.
 
 ## `lore distill-queue`
 
@@ -67,15 +74,23 @@ lore distill-queue — 3 waiting, 1 deferred
 waiting:
   trailhead/spec/streaming-export  2026-09-02  ready  slice loop complete, not yet distilled
   trailhead/spec/notes-are-records  2026-10-11  planned  planned, not yet distilled
-  levr/spec/audio-on-demand  2026-11-01  ready  slice loop complete again since it was last distilled
+  levr/spec/audio-on-demand  2026-11-01  ready  slice loop complete, previously distilled
 
 deferred, no linked task (distill each by target):
   default/spec/sketch-the-sync-design  2026-06-30  complete  complete, never distilled
 ```
 
 With nothing waiting it prints `lore distill-queue — nothing waiting` and exits 0. When a vault was
-not fully read it prints one `lore:` line naming the vault and exits 1, because a partial queue read
-as whole would let the sweep skip a spec. A record name that is not a valid record id is printed as
+not fully read it prints one `lore:` line and exits 1, because a partial queue read as whole would
+let the sweep skip a spec. The line names the vault and the way on:
+
+```
+lore: vault scratch could not be read, so the distill queue is refused rather than built partial; repair or remove the vault to sweep again, or distill one spec by name with /craft:distill spec/<name>
+```
+
+Every successful run's first line starts with `lore distill-queue — `. A caller treats any non-zero
+exit, and any output whose first line does not start that way (an older lore without this command,
+a crash), as a refusal — never as an empty queue. A record name that is not a valid record id is printed as
 `<vault>/spec/ (a record whose name is not a valid record id)` and is never echoed; the sweep
 cannot act on it, and the line says so.
 
@@ -88,7 +103,7 @@ distill-queue — no findings.
 When some specs are deferred, the heading says so even with no findings:
 
 ```
-distill-queue — no findings (1 deferred: no linked task; distill each with /craft:distill spec/<name>).
+distill-queue — no findings (1 deferred: no linked task; list them with lore distill-queue and distill each with /craft:distill spec/<name>).
 ```
 
 ## State — one spec waiting to be distilled
@@ -96,17 +111,17 @@ distill-queue — no findings (1 deferred: no linked task; distill each with /cr
 ```
 distill-queue — 1 finding, oldest first
   trailhead/spec/streaming-export  2026-09-02  ready  slice loop complete, not yet distilled
-Act on these with /craft:distill: a sweep takes every spec listed; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
+Act on these with /craft:distill: a sweep takes every waiting spec, including any not shown; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
 ```
 
 ## State — more specs waiting than the per-check cap
 
 ```
-distill-queue — 31 findings, oldest first (4 deferred: no linked task; distill each with /craft:distill spec/<name>)
+distill-queue — 31 findings, oldest first (4 deferred: no linked task; list them with lore distill-queue and distill each with /craft:distill spec/<name>)
   default/spec/import-notes-from-old-wiki  2025-01-14  complete  complete, never distilled
   …  (20 lines)
   11 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
-Act on these with /craft:distill: a sweep takes every spec listed; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
+Act on these with /craft:distill: a sweep takes every waiting spec, including any not shown; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
 ```
 
 ## State — the check fails, such as an anchoring ADR that cannot be read
