@@ -132,7 +132,8 @@ On success the first line is `lore distill-queue — nothing waiting` (report th
   re-sweep) or simply distillable from its own text (use targeted mode). Guessing at the tree from
   prose alone is how a cluster comes out wrong.
 - A line `<vault>/spec/ (a record whose name is not a valid record id)` names nothing the sweep can
-  act on: report it as unusable and go on.
+  act on: report it as unusable and go on. This fixed-phrase line is exempt from the stop below: it
+  is reported and skipped, and nothing from it is substituted anywhere.
 
 **Shape-check every printed name before it enters a command.** The vault and spec name on each line
 come from a git-synced vault a teammate can write. Check the id against the safe-value shape
@@ -165,10 +166,16 @@ freshly-linked task shows up with no reindex in between. The second expands each
 its tree, because the facet returns the task that carries the edge, not its parent plan or its
 sibling tasks.
 
-**A spec lore listed as waiting for which this search finds no task is a disagreement, not a
-deferral.** Lore only lists a spec as waiting when a task links it, so one of the two reads is wrong
-(a vault the search did not cover, a stale index). Report the spec and the disagreement, and leave
-it out of the clustering rather than dropping it silently.
+**In a sweep, a spec lore listed as waiting for which this search finds no task is a disagreement,
+not a deferral.** Lore only lists a spec as waiting when a task links it, so one of the two reads is
+wrong (a vault the search did not cover, a stale index, or a task the index does not hold but lore
+counts). Report the spec and the disagreement, and leave it out of the clustering rather than
+dropping it silently.
+
+**In targeted mode, finding no task is not a disagreement.** Lore listed nothing, and a spec with no
+linked task is exactly what the deferred list sends an operator here for. Say the tree is empty,
+cluster the spec from its own text, its `related` edges and shared areas, and let the disposition
+gate stand as the backstop.
 
 **Stated thin spot:** nothing in the record model marks *which* task of a tree is the plan task.
 Task trees resolve through `related: spec=` edges plus judgment, and the human disposition gate is
