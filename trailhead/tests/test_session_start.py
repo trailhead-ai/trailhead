@@ -3215,7 +3215,10 @@ def _sandbox_start_decision(probe, rendered, home=None):
     if probe[0] != 0:
         return "skip", f"the sandbox cannot start on this host (rc={probe[0]}): {_scrubbed_tail(probe[1], home)}"
     if rendered[0] != 0:
-        return "fail", f"the sandbox failed to start with the ritual's rendered settings (rc={rendered[0]}): {_scrubbed_tail(rendered[1], home)}"
+        return "fail", (
+            f"the sandbox failed to start with the ritual's rendered settings (rc={rendered[0]}): "
+            f"{_scrubbed_tail(rendered[1], home)}"
+        )
     return "run", ""
 
 
