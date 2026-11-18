@@ -125,6 +125,8 @@ def test_an_edge_to_an_active_superseded_or_dropped_adr_excludes(adr_status):
 
 @pytest.mark.parametrize("records,unreadable,note", [
     ([adr("d", "draft")], (), "its ADR is still draft"),
+    ([adr("d", "bogus")], (), "its ADR has no recognised status"),
+    ([adr("d", None)], (), "its ADR has no recognised status"),
     ([], (), "its ADR could not be found"),
     ([], (("adr", "d"),), "its ADR could not be read"),
 ])

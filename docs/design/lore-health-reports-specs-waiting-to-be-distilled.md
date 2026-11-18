@@ -21,8 +21,8 @@ A candidate is **excluded** when either holds:
   `craft/slice-loop` label is `complete`, which stays in: its annotation records an earlier
   distillation, and the slices shipped since the loop resumed have never been distilled;
 - it carries a `related adr` edge whose ADR is `active`, `superseded` or `dropped`. An edge whose
-  ADR is `draft`, cannot be found, or cannot be read does not exclude it: no decision is on record
-  yet. The ADR is looked up in the spec's own vault first. When that vault does not hold it, every
+  ADR is `draft`, has an unrecognised or missing status, cannot be found, or cannot be read does
+  not exclude it: no decision is on record yet. The ADR is looked up in the spec's own vault first. When that vault does not hold it, every
   other configured vault is looked in, and the edge excludes only when every copy found is
   `active`, `superseded` or `dropped`; copies that disagree keep the spec waiting, so a same-named
   ADR elsewhere cannot silently take a spec out of the queue.
@@ -57,7 +57,8 @@ A finding line names the spec, its last update, its status, and why it is waitin
 
 The label's value is printed only when it is `complete` or `stopped`; any other value is never
 echoed. A spec kept waiting despite a `related adr` edge says why, after the reason: `; its ADR is
-still draft`, `; its ADR could not be found`, or `; its ADR could not be read`.
+still draft`, `; its ADR has no recognised status`, `; its ADR could not be found`, or `; its ADR
+could not be read`.
 
 Every vault name, record id and reason is printed through the same control-character escaping and
 record-id shape rule the rest of `lore health` uses, in both the check and `lore distill-queue`.

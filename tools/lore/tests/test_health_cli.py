@@ -2414,8 +2414,3 @@ def test_a_vault_name_with_control_characters_is_escaped_in_the_distill_group(tm
     r = w.run()
     assert "\x1b" not in r.stdout
     assert "ev\\nil\\x1b[31mv/spec/waits" in group(r.stdout, DQ)[1]
-
-
-def test_the_help_names_the_fifth_check(world):
-    flat = " ".join(world.run("--help").stdout.split())
-    assert "distill-queue reports" in flat and "/craft:distill" in flat

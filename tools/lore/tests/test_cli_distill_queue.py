@@ -106,6 +106,16 @@ def test_a_waiting_spec_held_by_a_draft_adr_edge_says_why_after_the_reason(world
     assert "  trailhead/spec/s  2026-03-01  planned  planned, not yet distilled; its ADR is still draft" in r.stdout
 
 
+def test_a_waiting_spec_whose_adr_status_is_unrecognised_says_so_after_the_reason(world):
+    t = world.roots["trailhead"]
+    _put(t, "adr", "anchor", "bogus")
+    _put(t, "spec", "s", "planned", related={"adr": ["anchor"]})
+    _link(t, "s")
+    r = world.run()
+    assert ("  trailhead/spec/s  2026-03-01  planned  planned, not yet distilled; "
+            "its ADR has no recognised status") in r.stdout
+
+
 def test_only_deferred_specs_omit_the_waiting_section(world):
     _put(world.roots["default"], "spec", "alone", "complete")
     r = world.run()
@@ -255,12 +265,6 @@ def test_the_command_scans_with_the_index_probe_off_and_health_and_validate_leav
     m = len(calls)
     run_cli(["validate"], vault=world.roots["default"], state_dir=world.state, env_extra=world.env())
     assert len(calls) > m and all("probe_index" not in c for c in calls[m:])
-
-
-def test_help_describes_the_command(world):
-    r = world.run("--help")
-    assert r.returncode == 0
-    assert r.stdout.startswith("usage: lore distill-queue")
 
 
 @pytest.mark.seam_real

@@ -42,10 +42,10 @@ ignored.
 the sweep cannot cluster a spec without a task tree, so it is deferred to be distilled
 by target. A task links to a spec when its sidecar's ``related.spec`` names the spec
 verbatim and case-sensitively (no ``spec/`` prefix stripping, no ``@stage``), in any
-vault, at any task status. This is exactly what the search index's ``related-spec:``
-facet over ``kind:task`` answers, down to its one narrowing: the index holds only a
-record with both a ``created-at`` and an ``updated-at``, so a task missing either does
-not link. The task-to-spec map is built once per run.
+vault, at any task status. This is what the search index's ``related-spec:``
+facet over ``kind:task`` answers, except that the index holds only a record the
+indexer can store: one with both a ``created-at`` and an ``updated-at``, no reserved
+label key and no value it cannot bind, so a task failing any of those does not link. The task-to-spec map is built once per run.
 
 **Skipped.** When any vault was not fully read no spec can be judged, because a task
 edge or an ADR's status could sit in the unread part: the result is
@@ -64,6 +64,7 @@ from datetime import datetime, timezone
 from typing import ClassVar
 
 from ..record.guards import FROZEN_STATUSES
+from ..record.model import STATUS_VOCAB
 from . import references
 from .model import ScannedRecord, VaultScan, parse_timestamp, status
 
@@ -75,8 +76,10 @@ CANDIDATE_STATUSES = ("planned", "complete")
 READY = "ready"
 
 ADR_DECIDED = FROZEN_STATUSES["adr"]
+ADR_STATUSES = frozenset(STATUS_VOCAB["adr"])
 
 NOTE_DRAFT = "its ADR is still draft"
+NOTE_UNRECOGNISED = "its ADR has no recognised status"
 NOTE_NOT_FOUND = "its ADR could not be found"
 NOTE_UNREADABLE = "its ADR could not be read"
 
@@ -186,6 +189,8 @@ class _Adrs:
             return False, NOTE_NOT_FOUND
         if all(s in ADR_DECIDED for s in found):
             return True, ""
+        if any(s not in ADR_STATUSES for s in found):
+            return False, NOTE_UNRECOGNISED
         return False, NOTE_DRAFT
 
 
