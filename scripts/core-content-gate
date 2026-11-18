@@ -1,0 +1,533 @@
+#!/usr/bin/env python3
+"""core-content-gate — refuse core-vault content that is not fit to publish.
+
+One run does three checks under one exit code.
+
+1. Content scrub. Scans every file under `<repo-root>/core-vault/`, sidecars included, for five
+classes: `email`, `commit-id`, `home-path`, `credential`, and `deny-list`.
+A finding prints as `<relpath>:<lineno>:<class>` (a deny-list finding as
+`deny-list#<line number in the list>`) and never carries the matched text, a
+deny-list line, or a regex error message, on stdout or stderr. A path
+component that itself trips a class prints as `<redacted-name>`; a line longer than
+`MAX_LINE_LENGTH` is a `line-too-long` finding and is not scanned further; a path whose joined form trips
+the deny-list prints as `<redacted-path>`.
+
+2. Validation. Runs this checkout's `lore validate --path <repo-root>/core-vault` with an
+environment fenced away from the caller's lore config and vaults. It passes when the
+validator reports nothing, or when the only finding is the vault-level `no-records` (it
+prints `ok: core vault holds no records yet`, unless some `<n>.md` sits beside `<n>.json` anywhere
+under core-vault). On every run a `<n>.md` beside `<n>.json` not at exactly `<kind>/<n>` depth is an
+`unvalidated-record` finding). Every other finding fails and is relayed
+as `<vault> <record>: <code>` and never with the validator's free-text detail, which can carry
+sidecar values. A `<n>.md` beside `<n>.json` at `<kind>/<n>` depth whose id does not fit the
+record-id grammar is an `unvalidated-record` finding. A validator that exits other than 0 or 1, cannot be run,
+or prints a line this parser does not recognise is exit 2.
+
+3. Pointer check. Scans the text files under `<repo-root>/tools/*/plugins/*` for
+`trailhead core show <token>`, any whitespace (newlines included) allowed between the words; the
+finding's line is the one where the pointer starts. A file with a text extension that is not strict
+UTF-8 is exit 2; other undecodable files are skipped. Symlinked tool, plugins and plugin folders
+are not walked. Surrounding quotes, backticks and brackets are stripped; a token
+with no `/` (prose) or one starting `<`, `$` or `{` (a placeholder) is skipped. A `/`-bearing token the
+`trailhead core show` grammar refuses is `<relpath>:<lineno>:pointer-invalid` (the token is not
+printed). A pointer whose `core-vault/<kind>/<name>.md` and `.json` are not both
+regular files that resolve inside `core-vault/` is `<relpath>:<lineno>:pointer-missing:<id>`.
+Prints `pointers: <N> checked in <M> files`, M being the text files scanned. A repo root with no
+`tools/*/plugins/*` folder, or one of those levels that cannot be listed, is exit 2.
+
+`--repo-root` selects only the content to check. `capture_scan` is always
+imported from this script's own checkout.
+
+Usage:
+  scripts/core-content-gate [--repo-root DIR] [--denylist PATH]
+
+`--denylist` defaults to `$CORE_CONTENT_DENYLIST`. With none, the gate says so
+and runs its generic classes only.
+
+Exit codes:
+  0  clean
+  1  one or more findings (a symlink anywhere in core-vault is a `symlink`
+     finding at line 0; it is never followed)
+  2  the gate could not certify the content: no core-vault folder, a validator that
+     cannot be trusted (see above), a deny-list
+     that is missing, unreadable, empty of patterns or holds an invalid regex,
+     a file that does not decode as strict UTF-8 (a binary or UTF-16 file), or
+     any unexpected exception. Every such line starts `gate could not run:` and
+     ends with what to do next. Exit 2 never means "fine".
+
+Under `GITHUB_ACTIONS` each finding is also emitted as a `::error` annotation,
+and a run without a deny-list emits a `::warning::` and a `$GITHUB_STEP_SUMMARY`
+line.
+
+Other checks extend this script by calling `scrub_line` / `scrub_text` (class
+hits, never matched text) and adding to one `Findings` accumulator, so one exit
+code covers them all.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import stat
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+_CHECKOUT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_CHECKOUT / "tools" / "craft" / "plugins" / "craft" / "scripts"))
+
+try:
+    import capture_scan  # noqa: E402
+except Exception as _exc:  # noqa: BLE001 - reported as exit 2 by main(), never a traceback
+    capture_scan = None
+    _IMPORT_FAILURE: str | None = type(_exc).__name__
+else:
+    _IMPORT_FAILURE = None
+
+CORE_DIR = "core-vault"
+REDACTED_NAME = "<redacted-name>"
+REDACTED_PATH = "<redacted-path>"
+MAX_LINE_LENGTH = 10_000
+NO_DENYLIST_NOTICE = "no deny-list supplied; generic patterns only"
+_COULD_NOT_RUN = "gate could not run:"
+
+_EMAIL = re.compile(r"(?<![A-Za-z0-9._%+\-])[A-Za-z0-9._%+\-]+@[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}")
+_COMMIT_ID = re.compile(
+    r"(?<![0-9A-Za-z_])(?=[0-9a-fA-F]*[0-9])(?=[0-9a-fA-F]*[a-fA-F])[0-9a-fA-F]{7,40}(?![0-9A-Za-z_])"
+)
+_HOME_PATH = re.compile(
+    r"(?<![\w.~\-])(?:/home/[^/\s]+|/Users/[^/\s]+|/root(?![\w\-])|[A-Za-z]:[\\/]Users[\\/][^\\/\s]+)"
+)
+
+
+_LORE_WRAPPER = Path("tools") / "lore" / "plugins" / "lore" / "bin" / "lore"
+LORE_TIMEOUT_SECONDS = 120
+_NO_RECORDS = "no-records"
+NO_RECORDS_OK = "ok: core vault holds no records yet"
+_VALIDATOR_SUMMARY = re.compile(r"lore: validated \d+ records? in \d+ vaults?: \d+ findings?(?: \(.*\))?")
+_VALIDATOR_FINDING = re.compile(r"(?P<vault>\S+)(?: (?P<record>\S+))?: (?P<code>[a-z][a-z0-9-]*): .*")
+# Mirrors `_RECORD_ID` in trailhead/core_vault.py; a test holds the two in agreement.
+_RECORD_ID = re.compile(r"[a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*")
+_POINTER = re.compile(r"trailhead\s+core\s+show\s+(?P<token>\S+)")
+_TEXT_SUFFIXES = frozenset(
+    {".md", ".json", ".py", ".sh", ".bash", ".zsh", ".toml", ".yaml", ".yml", ".txt", ".cfg", ".ini", ".rst",
+     ".js", ".mjs", ".ts", ".html", ".css", ".xml", ".csv", ".jsonl"}
+)
+_TRAILING_PUNCTUATION = ".,;:!?)]}'\"`*"
+_LEADING_PUNCTUATION = "([`'\"*"
+_NOT_AN_ID_START = ("<", "$", "{")
+
+
+class GateCannotRun(Exception):
+    """The gate cannot certify the content; the message is `cause; remedy`."""
+
+
+class Findings:
+    """Every check adds here; `exit_code` is the one verdict."""
+
+    def __init__(self) -> None:
+        self.items: list[tuple[str, int, str]] = []
+        self.relayed: list[str] = []
+
+    def add(self, relpath: str, lineno: int, label: str) -> None:
+        self.items.append((relpath, lineno, label))
+
+    def add_line(self, line: str) -> None:
+        self.relayed.append(line)
+
+    def exit_code(self) -> int:
+        return 1 if self.items or self.relayed else 0
+
+
+def scrub_line(
+    line: str, *, json_stream: bool = False, denylist: list[tuple[int, re.Pattern]] | None = None
+) -> list[str]:
+    """Class labels the line trips, each once, never the matched text."""
+    return [label for _, label in scrub_text(line, json_stream=json_stream, denylist=denylist)]
+
+
+def _numbered_lines(text: str) -> list[tuple[int, str]]:
+    """(lineno, line) split on `\\n` only, as editors count, dropping one trailing `\\r` per line."""
+    return [(n, line[:-1] if line.endswith("\r") else line) for n, line in enumerate(text.split("\n"), start=1)]
+
+
+def scrub_text(
+    text: str, *, json_stream: bool = False, denylist: list[tuple[int, re.Pattern]] | None = None
+) -> list[tuple[int, str]]:
+    """(lineno, label) pairs for `text`. Matched text is dropped here."""
+    hits: list[tuple[int, str]] = []
+    for lineno, line in _numbered_lines(text):
+        if len(line) > MAX_LINE_LENGTH:
+            hits.append((lineno, "line-too-long"))
+            continue
+        classes: list[str] = []
+        if _EMAIL.search(line):
+            classes.append("email")
+        if _COMMIT_ID.search(line):
+            classes.append("commit-id")
+        if _HOME_PATH.search(line):
+            classes.append("home-path")
+        for finding in capture_scan.scan_text(line, json_stream=json_stream):
+            if capture_scan.is_credential_class(finding.cls) and "credential" not in classes:
+                classes.append("credential")
+        hits.extend((lineno, label) for label in classes)
+        for number, pattern in denylist or []:
+            if pattern.search(line):
+                hits.append((lineno, f"deny-list#{number}"))
+    return hits
+
+
+def load_denylist(path: Path) -> list[tuple[int, re.Pattern]]:
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise GateCannotRun(
+            "the deny-list file does not exist; fix the --denylist path or $CORE_CONTENT_DENYLIST"
+        ) from None
+    except (OSError, UnicodeDecodeError):
+        raise GateCannotRun("the deny-list file cannot be read as UTF-8; check its permissions and encoding") from None
+    patterns: list[tuple[int, re.Pattern]] = []
+    for number, line in enumerate(raw.splitlines(), start=1):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        try:
+            patterns.append((number, re.compile(stripped, re.IGNORECASE)))
+        except re.error:
+            raise GateCannotRun(f"the deny-list holds an invalid regex at line {number}; fix that line") from None
+    if not patterns:
+        raise GateCannotRun(
+            "the deny-list holds no patterns (only comments or blank lines); add patterns or drop the deny-list"
+        )
+    return patterns
+
+
+def _redact(text: str, denylist: list[tuple[int, re.Pattern]]) -> str:
+    return REDACTED_NAME if scrub_line(text, denylist=denylist) else text
+
+
+def _home_shaped(relparts: tuple[str, ...]) -> bool:
+    """A `home/<name>`, `Users/<name>` or `root` folder step anywhere in the path, as a leading `/` would read it."""
+    parts = relparts[1:] if relparts and relparts[0] == CORE_DIR else relparts
+    return any(_HOME_PATH.match("/" + "/".join(parts[i:])) for i in range(len(parts)))
+
+
+def _display(relparts: tuple[str, ...], denylist: list[tuple[int, re.Pattern]]) -> str:
+    shown = "/".join(_redact(part, denylist) for part in relparts)
+    joined = "/".join(relparts)
+    if REDACTED_NAME in shown or not (
+        _home_shaped(relparts) or any(pattern.search(joined) for _, pattern in denylist)
+    ):
+        return shown
+    if relparts[0] != CORE_DIR:
+        return REDACTED_PATH
+    return f"{CORE_DIR}/{REDACTED_PATH}"
+
+
+_CONTROL = re.compile("[\x00-\x1f\x7f-\x9f]")
+
+
+def _one_line(text: str) -> str:
+    return _CONTROL.sub(lambda m: f"%{ord(m[0]):02X}", text)
+
+
+def _escape_data(text: str) -> str:
+    return _one_line(text.replace("%", "%25"))
+
+
+def _escape_property(text: str) -> str:
+    return _escape_data(text).replace(":", "%3A").replace(",", "%2C")
+
+
+def _decode(path: Path, shown: str) -> str:
+    shown = _one_line(shown)
+    try:
+        text = path.read_bytes().decode("utf-8")
+    except UnicodeDecodeError:
+        raise GateCannotRun(
+            f"{shown} is not strict UTF-8 text (a binary or UTF-16 file); "
+            "remove it from core-vault or re-save it as UTF-8"
+        ) from None
+    if "\x00" in text:
+        raise GateCannotRun(f"{shown} holds NUL bytes (a binary file); remove it from core-vault")
+    return text
+
+
+def _raise(exc: OSError) -> None:
+    raise exc
+
+
+def check_core_vault(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    core = root / CORE_DIR
+    if core.is_symlink():
+        findings.add(CORE_DIR, 0, "symlink")
+        return
+    if not core.is_dir():
+        raise GateCannotRun(
+            f"{CORE_DIR}/ does not exist under the repo root; pass --repo-root pointing at a checkout that has it"
+        )
+
+    for dirpath, dirnames, filenames in os.walk(core, onerror=_raise):
+        here = Path(dirpath).relative_to(root)
+        dirnames.sort()
+        for name in sorted(dirnames + filenames):
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                findings.add(_display((*here.parts, name), denylist), 0, "symlink")
+            labels = scrub_line(name, denylist=denylist)
+            if _home_shaped((*here.parts, name)) and not _home_shaped(here.parts):
+                labels.append("home-path")
+            for label in dict.fromkeys(labels):
+                findings.add(_display((*here.parts, name), denylist), 0, label)
+        dirnames[:] = [d for d in dirnames if not (Path(dirpath) / d).is_symlink()]
+        for name in sorted(filenames):
+            full = Path(dirpath) / name
+            if full.is_symlink():
+                continue
+            shown = _display((*here.parts, name), denylist)
+            text = _decode(full, shown)
+            for lineno, label in scrub_text(text, json_stream=full.suffix == ".json", denylist=denylist):
+                findings.add(shown, lineno, label)
+
+
+def _fenced_env(home: str) -> dict[str, str]:
+    env = {k: os.environ[k] for k in ("PATH", "LANG", "LC_ALL", "LC_CTYPE") if k in os.environ}
+    env.update(
+        HOME=home,
+        XDG_CONFIG_HOME=f"{home}/config",
+        XDG_STATE_HOME=f"{home}/state",
+        XDG_CACHE_HOME=f"{home}/cache",
+        XDG_DATA_HOME=f"{home}/data",
+        LORE_PUBLISH_DISABLE="1",
+    )
+    return env
+
+
+def _run_validator(root: Path) -> tuple[int, str, str]:
+    wrapper = _CHECKOUT / _LORE_WRAPPER
+    if not wrapper.is_file():
+        raise GateCannotRun(f"{_LORE_WRAPPER} is missing from this checkout; run the gate from a full checkout")
+    with tempfile.TemporaryDirectory(prefix="core-gate-lore-") as home:
+        try:
+            done = subprocess.run(
+                ["bash", str(wrapper), "validate", "--path", str(root / CORE_DIR)],
+                capture_output=True,
+                env=_fenced_env(home),
+                cwd=home,
+                timeout=LORE_TIMEOUT_SECONDS,
+            )
+        except (OSError, subprocess.SubprocessError):
+            raise GateCannotRun("lore validate could not be run; check that bash and python3 are available") from None
+    try:
+        return done.returncode, done.stdout.decode("utf-8"), done.stderr.decode("utf-8")
+    except UnicodeDecodeError:
+        raise GateCannotRun(
+            "lore validate printed non-UTF-8 output; run `lore validate --path core-vault` by hand"
+        ) from None
+
+
+def _cut_line(vault: str, record: str | None, code: str, denylist: list[tuple[int, re.Pattern]]) -> str:
+    who = _redact(vault, denylist) + (f" {_redact(record, denylist)}" if record else "")
+    return f"{who}: {code}"
+
+
+def _record_shaped_pairs(root: Path) -> list[tuple[str, ...]]:
+    """Every `<n>.md` with a `<n>.json` beside it under core-vault (README.md excepted), as path parts."""
+    core = root / CORE_DIR
+    found: list[tuple[str, ...]] = []
+    for dirpath, dirnames, filenames in os.walk(core, onerror=_raise):
+        dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) / d).is_symlink())
+        here = Path(dirpath).relative_to(core).parts
+        names = set(filenames)
+        for name in sorted(names):
+            stem, suffix = os.path.splitext(name)
+            if suffix == ".md" and name != "README.md" and f"{stem}.json" in names:
+                found.append((*here, name))
+    return found
+
+
+def _is_validated_shape(rel: tuple[str, ...]) -> bool:
+    """`<kind>/<name>.md` at depth two whose id fits the record-id grammar the validator is trusted to cover."""
+    return len(rel) == 2 and _RECORD_ID.fullmatch(f"{rel[0]}/{os.path.splitext(rel[1])[0]}") is not None
+
+
+def check_validation(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    returncode, stdout, stderr = _run_validator(root)
+    if returncode not in (0, 1):
+        raise GateCannotRun(
+            f"lore validate exited {returncode}; run `lore validate --path core-vault` by hand to see why"
+        )
+    parsed: list[tuple[str, str | None, str]] = []
+    for line in (stdout + stderr).splitlines():
+        if not line.strip() or _VALIDATOR_SUMMARY.fullmatch(line):
+            continue
+        found = _VALIDATOR_FINDING.fullmatch(line) if line in stdout.splitlines() else None
+        if found is None:
+            raise GateCannotRun(
+                "lore validate printed a line this gate does not recognise; "
+                "update the parser in scripts/core-content-gate or run `lore validate --path core-vault` by hand"
+            )
+        parsed.append((found["vault"], found["record"], found["code"]))
+    if (returncode == 0) != (not parsed):
+        raise GateCannotRun(
+            f"lore validate exited {returncode} but printed {len(parsed)} findings; "
+            "run `lore validate --path core-vault` by hand"
+        )
+    no_records_only = bool(parsed) and all(code == _NO_RECORDS and record is None for _, record, code in parsed)
+    pairs = _record_shaped_pairs(root)
+    unvalidated = pairs if no_records_only else [rel for rel in pairs if not _is_validated_shape(rel)]
+    for rel in unvalidated:
+        findings.add(_display((CORE_DIR, *rel), denylist), 0, "unvalidated-record")
+    if no_records_only:
+        if not unvalidated:
+            print(NO_RECORDS_OK)
+        return
+    for vault, record, code in parsed:
+        findings.add_line(_cut_line(vault, record, code, denylist))
+
+
+def _is_regular_inside(path: Path, anchor: Path) -> bool:
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        path.resolve(strict=True).relative_to(anchor)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
+def _subdirs(path: Path) -> list[Path]:
+    try:
+        if path.is_symlink():
+            return []
+        with os.scandir(path) as entries:
+            return sorted(Path(entry.path) for entry in entries if entry.is_dir(follow_symlinks=False))
+    except (FileNotFoundError, NotADirectoryError):
+        return []
+    except OSError as exc:
+        raise GateCannotRun(
+            f"{exc.strerror or type(exc).__name__} listing a tools/ folder; check permissions on tools/*/plugins"
+        ) from None
+
+
+def _plugin_dirs(root: Path) -> list[Path]:
+    plugins = [
+        plugin
+        for tool in _subdirs(root / "tools")
+        for plugin in _subdirs(tool / "plugins")
+    ]
+    if not plugins:
+        raise GateCannotRun(
+            "no tools/*/plugins/* folder under the repo root; pass --repo-root pointing at a checkout that ships plugins"
+        )
+    return plugins
+
+
+def _pointer_files(root: Path):
+    for plugin in _plugin_dirs(root):
+        for dirpath, dirnames, filenames in os.walk(plugin, onerror=_raise):
+            dirnames[:] = sorted(d for d in dirnames if not (Path(dirpath) / d).is_symlink())
+            for name in sorted(filenames):
+                full = Path(dirpath) / name
+                if not full.is_symlink():
+                    yield full
+
+
+def check_pointers(root: Path, denylist: list[tuple[int, re.Pattern]], findings: Findings) -> None:
+    anchor = root.resolve() / CORE_DIR
+    checked = scanned = 0
+    for path in _pointer_files(root):
+        shown = _display(path.relative_to(root).parts, denylist)
+        try:
+            text = path.read_bytes().decode("utf-8")
+            readable = "\x00" not in text
+        except UnicodeDecodeError:
+            readable = False
+        if not readable:
+            if path.suffix.lower() in _TEXT_SUFFIXES:
+                raise GateCannotRun(
+                    f"{_one_line(shown)} is a text file that is not strict UTF-8 (or holds NUL bytes), so its pointers "
+                    "cannot be checked; re-save it as UTF-8"
+                )
+            continue
+        scanned += 1
+        for match in _POINTER.finditer(text):
+            lineno = text.count("\n", 0, match.start()) + 1
+            record_id = match["token"].lstrip(_LEADING_PUNCTUATION).rstrip(_TRAILING_PUNCTUATION)
+            if record_id.startswith(_NOT_AN_ID_START) or "/" not in record_id:
+                continue
+            checked += 1
+            if _RECORD_ID.fullmatch(record_id) is None:
+                findings.add(shown, lineno, "pointer-invalid")
+                continue
+            if all(_is_regular_inside(anchor / f"{record_id}{suffix}", anchor) for suffix in (".md", ".json")):
+                continue
+            findings.add(shown, lineno, f"pointer-missing:{_redact(record_id, denylist)}")
+    print(f"pointers: {checked} checked in {scanned} files")
+
+
+def _emit(findings: Findings, github: bool) -> None:
+    for line in findings.relayed:
+        print(_one_line(line))
+        if github:
+            print(f"::error file={CORE_DIR}::{_escape_data(line)}")
+    for relpath, lineno, label in findings.items:
+        print(f"{_one_line(relpath)}:{lineno}:{label}")
+        if github:
+            print(f"::error file={_escape_property(relpath)},line={lineno}::{_escape_data(label)}")
+
+
+def run(root: Path, denylist_path: str | None, github: bool, summary: str | None) -> int:
+    findings = Findings()
+    denylist: list[tuple[int, re.Pattern]] = []
+    if denylist_path:
+        denylist = load_denylist(Path(denylist_path))
+        print(f"deny-list: {len(denylist)} patterns loaded")
+    else:
+        print(NO_DENYLIST_NOTICE)
+        if github:
+            print(f"::warning::{NO_DENYLIST_NOTICE}; set the CORE_CONTENT_DENYLIST secret to add the private terms")
+            if summary:
+                with open(summary, "a", encoding="utf-8") as fh:
+                    fh.write(f"{NO_DENYLIST_NOTICE}\n")
+    check_core_vault(root, denylist, findings)
+    if not (root / CORE_DIR).is_symlink():
+        check_validation(root, denylist, findings)
+    check_pointers(root, denylist, findings)
+    _emit(findings, github)
+    return findings.exit_code()
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Content gate for the core-vault folder.")
+    parser.add_argument("--repo-root", default=str(_CHECKOUT), help="repo whose core-vault/ is checked")
+    parser.add_argument("--denylist", default=os.environ.get("CORE_CONTENT_DENYLIST") or None)
+    args = parser.parse_args(argv)
+    try:
+        if _IMPORT_FAILURE:
+            raise GateCannotRun(
+                f"capture_scan could not be imported ({_IMPORT_FAILURE}); "
+                "run the gate from a full checkout that has tools/craft/plugins/craft/scripts"
+            )
+        return run(
+            Path(args.repo_root),
+            args.denylist,
+            bool(os.environ.get("GITHUB_ACTIONS")),
+            os.environ.get("GITHUB_STEP_SUMMARY"),
+        )
+    except GateCannotRun as exc:
+        print(f"{_COULD_NOT_RUN} {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - any failure to scan is "could not certify", never a finding
+        cause = exc.strerror if isinstance(exc, OSError) and exc.strerror else type(exc).__name__
+        print(
+            f"{_COULD_NOT_RUN} unexpected {type(exc).__name__} ({cause}); "
+            "re-run, and if it persists check permissions on core-vault and the shipped plugin folders",
+            file=sys.stderr,
+        )
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

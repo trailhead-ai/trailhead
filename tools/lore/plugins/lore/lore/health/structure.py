@@ -3,7 +3,8 @@
 Findings come from three places: the scan's own unreadable records, the
 ``model.validate`` errors of each readable sidecar (plus a kind that differs
 from its directory), and a confined walk for orphan artifacts the scan skips
-silently. The walk uses ``scandir`` and realpath only and never opens or reads a
+silently, plus top-level folders that are not kinds yet directly hold a record
+pair. The walk uses ``scandir`` and realpath only and never opens or reads a
 file. A symlinked orphan whose realpath leaves the vault is an escaping skip,
 returned as a number and never as a path; one resolving inside the vault is the
 orphan defect it is.
@@ -24,6 +25,7 @@ CODE_SIDECAR_MISSING = "sidecar-missing"
 CODE_BODY_MISSING = "body-missing"
 CODE_KIND_MISMATCH = "kind-mismatch"
 CODE_INVALID_SIDECAR = "invalid-sidecar"
+CODE_MISFILED_FOLDER = "misfiled-folder"
 
 
 @dataclass(frozen=True)
@@ -89,6 +91,51 @@ def _orphans(vault: str, root: Path, reported: frozenset[tuple[str, str]] = froz
     return findings, skips
 
 
+def _one_edit_apart(a: str, b: str) -> bool:
+    if a == b or abs(len(a) - len(b)) > 1:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b)) == 1
+    short, long_ = sorted((a, b), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+# A kind plus a trailing ``s`` is one edit away, so plurals are covered.
+def _suggest_kind(name: str) -> str | None:
+    candidates = sorted(k for k in record_model.KINDS if _one_edit_apart(name, k))
+    return candidates[0] if candidates else None
+
+
+def _has_direct_pair(folder: str) -> bool:
+    try:
+        with os.scandir(folder) as it:
+            regular = {e.name for e in it if e.is_file(follow_symlinks=False)}
+    except OSError:
+        return False
+    return any(n.endswith(".md") and n[:-3] + ".json" in regular for n in regular)
+
+
+def _misfiled_folders(vault: str, root: Path) -> list[StructuralFinding]:
+    """One finding per direct child folder of *root* that is not a kind but directly holds a record pair.
+
+    A symlinked folder is never descended, so nothing outside the vault is read.
+    """
+    findings: list[StructuralFinding] = []
+    with os.scandir(root) as it:
+        entries = sorted(it, key=lambda e: e.name)
+    for entry in entries:
+        if entry.name in record_model.KINDS or not entry.is_dir(follow_symlinks=False):
+            continue
+        if not _has_direct_pair(entry.path):
+            continue
+        detail = f"{entry.name} holds records but is not a kind folder"
+        kind = _suggest_kind(entry.name)
+        if kind is not None:
+            detail += f"; did you mean {kind}?"
+        findings.append(StructuralFinding(vault, "", CODE_MISFILED_FOLDER, detail))
+    return findings
+
+
 def check_structure(scan: VaultScan, root) -> tuple[list[StructuralFinding], int]:
     """Return ``(findings, escaping_skips)`` for one scanned vault rooted at *root*.
 
@@ -114,5 +161,6 @@ def check_structure(scan: VaultScan, root) -> tuple[list[StructuralFinding], int
             findings.append(StructuralFinding(scan.vault, record_id, CODE_INVALID_SIDECAR, error))
     orphan_findings, skips = _orphans(scan.vault, Path(root), frozenset((u.kind, u.name) for u in scan.unreadable))
     findings.extend(orphan_findings)
+    findings.extend(_misfiled_folders(scan.vault, Path(root)))
     findings.sort(key=lambda f: (f.vault, f.record_id, f.code, f.detail))
     return findings, skips
