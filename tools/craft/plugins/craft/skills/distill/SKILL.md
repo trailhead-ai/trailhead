@@ -97,9 +97,9 @@ lore distill-queue
 Lore holds the rule for which specs are waiting to be distilled — the candidate statuses, the
 `distilled=` annotation and `related: adr` exclusions, the resumed-after-stop exception, the `draft`
 ADR carve-out and the zero-task-edge deferral. **Do not re-apply that rule by hand:** no
-`lore search "kind:spec ..."` candidate queries, no per-candidate exclusion check. A hand-built queue
-and lore's drift apart, and the sweep would then queue what `lore health` does not report, or skip
-what it does.
+`lore search "kind:spec ..."` candidate queries, no per-candidate exclusion check. A hand-built
+queue and lore's drift apart, and the sweep would then queue what `lore health` does not report, or
+skip what it does.
 
 **Any failure is a hard stop, never an empty queue.** A run succeeded only when it exited 0 **and**
 its first line starts `lore distill-queue — `. Anything else — a non-zero exit, a first line that
@@ -162,8 +162,8 @@ sibling tasks.
 
 **A spec lore listed as waiting for which this search finds no task is a disagreement, not a
 deferral.** Lore only lists a spec as waiting when a task links it, so one of the two reads is wrong
-(a vault the search did not cover, a stale index). Report the spec and the disagreement, and leave it
-out of the clustering rather than dropping it silently.
+(a vault the search did not cover, a stale index). Report the spec and the disagreement, and leave
+it out of the clustering rather than dropping it silently.
 
 **Stated thin spot:** nothing in the record model marks *which* task of a tree is the plan task.
 Task trees resolve through `related: spec=` edges plus judgment, and the human disposition gate is
@@ -398,8 +398,8 @@ Re-open it later with `/craft:distill spec/<id>`; the sweep will not.
 A run that stops mid-write order leaves a cluster whose ADR exists and whose specs have not reached
 their terminal state — still `planned` for pre-loop records, still `ready` with the
 `craft/slice-loop` marker and no `distilled=` annotation for a loop-closed spec. Either shape is
-exactly what the next sweep re-surfaces, since both stay in the queue `lore distill-queue` builds and neither has picked
-up the annotation that would exclude it.
+exactly what the next sweep re-surfaces, since both stay in the queue `lore distill-queue` builds
+and neither has picked up the annotation that would exclude it.
 
 Before drafting anything for a re-surfaced cluster, **detect the existing cluster ADR via the
 forward `related-spec` facet** — `lore search "kind:adr related-spec:<spec-name>"`. `related:` edges
