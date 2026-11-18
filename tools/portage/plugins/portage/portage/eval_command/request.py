@@ -33,7 +33,7 @@ the case) and ``timeout`` are followed by ``resubmit``. A ``runner-broken`` whos
 is gone also carries a ``cause`` naming the update that restores it, printed as a ``cause:`` line.
 ``eval-command-too-old`` is printed by ``start`` alone, when ``--require-version N`` names a version above
 ``EVAL_COMMAND_VERSION`` (no request is created); it is followed by ``stop and report`` and every reason in
-``STOP_AND_REPORT_REASONS``, the tuple ``next_step_for`` reads, is. ``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists), or by ``wait`` for a
+``STOP_AND_REPORT_REASONS``, the tuple that enumerates the known stop-and-report reasons, is; ``next_step_for`` resubmits only the reasons in ``RESUBMIT_REASONS``, so any reason not in that set, one the module has never heard of included, is ``stop and report``. ``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists), or by ``wait`` for a
 request started from inside the sandbox whose worker is gone.
 """
 
@@ -70,6 +70,7 @@ RUNNER_MISSING_CAUSE = ("the pinned runner binary is gone; put `claude` on PATH,
                         "`trailhead update`")
 STOP_AND_REPORT_REASONS = (RUNNER_BROKEN, COULD_NOT_LEAVE_SANDBOX, EVAL_COMMAND_TOO_OLD, NO_RUNNER,
                            RUNNER_MISSING, COST_CAP, RUNNER_ERROR, RUNS_ERRORED, SANDBOX_UNWRITABLE)
+RESUBMIT_REASONS = (INTERRUPTED, TIMEOUT)
 NEXT_STEPS = (STOP_AND_REPORT, RESUBMIT)
 SHIM_ENV = "PORTAGE_EVAL_SHIM"
 SHIM_NAME = "portage-eval"
@@ -118,7 +119,7 @@ def wait_command(request_id: str) -> str:
 
 
 def next_step_for(reason: str) -> str:
-    return STOP_AND_REPORT if reason in STOP_AND_REPORT_REASONS else RESUBMIT
+    return RESUBMIT if reason in RESUBMIT_REASONS else STOP_AND_REPORT
 
 
 def not_run_case(case: str, runs: int, reason: str, next_step: str | None = None,

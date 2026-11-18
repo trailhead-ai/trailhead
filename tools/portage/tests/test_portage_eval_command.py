@@ -844,6 +844,24 @@ class TestNextStepFor:
         assert request.INTERRUPTED not in request.STOP_AND_REPORT_REASONS
         assert "timeout" not in request.STOP_AND_REPORT_REASONS
 
+    def test_a_reason_nobody_classified_is_followed_by_stop_and_report(self):
+        assert request.next_step_for("some-future-reason") == request.STOP_AND_REPORT
+
+    def test_the_two_reason_sets_are_disjoint(self):
+        assert not set(request.STOP_AND_REPORT_REASONS) & set(request.RESUBMIT_REASONS)
+
+    def test_every_not_run_reason_the_modules_define_is_classified_exactly_once(self):
+        from portage.eval_core import run as core_run
+        slug = re.compile(r"^[a-z]+(-[a-z]+)*\Z")
+        not_reasons = {"STOP_AND_REPORT", "RESUBMIT", "SHIM_NAME"}
+        defined = {v for mod in (core_run, request) for k, v in vars(mod).items()
+                   if k.isupper() and k not in not_reasons and isinstance(v, str) and slug.match(v)}
+        assert request.INTERRUPTED in defined and core_run.TIMEOUT in defined
+        for reason in sorted(defined):
+            count = (request.STOP_AND_REPORT_REASONS.count(reason)
+                     + request.RESUBMIT_REASONS.count(reason))
+            assert count == 1, (reason, count)
+
 
 class TestPinnedShimEndToEnd:
     def _shim(self, ws, tmp_path):
