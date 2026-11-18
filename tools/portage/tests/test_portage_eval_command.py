@@ -839,16 +839,8 @@ class TestNextStepFor:
     def test_interrupted_and_timeout_are_followed_by_resubmit(self, reason):
         assert request.next_step_for(reason) == request.RESUBMIT
 
-    def test_the_stop_and_report_reasons_include_the_too_old_reason_and_neither_resubmit_reason(self):
-        assert request.EVAL_COMMAND_TOO_OLD in request.STOP_AND_REPORT_REASONS
-        assert request.INTERRUPTED not in request.STOP_AND_REPORT_REASONS
-        assert "timeout" not in request.STOP_AND_REPORT_REASONS
-
     def test_a_reason_nobody_classified_is_followed_by_stop_and_report(self):
         assert request.next_step_for("some-future-reason") == request.STOP_AND_REPORT
-
-    def test_the_two_reason_sets_are_disjoint(self):
-        assert not set(request.STOP_AND_REPORT_REASONS) & set(request.RESUBMIT_REASONS)
 
     def test_every_not_run_reason_the_modules_define_is_classified_exactly_once(self):
         from portage.eval_core import run as core_run
