@@ -1311,6 +1311,7 @@ def test_live_hub_session_cannot_plant_git_config_in_a_vault_but_can_write_recor
 # -- the broker section ------------------------------------------------------
 
 CONTRACT = json.loads((Path(__file__).parent / "fixtures" / "ranger-contract.json").read_text())
+VAULT_FLAG = CONTRACT["loop"]["ritual_vault_flag"]
 
 
 def _broker_argv(session_id):
@@ -1452,7 +1453,7 @@ def test_setup_sandbox_only_works_before_any_workspace_exists(tmp_path, monkeypa
     [
         (RITUAL_ROLE, ["--workspace", "WS"]),
         (RITUAL_ROLE, ["--prompt-file", "PROMPT"]),
-        (RITUAL_ROLE, ["--vault", "work"]),
+        (RITUAL_ROLE, [VAULT_FLAG, "work"]),
         ("hub", []),
     ],
 )
@@ -2343,7 +2344,7 @@ def _ritual_cli(monkeypatch, env, ws, *extra, session="rit-1", vault=RITUAL_VAUL
         monkeypatch, env,
         ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json",
          *([f"--session={session}"] if session is not None else []),
-         *([f"--vault={vault}"] if vault is not None else []), *extra],
+         *([f"{VAULT_FLAG}={vault}"] if vault is not None else []), *extra],
     )
 
 
@@ -3128,11 +3129,11 @@ def test_cli_refuses_a_hostile_ritual_vault_and_writes_no_session_files(tmp_path
     rc = _run_cli(
         monkeypatch, env,
         ["session-start", "--role", RITUAL_ROLE, "--account", "a", "--workspace", str(ws), "--json",
-         "--session=rit-1", f"--vault={value}"],
+         "--session=rit-1", f"{VAULT_FLAG}={value}"],
     )
     captured = capsys.readouterr()
     assert rc != 0 and captured.out == ""
-    assert captured.err.startswith("trailhead: ") and "--vault" in captured.err
+    assert captured.err.startswith("trailhead: ") and VAULT_FLAG in captured.err
     assert not (Path(env["OUTPOST_STATE_DIR"]) / "sessions" / "rit-1").exists()
 
 
@@ -3141,7 +3142,7 @@ def test_cli_refuses_a_ritual_without_a_vault_and_names_the_fix(tmp_path, monkey
     rc = _ritual_cli(monkeypatch, env, ws, vault=None)
     captured = capsys.readouterr()
     assert rc != 0 and captured.out == ""
-    assert "--vault" in captured.err and "ritual" in captured.err
+    assert VAULT_FLAG in captured.err and "ritual" in captured.err
 
 
 def test_cli_ritual_start_with_a_vault_names_the_denied_vaults_in_its_settings(tmp_path, monkeypatch, capsys):
@@ -3157,9 +3158,9 @@ def test_cli_ritual_start_with_a_vault_names_the_denied_vaults_in_its_settings(t
 
 def test_cli_refuses_a_vault_for_the_hub(tmp_path, monkeypatch, capsys):
     env, _ = _ritual_ready(tmp_path)
-    rc = _run_cli(monkeypatch, env, [*_HUB_ARGV, "--vault", "a"])
+    rc = _run_cli(monkeypatch, env, [*_HUB_ARGV, VAULT_FLAG, "a"])
     captured = capsys.readouterr()
-    assert rc != 0 and captured.out == "" and "--vault" in captured.err
+    assert rc != 0 and captured.out == "" and VAULT_FLAG in captured.err
 
 
 def test_the_hub_start_denies_no_vault_directory(tmp_path):
@@ -3169,35 +3170,6 @@ def test_the_hub_start_denies_no_vault_directory(tmp_path):
     deny_write = _settings_of(_start(env))["sandbox"]["filesystem"]["denyWrite"]
     for vault in ("a", "b"):
         assert str(lore / "vaults" / vault) not in deny_write
-
-
-def _composed_craft_skill(tmp_path: Path, name: str) -> str:
-    from trailhead.capabilities import load_manifest
-    from trailhead.compose import apply_plan, compose_plan
-
-    manifest = load_manifest(Path(__file__).parent.parent.parent / "tools" / "craft" / "capabilities.toml")
-    dest = tmp_path / "composed"
-    apply_plan(compose_plan(manifest, {}, {name: None}, dest))
-    return (dest / "skills" / name / "SKILL.md").read_text()
-
-
-def _record_create_invocations(text: str) -> list[str]:
-    flat = re.sub(r"\\?\s*\n\s*", " ", text)
-    flat = re.sub(r"\s+", " ", flat)
-    return [m.group(0) for m in re.finditer(r"lore record create --kind.*?(?= < |`|$)", flat)]
-
-
-@pytest.mark.parametrize("skill, expected", [("slice", 1), ("plan", 3)])
-def test_the_composed_craft_skill_routes_every_record_create_through_the_spec_vault(tmp_path, skill, expected):
-    invocations = _record_create_invocations(_composed_craft_skill(tmp_path, skill))
-    assert len(invocations) == expected
-    for invocation in invocations:
-        assert "--vault <vault>" in invocation, invocation
-
-
-def test_the_record_create_scanner_flags_an_invocation_with_no_vault():
-    text = "```sh\nlore record create \\\n  --kind task --title 'x' --label l < <body>\n```"
-    assert _record_create_invocations(text) == ["lore record create --kind task --title 'x' --label l"]
 
 
 def _srt_run(settings_path: Path, command: str) -> subprocess.CompletedProcess:

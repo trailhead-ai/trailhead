@@ -162,6 +162,8 @@ def _judge_task(kind: str, record_id: str, spec: str, vault: str, show: Show) ->
     is_slice_parent = isinstance(labels, dict) and SLICE_PARENT_LABEL in labels
     if not is_slice_parent or not isinstance(specs, list) or spec not in specs:
         return _stuck("record-outside-spec", record_id)
+    if kind == "refused":
+        return _verdict(kind, record_id)
     if _last_run_outcome(body) != kind:
         return _stuck("record-mismatch", record_id)
     return _verdict(kind, record_id)
@@ -185,6 +187,6 @@ def judge(spec: str, vault: str, output_file: Path, *, show: Show) -> dict:
         if name == spec and (kind in _BLOCKLESS_KINDS or kind == "needs-a-decision"):
             return _verdict(kind, record_id)
         return _stuck("record-outside-spec", record_id)
-    if kind in _BLOCKLESS_KINDS:
+    if kind in _BLOCKLESS_KINDS and kind != "refused":
         return _stuck("record-outside-spec", record_id)
     return _judge_task(kind, record_id, spec, vault, show)
