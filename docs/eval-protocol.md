@@ -134,10 +134,10 @@ session), and exits 3. An eval command from before the flag existed rejects it a
 an argument:
 
 ```
-... error: unrecognized arguments: --require-version
+portage: error: unrecognized arguments: --require-version 2
 ```
 
-(argparse's message on stderr, exit 2), and a shim that is not installed at all is `not found`. Both
+(argparse's message on stderr after its usage line, exit 2), and a shim that is not installed at all is `not found`. Both
 mean the eval command is missing or older than this protocol: stop and report,
 saying the fix is `trailhead update`, `chezmoi apply` and a new session. **Never
 retry without `--require-version`**; dropping it is how a stale command runs the
