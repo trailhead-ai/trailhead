@@ -22,6 +22,8 @@ from trailhead.tests.test_session_start import _fence, _run_cli
 SPEC = "the-spec"
 VAULT = "v"
 FIXTURE = Path(__file__).parent / "fixtures" / "ranger-contract.json"
+LOOP = json.loads(FIXTURE.read_text())["loop"]
+VAULT_FLAG = LOOP["ritual_vault_flag"]
 LORE_CLI = Path(__file__).resolve().parents[2] / "tools" / "lore" / "plugins" / "lore" / "cli" / "lore"
 
 
@@ -256,6 +258,30 @@ def test_a_line_matching_the_slice_parents_block_is_that_verdict(tmp_path, kind)
     assert world.calls[0] == ("task/p", VAULT)
 
 
+def test_a_refusal_naming_the_slice_parent_is_a_refused_verdict(tmp_path):
+    world = _world(p=_task("no run section: a refusal writes nothing\n"))
+    out = _judge(_write(tmp_path, "outcome: refused task/p parked=0 — not ready; slice it first\n"), world)
+    assert out == _ok("refused", "task/p")
+    assert world.calls[0] == ("task/p", VAULT)
+
+
+def test_a_refusal_naming_a_task_of_another_spec_is_outside_the_spec(tmp_path):
+    world = _world(p=_task("x\n", spec="another-spec"))
+    out = _judge(_write(tmp_path, "outcome: refused task/p parked=0\n"), world)
+    assert out == _stuck("record-outside-spec", "task/p")
+
+
+def test_a_refusal_naming_a_task_without_the_slice_parent_label_is_outside_the_spec(tmp_path):
+    world = _world(p=_task("x\n", labelled=False))
+    out = _judge(_write(tmp_path, "outcome: refused task/p parked=0\n"), world)
+    assert out == _stuck("record-outside-spec", "task/p")
+
+
+def test_a_refusal_naming_a_task_that_does_not_exist_is_unreadable(tmp_path):
+    out = _judge(_write(tmp_path, "outcome: refused task/ghost parked=0\n"))
+    assert out == _stuck("record-unreadable", "task/ghost")
+
+
 def test_the_same_line_when_the_block_says_another_kind_is_a_mismatch(tmp_path):
     world = _world(p=_task(_block("plan-ready")))
     out = _judge(_write(tmp_path, "outcome: slice-chosen task/p parked=0\n"), world)
@@ -343,7 +369,7 @@ def test_a_spec_level_kind_naming_another_spec_is_outside_the_spec(tmp_path, kin
     assert out == _stuck("record-outside-spec", "spec/other-spec")
 
 
-@pytest.mark.parametrize("kind", ["refused", "spec-complete", "waiting"])
+@pytest.mark.parametrize("kind", ["spec-complete", "waiting"])
 def test_a_blockless_kind_naming_a_task_is_outside_the_spec(tmp_path, kind):
     world = _world(p=_task(_block(kind)))
     out = _judge(_write(tmp_path, f"outcome: {kind} task/p parked=0 — x; y\n"), world)
@@ -389,7 +415,7 @@ def _cli(monkeypatch, capsys, tmp_path, argv):
 
 
 def _args(path: Path, spec: str = SPEC, vault: str = VAULT) -> list[str]:
-    return ["read-outcome", "--spec", spec, "--vault", vault, "--output-file", str(path), "--json"]
+    return ["read-outcome", "--spec", spec, f"{VAULT_FLAG}={vault}", "--output-file", str(path), "--json"]
 
 
 @pytest.mark.parametrize("kind,record", [("refused", f"spec/{SPEC}"), ("stuck", "task/p"), ("waiting", "spec/other")])
@@ -430,10 +456,10 @@ def test_a_malformed_line_never_reaches_any_output(monkeypatch, capsys, tmp_path
 @pytest.mark.parametrize(
     "argv",
     [
-        ["read-outcome", "--spec", SPEC, "--vault", VAULT, "--output-file", "f"],
-        ["read-outcome", "--vault", VAULT, "--output-file", "f", "--json"],
+        ["read-outcome", "--spec", SPEC, VAULT_FLAG, VAULT, "--output-file", "f"],
+        ["read-outcome", VAULT_FLAG, VAULT, "--output-file", "f", "--json"],
         ["read-outcome", "--spec", SPEC, "--output-file", "f", "--json"],
-        ["read-outcome", "--spec", SPEC, "--vault", VAULT, "--json"],
+        ["read-outcome", "--spec", SPEC, VAULT_FLAG, VAULT, "--json"],
     ],
 )
 def test_missing_arguments_exit_two_with_nothing_on_stdout(monkeypatch, capsys, tmp_path, argv):
@@ -446,7 +472,7 @@ def test_a_spec_outside_the_name_shape_exits_two_without_echoing_it(monkeypatch,
     path = _write(tmp_path, f"outcome: refused spec/{SPEC} parked=0\n")
     seen = set()
     for spec in ["Bad_Spec", "a b", "../x", "spec/x", "", "x;rm", "ünï"]:
-        argv = ["read-outcome", "--spec", spec, "--vault", VAULT, "--output-file", str(path), "--json"]
+        argv = _args(path, spec=spec)
         code, out, err = _cli(monkeypatch, capsys, tmp_path, argv)
         assert code == 2 and out == ""
         seen.add(err)
@@ -458,6 +484,7 @@ def test_an_unsafe_vault_name_exits_two(monkeypatch, capsys, tmp_path, vault):
     path = _write(tmp_path, "x\n")
     code, out, err = _cli(monkeypatch, capsys, tmp_path, _args(path, vault=vault))
     assert code == 2 and out == ""
+    assert err == "trailhead: read-outcome: --vault is not a safe vault name\n"
 
 
 def test_a_stuck_verdict_for_a_bad_file_is_not_an_argument_error(monkeypatch, capsys, tmp_path):
@@ -469,17 +496,24 @@ def test_a_stuck_verdict_for_a_bad_file_is_not_an_argument_error(monkeypatch, ca
 
 
 def test_the_loop_section_matches_the_command():  # inert-gate: allow cross-repo contract seam
-    loop = json.loads(FIXTURE.read_text())["loop"]
+    loop = LOOP
     assert loop["command"] == "read-outcome"
     assert tuple(loop["verdict_fields"]) == read_outcome.VERDICT_FIELDS
+    assert set(loop["outcome_kinds"]) == set(read_outcome.OUTCOME_KINDS)
     assert set(loop["reason_codes"]) == set(read_outcome.REASON_CODES)
     assert all(loop["reason_codes"].values())
+
+
+@pytest.mark.parametrize("kind", [*LOOP["outcome_kinds"], "invented-kind"])
+def test_the_judge_accepts_exactly_the_fixtures_outcome_kinds(tmp_path, kind):
+    verdict = _judge(_write(tmp_path, f"outcome: {kind} spec/{SPEC} parked=0\n"))
+    assert (verdict["reason_code"] == "malformed-outcome") == (kind not in LOOP["outcome_kinds"])
 
 
 def test_the_fixture_argv_runs_the_command_and_prints_the_fixture_fields(monkeypatch, capsys, tmp_path):
     loop = json.loads(FIXTURE.read_text())["loop"]
     path = _write(tmp_path, "nothing\n")
-    flags = {"--spec": SPEC, "--vault": VAULT, "--output-file": str(path)}
+    flags = {"--spec": SPEC, VAULT_FLAG: VAULT, "--output-file": str(path)}
     argv = [loop["command"]]
     for flag in loop["argv"]:
         argv += [flag] if flag == "--json" else [flag, flags[flag]]
