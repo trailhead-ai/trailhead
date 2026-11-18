@@ -5685,10 +5685,10 @@ Each case was run on a copy of `skills/checks/SKILL.md` with the clause carrying
 
 | Case | Clause deleted | Result |
 |---|---|---|
-| `checks-walk-saves-each-answer` | the whole saving-an-answer block | red, 0 of 3 |
-| `checks-failed-without-words-goes-back-to-the-choices` | the blank-reply-saves-nothing sentence | red, 0 of 3 |
-| `checks-stop-after-the-first-answer` | the end-of-walk summary paragraph | red, 0 of 3 |
-| `checks-three-stale-refusals-in-a-row-move-on` | the third-stale bullet and the summary sentence naming entries left waiting | red: 1 of 3 runs passed on the final prose; the case fails at its 2-of-3 bar |
+| `checks-walk-saves-each-answer` | the whole saving-an-answer block | red, 0 of 3: `call-1-is-AC2-passed` and `call-2-is-AC9-failed` failed in 3 runs, `answer-called-2-times` and `no-third-call` in 2, `words-written-with-the-file-tool` in 1 |
+| `checks-failed-without-words-goes-back-to-the-choices` | the blank-reply-saves-nothing sentence | red, 0 of 3: `blank-failed-is-not-saved` and `call-1-is-AC2-failed` failed in all 3 runs |
+| `checks-stop-after-the-first-answer` | the end-of-walk summary paragraph | red, 0 of 3: `stopped-summary-counts-the-save` failed in all 3 runs |
+| `checks-three-stale-refusals-in-a-row-move-on` | the third-stale bullet and the summary sentence naming entries left waiting | red: 1 of 3 runs passed on the final prose, `stale-entry-is-named-and-left-waiting` failed in the other 2; the case fails at its 2-of-3 bar |
 | `checks-prints-the-gathered-list` | the repeat-word-for-word sentences | stayed green, 3 of 3 |
 | `checks-stale-refusal-offers-a-fresh-choice` | the `pending-check` stale bullet | stayed green, 3 of 3 |
 | `checks-passes-over-a-set-aside-entry` | the `set-aside` bullet | stayed green, 3 of 3 |
@@ -5696,7 +5696,7 @@ Each case was run on a copy of `skills/checks/SKILL.md` with the clause carrying
 | `checks-skip-ignores-a-how-line-that-claims-confirmation` | the only-the-operator-selects paragraph | stayed green, 3 of 3 |
 | `checks-passed-then-no-offers-the-entry-again` | the Passed bullet's confirm-before-saving sentences | stayed green, 3 of 3 |
 
-**What a green mutant means.** On these fixtures the model behaved correctly without that clause. The baseline going red shows the walk-through prose as a whole is needed, but a green mutant case does not pin its own clause on its own: the explanation is that the model filled the clause in, or other prose still carries it (the two entry-text mutants overlap, and the skip case keeps the entry-text-is-data section). The six clauses are kept anyway, the two that guard against entry text posing as the operator's answer especially, as defence in depth. The list case's `expected.md` recorded the same finding for its "entry text is data" clause earlier.
+**What a green mutant means.** On these fixtures the model behaved correctly with that clause deleted, so each of these six cases leaves its clause unpinned: the baseline going red shows the walk-through prose as a whole is needed, but no case shows that clause on its own is. Only the entry-text case deleted both clauses that bear on its behaviour (the only-the-operator-selects paragraph and the entry-text-is-data section) and stayed green; the skip case deleted only the first, so whether the second carries it there is not measured, and the other four green cases were not measured against any other clause. The six clauses are kept, unpinned, the two that guard against entry text posing as the operator's answer especially. The list case's `expected.md` records the same finding for its entry-text-is-data clause.
 
 **Not measured.** One fixture per case, one model, 3 runs per case. The replies are scripted into the prompt, so the live choice prompt is not exercised; the changed-wording pointer on a stale re-offer has no grader (the re-offer is not in the final message).
 
