@@ -813,6 +813,12 @@
         "skills/checks/SKILL.md"
       ],
       "merge_only": true
+    },
+    "checks-two-answers-on-one-spec-both-save": {
+      "measures": [
+        "skills/checks/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }
