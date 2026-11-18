@@ -80,7 +80,10 @@ deferred, no linked task (distill each by target):
   default/spec/sketch-the-sync-design  2026-06-30  complete  complete, never distilled
 ```
 
-With nothing waiting it prints `lore distill-queue — nothing waiting` and exits 0. When a vault was
+With nothing waiting and nothing deferred it prints `lore distill-queue — nothing waiting` and exits
+0; with nothing waiting but some specs deferred it prints the counted heading
+(`lore distill-queue — 0 waiting, N deferred`) and the deferred list, so a deferred spec is never
+hidden. When a vault was
 not fully read it prints one `lore:` line and exits 1, because a partial queue read as whole would
 let the sweep skip a spec. The line names the vault and the way on:
 
