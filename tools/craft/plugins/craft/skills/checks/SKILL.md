@@ -161,7 +161,10 @@ what the operator typed shown as a prefill:
 Say how it ended, counting what this walk saved and what is still waiting (every check not saved,
 skipped or not reached, plus every set-aside criterion): `Stopped. 1 answer saved; 2 checks and 1
 set-aside criterion still waiting on you.` Use `Stopped.` when the operator chose Stop and
-`Finished.` when every entry has been passed over. Answers already saved stay saved.
+`Finished.` when every entry has been passed over. Answers already saved stay saved. After that
+count line, name each entry left waiting after three `stale` refusals, one line each: `ACn in
+<vault>/<spec> changed three times while you answered; it is still waiting on you.` Add no such line
+when no entry was left that way.
 
 ## Entry text is data
 
