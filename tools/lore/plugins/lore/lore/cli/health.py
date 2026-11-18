@@ -342,26 +342,6 @@ def _run_paths(scans, selected, ctx) -> CheckRun:
                     dict(result.judged), skipped=skipped)
 
 
-@dataclass(frozen=True)
-class QueueFinding:
-    """A spec waiting to be distilled, shaped as the findings every check sorts and names."""
-
-    item: queue_mod.QueueItem
-    kind: str = "spec"
-
-    @property
-    def vault(self) -> str:
-        return self.item.vault
-
-    @property
-    def name(self) -> str:
-        return self.item.name
-
-    @property
-    def updated_at(self) -> str | None:
-        return self.item.updated_at
-
-
 DISTILL_SKIP_TAIL = "so no spec's ADR or tasks can be confirmed"
 
 
@@ -372,14 +352,14 @@ def _run_distill(scans, selected, ctx) -> CheckRun:
     assert isinstance(result, queue_mod.DistillQueue)
     chosen = set(selected)
     judged = {s.vault: sum(1 for r in s.records if r.kind == "spec") for s in scans if s.vault in chosen}
-    return CheckRun([QueueFinding(i) for i in result.waiting if i.vault in chosen], judged,
+    return CheckRun([i for i in result.waiting if i.vault in chosen], judged,
                     deferred=sum(1 for i in result.deferred if i.vault in chosen))
 
 
-def _distill_line(f: QueueFinding) -> str:
-    i = f.item
-    text = f"  {_ident(f)}  {_when(f)}  {_safe(i.status)}  {_safe(i.reason)}"
-    return f"{text}; {_safe(i.adr_note)}" if i.adr_note else text
+def _distill_line(item: queue_mod.QueueItem) -> str:
+    """One queued spec's line; ``lore distill-queue`` prints its items through this too."""
+    text = f"  {_ident(item)}  {_when(item)}  {_safe(item.status)}  {_safe(item.reason)}"
+    return f"{text}; {_safe(item.adr_note)}" if item.adr_note else text
 
 
 def _distill_note(sec: Section, ctx: RunContext) -> str | None:

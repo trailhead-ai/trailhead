@@ -9,10 +9,10 @@ decides; that module states the rule, this one only prints it.
 ``deferred, no linked task (distill each by target):`` list, one line per spec as
 ``  <vault>/spec/<name>  <date>  <status>  <reason>[; <ADR note>]``; with nothing
 waiting and nothing deferred it is ``lore distill-queue — nothing waiting``. Every
-vault name, record id and reason is printed through the escaping and record-id shape
-rule ``lore health`` uses (:func:`lore.cli.health._record_id` and friends), so a
-control character in a vault name is escaped and a spec name that is not a valid
-record id is replaced by a fixed phrase and never echoed.
+spec line is composed by the same function ``lore health``'s ``distill-queue`` check
+prints its findings with (:func:`lore.cli.health._distill_line`), so a spec reads
+identically on both surfaces: a control character in a vault name is escaped and a
+spec name that is not a valid record id is replaced by a fixed phrase and never echoed.
 
 **Exit codes.** 0 on success, with or without specs waiting. 1 with one ``lore:``
 stderr line and nothing on stdout when the queue cannot be built: a vault was not
@@ -30,7 +30,7 @@ import sys
 
 from ..health import distill_queue as queue_mod
 from ..health import scan as scan_mod
-from .health import _emit, _record_id, _safe, _when
+from .health import _distill_line, _emit, _safe
 
 HEADER = "lore distill-queue — "
 DEFERRED_HEADING = "deferred, no linked task (distill each by target):"
@@ -39,19 +39,14 @@ _FALLBACK = "repair or remove the vault to sweep again, or distill one spec by n
 _scan_vault = scan_mod.scan_vault
 
 
-def _line(item: queue_mod.QueueItem) -> str:
-    text = f"  {_record_id(item.vault, 'spec', item.name)}  {_when(item)}  {_safe(item.status)}  {item.reason}"
-    return f"{text}; {item.adr_note}" if item.adr_note else text
-
-
 def render(queue: queue_mod.DistillQueue) -> list[str]:
     if not queue.waiting and not queue.deferred:
         return [f"{HEADER}nothing waiting"]
     lines = [f"{HEADER}{len(queue.waiting)} waiting, {len(queue.deferred)} deferred"]
     if queue.waiting:
-        lines += ["", "waiting:", *(_line(i) for i in queue.waiting)]
+        lines += ["", "waiting:", *(_distill_line(i) for i in queue.waiting)]
     if queue.deferred:
-        lines += ["", DEFERRED_HEADING, *(_line(i) for i in queue.deferred)]
+        lines += ["", DEFERRED_HEADING, *(_distill_line(i) for i in queue.deferred)]
     return lines
 
 

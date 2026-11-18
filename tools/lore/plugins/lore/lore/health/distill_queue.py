@@ -61,6 +61,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import ClassVar
 
 from ..record.guards import FROZEN_STATUSES
 from . import references
@@ -87,6 +88,7 @@ INDEXED_TASK_FIELDS = ("created-at", "updated-at")
 class QueueItem:
     """One spec in the queue."""
 
+    kind: ClassVar[str] = "spec"
     vault: str
     name: str
     updated_at: str | None
