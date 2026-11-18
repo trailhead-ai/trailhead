@@ -146,8 +146,9 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(f"eval start: --require-version {args.require_version!r} must be 1 to 6 ASCII decimal digits",
                   file=sys.stderr)
             return 2
-        if int(args.require_version) > request.EVAL_COMMAND_VERSION:
-            return _too_old(int(args.require_version))
+        required = int(args.require_version)
+        if required > request.EVAL_COMMAND_VERSION:
+            return _too_old(required)
     if args.backend is None and "SANDBOX_RUNTIME" in os.environ:
         return _leave_sandbox(args)
     try:
