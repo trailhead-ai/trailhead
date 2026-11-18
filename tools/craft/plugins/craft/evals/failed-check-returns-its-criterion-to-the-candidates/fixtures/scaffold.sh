@@ -33,7 +33,13 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "pending_check.py $*" >> "$here/lore-calls.log"
 PATH="$here/bin:$PATH" exec "$here/py-home/bin/python3" "$here/real-scripts/pending_check.py" "$@"
 EOW
-chmod +x bin/lore scripts/pending_check.py
+# scripts/found_work.py runs the plugin's follow-ups script against bin/lore.
+cat > scripts/found_work.py <<'EOW'
+#!/bin/sh
+here=$(cd "$(dirname "$0")/.." && pwd)
+PATH="$here/bin:$PATH" exec "$here/py-home/bin/python3" "$here/real-scripts/found_work.py" "$@"
+EOW
+chmod +x bin/lore scripts/pending_check.py scripts/found_work.py
 printf "# CLAUDE.md\n\n## Project Maturity\n\nearly\n" > CLAUDE.md
 SPEC='# Print shipping labels
 
