@@ -135,7 +135,9 @@ class StubOutpost:
     is set, then closes the connection (an early close is a dropped stream). ``log_connections``,
     when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
     likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
-    and a ``Cut`` step ends it mid-chunk. ``release`` is set
+    and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
+    ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``).
+    ``release`` is set
     on exit so no waiting step outlives the stub.
     """
 
@@ -153,6 +155,8 @@ class StubOutpost:
     start_reply: tuple[int, object] | None = None
     view: dict | None = None
     view_reply: tuple[int, object] | None = None
+    cancel_reply: tuple[int, object] | None = None
+    log_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
     log_connections: list[list] | None = None
     view_sequence: list[dict] | None = None
@@ -238,6 +242,14 @@ class StubOutpost:
                     if self._authorised():
                         self._send(202, {"id": 7, "state": "queued", "matrix": None, "not_run": 0})
                     return
+                parts = urlsplit(self.path).path.split("/")
+                if (parts[:3] == ["", "gateway", "runs"] and len(parts) == 5
+                        and parts[3].isdigit() and parts[4] == "cancel"):
+                    if stub.cancel_reply is not None:
+                        return self._send(*stub.cancel_reply)
+                    if self._authorised():
+                        self._send(202, {"id": int(parts[3]), "state": "completed", "result": "cancelled"})
+                    return
                 if self.path == "/gateway/sessions":
                     if stub.register_reply is not None:
                         return self._send(*stub.register_reply)
@@ -267,6 +279,8 @@ class StubOutpost:
                 parts = urlsplit(self.path).path.split("/")
                 if len(parts) in (4, 5) and parts[:3] == ["", "gateway", "runs"] and parts[3].isdigit():
                     if len(parts) == 5 and parts[4] == "log":
+                        if stub.log_reply is not None:
+                            return self._send(*stub.log_reply)
                         if stub.view_reply is not None and stub.view_reply[0] == 404:
                             return self._send(*stub.view_reply)
                         if self._authorised():
