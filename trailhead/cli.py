@@ -653,7 +653,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "--vault",
         metavar="NAME",
         default=None,
-        help="The one lore vault a ritual may write records in (required for the ritual role); every other vault is write-denied.",
+        help=(
+            "The one lore vault a ritual may write records in (required for the ritual role); "
+            "every other vault is write-denied."
+        ),
     )
     session_p.add_argument(
         "--setup-sandbox-only",

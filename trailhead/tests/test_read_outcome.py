@@ -213,7 +213,7 @@ def test_a_valid_line_before_a_malformed_last_line_is_not_used(tmp_path):
         f"outcome: refused spec/{SPEC}/more parked=0",
         f"outcome: refused spec/{SPEC}\x00 parked=0",
         f"outcome: refused lesson/{SPEC} parked=0",
-        f"outcome: refused task parked=0",
+        "outcome: refused task parked=0",
         f"preamble outcome: refused spec/{SPEC} parked=0",
         f"outcome:refused spec/{SPEC} parked=0",
     ],
@@ -596,7 +596,9 @@ def test_copies_one_byte_apart_differ(tmp_path):
 def test_this_repos_contract_copy_equals_outposts():
     sibling = Path(__file__).resolve().parents[3] / "outpost" / "tests" / "fixtures" / "ranger-contract.json"
     if not sibling.is_file():
-        pytest.skip(f"SKIPPED, nothing compared: the sibling copy {sibling} is absent (no outpost member beside this repo)")
+        pytest.skip(
+            f"SKIPPED, nothing compared: the sibling copy {sibling} is absent (no outpost member beside this repo)"
+        )
     assert _copies_differ(FIXTURE, sibling) is None
 
 
@@ -629,7 +631,8 @@ def test_the_command_judges_against_records_in_a_real_lore_vault(monkeypatch, ca
     lore("init")
     for name in ("mine", "elsewhere"):
         lore("vault", "add", name, "--scope", "team", "--path", str(tmp_path / name))
-    lore("record", "create", "--kind", "spec", "--title", "Real Spec", "--vault", "mine", "--status", "ready", stdin="# s\n")
+    lore("record", "create", "--kind", "spec", "--title", "Real Spec", "--vault", "mine", "--status", "ready",
+         stdin="# s\n")
     parent = ["--related", "spec=real-spec", "--label", "craft/slice-parent=true"]
     lore("record", "create", "--kind", "task", "--title", "Real Parent", "--vault", "mine", *parent,
          stdin="# p\n\n" + _block("slice-chosen"))
