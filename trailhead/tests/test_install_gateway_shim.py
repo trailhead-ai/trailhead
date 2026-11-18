@@ -94,6 +94,59 @@ class TestShimBuild:
         assert expected in proc.stdout
         assert not marker.exists(), marker.read_text()
 
+    def test_the_shim_runs_no_shell_startup_code_the_session_puts_in_its_environment(self, tmp_path):
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        marker = tmp_path / "ran-hostile-code"
+        startup = tmp_path / "bash-env"
+        startup.write_text(f'echo bash-env >> "{marker}"\n')
+        run_env = {
+            "HOME": env["HOME"],
+            "PATH": "/usr/bin:/bin",
+            "SHELLOPTS": "xtrace",
+            "PS4": f'$(echo ps4 >> "{marker}")',
+            "BASH_ENV": str(startup),
+            "ENV": str(startup),
+        }
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "outpost-gateway"), "--help"],
+            capture_output=True, text=True, env=run_env, timeout=60,
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert "run list" in proc.stdout
+        assert not marker.exists(), marker.read_text()
+
+    def test_git_and_python_variables_the_session_sets_do_not_reach_run_start(self, tmp_path, hermetic_git_env):
+        env = _env(tmp_path)
+        build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        repo = tmp_path / "elsewhere-repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+        plain = tmp_path / "plain"
+        plain.mkdir()
+        marker = tmp_path / "ran-hostile-code"
+        planted = tmp_path / "planted"
+        planted.mkdir()
+        (planted / "sitecustomize.py").write_text(f'open("{marker}", "a").write("sitecustomize\\n")\n')
+        hostile_bin = tmp_path / "hostile-bin"
+        hostile_bin.mkdir()
+        (hostile_bin / "git").write_text(f'#!/bin/sh\necho git >> "{marker}"\n')
+        (hostile_bin / "git").chmod(0o755)
+        run_env = {
+            "HOME": env["HOME"],
+            "PATH": f"{hostile_bin}:/usr/bin:/bin",
+            "PYTHONPATH": str(planted),
+            "GIT_DIR": str(repo / ".git"),
+            "GIT_WORK_TREE": str(repo),
+        }
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "outpost-gateway"), "run", "start", "build"],
+            capture_output=True, text=True, env=run_env, cwd=plain, timeout=60,
+        )
+        assert (proc.returncode, proc.stdout) == (2, "")
+        assert proc.stderr == "outpost-gateway: this folder is not inside a git work tree\n"
+        assert not marker.exists(), marker.read_text()
+
     def test_an_installing_venv_that_is_a_copy_does_not_put_its_site_packages_in_front(self, tmp_path, monkeypatch):
         venv = tmp_path / "venv"
         subprocess.run([sys.executable, "-m", "venv", "--copies", "--without-pip", str(venv)], check=True)

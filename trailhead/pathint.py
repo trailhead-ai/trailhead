@@ -265,7 +265,7 @@ _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 # What the ``portage-eval`` shim adds: the sandbox marker the command reads to tell a sandboxed
 # caller from an excluded one, and the identity and locale the runner needs. XDG_CACHE_HOME is
-# deliberately absent. The standard LC_* categories are listed because ``sh`` cannot pass a glob.
+# deliberately absent. The standard LC_* categories are listed because the shim cannot pass a glob.
 EVAL_SHIM_EXTRA_ENV = (
     "SANDBOX_RUNTIME", "USER", "LANG", "TERM", "LC_ALL", "LC_COLLATE", "LC_CTYPE", "LC_MESSAGES",
     "LC_MONETARY", "LC_NUMERIC", "LC_TIME", "LC_PAPER", "LC_NAME", "LC_ADDRESS", "LC_TELEPHONE",
@@ -324,13 +324,17 @@ def resolve_eval_runner(env: dict[str, str], *, euid: int | None = None) -> Path
 def _pinned_shim_content(
     name: str, script: Path, trailhead_root: str, options: PinnedShimOptions | None = None
 ) -> str:
-    """A ``/bin/sh`` shim running *script* on this process's interpreter, isolated.
+    """A ``/bin/bash -p`` shim running *script* on this process's interpreter, isolated.
 
-    ``/bin/sh`` rather than ``env bash``, and ``/usr/bin/env`` by absolute path: neither
-    may be looked up through PATH. The interpreter starts from an empty environment
-    carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed PATH, so a loader variable
-    the session exported cannot reach it. *options* adds names passed through when set and
-    values fixed at build time, for the one shim that needs them.
+    The shell and ``/usr/bin/env`` are named by absolute path, so neither is looked up
+    through PATH. ``-p`` (privileged mode) makes bash ignore ``BASH_ENV``, ``ENV``,
+    ``SHELLOPTS``, ``BASHOPTS`` and exported functions, so no variable the session
+    sets on the command runs code in the shell before its one line; ``/bin/sh`` would
+    not do on macOS, where it is bash honouring ``SHELLOPTS``. The interpreter starts
+    from an empty environment carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed
+    PATH, so a loader variable the session exported cannot reach it.
+    *options* adds names passed through when set and values fixed at build time, for the one
+    shim that needs them.
     """
     options = options or PinnedShimOptions()
     interpreter = os.path.realpath(sys.executable)
@@ -350,7 +354,7 @@ def _pinned_shim_content(
     passed = [f'${{{var}:+{var}="${var}"}}' for var in (*_PINNED_SHIM_ENV, *options.extra_env)]
     assignments = " ".join([f'PATH="{_PINNED_SHIM_PATH}"', f'TRAILHEAD_ROOT="{trailhead_root}"', *fixed, *passed])
     return (
-        "#!/bin/sh\n"
+        "#!/bin/bash -p\n"
         f"# trailhead-managed shim for {name}\n"
         f'exec /usr/bin/env -i {assignments} "{interpreter}" -I -S "{script}" "$@"\n'
     )

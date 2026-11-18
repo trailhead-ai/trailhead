@@ -22,6 +22,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from trailhead.harness import session_key
 
@@ -109,20 +110,33 @@ def run_under_harness(
     return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
 
 
+class Cut:
+    """A ``log_steps`` entry for a chunked log: announce a chunk, send part of it, and close the socket."""
+
+
 @dataclass
 class Seen:
     method: str
     path: str
     headers: dict[str, str]
     body: str
+    raw: bytes = b""
 
 
 @dataclass
 class StubOutpost:
     """Loopback Outpost: issues TOKEN for the right client, serves ``runs`` for TOKEN.
 
-    ``token_reply`` / ``runs_reply`` — ``(status, body)`` — override the answers
-    wholesale; ``body`` may be a dict (sent as JSON) or a str (sent verbatim).
+    ``token_reply`` / ``runs_reply`` / ``start_reply`` / ``view_reply`` — ``(status, body)`` —
+    override the answers wholesale; ``body`` may be a dict (sent as JSON) or a str (sent verbatim).
+    ``POST /gateway/runs`` answers 202 (or ``start_reply``) and keeps the uploaded tar in
+    ``requests``; ``GET /gateway/runs/<id>`` serves ``view``; ``GET /gateway/runs/<id>/log``
+    writes ``log_steps`` in order, a ``str`` as it is, a ``threading.Event`` as a wait until it
+    is set, then closes the connection (an early close is a dropped stream). ``log_connections``,
+    when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
+    likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
+    and a ``Cut`` step ends it mid-chunk. ``release`` is set
+    on exit so no waiting step outlives the stub.
     """
 
     workspace: str = "trailhead/outpost-gateway"
@@ -136,7 +150,15 @@ class StubOutpost:
     runs_redirect: str | None = None
     authority: str = REGISTRATION_AUTHORITY
     register_reply: tuple[int, object] | None = None
+    start_reply: tuple[int, object] | None = None
+    view: dict | None = None
+    view_reply: tuple[int, object] | None = None
+    log_steps: list = field(default_factory=list)
+    log_connections: list[list] | None = None
+    view_sequence: list[dict] | None = None
+    log_chunked: bool = False
     requests: list[Seen] = field(default_factory=list)
+    release: threading.Event = field(default_factory=threading.Event)
 
     def __post_init__(self) -> None:
         stub = self
@@ -154,10 +176,50 @@ class StubOutpost:
                 self.end_headers()
                 self.wfile.write(raw)
 
-            def _record(self, body: str) -> None:
+            def _record(self, raw: bytes) -> None:
                 stub.requests.append(
-                    Seen(self.command, self.path, {k.lower(): v for k, v in self.headers.items()}, body)
+                    Seen(
+                        self.command,
+                        self.path,
+                        {k.lower(): v for k, v in self.headers.items()},
+                        raw.decode(errors="replace"),
+                        raw,
+                    )
                 )
+
+            def _authorised(self) -> bool:
+                if self.headers.get("Authorization") == f"Bearer {stub.token}":
+                    return True
+                self._send(401, {"reason": "credential_unrecognised", "message": "The bearer token is not recognised."})
+                return False
+
+            def _stream_log(self) -> None:
+                logs = sum(1 for q in stub.requests if urlsplit(q.path).path.endswith("/log"))
+                steps = stub.log_steps
+                if stub.log_connections is not None:
+                    steps = stub.log_connections[min(logs - 1, len(stub.log_connections) - 1)]
+                self.send_response(200)
+                self.send_header("Content-Type", "text/plain")
+                if stub.log_chunked:
+                    self.send_header("Transfer-Encoding", "chunked")
+                self.end_headers()
+                for step in steps:
+                    if isinstance(step, threading.Event):
+                        while not (step.is_set() or stub.release.is_set()):
+                            step.wait(0.05)
+                        continue
+                    if isinstance(step, Cut):
+                        self.wfile.write(b"ff\r\npartial")
+                        self.wfile.flush()
+                        self.close_connection = True
+                        return
+                    data = step.encode()
+                    if stub.log_chunked:
+                        data = f"{len(data):x}\r\n".encode() + data + b"\r\n"
+                    self.wfile.write(data)
+                    self.wfile.flush()
+                if stub.log_chunked:
+                    self.wfile.write(b"0\r\n\r\n")
 
             def _redirect(self, location: str) -> None:
                 self.send_response(302)
@@ -167,8 +229,15 @@ class StubOutpost:
 
             def do_POST(self):
                 length = int(self.headers.get("Content-Length") or 0)
-                body = self.rfile.read(length).decode()
-                self._record(body)
+                raw = self.rfile.read(length)
+                body = raw.decode(errors="replace")
+                self._record(raw)
+                if urlsplit(self.path).path == "/gateway/runs":
+                    if stub.start_reply is not None:
+                        return self._send(*stub.start_reply)
+                    if self._authorised():
+                        self._send(202, {"id": 7, "state": "queued", "matrix": None, "not_run": 0})
+                    return
                 if self.path == "/gateway/sessions":
                     if stub.register_reply is not None:
                         return self._send(*stub.register_reply)
@@ -194,7 +263,24 @@ class StubOutpost:
                 self._send(200, {"access_token": stub.token, "token_type": "Bearer", "scope": "gateway"})
 
             def do_GET(self):
-                self._record("")
+                self._record(b"")
+                parts = urlsplit(self.path).path.split("/")
+                if len(parts) in (4, 5) and parts[:3] == ["", "gateway", "runs"] and parts[3].isdigit():
+                    if len(parts) == 5 and parts[4] == "log":
+                        if stub.view_reply is not None and stub.view_reply[0] == 404:
+                            return self._send(*stub.view_reply)
+                        if self._authorised():
+                            self._stream_log()
+                        return
+                    if len(parts) == 4:
+                        if stub.view_reply is not None:
+                            return self._send(*stub.view_reply)
+                        if self._authorised():
+                            if stub.view_sequence is not None:
+                                views = sum(1 for q in stub.requests if urlsplit(q.path).path.count("/") == 3)
+                                return self._send(200, stub.view_sequence[min(views - 1, len(stub.view_sequence) - 1)])
+                            self._send(200, stub.view)
+                        return
                 if stub.runs_redirect is not None and self.path == "/gateway/runs":
                     return self._redirect(stub.runs_redirect)
                 if self.path != "/gateway/runs":
@@ -216,6 +302,7 @@ class StubOutpost:
         return self
 
     def __exit__(self, *exc) -> None:
+        self.release.set()
         self._server.shutdown()
         self._server.server_close()
 
