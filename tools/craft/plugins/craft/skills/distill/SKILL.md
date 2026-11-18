@@ -107,8 +107,9 @@ its first line starts `lore distill-queue — `. Anything else — a non-zero ex
 starts differently, no output (an older lore without the command, a crash) — stops the sweep before
 anything is queued, clustered or drafted:
 
-- a `lore:` refusal line (exit 1, a vault that could not be read): relay it exactly as printed. It
-  already names the way on, `/craft:distill spec/<name>` for one spec by name.
+- a `lore:` refusal line (exit 1, a vault or a spec or task record that could not be read): relay it
+  exactly as printed. It already names the way on, `/craft:distill spec/<name>` for one spec by
+  name.
 - the command is missing (an unknown-command error, an unrecognised-command usage message): say that
   this lore predates `lore distill-queue` and to update it (`trailhead update`), then stop.
 - anything else: relay what was printed and stop.
