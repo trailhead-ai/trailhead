@@ -1,6 +1,6 @@
-# Tests never read git history: no git log, git show or lookup by commit, and a past version a test needs is committed as a fixture
+# Tests never read git history: no git log, git show or lookup by commit in the checked-out repository, and a past version a test needs is committed as a fixture
 
-Tests never read git history. A test must not run `git log` or `git show`, or look anything up by commit; a past version of a file that a test needs is committed as a fixture beside the test.
+Tests never read the checked-out repository's git history. A test must not run `git log` or `git show`, or look anything up by commit, in the repository the code is checked out in; a past version of a file that a test needs is committed as a fixture beside the test. A test that builds its own throwaway repository under its temporary directory is unaffected.
 
 ## Context
 
@@ -27,7 +27,7 @@ The fixture is ordinary content that any checkout holds, and varying the input s
 
 ## Decision
 
-No test runs `git log` or `git show`, or looks anything up by commit, tag or revision. When a test needs a past version of a file, that version is committed as a fixture and the test reads the fixture.
+No test runs `git log` or `git show`, or looks anything up by commit, tag or revision, in the checked-out repository. A test that builds its own throwaway repository under its temporary directory, and reads the history it made there, is unaffected: that history is created by the test and cannot be rewritten or missing. When a test needs a past version of a file, that version is committed as a fixture and the test reads the fixture.
 
 The reasoning is the pair above: rebased and squashed commits get new IDs, so history citations go stale, and CI checks out at depth 1, so history is absent where tests run.
 

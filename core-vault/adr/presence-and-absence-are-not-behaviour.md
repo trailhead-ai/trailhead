@@ -26,7 +26,12 @@ Legitimate, because the test ran the step that produced the file and then checke
         lines = (tmp_path / "summary.txt").read_text().splitlines()
         assert lines == ["a: 1", "b: 2"]
 
-Existence alone would have passed with an empty file. The contents show the step did the right thing, and varying the rows shows the output depends on them.
+    def test_build_report_follows_the_rows_it_is_given(tmp_path):
+        build_report([("c", 3)], tmp_path)
+        lines = (tmp_path / "summary.txt").read_text().splitlines()
+        assert lines == ["c: 3"]
+
+Existence alone would have passed with an empty file. The contents show the step did the right thing, and the second call, with different rows and a different expected output, shows the output depends on them.
 
 ## Decision
 

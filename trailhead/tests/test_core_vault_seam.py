@@ -266,19 +266,22 @@ CORE_SOURCE = REPO_ROOT / "core-vault"
 
 
 def test_every_shipped_core_record_reaches_both_read_paths(env, lore_ready, tmp_path):
-    mds = sorted(p for p in CORE_SOURCE.glob("*/*.md"))
-    pairs = [p for p in mds if p.with_suffix(".json").is_file()]
-    assert len(mds) == len(pairs), f"records without a sidecar: {[str(p) for p in mds if p not in pairs]}"
-    assert pairs, "the checkout's core-vault holds no records"
+    mds = sorted(CORE_SOURCE.glob("*/*.md"))
+    jsons = sorted(CORE_SOURCE.glob("*/*.json"))
+    no_sidecar = [str(p) for p in mds if not p.with_suffix(".json").is_file()]
+    no_body = [str(p) for p in jsons if not p.with_suffix(".md").is_file()]
+    assert not no_sidecar, f"records without a sidecar: {no_sidecar}"
+    assert not no_body, f"sidecars without a record body: {no_body}"
+    assert mds, "the checkout's core-vault holds no records"
 
     decoy = tmp_path / "decoy"
-    for md in pairs:
+    for md in mds:
         write_record(decoy, md.stem, "Decoy", "DECOY-BODY", kind=md.parent.name)
     lore(env, "vault", "add", "decoy", "--scope", "team", "--path", str(decoy))
     assert step(CORE_SOURCE, env).outcome == "registered"
     installed = core_copy_dir(env).resolve()
 
-    for md in pairs:
+    for md in mds:
         kind, name = md.parent.name, md.stem
         sidecar = json.loads(md.with_suffix(".json").read_text())
         assert sidecar["created-by"] == "trailhead" and sidecar["updated-by"] == "trailhead", f"{kind}/{name}"
@@ -289,5 +292,8 @@ def test_every_shipped_core_record_reaches_both_read_paths(env, lore_ready, tmp_
 
         hits = json.loads(lore(env, "search", "--json", name))["hits"]
         mine = [h for h in hits if h["id"].endswith(f"{kind}/{name}") and Path(h["vault"]).resolve() == installed]
-        assert mine, f"{kind}/{name} not found in the installed core copy: {hits}"
+        assert mine, (
+            f"{kind}/{name} not found in the installed core copy: {hits}. Lore search matches the words of the "
+            "title and opening text, not the id, so every word of the slug may need to appear there"
+        )
         assert mine[0]["shared"] == 0, f"{kind}/{name}: shared={mine[0]['shared']}"

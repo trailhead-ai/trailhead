@@ -61,7 +61,7 @@ Testing the behaviour, with inputs on either side of what decides the answer:
         assert retry_delay(6) == 30
         assert retry_delay(50) == 30
 
-Here the honest answer to "what would have to break for this to go red" is that the mapping from attempt to delay stops working. A snapshot of the full table of delays, or a golden file holding it, falls on the restating side unless the test also changes what it feeds the function.
+Here the honest answer to "what would have to break for this to go red" is that the mapping from attempt to delay stops working. A snapshot of the full table of delays, or a golden file holding it, falls on the restating side. A behaviour test varies the input instead.
 
 One exception is allowed: the seam smoke. Wiring has no input to vary, so one test per seam, marked as such, is enough.
 
@@ -131,7 +131,7 @@ Rules: [[adr/tests-are-written-red-first]] for scoped runs and the single full r
 - **Build shared setup once, copy it per test.** A prebuilt data directory is made once per worker and copied. Whatever differs from the template, such as a dirty tree, is a parameter the test passes.
 - **Use the real disk under a temporary directory.** Make the failure real: a read-only directory, a file where a directory was expected.
 - **Wait on an observable, never on a duration.** Wait for the file, the sentinel line or the process exit. Where elapsed time is the subject, inject the clock.
-- **Inject a collaborator when the test varies its answer.** Patching a function by module path names an import layout and breaks when code moves.
+- **Inject a collaborator when the test varies its answer or the code already takes one.** Patching a function by module path names an import layout and breaks when code moves, so patch by module path only to stub an orchestrator's collaborator the test does not care about.
 - **Add a case to the file that already tests the subject.** Cases of the same shape with different values are one parametrised test, and it still needs its mutation check.
 - **Re-home a slow test, never delete it.** Move real-process tests to an opt-in tier that runs as its own required job, and say in the closing line that the tier was left out.
 - **Budget the run.** A guard that fails when run time passes a budget derived from measured history keeps the cost from creeping back.

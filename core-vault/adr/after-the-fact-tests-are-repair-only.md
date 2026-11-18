@@ -15,9 +15,9 @@ Derive the tests from that contract, not from the code:
         assert shipping_cost(1.2) == 7
         assert shipping_cost(3) == 9
 
-Then mutation-check the test. Save a copy of the file, change the boundary comparison from "greater than 1" to "greater than or equal to 1", and run the test. It must fail on the first assertion, which proves it binds the boundary. Restore the copy and diff it against the saved one; the diff must be empty. Run the test again and it passes.
+Then mutation-check the test. Save a copy of the file, change the rounding from rounding up to rounding down, and run the test. It must fail on the second assertion, because 1.2 kg then costs 5 instead of 7, which proves the test binds the rounding. Restore the copy and diff it against the saved one; the diff must be empty. Run the test again and it passes.
 
-Had the mutation left the test green, the behaviour would be unpinned, and the test would be strengthened and checked again before moving on.
+Had the mutation left the test green, the behaviour would be unpinned, and the test would be strengthened and checked again before moving on. A mutation that changes no answer at any tested point, such as swapping "greater than 1" for "greater than or equal to 1" here, where weight 1 costs 5 either way, proves nothing; pick one that changes the answer at a point the test feeds in.
 
 ## Decision
 
