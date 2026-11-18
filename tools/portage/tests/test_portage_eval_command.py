@@ -775,6 +775,76 @@ class TestBackendChoice:
         assert rc == 3 and "next step: stop and report" in out
 
 
+class TestRequireVersion:
+    def _argv(self, ws, version, *extra):
+        return ["eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                "--require-version", version, *extra]
+
+    def _nothing_created(self, ws):
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+        assert ws.count("canary-started") == 0
+
+    def test_a_required_version_above_this_commands_is_not_run_too_old_and_creates_nothing(self, ws):
+        have = request.EVAL_COMMAND_VERSION
+        rc, out, err = ws.main(*self._argv(ws, str(have + 1), "--backend", "local"))
+        assert rc == 3, (out, err)
+        lines = out.splitlines()
+        assert "not run: eval-command-too-old" in lines
+        assert "next step: stop and report" in lines
+        assert f"required version: {have + 1}" in lines
+        assert f"this command's version: {have}" in lines
+        assert "trailhead update" in out and "new session" in out
+        assert "request:" not in out
+        self._nothing_created(ws)
+
+    @pytest.mark.parametrize("delta", [0, -1, -2])
+    def test_a_required_version_at_or_below_this_commands_starts_the_request(self, ws, delta):
+        required = max(request.EVAL_COMMAND_VERSION + delta, 0)
+        rc, out, err = ws.main(*self._argv(ws, str(required), "--backend", "local"))
+        assert rc == 0, (out, err)
+        request_id = re.search(r"^request: (\S+)$", out, re.M).group(1)
+        rc, out, _ = ws.wait(request_id)
+        assert rc == 0 and "case c1: pass" in out
+
+    @pytest.mark.parametrize("value", ["abc", "-1", "2.0", "+2", " 2", "2 ", "2\n", "", "1" * 30,
+                                       "\u0662", "\u0661\u0662", "\uff12", "0x2"])
+    def test_a_value_that_is_not_plain_ascii_digits_is_refused_naming_it_and_creates_nothing(self, ws, value):
+        rc, out, err = ws.main(*self._argv(ws, value, "--backend", "local"))
+        assert rc == 2, (out, err)
+        assert repr(value) in err and "request:" not in out
+        self._nothing_created(ws)
+
+    def test_with_the_sandbox_marker_a_too_high_version_is_too_old_not_could_not_leave_sandbox(
+            self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, err = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION + 1)))
+        assert rc == 3, (out, err)
+        assert "not run: eval-command-too-old" in out.splitlines()
+        assert "could-not-leave-sandbox" not in out
+        self._nothing_created(ws)
+
+    def test_with_the_sandbox_marker_a_satisfied_version_is_still_could_not_leave_sandbox(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        rc, out, _ = ws.main(*self._argv(ws, str(request.EVAL_COMMAND_VERSION)))
+        assert rc == 3
+        assert "not run: could-not-leave-sandbox" in out.splitlines()
+
+
+class TestNextStepFor:
+    @pytest.mark.parametrize("reason", request.STOP_AND_REPORT_REASONS)
+    def test_every_stop_and_report_reason_is_followed_by_stop_and_report(self, reason):
+        assert request.next_step_for(reason) == request.STOP_AND_REPORT
+
+    @pytest.mark.parametrize("reason", [request.INTERRUPTED, "timeout"])
+    def test_interrupted_and_timeout_are_followed_by_resubmit(self, reason):
+        assert request.next_step_for(reason) == request.RESUBMIT
+
+    def test_the_stop_and_report_reasons_include_the_too_old_reason_and_neither_resubmit_reason(self):
+        assert request.EVAL_COMMAND_TOO_OLD in request.STOP_AND_REPORT_REASONS
+        assert request.INTERRUPTED not in request.STOP_AND_REPORT_REASONS
+        assert "timeout" not in request.STOP_AND_REPORT_REASONS
+
+
 class TestPinnedShimEndToEnd:
     def _shim(self, ws, tmp_path):
         from trailhead.install import build_cli_shims, resolve_cli_tools
@@ -814,6 +884,14 @@ class TestPinnedShimEndToEnd:
         assert "not run: could-not-leave-sandbox" in proc.stdout
         assert f"{shim} start --plugin plugins/p --case c1 --repo {ws.repo}" in proc.stdout
         assert "chezmoi apply" in proc.stdout
+        assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
+
+    def test_the_shim_with_a_too_high_required_version_reports_too_old(self, ws, tmp_path):
+        shim = self._shim(ws, tmp_path)
+        proc = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1",
+                         "--require-version", str(request.EVAL_COMMAND_VERSION + 1))
+        assert proc.returncode == 3, (proc.stdout, proc.stderr)
+        assert "not run: eval-command-too-old" in proc.stdout.splitlines()
         assert not ws.eval_root.exists() or list(ws.eval_root.iterdir()) == []
 
     def test_the_shim_without_the_marker_runs_locally_with_no_backend_flag(self, ws, tmp_path):

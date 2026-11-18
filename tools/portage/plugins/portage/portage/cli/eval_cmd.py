@@ -1,11 +1,17 @@
 """``portage eval`` — run named eval cases of a plugin and read their verdicts.
 
 ``start --plugin <repo-relative plugin root> --case <name> [--case ...] [--backend local]
-[--repo <path>]`` loads ``<plugin root>/evals/eval-gate.json`` from the working tree, creates a
+[--repo <path>] [--require-version N]`` loads ``<plugin root>/evals/eval-gate.json`` from the working tree, creates a
 request (``portage.eval_command.request``), starts a detached worker and prints ``request: <id>``
 and ``wait: <paste-ready command>`` without waiting. Exit 0 started, 3 not run (the not-run block
 is printed), 2 refused (a stderr line names why: an undeclared case, a plugin root that leaves the
-repo, a mapping that does not load).
+repo, a mapping that does not load, a ``--require-version`` that is not 1 to 6 ASCII decimal digits).
+
+``--require-version N`` is a caller's statement of the eval command version it needs. When N is above
+``request.EVAL_COMMAND_VERSION`` the request is not run ``eval-command-too-old``: nothing is created or
+started, exit 3, and the block names the required and this command's version, the fix (run
+``trailhead update``, then start a new session) and the next step ``stop and report``. The check runs
+before the sandbox-marker check; at or below the command's version, start proceeds as without the flag.
 
 ``wait <id> [--timeout-seconds N]`` (default 110, 1..540) polls the request and prints a summary
 line, then each case's verdict and each run's score, and for a not-run case its reason and next
@@ -52,6 +58,8 @@ def add_eval_subparser(sub) -> None:
                    help="A case the plugin's eval-gate.json declares (repeatable)")
     s.add_argument("--backend", choices=["local"], default=None, help="Where to run the cases")
     s.add_argument("--repo", default=None, help="Repository (default: the working directory's git top level)")
+    s.add_argument("--require-version", default=None, metavar="N",
+                   help="Not run (eval-command-too-old) when this eval command's version is below N")
     s.set_defaults(func=cmd_start)
 
     w = group.add_parser("wait", help="Wait for a request and print its verdicts.",
@@ -124,7 +132,22 @@ def _leave_sandbox(args: argparse.Namespace) -> int:
     return 3
 
 
+def _too_old(required: int) -> int:
+    request.print_not_run_block(request.EVAL_COMMAND_TOO_OLD)
+    print(f"required version: {required}")
+    print(f"this command's version: {request.EVAL_COMMAND_VERSION}")
+    print("fix: run `trailhead update`, then start a new session")
+    return 3
+
+
 def cmd_start(args: argparse.Namespace) -> int:
+    if args.require_version is not None:
+        if not request.REQUIRE_VERSION_PATTERN.match(args.require_version):
+            print(f"eval start: --require-version {args.require_version!r} must be 1 to 6 ASCII decimal digits",
+                  file=sys.stderr)
+            return 2
+        if int(args.require_version) > request.EVAL_COMMAND_VERSION:
+            return _too_old(int(args.require_version))
     if args.backend is None and "SANDBOX_RUNTIME" in os.environ:
         return _leave_sandbox(args)
     try:
