@@ -349,8 +349,6 @@ def _headline(rows: list, unreadable: set) -> str:
 
 
 def render(rows: list, unreadable: set) -> str:
-    if not rows and not unreadable:
-        return f"{_headline(rows, unreadable)}\n"
     rows = sorted(rows, key=_sort_key)
     lines = [_headline(rows, unreadable)]
     lines += [f"Could not read: {label} — {REASONS[key]}" for label, key in sorted(unreadable)]
