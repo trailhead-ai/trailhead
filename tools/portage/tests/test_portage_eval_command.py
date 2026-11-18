@@ -829,6 +829,23 @@ class TestRequireVersion:
         assert rc == 3
         assert "not run: could-not-leave-sandbox" in out.splitlines()
 
+    @pytest.mark.parametrize("version", ["1", "2", "001"])
+    def test_the_printed_outside_the_sandbox_command_carries_the_required_version(self, ws, monkeypatch, version):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main(*self._argv(ws, version, "--case", "c2"))
+        assert rc == 3
+        assert (f"run outside the sandbox: {SHIM} start --require-version {int(version)} --plugin plugins/p "
+                f"--case c1 --case c2 --repo {ws.repo}") in out.splitlines()
+
+    def test_the_printed_outside_the_sandbox_command_has_no_version_flag_when_none_was_given(self, ws, monkeypatch):
+        monkeypatch.setenv("SANDBOX_RUNTIME", "1")
+        monkeypatch.setenv("PORTAGE_EVAL_SHIM", SHIM)
+        rc, out, _ = ws.main("eval", "start", "--repo", str(ws.repo), "--plugin", "plugins/p", "--case", "c1")
+        assert rc == 3
+        printed = [line for line in out.splitlines() if line.startswith("run outside the sandbox:")]
+        assert printed == [f"run outside the sandbox: {SHIM} start --plugin plugins/p --case c1 --repo {ws.repo}"]
+
 
 class TestNextStepFor:
     @pytest.mark.parametrize("reason", request.STOP_AND_REPORT_REASONS)

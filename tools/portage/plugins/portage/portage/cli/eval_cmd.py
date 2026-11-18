@@ -123,7 +123,10 @@ def _leave_sandbox(args: argparse.Namespace) -> int:
                   "outside the sandbox; run `trailhead update` with `claude` on PATH, then `chezmoi apply` "
                   "and start a new session")
             return 3
-    words = [shim, "start", "--plugin", args.plugin]
+    words = [shim, "start"]
+    if args.require_version is not None:
+        words += ["--require-version", str(int(args.require_version))]
+    words += ["--plugin", args.plugin]
     for case in args.cases:
         words += ["--case", case]
     if args.repo is not None:
