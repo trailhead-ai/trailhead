@@ -70,9 +70,9 @@ the cases in a detached worker outside the agent's sandbox.
 
 **The shim.** `trailhead install` writes it as `portage-eval` in the `bin`
 directory of trailhead's state directory: `$XDG_STATE_HOME/trailhead/bin/portage-eval`,
-which is `/home/<you>/.local/state/trailhead/bin/portage-eval` when
+which is `$HOME/.local/state/trailhead/bin/portage-eval` when
 `XDG_STATE_HOME` is unset (on every OS, macOS included). Use the **absolute** path,
-with the home directory spelled out. When a refusal or a not-run block prints the
+with the home directory spelled out: `/home/<you>` on Linux, `/Users/<you>` on macOS. When a refusal or a not-run block prints the
 absolute path of the shim, copy that one.
 
 **Run it bare, as one command.** The call is the shim path and its arguments and
