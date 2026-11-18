@@ -16,7 +16,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from trailhead.ranger.drive_groups import _UNSAFE_VAULT_NAME
+from trailhead.ranger.drive_groups import DriveGroupsError, check_vault_name
 
 VERDICT_FIELDS = ("verdict", "record", "reason_code")
 REASON_CODES = (
@@ -37,7 +37,8 @@ OUTCOME_KINDS = (
     "spec-complete",
     "refused",
 )
-RECORD_NAME_PATTERN = r"^[a-z0-9][a-z0-9-]*$"
+_RECORD_NAME = r"[a-z0-9][a-z0-9-]*"
+RECORD_NAME_PATTERN = rf"^{_RECORD_NAME}$"
 SLICE_PARENT_LABEL = "craft/slice-parent"
 
 _BLOCKLESS_KINDS = frozenset({"refused", "spec-complete", "waiting"})
@@ -47,7 +48,7 @@ _MAX_LINE_CHARS = 8192
 _LORE_TIMEOUT_SECONDS = 60
 
 _NAME_RE = re.compile(RECORD_NAME_PATTERN)
-_OUTCOME_RE = re.compile(r"outcome: ([a-z-]+) (task|spec)/([a-z0-9][a-z0-9-]*) parked=[0-9]{1,6}(?: — .*)?")
+_OUTCOME_RE = re.compile(rf"outcome: ([a-z-]+) (task|spec)/({_RECORD_NAME}) parked=[0-9]{{1,6}}(?: — .*)?")
 _HEADING_RE = re.compile(r"#{1,6} ")
 _BLOCK_HEADING = "## Unattended run"
 _OUTCOME_FIELD_RE = re.compile(r"\*\*Outcome:\*\*[ \t]*(\S+)[ \t]*")
@@ -60,7 +61,11 @@ def valid_spec(spec: str) -> bool:
 
 
 def valid_vault(vault: str) -> bool:
-    return _UNSAFE_VAULT_NAME.search(vault) is None
+    try:
+        check_vault_name(vault)
+    except DriveGroupsError:
+        return False
+    return True
 
 
 def lore_show(env: dict[str, str]) -> Show:
