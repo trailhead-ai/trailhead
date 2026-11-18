@@ -424,7 +424,9 @@ def test_format_one_block_written_before_this_change_parses(capsys, monkeypatch)
     lines = out.splitlines()
     assert "blocks: 1" in lines
     assert "latest-outcome: needs-a-decision" in lines
-    assert fenced(out, "latest-checkpoint:") == ["plan written, 2 child tasks cut, council review not started yet (waiting on Q1)"]
+    assert fenced(out, "latest-checkpoint:") == [
+        "plan written, 2 child tasks cut, council review not started yet (waiting on Q1)"
+    ]
     assert "highest-q: Q1" in lines
     assert "block=1 status=unanswered match=none applied=no" in qline(out, 1)
 
@@ -485,7 +487,11 @@ def rituals_block(rituals, *, planned=None, checkpoint="slice chosen"):
     "rituals, expected",
     [
         ("execute (2 calls decided unattended), pull_request (0 calls decided unattended)", "pull_request"),
-        ("slice (1 calls decided unattended), plan (0 calls decided unattended), execute (3 calls decided unattended)", "execute"),
+        (
+            "slice (1 calls decided unattended), plan (0 calls decided unattended), "
+            "execute (3 calls decided unattended)",
+            "execute",
+        ),
         ("slice (1 calls decided unattended)", "slice"),
         (None, "none"),
     ],
@@ -532,7 +538,8 @@ def test_planned_tasks_are_reported_in_order_in_the_data_fence(capsys, monkeypat
     out = report(body, capsys, monkeypatch)
     lines = out.splitlines()
     assert "planned-tasks-block: 1" in lines
-    assert lines.index("planned-tasks-block: 1") == lines.index(next(x for x in lines if x.startswith("highest-q:"))) + 1
+    highest_q = lines.index(next(x for x in lines if x.startswith("highest-q:")))
+    assert lines.index("planned-tasks-block: 1") == highest_q + 1
     assert [x for x in lines if x.startswith("planned-task:")] == ["planned-task: block=1", "planned-task: block=1"]
     assert fenced(out, "planned-task: block=1") == ["first thing"]
     tail = "\n".join(lines[lines.index("planned-task: block=1") + 3 :])
@@ -592,7 +599,11 @@ def test_highest_q_counts_a_recognised_repark_pointer(capsys, monkeypatch):
 
 
 def test_highest_q_counts_a_lookalike_naming_a_higher_number(capsys, monkeypatch):
-    body = block(questions=q(2)) + "\n" + block(questions="- Q2: still open - answer goes under the original Q2 entry\n- Q8: still open — answer goes under the original Q3 entry")
+    lookalikes = (
+        "- Q2: still open - answer goes under the original Q2 entry\n"
+        "- Q8: still open — answer goes under the original Q3 entry"
+    )
+    body = block(questions=q(2)) + "\n" + block(questions=lookalikes)
     assert "highest-q: Q8" in report(body, capsys, monkeypatch).splitlines()
 
 
@@ -613,7 +624,8 @@ def test_cli_seam_runs_as_a_process(tmp_path):
 def test_options_line_after_the_answer_does_not_change_the_match(capsys, monkeypatch):
     free = "**Answer:** go with the second plan"
     late = "  - Options: (a) go with the second plan — costs a day"
-    body = block(outcome="needs-a-decision", questions=q(1, opts="  - Options: (b) other — costs a day") + "\n" + free + "\n" + late)
+    questions = q(1, opts="  - Options: (b) other — costs a day") + "\n" + free + "\n" + late
+    body = block(outcome="needs-a-decision", questions=questions)
     assert "match=unmatched" in qline(report(body, capsys, monkeypatch), 1)
 
 
