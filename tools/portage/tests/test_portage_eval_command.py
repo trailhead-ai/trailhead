@@ -284,7 +284,7 @@ class TestStart:
         request_id = ws.started("c1", "c2")
         rc, out, _ = ws.wait(request_id)
         assert rc == 0
-        assert "case c1: pass" in out and "case c2: pass" in out and "c3" not in out
+        assert "case c1: pass" in out and "case c2: pass" in out and "case c3" not in out
         assert ws.count("case-started-c1") == 1 and ws.count("case-started-c2") == 1
         assert ws.count("case-started-c3") == 0
 
