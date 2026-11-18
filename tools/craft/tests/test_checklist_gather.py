@@ -895,7 +895,8 @@ def test_changing_one_specs_body_changes_only_its_entries_revision(capsys, shelf
                        set_aside("AC17", waits="alpha-wait")))
     assert r.returncode == 0, r.stderr
     _, after, _ = go_json(capsys, lore)
-    revs = lambda doc, vault: {e["revision"] for e in doc["entries"] if e["vault"] == vault}
+    def revs(doc, vault):
+        return {e["revision"] for e in doc["entries"] if e["vault"] == vault}
     assert revs(after, "beta") == revs(before, "beta") and len(revs(after, "beta")) == 1
     assert len(revs(after, "alpha")) == 1 and revs(after, "alpha") != revs(before, "alpha")
 

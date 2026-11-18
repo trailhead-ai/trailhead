@@ -28,7 +28,8 @@ _BACKTICKED = re.compile(r"`([a-z][a-z0-9-]*)`")
 
 
 def section(markdown: str, start_heading: str, end_heading: str | None = None) -> str:
-    """The text from the heading starting `start_heading` up to the next `## ` heading, or to the heading starting `end_heading`."""
+    """The text from the heading starting `start_heading` up to the next `## ` heading,
+    or to the heading starting `end_heading`."""
     lines = markdown.splitlines()
     begin = next(i for i, ln in enumerate(lines) if ln.startswith(start_heading))
     stop = len(lines)

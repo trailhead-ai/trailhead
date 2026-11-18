@@ -418,7 +418,9 @@ def test_the_operators_words_never_reach_an_argv_and_the_reason_is_fixed_text(wo
     assert argv[argv.index("--reason") + 1] == "check passed on the check list"
     assert argv[argv.index("--initiated-by") + 1] == "operator"
     assert not any("saw 3" in part for call, _ in world.lore.calls for part in call)
-    assert [stdin for call, stdin in world.lore.calls if call[:2] == ["record", "amend"] and "--help" not in call][0].count("saw 3") == 1
+    amend_stdins = [stdin for call, stdin in world.lore.calls
+                    if call[:2] == ["record", "amend"] and "--help" not in call]
+    assert amend_stdins[0].count("saw 3") == 1
 
 
 # --- lore support, layer and failures ----------------------------------------
@@ -446,7 +448,8 @@ def test_a_lore_missing_a_flag_the_write_needs_is_too_old_before_any_read(world,
 
 
 def test_a_lore_that_cannot_describe_a_command_is_too_old(world, capsys):
-    world.lore.inject(["record", "amend", "--help"], returncode=2, stdout="usage: lore record amend [--close ACn] [--base REVISION]")
+    world.lore.inject(["record", "amend", "--help"], returncode=2,
+                      stdout="usage: lore record amend [--close ACn] [--base REVISION]")
     res = world.run(capsys, answer="failed")
     assert (res.code, res.reason) == (2, "lore-too-old")
 

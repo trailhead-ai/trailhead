@@ -62,7 +62,8 @@ def world(tmp_path):
     return lore, env, created.stdout.splitlines()[0]
 
 
-def test_a_gathered_entry_answered_passed_is_saved_closed_and_leaves_the_candidates(world, tmp_path):  # inert-gate: allow wiring smoke: real lore, real scripts
+# inert-gate: allow wiring smoke: real lore, real scripts
+def test_a_gathered_entry_answered_passed_is_saved_closed_and_leaves_the_candidates(world, tmp_path):
     lore, env, spec = world
     gathered = json.loads(_run(env, "checklist_gather.py", "--json").stdout)
     (entry,) = gathered["entries"]
