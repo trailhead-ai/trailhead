@@ -264,11 +264,7 @@ def _write(runner, vault: str, spec_id: str, entry, answer: str, base: str, prop
     done = sw.write_record(runner, argv, proposed)
     if done is not None and done.returncode == 0:
         return
-    try:
-        _, current = _read_spec(runner, vault, spec_id)
-    except Refusal:
-        current = base
-    if current != base:
+    if sw.revision_changed(runner, vault, spec_id, base, "spec-unreadable"):
         raise Refusal(f"{spec_id} changed after it was read", "stale", 1)
     text = done.stderr if done is not None else ""
     if answer == "passed" and any(t in text for t in _CLOSE_REFUSED_TEXTS):
