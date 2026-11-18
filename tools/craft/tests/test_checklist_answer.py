@@ -579,6 +579,40 @@ def test_a_save_whose_revision_re_read_fails_still_stands_with_no_revision_line(
     assert world.entry("AC2").status == "failed"
 
 
+def after_write(world, change):
+    """A runner that applies `change` to the spec just after our write, before the script reads it again."""
+    def runner(argv, stdin=None):
+        done = world.lore(argv, stdin=stdin)
+        if argv[:2] in (["record", "update"], ["record", "amend"]) and "--help" not in argv:
+            world.edit(change)
+        return done
+    return runner
+
+
+def test_a_save_another_writer_changed_before_the_re_read_prints_no_revision_line(world, capsys):
+    res = world.run(capsys, runner=after_write(world, lambda b: b.rstrip("\n") + "\n\nAn unseen addition.\n"))
+
+    assert (res.code, res.out) == (0, "saved: AC2 failed\n")
+
+
+def test_a_save_that_gained_only_a_trailing_newline_still_prints_its_revision(world, capsys):
+    res = world.run(capsys, runner=after_write(world, lambda b: b.rstrip("\n") + "\n\n"))
+
+    assert res.code == 0, res.err
+    assert revision_line(res) == world.revision
+
+
+def test_a_write_lore_refused_because_another_writer_saved_an_unparsable_section_is_stale(world, capsys):
+    def runner(argv, stdin=None):
+        if argv[:2] in (["record", "update"], ["record", "amend"]) and "--help" not in argv:
+            world.edit(lambda b: b + "\nloose prose in the section\n")
+        return world.lore(argv, stdin=stdin)
+
+    res = world.run(capsys, runner=runner)
+
+    assert (res.code, res.reason) == (1, "stale")
+
+
 def test_answering_two_entries_in_turn_with_the_returned_revisions_saves_both(world, capsys):
     first = world.run(capsys, criterion="AC2", answer="failed", words="no 3 on the banner")
     assert first.code == 0, first.err
