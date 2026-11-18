@@ -593,6 +593,168 @@
         "skills/_shared/execute.md"
       ],
       "merge_only": true
+    },
+    "unattended-plan-resumes-with-an-answered-critical": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ],
+      "merge_only": true
+    },
+    "unattended-plan-reparks-an-unanswered-question": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ],
+      "merge_only": true
+    },
+    "unattended-plan-resumes-after-stuck": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-resumes-an-interrupted-run-on-request": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-refuses-an-outcome-less-block": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ],
+      "merge_only": true
+    },
+    "unattended-plan-parks-a-correction-at-the-end": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-reparks-an-unmatched-answer": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-takes-over-an-interrupted-block": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ],
+      "merge_only": true
+    },
+    "unattended-plan-refuses-a-finished-block": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-creates-only-the-missing-planned-children": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-binds-the-unbound-default-vault": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-parks-a-correction-and-continues": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-refuses-a-block-stopped-in-plan": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-refuses-an-outcome-less-block": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-reparks-an-unanswered-question": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-after-stuck": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-an-interrupted-run-on-request": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-resumes-with-an-answered-assumption": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-stops-when-taken-over": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-takes-over-an-interrupted-block-and-reaches-dispatch": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
+    },
+    "unattended-execute-starts-fresh-after-a-finished-plan": {
+      "measures": [
+        "skills/_shared/execute.md",
+        "skills/execute/SKILL.md",
+        "skills/_shared/unattended.md",
+        "scripts/run_block.py"
+      ]
     }
   }
 }

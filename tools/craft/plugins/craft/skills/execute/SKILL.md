@@ -19,8 +19,9 @@ description: >
 
 Execute a plan task-by-task — or a standalone task as its own single slice, with a human operator
 present to answer escalations. With the whole token `--unattended` (and `--then-pr`) on the
-invocation, no operator answers anything: `../_shared/execute.md`'s Unattended request section
-states what each stop does, and `../_shared/unattended.md` defines the contract it points at. **Read
+invocation, no operator answers anything (a whole `--resume` token beside it takes over an earlier
+run's outcome-less block): `../_shared/execute.md`'s Unattended request section states what each
+stop does, and `../_shared/unattended.md` defines the contract it points at. **Read
 `../_shared/unattended.md` now when `--unattended` is present, and follow it in full.**
 
 **The procedure lives in `../_shared/execute.md`** (a sibling of this skill's directory), alongside

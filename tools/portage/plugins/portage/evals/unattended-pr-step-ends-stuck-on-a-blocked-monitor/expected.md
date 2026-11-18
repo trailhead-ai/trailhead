@@ -31,3 +31,7 @@ Predicted baseline (red): no `outcome:` line and no block outcome.
 - The credential scrub of the block diff, the temp-file route for the diff and the one retry of a non-applying diff are not graded.
 - An earlier fixture made the group name a green-driver agent that does not exist; monitor then decided `BLOCKED` with its prescribed message, which contains backticks, and the runner's sandbox denied the `printf` redirect that writes it, so no outcome file appeared and the case timed out. The fixture was changed to the `blocked` action above (disclosed here; no grader was changed).
 - Whether monitor ends `BLOCKED` or `STOPPED` on this fixture is the monitor's call; both map to `stuck`, and the case does not distinguish them.
+
+## Amended after the treatment run (2026-11-16)
+
+The prompt now says that execute ran earlier in this same session and left its block open at `**Checkpoint:** close`. The fixture was out of step with the PR step's latest-block rules: the seeded block is execute's open block with no outcome, and without the hand-off sentence the step correctly refuses it as held by another run. The bar is unchanged; the fixture now describes the situation the case is about.

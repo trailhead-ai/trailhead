@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: unattended-plan-resumes-an-interrupted-run-on-request
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

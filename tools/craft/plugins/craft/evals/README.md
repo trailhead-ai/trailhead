@@ -71,6 +71,16 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   are for the plan ritual's migration-suppression step, which pipes the spec body into
   `migration_bar.py` and reads the printed directive. One covers the bare call and one the call with
   arguments, as `Bash(mktemp)` and `Bash(mktemp *)` do.
+- The two grants `Bash(*/scripts/run_block.py)` and `Bash(*/scripts/run_block.py *)` are for the
+  resumed unattended rituals, which pipe a record body into the run-block reader and read the
+  printed report: `<path>/scripts/run_block.py < <file>`. One covers the bare call and one the
+  call with arguments or a redirection, as the `migration_bar.py` pair does; the runner does not
+  split a command at a redirection, so `run_block.py < <file>` is allowed by the `*` form. Their
+  leading `*` has the same shape as the script grants above, so they admit any single command whose
+  text contains `<anything>/scripts/run_block.py` (or that text followed by anything), whatever
+  program runs it. The reader only reads stdin and prints; it writes nothing. The cases that
+  measure it install a wrapper at `./scripts/run_block.py` that logs the call and runs the real
+  copy.
 - The `pending_check.py *` and `observation_gate.py` grants are for the close's manual-check
   discharge in `skills/_shared/execute.md`, run by the cases `close-defers-an-unconfirmed-check`,
   `stale-write-leaves-the-slice-open` and `one-failed-check-saves-nothing`. `pending_check.py *`
@@ -95,7 +105,7 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   (`--discard-changes`, `--detach`), and `git log origin/*` admits `--output=<path>`, which writes a
   file the sandbox allows.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
-  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `pending_check.py`) matches any single command that ends in
+  `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `run_block.py`, `pending_check.py`) matches any single command that ends in
   or contains that script path, whatever program runs it. So the set of commands a case can run is
   bounded by the runner's sandbox, not by these patterns. The grants shape only the eval runner;
   they are never installed and change nothing for a real install. Anchoring them is a runner change,
@@ -129,6 +139,13 @@ A case marked `"merge_only": true` runs before merge, not on every push. On the 
 the core cases are the detectors, one per behaviour the file decides, and the other cases are `merge_only`.
 A case that also measures a file with no `merge_only` case, or that runs past the 540 s gate budget, stays
 core, and every measured file keeps at least one core case. Say which tier a new case is in when you add it.
+
+The resumed-run cases (`unattended-plan-*` and `unattended-execute-*` that also measure
+`scripts/run_block.py`) keep their detectors in execute: each execute case detects one resume behaviour and
+is core. The plan cases that repeat a behaviour execute already detects (an answered question, a re-parked
+question, an outcome-less block, a takeover) are `merge_only`; the plan cases for behaviours only plan
+decides (a finished block, an unmatched answer, the missing planned children, a correction parked at the
+end) stay core, as do the two that resume a run to its end, which run past the gate budget.
 
 The `runner` block holds the grants of that batch command, the model `claude-opus-5-5`, and
 `max_cost_usd` 3.5 per case. The cap is sized from the logged cost: the consult case is the dearest
