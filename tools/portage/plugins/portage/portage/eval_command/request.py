@@ -31,10 +31,13 @@ A case result::
 ``stop and report``, except the core's ``timeout``; ``interrupted`` (the worker died before deciding
 the case) and ``timeout`` are followed by ``resubmit``. A ``runner-broken`` whose pinned runner binary
 is gone also carries a ``cause`` naming the update that restores it, printed as a ``cause:`` line.
-``eval-command-too-old`` is printed by ``start`` alone, when ``--require-version N`` names a version above
-``EVAL_COMMAND_VERSION`` (no request is created); it is followed by ``stop and report`` and every reason in
-``STOP_AND_REPORT_REASONS``, the tuple that enumerates the known stop-and-report reasons, is; ``next_step_for`` resubmits only the reasons in ``RESUBMIT_REASONS``, so any reason not in that set, one the module has never heard of included, is ``stop and report``. ``could-not-leave-sandbox`` is printed by ``start`` alone (no request exists), or by ``wait`` for a
-request started from inside the sandbox whose worker is gone.
+``eval-command-too-old`` is printed by ``start`` alone, when ``--require-version N`` names a version
+above ``EVAL_COMMAND_VERSION`` (no request is created); it is followed by ``stop and report`` and every
+reason in ``STOP_AND_REPORT_REASONS``, the tuple that enumerates the known stop-and-report reasons, is;
+``next_step_for`` resubmits only the reasons in ``RESUBMIT_REASONS``, so any reason not in that set, one
+the module has never heard of included, is ``stop and report``. ``could-not-leave-sandbox`` is printed
+by ``start`` alone (no request exists), or by ``wait`` for a request started from inside the sandbox
+whose worker is gone.
 """
 
 from __future__ import annotations
