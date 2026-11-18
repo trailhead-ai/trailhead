@@ -864,13 +864,13 @@ class TestNextStepFor:
 
 
 class TestPinnedShimEndToEnd:
-    def _shim(self, ws, tmp_path):
+    def _shim(self, ws, tmp_path, runner=None):
         from trailhead.install import build_cli_shims, resolve_cli_tools
         from trailhead.pathint import resolve_shim_dir
 
         stubbin = tmp_path / "stubbin"
         stubbin.mkdir()
-        (stubbin / "claude").symlink_to(ws.stub)
+        (stubbin / "claude").symlink_to(ws.stub if runner is None else runner)
         env = {"HOME": str(ws.home), "PATH": f"{stubbin}:/usr/bin:/bin"}
         build_cli_shims(resolve_cli_tools({"portage": True}), env=env)
         return resolve_shim_dir(env=env) / "portage-eval"
@@ -894,6 +894,18 @@ class TestPinnedShimEndToEnd:
         assert waited.returncode == 0, (waited.stdout, waited.stderr)
         assert "case c1: pass" in waited.stdout
         assert ws.count("case-started-c1") == 1
+
+    def test_the_shim_runs_an_uncommitted_edit_of_the_measured_prose_not_the_committed_one(self, ws, tmp_path):
+        _commit_repo(ws.repo)
+        (ws.repo / "plugins" / "p" / "skills" / "x.md").write_text("edited after the commit")
+        shim = self._shim(ws, tmp_path, runner=_recording_runner(ws, tmp_path))
+        started = self._run(shim, ws, "start", "--repo", str(ws.repo), "--plugin", "plugins/p",
+                            "--case", "c1", "--backend", "local")
+        assert started.returncode == 0, started.stderr
+        request_id = re.search(r"^request: (\S+)$", started.stdout, re.M).group(1)
+        waited = self._run(shim, ws, "wait", request_id, "--timeout-seconds", "100")
+        assert waited.returncode == 0, (waited.stdout, waited.stderr)
+        assert _recorded(ws, "c1")["files"]["skills/x.md"] == "edited after the commit"
 
     def test_the_shim_with_the_sandbox_marker_and_no_backend_tells_the_session_to_stop(self, ws, tmp_path):
         shim = self._shim(ws, tmp_path)
@@ -1052,3 +1064,92 @@ class TestWorkerImportIsolation:
         rc, out, _ = ws.wait(request_id)
         assert rc == 0 and "case c1: pass" in out
         assert not marker.exists()
+
+
+GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+
+
+def _git(repo, *args):
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false",
+         *args], cwd=repo, check=True, capture_output=True, text=True,
+        env={**os.environ, **GIT_ENV}).stdout
+
+
+def _commit_repo(repo):
+    _git(repo, "init", "-q")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "committed")
+
+
+def _recording_runner(ws, tmp_path):
+    """A runner that writes the plugin directory it was handed (every file's content) and its argv to
+    the control directory, one file per case, then behaves as the ordinary stub."""
+    script = tmp_path / "recording-runner"
+    script.write_text(f"""#!{sys.executable}
+import json, os, sys
+argv = sys.argv
+if "--eval-dir" not in argv:
+    case = argv[argv.index("--case") + 1]
+    plugin = argv[argv.index("plugin") + 2]
+    files = {{}}
+    for root, _, names in os.walk(plugin):
+        for n in names:
+            path = os.path.join(root, n)
+            files[os.path.relpath(path, plugin)] = open(path).read()
+    json.dump({{"argv": argv, "files": files}}, open(os.path.join({str(ws.ctl)!r}, "rec-" + case + ".json"), "w"))
+os.execv({str(ws.stub)!r}, argv)
+""")
+    script.chmod(0o755)
+    return script
+
+
+def _recorded(ws, case):
+    return json.loads(until(lambda: (ws.ctl / f"rec-{case}.json").exists() and (ws.ctl / f"rec-{case}.json"))
+                      .read_text())
+
+
+class TestDirtyWorkingTree:
+    @pytest.fixture
+    def rec(self, ws, tmp_path, monkeypatch):
+        monkeypatch.setenv("PORTAGE_EVAL_RUNNER", str(_recording_runner(ws, tmp_path)))
+        _commit_repo(ws.repo)
+        return ws
+
+    @pytest.mark.parametrize("edit, relpath, content", [
+        (False, "skills/x.md", "x"),
+        (True, "skills/x.md", "prose edited after the commit"),
+        (True, "skills/x.md", ""),
+        (True, "evals/c1/case.yaml", ""),
+        (True, "evals/c1/case.yaml", "name: [unclosed\n"),
+    ], ids=["clean", "edited-prose", "truncated-prose", "truncated-case", "garbled-case"])
+    def test_the_runner_is_handed_the_working_tree_as_it_stands_and_start_never_refuses_it(
+            self, rec, edit, relpath, content):
+        if edit:
+            (rec.repo / "plugins" / "p" / relpath).write_text(content)
+        assert bool(_git(rec.repo, "status", "--porcelain").strip()) is edit
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        assert _recorded(rec, "c1")["files"][relpath] == content
+
+    def test_a_request_runs_the_mapping_of_the_working_tree_not_the_committed_one(self, rec):
+        edited = {**MAPPING, "runner": {"model": "opus", "allow_tools": ["Read", "Grep"], "max_cost_usd": 3.0}}
+        (rec.repo / "plugins" / "p" / "evals" / "eval-gate.json").write_text(json.dumps(edited))
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        doc = json.loads((rec.req(request_id) / "request.json").read_text())
+        assert doc["cases"][0]["runner"] == edited["runner"]
+        argv = _recorded(rec, "c1")["argv"]
+        assert argv[argv.index("--model") + 1] == "opus"
+        grants = argv[argv.index("--allow-tools") + 1:]
+        assert grants[:2] == ["Read", "Grep"] and grants[2].startswith("-")
+
+    def test_a_request_with_an_unedited_mapping_carries_the_committed_grants(self, rec):
+        request_id = rec.started("c1")
+        assert rec.wait(request_id)[0] == 0
+        argv = _recorded(rec, "c1")["argv"]
+        assert argv[argv.index("--model") + 1] == "sonnet"
+        grants = argv[argv.index("--allow-tools") + 1:]
+        assert grants[0] == "Read" and grants[1].startswith("-")
