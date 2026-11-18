@@ -344,6 +344,27 @@ def test_a_vault_with_records_outside_its_root_means_no_spec_is_judged():
     assert res == dq.DistillSkipped(("a",))
 
 
+@pytest.mark.parametrize("kind", ["spec", "task"])
+def test_an_unreadable_spec_or_task_means_no_spec_is_judged(kind):
+    res = dq.build_distill_queue([vault("a", spec("s", "planned"), linked("s")),
+                                  vault("b", unreadable=((kind, "gone"),))])
+    assert res == dq.DistillSkipped((), ("b",))
+    assert res.at_fault == ("b",)
+
+
+@pytest.mark.parametrize("kind", ["adr", "lesson", "session", "decision"])
+def test_an_unreadable_record_of_another_kind_does_not_stop_the_queue(kind):
+    res = queue(vault("a", spec("s", "planned"), linked("s"), unreadable=((kind, "gone"),)))
+    assert [i.name for i in res.waiting] == ["s"]
+
+
+def test_a_vault_both_not_fully_read_and_holding_an_unreadable_spec_is_named_once_as_not_fully_read():
+    res = dq.build_distill_queue([vault("a", unreadable=(("spec", "x"),), skipped_escaping=1),
+                                  vault("b", unreadable=(("task", "y"),))])
+    assert res == dq.DistillSkipped(("a",), ("b",))
+    assert res.at_fault == ("a", "b")
+
+
 # --- scan switch ---------------------------------------------------------------
 
 

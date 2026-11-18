@@ -246,11 +246,18 @@ def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[s
         return "its directory could not be read"
     if scan.skipped_escaping:
         return "records lie outside its vault root and were not read"
-    names = ", ".join(at_fault)
-    noun = "vault" if len(at_fault) == 1 else "vaults"
-    unreadable = all(scans[name].unreadable_reason is not None for name in at_fault)
-    state = "could not be read" if unreadable else "could not be fully read"
-    return f"{noun} {names} {state}, {tail}"
+    holders = tuple(n for n in at_fault if scans[n].fully_read)
+    incomplete = tuple(n for n in at_fault if n not in holders)
+    causes = []
+    if incomplete:
+        noun = "vault" if len(incomplete) == 1 else "vaults"
+        unreadable = all(scans[name].unreadable_reason is not None for name in incomplete)
+        state = "could not be read" if unreadable else "could not be fully read"
+        causes.append(f"{noun} {', '.join(incomplete)} {state}")
+    if holders:
+        noun, verb = ("vault", "holds") if len(holders) == 1 else ("vaults", "hold")
+        causes.append(f"{noun} {', '.join(holders)} {verb} a spec or task record that could not be read")
+    return f"{' and '.join(causes)}, {tail}"
 
 
 _EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
@@ -348,7 +355,7 @@ DISTILL_SKIP_TAIL = "so no spec's ADR or tasks can be confirmed"
 def _run_distill(scans, selected, ctx) -> CheckRun:
     result = queue_mod.build_distill_queue(scans)
     if isinstance(result, queue_mod.DistillSkipped):
-        return CheckRun(None, {}, result.vaults)
+        return CheckRun(None, {}, result.at_fault)
     assert isinstance(result, queue_mod.DistillQueue)
     chosen = set(selected)
     judged = {s.vault: sum(1 for r in s.records if r.kind == "spec") for s in scans if s.vault in chosen}

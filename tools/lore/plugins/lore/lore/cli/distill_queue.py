@@ -16,8 +16,8 @@ spec name that is not a valid record id is replaced by a fixed phrase and never 
 
 **Exit codes.** 0 on success, with or without specs waiting. 1 with one ``lore:``
 stderr line and nothing on stdout when the queue cannot be built: a vault was not
-fully read (the line names it and the way on: repair or remove the vault, or distill
-one spec by name), the configuration cannot be read, or anything fails unexpectedly.
+fully read, or holds a spec or task record that could not be read (the line names the
+vault and the way on: repair or remove it, or distill one spec by name), the configuration cannot be read, or anything fails unexpectedly.
 A caller treats any non-zero exit, and any stdout whose first line does not start
 ``lore distill-queue — ``, as a refusal and never as an empty queue.
 
@@ -34,7 +34,10 @@ from .health import _distill_line, _emit, _safe
 
 HEADER = "lore distill-queue — "
 DEFERRED_HEADING = "deferred, no linked task (distill each by target):"
-_FALLBACK = "repair or remove the vault to sweep again, or distill one spec by name with /craft:distill spec/<name>"
+_BY_NAME = "or distill one spec by name with /craft:distill spec/<name>"
+_FALLBACK = f"repair or remove the vault to sweep again, {_BY_NAME}"
+_FALLBACK_RECORD = f"repair or remove the record to sweep again, {_BY_NAME}"
+_FALLBACK_BOTH = f"repair or remove what could not be read to sweep again, {_BY_NAME}"
 
 _scan_vault = scan_mod.scan_vault
 
@@ -52,11 +55,20 @@ def render(queue: queue_mod.DistillQueue) -> list[str]:
 
 def _refusal(skipped: queue_mod.DistillSkipped, scans) -> str:
     by_name = {s.vault: s for s in scans}
-    names = ", ".join(_safe(v) for v in skipped.vaults)
-    noun = "vault" if len(skipped.vaults) == 1 else "vaults"
-    unreadable = all(by_name[v].unreadable_reason is not None for v in skipped.vaults)
-    state = "could not be read" if unreadable else "could not be fully read"
-    return f"lore: {noun} {names} {state}, so the distill queue is refused rather than built partial; {_FALLBACK}"
+    causes = []
+    if skipped.vaults:
+        names = ", ".join(_safe(v) for v in skipped.vaults)
+        noun = "vault" if len(skipped.vaults) == 1 else "vaults"
+        unreadable = all(by_name[v].unreadable_reason is not None for v in skipped.vaults)
+        state = "could not be read" if unreadable else "could not be fully read"
+        causes.append(f"{noun} {names} {state}")
+    if skipped.unreadable_records:
+        names = ", ".join(_safe(v) for v in skipped.unreadable_records)
+        noun, verb = ("vault", "holds") if len(skipped.unreadable_records) == 1 else ("vaults", "hold")
+        causes.append(f"{noun} {names} {verb} a spec or task record that could not be read")
+    fallback = (_FALLBACK if not skipped.unreadable_records
+                else _FALLBACK_RECORD if not skipped.vaults else _FALLBACK_BOTH)
+    return f"lore: {' and '.join(causes)}, so the distill queue is refused rather than built partial; {fallback}"
 
 
 def cmd_distill_queue(args) -> int:

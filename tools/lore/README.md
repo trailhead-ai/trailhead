@@ -81,7 +81,7 @@ lore record amend <id>    Correct a record's body in place, even a frozen record
 lore record history <id>  Print a record's change history, newest first, entries numbered (what amend recorded: when, by whom, who asked, why, the diff); --body-before N previews the body before entry N
 lore record criteria <spec-id>  Print, read-only, one JSON object `{record, declared, removed}`: the criterion IDs a spec's body declares (document order) and the ones its change-history recorded as removed (numeric order); refuses a non-spec, a missing or duplicate `## Acceptance Criteria` heading, or a malformed stored history
 lore validate             Check every record is well formed and every link resolves, one line per finding; exits non-zero on any (--vault <name> for one vault, --path <dir> for a bare directory); read-only
-lore distill-queue        List, read-only, the specs waiting to be condensed into ADRs (oldest first) and the deferred specs no task links to; the same rule `lore health`'s `distill-queue` check reports; refuses when any vault could not be read
+lore distill-queue        List, read-only, the specs waiting to be condensed into ADRs (oldest first) and the deferred specs no task links to; the same rule `lore health`'s `distill-queue` check reports; refuses when any vault could not be read or holds an unreadable spec or task record
 lore areas                List the area profiles across every configured non-shared vault
 lore signing enable       Generate (or adopt with --key) a no-passphrase SSH key this host signs vault commits with
 lore signing status       Report whether this host signs vault commits unattended, or what's missing

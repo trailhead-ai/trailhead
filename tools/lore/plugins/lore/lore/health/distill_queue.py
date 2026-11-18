@@ -50,8 +50,12 @@ conditions, a reserved label key and a value it cannot bind, are not mirrored: s
 links here, so its spec is waiting, but a ``kind:task related-spec:`` search does not find it. The task-to-spec map is built once per run.
 
 **Skipped.** When any vault was not fully read no spec can be judged, because a task
-edge or an ADR's status could sit in the unread part: the result is
-:class:`DistillSkipped` naming those vaults.
+edge or an ADR's status could sit in the unread part. The same holds when any vault
+holds an unreadable ``spec`` or ``task`` record (its kind is its directory): an unread
+spec is missing from the queue, and an unread task may be the one linking a spec. The
+result is :class:`DistillSkipped` naming both sets of vaults. An unreadable ADR does not
+skip: it is judged per edge, with the "could not be read" note. An unreadable record of
+any other kind is never consulted.
 
 Each waiting or deferred spec is a :class:`QueueItem` carrying its reason (the text a
 report prints) and, when a ``related adr`` edge was ignored for want of a decision, an
@@ -110,11 +114,29 @@ class DistillQueue:
     deferred: tuple[QueueItem, ...] = ()
 
 
+#: An unreadable record of one of these kinds leaves the queue unjudgeable.
+JUDGED_KINDS = ("spec", "task")
+
+
 @dataclass(frozen=True)
 class DistillSkipped:
-    """The queue could not be built; ``vaults`` names the vaults not fully read."""
+    """The queue could not be built.
+
+    ``vaults`` names the vaults not fully read; ``unreadable_records`` names the other
+    vaults that hold an unreadable spec or task record.
+    """
 
     vaults: tuple[str, ...]
+    unreadable_records: tuple[str, ...] = ()
+
+    @property
+    def at_fault(self) -> tuple[str, ...]:
+        return self.vaults + self.unreadable_records
+
+
+def holds_unreadable_judged_record(scan: VaultScan) -> bool:
+    """Whether *scan* holds an unreadable record of a kind the queue is judged from."""
+    return any(u.kind in JUDGED_KINDS for u in scan.unreadable)
 
 
 def _mapping(sidecar: dict, field: str) -> dict:
@@ -232,8 +254,9 @@ def _sort_key(item: QueueItem):
 def build_distill_queue(scans: Sequence[VaultScan]) -> DistillQueue | DistillSkipped:
     """Judge every spec of every scanned vault; see the module docstring for the rule."""
     at_fault = tuple(s.vault for s in scans if not s.fully_read)
-    if at_fault:
-        return DistillSkipped(at_fault)
+    holders = tuple(s.vault for s in scans if s.fully_read and holds_unreadable_judged_record(s))
+    if at_fault or holders:
+        return DistillSkipped(at_fault, holders)
 
     adrs = _Adrs(scans)
     linked = _linked_spec_names(scans)

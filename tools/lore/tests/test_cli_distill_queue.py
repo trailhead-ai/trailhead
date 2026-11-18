@@ -167,6 +167,87 @@ def test_a_single_unreadable_record_does_not_refuse(world):
     assert r.stdout.splitlines()[0] == "lore distill-queue — 1 waiting, 0 deferred"
 
 
+def _oversize_sidecar(root, kind, name):
+    d = root / kind
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.json").write_text(json.dumps({"title": name, "pad": "x" * (1024 * 1024 + 1)}))
+    (d / f"{name}.md").write_text("x")
+
+
+def _malformed(root, kind, name):
+    d = root / kind
+    d.mkdir(parents=True, exist_ok=True)
+    (d / f"{name}.json").write_text("{not json")
+    (d / f"{name}.md").write_text("x")
+
+
+RECORD_REFUSAL = ("lore: vault trailhead holds a spec or task record that could not be read, so the distill "
+                  "queue is refused rather than built partial; repair or remove the record to sweep again, "
+                  "or distill one spec by name with /craft:distill spec/<name>")
+
+
+def test_an_unreadable_spec_refuses_the_queue_naming_the_vault_and_the_reason(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _oversize_sidecar(world.roots["trailhead"], "spec", "big")
+    r = world.run()
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert r.stderr.splitlines() == [RECORD_REFUSAL]
+
+
+def test_an_unreadable_task_refuses_the_queue_rather_than_deferring_its_spec(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _malformed(world.roots["trailhead"], "task", "broken")
+    r = world.run()
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert r.stderr.splitlines() == [RECORD_REFUSAL]
+
+
+def test_an_unreadable_adr_does_not_refuse_and_the_spec_waits_with_the_note(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned", related={"adr": ["anchor"]})
+    _link(d, "s")
+    _malformed(d, "adr", "anchor")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "its ADR could not be read" in r.stdout
+
+
+def test_an_unreadable_record_of_another_kind_does_not_refuse(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _oversize_sidecar(d, "decision", "big")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.splitlines()[0] == "lore distill-queue — 1 waiting, 0 deferred"
+
+
+def test_a_vault_not_fully_read_and_another_holding_an_unreadable_spec_are_both_named(world):
+    _malformed(world.roots["default"], "spec", "x")
+    os.rmdir(world.roots["trailhead"])
+    r = world.run()
+    assert r.returncode == 1
+    assert r.stderr.splitlines() == [
+        "lore: vault trailhead could not be read and vault default holds a spec or task record that could "
+        "not be read, so the distill queue is refused rather than built partial; repair or remove what "
+        "could not be read to sweep again, or distill one spec by name with /craft:distill spec/<name>"]
+
+
+def test_a_refusal_for_an_unreadable_record_escapes_the_vault_name(tmp_path):
+    w = World(tmp_path, names=("default", "bad\x1b[31mname"))
+    _malformed(w.roots["bad\x1b[31mname"], "spec", "x")
+    r = w.run()
+    assert r.returncode == 1
+    assert "\x1b" not in r.stderr
+    assert r.stderr.startswith("lore: vault bad")
+
+
 def test_unreadable_config_is_one_lore_line_exit_one_and_no_header(world):
     (world.cfg / "lore" / "config.json").write_text("{not json")
     r = world.run()

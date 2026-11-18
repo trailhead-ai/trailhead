@@ -2350,6 +2350,33 @@ def test_a_spec_kept_waiting_because_its_adr_could_not_be_read_says_so(world):
                                       "planned, not yet distilled; its ADR could not be read")
 
 
+def test_an_unreadable_spec_skips_the_check_on_every_row_naming_the_vault_and_the_reason(world):
+    _spec(world.roots["default"], "waits")
+    bad = world.roots["levr"] / "spec"
+    bad.mkdir()
+    (bad / "broken.json").write_text("{not json")
+    (bad / "broken.md").write_text("x\n")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout, DQ)
+    reason = ("yes: vault levr holds a spec or task record that could not be read, "
+              "so no spec's ADR or tasks can be confirmed")
+    assert got["default"] == ("—", "—", reason)
+    assert got["trailhead"] == got["default"] == got["levr"]
+    assert group(r.stdout, DQ) == [f"{DQ} — skipped."]
+
+
+def test_an_unreadable_adr_does_not_skip_the_check(world):
+    _spec(world.roots["default"], "waits")
+    bad = world.roots["levr"] / "adr"
+    bad.mkdir()
+    (bad / "broken.json").write_text("{not json")
+    (bad / "broken.md").write_text("x\n")
+    r = world.run()
+    assert group(r.stdout, DQ)[0] != f"{DQ} — skipped."
+    assert rows(r.stdout, DQ)["default"][2] == "no"
+
+
 def test_an_unreadable_vault_skips_the_check_on_every_row_naming_it(world):
     _spec(world.roots["default"], "waits")
     os.chmod(world.roots["levr"], 0)

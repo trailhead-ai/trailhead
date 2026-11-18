@@ -8,7 +8,7 @@ format described by [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `lore distill-queue` lists the specs waiting to be condensed into ADRs, oldest first, and the
   deferred specs no task links to, which are distilled by target. `lore health` gains a fifth
   check, `distill-queue`, that reports the same waiting specs from the same rule, and skips when
-  any vault could not be read. `/craft:distill` builds its sweep queue from `lore distill-queue`
+  any vault could not be read or holds an unreadable spec or task record. `/craft:distill` builds its sweep queue from `lore distill-queue`
   instead of its own search.
 - `lore validate` now fails with a `misfiled-folder` finding for a top-level vault folder that is
   not named for a record kind but directly holds a record (`<n>.md` beside `<n>.json`), such as

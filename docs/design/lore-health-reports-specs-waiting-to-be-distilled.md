@@ -33,7 +33,11 @@ the sweep cannot cluster it without a task tree, so it is distilled by target.
 
 Session records are never judged. When any vault was not fully read, no spec can be judged — a
 task edge or an ADR's status could sit in the unread part — so the check is skipped for every
-vault and `lore distill-queue` refuses.
+vault and `lore distill-queue` refuses. The same holds when any vault holds a spec or task record
+that could not be read (an oversize or malformed sidecar, an oversize or non-UTF-8 body): an
+unread spec would silently leave the queue, and an unread task could be the one linking a spec, so
+a waiting spec would read as deferred. An unreadable ADR does not refuse (it is judged per edge,
+below), and an unreadable record of any other kind is never consulted.
 
 ## Layout changes
 
@@ -92,6 +96,16 @@ let the sweep skip a spec. The line names the vault and the way on:
 lore: vault scratch could not be read, so the distill queue is refused rather than built partial; repair or remove the vault to sweep again, or distill one spec by name with /craft:distill spec/<name>
 ```
 
+It refuses the same way when a vault holds a spec or task record that could not be read, naming that
+vault and saying so:
+
+```
+lore: vault scratch holds a spec or task record that could not be read, so the distill queue is refused rather than built partial; repair or remove the record to sweep again, or distill one spec by name with /craft:distill spec/<name>
+```
+
+When both causes hold, one line names both (`vault a could not be read and vault b holds a spec or
+task record that could not be read`) and the way on reads `repair or remove what could not be read`.
+
 Every successful run's first line starts with `lore distill-queue — `. A caller treats any non-zero
 exit, and any output whose first line does not start that way (an older lore without this command,
 a crash), as a refusal — never as an empty queue. A record name that is not a valid record id is printed as
@@ -144,6 +158,13 @@ default     distill-queue   —        —         yes: vault scratch could not 
 scratch     distill-queue   —        —         yes: its directory could not be read
 
 distill-queue — skipped.
+```
+
+A vault that holds an unreadable spec or task record skips the check on every row the same way,
+naming that vault and why:
+
+```
+default     distill-queue   —        —         yes: vault scratch holds a spec or task record that could not be read, so no spec's ADR or tasks can be confirmed
 ```
 
 A check that raises is reported as `errored: <error type>` on its rows and in its group, and every
