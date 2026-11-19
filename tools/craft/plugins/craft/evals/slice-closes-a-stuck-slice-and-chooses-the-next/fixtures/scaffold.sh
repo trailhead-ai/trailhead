@@ -27,7 +27,7 @@ printf '%s\n' "$*" >> "$here/script-lore-calls.log"
 LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
 EOW
 # scripts/ is the plugin's scripts directory for this run: each gate is a wrapper over the real script.
-for f in ledger_gate candidate_set covers_gate; do
+for f in ledger_gate candidate_set covers_gate found_work; do
   cat > "scripts/$f.py" <<EOW
 #!/bin/sh
 here=\$(cd "\$(dirname "\$0")/.." && pwd)
