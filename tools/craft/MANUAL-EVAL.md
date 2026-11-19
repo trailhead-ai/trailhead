@@ -5522,3 +5522,26 @@ Each probe ran against the unknown case on the edited prose, then the tree was r
 
 The all-reads probe was not run: the all-reads case does not discriminate on either arm (above).
 
+
+## Cases: two entry points to one entity are one surface when neither is usable alone, and a create criterion spanning two surfaces stays with the second (2026-11-19)
+
+**Status: written, not run.** The cases and their `expected.md` files are committed before any run; the baseline and treatment arms are recorded below once measured.
+
+Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`, each pre-registered in its `expected.md`. They cover the amended surface definition (one entity reached through two entry points is one surface when the functionality is not usable through either alone, two when each is usable on its own; the test is value) and the first-slice rule's reconciliation with the cross-surface reason (a create criterion spanning two surfaces stays with the surface that ships second). Each runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list.
+
+| Case | Fixture | Expected slice | Expected on the unedited prose |
+|---|---|---|---|
+| `slice-takes-a-ui-and-the-api-it-needs-as-one-surface` | `reservation-book`: a Reservations page (AC1 list, AC2 add) and `/api/reservations` (AC3 GET, AC4 POST); the Problem says the page does nothing without the API and the API has no consumer yet | AC1, AC2, AC3, AC4 | red |
+| `slice-leaves-a-create-criterion-spanning-two-surfaces-to-the-second-surface` | `team-notes`: `notes` group (AC1 list, AC2 show, AC3 add that also publishes to the feed) and a separate web feed (AC4 post, AC5 remove); both usable alone, the command group first, no create criterion on it other than AC3 | AC1, AC2; not AC3, AC4, AC5 | red, moderate confidence (the unedited cross-surface reason could also hold AC3 back) |
+| `slice-still-splits-two-independently-usable-entry-points-to-one-entity` | `ticket-queue`: `deskq tickets` group (AC1-AC3) and `/tickets` API (AC4-AC6), each documented as used alone by a different consumer | AC1-AC3 or AC4-AC6, never a mix | green (a guard: the edit must not over-merge) |
+
+Prose fingerprints (`git hash-object`) of the baseline: `skills/_shared/slice.md` `cf1033cb66351a7dedb3b74be88290ec2fe5a923`, `skills/slice/SKILL.md` `d69caaeaad33b56fe461bd25e1c0832a13bdd60b`.
+
+Bar: baseline 2 runs as the portage-eval shim decides; treatment bar 3 of 3 runs, which the shim decides at 2, recorded as run and not as a met 3 of 3; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. No grader reads rule text and none is a judge.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| all three cases | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | — | per the table above | not yet run |
+| all three cases | treatment | — | — | 3 of 3 | not yet run |

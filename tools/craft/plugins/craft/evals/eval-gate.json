@@ -681,6 +681,27 @@
         "skills/slice/SKILL.md"
       ],
       "merge_only": true
+    },
+    "slice-takes-a-ui-and-the-api-it-needs-as-one-surface": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-leaves-a-create-criterion-spanning-two-surfaces-to-the-second-surface": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-still-splits-two-independently-usable-entry-points-to-one-entity": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }
