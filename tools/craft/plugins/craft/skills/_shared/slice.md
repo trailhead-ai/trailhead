@@ -109,6 +109,10 @@ the stop-here test below.
 - **The work would cross a surface.** A criterion spanning two surfaces belongs to whichever surface
   ships second, so the surface shipping first ends before it.
 
+A criterion the slice skill's set-aside rule sets aside (an outside account or real-world event a
+stand-in cannot replace) leaves the candidate set rather than being cut from the surface. A slice
+that leaves it out has not ended short, and names no one of these reasons for it.
+
 ### The first slice on a surface
 
 The first slice on a surface whose remaining criteria include creation, with nothing shipped for
@@ -166,16 +170,16 @@ specifically so the read, create, and mutate work beats on it while it is still 
 Parallel work on top of an interface becomes safe as a consequence, once that churn settles; it is
 not what the choice optimizes for.
 
-Ordering among polish criteria gets no derivation beyond this, because it has none: it is
-preferential and externally driven — customer-visible surface usually first, then whatever
-requirements or taste dictate. State a polish-phase pick and its reason to the operator as a
-recommendation rather than presenting it as derived.
+Which surface's polish slice goes first is not derived by phase or by interface leverage, because it
+has no derivation: it is preferential and externally driven — customer-visible surface usually
+first, then whatever requirements or taste dictate. State a polish-phase pick and its reason to the
+operator as a recommendation rather than presenting it as derived.
 
 ## The commitment guard: nothing binds to a shape that is still moving
 
-An interface is not locked until the polish phase. The read, create, and mutate slices are expected
-to change it, and that expectation is a licence to churn: do not spend a slice generalizing or
-hardening an interface before the mutation slices have exercised it.
+An interface is not locked until the polish phase. The read, create, and mutate work is expected to
+change it, and that expectation is a licence to churn: do not spend a slice generalizing or
+hardening an interface before the mutation work has exercised it.
 
 The same guard defers ancillary, cross-cutting features — notifications, audit logging, analytics —
 to the polish phase. Each of them binds another part of the system to data models that have not

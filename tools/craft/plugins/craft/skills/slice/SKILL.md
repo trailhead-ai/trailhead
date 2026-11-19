@@ -985,7 +985,7 @@ parent task already exists.
 
 **The claim names the chosen surface and the criteria assigned to it**, each by its own words with
 its number after it, so the operator can catch a bad grouping while it is still cheap to reject. It
-names the criteria assigned to the surfaces not chosen the same way, as what this slice leaves. The
+names each surface not chosen and counts the criteria assigned to it, as what this slice leaves. The
 surface is the chooser's own reading of the criteria's text, and the statement says so. Whenever the
 slice ends before its surface's core criteria are all covered, the statement also says which of
 `_shared/slice.md`'s three reasons applies, in this skill's own words, and names the chosen
