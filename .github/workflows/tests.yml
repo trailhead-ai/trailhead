@@ -151,7 +151,10 @@ jobs:
     # green vacuously: pytest exits nonzero when the selection is empty, and the guard fails the
     # job when fewer tests pass than the tier's baseline (a skipped test counts as not passed).
     name: pytest ${{ matrix.tier }} (py${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    # seam_real runs on ubuntu-24.04: on the newer image the sandbox runtime cannot start
+    # (its seccomp helper is refused a nested user namespace), while Outpost's real-sandbox
+    # job starts it on 24.04.
+    runs-on: ${{ matrix.tier == 'seam_real' && 'ubuntu-24.04' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
@@ -231,7 +234,7 @@ jobs:
           npm install -g "@anthropic-ai/sandbox-runtime@0.0.82"
           command -v srt
 
-      # Hosted ubuntu-24.04 restricts unprivileged user namespaces through AppArmor, which
+      # Hosted Ubuntu images restrict unprivileged user namespaces through AppArmor, which
       # stops bubblewrap from creating one. The runner is single-use, so lifting the
       # restriction for this job changes nothing beyond it.
       - name: Allow unprivileged user namespaces
