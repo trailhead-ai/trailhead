@@ -169,6 +169,17 @@ class TestAppendedLine:
         for key in ("verdict", "reason", "runner_version", "tier", "runs", "budget_seconds"):
             assert line[key] == baseline[key]
 
+    @pytest.mark.parametrize("body", ['["claudeVersion", "suite"]', '"2.1.306"'])
+    def test_a_runner_output_that_is_not_an_object_gives_null_model_and_version(
+            self, env, body):
+        out = env.tmp / "not-an-object.json"
+        out.write_text(body)
+        env.fake(str(out), code=0)
+        _run(env)
+        line = _lines(env)[0]
+        assert (line["model"], line["runner_version"]) == (None, None)
+        assert (line["verdict"], line["reason"]) == ("not-run", "runner-error")
+
     def test_a_64_character_model_is_kept(self, env):
         doc = _result([PASS] * 12, costUsd=0.1)
         doc["suite"]["modelOverride"] = "m" * 64
