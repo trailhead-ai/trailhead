@@ -29,6 +29,7 @@ import json
 import math
 import os
 import re
+import stat
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
@@ -43,7 +44,8 @@ from .select import MAPPING_NAME
 from .verdict import _safe
 
 DEFAULT_DECLARED_TIMEOUT = 300
-_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+_STAMP = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+MAX_HISTORY_BYTES = 2 * history.MAX_BYTES
 _VERDICTS = {"pass", "fail", "not-run"}
 _SKIP_DIRS = {".git", "node_modules"}
 
@@ -73,8 +75,8 @@ def _declared_timeout(case_dir: Path) -> str:
     try:
         prompt = (case_dir / "prompt.md").read_text() if (case_dir / "prompt.md").is_file() else ""
         front = re.match(r"---\n(.*?)\n---\n", prompt, re.S)
-        for text, strict in ((front.group(1) if front else "", r"timeout_seconds:\s*(\d{1,6})\s*"),
-                             ((case_dir / "case.yaml").read_text(), r"\s+timeout_seconds:\s*(\d{1,6})\s*")):
+        for text, strict in ((front.group(1) if front else "", r"timeout_seconds:\s*([0-9]{1,6})\s*"),
+                             ((case_dir / "case.yaml").read_text(), r"\s+timeout_seconds:\s*([0-9]{1,6})\s*")):
             found = None
             for line in text.splitlines():
                 if "timeout_seconds" not in line:
@@ -156,14 +158,23 @@ def _decision(doc: dict) -> dict | None:
 
 def _lines(path: Path) -> list[bytes]:
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return []
     except OSError as e:
         raise TimingsError(f"history {path.name} unreadable: {e.strerror}") from None
     try:
         with os.fdopen(fd, "rb") as f:
-            return [x for x in f.read().split(b"\n") if x.strip()]
+            st = os.fstat(f.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                raise TimingsError(f"history {path.name} is not a regular file")
+            if st.st_size > MAX_HISTORY_BYTES:
+                raise TimingsError(f"history {path.name} is too large ({st.st_size} bytes, "
+                                   f"over {MAX_HISTORY_BYTES})")
+            data = f.read(MAX_HISTORY_BYTES + 1)
+            if len(data) > MAX_HISTORY_BYTES:
+                raise TimingsError(f"history {path.name} is too large (over {MAX_HISTORY_BYTES} bytes)")
+            return [x for x in data.split(b"\n") if x.strip()]
     except OSError as e:
         raise TimingsError(f"history {path.name} unreadable: {e.strerror}") from None
 
@@ -178,7 +189,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
             total += 1
             try:
                 doc = json.loads(raw)
-            except ValueError:
+            except Exception:
                 doc = None
             if not isinstance(doc, dict):
                 tally["corrupt"] += 1

@@ -222,18 +222,26 @@ class TestCannotBeWritten:
             (eg / "history.jsonl").mkdir()
         elif how == "symlink":
             (eg / "history.jsonl").symlink_to(outside)
+        elif how in ("fifo", "fifo-with-reader"):
+            os.mkfifo(eg / "history.jsonl")
+            if how == "fifo-with-reader":
+                self.reader = os.open(eg / "history.jsonl", os.O_RDONLY | os.O_NONBLOCK)
         capsys.readouterr()
-        assert env.run() == 0
+        try:
+            assert env.run() == 0
+        finally:
+            if getattr(self, "reader", None) is not None:
+                os.close(self.reader)
         err = capsys.readouterr().err
         return before, err, outside
 
-    @pytest.mark.parametrize("how", ["group-writable", "directory", "symlink"])
+    @pytest.mark.parametrize("how", ["group-writable", "directory", "symlink", "fifo", "fifo-with-reader"])
     def test_the_result_and_exit_code_are_as_without_the_history(self, env, capsys, tmp_path, how):
         (result, raw), err, outside = self._broken(env, capsys, how, tmp_path)
         assert env.result() == result
         assert (env.state / "results" / "c1.json").read_bytes() == raw
 
-    @pytest.mark.parametrize("how", ["group-writable", "directory", "symlink"])
+    @pytest.mark.parametrize("how", ["group-writable", "directory", "symlink", "fifo", "fifo-with-reader"])
     def test_stderr_carries_the_one_line(self, env, capsys, tmp_path, how):
         _, err, _ = self._broken(env, capsys, how, tmp_path)
         lines = [x for x in err.splitlines() if x.startswith("eval-gate: timing history")]
@@ -242,6 +250,18 @@ class TestCannotBeWritten:
     def test_nothing_is_written_through_a_symlink(self, env, capsys, tmp_path):
         _, _, outside = self._broken(env, capsys, "symlink", tmp_path)
         assert not outside.exists()
+
+    def test_a_short_write_is_a_warning_not_a_silent_torn_line(self, tmp_path, capsys):
+        env = {"PORTAGE_CACHE_DIR": str(tmp_path / "cache")}
+        history.append({"a": 1}, env, write=lambda fd, b: 3)
+        err = capsys.readouterr().err
+        assert err.startswith("eval-gate: timing history not written: ") and err.count("\n") == 1
+
+    def test_a_full_write_is_not_a_warning(self, tmp_path, capsys):
+        env = {"PORTAGE_CACHE_DIR": str(tmp_path / "cache")}
+        history.append({"a": 1}, env)
+        assert capsys.readouterr().err == ""
+        assert json.loads(history.history_path(env).read_text()) == {"a": 1}
 
     def test_a_healthy_history_prints_nothing_to_stderr(self, env, capsys):
         assert env.run() == 0

@@ -9,7 +9,9 @@ case's current pass-cache key, computed the way the gate computes it.
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import sys
 
 import pytest
 
@@ -18,6 +20,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
 from portage.eval_gate import canary, history
+from portage.eval_gate import timings as gate_timings
 from portage.eval_gate.run import MAX_TIMEOUT_SECONDS, _cache_key
 from test_portage_eval_gate_run import PASS, RUNNER as GATE_RUNNER, Env, _result
 
@@ -368,3 +371,76 @@ class TestFailures:
         with pytest.raises(SystemExit) as e:
             dispatch.main(["eval-gate", "timings"])
         assert e.value.code == 2
+
+
+def _nesting_that_overflows_json() -> str:
+    """JSON array nesting just past where this interpreter's parser raises RecursionError (the
+    parser's own limit, not ``sys.getrecursionlimit()``, on 3.12+)."""
+    depth = sys.getrecursionlimit()
+    while depth < 2_000_000:
+        text = "[" * depth + "]" * depth
+        try:
+            json.loads(text)
+        except RecursionError:
+            return text
+        depth *= 2
+    pytest.skip("json.loads does not overflow on this interpreter")
+
+
+class TestHostileInputs:
+    def test_a_line_nested_past_the_recursion_limit_is_corrupt(self, repo, capsys):
+        repo.case("c1")
+        repo.write(repo.line("c1"), raw=[_nesting_that_overflows_json()])
+        rc, out, err = repo.timings(capsys)
+        assert rc == 0 and "corrupt 1" in out and err == ""
+        assert table(out)["c1"]["decisions"] == "1"
+
+    @pytest.mark.parametrize("stamp,counted", [("2026-11-19T12:30:00Z", True),
+                                               ("\u0662\u0660\u0662\u0666-11-19T12:30:00Z", False),
+                                               ("\uff12\uff10\uff12\uff16-11-19T12:30:00Z", False)])
+    def test_only_ascii_digit_stamps_count(self, repo, capsys, stamp, counted):
+        repo.case("c1")
+        repo.write(repo.line("c1", at=stamp))
+        rc, out, _ = repo.timings(capsys)
+        assert rc == 0
+        assert (stamp in out) is counted
+        assert ("mis-shaped 0" in out) is counted
+
+    def test_a_deeply_nested_mapping_exits_2_with_a_clean_message(self, repo, capsys):
+        repo.case("c1")
+        (repo.root / "plugins" / "p" / "evals" / "eval-gate.json").write_text(
+            _nesting_that_overflows_json())
+        rc, out, err = repo.timings(capsys)
+        assert rc == 2 and err.startswith("portage: ") and "Traceback" not in err and out == ""
+
+    def test_an_oserror_computing_a_case_key_exits_2_with_a_clean_message(self, repo, capsys, monkeypatch):
+        repo.case("c1")
+
+        def boom(*a, **k):
+            raise OSError(5, "Input/output error")
+
+        monkeypatch.setattr(gate_timings, "_cache_key", boom)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 2 and err.startswith("portage: ") and "Traceback" not in err and out == ""
+
+    def test_a_fifo_history_exits_2_without_blocking(self, repo, capsys):
+        repo.case("c1")
+        d = repo.cache / "eval-gate"
+        d.mkdir(parents=True)
+        os.mkfifo(d / history.HISTORY_NAME)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 2 and err.startswith("portage: ") and "regular" in err and out == ""
+
+    def test_a_history_over_the_size_cap_is_refused_and_one_at_the_cap_is_read(self, repo, capsys):
+        repo.case("c1")
+        d = repo.cache / "eval-gate"
+        repo.write(repo.line("c1"))
+        f = d / history.HISTORY_NAME
+        with open(f, "r+b") as fh:
+            fh.truncate(gate_timings.MAX_HISTORY_BYTES + 1)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 2 and err.startswith("portage: ") and "too large" in err and out == ""
+        with open(f, "r+b") as fh:
+            fh.truncate(gate_timings.MAX_HISTORY_BYTES)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 0

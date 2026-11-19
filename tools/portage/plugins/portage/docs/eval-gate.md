@@ -117,7 +117,9 @@ pass-cache fingerprint (null when uncacheable), the runner's version, whether `P
 runner, the tier, the verdict and reason, the call's timeout, the case's wall time without a fresh canary's, and
 each run's pass, error, duration and cost figures. A `timeout` is written with the runs that came back. A cache
 hit, and a not-run decided before any runner started (`case-removed-on-branch`, `corpus-new-on-branch`,
-`head-moved`, a harness with no eval runner, a failed canary), write nothing. A file over 5 MB is renamed to
+`head-moved`, a harness with no eval runner, a failed canary) write nothing. A `runner-missing` decision writes
+no line either, including one where a later batch fails to launch: the eval core's not-run result already drops the
+earlier batches' runs, so there is nothing to record. A file over 5 MB is renamed to
 `history.1.jsonl` before the next line, so two generations are kept. A history that cannot be written prints one
 `eval-gate: timing history not written: <reason>` line on stderr and changes no verdict, exit code or result
 file. The file's shape is in the `eval_gate/history.py` docstring.
@@ -247,7 +249,7 @@ the measured cases with fewer than two decisions and the mapped cases with no co
 `timeout` and the scored runs with no duration, the median and maximum duration of scored runs that have one, the
 largest single-batch elapsed time, and the mean cost per decision (run plus judge cost).
 
-"Single-batch" is worked out from the line: a decision holding no more runs than the gate's first batch,
+"Single-batch" is worked out from the line: a decision holding at least one run and no more runs than the gate's first batch,
 `min(pass_at, runs - pass_at + 1)` for the mapped `runs` and `pass_at`, took one batch, so its `elapsed_seconds` is
 that batch's time. A multi-batch decision's elapsed time is not a batch time and is left out.
 

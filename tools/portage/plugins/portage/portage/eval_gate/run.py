@@ -110,8 +110,9 @@ A runner that cannot be launched (``OSError``: not found, not executable, bad fo
 not-run ``runner-missing``.
 
 A case a runner was started for is also appended to the timing history (``history.py``, which holds the
-line's shape); a cache hit and a not-run decided before any runner started are not. A history that cannot
-be written never changes the verdict, the exit code or the result file.
+line's shape); a cache hit, a not-run decided before any runner started and ``runner-missing`` (a later
+batch that fails to launch included; the eval core's not-run result already drops the earlier
+batches' runs) are not. A history that cannot be written never changes the verdict, the exit code or the result file.
 
 An unexpected exception during ``run`` is recorded by ``record_crash`` as not-run
 ``runner-error`` before the command exits 1.

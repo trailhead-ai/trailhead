@@ -205,6 +205,10 @@ def cmd_timings(args: argparse.Namespace) -> int:
     except gate_timings.TimingsError as e:
         print(f"portage: eval-gate timings: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2
+    except (RecursionError, OSError, ValueError) as e:
+        print(f"portage: eval-gate timings: cannot read the mappings or history: "
+              f"{type(e).__name__}", file=sys.stderr)
+        return 2
     for line in lines:
         print(line)
     return 0
