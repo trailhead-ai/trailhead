@@ -828,6 +828,16 @@ jobs:
       - run: echo "stream-first-$((6*7))"
       - run: sleep 20
       - run: echo "stream-second-$((6*7))"
+  cancel_hold:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "cancel-marker-$((6*7))"
+          sleep 120
+  cancel_behind:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "cancel-behind-ran-$((6*7))"
 """
 WORKFLOW = (
     WORKFLOW.replace("@CONNECT_CONTROL@", _CONNECT_CONTROL)
@@ -993,6 +1003,44 @@ def act_containers(engine_socket: str, name_part: str) -> list[dict]:
         return found
     except (OSError, ValueError, http.client.HTTPException):
         return []
+
+
+def act_container_names(engine_socket: str, *, request=engine_request) -> list[str]:
+    """The names of every act container the engine holds, stopped ones included; empty when the engine will not say."""
+    try:
+        status, body = request(engine_socket, "GET", "/containers/json?all=1")
+        if status != 200:
+            return []
+        return [n for c in json.loads(body) for n in (c.get("Names") or []) if n.startswith("/act-")]
+    except (OSError, ValueError, http.client.HTTPException):
+        return []
+
+
+def remove_act_containers(engine_socket: str) -> None:
+    """Force-remove every act container, so a run that was never cancelled does not leave a job sleeping."""
+    try:
+        status, body = engine_request(engine_socket, "GET", "/containers/json?all=1")
+        if status != 200:
+            return
+        for c in json.loads(body):
+            if any(n.startswith("/act-") for n in c.get("Names") or []):
+                engine_request(engine_socket, "DELETE", f"/containers/{c['Id']}?force=1")
+    except (OSError, ValueError, http.client.HTTPException):
+        pass
+
+
+ACT_COMMS = ("act", "act-run")
+
+
+def act_process_lines(ps_output: str) -> list[str]:
+    """The lines of ``ps -o pid,comm,args`` output whose process is act or its wrapper, not the engine beside them."""
+    return [line for line in ps_output.splitlines() if len(line.split()) >= 2 and line.split()[1] in ACT_COMMS]
+
+
+def runner_act_processes(user: str = "outpost-runner") -> list[str]:
+    """The act processes *user* owns right now."""
+    done = subprocess.run(["ps", "-u", user, "-o", "pid,comm,args"], capture_output=True, text=True, timeout=20)
+    return act_process_lines(done.stdout)
 
 
 def split_image_ref(ref: str) -> tuple[str, str]:

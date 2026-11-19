@@ -20,7 +20,9 @@ whole scenario at once, saying what to do, when the host is not ready; among the
 operator's own Outpost is not serving the engine filter, which only one Outpost can bind, so stop it for the run.
 ``TRAILHEAD_GATEWAY_E2E_OUTPOST`` and ``TRAILHEAD_GATEWAY_E2E_TRAILHEAD`` name the checkouts whose Outpost and
 gateway command the scenario runs (``run-e2e-red-then-green.sh`` points them at the commits before the run
-slice, where every run assertion must fail). What a session reaches, and what this suite leaves untested, is
+slice, where every run assertion must fail). The cancel scenario (``test_cancel_scenario_*``) is run by
+``run-e2e-cancel-red-then-green.sh``, which needs the act wrapper provisioned with ``setpriv --pdeathsig KILL``.
+What a session reaches, and what this suite leaves untested, is
 listed in the report on the task, not here.
 """
 
@@ -47,7 +49,10 @@ from ._gateway_e2e_support import (
     RUN_SESSION_TIMEOUT_SECONDS,
     SESSION_JOBS,
     HomeSentinel,
+    act_container_names,
     act_containers,
+    remove_act_containers,
+    runner_act_processes,
     prepull_image,
     probe_problems,
     build_fixture_repo,
@@ -614,3 +619,177 @@ def test_run_scenario_another_workspaces_session_cannot_see_or_start_the_first_o
     assert "in this workspace" in cross["view_w2_run"] and cross["view_w2_run"].splitlines()[-1] == "rc=2"
     w1_jobs = [r["job"] for r in json.loads(cross["list"].rsplit("\nrc=", 1)[0])["runs"]]
     assert w1_jobs.count("pass") == 1 and "slow" in w1_jobs
+
+
+# --- the cancel scenario: a real cancel stops act and its containers -------------------------------------
+
+#: Executor's wait between asking act's process group to stop and killing it (its ``graceMs`` default, 5000 ms).
+CANCEL_GRACE_SECONDS = 5
+#: What a cancel may take beyond the grace: the container removal, the kill's reaping and the executor's poll.
+CANCEL_MARGIN_SECONDS = 25
+HOLD_MARKER = "cancel-marker-42"
+
+
+@dataclass
+class CancelWorld:
+    hold_id: int
+    behind_id: int
+    hold_logged_marker: bool
+    control_processes: list
+    control_containers: list
+    behind_states_seen: list
+    behind_cancel: str
+    behind_final: tuple
+    foreign_cancel: str
+    hold_after_foreign: tuple
+    hold_cancel: str
+    cancel_seconds: float | None
+    hold_final: tuple
+    processes_after: list
+    containers_after: list
+    hold_log: str
+    listed: list
+    outpost_log: str
+
+
+def _wait(deadline_seconds, observe):
+    """Poll *observe* (a value that is falsy until it is what we wait for); the last value, whether or not it came."""
+    deadline = time.monotonic() + deadline_seconds
+    value = observe()
+    while not value and time.monotonic() < deadline:
+        time.sleep(0.25)
+        value = observe()
+    return value
+
+
+@pytest.fixture(scope="module")
+def cancel_world(tmp_path_factory):
+    host = require_run_host()
+    root = tmp_path_factory.mktemp("gw-cancel")
+    camp = make_camp(root)
+    home = Path(os.environ["HOME"])
+    leftover = _wait(30, lambda: not runner_act_processes())
+    assert leftover, f"an act process is already running as outpost-runner: {runner_act_processes()}"
+    sentinel = HomeSentinel(home / f".outpost-e2e-{secrets.token_hex(4)}", f"SENTINEL-{secrets.token_hex(8)}")
+    try:
+        sentinel.create()
+        with real_outpost(root, camp, runs=host) as outpost:
+            image = host.platforms["ubuntu-latest"]
+            prepull_image(host.engine_socket, image)
+            build_fixture_repo(
+                camp.w1 / "app",
+                image=image,
+                ssh=home / ".ssh",
+                sentinel=sentinel,
+                ports=(outpost.port, outpost.port),
+                operator_home=home,
+            )
+            gateway = install_shims(root, outpost) / "outpost-gateway"
+            env = step_env(root, outpost)
+            port = outpost.port
+            n = iter(range(10_000))
+
+            def gw(cwd, *argv):
+                """Run one gateway command from a fresh harness in *cwd*; its output, ending ``rc=<n>``."""
+                steps = [("register", register_cmd(port)), ("cmd", _gw(gateway, *argv))]
+                return run_fake_harness(root, f"h{next(n)}", cwd, steps, env)["cmd"]
+
+            w1 = camp.w1 / "app"
+
+            def start(job):
+                out = gw(w1, "run", "start", job)
+                found = re.search(r"^(\d+)$", out, re.M)
+                assert found, f"start {job} did not print a run id: {out!r}"
+                return int(found.group(1))
+
+            def row(run_id):
+                return next(((r[3], r[4]) for r in outpost.runs() if r[0] == run_id), (None, None))
+
+            hold_id = start("cancel_hold")
+            logged = _wait(120, lambda: HOLD_MARKER in gw(w1, "run", "view", str(hold_id), "--log"))
+            control_processes = runner_act_processes()
+            control_containers = act_container_names(host.engine_socket)
+
+            behind_id = start("cancel_behind")
+            seen = [row(behind_id)[0]]
+            behind_cancel = gw(w1, "run", "cancel", str(behind_id))
+            _wait(20, lambda: seen.append(row(behind_id)[0]) or row(behind_id)[0] == "completed")
+            behind_final = row(behind_id)
+
+            foreign_cancel = gw(camp.w2, "run", "cancel", str(hold_id))
+            hold_after_foreign = row(hold_id)
+
+            t0 = time.monotonic()
+            hold_cancel = gw(w1, "run", "cancel", str(hold_id))
+            done = _wait(CANCEL_GRACE_SECONDS + CANCEL_MARGIN_SECONDS, lambda: row(hold_id)[0] == "completed")
+            seconds = time.monotonic() - t0 if done else None
+            print(f"\ncancel of the running job took {seconds if seconds is None else round(seconds, 1)}s to complete")
+            if seconds is None:
+                remove_act_containers(host.engine_socket)
+            hold_final = row(hold_id)
+            _wait(5, lambda: not runner_act_processes())
+            yield CancelWorld(
+                hold_id,
+                behind_id,
+                bool(logged),
+                control_processes,
+                control_containers,
+                seen,
+                behind_cancel,
+                behind_final,
+                foreign_cancel,
+                hold_after_foreign,
+                hold_cancel,
+                seconds,
+                hold_final,
+                runner_act_processes(),
+                act_container_names(host.engine_socket),
+                gw(w1, "run", "view", str(hold_id), "--log"),
+                gw(w1, "run", "list", "--json"),
+                outpost.log.read_text()[-3000:],
+            )
+    finally:
+        remove_act_containers(host.engine_socket)
+        sentinel.remove()
+
+
+def test_cancel_scenario_a_running_job_ends_cancelled_within_the_grace_and_leaves_no_act_or_container(cancel_world):
+    w = cancel_world
+    assert w.hold_logged_marker, "the job never logged its marker, so it was never running"
+    assert w.control_processes and w.control_containers, (
+        f"while the job ran there was no act process {w.control_processes} or container {w.control_containers} "
+        "to see go, so the checks after the cancel prove nothing"
+    )
+    assert w.hold_cancel.splitlines()[-1] == "rc=0" and "cancel requested" in w.hold_cancel, w.hold_cancel
+    limit = CANCEL_GRACE_SECONDS + CANCEL_MARGIN_SECONDS
+    assert w.cancel_seconds is not None and w.cancel_seconds <= limit, (
+        f"the run did not complete within {limit}s of the cancel: {w.hold_final}; cancel said {w.hold_cancel!r}; "
+        f"Outpost's log:\n{w.outpost_log}"
+    )
+    assert w.hold_final == ("completed", "cancelled")
+    assert w.processes_after == [], f"act is still running as outpost-runner: {w.processes_after}"
+    assert w.containers_after == [], f"the engine still lists act containers: {w.containers_after}"
+    assert {r["id"]: (r["state"], r["result"]) for r in json.loads(w.listed.rsplit("\nrc=", 1)[0])["runs"]}[
+        w.hold_id
+    ] == ("completed", "cancelled")
+
+
+def test_cancel_scenario_a_queued_run_behind_it_ends_cancelled_without_ever_running(cancel_world):
+    w = cancel_world
+    assert w.behind_states_seen[0] == "queued", f"the run was not queued behind the running one: {w.behind_states_seen}"
+    assert w.behind_cancel.splitlines()[-1] == "rc=0", w.behind_cancel
+    assert w.behind_final == ("completed", "cancelled"), f"{w.behind_final}; cancel said {w.behind_cancel!r}"
+    assert "in_progress" not in w.behind_states_seen, w.behind_states_seen
+
+
+def test_cancel_scenario_another_workspaces_session_cannot_cancel_it_and_the_run_is_unchanged(cancel_world):
+    w = cancel_world
+    assert w.foreign_cancel.splitlines()[-1] != "rc=0", w.foreign_cancel
+    assert "run_not_found" in w.foreign_cancel, w.foreign_cancel
+    assert w.hold_after_foreign == ("in_progress", None), w.hold_after_foreign
+
+
+def test_cancel_scenario_the_cancelled_runs_log_holds_what_the_job_wrote_before_the_cancel(cancel_world):
+    w = cancel_world
+    assert w.hold_log.splitlines()[-1] == "rc=0", w.hold_log
+    assert HOLD_MARKER in w.hold_log, f"the log of the cancelled run is missing the job's output:\n{w.hold_log[-1500:]}"
