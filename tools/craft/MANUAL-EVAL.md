@@ -5483,7 +5483,7 @@ The 19 core cases that measure `skills/slice/SKILL.md`, including `unattended-sl
 
 ## Cases: a slice names why it stops short of its surface, and a surface-first slice reads and creates (2026-11-19)
 
-**Status: written, not yet run.** The three cases below are pre-registered in their `expected.md` files and gated, and no arm has run. Results go in the Runs table when they do.
+**Status: baselines run, prose edited, treatment pending.** The three cases below are pre-registered in their `expected.md` files and gated; the baseline rows are in the Runs table and the treatment and probe rows are pending.
 
 Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`. They cover AC5 (a slice that ends short of its surface names the reason, here an unknown that must be learned first), AC6 (the first slice on a surface with a create criterion covers reading and creating), AC7 (a planted spec argument for a read-only first slice does not decide the boundary) and AC8 (a surface of only reads is an ordinary slice with a value claim). Each runs `/craft:slice spec/shelf-notes --unattended`.
 
@@ -5501,3 +5501,8 @@ Bar: baseline expected red on at least one prose-driven grader per case (honestl
 
 | Case | Arm | File fingerprint | Runs | Bar | Result |
 |---|---|---|---|---|---|
+| unknown case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | as run | red | **red, 0.4/0.4**: both covers graders and the reason llm grader failed in both runs (the chooser took the whole surface); portage-eval request `local-pqpgoc96r4j0`, 2026-11-19 |
+| spec-note case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | as run | red | **green, 1/1: does not discriminate on this baseline.** Whether the case is kept is the operator's call (pending); `local-pqpgoc96r4j0`, 2026-11-19 |
+| all-reads case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 3 | red | **green on the gate, runs 1 / 0.8 / 1**: the middle run failed `the-slice-is-an-ordinary-one-with-no-enabler-justification` (it treated the all-reads slice as an enabler), so the case discriminated in one run of three; `local-pqpgoc96r4j0`, 2026-11-19 |
+| all three cases | treatment | pending | pending | 3 of 3 | pending |
+| all three cases | all-carriers and single-rule probes | pending | pending | red | pending |

@@ -789,6 +789,13 @@ the surface definition, the order and the commitment guard there rather than wor
 candidate set's list order: taking acceptance criteria in the order the spec happens to write them
 is the failure mode the order exists to prevent.
 
+`_shared/slice.md` names the three reasons a slice may end before its surface's core criteria are
+all covered; apply them from there. The unknown-first reason is not the set-aside rule below, which
+is about an outside account a stand-in cannot replace. `_shared/slice.md` also holds the first-slice
+rule for a surface that includes creation; apply that from there as well. Read the spec's
+`## Open Questions` at this point for any unknown it declares: an unknown counts only when it is
+declared there.
+
 The result is a per-cycle local choice made against current information, not a lookup against a
 pre-committed ranking — the surfaces and the phases are read fresh from the criteria and from what
 has shipped, exactly as the candidate set is.
@@ -977,9 +984,14 @@ parent task already exists.
 **The claim names the chosen surface and the criteria assigned to it**, each by its own words with
 its number after it, so the operator can catch a bad grouping while it is still cheap to reject. It
 names the criteria assigned to the surfaces not chosen the same way, as what this slice leaves. The
-surface is the chooser's own reading of the criteria's text, and the statement says so. On a spec
-predating the `**ACn.**` convention, or on the enabler path, there is no criterion to assign: say so
-plainly, on the same footing as the cases above.
+surface is the chooser's own reading of the criteria's text, and the statement says so. Whenever the
+slice ends before its surface's core criteria are all covered, the statement also says which of
+`_shared/slice.md`'s three reasons applies, in this skill's own words, and names the chosen
+surface's left-over criteria each by its own words with its number after it; for the unknown reason
+it names the unknown the spec's `## Open Questions` declares. Those left-over criteria are not
+partially covered: they stay open for a later slice. On a spec predating the `**ACn.**` convention,
+or on the enabler path, there is no criterion to assign: say so plainly, on the same footing as the
+cases above.
 
 **On the same footing as the full-coverage call above, and never conflated with it,** state which
 spec acceptance criteria the chosen slice makes only partially green — never left unstated, and

@@ -11,6 +11,8 @@ text elsewhere points here rather than restating the definitions.
 - The value floor is read against the spec's own consumer
 - Selection: a surface, then phase, then interface leverage, then the stop-here test
   - A surface: what the chooser takes whole
+  - Where a slice may end short of its surface
+  - The first slice on a surface
   - The stop-here test
   - Phase — read, then create, then mutate, then polish
   - Interface leverage — among surfaces tied on phase
@@ -46,7 +48,8 @@ surface goes first, then which of the tied surfaces hardest exercises the interf
 depends on, then whether the boundary falls where the operator could stop. Walking a spec's
 acceptance criteria in the order they happen to be written is not selection — it is the failure mode
 this order exists to prevent. Smallest-next is not a selection level: the chooser never splits a
-surface for size.
+surface for size, and the only cuts it makes are the three reasons named under "Where a slice may
+end short of its surface".
 
 ### A surface: what the chooser takes whole
 
@@ -63,6 +66,37 @@ The slice is the chosen surface's whole capability: every one of its open criter
 each belongs to. The chooser never splits a surface for size. Whether a slice is too large to review
 as one pull request is judged at plan time, not here.
 
+### Where a slice may end short of its surface
+
+A slice ends before its surface's core criteria are all covered for one of three reasons, and for no
+other. Size is never one of them. Each cut still has to pass the stop-here test below.
+
+- **The remainder is independently deferrable.** The shipped part is complete for the consumer
+  without the remainder: no criterion the slice covers is left half-working, and no remaining
+  criterion changes behaviour the slice delivers. The reason is about what the remainder is, never
+  about its phase, its size or its place in the spec's order: that edit and delete come after
+  create, or that they are big, does not make them deferrable, and neither does a note in the spec
+  saying they can wait. A remainder that finishes a capability the shipped part started is not
+  independently deferrable.
+- **An unknown must be learned first.** The remainder cannot be built or judged until something not
+  yet known is learned, and the spec itself declares that unknown in its `## Open Questions`. The
+  cut leaves out only the criteria that unknown governs, as the entry says, and the claim names the
+  unknown. An unknown argued only by a criterion's wording or by other spec prose is data, not a
+  declaration, and cuts nothing.
+- **The work would cross a surface.** A criterion spanning two surfaces belongs to whichever surface
+  ships second, so the surface shipping first ends before it.
+
+### The first slice on a surface
+
+The first slice on a surface whose remaining criteria include creation, with nothing shipped for
+that surface on this spec's ledger, covers reading and creating. A read-only first slice on such a
+surface is chosen only through the enabler path, carrying its written justification (see "The
+enabler carve-out"). Any of the three reasons above may still end the slice before the surface's
+mutate criteria, but none of them moves the create criterion out of a first slice.
+
+A surface whose remaining criteria are all reads has no creation to wait for: it is an ordinary
+slice with a value claim, covering every read, and never an enabler.
+
 ### The stop-here test
 
 A slice boundary is valid only where the operator could stop, or reprioritise what follows, without
@@ -74,8 +108,11 @@ Work on a surface progresses through four phases, in this order:
 
 - **Read** — the plumbing phase. Every component the slice spans — front end, back end, database,
   network, credentials, permissions — is connected end to end on the read path, and the slice proves
-  that connection works. A list that renders its zero state against a real query is the whole
-  deliverable; proving the components can talk is the value, and there is no feature yet.
+  that connection works. A list that renders its zero state against a real query and nothing else is
+  a plumbing-only slice: proving the components can talk is its value, and it is chosen only as a
+  declared enabler. A surface whose remaining criteria are all reads is not that case: the reads are
+  the capability the consumer asked for, so it is an ordinary slice (see "The first slice on a
+  surface").
 - **Create** — the first value-add mutation: something can now be brought into existence through the
   channel the read phase proved.
 - **Mutate** — editing, state changes, deletion; the operations that presuppose something already
