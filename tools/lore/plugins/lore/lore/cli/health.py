@@ -845,7 +845,10 @@ def add_health_subparser(sub) -> None:
     """Register the ``health`` command parser."""
     p = sub.add_parser(
         "health",
-        help="Report dangling links, retired links, stale tasks, missing paths and specs waiting to be distilled, across every vault (read-only)",
+        help=(
+            "Report dangling links, retired links, stale tasks, missing paths and specs "
+            "waiting to be distilled, across every vault (read-only)"
+        ),
         description=(
             "Read every record in every configured vault and run five checks. "
             "dangling-links reports references (related, supersedes, depends-on, parent, "

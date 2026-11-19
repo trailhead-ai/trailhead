@@ -2267,7 +2267,8 @@ def _mixed_world(world):
     _spec(d, "was-distilled", "complete", annotations={"distilled": "adr"}, updated="2026-02-04T00:00:00Z")
 
 
-def test_seam_smoke_health_findings_name_what_distill_queue_lists_and_deferred_counts_match(world):  # inert-gate: allow seam smoke
+# inert-gate: allow seam smoke
+def test_seam_smoke_health_findings_name_what_distill_queue_lists_and_deferred_counts_match(world):
     _mixed_world(world)
     health, queue = world.run("--all"), _queue_cli(world)
     assert health.returncode == 0 and queue.returncode == 0, (health.stderr, queue.stderr)

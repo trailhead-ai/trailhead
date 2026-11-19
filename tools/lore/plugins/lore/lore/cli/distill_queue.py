@@ -17,7 +17,8 @@ spec name that is not a valid record id is replaced by a fixed phrase and never 
 **Exit codes.** 0 on success, with or without specs waiting. 1 with one ``lore:``
 stderr line and nothing on stdout when the queue cannot be built: a vault was not
 fully read, or holds a spec or task record that could not be read (the line names the
-vault and the way on: repair or remove it, or distill one spec by name), the configuration cannot be read, or anything fails unexpectedly.
+vault and the way on: repair or remove it, or distill one spec by name), the
+configuration cannot be read, or anything fails unexpectedly.
 A caller treats any non-zero exit, and any stdout whose first line does not start
 ``lore distill-queue — ``, as a refusal and never as an empty queue.
 

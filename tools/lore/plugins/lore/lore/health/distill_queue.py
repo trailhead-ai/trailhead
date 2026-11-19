@@ -47,7 +47,8 @@ vault, at any task status. This is what the search index's ``related-spec:``
 facet over ``kind:task`` answers, except that a task missing a ``created-at`` or an
 ``updated-at`` does not link, because the index does not hold it. The index's other skip
 conditions, a reserved label key and a value it cannot bind, are not mirrored: such a task
-links here, so its spec is waiting, but a ``kind:task related-spec:`` search does not find it. The task-to-spec map is built once per run.
+links here, so its spec is waiting, but a ``kind:task related-spec:`` search does not find it. The task-to-spec map is
+built once per run.
 
 **Skipped.** When any vault was not fully read no spec can be judged, because a task
 edge or an ADR's status could sit in the unread part. The same holds when any vault
