@@ -170,10 +170,11 @@ specifically so the read, create, and mutate work beats on it while it is still 
 Parallel work on top of an interface becomes safe as a consequence, once that churn settles; it is
 not what the choice optimizes for.
 
-Which surface's polish slice goes first is not derived by phase or by interface leverage, because it
-has no derivation: it is preferential and externally driven — customer-visible surface usually
-first, then whatever requirements or taste dictate. State a polish-phase pick and its reason to the
-operator as a recommendation rather than presenting it as derived.
+Among surfaces whose remaining criteria are all polish, which polish slice goes first is not derived
+by phase or by interface leverage, because it has no derivation: it is preferential and externally
+driven — customer-visible surface usually first, then whatever requirements or taste dictate. State
+a polish-phase pick and its reason to the operator as a recommendation rather than presenting it as
+derived.
 
 ## The commitment guard: nothing binds to a shape that is still moving
 
