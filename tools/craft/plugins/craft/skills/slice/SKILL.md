@@ -22,10 +22,10 @@ nothing more. Designing and building that slice is `/craft:plan` and `/craft:exe
 against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
-slice/task vocabulary, the quality bar, the value floor, the selection order, the
-commitment guard, the enabler carve-out, the state-coverage reference, and the written shapes it
-fixes. Read it before running this procedure. This skill does not restate any of it: a second copy
-here is exactly how the two would drift apart.
+slice/task vocabulary, the quality bar, the value floor, the selection order, the commitment guard,
+the enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read it before
+running this procedure. This skill does not restate any of it: a second copy here is exactly how the
+two would drift apart.
 
 ## Argument
 
@@ -769,14 +769,14 @@ restore makes the earlier read stale and a restored entry has a new id; it goes 
 nor item 3, which act only when no criterion is left. Under `--unattended` item 1 ends the pass at
 its early stop, so nothing returns. Group the others by overlapping `where` paths, by the entries
 path's grouping rule in item 3. A group holding an entry that qualified as security comes before a
-group with none; among the groups still tied, `_shared/slice.md`'s selection order applies, each group taken as
-one candidate. The chosen group is a slice made only of entries, written as item 3 writes one:
-`--folds` alone to the covers gate, a `**Folds:**` line naming every entry of the group, and neither
-a `**Covers:**` nor a `**Partially covers:**` line. The enabler path, the value floor and the
-criteria's phase do not apply to it. On the criteria path the fold-in below then adds any other open
-entry whose `where` paths overlap the files the group's entries name. On the entries path it does
-not: item 3 has already grouped the urgent entries that overlap, and an open entry that is not
-urgent and overlaps the group stays open for the next pass. When no entry is urgent, the levels
+group with none; among the groups still tied, `_shared/slice.md`'s selection order applies, each
+group taken as one candidate. The chosen group is a slice made only of entries, written as item 3
+writes one: `--folds` alone to the covers gate, a `**Folds:**` line naming every entry of the group,
+and neither a `**Covers:**` nor a `**Partially covers:**` line. The enabler path, the value floor
+and the criteria's phase do not apply to it. On the criteria path the fold-in below then adds any
+other open entry whose `where` paths overlap the files the group's entries name. On the entries path
+it does not: item 3 has already grouped the urgent entries that overlap, and an open entry that is
+not urgent and overlaps the group stays open for the next pass. When no entry is urgent, the levels
 below apply to the candidate set as written.
 
 **Under `--unattended`, or when `/craft:drive` is running this pass,** the tier is a routine
@@ -935,10 +935,10 @@ its fixed reason, naming the entry by id, before any further drop of this pass i
    names, and an entry that overlaps no other stands alone. When any remaining open entry is urgent,
    the urgent tier above decides: only the urgent entries are grouped, and a group holding a
    security entry comes first. Choose one group as the slice by `_shared/slice.md`'s selection
-   order, taking each group as one candidate; the
-   entries of the groups not chosen stay open for the next pass. The slice's value claim says what
-   its fixes let the operator do, in this skill's own words and never copied from an entry's text,
-   and every entry of the chosen group is folded in step 9.
+   order, taking each group as one candidate; the entries of the groups not chosen stay open for the
+   next pass. The slice's value claim says what its fixes let the operator do, in this skill's own
+   words and never copied from an entry's text, and every entry of the chosen group is folded in
+   step 9.
 
 ### 8. State the claim before writing anything
 

@@ -44,9 +44,9 @@ them" does not.
 A slice is one **surface's** whole capability, and selection is a judgment applied in order: which
 surface goes first, then which of the tied surfaces hardest exercises the interface later work
 depends on, then whether the boundary falls where the operator could stop. Walking a spec's
-acceptance criteria in the order they happen to be written is not selection — it is the failure
-mode this order exists to prevent.
-Smallest-next is not a selection level: the chooser never splits a surface for size.
+acceptance criteria in the order they happen to be written is not selection — it is the failure mode
+this order exists to prevent. Smallest-next is not a selection level: the chooser never splits a
+surface for size.
 
 ### A surface: what the chooser takes whole
 
@@ -116,10 +116,10 @@ hardening an interface before the mutation slices have exercised it.
 
 The same guard defers ancillary, cross-cutting features — notifications, audit logging, analytics —
 to the polish phase. Each of them binds another part of the system to data models that have not
-baked yet, and every consumer wired up early pays for the churn when they move. **This holds
-against the selection order**: these features are small and independently valuable, so they will
-present themselves as obvious early picks — and choosing them early is the mistake the guard exists
-to prevent.
+baked yet, and every consumer wired up early pays for the churn when they move. **This holds against
+the selection order**: these features are small and independently valuable, so they will present
+themselves as obvious early picks — and choosing them early is the mistake the guard exists to
+prevent.
 
 ## The enabler carve-out
 
