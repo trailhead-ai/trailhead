@@ -215,6 +215,31 @@ jobs:
           echo "OUTPOST_TEST_BROWSER=$bin" >> "$GITHUB_ENV"
           echo "OUTPOST_REQUIRE_BROWSER=1" >> "$GITHUB_ENV"
 
+      # The seam_real tier runs the ritual's rendered sandbox settings under the real sandbox
+      # runtime (`srt`), which needs bubblewrap, socat and ripgrep on the host. The version
+      # matches the one Outpost pins in its package.json.
+      - name: Set up Node for the sandbox runtime
+        if: matrix.tier == 'seam_real'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the sandbox runtime
+        if: matrix.tier == 'seam_real'
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap socat ripgrep
+          npm install -g "@anthropic-ai/sandbox-runtime@0.0.82"
+          command -v srt
+
+      # Hosted ubuntu-24.04 restricts unprivileged user namespaces through AppArmor, which
+      # stops bubblewrap from creating one. The runner is single-use, so lifting the
+      # restriction for this job changes nothing beyond it.
+      - name: Allow unprivileged user namespaces
+        if: matrix.tier == 'seam_real'
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo sysctl -w kernel.unprivileged_userns_clone=1 || true
+
       - name: Run the ${{ matrix.tier }} tier
         # `-m <tier>` replaces the default selection from pyproject's addopts. `-rs` prints why
         # any test skipped.
