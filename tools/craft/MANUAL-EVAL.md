@@ -5588,3 +5588,19 @@ Treatment and probes (all carriers back to the baseline, the core and polish car
 | probe: recommendation carriers removed (the recommended-slice sentence, the Interface leverage section's existing "state a polish-phase pick … as a recommendation" sentence, step 7's pointer and both step 8 clauses; the core and polish definition kept) | not run | **red, 0.8/0.8** (request `local-x3ms2eixrpoc`): both runs failed `the-statement-offers-the-polish-slice-as-a-recommendation-with-its-reason`; the covers graders passed. The recommendation depends on this wording, the older sentence included |
 
 Every probe was restored and checked byte-identical to the edit. The edit's sites were found by reading the dispatched carrier lines, not by a grep count.
+
+### Close-out regression (2026-11-19)
+
+On the final prose (`skills/_shared/slice.md` `2b29404…`, `skills/slice/SKILL.md` `423ffa8…`), request `local-9cbgpkjvygce`: every runner case that measures either edited file (42, core and `merge_only`) and the plan and drive cases that read the quality bar's reworded "Small" (14), 56 in all. **All 56 pass the gate**; 52 passed every run, and four passed 2 of 3. Each failing run was read from the judge evidence the run record keeps, and none bears on slice selection:
+
+| Case | Runs | Failing run |
+|---|---|---|
+| `failed-check-returns-its-criterion-to-the-candidates` | 0.83 / 1 / 1 | the slice pass stopped because the craft scripts could not find `lore` on `PATH` |
+| `slice-amends-the-spec-on-a-free-text-answer-that-changes-it` | 0.57 / 1 / 1 | the run declined to amend the spec without `/lore:correct`, which the craft-only eval sandbox does not expose |
+| `slice-takes-an-all-reads-surface-as-one-ordinary-slice` | 1 / 0.8 / 1 | the statement judge's literal-opening requirement, as diagnosed below |
+| `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint` | 0.8 / 1 / 1 | the closing message omitted the `/portage:pull_request` command; judge votes split 1-2; the driver's stuck close makes no slice choice |
+
+The regression cost 139.12 USD. Two sentences the task's review flagged were then scoped to core criteria (the whole-capability sentence and the all-reads sentence; `skills/_shared/slice.md` `b8fe8d0…` after the fix), and the four cases that read them re-ran (request `local-u59a4m3gjxor`): the polish-out, polish-recommendation and one-entity canary cases green 1/1; the all-reads case 0.8 / 1 / 1 on the same judge.
+
+**The all-reads statement judge, diagnosed.** The judge evidence of the failing runs (`local-2bsgme7ve23r`, `local-pqpgoc96r4j0`) shows ordinary slices over all three reads with a value claim and a way to try it, phrased "you'll be able to" and "To try it". The judge failed them for not opening with the literal "You will be able to" and "Try it" sentences, so it measures sentence form, not whether the slice is an enabler. The tightened body grader that was reverted most likely failed for the same reason: the written value claim paraphrased the opening. The case stays a regression guard; the judge's literal-opening requirement is a follow-up.
+
