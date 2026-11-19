@@ -229,6 +229,36 @@ followed by the `plan` / `run` / `verdict` commands that produce a valid state (
 instead says to pull the PR head and retry). After a `head-mismatch`, plan, run and verify again on the new
 head.
 
+## Reading the timing history
+
+`portage eval-gate timings --repo <path> [--plugin <name>]` reads both history generations and the repository's
+`eval-gate.json` mappings and prints, per measured case, what the gate itself measured. It writes nothing and
+exits 0, or 2 with a `portage:` message on a usage error or an unreadable mapping.
+
+A history line counts only when its `plugin` and `case` have the mapping's case-name shape and name a mapped case,
+its `fingerprint` equals the case's current pass-cache key computed from the repository, and `pinned_runner` is not
+true. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
+A history with no lines prints that no runs are recorded yet.
+
+The output is a provenance line (the history path, the dates of the counted lines, the runner versions seen), a
+header row and one row per measured case, flagged cases first, then by plugin and case, and a closing line naming
+the measured cases with fewer than two decisions and the mapped cases with no counted lines. A row gives the tier
+(`core` or `merge-only`), the declared `timeout_seconds`, the decisions and runs counted, the decisions that ended
+`timeout` and the scored runs with no duration, the median and maximum duration of scored runs that have one, the
+largest single-batch elapsed time, and the mean cost per decision (run plus judge cost).
+
+"Single-batch" is worked out from the line: a decision holding no more runs than the gate's first batch,
+`min(pass_at, runs - pass_at + 1)` for the mapped `runs` and `pass_at`, took one batch, so its `elapsed_seconds` is
+that batch's time. A multi-batch decision's elapsed time is not a batch time and is left out.
+
+The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Flags:
+
+- `timed-out`: a decision ended `timeout`, or a scored run has no duration. The case counts as at least the budget
+  left (shown `>=420`) and also takes the next two flags.
+- `cannot-finish-a-split`: a single-batch decision took longer than half the budget left, the gate's own test of
+  the first call's elapsed time against the budget left.
+- `over-merge-margin`: a `merge-only` case whose largest single-batch elapsed time is over the budget left.
+
 ## Cost and limits
 
 `plan` prints the number of selected cases and the sum of their `max_cost_usd` caps, which is a ceiling. One
