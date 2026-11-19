@@ -140,6 +140,42 @@ class TestAppendedLine:
         _run(env)
         assert _lines(env)[0]["runner_version"] == expected
 
+    @pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-sonnet-5-5"])
+    def test_the_line_carries_the_model_the_runner_reports(self, env, model):
+        doc = _result([PASS] * 12, costUsd=0.1)
+        doc["suite"]["modelOverride"] = model
+        env.fake(pool=doc, code=0)
+        _run(env)
+        assert _lines(env)[0]["model"] == model
+
+    @pytest.mark.parametrize("suite", [
+        "absent", "not-a-dict", {}, {"modelOverride": None}, {"modelOverride": 7},
+        {"modelOverride": ["claude-opus-5-5"]}, {"modelOverride": ""},
+        {"modelOverride": "$(touch x)"}, {"modelOverride": "a" * 65}, {"modelOverride": "-x"},
+        {"modelOverride": "bad\x1b[31m"}])
+    def test_a_missing_or_out_of_shape_model_is_null_and_nothing_else_changes(self, env, suite):
+        env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+        _run(env, "c1")
+        baseline = _lines(env)[0]
+        doc = _result([PASS] * 12, costUsd=0.1)
+        if suite == "absent":
+            del doc["suite"]
+        else:
+            doc["suite"] = suite
+        env.fake(pool=doc, code=0)
+        _run(env, "c2")
+        line = _lines(env)[1]
+        assert line["model"] is None
+        for key in ("verdict", "reason", "runner_version", "tier", "runs", "budget_seconds"):
+            assert line[key] == baseline[key]
+
+    def test_a_64_character_model_is_kept(self, env):
+        doc = _result([PASS] * 12, costUsd=0.1)
+        doc["suite"]["modelOverride"] = "m" * 64
+        env.fake(pool=doc, code=0)
+        _run(env)
+        assert _lines(env)[0]["model"] == "m" * 64
+
     def test_an_uncacheable_case_has_a_null_fingerprint(self, env):
         (env.repo / "plugins" / "p" / "evals" / "c1" / "link").symlink_to("case.yaml")
         env.plan(tier="merge")

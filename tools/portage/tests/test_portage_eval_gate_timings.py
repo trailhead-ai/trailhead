@@ -208,6 +208,16 @@ class TestWhichLinesCount:
         assert (row["decisions"], row["max"]) == ("1", "100")
         assert "stale 1" in out.splitlines()[-1] and "pinned 1" in out.splitlines()[-1]
 
+    @pytest.mark.parametrize("model", ["claude-opus-5-5", None])
+    def test_a_line_carrying_model_counts_exactly_as_one_without(self, repo, capsys, model):
+        repo.case("c1")
+        plain = repo.line("c1", runs=[run(100), run(200)])
+        repo.write(plain)
+        without = repo.timings(capsys)[1]
+        repo.write(dict(plain, model=model))
+        assert repo.timings(capsys)[1] == without
+        assert repo.rows(capsys)["c1"]["decisions"] == "1"
+
     def test_a_case_name_with_a_control_character_is_mis_shaped_and_never_printed(self, repo, capsys):
         repo.case("c1")
         repo.write(repo.line("c1"), repo.line("c1", case="c1\x1b[31mred"))
@@ -343,6 +353,8 @@ class TestGateToTimingsSeam:
             assert rc == 0
             assert table(out)["c1"]["decisions"] == "1"
             assert "stale 0" in out
+            hist = json.loads((cache / "eval-gate" / history.HISTORY_NAME).read_text())
+            assert hist["model"] == "claude-opus-5-5"
         finally:
             shutil.rmtree(env.root, ignore_errors=True)
 
