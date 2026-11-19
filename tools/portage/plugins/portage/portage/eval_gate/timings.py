@@ -38,7 +38,7 @@ from portage.eval_core import run as core
 
 from . import history
 from .canary import TIMEOUT_SECONDS as CANARY_SECONDS
-from .mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
+from .mapping import CASE_NAME, MODEL_ID, MappingError, load_mapping, valid_corpus_path
 from .run import MAX_TIMEOUT_SECONDS, _cache_key
 from .select import MAPPING_NAME
 from .verdict import _safe
@@ -124,7 +124,7 @@ def _mapped_cases(repo: Path, only_plugin: str | None) -> dict[tuple[str, str], 
     return cases
 
 
-def _number(v: object, bound: float) -> bool:
+def is_number(v: object, bound: float) -> bool:
     if not isinstance(v, (int, float)) or isinstance(v, bool):
         return False
     try:
@@ -133,30 +133,32 @@ def _number(v: object, bound: float) -> bool:
         return False
 
 
-def _decision(doc: dict) -> dict | None:
+def decision(doc: dict) -> dict | None:
     """The validated numbers of a history line, or ``None`` when a field is outside its shape."""
-    runs = doc.get("runs")
+    runs, model = doc.get("runs"), doc.get("model")
     if not (isinstance(doc.get("plugin"), str) and isinstance(doc.get("case"), str)
             and isinstance(doc.get("recorded_at"), str) and _STAMP.fullmatch(doc["recorded_at"])
             and (doc.get("fingerprint") is None or isinstance(doc["fingerprint"], str))
             and isinstance(doc.get("pinned_runner"), bool) and doc.get("verdict") in _VERDICTS
-            and _number(doc.get("elapsed_seconds"), 10 * core.MAX_DURATION_SECONDS)
+            and is_number(doc.get("elapsed_seconds"), 10 * core.MAX_DURATION_SECONDS)
             and isinstance(runs, list)):
         return None
     out = []
     for r in runs:
         if not (isinstance(r, dict) and isinstance(r.get("errored"), bool)
-                and (r.get("duration_seconds") is None or _number(r["duration_seconds"], core.MAX_DURATION_SECONDS))
-                and all(r.get(k) is None or _number(r[k], core.MAX_RUN_COST_USD)
+                and (r.get("duration_seconds") is None or is_number(r["duration_seconds"], core.MAX_DURATION_SECONDS))
+                and all(r.get(k) is None or is_number(r[k], core.MAX_RUN_COST_USD)
                         for k in ("cost_usd", "judge_cost_usd"))):
             return None
         cost = sum(r[k] for k in ("cost_usd", "judge_cost_usd") if r.get(k) is not None)
-        out.append({"errored": r["errored"], "duration": r.get("duration_seconds"), "cost": cost})
+        out.append({"errored": r["errored"], "duration": r.get("duration_seconds"), "cost": cost,
+                    "cost_usd": r.get("cost_usd")})
     return {"at": doc["recorded_at"], "elapsed": doc["elapsed_seconds"], "runs": out,
-            "timeout": doc.get("reason") == "timeout", "version": doc.get("runner_version")}
+            "timeout": doc.get("reason") == "timeout", "version": doc.get("runner_version"),
+            "model": model if isinstance(model, str) and MODEL_ID.fullmatch(model) else None}
 
 
-def _lines(path: Path) -> list[bytes]:
+def history_lines(path: Path) -> list[bytes]:
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -185,7 +187,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
     versions: set[str] = set()
     total = 0
     for path in (history.rotated_path(env), history.history_path(env)):
-        for raw in _lines(path):
+        for raw in history_lines(path):
             total += 1
             try:
                 doc = json.loads(raw)
@@ -194,7 +196,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
             if not isinstance(doc, dict):
                 tally["corrupt"] += 1
                 continue
-            dec = _decision(doc)
+            dec = decision(doc)
             plugin, name = doc.get("plugin"), doc.get("case")
             if dec is None or not CASE_NAME.match(name) or not (plugin == "" or CASE_NAME.match(plugin)):
                 tally["mis-shaped"] += 1

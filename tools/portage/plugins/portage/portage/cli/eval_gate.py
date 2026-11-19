@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, atomic_write, record_crash, run_case
+from ..eval_gate import cost as gate_cost
 from ..eval_gate import timings as gate_timings
 from ..eval_gate import verdict as gate_verdict
 from ..eval_gate.select import TIERS, GitError, plan
@@ -52,6 +53,7 @@ def add_eval_gate_subparser(sub) -> None:
     _add_verdict(group)
     _add_splice(group)
     _add_timings(group)
+    _add_cost(group)
 
 
 def _add_plan(group) -> None:
@@ -208,6 +210,33 @@ def cmd_timings(args: argparse.Namespace) -> int:
     except (RecursionError, OSError, ValueError) as e:
         print(f"portage: eval-gate timings: cannot read the mappings or history: "
               f"{type(e).__name__}", file=sys.stderr)
+        return 2
+    for line in lines:
+        print(line)
+    return 0
+
+
+def _add_cost(group) -> None:
+    p = group.add_parser(
+        "cost",
+        help="Price what a one-file edit to each procedure file costs at the gate.",
+        description="Price, per procedure file of a plugin, the cases a one-file edit selects at the push "
+                    "and merge tiers from the recorded run costs, and print the median across files as "
+                    "the baseline. Read-only.",
+    )
+    p.add_argument("--repo", required=True, help="Path to the git repository")
+    p.add_argument("--plugin", required=True, help="The plugin whose skills/ files are priced")
+    p.add_argument("--runs-from", action="append", default=[], metavar="DIR",
+                   help="A directory of saved runner-output JSON files (repeatable)")
+    p.set_defaults(func=cmd_cost)
+
+
+def cmd_cost(args: argparse.Namespace) -> int:
+    try:
+        lines = gate_cost.report(Path(args.repo), args.plugin, [Path(d) for d in args.runs_from],
+                                 dict(os.environ))
+    except gate_cost.CostError as e:
+        print(f"portage: eval-gate cost: {gate_verdict.one_line(e)}", file=sys.stderr)
         return 2
     for line in lines:
         print(line)
