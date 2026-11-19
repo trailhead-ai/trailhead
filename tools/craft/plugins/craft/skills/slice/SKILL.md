@@ -1177,9 +1177,13 @@ Create the parent `task` record, linking it to the spec on the same write:
 
 ```sh
 lore record create \
-  --kind task --title '<slice title>' --status in-progress \
+  --kind task --title '<slice title>' --status in-progress --vault <vault> \
   --related "spec=$SPEC_NAME" --label craft/slice-parent < <body-path>
 ```
+
+`--vault <vault>` names the spec's vault, the one this pass resolved above. Without it the create is
+routed by the working directory and can land in another vault, and an unattended session may write
+records in its spec's vault only.
 
 The body is written to `<body-path>` (made with `mktemp`) with the file-writing tool and read by
 redirect; `lore record create` takes its body from stdin. Under `--unattended` this is required, and

@@ -57,6 +57,7 @@ from trailhead.outpost_supervisor import disable as supervisor_disable
 from trailhead.outpost_supervisor import enable as supervisor_enable
 from trailhead.pathint import PathIntegrationError, shellenv_lines
 from trailhead.paths import PathResolutionError
+from trailhead.ranger import read_outcome
 from trailhead.ranger.config import DEFAULT_LAUNCH_ACCOUNT, HubConfig, HubConfigError, read_hub_config
 from trailhead.ranger.drive_groups import DriveGroupsError, drive_groups
 from trailhead.uninstall import run_uninstall
@@ -291,12 +292,20 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if not ritual and args.vault is not None:
+        print(
+            "trailhead: --vault belongs to the ritual role; a hub writes every vault of its account",
+            file=sys.stderr,
+        )
+        return 1
     env = dict(os.environ)
     launch = broker_launch(args.broker_session, env=env) if args.broker_session is not None else None
     session_dir = broker_mcp_config_path(args.session, env=env).parent if ritual else None
     config = read_hub_config(args.account, env=env)
     if ritual:
-        profile = resolve_profile(RITUAL_PROFILE, args.account, env=env, workspace=args.workspace)
+        profile = resolve_profile(
+            RITUAL_PROFILE, args.account, env=env, workspace=args.workspace, vault=args.vault
+        )
         directory = profile.paths[ROLE_WORKSPACE]
     else:
         profile = resolve_profile(HUB_PROFILE, args.account, env=env)
@@ -350,11 +359,11 @@ def _cmd_session_start(args: argparse.Namespace) -> int:
 
 
 def _session_start_setup_sandbox_only(args: argparse.Namespace, ritual: bool) -> int:
-    refused = (args.workspace, args.prompt_file, args.broker_session, args.session)
+    refused = (args.workspace, args.prompt_file, args.broker_session, args.session, args.vault)
     if not ritual or any(value is not None for value in refused):
         print(
             "trailhead: --setup-sandbox-only belongs to the ritual role alone and takes no "
-            "--workspace, --prompt-file, --broker-session or --session",
+            "--workspace, --prompt-file, --broker-session, --session or --vault",
             file=sys.stderr,
         )
         return 1
@@ -382,6 +391,23 @@ def _cmd_drive_groups(args: argparse.Namespace) -> int:
         return 1
     groups = drive_groups(args.account, args.vault, env=dict(os.environ))
     print(json.dumps({DRIVE_GROUPS_OUTPUT_KEYS[0]: groups}))
+    return 0
+
+
+def _cmd_read_outcome(args: argparse.Namespace) -> int:
+    for ok, problem in (
+        (args.json, "prints JSON; pass --json"),
+        (read_outcome.valid_spec(args.spec), "--spec is not a spec name"),
+        (read_outcome.valid_vault(args.vault), "--vault is not a safe vault name"),
+    ):
+        if not ok:
+            print(f"trailhead: read-outcome: {problem}", file=sys.stderr)
+            return 2
+    env = dict(os.environ)
+    verdict = read_outcome.judge(
+        args.spec, args.vault, Path(args.output_file), show=read_outcome.lore_show(env)
+    )
+    print(json.dumps(verdict))
     return 0
 
 
@@ -624,6 +650,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Outpost's session id for a ritual; its session files land in that session's directory.",
     )
     session_p.add_argument(
+        "--vault",
+        metavar="NAME",
+        default=None,
+        help=(
+            "The one lore vault a ritual may write records in (required for the ritual role); "
+            "every other vault is write-denied."
+        ),
+    )
+    session_p.add_argument(
         "--setup-sandbox-only",
         action="store_true",
         default=False,
@@ -638,6 +673,15 @@ def _build_parser() -> argparse.ArgumentParser:
     drive_p.add_argument("--account", required=True, help="Account short name.")
     drive_p.add_argument("--vault", required=True, help="Vault name the group must bind.")
     drive_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
+
+    outcome_p = subparsers.add_parser(
+        "read-outcome",
+        help="Judge a ritual session's captured output against the record it names (JSON verdict).",
+    )
+    outcome_p.add_argument("--spec", required=True, help="The drive's spec name.")
+    outcome_p.add_argument("--vault", required=True, help="Vault holding the spec's records.")
+    outcome_p.add_argument("--output-file", required=True, metavar="PATH", help="The session's captured final output.")
+    outcome_p.add_argument("--json", action="store_true", default=False, help="Print JSON (required).")
 
     broker_p = subparsers.add_parser(
         "broker-header",
@@ -673,6 +717,7 @@ def main() -> int:
         "core": _cmd_core,
         "session-start": _cmd_session_start,
         "drive-groups": _cmd_drive_groups,
+        "read-outcome": _cmd_read_outcome,
         "broker-header": _cmd_broker_header,
         "gateway": _cmd_gateway,
     }
