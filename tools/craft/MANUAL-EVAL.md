@@ -5560,7 +5560,7 @@ The first-slice reconciliation was not probed: no case discriminates it (the spa
 
 ## Cases: polish stays out of the core slice and is offered as a recommendation (2026-11-19)
 
-**Status: baselines measured; the prose edit is written, treatment and probes pending.** Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only`, each pre-registered in its `expected.md`. They cover the core and polish rule: a criterion is polish only when every one of its surface's read, create and mutate criteria can be met without it, a surface's polish criteria stay out of the slice covering its core, and the polish slice is offered together as a recommendation with its reason. Each runs `/craft:slice spec/recipe-box --unattended` on the `recipes` command group (AC1 list, AC2 add, AC3 edit, AC4 delete; AC5 sort the list by a column, AC6 colour entries by tag).
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only`, each pre-registered in its `expected.md`. They cover the core and polish rule: a criterion is polish only when every one of its surface's read, create and mutate criteria can be met without it, a surface's polish criteria stay out of the slice covering its core, and the polish slice is offered together as a recommendation with its reason. Each runs `/craft:slice spec/recipe-box --unattended` on the `recipes` command group (AC1 list, AC2 add, AC3 edit, AC4 delete; AC5 sort the list by a column, AC6 colour entries by tag).
 
 | Case | Fixture | Expected slice | Expected on the unedited prose |
 |---|---|---|---|
@@ -5582,6 +5582,9 @@ Treatment and probes (all carriers back to the baseline, the core and polish car
 
 | Arm | Polish-out-of-core case | Recommendation case |
 |---|---|---|
-| treatment | pending | pending |
-| probe: core and polish carriers removed | pending | pending |
-| probe: recommendation carriers removed | pending | pending |
+| treatment (slice.md `2b29404…`, SKILL.md `423ffa8…`; request `local-xy4w0qx8l8pu`) | **green, 1/1**, every grader in both runs | **green, 1/1**, every grader in both runs |
+| all carriers removed | the baseline arm, by identity (the patch is the exact reverse of the prose edit): red 0.5/0.5 | the baseline arm, by identity: one judge miss in three |
+| probe: core and polish carriers removed (the definition and carve-out, every whole-capability clause restored to "every one of its open criteria"; the recommendation wording kept) | **red on the gate, runs 1 / 0.5 / 0.75** (request `local-w9j6iurbkrbu`): the second run took all six criteria and failed both covers graders; the first left polish out anyway, carried by the surviving recommendation wording and the Problem's "conveniences" sentence; the third failed only `final-line-is-slice-chosen`. The rule is attributable in one run of three | not run |
+| probe: recommendation carriers removed (the recommended-slice sentence, the Interface leverage section's existing "state a polish-phase pick … as a recommendation" sentence, step 7's pointer and both step 8 clauses; the core and polish definition kept) | not run | **red, 0.8/0.8** (request `local-x3ms2eixrpoc`): both runs failed `the-statement-offers-the-polish-slice-as-a-recommendation-with-its-reason`; the covers graders passed. The recommendation depends on this wording, the older sentence included |
+
+Every probe was restored and checked byte-identical to the edit. The edit's sites were found by reading the dispatched carrier lines, not by a grep count.
