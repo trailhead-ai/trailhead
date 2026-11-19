@@ -136,6 +136,7 @@ from pathlib import Path, PurePosixPath
 from portage.eval_core import run as core
 from portage.eval_core.run import (
     RUNNER_ERROR,
+    RUNNER_MISSING,
     RUNNER_OVERRIDE_ENV,
     SANDBOX_UNWRITABLE,
     TmpBaseRefused,
@@ -309,7 +310,7 @@ def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
 def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_seconds, harnesses,
                  env, clock) -> tuple[dict, float | None]:
     """The recorded result, and the case's wall time less a fresh canary's when a runner was
-    started for the case (``None`` when it was not)."""
+    started for the case (``None`` when it was not, or when a launch failed: ``runner-missing``)."""
     canary_seconds = 0.0
     in_canary = False
     case_started = False
@@ -340,7 +341,8 @@ def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_second
         execute=execute, resolve_runner=_runner_override, pin=_pin,
         env=env, harnesses=harnesses, clock=clock, canary=cached_canary, label="eval-gate run")
     elapsed = clock() - began - canary_seconds
-    return _record(state, case, result), elapsed if case_started else None
+    recorded = _record(state, case, result)
+    return recorded, elapsed if case_started and recorded["reason"] != RUNNER_MISSING else None
 
 
 def _history_record(state, plan, entry, result, fingerprint, pinned, timeout_seconds, elapsed,

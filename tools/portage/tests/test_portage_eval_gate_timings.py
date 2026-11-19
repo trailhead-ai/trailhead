@@ -9,6 +9,7 @@ case's current pass-cache key, computed the way the gate computes it.
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -18,6 +19,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 from portage.cli import dispatch
 from portage.eval_gate import canary, history
 from portage.eval_gate.run import MAX_TIMEOUT_SECONDS, _cache_key
+from test_portage_eval_gate_run import PASS, RUNNER as GATE_RUNNER, Env, _result
 
 LEFT = MAX_TIMEOUT_SECONDS - canary.TIMEOUT_SECONDS
 RUNNER = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
@@ -121,6 +123,18 @@ class TestCannotFinishASplit:
         assert repo.rows(capsys)["c1"]["batch-max"] == "-"
         repo.write(repo.line("c1", elapsed=LEFT - 1, runs=[run(100)]))
         assert repo.rows(capsys)["c1"]["batch-max"] == str(LEFT - 1)
+
+
+class TestBatchMax:
+    def test_a_decision_with_no_runs_is_not_taken_for_a_single_batch(self, repo, capsys):
+        repo.case("c1")
+        repo.write(repo.line("c1", elapsed=10, runs=[]))
+        assert repo.rows(capsys)["c1"]["batch-max"] == "-"
+
+    def test_a_timed_out_case_counts_as_at_least_the_full_budget(self, repo, capsys):
+        repo.case("c1")
+        repo.write(repo.line("c1", elapsed=5, runs=[run(None)]))
+        assert repo.rows(capsys)["c1"]["batch-max"] == f">={MAX_TIMEOUT_SECONDS}"
 
 
 class TestTimedOut:
@@ -287,7 +301,58 @@ class TestListing:
         assert sizes == [p.stat().st_mtime_ns for p in repo.cache.rglob("*") if p.is_file()]
 
 
+class TestMalformedNumbers:
+    @pytest.mark.parametrize("field,was", [("elapsed_seconds", '"elapsed_seconds": 10'),
+                                           ("duration_seconds", '"duration_seconds": 10'),
+                                           ("cost_usd", '"cost_usd": 0.1')])
+    def test_a_400_digit_integer_in_a_numeric_field_makes_the_line_mis_shaped(
+            self, repo, capsys, field, was):
+        repo.case("c1")
+        text = json.dumps(repo.line("c1", elapsed=10, runs=[run(10)]))
+        assert was in text
+        repo.write(raw=[text.replace(was, f'"{field}": ' + "9" * 400)])
+        rc, out, err = repo.timings(capsys)
+        assert rc == 0 and "Traceback" not in err
+        assert "mis-shaped 1" in out
+
+
+class TestGateToTimingsSeam:
+    def test_a_case_the_gate_ran_is_counted_not_stale(self, tmp_path, monkeypatch, capsys):
+        env = Env(tmp_path, monkeypatch)
+        try:
+            cache = tmp_path / "cache"
+            monkeypatch.setenv("PORTAGE_CACHE_DIR", str(cache))
+            monkeypatch.delenv("PORTAGE_EVAL_RUNNER", raising=False)
+            plugin = env.repo / "plugins" / "p"
+            (plugin / "evals" / "c1").mkdir(parents=True)
+            (plugin / "evals" / "c1" / "case.yaml").write_text("name: x\n")
+            (plugin / "skills").mkdir()
+            (plugin / "skills" / "s.md").write_text("prose\n")
+            (plugin / "evals" / "eval-gate.json").write_text(json.dumps(
+                {"schema_version": 1, "runner": GATE_RUNNER,
+                 "cases": {"c1": {"measures": ["skills"], "runs": 3, "pass_at": 2}}}))
+            env.cases = [dict(env.cases[0], measures=["skills"])]
+            env.plan(tier="merge")
+            env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+            assert env.run() == 0
+            rc = dispatch.main(["eval-gate", "timings", "--repo", str(env.repo)])
+            out = capsys.readouterr().out
+            assert rc == 0
+            assert table(out)["c1"]["decisions"] == "1"
+            assert "stale 0" in out
+        finally:
+            shutil.rmtree(env.root, ignore_errors=True)
+
+
 class TestFailures:
+    @pytest.mark.parametrize("name", [history.HISTORY_NAME, history.ROTATED_NAME])
+    def test_a_history_generation_that_is_a_directory_exits_2_with_a_clean_message(
+            self, repo, capsys, name):
+        repo.case("c1")
+        (repo.cache / "eval-gate" / name).mkdir(parents=True)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 2 and err.startswith("portage: ") and "Traceback" not in err and out == ""
+
     def test_an_unreadable_mapping_exits_2_with_a_clean_message(self, repo, capsys):
         repo.case("c1")
         (repo.root / "plugins" / "p" / "evals" / "eval-gate.json").write_text("{nope")

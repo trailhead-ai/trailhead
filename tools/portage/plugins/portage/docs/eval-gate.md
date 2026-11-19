@@ -253,8 +253,8 @@ that batch's time. A multi-batch decision's elapsed time is not a batch time and
 
 The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Flags:
 
-- `timed-out`: a decision ended `timeout`, or a scored run has no duration. The case counts as at least the budget
-  left (shown `>=420`) and also takes the next two flags.
+- `timed-out`: a decision ended `timeout`, or a scored run has no duration. The case counts as at least the full budget
+  (shown `>=540`, `MAX_TIMEOUT_SECONDS`) and also takes the next two flags.
 - `cannot-finish-a-split`: a single-batch decision took longer than half the budget left, the gate's own test of
   the first call's elapsed time against the budget left.
 - `over-merge-margin`: a `merge-only` case whose largest single-batch elapsed time is over the budget left.

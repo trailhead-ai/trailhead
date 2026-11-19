@@ -10,16 +10,16 @@ Every other line is tallied as ``corrupt`` (not a JSON object), ``mis-shaped`` (
 its shape or bounds), ``pinned`` or ``stale`` (an old fingerprint, or a case the mappings do not
 hold) and nothing from it is printed. Only validated names and numbers computed here reach stdout.
 
-A decision is *single-batch* when it holds no more runs than the gate's first batch,
+A decision is *single-batch* when it holds at least one run and no more runs than the gate's first batch,
 ``min(pass_at, runs - pass_at + 1)`` for the case's mapped ``runs`` and ``pass_at`` (the
 fingerprint covers both, so a counted line was made under the mapping read here). Its
 ``elapsed_seconds`` is then one batch's elapsed time; a multi-batch decision's is not, and is left
 out of the single-batch figures. The budget left is ``MAX_TIMEOUT_SECONDS - canary.TIMEOUT_SECONDS``.
 
 Flags: ``timed-out`` (a decision ended ``timeout``, or a scored run has no duration: the case
-counts as at least the budget left, and also takes the next two flags); ``cannot-finish-a-split``
-(a single-batch decision took longer than half the budget left, the gate's first-batch-elapsed
-against budget-left test in ``run.py``); ``over-merge-margin`` (a merge-only case whose largest
+counts as at least the full budget, ``MAX_TIMEOUT_SECONDS``, and also takes the next two flags);
+``cannot-finish-a-split`` (a single-batch decision took longer than half the budget left, the gate's
+first-batch-elapsed against budget-left test in ``run.py``); ``over-merge-margin`` (a merge-only case whose largest
 single-batch elapsed exceeds the budget left).
 """
 
@@ -123,7 +123,12 @@ def _mapped_cases(repo: Path, only_plugin: str | None) -> dict[tuple[str, str], 
 
 
 def _number(v: object, bound: float) -> bool:
-    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and 0 <= v <= bound
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return False
+    try:
+        return math.isfinite(v) and 0 <= v <= bound
+    except OverflowError:
+        return False
 
 
 def _decision(doc: dict) -> dict | None:
@@ -156,8 +161,11 @@ def _lines(path: Path) -> list[bytes]:
         return []
     except OSError as e:
         raise TimingsError(f"history {path.name} unreadable: {e.strerror}") from None
-    with os.fdopen(fd, "rb") as f:
-        return [x for x in f.read().split(b"\n") if x.strip()]
+    try:
+        with os.fdopen(fd, "rb") as f:
+            return [x for x in f.read().split(b"\n") if x.strip()]
+    except OSError as e:
+        raise TimingsError(f"history {path.name} unreadable: {e.strerror}") from None
 
 
 def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugin: str | None):
@@ -202,9 +210,9 @@ def _stats(case: _Case) -> dict:
               if not r["errored"] and r["duration"] is not None]
     null_runs = sum(1 for d in case.decisions for r in d["runs"] if not r["errored"] and r["duration"] is None)
     timeouts = sum(1 for d in case.decisions if d["timeout"])
-    single = [d["elapsed"] for d in case.decisions if len(d["runs"]) <= case.first_batch]
+    single = [d["elapsed"] for d in case.decisions if 0 < len(d["runs"]) <= case.first_batch]
     timed_out = bool(timeouts or null_runs)
-    batch_max = max([left] * timed_out + single) if (timed_out or single) else None
+    batch_max = max([MAX_TIMEOUT_SECONDS] * timed_out + single) if (timed_out or single) else None
     flags = []
     if timed_out:
         flags.append("timed-out")

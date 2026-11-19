@@ -183,6 +183,28 @@ class TestNoLine:
         assert not (env.cache / "eval-gate" / "history.jsonl").exists()
 
 
+class TestRunnerLaunchFailure:
+    @pytest.mark.parametrize("fails_on_call", [1, 2])
+    def test_a_runner_that_cannot_be_launched_appends_nothing(self, env, fails_on_call):
+        env.fake(pool=_result([PASS, FAIL, PASS], costUsd=0.1), code=1)
+        real, calls = gate_run._execute, []
+
+        def execute(runner, work_dir, timeout):
+            if "--eval-dir" in runner.argv:
+                return real(runner, work_dir, timeout)
+            calls.append(1)
+            if len(calls) == fails_on_call:
+                return None, False, True
+            return real(runner, work_dir, timeout)
+
+        env.mp.setattr(gate_run, "_execute", execute)
+        _run(env)
+        assert len(calls) == fails_on_call
+        assert (env.state / "results" / "c1.json").exists()
+        assert env.result()["reason"] == "runner-missing"
+        assert _lines(env) == []
+
+
 class TestCannotBeWritten:
     def _control(self, env):
         assert env.run() == 0
