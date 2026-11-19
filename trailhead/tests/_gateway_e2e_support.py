@@ -1005,15 +1005,22 @@ def act_containers(engine_socket: str, name_part: str) -> list[dict]:
         return []
 
 
+class EngineUnavailable(Exception):
+    """The container engine would not say what it holds."""
+
+
 def act_container_names(engine_socket: str, *, request=engine_request) -> list[str]:
-    """The names of every act container the engine holds, stopped ones included; empty when the engine will not say."""
+    """The names of every act container the engine holds, stopped ones included.
+
+    Raises ``EngineUnavailable`` when the engine will not say, so "no containers" is only ever a real answer.
+    """
     try:
         status, body = request(engine_socket, "GET", "/containers/json?all=1")
         if status != 200:
-            return []
+            raise EngineUnavailable(f"the engine answered {status} to the container listing")
         return [n for c in json.loads(body) for n in (c.get("Names") or []) if n.startswith("/act-")]
-    except (OSError, ValueError, http.client.HTTPException):
-        return []
+    except (OSError, ValueError, http.client.HTTPException) as err:
+        raise EngineUnavailable(f"the engine could not be asked for its containers: {err!r}") from err
 
 
 def remove_act_containers(engine_socket: str) -> None:

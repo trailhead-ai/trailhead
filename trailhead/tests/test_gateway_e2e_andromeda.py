@@ -49,6 +49,7 @@ from ._gateway_e2e_support import (
     RUN_SESSION_TIMEOUT_SECONDS,
     SESSION_JOBS,
     HomeSentinel,
+    EngineUnavailable,
     act_container_names,
     act_containers,
     remove_act_containers,
@@ -630,6 +631,14 @@ CANCEL_MARGIN_SECONDS = 25
 HOLD_MARKER = "cancel-marker-42"
 
 
+def _containers_or_none(engine_socket):
+    """The act containers the engine holds, or None when it would not say, which the assertion reads as a failure."""
+    try:
+        return act_container_names(engine_socket)
+    except EngineUnavailable:
+        return None
+
+
 @dataclass
 class CancelWorld:
     hold_id: int
@@ -646,7 +655,7 @@ class CancelWorld:
     cancel_seconds: float | None
     hold_final: tuple
     processes_after: list
-    containers_after: list
+    containers_after: list | None
     hold_log: str
     listed: list
     outpost_log: str
@@ -743,7 +752,7 @@ def cancel_world(tmp_path_factory):
                 seconds,
                 hold_final,
                 runner_act_processes(),
-                act_container_names(host.engine_socket),
+                _containers_or_none(host.engine_socket),
                 gw(w1, "run", "view", str(hold_id), "--log"),
                 gw(w1, "run", "list", "--json"),
                 outpost.log.read_text()[-3000:],
@@ -770,7 +779,7 @@ def test_cancel_scenario_a_running_job_ends_cancelled_within_the_grace_and_leave
     )
     assert w.hold_final == ("completed", "cancelled")
     assert w.processes_after == [], f"act is still running as outpost-runner: {w.processes_after}"
-    assert w.containers_after == [], f"the engine still lists act containers: {w.containers_after}"
+    assert w.containers_after == [], f"the engine lists act containers, or would not say (None): {w.containers_after}"
     assert {r["id"]: (r["state"], r["result"]) for r in json.loads(w.listed.rsplit("\nrc=", 1)[0])["runs"]}[
         w.hold_id
     ] == ("completed", "cancelled")

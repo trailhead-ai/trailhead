@@ -37,6 +37,9 @@ from trailhead.paths import state_dir
 STATES = ("queued", "in_progress", "completed")
 RESULTS = ("success", "failure", "cancelled")
 CANNOT_READ = "Outpost answered with a reply this command cannot read"
+# Outpost answers a cancel only after the run's containers are removed: a list call plus a
+# force-delete per container, each allowed up to 10s.
+CANCEL_TIMEOUT_SECONDS = 30.0
 SANDBOXED = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
 
 
@@ -195,8 +198,12 @@ def _run_view(run_id: int, port: int) -> int:
 
 def _run_view_log(run_id: int, port: int) -> int:
     token = _token(port)
-    if _get_view(token, run_id, port)["state"] == "queued":
+    run = _get_view(token, run_id, port)
+    if run["state"] == "queued":
         print(f"outpost-gateway: run {run_id} has not started, so it has no log yet", file=sys.stderr)
+        return 0
+    if run["state"] == "completed" and run.get("started_at") is None:
+        print(f"outpost-gateway: run {run_id} never started, so it has no log", file=sys.stderr)
         return 0
     stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log", headers=_bearer(token), port=port)
     try:
@@ -214,7 +221,13 @@ def _run_view_log(run_id: int, port: int) -> int:
 
 
 def _run_cancel(run_id: int, port: int) -> int:
-    reply = outpost_http.request("POST", f"/gateway/runs/{run_id}/cancel", headers=_bearer(_token(port)), port=port)
+    reply = outpost_http.request(
+        "POST",
+        f"/gateway/runs/{run_id}/cancel",
+        headers=_bearer(_token(port)),
+        port=port,
+        timeout=CANCEL_TIMEOUT_SECONDS,
+    )
     if reply.status != 202:
         raise _refusal(reply)
     state, result = reply.body.get("state"), reply.body.get("result")

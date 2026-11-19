@@ -841,6 +841,18 @@ class TestRunViewLog:
         assert (rc, out) == (2, "")
         assert err == "outpost-gateway: no run 7 in this workspace\n"
 
+    def test_a_run_cancelled_before_it_started_says_so_instead_of_printing_nothing(self, cli):
+        run = view(result="cancelled", exit_code=None, started_at=None)
+        with StubOutpost(view=run, log_steps=[]) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out) == (0, "")
+        assert err == "outpost-gateway: run 7 never started, so it has no log\n"
+
+    def test_a_run_cancelled_while_running_still_prints_its_log(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None), log_steps=["so far\n"]) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out, err) == (0, "so far\n", "")
+
     def test_without_the_flag_view_still_prints_the_fields_and_asks_for_no_log(self, cli):
         with StubOutpost(view=view(), log_steps=["x\n"]) as stub:
             rc, out, _ = cli(stub.port, "run", "view", "7")
@@ -866,6 +878,12 @@ class TestRunCancel:
             "result:   cancelled",
             "cancel requested; run 7 will complete as cancelled",
         ]
+
+    def test_a_cancel_the_route_answers_late_is_still_a_success(self, cli):
+        with StubOutpost(cancel_delay=3.5) as stub:
+            rc, out, err = self._cancel(cli, stub)
+        assert rc == 0, err
+        assert "cancel requested; run 7 will complete as cancelled" in out
 
     def test_a_running_run_is_still_in_progress_with_no_result_yet(self, cli):
         with StubOutpost(cancel_reply=(202, {"id": 7, "state": "in_progress", "result": None})) as stub:

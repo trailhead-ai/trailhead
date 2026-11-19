@@ -22,6 +22,7 @@ from trailhead.gateway import tree_upload
 from ._gateway_e2e_support import (
     RUN_GROUP,
     RealOutpost,
+    EngineUnavailable,
     act_container_names,
     act_process_lines,
     HomeSentinel,
@@ -580,5 +581,14 @@ def test_the_act_containers_are_listed_stopped_ones_included(containers, names):
     assert act_container_names("unused", request=_engine(containers)) == names
 
 
-def test_an_engine_that_will_not_say_lists_nothing():
-    assert act_container_names("unused", request=_engine([{"Id": "a", "Names": ["/act-x"]}], status=500)) == []
+def test_an_engine_that_will_not_say_is_not_reported_as_holding_no_containers():
+    with pytest.raises(EngineUnavailable):
+        act_container_names("unused", request=_engine([{"Id": "a", "Names": ["/act-x"]}], status=500))
+
+
+def test_an_engine_that_cannot_be_reached_is_not_reported_as_holding_no_containers():
+    def unreachable(socket_path, method, path, timeout=10):
+        raise ConnectionRefusedError
+
+    with pytest.raises(EngineUnavailable):
+        act_container_names("unused", request=unreachable)

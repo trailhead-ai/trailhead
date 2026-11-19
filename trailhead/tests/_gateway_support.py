@@ -136,7 +136,8 @@ class StubOutpost:
     when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
     likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
     and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
-    ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``).
+    ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``),
+    after ``cancel_delay`` seconds.
     ``release`` is set
     on exit so no waiting step outlives the stub.
     """
@@ -156,6 +157,7 @@ class StubOutpost:
     view: dict | None = None
     view_reply: tuple[int, object] | None = None
     cancel_reply: tuple[int, object] | None = None
+    cancel_delay: float = 0.0
     log_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
     log_connections: list[list] | None = None
@@ -245,6 +247,7 @@ class StubOutpost:
                 parts = urlsplit(self.path).path.split("/")
                 if (parts[:3] == ["", "gateway", "runs"] and len(parts) == 5
                         and parts[3].isdigit() and parts[4] == "cancel"):
+                    stub.release.wait(stub.cancel_delay)
                     if stub.cancel_reply is not None:
                         return self._send(*stub.cancel_reply)
                     if self._authorised():
