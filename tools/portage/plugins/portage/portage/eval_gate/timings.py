@@ -33,6 +33,8 @@ import statistics
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from portage.eval_core import run as core
+
 from . import history
 from .canary import TIMEOUT_SECONDS as CANARY_SECONDS
 from .mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
@@ -41,8 +43,6 @@ from .select import MAPPING_NAME
 from .verdict import _safe
 
 DEFAULT_DECLARED_TIMEOUT = 300
-MAX_DURATION_SECONDS = 3600
-MAX_COST_USD = 100
 _STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 _VERDICTS = {"pass", "fail", "not-run"}
 _SKIP_DIRS = {".git", "node_modules"}
@@ -117,7 +117,7 @@ def _mapped_cases(repo: Path, only_plugin: str | None) -> dict[tuple[str, str], 
             entry = {"case": name, "runner": mapping.runner, "runs": case.runs, "pass_at": case.pass_at,
                      "plugin_root": root, "measures": list(case.measures)}
             cases[(plugin, name)] = _Case(
-                plugin, name, case.merge_only, min(case.pass_at, case.runs - case.pass_at + 1),
+                plugin, name, case.merge_only, core._first_batch(case.runs, case.pass_at),
                 _cache_key(plugin_dir, entry), _declared_timeout(base / name))
     return cases
 
@@ -133,14 +133,14 @@ def _decision(doc: dict) -> dict | None:
             and isinstance(doc.get("recorded_at"), str) and _STAMP.fullmatch(doc["recorded_at"])
             and (doc.get("fingerprint") is None or isinstance(doc["fingerprint"], str))
             and isinstance(doc.get("pinned_runner"), bool) and doc.get("verdict") in _VERDICTS
-            and _number(doc.get("elapsed_seconds"), 10 * MAX_DURATION_SECONDS)
+            and _number(doc.get("elapsed_seconds"), 10 * core.MAX_DURATION_SECONDS)
             and isinstance(runs, list)):
         return None
     out = []
     for r in runs:
         if not (isinstance(r, dict) and isinstance(r.get("errored"), bool)
-                and (r.get("duration_seconds") is None or _number(r["duration_seconds"], MAX_DURATION_SECONDS))
-                and all(r.get(k) is None or _number(r[k], MAX_COST_USD)
+                and (r.get("duration_seconds") is None or _number(r["duration_seconds"], core.MAX_DURATION_SECONDS))
+                and all(r.get(k) is None or _number(r[k], core.MAX_RUN_COST_USD)
                         for k in ("cost_usd", "judge_cost_usd"))):
             return None
         cost = sum(r[k] for k in ("cost_usd", "judge_cost_usd") if r.get(k) is not None)
