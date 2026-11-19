@@ -6,7 +6,8 @@ Usage: eval-arm-compare --slimmed A.json --frozen B.json --none C.json
 
 A scenario is a case name. Its count for an arm is the number of runs in
 cases[].arms.with[] with passed true and error null, out of the runs with no
-error (the graded runs). A run with error set is never a pass and is listed.
+error (the graded runs). A run with error set, or with skippedPaidGraders true,
+is never a pass, is not graded, and is listed.
 
 Per scenario the verdict is:
   fail          slimmed passes fewer runs than frozen, an arm lacks the scenario,
@@ -59,9 +60,17 @@ def parse_families(specs: list[str]) -> dict[str, list[str]]:
     return families
 
 
+def _error_of(run: dict) -> str | None:
+    if run.get("error") is not None:
+        return str(run["error"])
+    if run.get("skippedPaidGraders"):
+        return "skippedPaidGraders"
+    return None
+
+
 def tally(runs: list[dict]) -> tuple[int, int, list[str]]:
-    errors = [str(r["error"]) for r in runs if r.get("error") is not None]
-    graded = [r for r in runs if r.get("error") is None]
+    errors = [_error_of(r) for r in runs if _error_of(r) is not None]
+    graded = [r for r in runs if _error_of(r) is None]
     return sum(1 for r in graded if r.get("passed") is True), len(graded), errors
 
 
