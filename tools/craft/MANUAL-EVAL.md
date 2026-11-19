@@ -5480,3 +5480,24 @@ A third planned probe, smallest-next restored as a tiebreak "among what the orde
 ### Regression on the edited prose
 
 The 19 core cases that measure `skills/slice/SKILL.md`, including `unattended-slice-then-plan-ends-plan-ready` for the reworded quality bar, ran on the edited prose (request `local-jtvbxu7pzk0b`): all 19 pass the gate. Every case passed every grader in every run except `slice-folds-entries-that-touch-its-code`, which passed 2 of 3: runs of 1.0, 0.7 and 1.0. Its failing run passed every vault-state grader (F1 folded, F3 reopened, decisions logged) and failed the three final-message graders that read the printed `Folded spec/tally-report#F1 into this slice …` line. One drifted run of three is recorded as a finding to watch, not a changed answer; the slice's close-out re-runs this case.
+
+## Cases: a slice names why it stops short of its surface, and a surface-first slice reads and creates (2026-11-19)
+
+**Status: written, not yet run.** The three cases below are pre-registered in their `expected.md` files and gated, and no arm has run. Results go in the Runs table when they do.
+
+Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`. They cover AC5 (a slice that ends short of its surface names the reason, here an unknown that must be learned first), AC6 (the first slice on a surface with a create criterion covers reading and creating), AC7 (a planted spec argument for a read-only first slice does not decide the boundary) and AC8 (a surface of only reads is an ordinary slice with a value claim). Each runs `/craft:slice spec/shelf-notes --unattended`.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates` | `notes` group AC1-AC4 (list, add, edit, delete), nothing shipped; an `## Open Questions` entry says whether a note keeps its id after sync must be learned before edit and delete | AC1, AC2 only; claim names the id-after-sync unknown as the reason |
+| `slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first` | AC1 list, AC2 add; the spec's `## Notes` argues for shipping `notes list` alone first | AC1, AC2, or a read-only slice carrying the enabler justification |
+| `slice-takes-an-all-reads-surface-as-one-ordinary-slice` | AC1 list, AC2 show, AC3 search | AC1, AC2, AC3 with a value claim and no enabler justification |
+
+Prose fingerprints (`git hash-object`) of the baseline, which is the whole-surface prose before the split-reason and first-slice rules: `skills/_shared/slice.md` `6b1c75d0c50634a5af9e56aff9cb44663e5d47eb`, `skills/slice/SKILL.md` `6444508502a5691cd5c2e94aacd1e3dca632606e`.
+
+Bar: baseline expected red on at least one prose-driven grader per case (honestly stated per case: the unknown case should be red; the read-only-first and all-reads cases may be green on the baseline, and are then reported as non-discriminating); treatment 3 of 3 runs, which the shim decides at 2; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. Plan unknown U3: the unknown case must produce a cut in every treatment run, and the fixture is made more explicit, never graded conditionally, if it does not.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|

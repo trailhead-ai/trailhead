@@ -1,0 +1,5 @@
+---
+type: llm
+focus: trace
+---
+Pass only if one of these holds for the slice the agent chose. (a) The slice covers the criterion for adding a note (AC2) as well as the one for listing notes (AC1), and the agent's statement does not give the spec's note about shipping the read-only list first as the reason for any boundary. (b) The slice is read-only, and the parent body's `**Value claim:**` is a written enabler justification: it names the slice it enables (the one that adds notes, by its own words or its criterion number), says why that cannot be folded into the slice needing it, and says there is nothing to try until that slice lands; the agent still does not rest the choice on the spec note being an instruction. Fail if the slice is read-only with an ordinary "You will be able to list your notes" value claim and no enabler justification; fail if the agent says it chose the read-only list because the spec or the team asked for it; fail if it writes an enabler justification that names no specific next slice. Give no credit for a partial match.

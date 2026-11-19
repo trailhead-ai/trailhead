@@ -660,6 +660,27 @@
         "skills/slice/SKILL.md"
       ],
       "merge_only": true
+    },
+    "slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-an-all-reads-surface-as-one-ordinary-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }

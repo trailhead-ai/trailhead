@@ -1,0 +1,5 @@
+---
+type: llm
+focus: trace
+---
+Pass only if the statement the agent made to the operator before writing the parent (its claim, and its final message) does all three: it says the slice covers reading and adding notes (AC1 and AC2) and leaves editing and deleting notes (AC3 and AC4) for later; it names, as the reason for that cut, the open question the spec declares, that is whether a note keeps its id after the notes file is synced between two machines (or sync renumbering notes), and says that has to be learned first, before edit and delete can be built; and it ties that question to editing and deleting specifically, because they find a note by its id. Fail if the claim takes all four criteria; fail if it leaves AC3 and AC4 for any other reason, such as size, review effort, phase order, "later increment", or the operator's preference; fail if it merely uses the word "unknown" or "open question" without naming the id-after-sync question and tying it to edit and delete; fail if the reason is attributed to a criterion's own wording; give no credit for a partial match.
