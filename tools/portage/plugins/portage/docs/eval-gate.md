@@ -111,6 +111,17 @@ that environment a runner authenticated on the operator's Claude Code login on a
 macOS was not checked). `HOME` is forwarded, so settings in the user's Claude configuration (an `env` block or an
 `apiKeyHelper`) can still change which credential a run uses and could move it onto API billing.
 
+Every case a runner was started for also appends one JSON line to `history.jsonl` in the `eval-gate` directory
+of portage's cache directory (the pass cache's directory; per host, never synced): the case, its plugin, the
+pass-cache fingerprint (null when uncacheable), the runner's version, whether `PORTAGE_EVAL_RUNNER` pinned the
+runner, the tier, the verdict and reason, the call's timeout, the case's wall time without a fresh canary's, and
+each run's pass, error, duration and cost figures. A `timeout` is written with the runs that came back. A cache
+hit, and a not-run decided before any runner started (`case-removed-on-branch`, `corpus-new-on-branch`,
+`head-moved`, a harness with no eval runner, a failed canary), write nothing. A file over 5 MB is renamed to
+`history.1.jsonl` before the next line, so two generations are kept. A history that cannot be written prints one
+`eval-gate: timing history not written: <reason>` line on stderr and changes no verdict, exit code or result
+file. The file's shape is in the `eval_gate/history.py` docstring.
+
 Nothing may leave a case running after the call returns: no `nohup`, no trailing `&`, no runner script, no
 `run_in_background`.
 
