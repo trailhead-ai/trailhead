@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: slice-leaves-polish-out-of-the-core-slice
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

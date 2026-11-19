@@ -702,6 +702,20 @@
         "skills/slice/SKILL.md"
       ],
       "merge_only": true
+    },
+    "slice-leaves-polish-out-of-the-core-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-states-a-polish-slice-as-a-recommendation-with-its-reason": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }
