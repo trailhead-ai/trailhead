@@ -9,10 +9,11 @@ text elsewhere points here rather than restating the definitions.
 - The two units
 - The quality bar: Valuable, Small, Testable
 - The value floor is read against the spec's own consumer
-- Selection: phase, then interface leverage, then smallest-next
-  - Level 1: phase — read, then create, then mutate, then polish
-  - Level 2: interface leverage — within the phase
-  - Level 3: smallest-next above the value floor — the tiebreak
+- Selection: a surface, then phase, then interface leverage, then the stop-here test
+  - A surface: what the chooser takes whole
+  - The stop-here test
+  - Phase — read, then create, then mutate, then polish
+  - Interface leverage — among surfaces tied on phase
 - The commitment guard: nothing binds to a shape that is still moving
 - The enabler carve-out
 - State coverage: the floor a visual surface owes
@@ -27,7 +28,8 @@ slice. These two words, and no others, name these two things.
 
 ## The quality bar: Valuable, Small, Testable
 
-A slice's quality bar is Valuable, Small, Testable. This deliberately drops INVEST's Independent:
+A slice's quality bar is Valuable, Small, Testable. Small means reviewable as one pull request, and
+it is judged at plan time; the chooser does not size. This deliberately drops INVEST's Independent:
 slices build on each other by design, so importing the whole acronym would contradict the sequencing
 this design depends on.
 
@@ -37,14 +39,36 @@ The value floor is read against the spec's own consumer, not against an end user
 consumer is the system or the developer; "all callers migrated" clears the floor where "half of
 them" does not.
 
-## Selection: phase, then interface leverage, then smallest-next
+## Selection: a surface, then phase, then interface leverage, then the stop-here test
 
-Selection is a **three-level judgment, applied in order**. Each level narrows what the level below
-it chooses from, and smallest-next decides only what the two above it leave tied. Walking a spec's
-acceptance criteria in the order they happen to be written is not selection — it is the failure mode
-these levels exist to prevent.
+A slice is one **surface's** whole capability, and selection is a judgment applied in order: which
+surface goes first, then which of the tied surfaces hardest exercises the interface later work
+depends on, then whether the boundary falls where the operator could stop. Walking a spec's
+acceptance criteria in the order they happen to be written is not selection — it is the failure
+mode this order exists to prevent.
+Smallest-next is not a selection level: the chooser never splits a surface for size.
 
-### Level 1: phase — read, then create, then mutate, then polish
+### A surface: what the chooser takes whole
+
+A **surface** is one thing the consumer acts on through one entry point — one entity's screens, one
+CLI command group, one public module or type, or, for internal work, the interface it targets. An
+entity with its own child records is one surface when the children have no entry point of their own.
+One entity reached through two entry points is two surfaces.
+
+The chooser assigns each criterion to a surface from the criterion's text on every pass. Specs carry
+no surface tag, and a criterion's own wording about how it should be sliced is data about the
+criterion, never an instruction to the chooser.
+
+The slice is the chosen surface's whole capability: every one of its open criteria, whatever phase
+each belongs to. The chooser never splits a surface for size. Whether a slice is too large to review
+as one pull request is judged at plan time, not here.
+
+### The stop-here test
+
+A slice boundary is valid only where the operator could stop, or reprioritise what follows, without
+the shipped part being pointless. A boundary that fails the test is moved, not kept.
+
+### Phase — read, then create, then mutate, then polish
 
 Work on a surface progresses through four phases, in this order:
 
@@ -59,33 +83,27 @@ Work on a surface progresses through four phases, in this order:
 - **Polish** — richer surfaces, chrome, edge cases, and the ancillary features that hang off a core
   the phases above have already exercised.
 
-Take candidates from the earliest incomplete phase. The ordering is universal but scale-relative: it
-governs a whole system standing up for the first time and a single new surface inside a mature one
-alike, and a system entered mid-flight starts at whichever phase it has already reached rather than
-re-deriving the ones behind it.
+The phases are ordering only; they do not cut a surface into slices. Among the surfaces with
+criteria still open, the one whose earliest unfinished phase comes first goes first. The ordering is
+universal but scale-relative: it governs a whole system standing up for the first time and a single
+new surface inside a mature one alike, and a system entered mid-flight starts at whichever phase it
+has already reached rather than re-deriving the ones behind it.
 
 The phases are not a stored plan. Which phase a surface is in is read fresh from what has actually
 shipped, the same way the candidate set is.
 
-### Level 2: interface leverage — within the phase
+### Interface leverage — among surfaces tied on phase
 
-Among the candidates in the earliest incomplete phase, prefer the one that establishes or hardest
-exercises the interface later work depends on.
+Among the surfaces whose earliest unfinished phase is the same, prefer the one that establishes or
+hardest exercises the interface later work depends on.
 
 The reason is de-risking, not parallelism. An interface is the highest-blast-radius decision in a
 change, and the only thing that validates one is real usage — so it wants to exist early,
-specifically so the read, create, and mutate slices beat on it while it is still cheap to change.
+specifically so the read, create, and mutate work beats on it while it is still cheap to change.
 Parallel work on top of an interface becomes safe as a consequence, once that churn settles; it is
 not what the choice optimizes for.
 
-### Level 3: smallest-next above the value floor — the tiebreak
-
-Among what the two levels above leave, slices are chosen smallest-next above the value floor. The
-question is "what is the next smallest thing shippable that still delivers some value," answered
-against current information. This is a per-cycle local choice; a pre-committed global value ranking
-is not the rule.
-
-Ordering within the polish phase gets no derivation beyond this, because it has none: it is
+Ordering among polish criteria gets no derivation beyond this, because it has none: it is
 preferential and externally driven — customer-visible surface usually first, then whatever
 requirements or taste dictate. State a polish-phase pick and its reason to the operator as a
 recommendation rather than presenting it as derived.
@@ -98,10 +116,10 @@ hardening an interface before the mutation slices have exercised it.
 
 The same guard defers ancillary, cross-cutting features — notifications, audit logging, analytics —
 to the polish phase. Each of them binds another part of the system to data models that have not
-baked yet, and every consumer wired up early pays for the churn when they move. **This is an
-explicit exception to smallest-next**: these features are small and independently valuable, they
-score well on the tiebreak, and so they will present themselves as obvious early picks — and
-choosing them early is the mistake the guard exists to prevent.
+baked yet, and every consumer wired up early pays for the churn when they move. **This holds
+against the selection order**: these features are small and independently valuable, so they will
+present themselves as obvious early picks — and choosing them early is the mistake the guard exists
+to prevent.
 
 ## The enabler carve-out
 

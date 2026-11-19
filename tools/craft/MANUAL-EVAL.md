@@ -5345,6 +5345,8 @@ timeout 900 env -u LORE_CONFIG_DIR -u LORE_STATE_DIR -u XDG_CONFIG_HOME -u XDG_S
 | fixture revision: the seeded open task's value claim now says to close the manifest file the label reader in `labels/printer.py` opens, so the search slice step 7 runs (`lore search "close manifest file"`, `lore search "kind:task manifest"`) finds it; the first run's three attended runs found no holding task and recommended the restore, failing `the-first-listed-fix-is-the-drop-naming-the-task-that-holds-the-work`; both scaffolds updated | edited | 3 each | pending | pass at 2 of 3 |
 | mutation, "and no fix offered here" removed from step 7 rule 1 (the sentence that no stop or offered fix names a re-run); expected red in a run that writes a `/craft:slice` command into a fix line: `the-message-does-not-tell-the-operator-to-re-run-slice` | edited | 1 | pending | attended case |
 
+Baseline note: in every baseline run the CLI create, vault write (canary) and final-line graders passed and both covers graders (the covers-gate `--covers` list and the written `**Covers:**` line) failed. The runner deletes traces, so which criteria the unedited rule chose is not observable beyond the graders.
+
 ### Carrier mutations
 
 One run each on the edited prose, a single carrier changed, case named in the last column; a mutation that leaves its case green is reported and the grader strengthened.
@@ -5456,11 +5458,11 @@ Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 
 
 | Case | Arm | File fingerprint | Runs | Bar | Result |
 |---|---|---|---|---|---|
-| all four, canary | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
-| hostile criterion | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
-| two fresh surfaces | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
-| one surface shipped | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
-| different phases | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| all four, canary | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.6/0.6); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| hostile criterion | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| two fresh surfaces | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| one surface shipped | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| different phases | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
 | all five cases | treatment | pending (edited) | 3 each | 3 of 3 | pending |
 | all five cases | all-carriers mutation (every carrier of the surface rule removed at once) | pending | 3 each | red | pending |
 

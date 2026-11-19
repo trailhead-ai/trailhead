@@ -2,7 +2,7 @@
 name: slice
 description: >
   Choose and materialize the next vertical slice from a `ready` spec — read the spec fresh,
-  derive the remaining candidates, choose smallest-next above the value floor, state the value
+  derive the remaining candidates, choose one surface's whole capability above the value floor, state the value
   claim to the operator, then write the chosen slice as an `in-progress` parent task linked to
   the spec.
   TRIGGER when: user says "slice this spec", "what's the next slice", "pick the next slice",
@@ -22,7 +22,7 @@ nothing more. Designing and building that slice is `/craft:plan` and `/craft:exe
 against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
-slice/task vocabulary, the quality bar, the value floor, the three-level selection rule, the
+slice/task vocabulary, the quality bar, the value floor, the selection order, the
 commitment guard, the enabler carve-out, the state-coverage reference, and the written shapes it
 fixes. Read it before running this procedure. This skill does not restate any of it: a second copy
 here is exactly how the two would drift apart.
@@ -769,7 +769,7 @@ restore makes the earlier read stale and a restored entry has a new id; it goes 
 nor item 3, which act only when no criterion is left. Under `--unattended` item 1 ends the pass at
 its early stop, so nothing returns. Group the others by overlapping `where` paths, by the entries
 path's grouping rule in item 3. A group holding an entry that qualified as security comes before a
-group with none; among the groups still tied, `_shared/slice.md`'s levels apply, each group taken as
+group with none; among the groups still tied, `_shared/slice.md`'s selection order applies, each group taken as
 one candidate. The chosen group is a slice made only of entries, written as item 3 writes one:
 `--folds` alone to the covers gate, a `**Folds:**` line naming every entry of the group, and neither
 a `**Covers:**` nor a `**Partially covers:**` line. The enabler path, the value floor and the
@@ -783,17 +783,17 @@ below apply to the candidate set as written.
 decision, never a question. It is logged with the selection (step 8 says where), naming each urgent
 entry by id and the kind that qualified it, and it logs `urgent tier: none` when no entry qualified.
 
-Apply `_shared/slice.md`'s selection rule against the candidate set. It is a three-level judgment,
-applied in order — the phase the surface has reached, then interface leverage within that phase,
-then smallest-next above the value floor as the tiebreak. Read those three levels and the commitment
-guard there rather than working from the candidate set's list order: taking acceptance criteria in
-the order the spec happens to write them is the failure mode the levels exist to prevent.
+Apply `_shared/slice.md`'s selection order against the candidate set: assign every criterion to a
+surface from its own text, then choose one surface and take its whole capability as the slice. Read
+the surface definition, the order and the commitment guard there rather than working from the
+candidate set's list order: taking acceptance criteria in the order the spec happens to write them
+is the failure mode the order exists to prevent.
 
 The result is a per-cycle local choice made against current information, not a lookup against a
-pre-committed ranking — the phases are read fresh from what has shipped, exactly as the candidate
-set is.
+pre-committed ranking — the surfaces and the phases are read fresh from the criteria and from what
+has shipped, exactly as the candidate set is.
 
-**Judge each candidate in the chosen phase against the set-aside rule before choosing.** Set a
+**Judge each candidate in the chosen surface against the set-aside rule before choosing.** Set a
 candidate aside only when building it needs a real outside account, business setup, or real-world
 event that a stand-in cannot replace for building and testing: an account the company has not
 opened, a registration or approval still in someone else's queue, a live service with no test
@@ -934,8 +934,8 @@ its fixed reason, naming the entry by id, before any further drop of this pass i
    group when they name the same file, or when one names a directory that holds a file the other
    names, and an entry that overlaps no other stands alone. When any remaining open entry is urgent,
    the urgent tier above decides: only the urgent entries are grouped, and a group holding a
-   security entry comes first. Choose one group as the slice by `_shared/slice.md`'s rule, the
-   phase, then the interface leverage, then smallest-next, taking each group as one candidate; the
+   security entry comes first. Choose one group as the slice by `_shared/slice.md`'s selection
+   order, taking each group as one candidate; the
    entries of the groups not chosen stay open for the next pass. The slice's value claim says what
    its fixes let the operator do, in this skill's own words and never copied from an entry's text,
    and every entry of the chosen group is folded in step 9.
@@ -973,6 +973,13 @@ record specifically, the write that actually creates the slice the operator is b
 accept. Nothing in this procedure writes the parent task record or hands off to `/craft:plan` ahead
 of that statement: the claim is stated while it is still cheap to reject, not discovered after the
 parent task already exists.
+
+**The claim names the chosen surface and the criteria assigned to it**, each by its own words with
+its number after it, so the operator can catch a bad grouping while it is still cheap to reject. It
+names the criteria assigned to the surfaces not chosen the same way, as what this slice leaves. The
+surface is the chooser's own reading of the criteria's text, and the statement says so. On a spec
+predating the `**ACn.**` convention, or on the enabler path, there is no criterion to assign: say so
+plainly, on the same footing as the cases above.
 
 **On the same footing as the full-coverage call above, and never conflated with it,** state which
 spec acceptance criteria the chosen slice makes only partially green — never left unstated, and
