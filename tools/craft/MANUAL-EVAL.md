@@ -5483,7 +5483,7 @@ The 19 core cases that measure `skills/slice/SKILL.md`, including `unattended-sl
 
 ## Cases: a slice names why it stops short of its surface, and a surface-first slice reads and creates (2026-11-19)
 
-**Status: baselines run, prose edited, treatment pending.** The three cases below are pre-registered in their `expected.md` files and gated; the baseline rows are in the Runs table and the treatment and probe rows are pending.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. The unknown case is red on the baseline, green after the edit and red again with the three-reasons rule removed; the spec-note case does not discriminate and is kept as a regression guard by the operator's decision; the all-reads case failed its statement judge in one run of three on both arms.
 
 Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`. They cover AC5 (a slice that ends short of its surface names the reason, here an unknown that must be learned first), AC6 (the first slice on a surface with a create criterion covers reading and creating), AC7 (a planted spec argument for a read-only first slice does not decide the boundary) and AC8 (a surface of only reads is an ordinary slice with a value claim). Each runs `/craft:slice spec/shelf-notes --unattended`.
 
@@ -5501,8 +5501,22 @@ Bar: baseline expected red on at least one prose-driven grader per case (honestl
 
 | Case | Arm | File fingerprint | Runs | Bar | Result |
 |---|---|---|---|---|---|
-| unknown case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | as run | red | **red, 0.4/0.4**: both covers graders and the reason llm grader failed in both runs (the chooser took the whole surface); portage-eval request `local-pqpgoc96r4j0`, 2026-11-19 |
-| spec-note case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | as run | red | **green, 1/1: does not discriminate on this baseline.** Whether the case is kept is the operator's call (pending); `local-pqpgoc96r4j0`, 2026-11-19 |
+| unknown case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 2 (runner stopped once decided) | red | **red, 0.4/0.4**: both covers graders and the reason llm grader failed in both runs (the chooser took the whole surface); portage-eval request `local-pqpgoc96r4j0`, 2026-11-19 |
+| spec-note case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 2 (runner stopped once decided) | red | **green, 1/1: does not discriminate on this baseline.** The whole-surface rule already takes list and add. The operator kept the case as a regression guard for AC7 rather than strengthen it: forcing a red would mean blocking the create criterion, which contradicts AC6; `local-pqpgoc96r4j0`, 2026-11-19 |
 | all-reads case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 3 | red | **green on the gate, runs 1 / 0.8 / 1**: the middle run failed `the-slice-is-an-ordinary-one-with-no-enabler-justification` (it treated the all-reads slice as an enabler), so the case discriminated in one run of three; `local-pqpgoc96r4j0`, 2026-11-19 |
-| all three cases | treatment | pending | pending | 3 of 3 | pending |
-| all three cases | all-carriers and single-rule probes | pending | pending | red | pending |
+| unknown case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 (runner stopped once decided) | 3 of 3 | **green, 1/1**: every run cut the surface after list and add and named the id-after-sync unknown as the reason, so plan unknown U3 is resolved; request `local-2bsgme7ve23r` |
+| spec-note case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 (runner stopped once decided) | 3 of 3 | **green, 1/1** (regression guard); `local-2bsgme7ve23r` |
+| all-reads case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 3 | 3 of 3 | **green on the gate, runs 0.8 / 1 / 1, below the 3-of-3 bar**: the first run failed `the-slice-is-an-ordinary-one-with-no-enabler-justification` (judge votes FAIL FAIL FAIL), at the same rate as the baseline. In that run both covers graders passed, so the written parent carried a `**Covers:**` line over all three reads, a `**Value claim:**` and a covers-gate call, none of which an enabler slice writes: by the record the slice was ordinary. The judge sees only the first and last 12 messages and requires the "You will be able to", "Try it" and green-criteria sentences inside them, so what it failed cannot be told apart from a statement outside its window; the runner deleted the trace. The grader is left unchanged, not loosened to pass. Recorded as a finding: the edit did not move this judge, and its observation point is fragile; `local-2bsgme7ve23r` |
+| all three cases | all-carriers mutation | slice.md `6b1c75d…`, SKILL.md `6444508…` | — | red | **the baseline arm, by identity**: the all-carriers patch is the exact reverse of the prose edit, so it restores the baseline fingerprints; not run again |
+
+### Carrier mutations
+
+Each probe ran against the unknown case on the edited prose, then the tree was restored and checked byte-identical to the edit.
+
+| Probe | What it removes | Unknown case result | Reading |
+|---|---|---|---|
+| three reasons | every carrier of the three-reasons rule: its contents entry, the selection intro's clause, the whole "Where a slice may end short of its surface" subsection, the first-slice section's sentence about the reasons, step 7's sentences naming the reasons and separating them from the set-aside rule, and step 8's reason-and-left-over clause; the first-slice rule, the all-reads rule and step 7's Open Questions instruction stay | **red**, runs 0.4 / 1 / 0.4 (request `local-56fgr2ig1g8x`): two runs took the whole surface and stated no reason, failing both covers graders and the reason judge | the cut and the stated reason depend on the three-reasons rule |
+| Open Questions instruction | only step 7's sentence telling the chooser to read the spec's `## Open Questions` | green, 1/1 (request `local-98j1p51c2453`) | redundant to the grader: the shared doc's unknown reason, which counts only an unknown the spec declares in its Open Questions, carries the read on its own |
+
+The first-slice and all-reads probes were not run: no case discriminates them. The spec-note case is green on the baseline, and the all-reads case's one failing judge vote is at the same rate on both arms.
+
