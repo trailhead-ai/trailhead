@@ -5438,7 +5438,7 @@ Bar for each case: 3 runs, pass at 2 of 3; one rerun of a failed batch permitted
 
 ## Cases: a slice is one surface's whole capability, not one phase of it (2026-11-19)
 
-**Status: built, not run.** The runner cannot be started where the cases were built, so no run, score or baseline is recorded; every row below is pending and the controller fills it in from the `portage-eval` shim.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. Baselines are red, treatment is green, and removing the whole-capability rule turns the canary red.
 
 Five runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, each pre-registered in its `expected.md` before any run. They cover AC1 (one entity read, created, edited and deleted on one surface is one slice), the spec's Constraint that criterion text is data, AC2 (two surfaces yield a slice covering one surface), AC3 (once one surface shipped, the other is next) and AC4 (the surface whose earliest unfinished phase comes first is chosen). Every case runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list. `slice-takes-all-four-operations-on-one-surface-as-one-slice` is the core-tier canary and performs a real `lore record create`; the other four are `merge_only`.
 
@@ -5450,9 +5450,9 @@ Five runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, eac
 | `slice-takes-the-other-surface-after-one-has-shipped` | same, ledger holds a `done` slice covering AC1-AC3 | AC4, AC5, AC6 |
 | `slice-takes-the-surface-whose-earliest-phase-comes-first` | `ledgerctl invoices` group (AC1-AC3, read shipped) and `/customers` endpoints (AC4-AC6) | AC4, AC5, AC6 |
 
-Prose fingerprints (`git hash-object`): unedited `skills/_shared/slice.md` `4a88c9748e5b3e713d8e5c615f5266a7ac016eb7`, unedited `skills/slice/SKILL.md` `1cf2b2672b21e69445ba90940f48bcd9313ed010`; edited fingerprints are filled in after the prose edit.
+Prose fingerprints (`git hash-object`): unedited `skills/_shared/slice.md` `4a88c9748e5b3e713d8e5c615f5266a7ac016eb7`, unedited `skills/slice/SKILL.md` `1cf2b2672b21e69445ba90940f48bcd9313ed010`; edited `skills/_shared/slice.md` `faaed7a13a77fe5eee5ade78e32486dac0c5c78b`, edited `skills/slice/SKILL.md` `18465ce2f3b704a06a780ce4ecc7b71c2bf41369`. A later reflow to the wrap column (`6b1c75d0c50634a5af9e56aff9cb44663e5d47eb`, `ec71fab52bd3fdc1b3d8efc638344ac7b44cd6a3`) changes whitespace only: a whitespace-insensitive word diff between the two pairs is empty.
 
-Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 3 of 3; one rerun of a failed batch permitted and reported as such. A baseline that comes out green means the fixture is strengthened, not the case kept.
+Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 3 of 3 (as run, the shim stops a case once the gate's 2-of-3 bar decides it, so each arm below ran 2 runs); one rerun of a failed batch permitted and reported as such. A baseline that comes out green means the fixture is strengthened, not the case kept.
 
 ### Runs
 
@@ -5463,9 +5463,20 @@ Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 
 | two fresh surfaces | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
 | one surface shipped | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
 | different phases | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
-| all five cases | treatment | pending (edited) | 3 each | 3 of 3 | pending |
-| all five cases | all-carriers mutation (every carrier of the surface rule removed at once) | pending | 3 each | red | pending |
+| all five cases | treatment | slice.md `faaed7a…`, SKILL.md `18465ce…` | 2 each (runner stopped once decided) | 3 of 3 | **green, every grader in every run** (score 1/1 on all five); request `local-kbq5wydrfsa5`. 2 of 2, not the 3 of 3 the bar names: the shim decides at 2 |
+| all five cases | all-carriers mutation (every carrier of the surface rule removed at once) | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | — | red | **red, by identity with the baseline**: reversing the prose edit leaves both files byte-identical to the unedited ones (same fingerprints), so this arm is the baseline arm above and was not run again |
 
 ### Carrier mutations
 
-None run yet. Each single-rule probe is paired with the all-carriers mutation so that a red case is attributable.
+Each probe ran against the canary only, on the edited prose, then the tree was restored and checked byte-identical to the edit.
+
+| Probe | What it removes | Canary result | Reading |
+|---|---|---|---|
+| no-split | both "the chooser never splits a surface for size" sentences in `skills/_shared/slice.md` | green, 1/1 (request `local-5blieoesnlf1`) | the whole-capability sentence carries the rule alone; the no-split sentence is redundant to the grader |
+| whole-capability | every carrier of the whole-capability rule: the shared doc's selection intro, the surface section's heading and contents entry, the "whole capability … never splits a surface for size" paragraph and the intro's no-split clause, and the slice skill's description and step 7 sentence; the surface definition and the phase order stay | **red**, 0.8/0.6 (request `local-yedj966zf5fz`): run 1 still took all four criteria and failed only its final line; run 2 failed both covers graders | the covers graders depend on the whole-capability rule; without it the surface definition alone takes the whole surface in about half the runs |
+
+A third planned probe, smallest-next restored as a tiebreak "among what the order leaves tied", was not run: it leaves every whole-capability carrier in place, so it could not turn the covers graders red and would not attribute anything.
+
+### Regression on the edited prose
+
+The 19 core cases that measure `skills/slice/SKILL.md`, including `unattended-slice-then-plan-ends-plan-ready` for the reworded quality bar, ran on the edited prose (request `local-jtvbxu7pzk0b`): all 19 pass the gate. Every case passed every grader in every run except `slice-folds-entries-that-touch-its-code`, which passed 2 of 3: runs of 1.0, 0.7 and 1.0. Its failing run passed every vault-state grader (F1 folded, F3 reopened, decisions logged) and failed the three final-message graders that read the printed `Folded spec/tally-report#F1 into this slice …` line. One drifted run of three is recorded as a finding to watch, not a changed answer; the slice's close-out re-runs this case.
