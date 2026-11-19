@@ -10,10 +10,17 @@ in ``portage.eval_gate.run``, which calls this.
     {"case": str, "verdict": "pass" | "fail" | "not-run", "passed": int, "failed": int,
      "errored": int, "reason": null | <reason code>,
      "runs": [{"passed": bool, "errored": bool, "score": number | null,
-               "graders": [{"name": str, "passed": bool}, ...]}, ...]}
+               "graders": [{"name": str, "passed": bool}, ...],
+               "duration_seconds": number | null, "cost_usd": number | null,
+               "judge_cost_usd": number | null}, ...]}
 
-``runs`` holds every call's runs in order, built only from the score and the graders' names and
-pass flags, never runner output. ``run_canary`` returns the same shape for case ``sandbox-write``.
+``runs`` holds every call's runs in order. The only runner values a run record carries are the
+score, the graders' names and pass flags, and the run's ``durationSeconds``, ``costUsd`` and
+``judgeCostUsd`` as ``duration_seconds``, ``cost_usd`` and ``judge_cost_usd``. Each of those
+three lands only when it is an int or float (not a bool), finite, non-negative and at most 3600
+(a duration) or 100 (a cost); anything else, a missing key included, is null. A run the runner
+never returned, and every run of a runner killed at its time limit, carries null for all three.
+``run_canary`` returns the same shape for case ``sandbox-write``.
 
 The process executor and the runner resolution are injected, so a caller keeps its own:
 
@@ -145,6 +152,23 @@ def _passes(run: dict) -> bool:
     return isinstance(score, (int, float)) and score >= 1.0
 
 
+MAX_DURATION_SECONDS = 3600
+MAX_RUN_COST_USD = 100
+TIMING_FIELDS = (("duration_seconds", "durationSeconds", MAX_DURATION_SECONDS),
+                 ("cost_usd", "costUsd", MAX_RUN_COST_USD),
+                 ("judge_cost_usd", "judgeCostUsd", MAX_RUN_COST_USD))
+
+
+def _measure(value: object, bound: float) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return value if 0 <= value <= bound else None
+
+
+def _unmeasured(record: dict) -> dict:
+    return {**record, **{field: None for field, _, _ in TIMING_FIELDS}}
+
+
 def _run_record(run: dict) -> dict:
     graders = run.get("graders") if isinstance(run.get("graders"), list) else []
     score = run.get("score")
@@ -157,20 +181,25 @@ def _run_record(run: dict) -> dict:
             for g in graders
             if isinstance(g, dict) and isinstance(g.get("name"), str)
         ],
+        **{field: _measure(run.get(key), bound) for field, key, bound in TIMING_FIELDS},
     }
 
 
 def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool,
-            asked: int | None = None) -> dict:
-    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far."""
+            asked: int | None = None, killed_from: int = 0) -> dict:
+    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far.
+
+    When ``killed``, the runs from index ``killed_from`` on came from the call that was killed
+    and carry no timing; earlier runs came from calls that finished and keep theirs."""
     asked = n if asked is None else asked
     runs = _runs_of(doc)
-    records = [_run_record(r) for r in (runs or [])][:asked]
+    records = [_unmeasured(rec) if killed and i >= killed_from else rec
+               for i, rec in enumerate(_run_record(r) for r in (runs or [])[:asked])]
     scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
     passing = sum(1 for r in scored if _passes(r))
     failing = len(scored) - passing
     errored = asked - len(scored)
-    records += [{"passed": False, "errored": True, "score": None, "graders": []}
+    records += [_unmeasured({"passed": False, "errored": True, "score": None, "graders": []})
                 ] * max(0, asked - len(records))
     base = {"passed": passing, "failed": failing, "errored": errored, "runs": records}
 
@@ -378,9 +407,9 @@ def _run_planned(plugin_dir, case, n, pass_at, runner_cfg, runs_dir, json_path, 
         segment = (runs or [])[:batch]
         segment += [{"error": "missing"}] * (batch - len(segment))
         merged += segment
-        asked += batch
         view = {**(doc if isinstance(doc, dict) else {}), "cases": [{"arms": {"with": merged}}]}
-        decided = _decide(view, n, pass_at, code, killed, asked=asked)
+        decided = _decide(view, n, pass_at, code, killed, asked=asked + batch, killed_from=asked)
+        asked += batch
         if runs is None and decided["verdict"] == "not-run":
             decided["reason"] = TIMEOUT if killed else RUNNER_ERROR
         result = {"case": case, **decided}

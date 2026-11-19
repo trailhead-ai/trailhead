@@ -111,6 +111,19 @@ that environment a runner authenticated on the operator's Claude Code login on a
 macOS was not checked). `HOME` is forwarded, so settings in the user's Claude configuration (an `env` block or an
 `apiKeyHelper`) can still change which credential a run uses and could move it onto API billing.
 
+Every case a runner was started for also appends one JSON line to `history.jsonl` in the `eval-gate` directory
+of portage's cache directory (the pass cache's directory; per host, never synced): the case, its plugin, the
+pass-cache fingerprint (null when uncacheable), the runner's version, whether `PORTAGE_EVAL_RUNNER` pinned the
+runner, the tier, the verdict and reason, the call's timeout, the case's wall time without a fresh canary's, and
+each run's pass, error, duration and cost figures. A `timeout` is written with the runs that came back. A cache
+hit, and a not-run decided before any runner started (`case-removed-on-branch`, `corpus-new-on-branch`,
+`head-moved`, a harness with no eval runner, a failed canary) write nothing. A `runner-missing` decision writes
+no line either, including one where a later batch fails to launch: the eval core's not-run result already drops the
+earlier batches' runs, so there is nothing to record. A file over 5 MB is renamed to
+`history.1.jsonl` before the next line, so two generations are kept. A history that cannot be written prints one
+`eval-gate: timing history not written: <reason>` line on stderr and changes no verdict, exit code or result
+file. The file's shape is in the `eval_gate/history.py` docstring.
+
 Nothing may leave a case running after the call returns: no `nohup`, no trailing `&`, no runner script, no
 `run_in_background`.
 
@@ -217,6 +230,36 @@ A refusal prints, on stderr, `portage merge: eval-gate check failed for <repo>: 
 followed by the `plan` / `run` / `verdict` commands that produce a valid state (a `local-head-stale` refusal
 instead says to pull the PR head and retry). After a `head-mismatch`, plan, run and verify again on the new
 head.
+
+## Reading the timing history
+
+`portage eval-gate timings --repo <path> [--plugin <name>]` reads both history generations and the repository's
+`eval-gate.json` mappings and prints, per measured case, what the gate itself measured. It writes nothing and
+exits 0, or 2 with a `portage:` message on a usage error or an unreadable mapping.
+
+A history line counts only when its `plugin` and `case` have the mapping's case-name shape and name a mapped case,
+its `fingerprint` equals the case's current pass-cache key computed from the repository, and `pinned_runner` is not
+true. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
+A history with no lines prints that no runs are recorded yet.
+
+The output is a provenance line (the history path, the dates of the counted lines, the runner versions seen), a
+header row and one row per measured case, flagged cases first, then by plugin and case, and a closing line naming
+the measured cases with fewer than two decisions and the mapped cases with no counted lines. A row gives the tier
+(`core` or `merge-only`), the declared `timeout_seconds`, the decisions and runs counted, the decisions that ended
+`timeout` and the scored runs with no duration, the median and maximum duration of scored runs that have one, the
+largest single-batch elapsed time, and the mean cost per decision (run plus judge cost).
+
+"Single-batch" is worked out from the line: a decision holding at least one run and no more runs than the gate's first batch,
+`min(pass_at, runs - pass_at + 1)` for the mapped `runs` and `pass_at`, took one batch, so its `elapsed_seconds` is
+that batch's time. A multi-batch decision's elapsed time is not a batch time and is left out.
+
+The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Flags:
+
+- `timed-out`: a decision ended `timeout`, or a scored run has no duration. The case counts as at least the full budget
+  (shown `>=540`, `MAX_TIMEOUT_SECONDS`) and also takes the next two flags.
+- `cannot-finish-a-split`: a single-batch decision took longer than half the budget left, the gate's own test of
+  the first call's elapsed time against the budget left.
+- `over-merge-margin`: a `merge-only` case whose largest single-batch elapsed time is over the budget left.
 
 ## Cost and limits
 

@@ -86,6 +86,32 @@ class TestReuse:
         assert (r["passed"], r["failed"], r["errored"]) == (2, 0, 0)
         assert len(r["runs"]) == 2 and r["runs"][0]["graders"]
 
+    def test_a_stored_pass_keeps_each_runs_duration_cost_and_judge_cost(self, env):
+        timed = [dict(PASS, durationSeconds=10.5, costUsd=0.2, judgeCostUsd=0.01),
+                 dict(PASS, durationSeconds=20, costUsd=0.3, judgeCostUsd=0.02)]
+        env.fake(pool=_result(timed, costUsd=0.1))
+        assert env.run() == 0
+        assert env.run() == 0
+        r = env.result()
+        assert r["cached"] is True
+        assert [(x["duration_seconds"], x["cost_usd"], x["judge_cost_usd"]) for x in r["runs"]] == [
+            (10.5, 0.2, 0.01), (20, 0.3, 0.02)]
+
+    def test_a_pass_stored_without_the_timing_fields_is_still_a_hit_and_reads_them_as_null(self, env):
+        assert env.run() == 0
+        stored = _cache_files(env)[0]
+        doc = json.loads(stored.read_text())
+        for run in doc["runs"]:
+            for k in ("duration_seconds", "cost_usd", "judge_cost_usd"):
+                del run[k]
+        stored.write_text(json.dumps(doc))
+        before = len(env.case_calls)
+        assert env.run() == 0
+        r = env.result()
+        assert (r["cached"], len(env.case_calls)) == (True, before)
+        assert [(x["duration_seconds"], x["cost_usd"], x["judge_cost_usd"]) for x in r["runs"]] == [
+            (None, None, None)] * 2
+
     def test_a_hit_needs_no_canary_state(self, env):
         assert env.run() == 0
         (env.state / "canary.json").unlink()

@@ -12,10 +12,15 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
                     | "case-removed-on-branch" | "corpus-new-on-branch" | "head-moved",
      "runs": [{"passed": bool, "errored": bool,
-               "graders": [{"name": str, "passed": bool}, ...]}, ...]}
+               "graders": [{"name": str, "passed": bool}, ...],
+               "duration_seconds": number | null, "cost_usd": number | null,
+               "judge_cost_usd": number | null}, ...]}
 
-``reason`` is null on pass and fail. ``runs`` is built only from grader names and
-booleans — never runner output or grader explanations. The runner's own result stays
+``reason`` is null on pass and fail. The only runner values a run record carries are grader
+names and booleans plus the run's duration, cost and judge cost; each of those three is the
+runner's own number only when it is finite, non-negative and within a sanity bound (3600 seconds,
+100 dollars), else null, and null for a run the runner never returned or that was killed. A stored
+pass or result written without them reads as null. Never grader explanations. The runner's own result stays
 at ``<state>/runs/<case>.json`` (artifacts in ``<state>/runs/<case>/``).
 
 Deciding from the runner's JSON, never its exit code (a scored fail, a scaffold
@@ -104,6 +109,11 @@ not-run ``case-removed-on-branch`` before any harness lookup or canary; no runne
 A runner that cannot be launched (``OSError``: not found, not executable, bad format) is
 not-run ``runner-missing``.
 
+A case a runner was started for is also appended to the timing history (``history.py``, which holds the
+line's shape); a cache hit, a not-run decided before any runner started and ``runner-missing`` (a later
+batch that fails to launch included; the eval core's not-run result already drops the earlier
+batches' runs) are not. A history that cannot be written never changes the verdict, the exit code or the result file.
+
 An unexpected exception during ``run`` is recorded by ``record_crash`` as not-run
 ``runner-error`` before the command exits 1.
 
@@ -121,11 +131,13 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from portage.eval_core import run as core
 from portage.eval_core.run import (
     RUNNER_ERROR,
+    RUNNER_MISSING,
     RUNNER_OVERRIDE_ENV,
     SANDBOX_UNWRITABLE,
     TmpBaseRefused,
@@ -134,7 +146,7 @@ from portage.eval_core.run import (
 )
 
 from . import cache as pass_cache
-from . import canary
+from . import canary, history
 from .mapping import CASE_NAME
 
 DEFAULT_TIMEOUT_SECONDS = 540
@@ -236,6 +248,7 @@ def run_case(
     harnesses: list | None = None,
     env: dict[str, str] | None = None,
     clock=time.monotonic,
+    now=lambda: datetime.now(timezone.utc),
 ) -> dict:
     """Validate, run and record one case; return the result written."""
     state = Path(state)
@@ -255,7 +268,9 @@ def run_case(
 
     if env is None:
         env = dict(os.environ)
-    key = None if RUNNER_OVERRIDE_ENV in env else _cache_key(plugin_dir, entry)
+    fingerprint = _cache_key(plugin_dir, entry)
+    pinned = RUNNER_OVERRIDE_ENV in env
+    key = None if pinned else fingerprint
     hit = pass_cache.lookup(key, env) if key else None
     if hit is not None:
         return _record(state, case, {"case": case, **hit, "reason": None, "cached": True})
@@ -265,8 +280,16 @@ def run_case(
         harnesses = detect_harnesses(env)
 
     try:
-        result = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_seconds,
-                              harnesses, env, clock)
+        result, started = _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg,
+                                       timeout_seconds, harnesses, env, clock)
+        if started is not None:
+            try:
+                record = _history_record(state, plan, entry, result, fingerprint, pinned,
+                                         timeout_seconds, started, now())
+            except Exception as e:
+                history.warn(e)
+            else:
+                history.append(record, env)
         if key and _cache_key(plugin_dir, entry) == key:
             pass_cache.store(key, result, env)
         return result
@@ -286,21 +309,61 @@ def _cache_key(plugin_dir: Path, entry: dict) -> str | None:
 
 
 def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_seconds, harnesses,
-                 env, clock) -> dict:
+                 env, clock) -> tuple[dict, float | None]:
+    """The recorded result, and the case's wall time less a fresh canary's when a runner was
+    started for the case (``None`` when it was not, or when a launch failed: ``runner-missing``)."""
+    canary_seconds = 0.0
+    in_canary = False
+    case_started = False
+
+    def execute(runner, work_dir, timeout):
+        nonlocal case_started
+        case_started = case_started or not in_canary
+        return _execute(runner, work_dir, timeout)
+
     def cached_canary(run_canary, timeout):
+        nonlocal canary_seconds, in_canary
         cached = canary.read_cached(state)
         if cached is not None:
             return cached
-        fresh = _ordered(run_canary(timeout))
+        began, in_canary = clock(), True
+        try:
+            fresh = _ordered(run_canary(timeout))
+        finally:
+            in_canary = False
+            canary_seconds = clock() - began
         _write_json(state / canary.CACHE_NAME, fresh)
         return fresh
 
+    began = clock()
     result = core.decide_case(
         plugin_dir=plugin_dir, case=case, runs=n, pass_at=pass_at, runner=runner_cfg,
         output_dir=state / "runs", timeout_seconds=timeout_seconds, work_dir=state,
-        execute=_execute, resolve_runner=_runner_override, pin=_pin,
+        execute=execute, resolve_runner=_runner_override, pin=_pin,
         env=env, harnesses=harnesses, clock=clock, canary=cached_canary, label="eval-gate run")
-    return _record(state, case, result)
+    elapsed = clock() - began - canary_seconds
+    recorded = _record(state, case, result)
+    return recorded, elapsed if case_started and recorded["reason"] != RUNNER_MISSING else None
+
+
+def _history_record(state, plan, entry, result, fingerprint, pinned, timeout_seconds, elapsed,
+                    recorded_at) -> dict:
+    case = result["case"]
+    return {
+        "recorded_at": recorded_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "plugin": PurePosixPath(entry["plugin_root"]).name,
+        "case": case,
+        "fingerprint": fingerprint,
+        "runner_version": history.runner_version(core.read_json(state / "runs" / f"{case}.json")),
+        "pinned_runner": pinned,
+        "tier": plan.get("tier"),
+        "verdict": result["verdict"],
+        "reason": result["reason"],
+        "budget_seconds": timeout_seconds,
+        "elapsed_seconds": elapsed,
+        "runs": [{k: r.get(k) for k in ("passed", "errored", "duration_seconds", "cost_usd",
+                                        "judge_cost_usd")} for r in result["runs"]],
+    }
 
 
 def record_crash(state: Path, case: str) -> None:
@@ -319,7 +382,10 @@ def record_crash(state: Path, case: str) -> None:
 def _ordered(result: dict) -> dict:
     ordered = {k: result[k] for k in
                ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
-    ordered["runs"] = [{k: v for k, v in r.items() if k != "score"} for r in ordered["runs"]]
+    ordered["runs"] = [
+        {**{k: v for k, v in r.items() if k != "score"},
+         **{field: r.get(field) for field, _, _ in core.TIMING_FIELDS}}
+        for r in ordered["runs"]]
     return ordered
 
 

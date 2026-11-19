@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 from ..eval_gate.run import DEFAULT_TIMEOUT_SECONDS, RunRefused, atomic_write, record_crash, run_case
+from ..eval_gate import timings as gate_timings
 from ..eval_gate import verdict as gate_verdict
 from ..eval_gate.select import TIERS, GitError, plan
 
@@ -50,6 +51,7 @@ def add_eval_gate_subparser(sub) -> None:
     _add_run(group)
     _add_verdict(group)
     _add_splice(group)
+    _add_timings(group)
 
 
 def _add_plan(group) -> None:
@@ -182,4 +184,31 @@ def cmd_splice(args: argparse.Namespace) -> int:
         return 2
     if not args.out:
         sys.stdout.write(result)
+    return 0
+
+
+def _add_timings(group) -> None:
+    p = group.add_parser(
+        "timings",
+        help="Report measured run times per case from the timing history.",
+        description="Report the measured run times, costs and budget flags of each mapped case, read "
+                    "from the timing history. Read-only.",
+    )
+    p.add_argument("--repo", required=True, help="Path to the repository holding the eval-gate.json mappings")
+    p.add_argument("--plugin", default=None, help="Report only this plugin's cases")
+    p.set_defaults(func=cmd_timings)
+
+
+def cmd_timings(args: argparse.Namespace) -> int:
+    try:
+        lines = gate_timings.report(Path(args.repo), args.plugin, dict(os.environ))
+    except gate_timings.TimingsError as e:
+        print(f"portage: eval-gate timings: {gate_verdict.one_line(e)}", file=sys.stderr)
+        return 2
+    except (RecursionError, OSError, ValueError) as e:
+        print(f"portage: eval-gate timings: cannot read the mappings or history: "
+              f"{type(e).__name__}", file=sys.stderr)
+        return 2
+    for line in lines:
+        print(line)
     return 0

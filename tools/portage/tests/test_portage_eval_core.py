@@ -92,6 +92,106 @@ class TestBatchedDeciding:
         assert _asked(env) == [3, 1, 1]
 
 
+def _timed(duration=128, cost=0.5, judge=0.02, **over):
+    return dict(PASS, durationSeconds=duration, costUsd=cost, judgeCostUsd=judge, **over)
+
+
+def _timing(run):
+    return (run["duration_seconds"], run["cost_usd"], run["judge_cost_usd"])
+
+
+class TestRunTimingFields:
+    def test_each_run_carries_its_own_duration_cost_and_judge_cost(self, env):
+        env.fake(pool=_result([_timed(212.5, 0.41, 0.02), _timed(90, 0.3, 0.01), PASS]))
+        runs = _call(env)["runs"]
+        assert [_timing(r) for r in runs] == [(212.5, 0.41, 0.02), (90, 0.3, 0.01)]
+
+    @pytest.mark.parametrize("key,field,value,expect", [
+        ("durationSeconds", "duration_seconds", "212", None),
+        ("durationSeconds", "duration_seconds", -1, None),
+        ("durationSeconds", "duration_seconds", float("nan"), None),
+        ("durationSeconds", "duration_seconds", True, None),
+        ("durationSeconds", "duration_seconds", 3600, 3600),
+        ("durationSeconds", "duration_seconds", 3601, None),
+        ("costUsd", "cost_usd", "0.4", None),
+        ("costUsd", "cost_usd", -0.01, None),
+        ("costUsd", "cost_usd", float("nan"), None),
+        ("costUsd", "cost_usd", False, None),
+        ("costUsd", "cost_usd", 100, 100),
+        ("costUsd", "cost_usd", 101, None),
+        ("judgeCostUsd", "judge_cost_usd", "0.1", None),
+        ("judgeCostUsd", "judge_cost_usd", -1, None),
+        ("judgeCostUsd", "judge_cost_usd", True, None),
+        ("judgeCostUsd", "judge_cost_usd", 100, 100),
+        ("judgeCostUsd", "judge_cost_usd", 101, None),
+    ])
+    def test_a_bad_value_nulls_that_field_alone_and_leaves_the_verdict(self, env, key, field,
+                                                                       value, expect):
+        base = _timed(212.5, 0.41, 0.02)
+        env.fake(pool=_result([dict(base, **{key: value}), base, PASS]))
+        result = _call(env)
+        assert (result["verdict"], result["passed"]) == ("pass", 2)
+        run = result["runs"][0]
+        want = {"duration_seconds": 212.5, "cost_usd": 0.41, "judge_cost_usd": 0.02}
+        want[field] = expect
+        assert {f: run[f] for f in want} == want
+
+    def test_a_missing_key_is_null_for_that_field_only(self, env):
+        run = _timed(10, 0.2, 0.03)
+        del run["costUsd"]
+        env.fake(pool=_result([run, _timed(), PASS]))
+        assert _timing(_call(env)["runs"][0]) == (10, None, 0.03)
+
+    def test_a_case_decided_across_two_batches_keeps_each_runs_numbers_in_order(self, env):
+        env.fake(pool=_result([_timed(1, 0.1, 0.01), HALF | {"durationSeconds": 2, "costUsd": 0.2,
+                                                                "judgeCostUsd": 0.02},
+                               _timed(3, 0.3, 0.03)], costUsd=0.1))
+        result = _call(env)
+        assert _asked(env) == [2, 1]
+        assert [_timing(r) for r in result["runs"]] == [(1, 0.1, 0.01), (2, 0.2, 0.02),
+                                                        (3, 0.3, 0.03)]
+
+    def test_a_requested_run_the_runner_never_returned_is_null_for_all_three(self, env):
+        env.fake(pool=_result([_timed(7, 0.1, 0.01)]))
+        runs = _call(env)["runs"]
+        assert [_timing(r) for r in runs] == [(7, 0.1, 0.01), (None, None, None)]
+        assert runs[1]["errored"] is True
+
+    def test_a_canary_the_runner_never_returned_a_run_for_is_null_for_all_three(self, env):
+        env.fake(canary="garbage", canary_code=1)
+        result = run_canary(work_dir=env.state, timeout_seconds=60, execute=execute,
+                            resolve_runner=_no_override, pin=_no_pin, env=dict(os.environ))
+        assert [_timing(r) for r in result["runs"]] == [(None, None, None)]
+
+    def test_a_canary_run_carries_its_numbers(self, env):
+        env.fake(canary=_result([_timed(3, 0.05, 0.001)]))
+        result = run_canary(work_dir=env.state, timeout_seconds=60, execute=execute,
+                            resolve_runner=_no_override, pin=_no_pin, env=dict(os.environ))
+        assert [_timing(r) for r in result["runs"]] == [(3, 0.05, 0.001)]
+
+    def test_a_runner_killed_at_the_budget_has_null_for_every_run_even_if_it_wrote_a_file(self, env):
+        env.fake(pool=_result([_timed(5, 0.1, 0.01)] * 3), sleep=30)
+        result = _call(env, timeout_seconds=1)
+        assert result["runs"]
+        assert [_timing(r) for r in result["runs"]] == [(None, None, None)] * len(result["runs"])
+
+    def test_a_later_batch_killed_at_the_budget_keeps_the_earlier_batchs_numbers(self, env):
+        env.fake(pool=_result([_timed(1, 0.1, 0.01), HALF | {"durationSeconds": 2, "costUsd": 0.2,
+                                                                "judgeCostUsd": 0.02},
+                               _timed(3, 0.3, 0.03)], costUsd=0.1))
+        calls = []
+
+        def kill_the_second_batch(runner, cwd, timeout):
+            code, killed, missing = execute(runner, cwd, timeout)
+            calls.append(None)
+            return (None, True, missing) if len(calls) == 3 else (code, killed, missing)
+
+        result = _call(env, execute=kill_the_second_batch)
+        assert _asked(env) == [2, 1]
+        assert [_timing(r) for r in result["runs"]] == [(1, 0.1, 0.01), (2, 0.2, 0.02),
+                                                        (None, None, None)]
+
+
 class TestInjection:
     def test_the_injected_executor_runs_the_canary_and_every_batch(self, env):
         env.fake(pool=_result([PASS, HALF, PASS], costUsd=0.1))
@@ -204,12 +304,13 @@ class TestGateTempDirOrder:
 
 
 class TestGateResultFiles:
-    def test_a_gate_run_writes_no_score_into_the_result_file(self, env):
+    def test_a_gate_run_writes_no_score_but_the_three_timing_fields_into_the_result_file(self, env):
         env.fake(pool=_result([PASS, HALF, PASS], costUsd=0.1))
         assert env.run() == 0
         runs = env.result()["runs"]
         assert len(runs) == 3
-        assert all(set(r) == {"passed", "errored", "graders"} for r in runs)
+        assert all(set(r) == {"passed", "errored", "graders", "duration_seconds", "cost_usd",
+                              "judge_cost_usd"} for r in runs)
 
     def test_the_cached_canary_carries_no_score_either(self, env):
         env.fake(pool=_result([PASS, PASS, PASS], costUsd=0.1))
