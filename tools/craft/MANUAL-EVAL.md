@@ -5525,7 +5525,7 @@ The all-reads probe was not run: the all-reads case does not discriminate on eit
 
 ## Cases: two entry points to one entity are one surface when neither is usable alone, and a create criterion spanning two surfaces stays with the second (2026-11-19)
 
-**Status: written, not run.** The cases and their `expected.md` files are committed before any run; the baseline and treatment arms are recorded below once measured.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. The UI-and-API case is red on the baseline, green after the edit and red again with the surface sentence alone reverted; the spanning-create case is green on the baseline, so it does not discriminate; the guard stays green on both arms.
 
 Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`, each pre-registered in its `expected.md`. They cover the amended surface definition (one entity reached through two entry points is one surface when the functionality is not usable through either alone, two when each is usable on its own; the test is value) and the first-slice rule's reconciliation with the cross-surface reason (a create criterion spanning two surfaces stays with the surface that ships second). Each runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list.
 
@@ -5543,5 +5543,16 @@ Bar: baseline 2 runs as the portage-eval shim decides; treatment bar 3 of 3 runs
 
 | Case | Arm | File fingerprint | Runs | Bar | Result |
 |---|---|---|---|---|---|
-| all three cases | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | — | per the table above | not yet run |
-| all three cases | treatment | — | — | 3 of 3 | not yet run |
+| UI-and-API case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 3 | red | **red on the gate, runs 0 / 1 / 0.5** (request `local-itf95b53uphr`): the third run split the page from the API as the unedited rule says (both covers graders failed); the second merged them anyway, on the Problem's account of the API; the first created no slice at all (every grader failed, the final line included), so it ended some other way the deleted trace cannot show |
+| spanning-create case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 | red | **green, 1/1: does not discriminate.** The unedited cross-surface reason already held AC3 back from the command group's first slice, so the first-slice sentence's overreach did not bite in practice; the edit's reconciliation is pinned by wording only, and the case stays as a regression guard; `local-itf95b53uphr` |
+| guard case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 | green | **green, 1/1**, as a guard should be; `local-itf95b53uphr` |
+| all three cases | treatment | slice.md `0869634…`, SKILL.md `d69caae…` | 2 each (runner stopped once decided) | 3 of 3 | **green, every grader in every run** (score 1/1 on all three); request `local-5lmmtrg8t5o5`. The guard staying green shows the edit does not merge independently usable entry points |
+| all three cases | all-carriers mutation | slice.md `cf1033c…` | — | red | **the baseline arm, by identity**: reverting the edit restores the baseline fingerprint; not run again |
+
+### Carrier mutations
+
+| Probe | What it removes | UI-and-API case result | Reading |
+|---|---|---|---|
+| surface sentence | the new two-entry-points sentences in `skills/_shared/slice.md`'s surface section, back to "One entity reached through two entry points is two surfaces."; the first-slice reconciliation stays; `skills/slice/SKILL.md` carries no copy of the rule | **red**, 0.5/0.5 (request `local-9oala3xxhmd7`): both runs split the page from the API and failed both covers graders | the merge depends on the new surface sentence. Restored; byte-identical to the edit |
+
+The first-slice reconciliation was not probed: no case discriminates it (the spanning-create case is green on the baseline).
