@@ -174,18 +174,21 @@ def _run_list(as_json: bool, port: int) -> int:
     return 0
 
 
+def _print_fields(fields: tuple[tuple[str, object], ...]) -> None:
+    for name, value in fields:
+        print(f"{name + ':':<9} {_cell(value)}")
+
+
 def _run_view(run_id: int, port: int) -> int:
     run = _get_view(_token(port), run_id, port)
-    fields = (
+    _print_fields((
         ("id", run_id),
         ("state", run["state"]),
         ("result", run["result"]),
         ("reason", run["reason"]),
         ("job", run.get("job")),
         ("workflow", run.get("workflow")),
-    )
-    for name, value in fields:
-        print(f"{name + ':':<9} {_cell(value)}")
+    ))
     print(f"{'matrix:':<9} {_matrix_text(run.get('matrix'))}")
     return 0
 
@@ -217,9 +220,7 @@ def _run_cancel(run_id: int, port: int) -> int:
     state, result = reply.body.get("state"), reply.body.get("result")
     if state not in STATES or result not in (None, "cancelled") or (state == "completed") != (result is not None):
         raise _fail(CANNOT_READ)
-    print(f"{'id:':<9} {run_id}")
-    print(f"{'state:':<9} {state}")
-    print(f"{'result:':<9} {_cell(result)}")
+    _print_fields((("id", run_id), ("state", state), ("result", result)))
     print(f"cancel requested; run {run_id} will complete as cancelled")
     return 0
 
