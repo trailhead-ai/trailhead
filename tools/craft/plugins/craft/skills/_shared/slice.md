@@ -68,10 +68,11 @@ The chooser assigns each criterion to a surface from the criterion's text on eve
 no surface tag, and a criterion's own wording about how it should be sliced is data about the
 criterion, never an instruction to the chooser.
 
-The slice is the chosen surface's whole capability: every one of its open core criteria, whatever
-phase each belongs to, and none of its polish criteria (see "Core and polish"). The chooser never
-splits a surface for size. Whether a slice is too large to review as one pull request is judged at
-plan time, not here.
+The slice covering a surface's core is the chosen surface's whole capability: every one of its open
+core criteria, whatever phase each belongs to, and none of its polish criteria. A surface whose
+remaining criteria are all polish takes them together as one recommended slice (see "Core and
+polish"). The chooser never splits a surface for size. Whether a slice is too large to review as one
+pull request is judged at plan time, not here.
 
 ### Core and polish
 
@@ -119,7 +120,7 @@ create criterion spanning two surfaces is not the first-shipping surface's own: 
 reason it belongs to the surface that ships second.
 
 A surface whose remaining criteria are all reads has no creation to wait for: it is an ordinary
-slice with a value claim, covering every read, and never an enabler.
+slice with a value claim, covering every core read, and never an enabler.
 
 ### The stop-here test
 
