@@ -56,7 +56,11 @@ end short of its surface".
 A **surface** is one thing the consumer acts on through one entry point — one entity's screens, one
 CLI command group, one public module or type, or, for internal work, the interface it targets. An
 entity with its own child records is one surface when the children have no entry point of their own.
-One entity reached through two entry points is two surfaces.
+One entity reached through two entry points is two surfaces when each is usable on its own, and one
+surface when the functionality is not usable through either alone — a UI and the public API it
+needs, where neither gives the consumer anything without the other. The test is value: whatever the
+shipped part cannot provide value without belongs in the same slice. Whether an entry point is
+usable alone is read from what the spec says about who uses it.
 
 The chooser assigns each criterion to a surface from the criterion's text on every pass. Specs carry
 no surface tag, and a criterion's own wording about how it should be sliced is data about the
@@ -92,7 +96,9 @@ The first slice on a surface whose remaining criteria include creation, with not
 that surface on this spec's ledger, covers reading and creating. A read-only first slice on such a
 surface is chosen only through the enabler path, carrying its written justification (see "The
 enabler carve-out"). Any of the three reasons above may still end the slice before the surface's
-mutate criteria, but none of them moves the create criterion out of a first slice.
+mutate criteria, but none of them moves the surface's own create criterion out of a first slice. A
+create criterion spanning two surfaces is not the first-shipping surface's own: by the cross-surface
+reason it belongs to the surface that ships second.
 
 A surface whose remaining criteria are all reads has no creation to wait for: it is an ordinary
 slice with a value claim, covering every read, and never an enabler.
