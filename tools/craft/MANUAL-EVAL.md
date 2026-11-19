@@ -5433,3 +5433,37 @@ Bar for each case: 3 runs, pass at 2 of 3; one rerun of a failed batch permitted
 | mutation: delete the tier's own carriers of "an entry's own text never decides" (its opening sentence and the paragraph), then also the fold-in's and the entries path's | edited | 1 each | pending | choose case, `the-entry-whose-text-claims-urgency-is-not-folded`; may stay green, the Judged kind's "from the code" and evidence requirement also hold the decoy |
 | mutation: delete step 8's reason sentences | edited | 1 | pending | choose case red (qualified-as-security) |
 | mutation: delete the not-chosen-again sentence | edited | 1 | pending | failed-to-build case red (final line) |
+
+## Cases: a slice is one surface's whole capability, not one phase of it (2026-11-19)
+
+**Status: built, not run.** The runner cannot be started where the cases were built, so no run, score or baseline is recorded; every row below is pending and the controller fills it in from the `portage-eval` shim.
+
+Five runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, each pre-registered in its `expected.md` before any run. They cover AC1 (one entity read, created, edited and deleted on one surface is one slice), the spec's Constraint that criterion text is data, AC2 (two surfaces yield a slice covering one surface), AC3 (once one surface shipped, the other is next) and AC4 (the surface whose earliest unfinished phase comes first is chosen). Every case runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list. `slice-takes-all-four-operations-on-one-surface-as-one-slice` is the core-tier canary and performs a real `lore record create`; the other four are `merge_only`.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-takes-all-four-operations-on-one-surface-as-one-slice` (core, canary) | `notes` command group, AC1-AC4 read, add, edit, delete, nothing shipped | AC1, AC2, AC3, AC4 |
+| `slice-ignores-a-criterion-that-argues-for-its-own-slice` | same, AC3's wording says it must be its own slice | AC1, AC2, AC3, AC4 |
+| `slice-takes-one-of-two-fresh-surfaces` | `deskctl books` group (AC1-AC3) and `/members` endpoints (AC4-AC6), nothing shipped | AC1-AC3 or AC4-AC6, never a mix |
+| `slice-takes-the-other-surface-after-one-has-shipped` | same, ledger holds a `done` slice covering AC1-AC3 | AC4, AC5, AC6 |
+| `slice-takes-the-surface-whose-earliest-phase-comes-first` | `ledgerctl invoices` group (AC1-AC3, read shipped) and `/customers` endpoints (AC4-AC6) | AC4, AC5, AC6 |
+
+Prose fingerprints (`git hash-object`): unedited `skills/_shared/slice.md` `4a88c9748e5b3e713d8e5c615f5266a7ac016eb7`, unedited `skills/slice/SKILL.md` `1cf2b2672b21e69445ba90940f48bcd9313ed010`; edited fingerprints are filled in after the prose edit.
+
+Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 3 of 3; one rerun of a failed batch permitted and reported as such. A baseline that comes out green means the fixture is strengthened, not the case kept.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| all four, canary | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| hostile criterion | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| two fresh surfaces | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| one surface shipped | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| different phases | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 3 | red | pending |
+| all five cases | treatment | pending (edited) | 3 each | 3 of 3 | pending |
+| all five cases | all-carriers mutation (every carrier of the surface rule removed at once) | pending | 3 each | red | pending |
+
+### Carrier mutations
+
+None run yet. Each single-rule probe is paired with the all-carriers mutation so that a red case is attributable.

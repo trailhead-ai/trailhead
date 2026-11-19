@@ -626,6 +626,40 @@
         "skills/_shared/execute.md"
       ],
       "merge_only": true
+    },
+    "slice-takes-all-four-operations-on-one-surface-as-one-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-ignores-a-criterion-that-argues-for-its-own-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-one-of-two-fresh-surfaces": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-the-other-surface-after-one-has-shipped": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-the-surface-whose-earliest-phase-comes-first": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }

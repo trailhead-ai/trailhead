@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: slice-ignores-a-criterion-that-argues-for-its-own-slice
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
