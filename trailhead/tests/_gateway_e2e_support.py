@@ -1005,6 +1005,18 @@ def act_containers(engine_socket: str, name_part: str) -> list[dict]:
         return []
 
 
+class NotTheRunnerEngine(Exception):
+    """The socket is not the dedicated runner engine's, so nothing may be listed or removed through it."""
+
+
+def require_runner_engine(engine_socket: str) -> None:
+    if str(engine_socket) != ENGINE_SOCKET_PATH:
+        raise NotTheRunnerEngine(
+            f"refusing to touch containers through {engine_socket!r}: only the dedicated runner engine "
+            f"{ENGINE_SOCKET_PATH} may be listed or cleared, whatever the operator's runs config names"
+        )
+
+
 class EngineUnavailable(Exception):
     """The container engine would not say what it holds."""
 
@@ -1014,6 +1026,7 @@ def act_container_names(engine_socket: str, *, request=engine_request) -> list[s
 
     Raises ``EngineUnavailable`` when the engine will not say, so "no containers" is only ever a real answer.
     """
+    require_runner_engine(engine_socket)
     try:
         status, body = request(engine_socket, "GET", "/containers/json?all=1")
         if status != 200:
@@ -1023,15 +1036,19 @@ def act_container_names(engine_socket: str, *, request=engine_request) -> list[s
         raise EngineUnavailable(f"the engine could not be asked for its containers: {err!r}") from err
 
 
-def remove_act_containers(engine_socket: str) -> None:
-    """Force-remove every act container, so a run that was never cancelled does not leave a job sleeping."""
+def remove_act_containers(engine_socket: str, *, request=engine_request) -> None:
+    """Force-remove every act container, so a run that was never cancelled does not leave a job sleeping.
+
+    Raises ``NotTheRunnerEngine`` for any socket but the dedicated runner engine's, before any request is sent.
+    """
+    require_runner_engine(engine_socket)
     try:
-        status, body = engine_request(engine_socket, "GET", "/containers/json?all=1")
+        status, body = request(engine_socket, "GET", "/containers/json?all=1")
         if status != 200:
             return
         for c in json.loads(body):
             if any(n.startswith("/act-") for n in c.get("Names") or []):
-                engine_request(engine_socket, "DELETE", f"/containers/{c['Id']}?force=1")
+                request(engine_socket, "DELETE", f"/containers/{c['Id']}?force=1")
     except (OSError, ValueError, http.client.HTTPException):
         pass
 

@@ -22,7 +22,9 @@ from trailhead.gateway import tree_upload
 from ._gateway_e2e_support import (
     RUN_GROUP,
     RealOutpost,
+    ENGINE_SOCKET_PATH,
     EngineUnavailable,
+    NotTheRunnerEngine,
     act_container_names,
     act_process_lines,
     HomeSentinel,
@@ -34,6 +36,7 @@ from ._gateway_e2e_support import (
     load_runs_host,
     parse_stamped_lines,
     probe_problems,
+    remove_act_containers,
     pull_stream_error,
     split_image_ref,
     preflight_problems,
@@ -578,12 +581,12 @@ def _engine(containers, status=200):
     ],
 )
 def test_the_act_containers_are_listed_stopped_ones_included(containers, names):
-    assert act_container_names("unused", request=_engine(containers)) == names
+    assert act_container_names(ENGINE_SOCKET_PATH, request=_engine(containers)) == names
 
 
 def test_an_engine_that_will_not_say_is_not_reported_as_holding_no_containers():
     with pytest.raises(EngineUnavailable):
-        act_container_names("unused", request=_engine([{"Id": "a", "Names": ["/act-x"]}], status=500))
+        act_container_names(ENGINE_SOCKET_PATH, request=_engine([{"Id": "a", "Names": ["/act-x"]}], status=500))
 
 
 def test_an_engine_that_cannot_be_reached_is_not_reported_as_holding_no_containers():
@@ -591,4 +594,39 @@ def test_an_engine_that_cannot_be_reached_is_not_reported_as_holding_no_containe
         raise ConnectionRefusedError
 
     with pytest.raises(EngineUnavailable):
-        act_container_names("unused", request=unreachable)
+        act_container_names(ENGINE_SOCKET_PATH, request=unreachable)
+
+
+def _recording(containers):
+    calls = []
+    answer = _engine(containers)
+
+    def request(socket_path, method, path, timeout=10):
+        calls.append((socket_path, method, path))
+        if method == "DELETE":
+            return 204, b""
+        return answer(socket_path, method, path, timeout)
+
+    return calls, request
+
+
+def test_the_runner_engine_socket_has_its_act_containers_force_removed():
+    calls, request = _recording([{"Id": "a", "Names": ["/act-x"]}, {"Id": "b", "Names": ["/keep"]}])
+    remove_act_containers(ENGINE_SOCKET_PATH, request=request)
+    assert [c for c in calls if c[1] == "DELETE"] == [(ENGINE_SOCKET_PATH, "DELETE", "/containers/a?force=1")]
+
+
+@pytest.mark.parametrize("socket_path", ["/var/run/docker.sock", "/run/docker.sock", "/somewhere/else.sock", ""])
+def test_removal_on_any_other_socket_is_refused_before_a_request_is_sent(socket_path):
+    calls, request = _recording([{"Id": "a", "Names": ["/act-x"]}])
+    with pytest.raises(NotTheRunnerEngine):
+        remove_act_containers(socket_path, request=request)
+    assert calls == []
+
+
+@pytest.mark.parametrize("socket_path", ["/var/run/docker.sock", "/somewhere/else.sock"])
+def test_listing_on_any_other_socket_is_refused_before_a_request_is_sent(socket_path):
+    calls, request = _recording([{"Id": "a", "Names": ["/act-x"]}])
+    with pytest.raises(NotTheRunnerEngine):
+        act_container_names(socket_path, request=request)
+    assert calls == []
