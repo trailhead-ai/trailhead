@@ -776,8 +776,8 @@ and neither a `**Covers:**` nor a `**Partially covers:**` line. The enabler path
 and the criteria's phase do not apply to it. On the criteria path the fold-in below then adds any
 other open entry whose `where` paths overlap the files the group's entries name. On the entries path
 it does not: item 3 has already grouped the urgent entries that overlap, and an open entry that is
-not urgent and overlaps the group stays open for the next pass. When no entry is urgent, the levels
-below apply to the candidate set as written.
+not urgent and overlaps the group stays open for the next pass. When no entry is urgent, the
+selection order below applies to the candidate set as written.
 
 **Under `--unattended`, or when `/craft:drive` is running this pass,** the tier is a routine
 decision, never a question. It is logged with the selection (step 8 says where), naming each urgent
