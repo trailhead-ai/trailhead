@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: distill-sweep-builds-its-queue-from-lore
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
