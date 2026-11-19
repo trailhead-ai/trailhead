@@ -755,7 +755,9 @@ def cancel_world(tmp_path_factory):
 
 def test_cancel_scenario_a_running_job_ends_cancelled_within_the_grace_and_leaves_no_act_or_container(cancel_world):
     w = cancel_world
-    assert w.hold_logged_marker, "the job never logged its marker, so it was never running"
+    assert w.hold_logged_marker, (
+        f"the job never logged its marker, so it was never running; its log read:\n{w.hold_log[-1500:]}"
+    )
     assert w.control_processes and w.control_containers, (
         f"while the job ran there was no act process {w.control_processes} or container {w.control_containers} "
         "to see go, so the checks after the cancel prove nothing"
