@@ -2,9 +2,9 @@
 name: slice
 description: >
   Choose and materialize the next vertical slice from a `ready` spec — read the spec fresh,
-  derive the remaining candidates, choose one surface's whole capability above the value floor, state the value
-  claim to the operator, then write the chosen slice as an `in-progress` parent task linked to
-  the spec.
+  derive the remaining candidates, choose one surface's whole capability, polish excepted, above the
+  value floor, state the value claim to the operator, then write the chosen slice as an
+  `in-progress` parent task linked to the spec.
   TRIGGER when: user says "slice this spec", "what's the next slice", "pick the next slice",
   "run /craft:slice", or a spec has just come out of `/craft:gauntlet` at `ready` and needs its
   first (or next) slice chosen.
@@ -784,10 +784,12 @@ decision, never a question. It is logged with the selection (step 8 says where),
 entry by id and the kind that qualified it, and it logs `urgent tier: none` when no entry qualified.
 
 Apply `_shared/slice.md`'s selection order against the candidate set: assign every criterion to a
-surface from its own text, then choose one surface and take its whole capability as the slice. Read
-the surface definition, the order and the commitment guard there rather than working from the
-candidate set's list order: taking acceptance criteria in the order the spec happens to write them
-is the failure mode the order exists to prevent.
+surface from its own text, then choose one surface and take its capability as the slice, leaving out
+the polish that `_shared/slice.md`'s "Core and polish" rule defines. That rule also says a surface's
+polish criteria are offered together as one recommended slice. Read the surface definition, the
+order and the commitment guard there rather than working from the candidate set's list order: taking
+acceptance criteria in the order the spec happens to write them is the failure mode the order exists
+to prevent.
 
 `_shared/slice.md` names the three reasons a slice may end before its surface's core criteria are
 all covered; apply them from there. The unknown-first reason is not the set-aside rule below, which
@@ -989,9 +991,12 @@ slice ends before its surface's core criteria are all covered, the statement als
 `_shared/slice.md`'s three reasons applies, in this skill's own words, and names the chosen
 surface's left-over criteria each by its own words with its number after it; for the unknown reason
 it names the unknown the spec's `## Open Questions` declares. Those left-over criteria are not
-partially covered: they stay open for a later slice. On a spec predating the `**ACn.**` convention,
-or on the enabler path, there is no criterion to assign: say so plainly, on the same footing as the
-cases above.
+partially covered: they stay open for a later slice. When the chosen surface's polish criteria are
+left out of its core slice, the statement names them the same way and says they are offered together
+as a later recommended slice. When the slice is a surface's polish criteria taken together, the
+statement offers it as a recommendation, not as derived, and gives its reason, a concrete one about
+those criteria. On a spec predating the `**ACn.**` convention, or on the enabler path, there is no
+criterion to assign: say so plainly, on the same footing as the cases above.
 
 **On the same footing as the full-coverage call above, and never conflated with it,** state which
 spec acceptance criteria the chosen slice makes only partially green — never left unstated, and

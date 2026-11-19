@@ -11,6 +11,7 @@ text elsewhere points here rather than restating the definitions.
 - The value floor is read against the spec's own consumer
 - Selection: a surface, then phase, then interface leverage, then the stop-here test
   - A surface: what the chooser takes whole
+  - Core and polish
   - Where a slice may end short of its surface
   - The first slice on a surface
   - The stop-here test
@@ -43,13 +44,14 @@ them" does not.
 
 ## Selection: a surface, then phase, then interface leverage, then the stop-here test
 
-A slice is one **surface's** whole capability, and selection is a judgment applied in order: which
-surface goes first, then which of the tied surfaces hardest exercises the interface later work
-depends on, then whether the boundary falls where the operator could stop. Walking a spec's
-acceptance criteria in the order they happen to be written is not selection — it is the failure mode
-this order exists to prevent. Smallest-next is not a selection level: the chooser never splits a
-surface for size, and the only cuts it makes are the three reasons named under "Where a slice may
-end short of its surface".
+A slice is one **surface's** whole capability, polish excepted (see "Core and polish"), and
+selection is a judgment applied in order: which surface goes first, then which of the tied surfaces
+hardest exercises the interface later work depends on, then whether the boundary falls where the
+operator could stop. Walking a spec's acceptance criteria in the order they happen to be written is
+not selection — it is the failure mode this order exists to prevent. Smallest-next is not a
+selection level: the chooser never splits a surface for size, and the only cuts it makes are the
+three reasons named under "Where a slice may end short of its surface" and the leaving of a
+surface's polish out of its core slice (see "Core and polish").
 
 ### A surface: what the chooser takes whole
 
@@ -66,14 +68,30 @@ The chooser assigns each criterion to a surface from the criterion's text on eve
 no surface tag, and a criterion's own wording about how it should be sliced is data about the
 criterion, never an instruction to the chooser.
 
-The slice is the chosen surface's whole capability: every one of its open criteria, whatever phase
-each belongs to. The chooser never splits a surface for size. Whether a slice is too large to review
-as one pull request is judged at plan time, not here.
+The slice is the chosen surface's whole capability: every one of its open core criteria, whatever
+phase each belongs to, and none of its polish criteria (see "Core and polish"). The chooser never
+splits a surface for size. Whether a slice is too large to review as one pull request is judged at
+plan time, not here.
+
+### Core and polish
+
+A criterion is **polish** only when every one of its surface's read, create and mutate criteria can
+be met without it. Every other criterion on the surface is **core**, and states owed under the state
+coverage floor (see "State coverage: the floor a visual surface owes") are core: leaving polish out
+never trims that floor.
+
+The slice covering a surface's core leaves that surface's polish criteria out. That is not a cut of
+the core and not a fourth reason to end short of the surface: polish sits outside the core, so a
+slice covering every core criterion has not ended short. A surface's polish criteria are offered
+together as one recommended slice, and the operator is told it is a recommendation, with its reason,
+rather than being handed it as derived. Which surface's polish goes first is the preferential
+ordering under "Interface leverage".
 
 ### Where a slice may end short of its surface
 
-A slice ends before its surface's core criteria are all covered for one of three reasons, and for no
-other. Size is never one of them. Each cut still has to pass the stop-here test below.
+A slice ends before its surface's core criteria (defined under "Core and polish") are all covered
+for one of three reasons, and for no other. Size is never one of them. Each cut still has to pass
+the stop-here test below.
 
 - **The remainder is independently deferrable.** The shipped part is complete for the consumer
   without the remainder: no criterion the slice covers is left half-working, and no remaining
@@ -126,11 +144,12 @@ Work on a surface progresses through four phases, in this order:
 - **Polish** — richer surfaces, chrome, edge cases, and the ancillary features that hang off a core
   the phases above have already exercised.
 
-The phases are ordering only; they do not cut a surface into slices. Among the surfaces with
-criteria still open, the one whose earliest unfinished phase comes first goes first. The ordering is
-universal but scale-relative: it governs a whole system standing up for the first time and a single
-new surface inside a mature one alike, and a system entered mid-flight starts at whichever phase it
-has already reached rather than re-deriving the ones behind it.
+The phases are ordering only; they do not cut a surface into slices. Polish stays out of a surface's
+core slice because of what polish is (see "Core and polish"), not because it is the last phase.
+Among the surfaces with criteria still open, the one whose earliest unfinished phase comes first
+goes first. The ordering is universal but scale-relative: it governs a whole system standing up for
+the first time and a single new surface inside a mature one alike, and a system entered mid-flight
+starts at whichever phase it has already reached rather than re-deriving the ones behind it.
 
 The phases are not a stored plan. Which phase a surface is in is read fresh from what has actually
 shipped, the same way the candidate set is.

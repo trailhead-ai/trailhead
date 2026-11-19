@@ -5560,7 +5560,7 @@ The first-slice reconciliation was not probed: no case discriminates it (the spa
 
 ## Cases: polish stays out of the core slice and is offered as a recommendation (2026-11-19)
 
-**Status: written, not yet run.** Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only`, each pre-registered in its `expected.md`. They cover the core and polish rule: a criterion is polish only when every one of its surface's read, create and mutate criteria can be met without it, a surface's polish criteria stay out of the slice covering its core, and the polish slice is offered together as a recommendation with its reason. Each runs `/craft:slice spec/recipe-box --unattended` on the `recipes` command group (AC1 list, AC2 add, AC3 edit, AC4 delete; AC5 sort the list by a column, AC6 colour entries by tag).
+**Status: baselines measured; the prose edit is written, treatment and probes pending.** Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only`, each pre-registered in its `expected.md`. They cover the core and polish rule: a criterion is polish only when every one of its surface's read, create and mutate criteria can be met without it, a surface's polish criteria stay out of the slice covering its core, and the polish slice is offered together as a recommendation with its reason. Each runs `/craft:slice spec/recipe-box --unattended` on the `recipes` command group (AC1 list, AC2 add, AC3 edit, AC4 delete; AC5 sort the list by a column, AC6 colour entries by tag).
 
 | Case | Fixture | Expected slice | Expected on the unedited prose |
 |---|---|---|---|
@@ -5570,3 +5570,18 @@ The first-slice reconciliation was not probed: no case discriminates it (the spa
 Prose fingerprints (`git hash-object`) of the baseline: `skills/_shared/slice.md` `0869634f4df7482894d53ffbd61eaad8f18668e2`, `skills/slice/SKILL.md` `d69caaeaad33b56fe461bd25e1c0832a13bdd60b`.
 
 Bar: baseline as the portage-eval shim decides; treatment bar 3 of 3 runs, which the shim decides at 2, recorded as run and not as a met 3 of 3; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. The recommendation case's judge reads the final message only, not rule text.
+
+Baselines (request `local-6vc0mo9mlsi3`, 2026-11-19, on the fingerprints above):
+
+| Case | Baseline | Reading |
+|---|---|---|
+| `slice-leaves-polish-out-of-the-core-slice` | **red**, 0.5/0.5 (2 runs, the shim stops once decided) | both covers graders failed in both runs; the chooser took all six criteria |
+| `slice-states-a-polish-slice-as-a-recommendation-with-its-reason` | green on the gate, runs 0.8 / 1 / 1 | the first run failed `the-statement-offers-the-polish-slice-as-a-recommendation-with-its-reason`; both covers graders passed in every run. It discriminates weakly (one run of three) |
+
+Treatment and probes (all carriers back to the baseline, the core and polish carriers only, the recommendation carriers only):
+
+| Arm | Polish-out-of-core case | Recommendation case |
+|---|---|---|
+| treatment | pending | pending |
+| probe: core and polish carriers removed | pending | pending |
+| probe: recommendation carriers removed | pending | pending |
