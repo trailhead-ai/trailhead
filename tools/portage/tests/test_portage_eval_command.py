@@ -448,6 +448,27 @@ class TestWait:
         assert c1.count("score 0.5") == 2 and "run 1: score 0.5 failed" in c1
         assert c2.count("score 1") == 2 and "run 1: score 1 passed" in c2
 
+    def test_wait_reads_a_result_whose_runs_carry_the_timing_fields_and_prints_the_same(self, ws):
+        ws.set("mode-c1", "fail")
+        request_id = ws.started("c1", "c2")
+        assert ws.wait(request_id)[0] == 1
+        path = ws.req(request_id) / "result.json"
+        timing = ("duration_seconds", "cost_usd", "judge_cost_usd")
+        doc = json.loads(path.read_text())
+        for c in doc["cases"]:
+            for run in c["runs"]:
+                assert all(k in run for k in timing)
+                for k in timing:
+                    del run[k]
+        path.write_text(json.dumps(doc))
+        plain = ws.wait(request_id)
+        for c in doc["cases"]:
+            for i, run in enumerate(c["runs"]):
+                run.update(duration_seconds=10.5 + i, cost_usd=0.4, judge_cost_usd=None)
+        path.write_text(json.dumps(doc))
+        assert plain[0] == 1
+        assert ws.wait(request_id) == plain
+
     def test_wait_exits_0_when_every_case_passed(self, ws):
         rc, out, _ = ws.wait(ws.started("c1", "c2"))
         assert rc == 0 and "summary: 2 passed" in out

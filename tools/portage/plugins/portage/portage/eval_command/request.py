@@ -23,9 +23,12 @@ A case result::
     {"case": str, "verdict": "pass" | "fail" | "not-run", "reason": null | <reason>,
      "next_step": null | "stop and report" | "resubmit", "cause": str (optional), "passed": int, "failed": int,
      "errored": int, "runs": [{"passed": bool, "errored": bool, "score": number | null,
-                               "graders": [{"name": str, "passed": bool}, ...]}, ...]}
+                               "graders": [{"name": str, "passed": bool}, ...],
+                               "duration_seconds": number | null, "cost_usd": number | null,
+                               "judge_cost_usd": number | null}, ...]}
 
-``reason`` and ``next_step`` are set only for a not-run case, and ``next_step`` is always one of
+The three timing fields are the eval core's validated numbers (null when unusable) and are never
+read by this module. ``reason`` and ``next_step`` are set only for a not-run case, and ``next_step`` is always one of
 ``stop and report``, ``resubmit`` (and ``retry later``, which no not-run case carries). ``runner-broken``
 (the canary did not pass, or the worker crashed) and every reason the eval core gives are followed by
 ``stop and report``, except the core's ``timeout``; ``interrupted`` (the worker died before deciding

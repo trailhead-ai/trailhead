@@ -12,10 +12,15 @@ first detected harness for its eval runner, runs it bounded by a wall-clock time
                     | "cost-cap" | "runner-error" | "runs-errored" | "runner-sandbox-unwritable"
                     | "case-removed-on-branch" | "corpus-new-on-branch" | "head-moved",
      "runs": [{"passed": bool, "errored": bool,
-               "graders": [{"name": str, "passed": bool}, ...]}, ...]}
+               "graders": [{"name": str, "passed": bool}, ...],
+               "duration_seconds": number | null, "cost_usd": number | null,
+               "judge_cost_usd": number | null}, ...]}
 
-``reason`` is null on pass and fail. ``runs`` is built only from grader names and
-booleans — never runner output or grader explanations. The runner's own result stays
+``reason`` is null on pass and fail. The only runner values a run record carries are grader
+names and booleans plus the run's duration, cost and judge cost; each of those three is the
+runner's own number only when it is finite, non-negative and within a sanity bound (3600 seconds,
+100 dollars), else null, and null for a run the runner never returned or that was killed. A stored
+pass or result written without them reads as null. Never grader explanations. The runner's own result stays
 at ``<state>/runs/<case>.json`` (artifacts in ``<state>/runs/<case>/``).
 
 Deciding from the runner's JSON, never its exit code (a scored fail, a scaffold
@@ -319,7 +324,10 @@ def record_crash(state: Path, case: str) -> None:
 def _ordered(result: dict) -> dict:
     ordered = {k: result[k] for k in
                ("case", "verdict", "passed", "failed", "errored", "reason", "runs")}
-    ordered["runs"] = [{k: v for k, v in r.items() if k != "score"} for r in ordered["runs"]]
+    ordered["runs"] = [
+        {**{k: v for k, v in r.items() if k != "score"},
+         **{field: r.get(field) for field, _, _ in core.TIMING_FIELDS}}
+        for r in ordered["runs"]]
     return ordered
 
 

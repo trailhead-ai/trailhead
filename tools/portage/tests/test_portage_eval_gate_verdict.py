@@ -104,6 +104,18 @@ def test_exit_1_output_carries_state_path_and_per_run_grader_verdicts(st, capsys
     assert "run 2: mentions-x=pass" in out
 
 
+def test_runs_carrying_the_timing_fields_read_the_same_as_runs_without_them(st, capsys):
+    st.plan([_entry("bad")])
+    plain = [{"passed": False, "errored": False, "graders": [{"name": "cites-y", "passed": False}]},
+             {"passed": True, "errored": False, "graders": [{"name": "cites-y", "passed": True}]}]
+    timed = [{**r, "duration_seconds": 12.5, "cost_usd": 0.3, "judge_cost_usd": None} for r in plain]
+    st.result("bad", verdict="fail", passed=1, failed=1, runs=plain)
+    baseline = verdict(capsys, st)
+    st.result("bad", verdict="fail", passed=1, failed=1, runs=timed)
+    assert baseline[0] == 1
+    assert verdict(capsys, st) == baseline
+
+
 def test_fail_plus_not_run_exits_1(st, capsys):
     st.plan([_entry("bad"), _entry("skipped")])
     st.result("bad", verdict="fail", passed=0, failed=3)

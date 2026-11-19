@@ -777,12 +777,13 @@ class TestStopAtAgreement:
         env.fake(seq=[_batch(env, [PASS, FAIL]), _batch(env, [PASS])])
         assert env.run() == 0
         runs = env.result()["runs"]
-        expect = [{"passed": True, "errored": False,
-                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in PASS["graders"]]},
-                  {"passed": False, "errored": False,
-                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in FAIL["graders"]]},
-                  {"passed": True, "errored": False,
-                   "graders": [{"name": g["name"], "passed": g["passed"]} for g in PASS["graders"]]}]
+        def record(run):
+            return {"passed": run["score"] >= 1.0, "errored": False,
+                    "graders": [{"name": g["name"], "passed": g["passed"]} for g in run["graders"]],
+                    "duration_seconds": run["durationSeconds"], "cost_usd": run["costUsd"],
+                    "judge_cost_usd": run["judgeCostUsd"]}
+
+        expect = [record(PASS), record(FAIL), record(PASS)]
         assert runs == expect
 
     @pytest.mark.parametrize("n,pass_at,first", [(3, 2, "2"), (5, 3, "3"), (5, 4, "2"), (4, 1, "1")])
