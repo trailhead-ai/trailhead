@@ -175,6 +175,22 @@ class TestRunTimingFields:
         assert result["runs"]
         assert [_timing(r) for r in result["runs"]] == [(None, None, None)] * len(result["runs"])
 
+    def test_a_later_batch_killed_at_the_budget_keeps_the_earlier_batchs_numbers(self, env):
+        env.fake(pool=_result([_timed(1, 0.1, 0.01), HALF | {"durationSeconds": 2, "costUsd": 0.2,
+                                                                "judgeCostUsd": 0.02},
+                               _timed(3, 0.3, 0.03)], costUsd=0.1))
+        calls = []
+
+        def kill_the_second_batch(runner, cwd, timeout):
+            code, killed, missing = execute(runner, cwd, timeout)
+            calls.append(None)
+            return (None, True, missing) if len(calls) == 3 else (code, killed, missing)
+
+        result = _call(env, execute=kill_the_second_batch)
+        assert _asked(env) == [2, 1]
+        assert [_timing(r) for r in result["runs"]] == [(1, 0.1, 0.01), (2, 0.2, 0.02),
+                                                        (None, None, None)]
+
 
 class TestInjection:
     def test_the_injected_executor_runs_the_canary_and_every_batch(self, env):

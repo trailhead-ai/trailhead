@@ -186,12 +186,15 @@ def _run_record(run: dict) -> dict:
 
 
 def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bool,
-            asked: int | None = None) -> dict:
-    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far."""
+            asked: int | None = None, killed_from: int = 0) -> dict:
+    """The verdict over ``n`` runs; ``asked`` is how many of them have been requested so far.
+
+    When ``killed``, the runs from index ``killed_from`` on came from the call that was killed
+    and carry no timing; earlier runs came from calls that finished and keep theirs."""
     asked = n if asked is None else asked
     runs = _runs_of(doc)
-    records = [_unmeasured(rec) if killed else rec
-               for rec in (_run_record(r) for r in (runs or [])[:asked])]
+    records = [_unmeasured(rec) if killed and i >= killed_from else rec
+               for i, rec in enumerate(_run_record(r) for r in (runs or [])[:asked])]
     scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
     passing = sum(1 for r in scored if _passes(r))
     failing = len(scored) - passing
@@ -404,9 +407,9 @@ def _run_planned(plugin_dir, case, n, pass_at, runner_cfg, runs_dir, json_path, 
         segment = (runs or [])[:batch]
         segment += [{"error": "missing"}] * (batch - len(segment))
         merged += segment
-        asked += batch
         view = {**(doc if isinstance(doc, dict) else {}), "cases": [{"arms": {"with": merged}}]}
-        decided = _decide(view, n, pass_at, code, killed, asked=asked)
+        decided = _decide(view, n, pass_at, code, killed, asked=asked + batch, killed_from=asked)
+        asked += batch
         if runs is None and decided["verdict"] == "not-run":
             decided["reason"] = TIMEOUT if killed else RUNNER_ERROR
         result = {"case": case, **decided}
