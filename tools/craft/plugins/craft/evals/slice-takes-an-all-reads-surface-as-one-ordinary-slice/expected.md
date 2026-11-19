@@ -26,12 +26,12 @@ Every clause holds.
 |---|---|---|
 | A written body has a `**Covers:**` line naming AC1, AC2 and AC3 and a `**Value claim:**` section | `the-written-parent-covers-every-read` | `tool_used` Write, `min: 1` |
 | A `covers_gate.py` call's `--covers` list names AC1, AC2 and AC3 | `the-covers-gate-is-given-every-read` | `tool_used` Bash, `min: 1` |
-| The statement presents an ordinary slice ("You will be able to ...", a "Try it ..." sentence, AC1 to AC3 made green); calling it an enabler, writing a justification in place of a value claim, or saying there is nothing to try fails | `the-slice-is-an-ordinary-one-with-no-enabler-justification` | `llm`, `focus: trace` |
+| A written parent body's `**Value claim:**` opens with "You will be able to …" and the body nowhere calls the slice an enabler, says what it enables, or says there is nothing to try | `the-slice-is-an-ordinary-one-with-no-enabler-justification` | `tool_used` Write |
 | The last line is `outcome: slice-chosen task/<name> parked=0` | `final-line-is-slice-chosen` | `regex` over the final message |
 | A `lore record create --kind task` command is issued for the slice parent | `a-slice-parent-is-created-through-the-cli` | `tool_used` Bash, `min: 1` |
 
 ## Limitations
 
-- The absence of an enabler justification is judged by the llm grader; the covers graders only show an ordinary slice's shape, since an enabler writes no `**Covers:**` line.
+- The absence of an enabler justification is read from the written parent body, where an enabler's justification sits in place of the value claim. This grader was first an `llm` grader over the trace; it failed one run in three on both the baseline and the edited prose while the written body in that run carried a `**Covers:**` line over every read and a value claim, and a trace judge sees only the first and last 12 messages, so it was tightened to read the full body, which the slice writes once, and both arms were run again. The operator-facing statement itself is not graded.
 - One fixture, one phrasing, one model tier, two runs as run.
 - A baseline that comes out green is reported as non-discriminating (plan unknown U2), not strengthened silently.
