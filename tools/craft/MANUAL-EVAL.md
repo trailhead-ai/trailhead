@@ -5784,7 +5784,7 @@ Spend at runner list price plus judge votes: about 207.3 USD for the baseline (c
 
 ## Case: a plan orders its tasks by phase and records a reviewability claim (2026-11-19)
 
-**Status: not yet run.** The case is written and pre-registered in its `expected.md`; no arm has run.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. The baseline is red, the treatment is green, each rule's all-carriers probe turns the case red on that rule's grader, and the three existing plan-ready cases stay green on the edited prose.
 
 One runner case for `skills/plan/SKILL.md`, `templates/plan.md` and `agents/planner.md`, in the core tier: it is the only case on the shared plan file that decides phase ordering and the reviewability line, and its 900 s timeout puts it past the gate budget.
 
@@ -5792,7 +5792,7 @@ One runner case for `skills/plan/SKILL.md`, `templates/plan.md` and `agents/plan
 |---|---|---|
 | `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` | `notes` spec, AC1 delete, AC2 edit, AC3 list, AC4 add (spec order is the reverse of phase order); a seeded slice parent covering all four; run with `--unattended` | add depends on list, edit and delete depend on add; the parent body carries a `**Reviewability:**` line naming a size; the last line is `outcome: plan-ready task/<name> parked=0` |
 
-Prose fingerprints (`git hash-object`) of the baseline: not yet recorded.
+Prose fingerprints (`git hash-object`): unedited `skills/plan/SKILL.md` `66cd54ee5f6f91574ae73df420daa4d0adbb1822`, `templates/plan.md` `d58e0b8554b6bd1a7966af7a5007290c9c3e8f2e`, `agents/planner.md` `87198d6b979b0827ebf82daf63091dc60623ab2d`; edited `skills/plan/SKILL.md` `09dacdad3db2a38ed998bdad54dc4d2de090a32c`, `templates/plan.md` `67bd87a411d3d1777aa78b40b06987c842fe8d29`, `agents/planner.md` `71f5c8ea80073e9a503851f2e4b503b82a05e882`.
 
 Bar: baseline 3 runs, expected red at least on the reviewability grader; treatment 3 of 3 runs; one rerun of a failed batch permitted and reported as such.
 
@@ -5800,4 +5800,15 @@ Bar: baseline 3 runs, expected red at least on the reviewability grader; treatme
 
 | Arm | Runs | Result | Notes |
 |---|---|---|---|
+| baseline | 2 (runner stopped once decided) | **red**, 0.6 / 0.2 | the reviewability grader and create-after-read failed in both runs; edit-after-create and delete-after-create-or-edit failed in run 2 only. The ordering graders read real `./lore record create` calls, so the case is also the runner canary: the fixture writes landed. Request `local-b3d956lmafbl` |
+| treatment | 2 (runner stopped once decided) | **green**, 1 / 1 | every grader in every run. 2 of 2, not the 3 of 3 the bar names: the shim decides at 2. Request `local-wrj6v311oga1` |
+| regression: `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | 2 each | **green**, 1 / 1 on all three | the un-narrowed plan-ready final line is unchanged. Request `local-wrj6v311oga1` |
+
+### Carrier mutations
+
+Each probe ran against this case on the edited prose, then the tree was restored and checked clean against the edit.
+
+| Probe | What it removes | Result | Reading |
 |---|---|---|---|
+| phase order | step 7's phase-order rule, step 8's "in step 7's phase order, never spec order" and its creates-depend-on-read sentence, and the planner's pointer | **red**, 0.8 / 0.8 (request `local-njrhaw8p9qqn`): create-after-read failed in both runs | the create-after-read edge depends on the rule; the edit and delete edges stayed green without it, so on this fixture plan orders those unprompted and only the read-before-create edge is attributable to the rule |
+| reviewability | the template field, step 8's slice-rooted write and canonical-sections entry, and step 9's display | **red**, 0.6 / 0.8 (request `local-pn69qkcso9hh`): the reviewability grader failed in both runs; run 1 also missed the final line | the reviewability line depends on these carriers; the final-line miss in one run is incidental to the probe and was not seen on any other arm |
