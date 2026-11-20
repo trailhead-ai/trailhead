@@ -5919,7 +5919,7 @@ Bar note: every green arm ran 2 of 2, not the 3 of 3 the bar names, as the shim 
 
 ## Fix pass after whole-change review (2026-11-20)
 
-**Status: not yet run.** These cases and graders were written test-first for the folds of the whole-change review of the slice-narrowing change; they have not been run on any prose. The controller measures them on today's prose, then the prose edit follows. Nothing below is a result.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. These cases and graders were written test-first for the folds of the whole-change review of the slice-narrowing change. On the prose before the fix (plan SKILL `6bce9d8…`, slice.md `42238ba…`) only the restore's second council pass was red in both runs; the same-write, re-fold and tightened set-aside graders were already green, and the access-check case mostly kept the check. They are kept as regression guards, not as red-to-green evidence. After the fix and two follow-up edits to the unattended no-stopping-point bullet, every affected case and the plan and slice regression set is green. The table below is the pre-registration; the runs follow it.
 
 | Case | Change | What it reads | Expected on today's prose |
 |---|---|---|---|
@@ -5931,3 +5931,13 @@ Bar note: every green arm ran 2 of 2, not the 3 of 3 the bar names, as the shim 
 | `tools/craft/tests/test_narrowed_parent_coverage.py` | the `criterion_gate` leg removed (it ran on the spec body alone and could not depend on the narrowed parent) | in-process gates on the parent body | green, 10 passed |
 
 Limitations: the grader that reads a `reopen` or `fold` transition reads the file-tool write of the transition document, so a document written through a shell command is missed; the second-council-pass grader counts builder-lens dispatches, not a council write; the `**Value claim:**` grader stops at the first escaped character on the line, so a claim with a double quote before AC3 would read as missing it.
+
+### Runs
+
+| Arm | Prose (`git hash-object`) | Result | Notes |
+|---|---|---|---|
+| before the fix | plan SKILL `6bce9d8…`, slice.md `42238ba…` | restore **red** 0.93 / 0.93 (only `the-council-reviewed-again-after-the-restore`, both runs); access check run 1 green, run 2 failed `no-child-body-delivers-the-access-check-removal`, run 3 timed out; canary run 1 failed both final-line graders, run 2 green, run 3 timed out; approval and set-aside green 1 / 1 | the same-write grader passed in both narrowing cases and the restore's re-fold graders passed, so those behaviours already held; the access-check case discriminates weakly. Request `local-cy66pjfbawih` |
+| the fix (`fix(craft)` folds: floor kept by the cut, slice.md's no-size sentence scoped to the chooser, full deferrable test in step 7, restore only on keep-whole or re-cut with re-fold and a second council pass, narrowing as its own give-back trigger, the no-cut answers named, the template field slice-rooted only, the plain ending only when nothing was narrowed) | plan SKILL `3a424ba…`, slice.md `5b65948…`, template `6335897…` | **14 of 15 cases green**, 1 / 1 in 2 runs each: access check, canary, restore, approval, planner, attended no-stopping-point, phase order, the three plan-ready cases, spec-change park, and the first-slice, set-aside and unknown-first slice cases. The unattended no-stopping-point case **regressed** to 1 of 3: run 2 parked nothing (0.33), run 3 failed `no-question-is-asked` | the answers to the no-cut question stood before the attended and unattended bullets, so an unattended run could read them as its own next step. Request `local-ol3grczjhjgh` |
+| answers moved under the attended bullet; the unattended bullet says the run carries out none of them | plan SKILL `533cfae…` | attended no-stopping-point **green** 1 / 1; unattended **1 of 3**, runs 0.89 / 1 / 0.89, failing only `no-question-is-asked` (judge votes split FAIL PASS FAIL) | every record grader passed: the run parked correctly but listed the options in its final message, which the judge reads as a choice left open. Request `local-kuz3nmbcvd5g` |
+| the parked report names `Q<n>` and does not lay the options out again | plan SKILL `ff6b8d4…` | unattended no-stopping-point **green** 1 / 1; `unattended-plan-parks-a-spec-change` **green** 1 / 1 | request `local-22lewp28omem`. Every green arm ran 2 of 2, not 3 of 3, as the shim decides at 2 |
+
