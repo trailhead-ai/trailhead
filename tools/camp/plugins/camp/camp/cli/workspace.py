@@ -16,29 +16,6 @@ if TYPE_CHECKING:
     from ..host.config import Host
 
 
-def _project_list_rows(entries: list[dict]) -> list[dict]:
-    """Project `cmd_ls_group`'s entries onto the fixed `camp list` JSON row
-    shape — the same projection `render_workspace_list` applies inline,
-    factored out so the `-a`/`--all-hosts` local answer below can build the
-    same row shape without printing. An unmanaged entry's `slug` is `None`
-    — passed through as-is, the same discriminator `render_workspace_list`
-    and `render_list_rows_human` both key off of.
-    """
-    return [
-        {
-            "ok": True,
-            "slug": e["slug"],
-            "branch": e.get("branch", ""),
-            "workspace_path": e["workspace_path"],
-            "group": e.get("group"),
-            "state": e.get("state"),
-            "window_count": e.get("window_count"),
-            "tmux_session": e.get("tmux_session"),
-        }
-        for e in entries
-    ]
-
-
 def render_list_rows_human(
     rows: list[dict],
     *,
@@ -174,13 +151,14 @@ def local_list_answer(
     from ..provision.lifecycle import (
         cmd_ls_group,
         load_answerable_groups,
+        project_list_rows,
         unmanaged_count_row,
     )
     from .common import _groups_dir
 
     if not all_groups:
         listing = cmd_ls_group(group, env=None, scope=DisclosureScope.GROUP)
-        rows = _project_list_rows(listing.entries)
+        rows = project_list_rows(listing.entries)
         if listing.unmanaged_count:
             rows.append(unmanaged_count_row(listing.unmanaged_count))
         return rows, ([listing.notice] if listing.notice else []), 0
@@ -202,7 +180,7 @@ def local_list_answer(
     entries, tmux_notices = _merged_widened_entries(groups, env=None)
     notices.extend(tmux_notices)
 
-    rows = _project_list_rows(entries)
+    rows = project_list_rows(entries)
     rows += [{"ok": False, "group": None, "reason": d} for d in unparsable]
     return rows, notices, 0
 
@@ -328,6 +306,7 @@ def _cmd_ls_host_cli(
     "how do I print one answered row" callback.
     """
     from ..host.relay import relay_all_groups
+    from ..provision.lifecycle import fill_list_row_defaults
     from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     if connect_timeout is None:
@@ -364,6 +343,7 @@ def _cmd_ls_host_cli(
         ["list", "--all-groups", "--json"],
         as_json=as_json,
         render_human_rows=_render_human_rows,
+        normalise_json_rows=fill_list_row_defaults,
         connect_timeout=connect_timeout,
     )
 

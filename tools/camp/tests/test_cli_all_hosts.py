@@ -3501,7 +3501,7 @@ _LEFTOVER_LOCAL = "camp-localleft-a1b2c3d4"
 _LEFTOVER_REMOTE = "camp-remoteleft-b2c3d4e5"
 
 _TMUX_ONE_LEFTOVER = (
-    'sys.stdout.write("2|1700000000|' + _LEFTOVER_LOCAL + '\\n")\nsys.exit(0)\n'
+    'sys.stdout.write("2|1700000000|0|' + _LEFTOVER_LOCAL + '\\n")\nsys.exit(0)\n'
 )
 _TMUX_OUTAGE = (
     'sys.stderr.write("directory /private/tmp/bad has unsafe permissions\\n")\n'

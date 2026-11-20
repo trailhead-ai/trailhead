@@ -280,6 +280,7 @@ class TestListJson:
         "window_count",
         "tmux_session",
         "last_touched",
+        "attached",
     }
 
     def test_json_carries_workspace_path(self, camp_cli, tmp_path, capsys):
@@ -328,6 +329,7 @@ class TestListJson:
             "window_count",
             "tmux_session",
             "last_touched",
+            "attached",
         }
         assert "host" not in rows[0]
 
@@ -592,6 +594,7 @@ class TestListAllGroups:
             "window_count",
             "tmux_session",
             "last_touched",
+            "attached",
         }
         assert rows[0]["ok"] is True
 

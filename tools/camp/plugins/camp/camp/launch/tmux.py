@@ -142,14 +142,17 @@ UNANSWERED = _Unanswered()
 @dataclass(frozen=True)
 class TmuxSession:
     """One session tmux reported: its name, live window count, and the epoch
-    second tmux itself last recorded activity on it (`#{session_activity}`).
-    Every session :meth:`Tmux.list_sessions` parses carries ``activity``;
-    it is `None` only for a `TmuxSession` a caller builds directly without
-    one."""
+    second tmux itself last recorded activity on it (`#{session_activity}`),
+    and whether at least one client is attached to it (`#{session_attached}`
+    is a client count; this is `count > 0`). Every session
+    :meth:`Tmux.list_sessions` parses carries ``activity`` and ``attached``;
+    each is `None` only for a `TmuxSession` a caller builds directly without
+    it."""
 
     name: str
     windows: int
     activity: int | None = None
+    attached: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -628,14 +631,16 @@ class Tmux:
     def list_sessions(self) -> SessionListing | _Unanswered:
         """Every session tmux currently holds, or ``UNANSWERED``.
 
-        Reads ``#{session_windows}|#{session_activity}|#{session_name}`` —
-        the two digit-only fields first, because a session name may
+        Reads
+        ``#{session_windows}|#{session_activity}|#{session_attached}|#{session_name}``
+        — the three digit-only fields first, because a session name may
         legitimately contain the delimiter, so the name is parsed as the
-        remainder after the FIRST TWO ``|``s and can never be misread as a
+        remainder after the FIRST THREE ``|``s and can never be misread as a
         leading field. ``session_activity`` is tmux's own last-activity
-        timestamp (epoch seconds) for the session — read in this SAME call
-        rather than a second one, so `camp list`'s "last touched" column
-        costs no extra tmux round trip per workspace.
+        timestamp (epoch seconds) for the session and ``session_attached``
+        its attached-client count — both read in this SAME call rather than
+        a second one, so `camp list`'s "last touched" and `attached`
+        values cost no extra tmux round trip per workspace.
 
         Extends this seam's tri-state rather than reusing :meth:`has_session`'s
         contract: a general listing command's non-zero exit has no single
@@ -647,7 +652,11 @@ class Tmux:
         ``UNANSWERED``.
         """
         done = self._run(
-            ["list-sessions", "-F", "#{session_windows}|#{session_activity}|#{session_name}"]
+            [
+                "list-sessions",
+                "-F",
+                "#{session_windows}|#{session_activity}|#{session_attached}|#{session_name}",
+            ]
         )
         if done is None:
             return UNANSWERED
@@ -665,12 +674,21 @@ class Tmux:
             if not separator or not count.isdigit():
                 dropped += 1
                 continue
-            activity, separator, name = rest.partition("|")
+            activity, separator, rest = rest.partition("|")
             if not separator or not activity.isdigit():
                 dropped += 1
                 continue
+            attached, separator, name = rest.partition("|")
+            if not separator or not attached.isdigit():
+                dropped += 1
+                continue
             sessions.append(
-                TmuxSession(name=name, windows=int(count), activity=int(activity))
+                TmuxSession(
+                    name=name,
+                    windows=int(count),
+                    activity=int(activity),
+                    attached=int(attached) > 0,
+                )
             )
         return SessionListing(sessions=tuple(sessions), dropped=dropped)
 

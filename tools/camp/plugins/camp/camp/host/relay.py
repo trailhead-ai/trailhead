@@ -298,10 +298,15 @@ def relay_all_groups(
     *,
     as_json: bool,
     render_human_rows: RenderHumanRows,
+    normalise_json_rows: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> None:
     """Run *remote_argv* on *host* over the transport and render the answer.
+
+    ``normalise_json_rows``, when given, reshapes an ANSWERED host's rows
+    just before they are printed as JSON; a host that did not answer prints
+    its failure rows untouched.
 
     ``connect_timeout`` is passed straight through to
     :func:`answer_for_host` — see its own docstring.
@@ -318,7 +323,8 @@ def relay_all_groups(
 
     if answer.answered:
         if as_json:
-            print(json.dumps(answer.rows))
+            rows = normalise_json_rows(answer.rows) if normalise_json_rows else answer.rows
+            print(json.dumps(rows))
         else:
             render_human_rows(answer.rows)
         for notice in answer.notices:
