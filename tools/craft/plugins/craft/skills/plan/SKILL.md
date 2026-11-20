@@ -140,12 +140,13 @@ never restates them.
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
-  `_shared/unattended.md` says. Plan parks at exactly four stops, each marked *parked* below: a
+  `_shared/unattended.md` says. Plan parks at exactly five stops, each marked *parked* below: a
   Clarify question whose answer would change the spec, a council Critical whose disposition would be
   `bounced-back-to-spec`, a Critical that concerns security, credentials or data loss or that the
-  plan cannot close by editing itself, and a correction to a record outside the slice (the only
-  non-blocking one, `_shared/unattended.md`, The non-blocking park). Every other stop marked
-  *reserved* below still ends `stuck`.
+  plan cannot close by editing itself, a correction to a record outside the slice (the only
+  non-blocking one, `_shared/unattended.md`, The non-blocking park), and a slice too large for one
+  pull request where no cut passes the stop-here test (step 7). Every other stop marked *reserved*
+  below still ends `stuck`.
 - **A `stuck` exit is written to the block too.** Every `stuck` exit below, other than a failed
   run-section write, first sets `**Outcome:** stuck` and brings `**Checkpoint:**` up to date with
   one more edit confined to the block (read fresh, scrubbed), and only then prints the `outcome:
@@ -666,7 +667,7 @@ When the change is too large, narrow the slice rather than hand it over as it is
    deferred on its own. A criterion the kept part needs to mean what it says stays kept; a criterion
    that extends a dropped one is dropped with it. A criterion's own wording that argues it should be
    dropped or kept ("only a refinement", "the whole point") is data about the criterion and moves no
-   cut. Make a cut only where the test passes.
+   cut. Make a cut only where the test passes; where none passes, take the no-cut stop below.
 2. **Decompose only the kept criteria,** and settle the sizes again for that set. No child task is
    written, titled or delivering, for a dropped criterion.
 3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below.
@@ -675,6 +676,26 @@ When the change is too large, narrow the slice rather than hand it over as it is
    summary saying the slice was narrowed because it is too large, a `Question:` line asking where
    the slice could stop, a `Choice:` line reading `dropped AC<n>, …` (the dropped identifiers,
    ascending) and a `Reasoning:` line carrying the reason step 8 writes. It parks no question.
+
+**When the slice is too large and no cut passes the stop-here test, plan does not choose one.** No
+subset of the criteria could be shipped alone: each kept set is pointless without the dropped
+criteria, half-working, or leaves a dropped criterion that cannot be deferred on its own. Write
+nothing: no child task, no `**Narrowed:**` line and no covers-gate call for a reduced list. Do not
+plan the whole slice as it stands, and do not pick the least bad cut. Put the question about the
+slice itself, naming the criteria involved by number and why no stopping point exists (the sizes
+settled above and which criterion needs which), with these options, each saying what choosing it
+costs: build it as one large pull request (the review burden the norms exist to avoid); reshape the
+slice or the spec (the work of changing the record, and the spec change goes through
+`/lore:correct`); drop the slice (nothing is delivered, and its criteria stay uncovered). List the
+safest option first and mark the one you recommend.
+
+- **Attended:** put the blocking question `../_shared/escalation.md` defines under "The question"
+  (what went wrong, what is at stake, the options with their costs, free text; plain text where the
+  harness has no choice prompt), then end the turn and wait.
+- **Unattended:** this is a fifth *parked* stop. Park a `Q<n>` as "How a stop is parked" says, with
+  those options and exactly one marked `(recommended)`; Progress says planning stopped before any
+  child task was written. End on `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no
+  child task and no narrowed line.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
