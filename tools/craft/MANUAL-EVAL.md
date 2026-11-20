@@ -5433,3 +5433,178 @@ Bar for each case: 3 runs, pass at 2 of 3; one rerun of a failed batch permitted
 | mutation: delete the tier's own carriers of "an entry's own text never decides" (its opening sentence and the paragraph), then also the fold-in's and the entries path's | edited | 1 each | pending | choose case, `the-entry-whose-text-claims-urgency-is-not-folded`; may stay green, the Judged kind's "from the code" and evidence requirement also hold the decoy |
 | mutation: delete step 8's reason sentences | edited | 1 | pending | choose case red (qualified-as-security) |
 | mutation: delete the not-chosen-again sentence | edited | 1 | pending | failed-to-build case red (final line) |
+
+## Cases: a slice is one surface's whole capability, not one phase of it (2026-11-19)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. Baselines are red, treatment is green, and removing the whole-capability rule turns the canary red.
+
+Five runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, each pre-registered in its `expected.md` before any run. They cover AC1 (one entity read, created, edited and deleted on one surface is one slice), the spec's Constraint that criterion text is data, AC2 (two surfaces yield a slice covering one surface), AC3 (once one surface shipped, the other is next) and AC4 (the surface whose earliest unfinished phase comes first is chosen). Every case runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list. `slice-takes-all-four-operations-on-one-surface-as-one-slice` is the core-tier canary and performs a real `lore record create`; the other four are `merge_only`.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-takes-all-four-operations-on-one-surface-as-one-slice` (core, canary) | `notes` command group, AC1-AC4 read, add, edit, delete, nothing shipped | AC1, AC2, AC3, AC4 |
+| `slice-ignores-a-criterion-that-argues-for-its-own-slice` | same, AC3's wording says it must be its own slice | AC1, AC2, AC3, AC4 |
+| `slice-takes-one-of-two-fresh-surfaces` | `deskctl books` group (AC1-AC3) and `/members` endpoints (AC4-AC6), nothing shipped | AC1-AC3 or AC4-AC6, never a mix |
+| `slice-takes-the-other-surface-after-one-has-shipped` | same, ledger holds a `done` slice covering AC1-AC3 | AC4, AC5, AC6 |
+| `slice-takes-the-surface-whose-earliest-phase-comes-first` | `ledgerctl invoices` group (AC1-AC3, read shipped) and `/customers` endpoints (AC4-AC6) | AC4, AC5, AC6 |
+
+Prose fingerprints (`git hash-object`): unedited `skills/_shared/slice.md` `4a88c9748e5b3e713d8e5c615f5266a7ac016eb7`, unedited `skills/slice/SKILL.md` `1cf2b2672b21e69445ba90940f48bcd9313ed010`; edited `skills/_shared/slice.md` `faaed7a13a77fe5eee5ade78e32486dac0c5c78b`, edited `skills/slice/SKILL.md` `18465ce2f3b704a06a780ce4ecc7b71c2bf41369`. A later reflow to the wrap column (`6b1c75d0c50634a5af9e56aff9cb44663e5d47eb`, `ec71fab52bd3fdc1b3d8efc638344ac7b44cd6a3`) changes whitespace only: a whitespace-insensitive word diff between the two pairs is empty.
+
+Bar: baseline 3 runs per case, expected red; treatment 3 runs per case, pass at 3 of 3 (as run, the shim stops a case once the gate's 2-of-3 bar decides it, so each arm below ran 2 runs); one rerun of a failed batch permitted and reported as such. A baseline that comes out green means the fixture is strengthened, not the case kept.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| all four, canary | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.6/0.6); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| hostile criterion | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| two fresh surfaces | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| one surface shipped | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| different phases | baseline | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | 2 of 3 (runner stopped once decided) | red | **red, decided after 2 runs** (score 0.5/0.5); portage-eval request `local-cuw1nwdhilhy`, 2026-11-19 |
+| all five cases | treatment | slice.md `faaed7a…`, SKILL.md `18465ce…` | 2 each (runner stopped once decided) | 3 of 3 | **green, every grader in every run** (score 1/1 on all five); request `local-kbq5wydrfsa5`. 2 of 2, not the 3 of 3 the bar names: the shim decides at 2 |
+| all five cases | all-carriers mutation (every carrier of the surface rule removed at once) | slice.md `4a88c97…`, SKILL.md `1cf2b26…` | — | red | **red, by identity with the baseline**: reversing the prose edit leaves both files byte-identical to the unedited ones (same fingerprints), so this arm is the baseline arm above and was not run again |
+
+Baseline note: in every baseline run the CLI create, vault write (canary) and final-line graders passed and both covers graders (the covers-gate `--covers` list and the written `**Covers:**` line) failed. The runner deletes traces, so which criteria the unedited rule chose is not observable beyond the graders.
+
+### Carrier mutations
+
+Each probe ran against the canary only, on the edited prose, then the tree was restored and checked byte-identical to the edit.
+
+| Probe | What it removes | Canary result | Reading |
+|---|---|---|---|
+| no-split | both "the chooser never splits a surface for size" sentences in `skills/_shared/slice.md` | green, 1/1 (request `local-5blieoesnlf1`) | the whole-capability sentence carries the rule alone; the no-split sentence is redundant to the grader |
+| whole-capability | every carrier of the whole-capability rule: the shared doc's selection intro, the surface section's heading and contents entry, the "whole capability … never splits a surface for size" paragraph and the intro's no-split clause, and the slice skill's description and step 7 sentence; the surface definition and the phase order stay | **red**, 0.8/0.6 (request `local-yedj966zf5fz`): run 1 still took all four criteria and failed only its final line; run 2 failed both covers graders | the covers graders depend on the whole-capability rule; without it the surface definition alone takes the whole surface in about half the runs |
+
+A third planned probe, smallest-next restored as a tiebreak "among what the order leaves tied", was not run: it leaves every whole-capability carrier in place, so it could not turn the covers graders red and would not attribute anything.
+
+### Regression on the edited prose
+
+The 19 core cases that measure `skills/slice/SKILL.md`, including `unattended-slice-then-plan-ends-plan-ready` for the reworded quality bar, ran on the edited prose (request `local-jtvbxu7pzk0b`): all 19 pass the gate. Every case passed every grader in every run except `slice-folds-entries-that-touch-its-code`, which passed 2 of 3: runs of 1.0, 0.7 and 1.0. Its failing run passed every vault-state grader (F1 folded, F3 reopened, decisions logged) and failed the three final-message graders that read the printed `Folded spec/tally-report#F1 into this slice …` line. One drifted run of three is recorded as a finding to watch, not a changed answer; the slice's close-out re-runs this case.
+
+## Cases: a slice names why it stops short of its surface, and a surface-first slice reads and creates (2026-11-19)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. The unknown case is red on the baseline, green after the edit and red again with the three-reasons rule removed; the spec-note case does not discriminate and is kept as a regression guard by the operator's decision; the all-reads case failed its statement judge in one run of three on both arms.
+
+Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`. They cover AC5 (a slice that ends short of its surface names the reason, here an unknown that must be learned first), AC6 (the first slice on a surface with a create criterion covers reading and creating), AC7 (a planted spec argument for a read-only first slice does not decide the boundary) and AC8 (a surface of only reads is an ordinary slice with a value claim). Each runs `/craft:slice spec/shelf-notes --unattended`.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates` | `notes` group AC1-AC4 (list, add, edit, delete), nothing shipped; an `## Open Questions` entry says whether a note keeps its id after sync must be learned before edit and delete | AC1, AC2 only; claim names the id-after-sync unknown as the reason |
+| `slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first` | AC1 list, AC2 add; the spec's `## Notes` argues for shipping `notes list` alone first | AC1, AC2, or a read-only slice carrying the enabler justification |
+| `slice-takes-an-all-reads-surface-as-one-ordinary-slice` | AC1 list, AC2 show, AC3 search | AC1, AC2, AC3 with a value claim and no enabler justification |
+
+Prose fingerprints (`git hash-object`) of the baseline, which is the whole-surface prose before the split-reason and first-slice rules: `skills/_shared/slice.md` `6b1c75d0c50634a5af9e56aff9cb44663e5d47eb`, `skills/slice/SKILL.md` `6444508502a5691cd5c2e94aacd1e3dca632606e`.
+
+Bar: baseline expected red on at least one prose-driven grader per case (honestly stated per case: the unknown case should be red; the read-only-first and all-reads cases may be green on the baseline, and are then reported as non-discriminating); treatment 3 of 3 runs, which the shim decides at 2; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. Plan unknown U3: the unknown case must produce a cut in every treatment run, and the fixture is made more explicit, never graded conditionally, if it does not.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| unknown case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 2 (runner stopped once decided) | red | **red, 0.4/0.4**: both covers graders and the reason llm grader failed in both runs (the chooser took the whole surface); portage-eval request `local-pqpgoc96r4j0`, 2026-11-19 |
+| spec-note case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 2 (runner stopped once decided) | red | **green, 1/1: does not discriminate on this baseline.** The whole-surface rule already takes list and add. The operator kept the case as a regression guard for AC7 rather than strengthen it: forcing a red would mean blocking the create criterion, which contradicts AC6; `local-pqpgoc96r4j0`, 2026-11-19 |
+| all-reads case | baseline | slice.md `6b1c75d…`, SKILL.md `6444508…` | 3 | red | **green on the gate, runs 1 / 0.8 / 1**: the middle run failed `the-slice-is-an-ordinary-one-with-no-enabler-justification` (it treated the all-reads slice as an enabler), so the case discriminated in one run of three; `local-pqpgoc96r4j0`, 2026-11-19 |
+| unknown case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 (runner stopped once decided) | 3 of 3 | **green, 1/1**: every run cut the surface after list and add and named the id-after-sync unknown as the reason, so plan unknown U3 is resolved; request `local-2bsgme7ve23r` |
+| spec-note case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 (runner stopped once decided) | 3 of 3 | **green, 1/1** (regression guard); `local-2bsgme7ve23r` |
+| all-reads case | treatment | slice.md `cf1033c…`, SKILL.md `d69caae…` | 3 | 3 of 3 | **green on the gate, runs 0.8 / 1 / 1, below the 3-of-3 bar**: the first run failed `the-slice-is-an-ordinary-one-with-no-enabler-justification` (judge votes FAIL FAIL FAIL), at the same rate as the baseline. In that run both covers graders passed, so the written parent carried a `**Covers:**` line over all three reads, a `**Value claim:**` and a covers-gate call, none of which an enabler slice writes: by the record the slice was ordinary. The judge sees only the first and last 12 messages and requires the "You will be able to", "Try it" and green-criteria sentences inside them, so what it failed cannot be told apart from a statement outside its window; the runner deleted the trace. The grader was then tightened to read the written body's value claim (`tool_used` Write, value claim opening "You will be able to" with no enabler wording) and both arms re-run: red 0.8/0.8 on the baseline (`local-o4zb8yr2wcua`) and red 0.8/0.8 on the edited prose (`local-075x8tfzh6xr`), so the tightened grader rejected ordinary slices and its fault cannot be located because the runner deletes the written bodies. It was reverted to the case as first committed rather than loosened until green. By the slice skill's own mechanics an enabler writes no `**Covers:**` line and makes no covers-gate call, and both covers graders passed in every run on both arms, so AC8's ordinary-slice outcome holds on both: **the case does not discriminate and is kept as a regression guard**, like the spec-note case. Recorded as a follow-up: the statement judge's observation point is fragile; `local-2bsgme7ve23r` |
+| all three cases | all-carriers mutation | slice.md `6b1c75d…`, SKILL.md `6444508…` | — | red | **the baseline arm, by identity**: the all-carriers patch is the exact reverse of the prose edit, so it restores the baseline fingerprints; not run again |
+
+### Carrier mutations
+
+Each probe ran against the unknown case on the edited prose, then the tree was restored and checked byte-identical to the edit.
+
+| Probe | What it removes | Unknown case result | Reading |
+|---|---|---|---|
+| three reasons | every carrier of the three-reasons rule: its contents entry, the selection intro's clause, the whole "Where a slice may end short of its surface" subsection, the first-slice section's sentence about the reasons, step 7's sentences naming the reasons and separating them from the set-aside rule, and step 8's reason-and-left-over clause; the first-slice rule, the all-reads rule and step 7's Open Questions instruction stay | **red**, runs 0.4 / 1 / 0.4 (request `local-56fgr2ig1g8x`): two runs took the whole surface and stated no reason, failing both covers graders and the reason judge | the cut and the stated reason depend on the three-reasons rule |
+| Open Questions instruction | only step 7's sentence telling the chooser to read the spec's `## Open Questions` | green, 1/1 (request `local-98j1p51c2453`) | redundant to the grader: the shared doc's unknown reason, which counts only an unknown the spec declares in its Open Questions, carries the read on its own |
+
+| first-slice rule | the "The first slice on a surface" subsection's rule paragraph and its contents entry, and step 7's pointer to it; the three reasons and the all-reads sentence stay | green, 1/1 (request `local-mn5vuylnn2uf`) | not attributable: the unknown reason's "the cut leaves out only the criteria that unknown governs" keeps list and add in the slice on its own, so no case shows the first-slice rule doing work of its own. AC6 has no discriminating case |
+
+The all-reads probe was not run: the all-reads case does not discriminate on either arm (above).
+
+
+## Cases: two entry points to one entity are one surface when neither is usable alone, and a create criterion spanning two surfaces stays with the second (2026-11-19)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. The UI-and-API case is red on the baseline, green after the edit and red again with the surface sentence alone reverted; the spanning-create case is green on the baseline, so it does not discriminate; the guard stays green on both arms.
+
+Three runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, all `merge_only`, each pre-registered in its `expected.md`. They cover the amended surface definition (one entity reached through two entry points is one surface when the functionality is not usable through either alone, two when each is usable on its own; the test is value) and the first-slice rule's reconciliation with the cross-surface reason (a create criterion spanning two surfaces stays with the surface that ships second). Each runs `/craft:slice spec/<name> --unattended` and grades the written parent's `**Covers:**` line and the covers-gate call's `--covers` list.
+
+| Case | Fixture | Expected slice | Expected on the unedited prose |
+|---|---|---|---|
+| `slice-takes-a-ui-and-the-api-it-needs-as-one-surface` | `reservation-book`: a Reservations page (AC1 list, AC2 add) and `/api/reservations` (AC3 GET, AC4 POST); the Problem says the page does nothing without the API and the API has no consumer yet | AC1, AC2, AC3, AC4 | red |
+| `slice-leaves-a-create-criterion-spanning-two-surfaces-to-the-second-surface` | `team-notes`: `notes` group (AC1 list, AC2 show, AC3 add that also publishes to the feed) and a separate web feed (AC4 post, AC5 remove); both usable alone, the command group first, no create criterion on it other than AC3 | AC1, AC2; not AC3, AC4, AC5 | red, moderate confidence (the unedited cross-surface reason could also hold AC3 back) |
+| `slice-still-splits-two-independently-usable-entry-points-to-one-entity` | `ticket-queue`: `deskq tickets` group (AC1-AC3) and `/tickets` API (AC4-AC6), each documented as used alone by a different consumer | AC1-AC3 or AC4-AC6, never a mix | green (a guard: the edit must not over-merge) |
+
+Prose fingerprints (`git hash-object`) of the baseline: `skills/_shared/slice.md` `cf1033cb66351a7dedb3b74be88290ec2fe5a923`, `skills/slice/SKILL.md` `d69caaeaad33b56fe461bd25e1c0832a13bdd60b`.
+
+Bar: baseline 2 runs as the portage-eval shim decides; treatment bar 3 of 3 runs, which the shim decides at 2, recorded as run and not as a met 3 of 3; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. No grader reads rule text and none is a judge.
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| UI-and-API case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 3 | red | **red on the gate, runs 0 / 1 / 0.5** (request `local-itf95b53uphr`): the third run split the page from the API as the unedited rule says (both covers graders failed); the second merged them anyway, on the Problem's account of the API; the first created no slice at all (every grader failed, the final line included), so it ended some other way the deleted trace cannot show |
+| spanning-create case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 | red | **green, 1/1: does not discriminate.** The unedited cross-surface reason already held AC3 back from the command group's first slice, so the first-slice sentence's overreach did not bite in practice; the edit's reconciliation is pinned by wording only, and the case stays as a regression guard; `local-itf95b53uphr` |
+| guard case | baseline | slice.md `cf1033c…`, SKILL.md `d69caae…` | 2 | green | **green, 1/1**, as a guard should be; `local-itf95b53uphr` |
+| all three cases | treatment | slice.md `0869634…`, SKILL.md `d69caae…` | 2 each (runner stopped once decided) | 3 of 3 | **green, every grader in every run** (score 1/1 on all three); request `local-5lmmtrg8t5o5`. The guard staying green shows the edit does not merge independently usable entry points |
+| all three cases | all-carriers mutation | slice.md `cf1033c…` | — | red | **the baseline arm, by identity**: reverting the edit restores the baseline fingerprint; not run again |
+
+### Carrier mutations
+
+| Probe | What it removes | UI-and-API case result | Reading |
+|---|---|---|---|
+| surface sentence | the new two-entry-points sentences in `skills/_shared/slice.md`'s surface section, back to "One entity reached through two entry points is two surfaces."; the first-slice reconciliation stays; `skills/slice/SKILL.md` carries no copy of the rule | **red**, 0.5/0.5 (request `local-9oala3xxhmd7`): both runs split the page from the API and failed both covers graders | the merge depends on the new surface sentence. Restored; byte-identical to the edit |
+
+The first-slice reconciliation was not probed: no case discriminates it (the spanning-create case is green on the baseline).
+
+
+## Cases: polish stays out of the core slice and is offered as a recommendation (2026-11-19)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-19. Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only`, each pre-registered in its `expected.md`. They cover the core and polish rule: a criterion is polish only when every one of its surface's read, create and mutate criteria can be met without it, a surface's polish criteria stay out of the slice covering its core, and the polish slice is offered together as a recommendation with its reason. Each runs `/craft:slice spec/recipe-box --unattended` on the `recipes` command group (AC1 list, AC2 add, AC3 edit, AC4 delete; AC5 sort the list by a column, AC6 colour entries by tag).
+
+| Case | Fixture | Expected slice | Expected on the unedited prose |
+|---|---|---|---|
+| `slice-leaves-polish-out-of-the-core-slice` | nothing shipped; the Problem says sorting and colouring are conveniences and the list is usable without them | AC1, AC2, AC3, AC4; neither AC5 nor AC6 | red, moderate to high confidence (the unedited rule takes every open criterion of the surface) |
+| `slice-states-a-polish-slice-as-a-recommendation-with-its-reason` | AC1 to AC4 shipped on the `## Slices` ledger with a `done` parent; AC5 and AC6 remain | AC5 and AC6 together; statement recommends the slice with a concrete reason (llm grader, `focus: trace`, over the final message, which the prompt asks to restate the statement) | green, moderate confidence: the unedited Interface leverage text already says to state a polish pick and its reason as a recommendation; kept as a guard if so |
+
+Prose fingerprints (`git hash-object`) of the baseline: `skills/_shared/slice.md` `0869634f4df7482894d53ffbd61eaad8f18668e2`, `skills/slice/SKILL.md` `d69caaeaad33b56fe461bd25e1c0832a13bdd60b`.
+
+Bar: baseline as the portage-eval shim decides; treatment bar 3 of 3 runs, which the shim decides at 2, recorded as run and not as a met 3 of 3; one rerun of a failed batch permitted and reported as such; a judge that disagrees across runs is tightened, not rerun away. The recommendation case's judge reads the final message only, not rule text.
+
+Baselines (request `local-6vc0mo9mlsi3`, 2026-11-19, on the fingerprints above):
+
+| Case | Baseline | Reading |
+|---|---|---|
+| `slice-leaves-polish-out-of-the-core-slice` | **red**, 0.5/0.5 (2 runs, the shim stops once decided) | both covers graders failed in both runs; the chooser took all six criteria |
+| `slice-states-a-polish-slice-as-a-recommendation-with-its-reason` | green on the gate, runs 0.8 / 1 / 1 | the first run failed `the-statement-offers-the-polish-slice-as-a-recommendation-with-its-reason`; both covers graders passed in every run. It discriminates weakly (one run of three) |
+
+Treatment and probes (all carriers back to the baseline, the core and polish carriers only, the recommendation carriers only):
+
+| Arm | Polish-out-of-core case | Recommendation case |
+|---|---|---|
+| treatment (slice.md `2b29404…`, SKILL.md `423ffa8…`; request `local-xy4w0qx8l8pu`) | **green, 1/1**, every grader in both runs | **green, 1/1**, every grader in both runs |
+| all carriers removed | the baseline arm, by identity (the patch is the exact reverse of the prose edit): red 0.5/0.5 | the baseline arm, by identity: one judge miss in three |
+| probe: core and polish carriers removed (the definition and carve-out, every whole-capability clause restored to "every one of its open criteria"; the recommendation wording kept) | **red on the gate, runs 1 / 0.5 / 0.75** (request `local-w9j6iurbkrbu`): the second run took all six criteria and failed both covers graders; the first left polish out anyway, carried by the surviving recommendation wording and the Problem's "conveniences" sentence; the third failed only `final-line-is-slice-chosen`. The rule is attributable in one run of three | not run |
+| probe: recommendation carriers removed (the recommended-slice sentence, the Interface leverage section's existing "state a polish-phase pick … as a recommendation" sentence, step 7's pointer and both step 8 clauses; the core and polish definition kept) | not run | **red, 0.8/0.8** (request `local-x3ms2eixrpoc`): both runs failed `the-statement-offers-the-polish-slice-as-a-recommendation-with-its-reason`; the covers graders passed. The recommendation depends on this wording, the older sentence included |
+
+Every probe was restored and checked byte-identical to the edit. The edit's sites were found by reading the dispatched carrier lines, not by a grep count.
+
+### Close-out regression (2026-11-19)
+
+On the final prose (`skills/_shared/slice.md` `2b29404…`, `skills/slice/SKILL.md` `423ffa8…`), request `local-9cbgpkjvygce`: every runner case that measures either edited file (42, core and `merge_only`) and the plan and drive cases that read the quality bar's reworded "Small" (14), 56 in all. **All 56 pass the gate**; 52 passed every run, and four passed 2 of 3. Each failing run was read from the judge evidence the run record keeps, and none bears on slice selection:
+
+| Case | Runs | Failing run |
+|---|---|---|
+| `failed-check-returns-its-criterion-to-the-candidates` | 0.83 / 1 / 1 | the slice pass stopped because the craft scripts could not find `lore` on `PATH` |
+| `slice-amends-the-spec-on-a-free-text-answer-that-changes-it` | 0.57 / 1 / 1 | the run declined to amend the spec without `/lore:correct`, which the craft-only eval sandbox does not expose |
+| `slice-takes-an-all-reads-surface-as-one-ordinary-slice` | 1 / 0.8 / 1 | the statement judge's literal-opening requirement, as diagnosed below |
+| `driver-closes-a-stuck-slice-instead-of-re-planning-with-a-build-checkpoint` | 0.8 / 1 / 1 | the closing message omitted the `/portage:pull_request` command; judge votes split 1-2; the driver's stuck close makes no slice choice |
+
+The regression cost 139.12 USD. Two sentences the task's review flagged were then scoped to core criteria (the whole-capability sentence and the all-reads sentence; `skills/_shared/slice.md` `b8fe8d0…` after the fix), and the four cases that read them re-ran (request `local-u59a4m3gjxor`): the polish-out, polish-recommendation and one-entity canary cases green 1/1; the all-reads case 0.8 / 1 / 1 on the same judge.
+
+**The all-reads statement judge, diagnosed.** The judge evidence of the failing runs (`local-2bsgme7ve23r`, `local-pqpgoc96r4j0`) shows ordinary slices over all three reads with a value claim and a way to try it, phrased "you'll be able to" and "To try it". The judge failed them for not opening with the literal "You will be able to" and "Try it" sentences, so it measures sentence form, not whether the slice is an enabler. The tightened body grader that was reverted most likely failed for the same reason: the written value claim paraphrased the opening. The case stays a regression guard; the judge's literal-opening requirement is a follow-up.
+
+### After the whole-change review (2026-11-19)
+
+The whole-change review's folded fixes (step 8 counts the unchosen surfaces' criteria, the polish-ordering sentence reworded and then scoped to surfaces with only polish left, a set-aside criterion stated not to be a cut, the commitment guard's "slices" repointed to "work") were re-measured on the cases that read those sentences. On the prose after the first four fixes, request `local-7mh75pdzstdt`: `slice-states-a-polish-slice-as-a-recommendation-with-its-reason`, `slice-sets-aside-what-needs-an-outside-account` and `slice-builds-against-a-stand-in-instead-of-setting-aside` green 1/1 each. On the final prose (`skills/_shared/slice.md` `2265630…`, `skills/slice/SKILL.md` `516322e…`), request `local-tm7mlk6zv9li`: the polish-recommendation and polish-out-of-core cases green 1/1 each. No case discriminates these wording fixes; the runs show they changed none of the measured answers.
+

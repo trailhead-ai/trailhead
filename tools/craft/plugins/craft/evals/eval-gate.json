@@ -626,6 +626,96 @@
         "skills/_shared/execute.md"
       ],
       "merge_only": true
+    },
+    "slice-takes-all-four-operations-on-one-surface-as-one-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ]
+    },
+    "slice-ignores-a-criterion-that-argues-for-its-own-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-one-of-two-fresh-surfaces": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-the-other-surface-after-one-has-shipped": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-the-surface-whose-earliest-phase-comes-first": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-an-all-reads-surface-as-one-ordinary-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-takes-a-ui-and-the-api-it-needs-as-one-surface": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-leaves-a-create-criterion-spanning-two-surfaces-to-the-second-surface": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-still-splits-two-independently-usable-entry-points-to-one-entity": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-leaves-polish-out-of-the-core-slice": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-states-a-polish-slice-as-a-recommendation-with-its-reason": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }

@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: slice-takes-all-four-operations-on-one-surface-as-one-slice
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh
