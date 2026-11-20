@@ -5888,14 +5888,14 @@ Prose fingerprints (`git hash-object`): unedited `skills/plan/SKILL.md` `3ef145b
 
 ## Cases: the first-slice rule decides on its own, and a set-aside create criterion still counts as creation (2026-11-20)
 
-**Status: not yet run.** The two cases are written and pre-registered in their `expected.md`; no arm has run. The prose half (the sentence in `skills/_shared/slice.md` saying a set-aside create criterion still counts as creation) is not yet edited.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. The first-slice case is green on the current prose and red with the first-slice rule removed, so it is the first case in which that rule alone decides the answer. The set-aside case is red on the unedited prose and green on the final prose. The four existing slice cases that border these rules stay green.
 
 Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only` (core cases for both files already exist). They resolve two follow-ups of the spec: an eval case where removing the first-slice rule alone changes the answer, and the ruling that a set-aside create criterion still counts as creation for the first-slice and all-reads rules.
 
 | Case | Fixture | Expected slice |
 |---|---|---|
 | `slice-first-slice-reads-and-creates-when-an-unknown-governs-the-create` | `notes` group: AC1 list (also prints the notes the old `jot` tool saved), AC2 add; an `## Open Questions` entry says whether two terminals adding at once lose a note must be learned before anything that writes is built | AC1, AC2 (the unknown cannot move the create criterion out of the first slice); with the first-slice rule removed, AC1 only |
-| `slice-treats-a-set-aside-create-criterion-as-creation` | `wallet` group: AC1 list, AC2 show (both read only what add saves), AC3 add that needs a live merchant account with the card network, which the company does not have and which has no test version | an enabler whose written justification names AC3, with no `**Covers:**` line and no covers-gate call; on the unedited prose an ordinary slice over AC1 and AC2 |
+| `slice-treats-a-set-aside-create-criterion-as-creation` | `wallet` group: AC1 list, AC2 show (both read only what add saves), AC3 add that needs a live merchant account with the card network, which the company does not have and which has no test version | an enabler whose written justification names AC3, with no `**Covers:**` line and no covers-gate call; on the unedited prose an ordinary slice over AC1 and AC2 was expected, and the runs chose no slice at all (below) |
 
 Prose fingerprints (`git hash-object`) when the cases were written: `skills/_shared/slice.md` `1cdf4bf2e21e2d9308ac80dcb35f936fab641dd9`, `skills/slice/SKILL.md` `516322e39e3b008a1a1f21f28c9902dbb881949a`.
 
@@ -5905,7 +5905,12 @@ Bar: first-slice case, current prose green and first-slice-rule-removed prose re
 
 | Case | Arm | File fingerprint | Runs | Bar | Result |
 |---|---|---|---|---|---|
-| first-slice case | current prose | — | — | green | not yet run |
-| first-slice case | first-slice-rule removed | — | — | red | not yet run |
-| set-aside case | unedited prose | — | — | red | not yet run |
-| set-aside case | edited prose | — | — | green | not yet run |
+| first-slice case | current prose | slice.md `1cdf4bf…`, SKILL.md `516322e…` | 2 (runner stopped once decided) | green | **green, 1 / 1**; request `local-phsq8370un78` |
+| first-slice case | first-slice-rule removed (the rule paragraph in "The first slice on a surface", `slice.md` 119-125, and step 7's pointer to it, `SKILL.md` 796-797; the heading and the all-reads paragraph stay) | — | 2 | red | **red, 0.5 / 0.5**: both covers graders failed in both runs, the chooser cut the create criterion for the unknown and took AC1 alone; request `local-r41k0oy8yxfh`. The rule decides this case on its own |
+| set-aside case | unedited prose | slice.md `1cdf4bf…`, SKILL.md `516322e…` | 2 | red | **red, 0.2 / 0.2**: no slice parent was created and the pass did not end `slice-chosen`. The chooser set AC3 aside, found no consuming slice for an enabler, and stopped, rather than shipping the reads as an ordinary slice as `expected.md` predicted; the never-gate-the-reads grader passed. Request `local-phsq8370un78` |
+| set-aside case | first edit | slice.md `04be108…`, SKILL.md `fb5b820…` | 3 | green | **2 of 3**, runs 0.8 / 1 / 1: the first run wrote the enabler but named the set-aside criterion without its identifier, failing the names-AC3 grader. The ruling then said the justification names the criterion by its identifier. Request `local-37132qf1ltun` |
+| set-aside case | final | slice.md `42238ba…`, SKILL.md `fb5b820…` | 2 (runner stopped once decided) | green | **green, 1 / 1**; request `local-tj1pdez80xwu` |
+| set-aside case | all-carriers probe (the ruling's commits reversed) | slice.md `1cdf4bf…`, SKILL.md `516322e…` | — | red | **red, by identity with the unedited arm**: the reversal restores the unedited fingerprints |
+| first-slice case and four bordering cases (`slice-takes-an-all-reads-surface-as-one-ordinary-slice`, `slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first`, `slice-sets-aside-what-needs-an-outside-account`, `slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates`) | first edit | slice.md `04be108…`, SKILL.md `fb5b820…` | 2 each | green | **green, 1 / 1 on all five**; request `local-37132qf1ltun`. `slice-sets-aside-what-needs-an-outside-account` also green on the final prose (`local-tj1pdez80xwu`) |
+
+Bar note: every green arm ran 2 of 2, not the 3 of 3 the bar names, as the shim decides at 2.
