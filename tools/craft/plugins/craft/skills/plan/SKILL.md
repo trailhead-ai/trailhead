@@ -674,11 +674,12 @@ When the change is too large, narrow the slice rather than hand it over as it is
    whole point") is data about the criterion and moves no cut. Make a cut only where the test
    passes; where none passes, take the no-cut stop below.
 
-**A criterion the state-coverage floor makes core is always kept.** `../_shared/slice.md` ships a
-surface's access check in the slice that first makes the surface reachable by more than one
-principal, so that check is core even when a cut by usefulness would let it wait. The
-`**Narrowed:**` line never lists it, the reduced list the covers gate certifies includes it, and no
-child task is written to remove or defer it.
+**A criterion that makes a surface safe to reach is always kept.** A surface reachable by more than
+one principal ships its access check in the slice that first makes it reachable, so that check is
+core even when a cut by usefulness would let it wait. (`../_shared/slice.md` requires the same for a
+visual surface under "State coverage: the floor a visual surface owes"; the principle here is not
+limited to visual surfaces.) The `**Narrowed:**` line never lists it, the reduced list the covers
+gate certifies includes it, and no child task is written to remove or defer it.
 2. **Decompose only the kept criteria,** and settle the sizes again for that set. No child task is
    written, titled or delivering, for a dropped criterion.
 3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below,
@@ -698,10 +699,12 @@ slice itself, naming the criteria involved by number and why no stopping point e
 settled above and which criterion needs which), with these options, each saying what choosing it
 costs: build it as one large pull request (the review burden the norms exist to avoid); reshape the
 slice or the spec (the work of changing the record, and the spec change goes through
-`/lore:correct`); drop the slice (nothing is delivered, and its criteria stay uncovered). List the
-safest option first and mark the one you recommend; for this question that order holds in place of
-the recommended-first order the escalation question otherwise uses. Reshaping is the safest option:
-it writes nothing and changes no record until the operator decides what the slice should be.
+`/lore:correct`); drop the slice (nothing is delivered, its criteria stay uncovered, and because the
+chooser never cuts for size, `/craft:slice` re-picks the same whole surface and planning meets this
+same stop unless the slice or the spec is reshaped). List the safest option first and mark the one
+you recommend; for this question that order holds in place of the recommended-first order the
+escalation question otherwise uses. Reshaping is the safest option: it writes nothing and changes no
+record until the operator decides what the slice should be.
 
 - **Attended:** put the blocking question `../_shared/escalation.md` defines under "The question"
   (what went wrong, what is at stake, the options with their costs, free text; plain text where the
@@ -710,8 +713,15 @@ it writes nothing and changes no record until the operator decides what the slic
     write the `**Reviewability:**` line from the sizes settled above, saying they exceed the norms.
   - **Reshape the slice or the spec:** stop. Plan writes nothing; the change to the slice or the
     spec goes through `/lore:correct`, and planning starts again against the corrected record.
-  - **Drop the slice:** set the parent task's status to `dropped` and write no child task. Its
-    criteria stay uncovered, so `/craft:slice` offers them again on its next run.
+  - **Drop the slice:** plan writes no status and no child task; the parent stays as it is. The drop
+    belongs to the slice ritual's existing drop procedure (`../slice/SKILL.md`, the open-slice
+    guard), which the operator runs: `lore record update task/<parent-name> --status dropped
+    --diff`, piping a unified diff that appends the why as a note, in the same invocation as the
+    flip, run through the credential-pattern scrub in `../_shared/security.md` first; then
+    `found_work.py reopen-abandoned --spec spec/<spec-name> --vault <vault> --session slice`, which
+    returns the follow-ups step 1 folded into this slice to open. Say both commands in the reply.
+    The criteria stay uncovered, and `/craft:slice` re-picks the same whole surface on its next run,
+    so planning meets this same stop again unless the slice or the spec is reshaped.
 - **Unattended:** this is a fifth *parked* stop, and the run carries out none of the options: no
   answer arrives in this session. Park a `Q<n>` as "How a stop is parked" says, with those options
   and exactly one marked `(recommended)`; Progress says planning stopped before any child task was
@@ -750,7 +760,7 @@ Say which in one line, run it through the credential-pattern scrub, and write th
 way as step 1's:
 
   ```
-  {"transition": "reopen", "parent": "task/<parent-name>", "spec": "spec/<spec-name>", "entries": ["F2"], "reason": "<why building it here would balloon the slice>"}
+  {"transition": "reopen", "parent": "task/<parent-name>", "spec": "spec/<spec-name>", "entries": ["F2"], "reason": "<why building it here would balloon the slice, or its work went with the criteria the cut dropped>"}
   ```
 
   ```sh
@@ -759,12 +769,12 @@ way as step 1's:
 
 The entry goes back to `open` for a later slice, and no child names it. This reopen is a routine
 decision under the rule, so it is not asked, and **under `--unattended` nothing here is asked:**
-decide it by this test and log it as a decision in the run block, naming the entry and the balloon
-reason. An entry that the rule says to ask about is, under `--unattended`, given back the same way
-with `reopen`, its reason beginning with the trigger in the words the rule's "No one to answer"
-section gives, and the closing message lists it first among what needs the operator. A failed call
-is reported in the closing message with its `reason-code:` token (and the `retry:` line on exit 3);
-the entry stays folded, so a child must name it.
+decide it by this test and log it as a decision in the run block, naming the entry and the reason
+(the balloon reason or the narrowing). An entry that the rule says to ask about is, under
+`--unattended`, given back the same way with `reopen`, its reason beginning with the trigger in the
+words the rule's "No one to answer" section gives, and the closing message lists it first among what
+needs the operator. A failed call is reported in the closing message with its `reason-code:` token
+(and the `retry:` line on exit 3); the entry stays folded, so a child must name it.
 
 Step 8 then removes each reopened entry from the parent's `**Folds:**` line.
 
@@ -1128,15 +1138,23 @@ as an unrelated adjustment to the plan, goes through this step's ordinary path a
 it is. To redo the write, put each dropped id back on the coverage line it came off, so the coverage
 line plus the `**Narrowed:**` ids is the list before narrowing again; for keeping the whole slice
 remove the `**Narrowed:**` line, and for a re-cut rewrite it to the new dropped ids and take those
-off instead; certify the resulting coverage with the covers gate again, rewrite the
-`**Reviewability:**` line from the sizes that now hold, and bring the child tasks to match (update
-the ones that stay, create those the restored criteria need, and mark a child dropped whose work
-left the slice). A folded entry that step 7 gave back because its work went with the dropped
-criteria and whose criteria are now restored is folded back in: write a `fold` transition for it
-through `found_work.py`, as step 1 writes it, put it on the parent's `**Folds:**` line again, and
-recreate the child that resolves it with the `Resolves` line in its **Delivers**. When the restore
-added children, step 8.5's council runs again on the restored plan before presenting. Then present
-again.
+off instead, choosing them by step 7's cut rules (the stop-here test, the full deferrable test, and
+the always-kept criterion) and giving back, through step 7's reopen with the narrowing as its
+reason, each folded entry whose work went with the newly dropped ids; certify the resulting coverage
+with the covers gate again, rewrite the `**Reviewability:**` line from the sizes that now hold, and
+bring the child tasks to match (update the ones that stay and create those the restored criteria
+need). Plan writes no status, so a child whose work left the slice is not dropped here: name it in
+the presentation, give the operator the drop to run
+(`lore record update task/<child-name> --status dropped --diff`, the scrubbed why-note appended in
+the same invocation, the form `../_shared/execute.md` gives for dropping a child task), and print no
+handoff prompt until `lore record show` reads each such child as `dropped`. A folded entry that step
+7 gave back because its work went with the dropped criteria and whose criteria are now restored is
+folded back in: write a `fold` transition for it through `found_work.py`, as step 1 writes it, put
+it on the parent's `**Folds:**` line again, and recreate the child that resolves it with the
+`Resolves` line in its **Delivers**. When the restore added children, step 8.5's council runs again
+on the restored plan before presenting; that second pass replaces the `## Council Review` section,
+written as a `--diff` hunk, so the section the hard-floor gate below reads holds the latest pass
+alone. Then present again.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print

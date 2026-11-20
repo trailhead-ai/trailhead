@@ -109,21 +109,19 @@ def test_coverage_lines_read_the_same_wherever_the_narrowed_line_sits(partial, _
 
 
 @pytest.mark.parametrize("partial, _derived", CASES)
-def test_the_gates_certify_a_parent_that_records_what_it_dropped(partial, _derived, run_gate):
-    body = parent_body(partial=partial)
-    coverage = ParentCoverage(body)
-    flags = ["--covers", ", ".join(coverage.covers)]
-    if coverage.partial:
-        flags += ["--partial-covers", ", ".join(coverage.partial)]
+def test_the_observation_gate_certifies_a_parent_that_records_what_it_dropped(partial, _derived, run_gate):
+    code, _out, err = run_gate(observation_gate, [], parent_body(partial=partial))
 
-    results = {
-        "covers_gate": run_gate(covers_gate, flags, SPEC_BODY),
-        "observation_gate": run_gate(observation_gate, [], body),
-    }
+    assert code == 0, err
 
-    assert {name: code for name, (code, _out, _err) in results.items()} == {
-        "covers_gate": 0, "observation_gate": 0,
-    }, results
+
+def test_the_observation_gate_still_refuses_a_dropped_criterion_written_back_onto_covers(run_gate):
+    body = parent_body(partial=None).replace("**Covers:** AC1, AC2, AC3", "**Covers:** AC1, AC2, AC3, AC4")
+
+    code, _out, err = run_gate(observation_gate, [], body)
+
+    assert code == 1, err
+    assert "AC4" in err
 
 
 @pytest.mark.parametrize("partial, derived", CASES)
