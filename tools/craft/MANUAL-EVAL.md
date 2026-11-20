@@ -5782,7 +5782,7 @@ Spend at runner list price plus judge votes: about 207.3 USD for the baseline (c
 
 
 
-## Case: a plan orders its tasks by phase and records a reviewability claim (2026-11-19)
+## Case: a plan orders its tasks by phase and records a reviewability claim (2026-11-20)
 
 **Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. The baseline is red, the treatment is green, each rule's all-carriers probe turns the case red on that rule's grader, and the three existing plan-ready cases stay green on the edited prose.
 
