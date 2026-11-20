@@ -33,7 +33,7 @@ already counted; a run without a valid ``startedAt`` is never a duplicate). A co
 when a selected case maps to its (case, model).
 
 Hostile input. A runner-output file is read with ``O_NOFOLLOW | O_NONBLOCK``, at most ``MAX_FILE_BYTES``,
-and skipped (tallied by reason, never printed) when it is not a regular file (``not-regular``), is over the
+and skipped (tallied by reason, never printed) when it is not a regular file or cannot be read (``not-regular``), is over the
 size bound (``too-large``), is past the directory's ``max_dir_bytes`` budget (``directory-bound``), is not
 JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own limit (``too-deep``), has a
 shape the reader does not take or a case name outside the mapping's shape (``bad-shape``), or holds a
@@ -133,21 +133,33 @@ def _plugins_of(suite: dict) -> list[str] | None:
     return names if all(isinstance(n, str) and CASE_NAME.match(n) for n in names) else None
 
 
+def _slurp(f, limit: int) -> bytes:
+    return f.read(limit)
+
+
 def _read_file(path: Path, budget: int) -> tuple[str | None, object, int]:
     """``(skip reason or None, parsed JSON, bytes read)``."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return "not-regular", None, 0
-    with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if not stat.S_ISREG(st.st_mode):
-            return "not-regular", None, 0
-        if st.st_size > MAX_FILE_BYTES:
-            return "too-large", None, 0
-        if st.st_size > budget:
-            return "directory-bound", None, 0
-        data = f.read(MAX_FILE_BYTES + 1)
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        os.close(fd)
+        return "not-regular", None, 0
+    if not stat.S_ISREG(st.st_mode):
+        os.close(fd)
+        return "not-regular", None, 0
+    try:
+        with os.fdopen(fd, "rb") as f:
+            if st.st_size > MAX_FILE_BYTES:
+                return "too-large", None, 0
+            if st.st_size > budget:
+                return "directory-bound", None, 0
+            data = _slurp(f, MAX_FILE_BYTES + 1)
+    except OSError:
+        return "not-regular", None, 0
     if len(data) > MAX_FILE_BYTES:
         return "too-large", None, len(data)
     try:

@@ -451,6 +451,43 @@ class TestHostileRunnerOutputs:
         os.symlink(target, fx.runs / "link.json")
         self._check(fx, "not-regular")
 
+    def test_a_directory_named_like_a_runner_output_is_skipped(self, fx):
+        self._good(fx)
+        (fx.runs / "x.json").mkdir()
+        self._check(fx, "not-regular")
+
+    def test_a_directory_named_like_a_runner_output_is_skipped_through_the_cli(self, fx, capsys):
+        self._good(fx)
+        (fx.runs / "x.json").mkdir()
+        rc = dispatch.main(["eval-gate", "cost", "--repo", str(fx.root), "--plugin", PLUGIN,
+                            "--runs-from", str(fx.runs)])
+        out = capsys.readouterr().out
+        assert rc == 0 and "not-regular 1" in out
+
+    @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="needs /proc/self/fd")
+    def test_a_skipped_directory_and_a_failed_read_leave_no_descriptor_open(self, fx, monkeypatch):
+        (fx.runs / "x.json").mkdir()
+        runner_file(fx.runs, "eio.json")
+        monkeypatch.setattr(cost, "_slurp", lambda f, n: (_ for _ in ()).throw(OSError(5, "EIO")))
+        before = len(os.listdir("/proc/self/fd"))
+        for name in ("x.json", "eio.json"):
+            assert cost._read_file(fx.runs / name, cost.MAX_DIR_BYTES)[0] == "not-regular"
+        assert len(os.listdir("/proc/self/fd")) == before
+
+    def test_a_read_error_on_a_regular_file_is_skipped(self, fx, monkeypatch):
+        self._good(fx)
+        runner_file(fx.runs, "eio.json", case="alpha-EVILMARKER", costs=((50.0, 0.0),))
+        real = cost._slurp
+
+        def flaky(f, n):
+            data = real(f, n)
+            if b"EVILMARKER" in data:
+                raise OSError(5, "Input/output error")
+            return data
+
+        monkeypatch.setattr(cost, "_slurp", flaky)
+        self._check(fx, "not-regular")
+
     def test_an_oversized_file_is_skipped(self, fx):
         self._good(fx)
         big = runner_file(fx.runs, "big.json", costs=((50.0, 0.0),))
