@@ -396,6 +396,7 @@ against. Order so that:
 - Tasks with unproven unknowns come first
 - Each task produces something testable
 - Later tasks build on validated earlier ones
+- Tasks run in the phase order `skills/plan/SKILL.md`'s step 7 sets
 
 Every task must include a test contract — the behaviors to prove with failing tests before writing
 implementation code.

@@ -11,6 +11,10 @@ per task instead. -->
 **Delta design:** <!-- High-level design of the change: the components touched, the data flow,
 key constraints. Keep it brief — the child tasks carry the per-task detail. -->
 
+**Reviewability:** <!-- One line on why this change fits one reviewable pull request, naming the
+concrete sizes judged: how many tasks, files and eval cases, and how many surfaces — not the
+verdict alone. Written on a slice-rooted parent. -->
+
 **Given Axioms (ground truth this plan rests on):**
 <!-- The facts this plan depends on, each as a citation: a file:line reference, a recorded
 decision/ADR, or a constraint the user stated. If you'd have to investigate to know it's true,

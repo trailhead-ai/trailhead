@@ -635,6 +635,9 @@ Order tasks so that:
 - Tasks with unproven unknowns come first
 - Each task produces something testable
 - Later tasks build on validated earlier ones
+- Tasks run in phase order: tasks that read come before tasks that create, and those come before
+  tasks that change or delete. A task that proves an unknown still goes ahead of the phase it
+  governs.
 
 **Every task follows TDD.** Each task description must include the test contract — the behaviors to
 prove with failing tests before writing implementation code. Tasks that skip or defer tests are not
@@ -732,24 +735,27 @@ that existing parent, exactly as the topic-rooted path does below.
      material that ships), write the combined body to a `mktemp` file with the file-writing tool and
      feed it in by redirect, `lore record update <parent-name> < <body-path>`, as
      `_shared/unattended.md`'s Record writes rule says, and remove the file afterwards when removal
-     is available. Render the same template sections, append them after the preserved sections, then
-     write the combined body — never `lore record create`, which would produce the second parent
-     this path exists to avoid. **Under `--unattended`, write the planned-tasks marker next**,
-     before the first child: one confined block write that adds `**Planned tasks:**` and the child
-     titles in order, as `_shared/unattended.md` (Planned tasks marker) shapes it.
+     is available. Render the same template sections, append them after the preserved sections, fill
+     the `**Reviewability:**` line from the sizes step 7 settled (in attended and unattended runs
+     alike), then write the combined body — never `lore record create`, which would produce the
+     second parent this path exists to avoid. **Under `--unattended`, write the planned-tasks marker
+     next**, before the first child: one confined block write that adds `**Planned tasks:**` and the
+     child titles in order, as `_shared/unattended.md` (Planned tasks marker) shapes it.
 2. **Create each child task.** Render craft's child-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the parent
-   (the slice parent, on the slice-rooted path) and ordered after any task it builds on — `lore
-   record create --kind task --title '<task topic>' --status ready --parent <parent-name>
-   --depends-on <earlier-task-name> --vault <vault> < <body-path>`, the body written to a `mktemp`
-   file with the file-writing tool and read by redirect. Under `--unattended` this is required: the
-   child body is plan text derived from vault and web material, so it is scrubbed first, flattened
-   to labelled single lines where it is a ritual-written section (`_shared/unattended.md`), and the
-   task topic in `--title` is single-quoted after quotes and every character outside letters,
-   digits, spaces, `.`, `:`, `/`, `_` and `-` are stripped from it; the file is removed after each
-   create when removal is available. Create children at `ready`; the `depends-on` edges — not the
-   status — gate which are runnable, so a later task stays un-runnable until its dependencies are
-   `done`. Omit `--depends-on` for tasks with no predecessor.
+   (the slice parent, on the slice-rooted path) and ordered after any task it builds on in step 7's
+   phase order, never spec order — `lore record create --kind task --title '<task topic>' --status
+   ready --parent <parent-name> --depends-on <earlier-task-name> --vault <vault> < <body-path>`, the
+   body written to a `mktemp` file with the file-writing tool and read by redirect. Under
+   `--unattended` this is required: the child body is plan text derived from vault and web material,
+   so it is scrubbed first, flattened to labelled single lines where it is a ritual-written section
+   (`_shared/unattended.md`), and the task topic in `--title` is single-quoted after quotes and
+   every character outside letters, digits, spaces, `.`, `:`, `/`, `_` and `-` are stripped from it;
+   the file is removed after each create when removal is available. Create children at `ready`; the
+   `depends-on` edges — not the status — gate which are runnable, so a later task stays un-runnable
+   until its dependencies are `done`. A task that creates depends on the read task before it, and a
+   task that changes or deletes depends on the create or change task before it. Omit `--depends-on`
+   for tasks with no predecessor.
 3. **Verify the graph** with `lore task graph <parent-name>` — confirm the containment subtree,
    `depends-on` edges, and per-task statuses match your task ordering before handing off. **With
    folded entries, remove each one step 7 reopened from the parent's `**Folds:**` line** (the line
@@ -800,6 +806,10 @@ sections — fill each in:
   constraint stated by the user. If you'd need to investigate to know it's true, it belongs in
   **Known Unknowns**, not here.
 - **Known Unknowns** — checkbox list; each notes which child task it blocks.
+- **Reviewability** — one line on why the planned change fits one reviewable pull request, naming
+  the concrete sizes judged: how many tasks, files and eval cases, and how many surfaces it touches
+  — not the verdict alone. Write it in the slice-rooted parent body, in attended and unattended runs
+  alike.
 - **`## Flow-out`** — the knowledge-flow-out completion gate (ticked at execution time before the
   parent goes `done`); leave the checklist unticked here.
 
@@ -1013,9 +1023,10 @@ and no handoff command is printed.** Confirm every Critical from step 8.5 is dis
 `outcome: plan-ready task/<parent-name> parked=0`, or on `needs-a-decision` as The end says when a
 question is parked.
 
-Share the plan path and a short summary, then wait for explicit user approval before writing any
-implementation code. Do **not** call `ExitPlanMode` — this skill runs outside plan mode so the plan
-can be written directly into the vault.
+Share the plan path and a short summary, with the parent's `**Reviewability:**` line shown as
+written, then wait for explicit user approval before writing any implementation code. Do **not**
+call `ExitPlanMode` — this skill runs outside plan mode so the plan can be written directly into the
+vault.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print
