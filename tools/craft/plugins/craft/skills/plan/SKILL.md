@@ -715,9 +715,10 @@ it writes nothing and changes no record until the operator decides what the slic
 - **Unattended:** this is a fifth *parked* stop, and the run carries out none of the options: no
   answer arrives in this session. Park a `Q<n>` as "How a stop is parked" says, with those options
   and exactly one marked `(recommended)`; Progress says planning stopped before any child task was
-  written. The question lives only in the block: the final message reports where it is parked and
-  asks the reader nothing. End on `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no
-  child task and no narrowed line.
+  written. The question lives only in the block: the final message reports where it is parked
+  (`Q<n>` on the task) and asks the reader nothing; it does not lay the options or their costs out
+  again. End on `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no child task and no
+  narrowed line.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
