@@ -988,6 +988,32 @@
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
       ]
+    },
+    "unattended-plan-narrows-an-oversized-slice": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "skills/_shared/slice.md",
+        "agents/planner.md"
+      ]
+    },
+    "plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/slice.md",
+        "agents/planner.md"
+      ]
+    },
+    "plan-restores-the-whole-slice-when-the-cut-is-rejected": {
+      "measures": [
+        "skills/plan/SKILL.md"
+      ]
+    },
+    "planner-narrows-an-oversized-slice-through-plans-procedure": {
+      "measures": [
+        "agents/planner.md",
+        "skills/plan/SKILL.md"
+      ]
     }
   }
 }

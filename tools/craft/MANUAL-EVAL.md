@@ -5812,3 +5812,27 @@ Each probe ran against this case on the edited prose, then the tree was restored
 |---|---|---|---|
 | phase order | step 7's phase-order rule, step 8's "in step 7's phase order, never spec order" and its creates-depend-on-read sentence, and the planner's pointer | **red**, 0.8 / 0.8 (request `local-njrhaw8p9qqn`): create-after-read failed in both runs | the create-after-read edge depends on the rule; the edit and delete edges stayed green without it, so on this fixture plan orders those unprompted and only the read-before-create edge is attributable to the rule |
 | reviewability | the template field, step 8's slice-rooted write and canonical-sections entry, and step 9's display | **red**, 0.6 / 0.8 (request `local-pn69qkcso9hh`): the reviewability grader failed in both runs; run 1 also missed the final line | the reviewability line depends on these carriers; the final-line miss in one run is incidental to the probe and was not seen on any other arm |
+
+## Case: a plan narrows an oversized slice at a point where the operator could stop (2026-11-20)
+
+**Status: not yet run.** The cases, the shared fixture and the regression test are written and checked offline; no arm has run through the `portage-eval` shim. The prose under test has not been edited.
+
+Four runner cases for `skills/plan/SKILL.md`, `skills/_shared/unattended.md`, `skills/_shared/slice.md` and `agents/planner.md`, all in the core tier: each declares a 900 s timeout, which `eval-gate.json`'s own check refuses for a `merge_only` case. They share one scaffold, `unattended-plan-narrows-an-oversized-slice/fixtures/scaffold.sh`, selected by its `VARIANT` variable (`stop` so far).
+
+| Case | Run as | Pre-registered cut | Expected on the unedited prose |
+|---|---|---|---|
+| `unattended-plan-narrows-an-oversized-slice` (the canary) | `/craft:plan <parent> --unattended` | keep AC1, AC2, AC3; drop AC4, AC5 | red: no narrowing exists, so the narrowed line, the reduced coverage line, the reduced-list gate call, the logged decision and the closing suffix all fail |
+| `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` | `/craft:plan <parent>`, stop at the approval step | same | red: same body graders fail, the final message presents all five criteria |
+| `plan-restores-the-whole-slice-when-the-cut-is-rejected` | same, with the answer "keep the whole slice" given in advance | same cut, then restored | red through the cut-was-made clauses; the three final-state graders (full coverage line, no `**Narrowed:**` line, no partial line) hold vacuously on the baseline |
+| `planner-narrows-an-oversized-slice-through-plans-procedure` | dispatches `craft:planner` on the parent | same | red: coverage stays at five criteria, no `**Narrowed:**` line |
+
+Prose fingerprints (`git hash-object`) of the unedited baseline: `skills/plan/SKILL.md` `09dacdad3db2a38ed998bdad54dc4d2de090a32c`, `skills/_shared/unattended.md` `a1bbc6e4727d005e45296e0be045cec3ba7510e0`, `skills/_shared/slice.md` `2265630e4dfe275b6ad4f64b213ed56d175eca9a`, `agents/planner.md` `71f5c8ea80073e9a503851f2e4b503b82a05e882`, `templates/plan.md` `67bd87a411d3d1777aa78b40b06987c842fe8d29`.
+
+Bar: baseline 3 runs, expected red; treatment 3 of 3 runs, which the shim decides at 2 (recorded as run, not as a met 3 of 3); one rerun of a failed batch permitted and reported as such; the planner case also a mutation arm with only the planner's pointer removed, expected red. The canary: if its treatment runs still disagree after the fixture is tightened, the run stops and the disagreement is reported; the case is never demoted and its bar never lowered. Regression: `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` and `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` stay green.
+
+Offline checks before any run: the two closing-line patterns do not overlap (the existing un-narrowed pattern fails every narrowed sample and the narrowed pattern fails every un-narrowed one), and each body, gate and record grader was run against hand-built tool inputs that satisfy it and ones that inject the failure it guards (a `**Covers:**` line naming a dropped criterion, a `**Partially covers:**` line naming one, a parked `Q<n>`, a child body for the legacy reports).
+
+### Runs
+
+| Arm | Runs | Result | Notes |
+|---|---|---|---|
