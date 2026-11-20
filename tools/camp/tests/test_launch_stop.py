@@ -149,13 +149,19 @@ def test_list_sessions_parses_one_session(monkeypatch) -> None:
     result = stop.Tmux().list_sessions()
 
     assert isinstance(result, stop.SessionListing)
-    assert result.sessions == (stop.TmuxSession(name="camp-feat-a-11112222", windows=3, activity=1700000000, attached=False),)
+    assert result.sessions == (
+        stop.TmuxSession(name="camp-feat-a-11112222", windows=3, activity=1700000000, attached=False),
+    )
 
 
 def test_list_sessions_parses_many_sessions(monkeypatch) -> None:
     from camp.launch import stop
 
-    stdout = "1|1700000000|0|camp-feat-a-11112222\n2|1700000000|0|camp-feat-b-22223333\n5|1700000000|0|not-camp-at-all\n"
+    stdout = (
+        "1|1700000000|0|camp-feat-a-11112222\n"
+        "2|1700000000|0|camp-feat-b-22223333\n"
+        "5|1700000000|0|not-camp-at-all\n"
+    )
     monkeypatch.setattr(
         stop.subprocess, "run", lambda *a, **k: _completed(returncode=0, stdout=stdout)
     )
@@ -337,7 +343,9 @@ def test_a_malformed_row_with_no_delimiter_is_dropped_and_reported(monkeypatch) 
 
     result = stop.Tmux().list_sessions()
 
-    assert result.sessions == (stop.TmuxSession(name="camp-feat-a-11112222", windows=3, activity=1700000000, attached=False),)
+    assert result.sessions == (
+        stop.TmuxSession(name="camp-feat-a-11112222", windows=3, activity=1700000000, attached=False),
+    )
     assert result.dropped == 1
 
 
@@ -353,7 +361,9 @@ def test_a_malformed_row_with_a_non_numeric_count_is_dropped_and_reported(
 
     result = stop.Tmux().list_sessions()
 
-    assert result.sessions == (stop.TmuxSession(name="camp-feat-b-22223333", windows=3, activity=1700000000, attached=False),)
+    assert result.sessions == (
+        stop.TmuxSession(name="camp-feat-b-22223333", windows=3, activity=1700000000, attached=False),
+    )
     assert result.dropped == 1
 
 
