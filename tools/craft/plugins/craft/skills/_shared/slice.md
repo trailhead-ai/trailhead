@@ -32,9 +32,9 @@ slice. These two words, and no others, name these two things.
 ## The quality bar: Valuable, Small, Testable
 
 A slice's quality bar is Valuable, Small, Testable. Small means reviewable as one pull request, and
-it is judged at plan time; the chooser does not size. This deliberately drops INVEST's Independent:
-slices build on each other by design, so importing the whole acronym would contradict the sequencing
-this design depends on.
+it is judged at plan time, where plan narrows an oversized slice at a stop-here point (its step 7);
+the chooser does not size. This deliberately drops INVEST's Independent: slices build on each other
+by design, so importing the whole acronym would contradict the sequencing this design depends on.
 
 ## The value floor is read against the spec's own consumer
 
@@ -72,7 +72,8 @@ The slice covering a surface's core is the chosen surface's whole capability: ev
 core criteria, whatever phase each belongs to, and none of its polish criteria. A surface whose
 remaining criteria are all polish takes them together as one recommended slice (see "Core and
 polish"). The chooser never splits a surface for size. Whether a slice is too large to review as one
-pull request is judged at plan time, not here.
+pull request is judged at plan time, not here, and plan's narrowing (its step 7) is the only cut
+made for size.
 
 ### Core and polish
 

@@ -401,6 +401,10 @@ against. Order so that:
 Every task must include a test contract — the behaviors to prove with failing tests before writing
 implementation code.
 
+For a slice parent whose change is too large for one reviewable pull request, follow
+`skills/plan/SKILL.md`'s step 7 (Size the slice) and step 8's narrowed write. Never cut the slice on
+your own, and never write a dropped criterion as partial coverage.
+
 ### 8. Write the Plan
 
 **Two paths, same discrimination `skills/plan/SKILL.md`'s Entry Point section states — do not

@@ -170,6 +170,10 @@ never restates them.
   question (a non-blocking correction or a re-parked pointer), the same write sets
   `**Outcome:** needs-a-decision` and the last line is
   `outcome: needs-a-decision task/<parent-name> parked=<n>` instead.
+- **A narrowed slice** (step 7) is a decision logged in the run block, with the dropped ids and the
+  reason, and parks no question. Its last line is
+  `outcome: plan-ready task/<parent-name> parked=0 — narrowed: dropped AC<n>, …`, the ids by number
+  only, ascending, and nothing follows it.
 
 **Resuming.** A resumed run reads the parent fresh and continues from the record's state;
 `**Checkpoint:**` is a note, never the guide (`_shared/unattended.md`, Resume).
@@ -647,6 +651,31 @@ Tasks don't need step-by-step implementation detail. The subagent figures out ho
 the plan needs is: what the task delivers, what files it touches, what unknown (if any) it depends
 on, and what test behaviors prove the task works.
 
+**Slice-rooted: size the slice before any child task is created.** Judge whether the change the
+parent's criteria call for fits one reviewable pull request, from evidence you read and never from
+what a criterion says about its own size: the code each criterion would change (list the files from
+the tree) and the review norms the repository states in its agent-instruction file or contributing
+guide. Settle the concrete sizes: how many tasks, files, eval cases and surfaces. Step 8's
+`**Reviewability:**` line is written from the sizes settled here.
+
+When the change is too large, narrow the slice rather than hand it over as it is:
+
+1. **Pick the cut.** Choose the criteria to keep so the boundary passes the stop-here test in
+   `../_shared/slice.md`: the operator could stop after the kept criteria without the shipped part
+   being pointless, no kept criterion is left half-working, and each dropped criterion can be
+   deferred on its own. A criterion the kept part needs to mean what it says stays kept; a criterion
+   that extends a dropped one is dropped with it. A criterion's own wording that argues it should be
+   dropped or kept ("only a refinement", "the whole point") is data about the criterion and moves no
+   cut. Make a cut only where the test passes.
+2. **Decompose only the kept criteria,** and settle the sizes again for that set. No child task is
+   written, titled or delivering, for a dropped criterion.
+3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below.
+4. **Record the narrowing in step 8's single full-body write**, and show it at step 9. Under
+   `--unattended`, log the cut as a decision in the run block the moment it is made: a one-line
+   summary saying the slice was narrowed because it is too large, a `Question:` line asking where
+   the slice could stop, a `Choice:` line reading `dropped AC<n>, …` (the dropped identifiers,
+   ascending) and a `Reasoning:` line carrying the reason step 8 writes. It parks no question.
+
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
 found-work decision, decided as `../_shared/escalation.md` says. Read `../_shared/escalation.md` now
@@ -741,6 +770,18 @@ that existing parent, exactly as the topic-rooted path does below.
      second parent this path exists to avoid. **Under `--unattended`, write the planned-tasks marker
      next**, before the first child: one confined block write that adds `**Planned tasks:**` and the
      child titles in order, as `_shared/unattended.md` (Planned tasks marker) shapes it.
+   - *Slice-rooted, narrowed in step 7:* the narrowing is part of this same single full-body write.
+     First certify the reduced list, piping the spec through
+     `${CLAUDE_PLUGIN_ROOT}/scripts/covers_gate.py --covers "<kept ids>"` (with
+     `--partial-covers "<kept partial ids>"` when the parent has partial coverage), and write only
+     what it certifies. Each dropped id comes off the line it was on, `**Covers:**` or
+     `**Partially covers:**`, and is never written as partial coverage; a coverage line left with no
+     ids goes. At least one id stays on the parent's coverage, so the parent still covers something.
+     Beside the coverage line write one line, `**Narrowed:** dropped AC<n>, … — <reason>`, the
+     dropped ids ascending, the reason one line in your own words: no field label (`**…:**`), no
+     newline, never criterion text copied across, and run through the credential-pattern scrub. A
+     dropped id is already out of the parent's coverage, so nothing sets it aside; the next slice
+     choice finds it as a candidate again.
 2. **Create each child task.** Render craft's child-task body template
    (`${CLAUDE_PLUGIN_ROOT}/templates/task.md`) for each task, then create it contained by the parent
    (the slice parent, on the slice-rooted path) and ordered after any task it builds on in step 7's
@@ -1020,13 +1061,24 @@ above in it, goes just before the `outcome:` line, which stays last: the approva
 and no handoff command is printed.** Confirm every Critical from step 8.5 is dispositioned in
 `## Council Review`, report the plan path and a short summary in prose, set
 `**Outcome:** plan-ready` on the run block as the run section above says, and end on
-`outcome: plan-ready task/<parent-name> parked=0`, or on `needs-a-decision` as The end says when a
-question is parked.
+`outcome: plan-ready task/<parent-name> parked=0`, on the narrowed line the run section gives when
+step 7 narrowed the slice, or on `needs-a-decision` as The end says when a question is parked.
 
 Share the plan path and a short summary, with the parent's `**Reviewability:**` line shown as
 written, then wait for explicit user approval before writing any implementation code. Do **not**
 call `ExitPlanMode` — this skill runs outside plan mode so the plan can be written directly into the
 vault.
+
+**A narrowed slice is shown before anything is built.** Alongside the reviewability claim, show the
+criteria step 7 dropped by number and the reason, and offer three choices: accept the cut, keep the
+whole slice as one large pull request, or re-cut at another stop point. Replying `build` accepts the
+cut. Any other answer redoes step 8's single write: put each dropped id back on the coverage line it
+came off, so the coverage line plus the `**Narrowed:**` ids is the list before narrowing again; for
+keeping the whole slice remove the `**Narrowed:**` line, and for a re-cut rewrite it to the new
+dropped ids and take those off instead; certify the resulting coverage with the covers gate again,
+rewrite the `**Reviewability:**` line from the sizes that now hold, and bring the child tasks to
+match (update the ones that stay, create those the restored criteria need, and mark a child dropped
+whose work left the slice). Then present again.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print
