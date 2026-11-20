@@ -5815,7 +5815,7 @@ Each probe ran against this case on the edited prose, then the tree was restored
 
 ## Case: a plan narrows an oversized slice at a point where the operator could stop (2026-11-20)
 
-**Status: not yet run.** The cases, the shared fixture and the regression test are written and checked offline; no arm has run through the `portage-eval` shim. The prose under test has not been edited.
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. Baselines are red on both fixtures, the treatment is green on the tightened fixture, three of the four targeted probes turn their case red, and the planner-pointer probe stays green (recorded as a coverage finding). The regression cases stay green.
 
 Four runner cases for `skills/plan/SKILL.md`, `skills/_shared/unattended.md`, `skills/_shared/slice.md` and `agents/planner.md`, all in the core tier: each declares a 900 s timeout, which `eval-gate.json`'s own check refuses for a `merge_only` case. They share one scaffold, `unattended-plan-narrows-an-oversized-slice/fixtures/scaffold.sh`, selected by its `VARIANT` variable (`stop` so far).
 
@@ -5828,6 +5828,8 @@ Four runner cases for `skills/plan/SKILL.md`, `skills/_shared/unattended.md`, `s
 
 Prose fingerprints (`git hash-object`) of the unedited baseline: `skills/plan/SKILL.md` `09dacdad3db2a38ed998bdad54dc4d2de090a32c`, `skills/_shared/unattended.md` `a1bbc6e4727d005e45296e0be045cec3ba7510e0`, `skills/_shared/slice.md` `2265630e4dfe275b6ad4f64b213ed56d175eca9a`, `agents/planner.md` `71f5c8ea80073e9a503851f2e4b503b82a05e882`, `templates/plan.md` `67bd87a411d3d1777aa78b40b06987c842fe8d29`.
 
+Prose fingerprints (`git hash-object`) of the edited prose: `skills/plan/SKILL.md` `3ef145b1bdcda24d540c46ff64bf104bb1bc2148`, `skills/_shared/unattended.md` `d7c211c8ab8b5f66923fbca932cd4b21551144ae`, `skills/_shared/slice.md` `1cdf4bf2e21e2d9308ac80dcb35f936fab641dd9`, `agents/planner.md` `0ae0d58adb28a1d5d5aebca27da9d1fa7ba86f00`.
+
 Bar: baseline 3 runs, expected red; treatment 3 of 3 runs, which the shim decides at 2 (recorded as run, not as a met 3 of 3); one rerun of a failed batch permitted and reported as such; the planner case also a mutation arm with only the planner's pointer removed, expected red. The canary: if its treatment runs still disagree after the fixture is tightened, the run stops and the disagreement is reported; the case is never demoted and its bar never lowered. Regression: `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` and `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` stay green.
 
 **Fixture tightened (one treatment batch of three, request `local-jvt916w4mjlf`, scored 1, 0.31 and a 900 s timeout).** In the 0.31 run plan judged the whole slice reviewable and did not narrow; the attended case narrowed 2 of 2 on the same fixture. The fixture was tightened rather than rerun, per unknown U1: the legacy reports no longer share one interface (each has its own entry function and row shape, so no generic exporter reads as sufficient), the 10 file / 300 line norm is also stated in `CONTRIBUTING.md`, `CLAUDE.md` says each report is handled in its own module and test, and AC4's text names every module under `shop/reports/`. Cut, ids, hostile wording and graders are unchanged; see the case's `expected.md`.
@@ -5838,3 +5840,18 @@ Offline checks before any run: the two closing-line patterns do not overlap (the
 
 | Arm | Runs | Result | Notes |
 |---|---|---|---|
+| baseline, first fixture | 2 each (runner stopped once decided) | **red on all four**: canary 0.31 / 0.46, approval 0.46 / 0.46, reject 0.7 / 0.7, planner 0.33 / 0.33 | no run wrote a `**Narrowed:**` line or certified a reduced list; the reject case's cut-was-made graders failed and its final-state graders held vacuously. Request `local-3ali3dto44o0` |
+| treatment, first fixture | 2 each; canary 3 | approval, reject, planner and the four regression cases **green** 1 / 1; canary **split**: 1, 0.31, and a 900 s timeout | the split is the reason the fixture was tightened (above). Request `local-jvt916w4mjlf` |
+| treatment, tightened fixture | 2 each (runner stopped once decided) | **green, 1 / 1 on all four**, canary runs 271 s and 245 s | every grader in every run; 2 of 2, not the 3 of 3 the bar names, as the shim decides at 2. Request `local-mr9kjjwhjt49` |
+| all-carriers probe (`t2-all`: every carrier of the narrowing removed), tightened fixture | 2 each | **red on all four**: canary 0.46 / 0.46, approval 0.77 / 0.77, reject 0.6 / 0.7, planner 0.67 / 0.67 | doubles as the baseline on the tightened fixture: no run wrote a `**Narrowed:**` line or certified a reduced list. Without the prose the approval and planner runs still left AC4 and AC5 off the coverage line, so the tightened fixture invites a cut on its own; the narrowed line, the gate call and the closing suffix are what the prose adds. Request `local-iykyvrea9vx8` |
+| regression on the edited prose: `plan-orders-tasks-by-phase-and-records-a-reviewability-claim`, `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | 2 each | **green**, 1 / 1 on all four | request `local-jvt916w4mjlf` |
+
+### Carrier mutations
+
+Each probe ran on the edited prose with the tightened fixture, then the tree was restored and checked clean (`git status --porcelain` empty) against the edit.
+
+| Probe | What it removes | Case | Result | Reading |
+|---|---|---|---|---|
+| planner pointer | only the planner's pointer to plan's step 7 and step 8 narrowed write | planner | **green**, 1 / 1 (request `local-1wcbrkmh4gds`) | not attributable: the planner narrows without its pointer, so it reaches plan's procedure on its own. No case pins the pointer |
+| unattended suffix | the narrowed ending in plan's unattended section and `_shared/unattended.md` | canary | **red**, 0.85 / 0.85 (request `local-50ko2uyc6owo`): both final-line graders failed in both runs | the narrowed closing line depends on these carriers; the narrowing itself held |
+| restore | only step 9's redo after a non-accept answer | reject | **red**, 0.5 / 0.5 (request `local-w0a53aeva2dy`): the restored coverage line, restored-list gate call, removed `**Narrowed:**` line, redone children and the whole-slice report all failed | the restore on rejection depends on step 9's redo |
