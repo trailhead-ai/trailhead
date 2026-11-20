@@ -176,6 +176,13 @@
       ],
       "merge_only": true
     },
+    "plan-orders-tasks-by-phase-and-records-a-reviewability-claim": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "templates/plan.md",
+        "agents/planner.md"
+      ]
+    },
     "plan-keeps-an-earlier-run-section": {
       "measures": [
         "skills/plan/SKILL.md",

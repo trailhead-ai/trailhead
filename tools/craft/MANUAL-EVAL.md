@@ -5779,3 +5779,25 @@ Readings:
 - No case regressed against the baseline on a record or outcome grader that the final prose was meant to hold.
 
 Spend at runner list price plus judge votes: about 207.3 USD for the baseline (craft and portage), 257.1 for the final batch, 64.1 for the rerun.
+
+
+
+## Case: a plan orders its tasks by phase and records a reviewability claim (2026-11-19)
+
+**Status: not yet run.** The case is written and pre-registered in its `expected.md`; no arm has run.
+
+One runner case for `skills/plan/SKILL.md`, `templates/plan.md` and `agents/planner.md`, in the core tier: it is the only case on the shared plan file that decides phase ordering and the reviewability line, and its 900 s timeout puts it past the gate budget.
+
+| Case | Fixture | Expected |
+|---|---|---|
+| `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` | `notes` spec, AC1 delete, AC2 edit, AC3 list, AC4 add (spec order is the reverse of phase order); a seeded slice parent covering all four; run with `--unattended` | add depends on list, edit and delete depend on add; the parent body carries a `**Reviewability:**` line naming a size; the last line is `outcome: plan-ready task/<name> parked=0` |
+
+Prose fingerprints (`git hash-object`) of the baseline: not yet recorded.
+
+Bar: baseline 3 runs, expected red at least on the reviewability grader; treatment 3 of 3 runs; one rerun of a failed batch permitted and reported as such.
+
+### Runs
+
+| Arm | Runs | Result | Notes |
+|---|---|---|---|
+|---|---|---|---|
