@@ -290,26 +290,6 @@ def answer_for_host(
     )
 
 
-#: The `camp list --json` keys an older remote camp may not send.
-_LIST_ROW_DEFAULT_KEYS = ("last_touched", "attached")
-
-
-def fill_list_row_defaults(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """*rows* with `last_touched` and `attached` set to null on every `ok`
-    row that omits them — an older camp's answer, which predates those keys.
-
-    An `ok: false` row is a failure report with its own shape and is
-    returned as-is. A row with no `ok` key is treated as ok, the same
-    reading `camp.host.merge` gives it.
-    """
-    return [
-        {**{key: None for key in _LIST_ROW_DEFAULT_KEYS}, **row}
-        if row.get("ok", True)
-        else row
-        for row in rows
-    ]
-
-
 def relay_all_groups(
     verb: str,
     host: Host,

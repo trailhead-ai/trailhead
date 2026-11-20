@@ -926,7 +926,7 @@ def _dispatch_all_hosts_command(
     """
     from ..host.config import HostConfigError, load_hosts, self_host_name
     from ..host.merge import answer_all_hosts_concurrently, merge_all_hosts_answer
-    from ..host.relay import fill_list_row_defaults
+    from ..provision.lifecycle import fill_list_row_defaults
 
     if all_groups and read_group_option(rest) is not None:
         print(

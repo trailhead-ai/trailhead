@@ -360,6 +360,58 @@ _LIST_JSON_KEYS = (
 )
 
 
+def project_list_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """`cmd_ls_group`-shaped entries projected onto the fixed
+    `_LIST_JSON_KEYS` row, each carrying `ok: true` — the one projection
+    every local `camp list --json` answer is built from: this module's
+    `render_workspace_list` and `cli/workspace.py`'s `local_list_answer`.
+
+    Source-specific extras (`manifest_path`) are dropped; `last_touched`
+    becomes an ISO-8601 UTC string or `None`. An unmanaged entry's `slug` is
+    `None` and passes through as-is — the discriminator every renderer keys
+    off of.
+    """
+    return [
+        {
+            "ok": True,
+            "slug": e["slug"],
+            "branch": e.get("branch", ""),
+            "workspace_path": e["workspace_path"],
+            "group": e.get("group"),
+            "state": e.get("state"),
+            "window_count": e.get("window_count"),
+            "tmux_session": e.get("tmux_session"),
+            "last_touched": to_iso_utc(e.get("last_touched")),
+            "attached": e.get("attached"),
+        }
+        for e in entries
+    ]
+
+
+#: The `camp list --json` keys an older remote camp may not send.
+_LIST_ROW_DEFAULT_KEYS = ("last_touched", "attached")
+
+
+def fill_list_row_defaults(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*rows* with `last_touched` and `attached` set to null on every `ok`
+    row that omits them — an older camp's answer, which predates those keys.
+
+    Applied to relayed rows before they are printed: `--host --json` (through
+    `camp.host.relay.relay_all_groups`'s `normalise_json_rows`) and the
+    `-a`/`--all-hosts` merged answer in `cli/dispatch.py`.
+
+    An `ok: false` row is a failure report with its own shape and is
+    returned as-is. A row with no `ok` key is treated as ok, the same
+    reading `camp.host.merge` gives it.
+    """
+    return [
+        {**{key: None for key in _LIST_ROW_DEFAULT_KEYS}, **row}
+        if row.get("ok", True)
+        else row
+        for row in rows
+    ]
+
+
 def unmanaged_count_row(count: int) -> dict[str, Any]:
     """The one `--json` row a group-scoped answer carries in place of naming
     its leftover sessions: the fixed `_LIST_JSON_KEYS` schema with every
@@ -410,8 +462,9 @@ def render_workspace_list(
         `null`; `attached` true / false / `null` for tmux not answering or
         no session), every success row carrying `ok: true`; empty → `[]`.
 
-    The renderer PROJECTS each entry onto the fixed schema (ignoring any
-    source-specific extras like manifest_path), so the two data models — group
+    The renderer PROJECTS each entry onto the fixed schema through
+    :func:`project_list_rows` (ignoring any source-specific extras like
+    manifest_path), so the two data models — group
     central manifests vs. the legacy worktree registry — surface one stable shape.
 
     *group_failures* — the `--all-groups` caller's unparsable-config detail
@@ -459,21 +512,7 @@ def render_workspace_list(
     from ..launch.table import render_table
 
     if as_json:
-        rows = [
-            {
-                "ok": True,
-                "slug": e["slug"],
-                "branch": e.get("branch", ""),
-                "workspace_path": e["workspace_path"],
-                "group": e.get("group"),
-                "state": e.get("state"),
-                "window_count": e.get("window_count"),
-                "tmux_session": e.get("tmux_session"),
-                "last_touched": to_iso_utc(e.get("last_touched")),
-                "attached": e.get("attached"),
-            }
-            for e in entries
-        ]
+        rows = project_list_rows(entries)
         rows += [
             {"ok": False, "group": None, "reason": detail}
             for detail in (group_failures or [])

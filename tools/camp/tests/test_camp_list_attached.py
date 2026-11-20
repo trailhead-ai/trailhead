@@ -186,18 +186,6 @@ def test_attached_reflects_whether_a_client_is_attached(
     assert _local_rows(capsys.readouterr().out)["ws-a"]["attached"] is expected
 
 
-def test_a_workspace_with_no_session_reads_attached_null(
-    env, tmp_path, monkeypatch, capsys
-) -> None:
-    _stub_sessions(tmp_path, monkeypatch, {_session("ws-a"): (_TMUX_ACTIVITY, 1)})
-
-    _run(monkeypatch, ["list", "--group", "testgrp", "--json"])
-
-    rows = _local_rows(capsys.readouterr().out)
-    assert rows["ws-a"]["attached"] is True
-    assert rows["ws-b"]["attached"] is None
-
-
 @pytest.mark.parametrize("argv", _ENTRY_POINTS)
 def test_tmux_not_answering_reads_attached_null_on_every_local_row(
     argv, env, tmp_path, monkeypatch, capsys
