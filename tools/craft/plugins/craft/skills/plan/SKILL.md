@@ -694,8 +694,10 @@ safest option first and mark the one you recommend.
   harness has no choice prompt), then end the turn and wait.
 - **Unattended:** this is a fifth *parked* stop. Park a `Q<n>` as "How a stop is parked" says, with
   those options and exactly one marked `(recommended)`; Progress says planning stopped before any
-  child task was written. End on `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no
-  child task and no narrowed line.
+  child task was written. The question lives only in the block: the final message reports where it
+  is parked and asks the reader nothing. End on
+  `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no child task and no narrowed
+  line.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
