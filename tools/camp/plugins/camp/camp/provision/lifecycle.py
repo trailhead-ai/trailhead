@@ -316,6 +316,7 @@ def cmd_ls_group(
             member_worktree_paths=member_paths_by_slug[e["slug"]],
             manifest_path=manifest_path_by_slug[e["slug"]],
         )
+        e["attached"] = row.attached
 
     unmanaged = [
         {
@@ -328,6 +329,7 @@ def cmd_ls_group(
             "window_count": u.windows,
             "tmux_session": u.name,
             "last_touched": float(u.activity) if u.activity is not None else None,
+            "attached": u.attached,
         }
         for u in classification.unmanaged
     ]
@@ -354,6 +356,7 @@ _LIST_JSON_KEYS = (
     "window_count",
     "tmux_session",
     "last_touched",
+    "attached",
 )
 
 
@@ -389,7 +392,7 @@ def render_workspace_list(
     so the human + --json surface is identical regardless of cwd.
 
     Each entry must carry `slug` and `workspace_path`; `branch`, `group`,
-    `state`, `window_count`, `tmux_session`, and `last_touched` are optional
+    `state`, `window_count`, `tmux_session`, `last_touched`, and `attached` are optional
     (`group` is `None` for the standalone fallback, which has no group to
     derive a session name from). An entry whose `slug` is `None` is an
     unmanaged row: its `tmux_session` prints in the WORKSPACE column
@@ -402,9 +405,10 @@ def render_workspace_list(
         `workspace_row_cells`) so a stray control character cannot forge a
         second row.
       - --json: a list of {ok, slug, branch, workspace_path, group, state,
-        window_count, tmux_session, last_touched} dicts (the fixed
+        window_count, tmux_session, last_touched, attached} dicts (the fixed
         _LIST_JSON_KEYS schema — `last_touched` an ISO-8601 UTC string or
-        `null`), every success row carrying `ok: true`; empty → `[]`.
+        `null`; `attached` true / false / `null` for tmux not answering or
+        no session), every success row carrying `ok: true`; empty → `[]`.
 
     The renderer PROJECTS each entry onto the fixed schema (ignoring any
     source-specific extras like manifest_path), so the two data models — group
@@ -466,6 +470,7 @@ def render_workspace_list(
                 "window_count": e.get("window_count"),
                 "tmux_session": e.get("tmux_session"),
                 "last_touched": to_iso_utc(e.get("last_touched")),
+                "attached": e.get("attached"),
             }
             for e in entries
         ]

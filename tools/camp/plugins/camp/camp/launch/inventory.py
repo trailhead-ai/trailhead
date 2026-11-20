@@ -106,7 +106,9 @@ class WorkspaceSession:
     ``#{session_activity}`` epoch second, `None` when there is no matched
     session to read it from — the tmux half of a workspace's "last touched"
     instant (see `camp.launch.lasttouched`, which combines it with the
-    caller's own worktree/manifest reads).
+    caller's own worktree/manifest reads). ``attached`` is whether that
+    session has at least one client attached, `None` when there is no
+    matched session.
     """
 
     slug: str
@@ -114,6 +116,7 @@ class WorkspaceSession:
     state: str
     windows: int | None = None
     activity: int | None = None
+    attached: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -121,11 +124,12 @@ class UnmanagedSession:
     """One leftover tmux session, claimed by no workspace. Carries only what
     tmux itself reported — no slug, no path, because no workspace owns it.
     ``activity`` is the session's own ``#{session_activity}``, same as
-    :attr:`WorkspaceSession.activity`."""
+    :attr:`WorkspaceSession.activity`; ``attached`` likewise."""
 
     name: str
     windows: int
     activity: int | None = None
+    attached: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -328,6 +332,7 @@ def classify_sessions(
                     state=STATE_RUNNING,
                     windows=session.windows,
                     activity=session.activity,
+                    attached=session.attached,
                 )
             )
         else:
@@ -342,7 +347,12 @@ def classify_sessions(
         if not is_retired_session_name(session.name):
             continue
         leftover_rows.append(
-            UnmanagedSession(name=session.name, windows=session.windows, activity=session.activity)
+            UnmanagedSession(
+                name=session.name,
+                windows=session.windows,
+                activity=session.activity,
+                attached=session.attached,
+            )
         )
 
     unmanaged = tuple(leftover_rows) if scope is DisclosureScope.WIDENED else ()

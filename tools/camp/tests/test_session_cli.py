@@ -316,12 +316,12 @@ elif args and args[0] == "list-sessions":
         # Window count then activity first, name as the remainder,
         # "|"-delimited to match what the real Tmux.list_sessions() seam
         # asks tmux to format
-        # (`#{session_windows}|#{session_activity}|#{session_name}`) and
-        # parses on the FIRST TWO "|"s — a session name may legally carry
-        # one of its own, so neither leading field is ever read out of the
+        # (`#{session_windows}|#{session_activity}|#{session_attached}|#{session_name}`)
+        # and parses on the FIRST THREE "|"s — a session name may legally carry
+        # one of its own, so no leading field is ever read out of the
         # name's tail. The activity value itself is a fixed stand-in
         # (nothing in this stub tracks real per-session activity).
-        print(f"{count}|1700000000|{name}")
+        print(f"{count}|1700000000|0|{name}")
 '''
 
 

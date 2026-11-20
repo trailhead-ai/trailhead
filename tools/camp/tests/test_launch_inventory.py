@@ -427,6 +427,42 @@ def test_unmanaged_row_carries_the_sessions_own_activity():
     )
 
 
+def test_matched_workspace_row_carries_the_sessions_own_attached_state():
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ws_a = inventory.Workspace(group="trailhead", slug="a", path="/w/a")
+    ws_b = inventory.Workspace(group="trailhead", slug="b", path="/w/b")
+    ws_c = inventory.Workspace(group="trailhead", slug="c", path="/w/c")
+    listing = SessionListing(
+        sessions=(
+            TmuxSession(name=inventory_name(inventory, ws_a), windows=1, attached=True),
+            TmuxSession(name=inventory_name(inventory, ws_b), windows=1, attached=False),
+        )
+    )
+
+    result = inventory.classify_sessions(
+        [ws_a, ws_b, ws_c], listing, scope=inventory.DisclosureScope.GROUP
+    )
+
+    assert [r.attached for r in result.workspaces] == [True, False, None]
+
+
+def test_unmanaged_row_carries_the_sessions_own_attached_state():
+    inventory, SessionListing, TmuxSession, _ = _import()
+
+    ws = inventory.Workspace(group="trailhead", slug="alpha", path="/w/alpha")
+    listing = SessionListing(
+        sessions=(
+            TmuxSession(name="camp-somebody-deadbeef", windows=1, attached=True),
+            TmuxSession(name="camp-someone-cafebabe", windows=1, attached=False),
+        )
+    )
+
+    result = inventory.classify_sessions([ws], listing, scope=inventory.DisclosureScope.WIDENED)
+
+    assert [u.attached for u in result.unmanaged] == [True, False]
+
+
 def test_format_sessions_cell_running_shows_window_count():
     inventory, _, _, _ = _import()
     assert inventory.format_sessions_cell(inventory.STATE_RUNNING, 3) == "3"

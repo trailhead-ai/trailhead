@@ -290,6 +290,26 @@ def answer_for_host(
     )
 
 
+#: The `camp list --json` keys an older remote camp may not send.
+_LIST_ROW_DEFAULT_KEYS = ("last_touched", "attached")
+
+
+def fill_list_row_defaults(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """*rows* with `last_touched` and `attached` set to null on every `ok`
+    row that omits them — an older camp's answer, which predates those keys.
+
+    An `ok: false` row is a failure report with its own shape and is
+    returned as-is. A row with no `ok` key is treated as ok, the same
+    reading `camp.host.merge` gives it.
+    """
+    return [
+        {**{key: None for key in _LIST_ROW_DEFAULT_KEYS}, **row}
+        if row.get("ok", True)
+        else row
+        for row in rows
+    ]
+
+
 def relay_all_groups(
     verb: str,
     host: Host,
@@ -298,10 +318,15 @@ def relay_all_groups(
     *,
     as_json: bool,
     render_human_rows: RenderHumanRows,
+    normalise_json_rows: Callable[[list[dict[str, Any]]], list[dict[str, Any]]] | None = None,
     connect_timeout: float = DEFAULT_CONNECT_TIMEOUT_SECONDS,
     runner: Runner = default_runner,
 ) -> None:
     """Run *remote_argv* on *host* over the transport and render the answer.
+
+    ``normalise_json_rows``, when given, reshapes an ANSWERED host's rows
+    just before they are printed as JSON; a host that did not answer prints
+    its failure rows untouched.
 
     ``connect_timeout`` is passed straight through to
     :func:`answer_for_host` — see its own docstring.
@@ -318,7 +343,8 @@ def relay_all_groups(
 
     if answer.answered:
         if as_json:
-            print(json.dumps(answer.rows))
+            rows = normalise_json_rows(answer.rows) if normalise_json_rows else answer.rows
+            print(json.dumps(rows))
         else:
             render_human_rows(answer.rows)
         for notice in answer.notices:

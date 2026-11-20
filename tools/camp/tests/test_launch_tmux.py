@@ -152,7 +152,7 @@ def test_spawn_session_names_with_s_never_carries_the_target_prefix(tmp_path, mo
         "    json.dump(table, open(table_path, 'w'))\n"
         "elif args and args[0] == 'list-sessions':\n"
         "    for name, windows in table.items():\n"
-        "        print(f'{windows}|1700000000|{name}')\n"
+        "        print(f'{windows}|1700000000|0|{name}')\n"
         "sys.exit(0)\n",
         encoding="utf-8",
     )
@@ -292,25 +292,57 @@ def test_list_sessions_answers_session_listing_only_on_the_no_server_shape(monke
     assert tmux_module.Tmux().list_sessions() is tmux_module.UNANSWERED
 
 
-def test_list_sessions_parses_activity_as_the_middle_field(monkeypatch):
-    """`#{session_windows}|#{session_activity}|#{session_name}` — activity is
-    read as the SECOND field (digits, like the count), so a session name
-    that itself carries a leading `|`-free run of digits is never misread as
-    the activity value: only the two leading digit-only fields, delimited by
-    the first two `|`s, are ever consumed as count/activity."""
+def test_list_sessions_parses_activity_as_the_second_field(monkeypatch):
+    """`#{session_windows}|#{session_activity}|#{session_attached}|#{session_name}`
+    — the three leading fields are digit-only and consumed by the first
+    three `|`s, so a session name is never misread as one of them."""
     import camp.launch.tmux as tmux_module
 
     monkeypatch.setattr(
         tmux_module.subprocess,
         "run",
-        lambda *a, **k: _completed(returncode=0, stdout="3|1700000000|my-session\n"),
+        lambda *a, **k: _completed(returncode=0, stdout="3|1700000000|0|my-session\n"),
     )
     result = tmux_module.Tmux().list_sessions()
 
     assert isinstance(result, tmux_module.SessionListing)
     assert result.sessions == (
-        tmux_module.TmuxSession(name="my-session", windows=3, activity=1700000000),
+        tmux_module.TmuxSession(
+            name="my-session", windows=3, activity=1700000000, attached=False
+        ),
     )
+
+
+@pytest.mark.parametrize(
+    "clients, expected", [("0", False), ("1", True), ("4", True)]
+)
+def test_list_sessions_reads_attached_as_whether_any_client_is_attached(
+    monkeypatch, clients, expected
+):
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout=f"3|1700000000|{clients}|my-session\n"),
+    )
+    result = tmux_module.Tmux().list_sessions()
+
+    assert [s.attached for s in result.sessions] == [expected]
+
+
+def test_list_sessions_drops_a_row_whose_attached_field_is_not_digits(monkeypatch):
+    import camp.launch.tmux as tmux_module
+
+    monkeypatch.setattr(
+        tmux_module.subprocess,
+        "run",
+        lambda *a, **k: _completed(returncode=0, stdout="3|1700000000|x|my-session\n"),
+    )
+    result = tmux_module.Tmux().list_sessions()
+
+    assert result.sessions == ()
+    assert result.dropped == 1
 
 
 def test_list_sessions_drops_a_row_whose_activity_field_is_not_digits(monkeypatch):
@@ -322,7 +354,7 @@ def test_list_sessions_drops_a_row_whose_activity_field_is_not_digits(monkeypatc
     monkeypatch.setattr(
         tmux_module.subprocess,
         "run",
-        lambda *a, **k: _completed(returncode=0, stdout="3|not-a-number|my-session\n"),
+        lambda *a, **k: _completed(returncode=0, stdout="3|not-a-number|0|my-session\n"),
     )
     result = tmux_module.Tmux().list_sessions()
 

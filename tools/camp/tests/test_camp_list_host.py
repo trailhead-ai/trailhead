@@ -634,7 +634,7 @@ def test_collection_failure_relays_rows_with_host_and_remote_exit_status(
     assert code == 0  # the remote's own exit status, carried through
     rows = json.loads(captured.out)
     assert rows == [
-        {"ok": True, "slug": "ws-a", "branch": "b", "workspace_path": "/a", "group": "g", "host": "andromeda"},
+        {"ok": True, "slug": "ws-a", "branch": "b", "workspace_path": "/a", "group": "g", "host": "andromeda", "last_touched": None, "attached": None},
         {"ok": False, "group": None, "reason": "levr.toml: invalid TOML", "host": "andromeda"},
     ]
 

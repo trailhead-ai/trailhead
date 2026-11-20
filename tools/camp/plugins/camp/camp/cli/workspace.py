@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 from typing import TYPE_CHECKING, Any, Callable
 
+from ..launch.lasttouched import to_iso_utc
 from .dispatch import _slug_from_name_or_cwd
 from .parser import CampParser, group_verb_parser
 
@@ -34,6 +35,8 @@ def _project_list_rows(entries: list[dict]) -> list[dict]:
             "state": e.get("state"),
             "window_count": e.get("window_count"),
             "tmux_session": e.get("tmux_session"),
+            "last_touched": to_iso_utc(e.get("last_touched")),
+            "attached": e.get("attached"),
         }
         for e in entries
     ]
@@ -327,7 +330,7 @@ def _cmd_ls_host_cli(
     call, outcome classification, and every rendering except this verb's own
     "how do I print one answered row" callback.
     """
-    from ..host.relay import relay_all_groups
+    from ..host.relay import fill_list_row_defaults, relay_all_groups
     from ..host.transport import DEFAULT_CONNECT_TIMEOUT_SECONDS
 
     if connect_timeout is None:
@@ -364,6 +367,7 @@ def _cmd_ls_host_cli(
         ["list", "--all-groups", "--json"],
         as_json=as_json,
         render_human_rows=_render_human_rows,
+        normalise_json_rows=fill_list_row_defaults,
         connect_timeout=connect_timeout,
     )
 
