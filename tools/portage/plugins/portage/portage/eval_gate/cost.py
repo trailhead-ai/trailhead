@@ -196,8 +196,7 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs, max_dir_bytes: 
             rec = run_record(raw)
             started = raw.get("startedAt")
             started = started if isinstance(started, str) and _STARTED.fullmatch(started) else None
-            total = sum(rec[k] for k in ("cost_usd", "judge_cost_usd") if rec[k] is not None)
-            runs.add(plugin, case, model, started, rec["cost_usd"], total, reason)
+            runs.add(plugin, case, model, started, rec["cost_usd"], timings.run_cost(rec), reason)
 
 
 def _ingest_history(env: dict[str, str], plugin: str, runs: _Runs) -> None:

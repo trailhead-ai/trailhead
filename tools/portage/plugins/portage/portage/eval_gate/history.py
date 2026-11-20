@@ -69,13 +69,15 @@ def runner_version(doc: object) -> str | None:
     return None
 
 
+def model_id(value: object) -> str | None:
+    """``value`` when it has the shape of a model id, else ``None``."""
+    return value if isinstance(value, str) and MODEL_ID.fullmatch(value) else None
+
+
 def runner_model(doc: object) -> str | None:
     """The runner JSON's ``suite.modelOverride`` when it has the shape of a model id, else ``None``."""
     suite = doc.get("suite") if isinstance(doc, dict) else None
-    model = suite.get("modelOverride") if isinstance(suite, dict) else None
-    if isinstance(model, str) and MODEL_ID.fullmatch(model):
-        return model
-    return None
+    return model_id(suite.get("modelOverride") if isinstance(suite, dict) else None)
 
 
 def append(record: dict, env: dict[str, str], write=os.write) -> None:
