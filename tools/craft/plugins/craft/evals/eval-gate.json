@@ -1036,6 +1036,12 @@
         "skills/plan/SKILL.md"
       ]
     },
+    "plan-narrowing-keeps-the-access-check-the-surface-needs": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/slice.md"
+      ]
+    },
     "planner-narrows-an-oversized-slice-through-plans-procedure": {
       "measures": [
         "agents/planner.md",

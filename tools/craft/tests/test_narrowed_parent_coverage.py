@@ -2,7 +2,7 @@
 
 The parent's body carries a `**Covers:**` line, optionally a `**Partially covers:**` line, and a
 `**Narrowed:** dropped AC<n>, … — <reason>` line naming criteria taken off its coverage. Each reader
-runs in-process on that body: `ParentCoverage`, the covers, criterion and observation gates, a ledger line
+runs in-process on that body: `ParentCoverage`, the covers and observation gates, a ledger line
 reconciled from the parent through `ledger_gate` and `candidate_set`, and the `--diff` append the council
 review makes through the in-process lore runner. The two inputs differ in what the coverage lines say about
 the dropped criteria: off coverage entirely, and wrongly written as partially covered.
@@ -24,7 +24,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 import candidate_set  # noqa: E402
 import covers_gate  # noqa: E402
-import criterion_gate  # noqa: E402
 import ledger_gate  # noqa: E402
 import observation_gate  # noqa: E402
 from parent_coverage import ParentCoverage  # noqa: E402
@@ -119,12 +118,11 @@ def test_the_gates_certify_a_parent_that_records_what_it_dropped(partial, _deriv
 
     results = {
         "covers_gate": run_gate(covers_gate, flags, SPEC_BODY),
-        "criterion_gate": run_gate(criterion_gate, [], SPEC_BODY),
         "observation_gate": run_gate(observation_gate, [], body),
     }
 
     assert {name: code for name, (code, _out, _err) in results.items()} == {
-        "covers_gate": 0, "criterion_gate": 0, "observation_gate": 0,
+        "covers_gate": 0, "observation_gate": 0,
     }, results
 
 

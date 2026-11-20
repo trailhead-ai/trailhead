@@ -6,7 +6,7 @@ The reject arm of the attended narrowing case. Given `/craft:plan task/export-th
 
 ## Fixture
 
-The shared scaffold, `VARIANT=stop`, as in `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval`. The prompt pre-approves the approach and every council disposition, answers the approval in advance ("keep the whole slice") and tells the run to stop after carrying the answer out.
+The shared scaffold, `VARIANT=stopfolded`: the `stop` slice plus one open spec follow-up, F1 (skip a legacy report whose data file is missing; its work belongs to AC4), folded into the parent by a `**Folds:**` line. The cut therefore gives F1 back, and the restore must fold it back. The prompt pre-approves the approach and every council disposition, answers the approval in advance ("keep the whole slice") and tells the run to stop after carrying the answer out.
 
 ## Conditions, sample and bar
 
@@ -28,6 +28,9 @@ Every clause holds.
 | A `covers_gate.py` call certifies the restored list `--covers "AC1, AC2, AC3, AC4, AC5"` | `covers-gate-certified-the-restored-list` | `tool_used` Bash, `min: 1` |
 | The cut was made first: a written `**Narrowed:**` line `dropped AC4, AC5 — <reason>` and a gate call on `--covers "AC1, AC2, AC3"` | `the-cut-was-written-before-it-was-rejected`, `the-cut-was-certified-before-it-was-rejected` | `tool_used` Write and Bash, `min: 1` |
 | The child tasks were redone for the whole slice: a child body delivers `--format jsonl`, names a legacy report module or covers AC4 or AC5 | `children-were-redone-to-cover-the-whole-slice` | `tool_used` Write, `min: 1` |
+| F1, given back at the cut, is folded into the parent again in the spec record, and the parent's `**Folds:**` line names it | `f1-is-folded-back-into-the-parent-once-the-slice-is-restored`, `the-parent-folds-line-names-f1-again` | `regex` over the spec and parent record files |
+| The cut gave F1 back (a written `reopen` transition for F1) and the restore folded it again (a written `fold` transition for F1) | `f1-was-given-back-when-the-cut-was-made`, `f1-was-folded-again-by-a-written-transition` | `tool_used` Write, `min: 1` |
+| The council reviewed again after the children were added on restore (the builder lens dispatched at least twice) | `the-council-reviewed-again-after-the-restore` | `tool_used` Agent, `min: 2` |
 | The final message reports the whole slice kept, all five criteria, nothing built | `final-message-reports-the-whole-slice-kept` | `llm`, `focus: trace` |
 | No `/craft:execute` skill run; no file under `shop/` written | `no-build-skill-was-run`, `no-code-was-written-before-approval` | `tool_used`, `max: 0` |
 

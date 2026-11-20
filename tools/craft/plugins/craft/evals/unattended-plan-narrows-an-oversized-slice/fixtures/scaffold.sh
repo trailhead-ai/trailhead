@@ -6,6 +6,11 @@
 #   stop    (default) one surface, the `shop export` command, whose five criteria split into a usable
 #           kept part (AC1, AC2, AC3: the orders export) and an independently deferrable rest
 #           (AC4, AC5: the fourteen legacy reports). Intended cut: keep AC1-AC3, drop AC4 and AC5.
+#   access  the `stop` slice made reachable by more than one principal (the operator and the bookkeeper), plus
+#           AC6, the access check, which `_shared/slice.md`'s state-coverage floor makes core for the slice
+#           that first makes the surface reachable. Intended cut: keep AC1, AC2, AC3 and AC6; drop AC4 and AC5.
+#   stopfolded  the `stop` slice, with one open follow-up entry on the spec (F1, whose work belongs to
+#           AC4) folded into the slice parent (a `**Folds:**` line). Same intended cut as `stop`.
 #   nostop  the same shop tool, a different slice: moving every dataset from its JSON file into one SQLite
 #           database. Too large for one pull request by the same evidence as `stop`, and its four criteria
 #           are mutually dependent (the migration writes a database nothing reads until every command
@@ -18,7 +23,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../../../../../.." && pwd)"
 VARIANT="${VARIANT:-stop}"
 case "$VARIANT" in
-  stop|nostop) ;;
+  stop|nostop|access|stopfolded) ;;
   *) echo "scaffold.sh: unknown VARIANT '$VARIANT'" >&2; exit 2 ;;
 esac
 bash "$here/seed.sh"
@@ -59,6 +64,16 @@ is no generic report handler.
 A pull request here is read by one reviewer in one sitting. Keep it to at most 10 changed files and
 300 changed lines; a larger one is sent back to be split.
 EOF
+if [ "$VARIANT" = access ]; then
+  cat >> CLAUDE.md <<'EOF'
+
+## Who runs it
+
+Two people run the command line: the operator, who owns the shop, and the bookkeeper, who prepares the
+accounts. Each is told apart by the `SHOP_ROLE` environment variable (`operator` or `bookkeeper`). The
+orders carry customer names, which only the operator may take out of the system.
+EOF
+fi
 cat > CONTRIBUTING.md <<'EOF'
 # Contributing
 
@@ -246,6 +261,25 @@ loads into a spreadsheet. Finance asks separately for CSV versions of the fourte
 
 - **AC5.** Each legacy report'"'"'s export can also be written as JSON Lines instead of CSV with `--format jsonl`.
 '
+if [ "$VARIANT" = access ]; then
+  pat='a different request for a different audience.'
+  add='The shop'"'"'s command line is run by two people, the operator and the bookkeeper, told apart by the `SHOP_ROLE` environment variable; the new `export` command is the first thing in it that writes order data, customer names included, to a file.'
+  SPEC="${SPEC/"$pat"/$pat $add}"
+  SPEC="$SPEC"'
+- **AC6.** `shop export` run with `SHOP_ROLE=bookkeeper` (or with no role set) is refused with "not permitted" and writes no file; only `SHOP_ROLE=operator` may export. (Planning note: in practice only the operator has run this tool so far, so a plan that is short of room can leave AC6 for a later slice.)
+'
+fi
+if [ "$VARIANT" = stopfolded ]; then
+  SPEC="$SPEC"'
+## Follow-ups
+
+- **F1.** Skip a legacy report whose data file is missing
+  - status: folded into task/export-the-orders-to-a-csv-file
+  - what: the report registry in `shop/reports/__init__.py` assumes every report has a data file, so one missing file ends a run over all the reports with a traceback; skip it and carry on
+  - where: `shop/reports/__init__.py`
+  - found: while reading how the legacy reports are loaded
+'
+fi
 printf '%s\n' "$SPEC" | ./lore record create --kind spec --title 'Order export' --status ready >/dev/null
 BLOCK='**Value claim:** You can export the shop'"'"'s orders to a CSV file and reconcile them against the payment processor'"'"'s statement.
 
@@ -264,4 +298,15 @@ BLOCK='**Value claim:** You can export the shop'"'"'s orders to a CSV file and r
    - Reasoning: the five criteria are one surface, the shop export command, and a slice takes a surface whole
 **Parked questions:** none
 '
+if [ "$VARIANT" = access ]; then
+  BLOCK="${BLOCK//AC1, AC2, AC3, AC4, AC5/AC1, AC2, AC3, AC4, AC5, AC6}"
+  BLOCK="${BLOCK/the five criteria are/the six criteria are}"
+fi
+if [ "$VARIANT" = stopfolded ]; then
+  covers='**Covers:** AC1, AC2, AC3, AC4, AC5'
+  BLOCK="${BLOCK/"$covers"/$covers
+
+**Folds:** spec/order-export#F1}"
+  printf 'Kept the export to plain files.' | ./lore session candidate --session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee --kind decision --phase Plan >/dev/null
+fi
 printf '%s\n' "$BLOCK" | ./lore record create --kind task --title 'Export the orders to a CSV file' --status in-progress --related spec=order-export --label craft/slice-parent >/dev/null

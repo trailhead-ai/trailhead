@@ -28,7 +28,7 @@ Every clause holds. Observation point: the written parent's body (a `Write` whos
 | Clause | Grader | Type and target |
 |---|---|---|
 | A written body has a `**Value claim:**` section and no `**Covers:**` line | `the-written-parent-is-an-enabler-with-no-covers-line` | `tool_used` Write, `min: 1` |
-| That body names AC3 after the `**Value claim:**` label and has no `**Covers:**` line | `the-written-justification-names-the-set-aside-create-criterion` | `tool_used` Write, `min: 1` |
+| That body names AC3 on the `**Value claim:**` line itself (not in a later section) and has no `**Covers:**` line | `the-written-justification-names-the-set-aside-create-criterion` | `tool_used` Write, `min: 1` |
 | No `covers_gate.py` call lists AC1 or AC2 | `the-covers-gate-is-never-given-the-reads` | `tool_used` Bash, `min: 0`, `max: 0` |
 | The last line is `outcome: slice-chosen task/<name> parked=0` | `final-line-is-slice-chosen` | `regex` over the final message |
 | A `lore record create --kind task` command is issued for the slice parent | `a-slice-parent-is-created-through-the-cli` | `tool_used` Bash, `min: 1` |
