@@ -305,6 +305,55 @@ def test_host_json_relays_a_remote_failure_row_without_the_new_keys(
     assert json.loads(capsys.readouterr().out)[0].keys() == _REMOTE_FAILURE.keys() | {"host"}
 
 
+def test_all_hosts_json_relays_a_remote_failure_row_without_the_new_keys(
+    env, monkeypatch, capsys
+) -> None:
+    _remote(monkeypatch, [_REMOTE_FAILURE])
+
+    assert _run(monkeypatch, ["list", "-ag", "--json"]) == 0
+
+    relayed = [r for r in json.loads(capsys.readouterr().out) if r.get("reason") == "bad config"]
+    assert relayed
+    assert all(r.keys() == _REMOTE_FAILURE.keys() | {"host"} for r in relayed)
+
+
+def test_host_json_keeps_the_key_order_the_remote_sent(env, monkeypatch, capsys) -> None:
+    _remote(monkeypatch, [_REMOTE_FULL, _REMOTE_OLD])
+
+    assert _run(monkeypatch, ["list", "--host", "andromeda", "--json"]) == 0
+
+    rows = {r["slug"]: r for r in json.loads(capsys.readouterr().out)}
+    sent = list(_REMOTE_FULL)
+    assert [k for k in rows["r-new"] if k != "host"] == sent
+    assert [k for k in rows["r-old"] if k != "host"] == list(_REMOTE_OLD) + ["last_touched", "attached"]
+
+
+def test_all_hosts_json_keeps_the_key_order_of_camp_list_for_a_local_row(
+    env, tmp_path, monkeypatch, capsys
+) -> None:
+    _stub_sessions(tmp_path, monkeypatch, {_session("ws-a"): (_TMUX_ACTIVITY, 1)})
+    assert _run(monkeypatch, ["list", "--group", "testgrp", "--json"]) == 0
+    plain = _local_rows(capsys.readouterr().out)["ws-a"]
+
+    assert _run(monkeypatch, ["list", "-ag", "--json"]) == 0
+    merged = _local_rows(capsys.readouterr().out)["ws-a"]
+
+    assert [k for k in merged if k != "host"] == list(plain)
+
+
+def test_all_hosts_json_keeps_the_key_order_the_remote_sent(env, monkeypatch, capsys) -> None:
+    _remote(monkeypatch, [_REMOTE_FULL, _REMOTE_OLD])
+
+    assert _run(monkeypatch, ["list", "-ag", "--json"]) == 0
+
+    by_slug = {}
+    for r in json.loads(capsys.readouterr().out):
+        if r.get("slug", "").startswith("r-"):
+            by_slug.setdefault(r["slug"], r)
+    assert [k for k in by_slug["r-new"] if k != "host"] == list(_REMOTE_FULL)
+    assert [k for k in by_slug["r-old"] if k != "host"] == list(_REMOTE_OLD) + ["last_touched", "attached"]
+
+
 def test_host_json_unreachable_host_keeps_its_failure_shape(
     env, monkeypatch, capsys
 ) -> None:

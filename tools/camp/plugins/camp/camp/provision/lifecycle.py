@@ -395,6 +395,7 @@ _LIST_ROW_DEFAULT_KEYS = ("last_touched", "attached")
 def fill_list_row_defaults(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """*rows* with `last_touched` and `attached` set to null on every `ok`
     row that omits them — an older camp's answer, which predates those keys.
+    The row keeps its own key order; only the missing keys are appended.
 
     Applied to relayed rows before they are printed: `--host --json` (through
     `camp.host.relay.relay_all_groups`'s `normalise_json_rows`) and the
@@ -405,7 +406,7 @@ def fill_list_row_defaults(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     reading `camp.host.merge` gives it.
     """
     return [
-        {**{key: None for key in _LIST_ROW_DEFAULT_KEYS}, **row}
+        {**row, **{key: None for key in _LIST_ROW_DEFAULT_KEYS if key not in row}}
         if row.get("ok", True)
         else row
         for row in rows
