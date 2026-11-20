@@ -703,24 +703,21 @@ safest option first and mark the one you recommend; for this question that order
 the recommended-first order the escalation question otherwise uses. Reshaping is the safest option:
 it writes nothing and changes no record until the operator decides what the slice should be.
 
-What plan does after each answer:
-
-- **Build it as one large pull request:** plan the whole slice as it stands, as if it had fit, and
-  write the `**Reviewability:**` line from the sizes settled above, saying they exceed the norms.
-- **Reshape the slice or the spec:** stop. Plan writes nothing; the change to the slice or the spec
-  goes through `/lore:correct`, and planning starts again against the corrected record.
-- **Drop the slice:** set the parent task's status to `dropped` and write no child task. Its
-  criteria stay uncovered, so `/craft:slice` offers them again on its next run.
-
 - **Attended:** put the blocking question `../_shared/escalation.md` defines under "The question"
   (what went wrong, what is at stake, the options with their costs, free text; plain text where the
-  harness has no choice prompt), then end the turn and wait.
-- **Unattended:** this is a fifth *parked* stop. Park a `Q<n>` as "How a stop is parked" says, with
-  those options and exactly one marked `(recommended)`; Progress says planning stopped before any
-  child task was written. The question lives only in the block: the final message reports where it
-  is parked and asks the reader nothing. End on
-  `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no child task and no narrowed
-  line.
+  harness has no choice prompt), then end the turn and wait. Once the operator answers:
+  - **Build it as one large pull request:** plan the whole slice as it stands, as if it had fit, and
+    write the `**Reviewability:**` line from the sizes settled above, saying they exceed the norms.
+  - **Reshape the slice or the spec:** stop. Plan writes nothing; the change to the slice or the
+    spec goes through `/lore:correct`, and planning starts again against the corrected record.
+  - **Drop the slice:** set the parent task's status to `dropped` and write no child task. Its
+    criteria stay uncovered, so `/craft:slice` offers them again on its next run.
+- **Unattended:** this is a fifth *parked* stop, and the run carries out none of the options: no
+  answer arrives in this session. Park a `Q<n>` as "How a stop is parked" says, with those options
+  and exactly one marked `(recommended)`; Progress says planning stopped before any child task was
+  written. The question lives only in the block: the final message reports where it is parked and
+  asks the reader nothing. End on `outcome: needs-a-decision task/<parent-name> parked=<n>`, with no
+  child task and no narrowed line.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
