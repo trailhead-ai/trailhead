@@ -687,7 +687,8 @@ settled above and which criterion needs which), with these options, each saying 
 costs: build it as one large pull request (the review burden the norms exist to avoid); reshape the
 slice or the spec (the work of changing the record, and the spec change goes through
 `/lore:correct`); drop the slice (nothing is delivered, and its criteria stay uncovered). List the
-safest option first and mark the one you recommend.
+safest option first and mark the one you recommend; for this question that order holds in place of
+the recommended-first order the escalation question otherwise uses.
 
 - **Attended:** put the blocking question `../_shared/escalation.md` defines under "The question"
   (what went wrong, what is at stake, the options with their costs, free text; plain text where the
