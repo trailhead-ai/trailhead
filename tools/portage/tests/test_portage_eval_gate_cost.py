@@ -497,6 +497,47 @@ class TestHostileRunnerOutputs:
         assert priced(lines)["alpha"][2:4] == ["2.0000", "2"]
         assert counts(lines, "runner outputs:")["directory-bound"] == 1
 
+    def test_malformed_files_are_charged_against_the_directory_bound(self, fx):
+        basic(fx)
+        pad = " " * 400
+        for i in range(4):
+            (fx.runs / f"m{i}.json").write_text("{not json" + pad)
+        size = (fx.runs / "m0.json").stat().st_size
+        lines = fx.report(fx.runs, max_dir_bytes=2 * size + 1)
+        tally = counts(lines, "runner outputs:")
+        assert (tally["not-json"], tally["directory-bound"]) == (2, 2)
+
+    def test_a_listing_over_the_entry_cap_reports_the_truncation(self, fx):
+        basic(fx)
+        for i in range(5):
+            runner_file(fx.runs, f"r{i}.json", costs=((1.0, 0.0),))
+        lines = fx.report(fx.runs, max_entries=3)
+        tally = counts(lines, "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (3, 1)
+
+    @pytest.mark.parametrize("cap", [5, 6, 1000])
+    def test_a_listing_within_the_entry_cap_reports_no_truncation(self, fx, cap):
+        basic(fx)
+        for i in range(5):
+            runner_file(fx.runs, f"r{i}.json", costs=((1.0, 0.0),))
+        tally = counts(fx.report(fx.runs, max_entries=cap), "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (5, 0)
+
+    @pytest.mark.parametrize("model", [None, 7, "claude-opus-5-5\x1b[31m", ["claude-opus-5-5"]])
+    def test_a_runner_output_without_a_model_id_is_model_unknown_and_unpriced(self, fx, model):
+        basic(fx)
+        runner_file(fx.runs, "m.json", costs=((50.0, 0.0),), model=model)
+        lines = fx.report(fx.runs)
+        assert "alpha" not in priced(lines)
+        assert counts(lines, "runs:")["model-unknown"] == 1 and counts(lines, "runs:")["counted"] == 0
+
+    @pytest.mark.parametrize("doc", ['[1, 2, 3]', '"EVILMARKER"', '{"cases": [5], "suite": {"plugins": ["craft"]}}',
+                                     '{"cases": ["EVILMARKER"], "suite": {"plugins": ["craft"]}}'])
+    def test_a_root_of_the_wrong_shape_is_skipped_as_bad_shape(self, fx, doc):
+        self._good(fx)
+        (fx.runs / "odd.json").write_text(doc)
+        self._check(fx, "bad-shape")
+
     def test_only_json_files_directly_in_the_directory_are_read(self, fx):
         basic(fx)
         runner_file(fx.runs, "good.json", costs=((1.0, 0.0), (3.0, 0.0)))

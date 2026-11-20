@@ -38,7 +38,9 @@ size bound (``too-large``), is past the directory's ``max_dir_bytes`` budget (``
 JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own limit (``too-deep``), has a
 shape the reader does not take or a case name outside the mapping's shape (``bad-shape``), or holds a
 ``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and at most
-``MAX_RUN_COST_USD`` (``bad-number``). A directory is scanned for at most ``MAX_ENTRIES`` entries.
+``MAX_RUN_COST_USD`` (``bad-number``). The directory budget is charged with every byte read, whether or not the file then parsed. A directory
+is scanned for at most ``MAX_ENTRIES`` entries, sorted by name after the cap; a directory that held more
+is tallied as ``listings-truncated``.
 Only names that passed the mapping's shapes and numbers computed here reach stdout; paths go through
 ``verdict._safe``.
 
@@ -47,6 +49,7 @@ Only names that passed the mapping's shapes and numbers computed here reach stdo
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
@@ -89,6 +92,7 @@ class _Runs:
         self.excluded = dict.fromkeys(RUN_EXCLUSIONS, 0)
         self.files_read = 0
         self.files_skipped = dict.fromkeys(SKIP_REASONS, 0)
+        self.listings_truncated = 0
 
     def add(self, plugin: str, case: str, model: str | None, started: str | None, cost_usd: float | None,
             total: float, reason: str | None) -> None:
@@ -129,29 +133,29 @@ def _plugins_of(suite: dict) -> list[str] | None:
     return names if all(isinstance(n, str) and CASE_NAME.match(n) for n in names) else None
 
 
-def _read_file(path: Path, budget: int) -> tuple[object, int] | str:
-    """The parsed JSON and its size, or the skip reason."""
+def _read_file(path: Path, budget: int) -> tuple[str | None, object, int]:
+    """``(skip reason or None, parsed JSON, bytes read)``."""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
-        return "not-regular"
+        return "not-regular", None, 0
     with os.fdopen(fd, "rb") as f:
         st = os.fstat(f.fileno())
         if not stat.S_ISREG(st.st_mode):
-            return "not-regular"
+            return "not-regular", None, 0
         if st.st_size > MAX_FILE_BYTES:
-            return "too-large"
+            return "too-large", None, 0
         if st.st_size > budget:
-            return "directory-bound"
+            return "directory-bound", None, 0
         data = f.read(MAX_FILE_BYTES + 1)
     if len(data) > MAX_FILE_BYTES:
-        return "too-large"
+        return "too-large", None, len(data)
     try:
-        return json.loads(data), st.st_size
+        return None, json.loads(data), len(data)
     except RecursionError:
-        return "too-deep"
+        return "too-deep", None, len(data)
     except ValueError:
-        return "not-json"
+        return "not-json", None, len(data)
 
 
 def _runner_output(doc: object):
@@ -172,22 +176,26 @@ def _runner_output(doc: object):
     return plugins, suite.get("ablation"), history.runner_model(doc), case, runs
 
 
-def _ingest_directory(directory: Path, plugin: str, runs: _Runs, max_dir_bytes: int) -> None:
+def _ingest_directory(directory: Path, plugin: str, runs: _Runs, max_dir_bytes: int,
+                      max_entries: int) -> None:
     try:
         if not stat.S_ISDIR(os.lstat(directory).st_mode):
             raise CostError("runs-from", f"{_safe(directory)} is not a directory")
         with os.scandir(directory) as it:
-            names = sorted(e.name for _, e in zip(range(MAX_ENTRIES), it) if e.name.endswith(".json"))
+            listed = [e.name for e in itertools.islice(it, max_entries + 1)]
     except OSError as e:
         raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
+    if len(listed) > max_entries:
+        runs.listings_truncated += 1
+    names = sorted(n for n in listed[:max_entries] if n.endswith(".json"))
     budget = max_dir_bytes
     for name in names:
-        got = _read_file(directory / name, budget)
-        parsed = _runner_output(got[0]) if isinstance(got, tuple) else got
+        skip, doc, nbytes = _read_file(directory / name, budget)
+        budget -= nbytes
+        parsed = skip or _runner_output(doc)
         if isinstance(parsed, str):
             runs.files_skipped[parsed] += 1
             continue
-        budget -= got[1]
         runs.files_read += 1
         plugins, ablation, model, case, records = parsed
         reason = ("ablation" if ablation != "none" else "multi-plugin" if len(plugins) != 1
@@ -239,7 +247,7 @@ def _table(rows: list[list[str]]) -> list[str]:
 
 
 def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
-           *, max_dir_bytes: int = MAX_DIR_BYTES) -> list[str]:
+           *, max_dir_bytes: int = MAX_DIR_BYTES, max_entries: int = MAX_ENTRIES) -> list[str]:
     """The report's lines for ``plugin``'s procedure files in ``repo`` against the recorded runs."""
     repo = Path(repo)
     if not repo.is_dir():
@@ -264,7 +272,7 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     read: set[str] = set()
     for directory in runs_from:
         if os.path.realpath(directory) not in read:
-            _ingest_directory(Path(directory), plugin, runs, max_dir_bytes)
+            _ingest_directory(Path(directory), plugin, runs, max_dir_bytes, max_entries)
             read.add(os.path.realpath(directory))
     _ingest_history(env, plugin, runs)
 
@@ -303,7 +311,8 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     matched = sum(len(v) for k, v in runs.costs.items() if k in wanted)
     out = [closing, mean, f"unpriced: {len(unpriced)} cases",
            f"runner outputs: read {runs.files_read}; skipped: "
-           + ", ".join(f"{r} {runs.files_skipped[r]}" for r in SKIP_REASONS),
+           + ", ".join(f"{r} {runs.files_skipped[r]}" for r in SKIP_REASONS)
+           + f"; listings-truncated {runs.listings_truncated}",
            f"runs: counted {counted} (matched {matched}); excluded: "
            + ", ".join(f"{r} {runs.excluded[r]}" for r in RUN_EXCLUSIONS),
            "procedure files:"]

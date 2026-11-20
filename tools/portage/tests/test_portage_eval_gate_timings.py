@@ -208,7 +208,7 @@ class TestWhichLinesCount:
         assert (row["decisions"], row["max"]) == ("1", "100")
         assert "stale 1" in out.splitlines()[-1] and "pinned 1" in out.splitlines()[-1]
 
-    @pytest.mark.parametrize("model", ["claude-opus-5-5", None])
+    @pytest.mark.parametrize("model", ["claude-opus-5-5", None, 7, "evil\x1b[31m", ["claude-opus-5-5"]])
     def test_a_line_carrying_model_counts_exactly_as_one_without(self, repo, capsys, model):
         repo.case("c1")
         plain = repo.line("c1", runs=[run(100), run(200)])

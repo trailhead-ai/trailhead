@@ -272,7 +272,10 @@ push-tier prices plus its merge-tier prices; the baseline is the median of the f
 `baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens
 with the baseline, the mean and the unpriced count, then the counts of files and runs read, skipped and excluded
 by reason, a row per file, the unpriced and priced cases (a price from one or two runs is flagged `thin`) and the
-files no case selects; its last line is the `baseline:` line. It writes nothing. Exit 0 on a report, 2 with a
+files no case selects; its last line is the `baseline:` line. The runner-output counts end with
+`listings-truncated <n>`, the number of run directories that held more entries than the scan cap (20000), so only a
+prefix of the listing was read. Every byte read from a runner output, parsed or not, counts against the directory's
+64 MiB read budget. It writes nothing. Exit 0 on a report, 2 with a
 `portage: eval-gate cost: <source> unreadable` line when the repo, mapping, a run directory or the history cannot be read.
 
 ## Cost and limits
