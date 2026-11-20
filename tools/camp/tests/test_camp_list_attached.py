@@ -212,6 +212,32 @@ def test_tmux_not_answering_reads_attached_null_on_every_local_row(
     assert [r["last_touched"] for r in rows.values()] == [_MANIFEST_ISO, _MANIFEST_ISO]
 
 
+def test_all_hosts_local_row_with_no_known_activity_reads_last_touched_null(
+    env, tmp_path, monkeypatch, capsys
+) -> None:
+    from camp.provision import lifecycle
+
+    real = lifecycle.workspace_last_touched
+    monkeypatch.setattr(
+        lifecycle,
+        "workspace_last_touched",
+        lambda *, tmux_activity, member_worktree_paths, manifest_path: (
+            None if manifest_path.parent.name == "ws-b" else real(
+                tmux_activity=tmux_activity,
+                member_worktree_paths=member_worktree_paths,
+                manifest_path=manifest_path,
+            )
+        ),
+    )
+    _stub_sessions(tmp_path, monkeypatch, {_session("ws-a"): (_TMUX_ACTIVITY, 1)})
+
+    assert _run(monkeypatch, ["list", "-ag", "--json"]) == 0
+
+    rows = _local_rows(capsys.readouterr().out)
+    assert rows["ws-a"]["last_touched"] == _TMUX_ISO
+    assert rows["ws-b"]["last_touched"] is None
+
+
 def test_a_leftover_session_row_carries_attached(
     env, tmp_path, monkeypatch, capsys
 ) -> None:
