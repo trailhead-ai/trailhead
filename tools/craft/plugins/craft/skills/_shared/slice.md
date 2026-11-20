@@ -127,10 +127,10 @@ reason it belongs to the surface that ships second.
 A create criterion the slice skill's set-aside rule sets aside still counts as creation for this
 rule and for the all-reads rule below: setting it aside takes it off the candidate set, not off the
 surface. A surface whose only create criterion is set aside is therefore not all-reads. Its reads
-ship only as an enabler whose written justification names the set-aside create criterion as what it
-unblocks, or the chooser takes another surface. The set-aside create criterion counts as the slice
-that enabler unblocks: it ships once it is released, so the chooser writes the enabler slice instead
-of stopping for want of a consuming slice.
+ship only as an enabler whose written justification names the set-aside create criterion, by its
+identifier (`AC<n>`), as what it unblocks, or the chooser takes another surface. The set-aside
+create criterion counts as the slice that enabler unblocks: it ships once it is released, so the
+chooser writes the enabler slice instead of stopping for want of a consuming slice.
 
 A surface with no create criterion at all, open or set aside, whose remaining criteria are all reads
 has no creation to wait for: it is an ordinary slice with a value claim, covering every core read,
