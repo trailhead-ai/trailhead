@@ -707,6 +707,20 @@
       ],
       "merge_only": true
     },
+    "slice-first-slice-reads-and-creates-when-an-unknown-governs-the-create": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-treats-a-set-aside-create-criterion-as-creation": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
     "slice-takes-an-all-reads-surface-as-one-ordinary-slice": {
       "measures": [
         "skills/_shared/slice.md",

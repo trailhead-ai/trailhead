@@ -5884,3 +5884,28 @@ Prose fingerprints (`git hash-object`): unedited `skills/plan/SKILL.md` `3ef145b
 | treatment, ordering clause (`6bce9d8…`, step 7 now says its safest-first order holds in place of the escalation question's recommended-first order) | 2 each | **green**, 1 / 1 on both | four unattended runs in a row green since the no-ask fix. Request `local-g69rbu6pmagd` |
 | all-carriers probe | — | **red, by identity with the baseline** | removing every carrier (the task's prose commits reversed) leaves `skills/plan/SKILL.md` and `agents/planner.md` byte-identical to the unedited fingerprints above, so this arm is the baseline arm and was not run again |
 
+
+
+## Cases: the first-slice rule decides on its own, and a set-aside create criterion still counts as creation (2026-11-20)
+
+**Status: not yet run.** The two cases are written and pre-registered in their `expected.md`; no arm has run. The prose half (the sentence in `skills/_shared/slice.md` saying a set-aside create criterion still counts as creation) is not yet edited.
+
+Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only` (core cases for both files already exist). They resolve two follow-ups of the spec: an eval case where removing the first-slice rule alone changes the answer, and the ruling that a set-aside create criterion still counts as creation for the first-slice and all-reads rules.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-first-slice-reads-and-creates-when-an-unknown-governs-the-create` | `notes` group: AC1 list (also prints the notes the old `jot` tool saved), AC2 add; an `## Open Questions` entry says whether two terminals adding at once lose a note must be learned before anything that writes is built | AC1, AC2 (the unknown cannot move the create criterion out of the first slice); with the first-slice rule removed, AC1 only |
+| `slice-treats-a-set-aside-create-criterion-as-creation` | `wallet` group: AC1 list, AC2 show (both read only what add saves), AC3 add that needs a live merchant account with the card network, which the company does not have and which has no test version | an enabler whose written justification names AC3, with no `**Covers:**` line and no covers-gate call; on the unedited prose an ordinary slice over AC1 and AC2 |
+
+Prose fingerprints (`git hash-object`) when the cases were written: `skills/_shared/slice.md` `1cdf4bf2e21e2d9308ac80dcb35f936fab641dd9`, `skills/slice/SKILL.md` `516322e39e3b008a1a1f21f28c9902dbb881949a`.
+
+Bar: first-slice case, current prose green and first-slice-rule-removed prose red, each 3 of 3; set-aside case, unedited prose red and edited prose green, each 3 of 3; one rerun of a failed batch permitted and reported as such; no grader is a judge (the body, the covers-gate call and the final line are the observation points).
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| first-slice case | current prose | — | — | green | not yet run |
+| first-slice case | first-slice-rule removed | — | — | red | not yet run |
+| set-aside case | unedited prose | — | — | red | not yet run |
+| set-aside case | edited prose | — | — | green | not yet run |
