@@ -5855,3 +5855,22 @@ Each probe ran on the edited prose with the tightened fixture, then the tree was
 | planner pointer | only the planner's pointer to plan's step 7 and step 8 narrowed write | planner | **green**, 1 / 1 (request `local-1wcbrkmh4gds`) | not attributable: the planner narrows without its pointer, so it reaches plan's procedure on its own. No case pins the pointer |
 | unattended suffix | the narrowed ending in plan's unattended section and `_shared/unattended.md` | canary | **red**, 0.85 / 0.85 (request `local-50ko2uyc6owo`): both final-line graders failed in both runs | the narrowed closing line depends on these carriers; the narrowing itself held |
 | restore | only step 9's redo after a non-accept answer | reject | **red**, 0.5 / 0.5 (request `local-w0a53aeva2dy`): the restored coverage line, restored-list gate call, removed `**Narrowed:**` line, redone children and the whole-slice report all failed | the restore on rejection depends on step 9's redo |
+
+## Cases: a plan stops and asks when an oversized slice has no stopping point (2026-11-20)
+
+**Status: not yet run.** The cases, the `nostop` fixture variant and the offline checks below are built; no arm has run. The prose half (step 7's no-cut branch, the unattended stop list, the planner pointer) is not yet edited, so the baseline below is the unedited prose of the narrowing task.
+
+Two runner cases, both in the core tier (each declares a 900 s timeout, which `eval-gate.json`'s own check refuses for a `merge_only` case). Both use `VARIANT=nostop` of the shared scaffold `unattended-plan-narrows-an-oversized-slice/fixtures/scaffold.sh` (tree and records in that directory's `nostop.sh`): a spec `shop-database` with four mutually dependent criteria (a migration that writes a database, commands that read only it, the same output as before, a repeatable migration), too large for one pull request by the 10 file / 300 line norm in `CLAUDE.md` and `CONTRIBUTING.md` (fifteen dataset modules, each with its own test, plus wiring; over thirty files), where no kept subset passes the stop-here test.
+
+| Case | Run as | Expected on the unedited prose |
+|---|---|---|
+| `plan-asks-when-an-oversized-slice-has-no-stopping-point` | `/craft:plan <parent>`, slice approved, ask the slice question as the skill says and stop | red: plans the whole slice as one large pull request or invents a cut; a stop-and-ask naming why no stopping point exists is the least likely outcome |
+| `unattended-plan-parks-an-oversized-slice-with-no-stopping-point` | `/craft:plan <parent> --unattended` | red: ends `plan-ready` (whole or narrowed) or `stuck`; plan parks at exactly three stops, none of them this |
+
+Bar: baseline 3 runs, expected red; treatment 3 of 3 runs (the shim decides at 2, recorded as run); one all-carriers probe, expected red on both. Regression: `unattended-plan-narrows-an-oversized-slice` and `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` must still narrow and not ask.
+
+Offline checks before any run: the `stop` variant scaffolds to the same tree before and after the `nostop` edit (a recursive diff of two scaffold runs, excluding the vault's own state files, is empty); the `nostop` scaffold builds and its sixteen tests pass; the final-line pattern accepts `outcome: needs-a-decision task/<name> parked=1` as the last line and rejects `parked=2`, `parked=0`, a `plan-ready` line and a line followed by a trailing question; the `Q1` patterns accept a title or question naming two criteria and one `(recommended)` and reject a `Q1` naming none, none recommended and two recommended; and the no-side-effect graders were run against hand-built injecting tool inputs: a `--kind task --parent` record create (child task), a Write carrying `**Narrowed:** dropped AC3, AC4 — ...` and `covers_gate.py ... --covers "AC1, AC2, AC3"` or `"AC1"` (a reduced list) each trip their grader, while the full list `"AC1, AC2, AC3, AC4"`, a record `show` and a Write of a coverage-complete body do not.
+
+### Runs
+
+None yet.

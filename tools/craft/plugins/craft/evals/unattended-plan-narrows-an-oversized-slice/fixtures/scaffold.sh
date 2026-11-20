@@ -6,13 +6,19 @@
 #   stop    (default) one surface, the `shop export` command, whose five criteria split into a usable
 #           kept part (AC1, AC2, AC3: the orders export) and an independently deferrable rest
 #           (AC4, AC5: the fourteen legacy reports). Intended cut: keep AC1-AC3, drop AC4 and AC5.
+#   nostop  the same shop tool, a different slice: moving every dataset from its JSON file into one SQLite
+#           database. Too large for one pull request by the same evidence as `stop`, and its four criteria
+#           are mutually dependent (the migration writes a database nothing reads until every command
+#           reads it, a command that reads it fails until the migration has written it, and the
+#           other two criteria say what the two together must keep true), so no kept subset passes the
+#           stop-here test. The tree and records come from `nostop.sh`.
 # Any other value is refused, so a case naming a variant that does not exist fails at scaffold time.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../../../../../.." && pwd)"
 VARIANT="${VARIANT:-stop}"
 case "$VARIANT" in
-  stop) ;;
+  stop|nostop) ;;
   *) echo "scaffold.sh: unknown VARIANT '$VARIANT'" >&2; exit 2 ;;
 esac
 bash "$here/seed.sh"
@@ -24,6 +30,11 @@ printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nLORE_EMAIL=eval@example.
 chmod +x lore
 printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")/.." && pwd)\nexec "$here/lore" "$@"\n' > bin/lore
 chmod +x bin/lore
+
+if [ "$VARIANT" = nostop ]; then
+  bash "$here/nostop.sh"
+  exit 0
+fi
 
 cat > CLAUDE.md <<'EOF'
 # CLAUDE.md

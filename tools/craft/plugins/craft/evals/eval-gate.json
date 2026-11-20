@@ -1004,6 +1004,19 @@
         "agents/planner.md"
       ]
     },
+    "plan-asks-when-an-oversized-slice-has-no-stopping-point": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "agents/planner.md"
+      ]
+    },
+    "unattended-plan-parks-an-oversized-slice-with-no-stopping-point": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "agents/planner.md"
+      ]
+    },
     "plan-restores-the-whole-slice-when-the-cut-is-rejected": {
       "measures": [
         "skills/plan/SKILL.md"
