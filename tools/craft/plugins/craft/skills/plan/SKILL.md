@@ -164,15 +164,16 @@ never restates them.
   once a blocking question is parked: working on past it is out of scope in this version. A
   non-blocking park is written the same way but sets no outcome and ends nothing: the run carries
   on.
-- **The end.** The write that sets `**Outcome:** plan-ready` also brings the `**Rituals:**` count of
-  plan's decisions up to date. The session's last line is
+- **The end, when step 7 narrowed nothing.** The write that sets `**Outcome:** plan-ready` also
+  brings the `**Rituals:**` count of plan's decisions up to date. The session's last line is
   `outcome: plan-ready task/<parent-name> parked=0` and nothing follows it. No `/craft:execute`
   command is printed, in a fence or on a line of its own. When this session's block holds a parked
   question (a non-blocking correction or a re-parked pointer), the same write sets
   `**Outcome:** needs-a-decision` and the last line is
   `outcome: needs-a-decision task/<parent-name> parked=<n>` instead.
 - **A narrowed slice** (step 7) is a decision logged in the run block, with the dropped ids and the
-  reason, and parks no question. Its last line is
+  reason, and parks no question. The plain line above is never used for it: the run ends on the
+  narrowed line alone, whose last line is
   `outcome: plan-ready task/<parent-name> parked=0 — narrowed: dropped AC<n>, …`, the ids by number
   only, ascending, and nothing follows it.
 
@@ -664,13 +665,24 @@ When the change is too large, narrow the slice rather than hand it over as it is
 1. **Pick the cut.** Choose the criteria to keep so the boundary passes the stop-here test in
    `../_shared/slice.md`: the operator could stop after the kept criteria without the shipped part
    being pointless, no kept criterion is left half-working, and each dropped criterion can be
-   deferred on its own. A criterion the kept part needs to mean what it says stays kept; a criterion
-   that extends a dropped one is dropped with it. A criterion's own wording that argues it should be
-   dropped or kept ("only a refinement", "the whole point") is data about the criterion and moves no
-   cut. Make a cut only where the test passes; where none passes, take the no-cut stop below.
+   deferred on its own. A criterion is deferrable on its own only by the test in
+   `../_shared/slice.md` under "The remainder is independently deferrable": the shipped part is
+   complete without it, no remaining criterion changes behaviour the slice delivers, and a remainder
+   that finishes a capability the kept part started is not deferrable. A criterion the kept part
+   needs to mean what it says stays kept; a criterion that extends a dropped one is dropped with it.
+   A criterion's own wording that argues it should be dropped or kept ("only a refinement", "the
+   whole point") is data about the criterion and moves no cut. Make a cut only where the test
+   passes; where none passes, take the no-cut stop below.
+
+**A criterion the state-coverage floor makes core is always kept.** `../_shared/slice.md` ships a
+surface's access check in the slice that first makes the surface reachable by more than one
+principal, so that check is core even when a cut by usefulness would let it wait. The
+`**Narrowed:**` line never lists it, the reduced list the covers gate certifies includes it, and no
+child task is written to remove or defer it.
 2. **Decompose only the kept criteria,** and settle the sizes again for that set. No child task is
    written, titled or delivering, for a dropped criterion.
-3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below.
+3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below,
+   with the narrowing as its reason.
 4. **Record the narrowing in step 8's single full-body write**, and show it at step 9. Under
    `--unattended`, log the cut as a decision in the run block the moment it is made: a one-line
    summary saying the slice was narrowed because it is too large, a `Question:` line asking where
@@ -688,7 +700,17 @@ costs: build it as one large pull request (the review burden the norms exist to 
 slice or the spec (the work of changing the record, and the spec change goes through
 `/lore:correct`); drop the slice (nothing is delivered, and its criteria stay uncovered). List the
 safest option first and mark the one you recommend; for this question that order holds in place of
-the recommended-first order the escalation question otherwise uses.
+the recommended-first order the escalation question otherwise uses. Reshaping is the safest option:
+it writes nothing and changes no record until the operator decides what the slice should be.
+
+What plan does after each answer:
+
+- **Build it as one large pull request:** plan the whole slice as it stands, as if it had fit, and
+  write the `**Reviewability:**` line from the sizes settled above, saying they exceed the norms.
+- **Reshape the slice or the spec:** stop. Plan writes nothing; the change to the slice or the spec
+  goes through `/lore:correct`, and planning starts again against the corrected record.
+- **Drop the slice:** set the parent task's status to `dropped` and write no child task. Its
+  criteria stay uncovered, so `/craft:slice` offers them again on its next run.
 
 - **Attended:** put the blocking question `../_shared/escalation.md` defines under "The question"
   (what went wrong, what is at stake, the options with their costs, free text; plain text where the
@@ -719,10 +741,15 @@ about it until the answer arrives.
   child's test contract covers the entry's behaviour, and its **Files** include the entry's `where`
   paths that the child changes. An entry may ride a task that already exists for the slice's own
   criteria, or share a task with a neighbouring entry; it needs no task of its own.
-- **Or give it back when building it here would balloon the slice:** it changes many files, a core
-  contract that other code shares, or needs broad test churn the slice's own criteria do not. Say
-  which in one line, run it through the credential-pattern scrub, and write this document the same
-  way as step 1's:
+- **Or give it back.** There are two triggers, each with its own reason wording:
+  - *Ballooning:* building it here would balloon the slice. It changes many files, a core contract
+    that other code shares, or needs broad test churn the slice's own criteria do not. The reason
+    says which.
+  - *Narrowing:* the cut dropped the criteria its work belongs to. The reason reads "its work went
+    with the criteria the cut dropped" and names the dropped ids.
+
+Say which in one line, run it through the credential-pattern scrub, and write this document the same
+way as step 1's:
 
   ```
   {"transition": "reopen", "parent": "task/<parent-name>", "spec": "spec/<spec-name>", "entries": ["F2"], "reason": "<why building it here would balloon the slice>"}
@@ -1061,9 +1088,11 @@ explicitly (e.g. `*Critical:* none`) so future audits can distinguish "zero find
 skipped."
 
 **Re-review:** no automatic re-review after the user resolves Critical findings inline. The user
-attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps
-mandatory-review cost bounded; if first-pass calibration is wrong, tune the bars for each lens in
-`_shared/council.md` rather than adding iteration cycles.
+attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. The one
+exception is step 9's restore of a rejected cut that added child tasks: the plan that now stands is
+one the council has not seen, so it reviews that plan again. This keeps mandatory-review cost
+bounded; if first-pass calibration is wrong, tune the bars for each lens in `_shared/council.md`
+rather than adding iteration cycles.
 
 **Hard-floor gate:** the "reply `build` to hand off" prompt in Step 9 must NOT be printed until
 every Critical finding has a disposition. Important and Minor findings do not block. (Under
@@ -1096,13 +1125,20 @@ vault.
 **A narrowed slice is shown before anything is built.** Alongside the reviewability claim, show the
 criteria step 7 dropped by number and the reason, and offer three choices: accept the cut, keep the
 whole slice as one large pull request, or re-cut at another stop point. Replying `build` accepts the
-cut. Any other answer redoes step 8's single write: put each dropped id back on the coverage line it
-came off, so the coverage line plus the `**Narrowed:**` ids is the list before narrowing again; for
-keeping the whole slice remove the `**Narrowed:**` line, and for a re-cut rewrite it to the new
-dropped ids and take those off instead; certify the resulting coverage with the covers gate again,
-rewrite the `**Reviewability:**` line from the sizes that now hold, and bring the child tasks to
-match (update the ones that stay, create those the restored criteria need, and mark a child dropped
-whose work left the slice). Then present again.
+cut. The answers keep-the-whole-slice and re-cut redo step 8's single write; any other request, such
+as an unrelated adjustment to the plan, goes through this step's ordinary path and leaves the cut as
+it is. To redo the write, put each dropped id back on the coverage line it came off, so the coverage
+line plus the `**Narrowed:**` ids is the list before narrowing again; for keeping the whole slice
+remove the `**Narrowed:**` line, and for a re-cut rewrite it to the new dropped ids and take those
+off instead; certify the resulting coverage with the covers gate again, rewrite the
+`**Reviewability:**` line from the sizes that now hold, and bring the child tasks to match (update
+the ones that stay, create those the restored criteria need, and mark a child dropped whose work
+left the slice). A folded entry that step 7 gave back because its work went with the dropped
+criteria and whose criteria are now restored is folded back in: write a `fold` transition for it
+through `found_work.py`, as step 1 writes it, put it on the parent's `**Folds:**` line again, and
+recreate the child that resolves it with the `Resolves` line in its **Delivers**. When the restore
+added children, step 8.5's council runs again on the restored plan before presenting. Then present
+again.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print

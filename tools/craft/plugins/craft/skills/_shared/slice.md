@@ -91,9 +91,10 @@ ordering under "Interface leverage".
 
 ### Where a slice may end short of its surface
 
-A slice ends before its surface's core criteria (defined under "Core and polish") are all covered
-for one of three reasons, and for no other. Size is never one of them. Each cut still has to pass
-the stop-here test below.
+When choosing a slice, the chooser ends it before its surface's core criteria (defined under "Core
+and polish") are all covered for one of three reasons, and for no other. Size is never one of them
+for the chooser. Plan's narrowing of a slice too large for one pull request is the one cut made for
+size, under its own rule in `plan`'s step 7. Each cut still has to pass the stop-here test below.
 
 - **The remainder is independently deferrable.** The shipped part is complete for the consumer
   without the remainder: no criterion the slice covers is left half-working, and no remaining
