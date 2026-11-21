@@ -40,8 +40,8 @@ JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own li
 shape the reader does not take or a case name outside the mapping's shape (``bad-shape``), or holds a
 ``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and at most
 ``MAX_RUN_COST_USD`` (``bad-number``). The directory budget is charged with every byte read, whether or
-not the file then parsed. A directory is scanned for at most ``MAX_ENTRIES`` entries, sorted by name after the cap; a directory that held more
-is tallied as ``listings-truncated``.
+not the file then parsed. A directory is scanned for at most ``MAX_ENTRIES`` entries, sorted by name
+after the cap; a directory that held more is tallied as ``listings-truncated``.
 Only names that passed the mapping's shapes and numbers computed here reach stdout; paths go through
 ``verdict._safe``.
 
