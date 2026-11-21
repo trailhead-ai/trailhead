@@ -14,7 +14,7 @@ PATHS = ["p/skills/a.md", "p/skills/b.md", "q/skills/a.md", "r/skills/a.md",
 
 
 @pytest.fixture
-def mixed(repo):
+def mixed(repo):  # noqa: F811  (repo is the imported fixture)
     _corpus(repo, "p", {"alpha": {"measures": ["skills/a.md"]},
                         "beta": {"measures": ["skills/b.md"]},
                         "gamma": {"measures": ["skills/a.md"], "merge_only": True},
