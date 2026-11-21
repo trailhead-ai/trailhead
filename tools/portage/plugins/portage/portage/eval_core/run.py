@@ -133,7 +133,7 @@ def _call_tmpdir(env: dict[str, str], strict_tmp: bool = False):
         shutil.rmtree(path, ignore_errors=True)
 
 
-def _runs_of(doc: object) -> list[dict] | None:
+def runs_of(doc: object) -> list[dict] | None:
     try:
         runs = doc["cases"][0]["arms"]["with"]  # type: ignore[index]
     except (KeyError, IndexError, TypeError):
@@ -159,7 +159,7 @@ TIMING_FIELDS = (("duration_seconds", "durationSeconds", MAX_DURATION_SECONDS),
                  ("judge_cost_usd", "judgeCostUsd", MAX_RUN_COST_USD))
 
 
-def _measure(value: object, bound: float) -> int | float | None:
+def measure(value: object, bound: float) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return value if 0 <= value <= bound else None
@@ -169,7 +169,7 @@ def _unmeasured(record: dict) -> dict:
     return {**record, **{field: None for field, _, _ in TIMING_FIELDS}}
 
 
-def _run_record(run: dict) -> dict:
+def run_record(run: dict) -> dict:
     graders = run.get("graders") if isinstance(run.get("graders"), list) else []
     score = run.get("score")
     return {
@@ -181,7 +181,7 @@ def _run_record(run: dict) -> dict:
             for g in graders
             if isinstance(g, dict) and isinstance(g.get("name"), str)
         ],
-        **{field: _measure(run.get(key), bound) for field, key, bound in TIMING_FIELDS},
+        **{field: measure(run.get(key), bound) for field, key, bound in TIMING_FIELDS},
     }
 
 
@@ -192,9 +192,9 @@ def _decide(doc: object, n: int, pass_at: int, exit_code: int | None, killed: bo
     When ``killed``, the runs from index ``killed_from`` on came from the call that was killed
     and carry no timing; earlier runs came from calls that finished and keep theirs."""
     asked = n if asked is None else asked
-    runs = _runs_of(doc)
+    runs = runs_of(doc)
     records = [_unmeasured(rec) if killed and i >= killed_from else rec
-               for i, rec in enumerate(_run_record(r) for r in (runs or [])[:asked])]
+               for i, rec in enumerate(run_record(r) for r in (runs or [])[:asked])]
     scored = [r for r in (runs or [])[:asked] if not _is_errored(r)]
     passing = sum(1 for r in scored if _passes(r))
     failing = len(scored) - passing
@@ -403,7 +403,7 @@ def _run_planned(plugin_dir, case, n, pass_at, runner_cfg, runs_dir, json_path, 
         if not asked:
             first_elapsed = clock() - call_start
         doc = read_json(json_path)
-        runs = _runs_of(doc)
+        runs = runs_of(doc)
         segment = (runs or [])[:batch]
         segment += [{"error": "missing"}] * (batch - len(segment))
         merged += segment

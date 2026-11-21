@@ -261,6 +261,23 @@ The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Fla
   the first call's elapsed time against the budget left.
 - `over-merge-margin`: a `merge-only` case whose largest single-batch elapsed time is over the budget left.
 
+## Pricing a one-file edit
+
+`portage eval-gate cost --repo <path> --plugin <name> [--runs-from <dir>]...` prices, for each procedure file (a
+regular `.md` file under the plugin's `skills/` that at least one case selects), the cases a one-file edit to it selects
+at the push and merge tiers (the gate's own selection, HEAD as the base; push leaves out `merge_only` cases). Each
+case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
+timing history and from every `*.json` runner output directly in each `--runs-from` directory. A file's total is its
+push-tier prices plus its merge-tier prices; the baseline is the median of the file totals, or
+`baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens
+with the baseline, the mean and the unpriced count, then the counts of files and runs read, skipped and excluded
+by reason, a row per file, the unpriced and priced cases (a price from one or two runs is flagged `thin`) and the
+files no case selects; its last line is the `baseline:` line. The runner-output counts end with
+`listings-truncated <n>`, the number of run directories that held more entries than the scan cap (20000), so only a
+prefix of the listing was read. Every byte read from a runner output, parsed or not, counts against the directory's
+64 MiB read budget. It writes nothing. Exit 0 on a report, 2 with a
+`portage: eval-gate cost: <source> unreadable` line when the repo, mapping, a run directory or the history cannot be read.
+
 ## Cost and limits
 
 `plan` prints the number of selected cases and the sum of their `max_cost_usd` caps, which is a ceiling. One

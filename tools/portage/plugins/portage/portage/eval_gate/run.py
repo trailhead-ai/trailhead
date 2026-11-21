@@ -349,12 +349,14 @@ def _run_planned(state, case, n, pass_at, plugin_dir, runner_cfg, timeout_second
 def _history_record(state, plan, entry, result, fingerprint, pinned, timeout_seconds, elapsed,
                     recorded_at) -> dict:
     case = result["case"]
+    runner_doc = core.read_json(state / "runs" / f"{case}.json")
     return {
         "recorded_at": recorded_at.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "plugin": PurePosixPath(entry["plugin_root"]).name,
         "case": case,
         "fingerprint": fingerprint,
-        "runner_version": history.runner_version(core.read_json(state / "runs" / f"{case}.json")),
+        "runner_version": history.runner_version(runner_doc),
+        "model": history.runner_model(runner_doc),
         "pinned_runner": pinned,
         "tier": plan.get("tier"),
         "verdict": result["verdict"],

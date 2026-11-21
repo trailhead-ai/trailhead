@@ -10,6 +10,7 @@ result already drops the earlier batches' runs, so there is nothing to record::
     {"recorded_at": "<UTC, YYYY-MM-DDTHH:MM:SSZ>", "plugin": str, "case": str,
      "fingerprint": str | null,         # the pass-cache key; null when the case is uncacheable
      "runner_version": str | null,      # the runner JSON's claudeVersion, when it looks like a version
+     "model": str | null,               # the runner JSON's suite.modelOverride, when it looks like a model id
      "pinned_runner": bool,             # PORTAGE_EVAL_RUNNER was set
      "tier": str | null,                # the plan's tier
      "verdict": "pass" | "fail" | "not-run", "reason": str | null,
@@ -40,6 +41,7 @@ from pathlib import Path
 from trailhead import paths
 
 from .cache import APP, SUBDIR, ensure_private_dir
+from .mapping import MODEL_ID
 
 HISTORY_NAME = "history.jsonl"
 ROTATED_NAME = "history.1.jsonl"
@@ -65,6 +67,17 @@ def runner_version(doc: object) -> str | None:
     if isinstance(version, str) and _VERSION.fullmatch(version):
         return version
     return None
+
+
+def model_id(value: object) -> str | None:
+    """``value`` when it has the shape of a model id, else ``None``."""
+    return value if isinstance(value, str) and MODEL_ID.fullmatch(value) else None
+
+
+def runner_model(doc: object) -> str | None:
+    """The runner JSON's ``suite.modelOverride`` when it has the shape of a model id, else ``None``."""
+    suite = doc.get("suite") if isinstance(doc, dict) else None
+    return model_id(suite.get("modelOverride") if isinstance(suite, dict) else None)
 
 
 def append(record: dict, env: dict[str, str], write=os.write) -> None:

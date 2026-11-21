@@ -133,7 +133,12 @@ def _number(v: object, bound: float) -> bool:
         return False
 
 
-def _decision(doc: dict) -> dict | None:
+def run_cost(record: dict) -> float:
+    """A run record's cost: its ``cost_usd`` plus its ``judge_cost_usd``, each where present."""
+    return sum(record[k] for k in ("cost_usd", "judge_cost_usd") if record.get(k) is not None)
+
+
+def decision(doc: dict) -> dict | None:
     """The validated numbers of a history line, or ``None`` when a field is outside its shape."""
     runs = doc.get("runs")
     if not (isinstance(doc.get("plugin"), str) and isinstance(doc.get("case"), str)
@@ -150,13 +155,14 @@ def _decision(doc: dict) -> dict | None:
                 and all(r.get(k) is None or _number(r[k], core.MAX_RUN_COST_USD)
                         for k in ("cost_usd", "judge_cost_usd"))):
             return None
-        cost = sum(r[k] for k in ("cost_usd", "judge_cost_usd") if r.get(k) is not None)
-        out.append({"errored": r["errored"], "duration": r.get("duration_seconds"), "cost": cost})
+        out.append({"errored": r["errored"], "duration": r.get("duration_seconds"), "cost": run_cost(r),
+                    "cost_usd": r.get("cost_usd")})
     return {"at": doc["recorded_at"], "elapsed": doc["elapsed_seconds"], "runs": out,
-            "timeout": doc.get("reason") == "timeout", "version": doc.get("runner_version")}
+            "timeout": doc.get("reason") == "timeout", "version": doc.get("runner_version"),
+            "model": history.model_id(doc.get("model"))}
 
 
-def _lines(path: Path) -> list[bytes]:
+def history_lines(path: Path) -> list[bytes]:
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
@@ -185,7 +191,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
     versions: set[str] = set()
     total = 0
     for path in (history.rotated_path(env), history.history_path(env)):
-        for raw in _lines(path):
+        for raw in history_lines(path):
             total += 1
             try:
                 doc = json.loads(raw)
@@ -194,7 +200,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
             if not isinstance(doc, dict):
                 tally["corrupt"] += 1
                 continue
-            dec = _decision(doc)
+            dec = decision(doc)
             plugin, name = doc.get("plugin"), doc.get("case")
             if dec is None or not CASE_NAME.match(name) or not (plugin == "" or CASE_NAME.match(plugin)):
                 tally["mis-shaped"] += 1
