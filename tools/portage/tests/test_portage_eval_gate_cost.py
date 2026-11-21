@@ -339,7 +339,8 @@ class TestPricing:
         assert section(lines, "priced cases:") == []
 
 
-EXCLUDED = ("ablation", "multi-plugin", "other-plugin", "zero-cost", "pinned", "model-unknown", "duplicate")
+EXCLUDED = ("ablation", "multi-plugin", "other-plugin", "zero-cost", "pinned", "model-unknown", "duplicate",
+            "duplicate-history")
 
 
 class TestExclusions:
@@ -739,6 +740,145 @@ class TestOneBudgetOneLevelDown:
         assert forward == backward
         assert counts(forward, "runner outputs:")["read"] == 4
         assert priced(forward)["alpha"][2:4] == ["5.0000", "4"]
+
+
+class TestHistoryMatching:
+    """A gate run is in the gate's history and, saved, in a runner output; it is priced once."""
+
+    def test_a_history_run_matching_a_runner_output_run_is_counted_once(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        fx.history(hline(cost_usd=1.0))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+        assert counts(lines, "runs:")["counted"] == 1
+        assert counts(lines, "runs:")["duplicate-history"] == 1
+        assert counts(lines, "runs:")["duplicate"] == 0
+
+    def test_a_history_run_whose_cost_differs_is_a_different_run(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        fx.history(hline(cost_usd=3.0))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["2.0000", "2"]
+        assert counts(lines, "runs:")["duplicate-history"] == 0
+
+    def test_the_cost_that_must_match_is_the_run_cost_with_the_judge(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.5),))
+        fx.history(hline(cost_usd=1.0, judge=0.5))
+        assert counts(fx.report(fx.runs), "runs:")["duplicate-history"] == 1
+
+    def test_two_identical_history_runs_need_a_counterpart_each(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        fx.history(hline(cost_usd=1.0), hline(cost_usd=1.0))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "2"]
+        assert counts(lines, "runs:")["counted"] == 2
+        assert counts(lines, "runs:")["duplicate-history"] == 1
+
+    def test_history_runs_do_not_match_each_other(self, fx):
+        basic(fx)
+        fx.history(hline(cost_usd=1.0), hline(cost_usd=1.0))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "2"]
+        assert counts(lines, "runs:")["duplicate-history"] == 0
+
+    def test_a_history_run_with_no_runner_output_is_counted(self, fx):
+        basic(fx)
+        fx.history(hline(cost_usd=1.0))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+        assert counts(lines, "runs:")["duplicate-history"] == 0
+
+    def test_a_history_run_on_another_model_is_not_matched(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        fx.history(hline(cost_usd=1.0, model=OTHER_MODEL))
+        assert counts(fx.report(fx.runs), "runs:")["duplicate-history"] == 0
+
+    def test_excluded_runs_neither_consume_nor_are_consumed(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "abl.json", costs=((1.0, 0.0),), ablation="skill")
+        fx.history(hline(cost_usd=1.0, pinned=True), hline(cost_usd=1.0, plugin="other"),
+                   hline(cost_usd=1.0))
+        lines = fx.report(fx.runs)
+        tally = counts(lines, "runs:")
+        assert tally["counted"] == 1 and tally["duplicate-history"] == 0
+        assert (tally["ablation"], tally["pinned"], tally["other-plugin"]) == (1, 1, 1)
+
+    def test_an_excluded_history_run_does_not_use_up_the_counterpart(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        fx.history(hline(cost_usd=1.0, pinned=True), hline(cost_usd=1.0))
+        tally = counts(fx.report(fx.runs), "runs:")
+        assert tally["duplicate-history"] == 1 and tally["pinned"] == 1 and tally["counted"] == 1
+
+    def test_an_excluded_runner_output_run_is_no_counterpart(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "multi.json", costs=((1.0, 0.0),), plugins=(PLUGIN, "other"))
+        fx.history(hline(cost_usd=1.0))
+        tally = counts(fx.report(fx.runs), "runs:")
+        assert tally["duplicate-history"] == 0 and tally["counted"] == 1
+
+    def test_the_matching_does_not_depend_on_the_order_of_runs_from(self, fx):
+        basic(fx)
+        other = fx.runs.parent / "other"
+        other.mkdir()
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0),))
+        runner_file(other, "b.json", costs=((3.0, 0.0),))
+        fx.history(hline(cost_usd=1.0), hline(cost_usd=3.0))
+        forward = fx.report(fx.runs, other)
+        assert forward == fx.report(other, fx.runs)
+        assert counts(forward, "runs:")["duplicate-history"] == 2
+        assert priced(forward)["alpha"][2:4] == ["2.0000", "2"]
+
+
+class TestHistoryLineTally:
+    def _lines(self, fx, *raw: str) -> None:
+        d = fx.cache / "eval-gate"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / history.HISTORY_NAME).write_text("".join(x + "\n" for x in raw))
+
+    def _mixed(self, fx) -> None:
+        bad_decision = {**hline(cost_usd=50.0), "verdict": "nonsense"}
+        self._lines(fx, json.dumps(hline(cost_usd=1.0)), "{not json", json.dumps([1, 2]),
+                    json.dumps(bad_decision), json.dumps(hline(case="Bad Case!", cost_usd=50.0)))
+
+    def test_skipped_history_lines_are_tallied_after_the_runner_output_line(self, fx):
+        basic(fx)
+        self._mixed(fx)
+        lines = fx.report(fx.runs)
+        at = next(i for i, x in enumerate(lines) if x.startswith("runner outputs:"))
+        assert lines[at + 1] == "history lines: read 5; skipped: corrupt 1, mis-shaped 3"
+        assert lines[at + 2].startswith("runs: counted 1")
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+
+    def test_a_history_skip_makes_the_baseline_lines_partial(self, fx):
+        basic(fx)
+        self._mixed(fx)
+        lines = fx.report(fx.runs)
+        want = "baseline: 2.0000 (partial: history-corrupt 1, history-mis-shaped 3)"
+        assert lines[0] == lines[-1] == want
+
+    def test_each_history_skip_is_named_on_its_own(self, fx):
+        basic(fx)
+        self._lines(fx, json.dumps(hline(cost_usd=1.0)), "{not json")
+        assert fx.report(fx.runs)[-1] == "baseline: 2.0000 (partial: history-corrupt 1)"
+        self._lines(fx, json.dumps(hline(cost_usd=1.0)), json.dumps([1]))
+        assert fx.report(fx.runs)[-1] == "baseline: 2.0000 (partial: history-mis-shaped 1)"
+
+    def test_a_clean_history_has_no_suffix(self, fx):
+        basic(fx)
+        fx.history(hline(cost_usd=1.0), hline(cost_usd=3.0))
+        lines = fx.report(fx.runs)
+        assert "history lines: read 2; skipped: corrupt 0, mis-shaped 0" in lines
+        assert lines[0] == lines[-1] == "baseline: 4.0000"
+
+    def test_no_history_reads_nothing(self, fx):
+        basic(fx)
+        assert "history lines: read 0; skipped: corrupt 0, mis-shaped 0" in fx.report(fx.runs)
 
 
 class TestPartialFigure:

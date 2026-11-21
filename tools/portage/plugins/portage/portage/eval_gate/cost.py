@@ -38,8 +38,20 @@ A run is counted unless it is excluded, for exactly one reason, checked in this 
 single plugin), ``other-plugin`` (it is not ``--plugin``), ``pinned``, ``model-unknown``, ``zero-cost``
 (no positive ``costUsd``), ``duplicate`` (same plugin, case, model, ``startedAt`` and cost as a run
 already counted, so a run repeated across a case's top-level output, its batch files and its aggregate
-result counts once; a repeat with no valid ``startedAt`` is not deduplicated), ``run-cap`` (the retained-run
-cap was already reached). A counted run is *matched* when a selected case maps to its (case, model).
+result counts once; a repeat with no valid ``startedAt`` is not deduplicated), ``duplicate-history`` (a
+history run matched to a runner-output run, below), ``run-cap`` (the retained-run
+cap was already reached).
+
+Every runner output is read before any history line. A counted history run is matched one-to-one against
+the counted runner-output runs of the same (plugin, case, model) with exactly the same per-run cost
+(``timings.run_cost``), through a per-key count of unconsumed runner-output runs kept in ``_Runs``; a
+match is excluded as ``duplicate-history``, so a gate run present in both sources is priced once. Matching
+consumes runner-output runs only (two identical history runs need a counterpart each), and an excluded
+run neither consumes nor is consumed. A history run with no counterpart is counted. The rule accepts one
+false merge: two distinct runs of one case on one model with bit-identical cost, one in each source,
+count once.
+
+A counted run is *matched* when a selected case maps to its (case, model).
 
 Hostile input. A runner-output file is read with ``O_NOFOLLOW | O_NONBLOCK``, at most ``MAX_FILE_BYTES``,
 and skipped (tallied by reason, never printed) when it is not a regular file or cannot be read
@@ -57,6 +69,11 @@ and ``max_retained_runs`` (the runs kept in memory; one past it is excluded as `
 ``directory-bound``, ``listings-truncated``, ``unlistable-directory`` or ``run-cap`` is nonzero the figure is
 partial, and both ``baseline:`` lines end with ``(partial: <name> <n>, ...)`` naming those tallies. To get a
 full figure, raise the bound that was hit or narrow ``--runs-from`` to the directories that matter.
+History lines are tallied as ``history lines: read <n>; skipped: corrupt <n>, mis-shaped <n>`` (the words
+and order of ``portage eval-gate timings``): ``corrupt`` is a line that is not JSON, ``mis-shaped`` any other
+unusable line (not an object, failing ``timings.decision``, a case name outside the mapping's shape). Either
+count nonzero also makes the figure partial, named ``history-corrupt`` and ``history-mis-shaped`` after the
+bound tallies.
 Only names that passed the mapping's shapes and numbers computed here reach stdout; paths go through
 ``verdict._safe``.
 
@@ -90,7 +107,7 @@ THIN_RUNS = 2
 SKIP_REASONS = ("not-regular", "too-large", "directory-bound", "not-json", "too-deep", "bad-shape",
                 "bad-number", "unlistable-directory")
 RUN_EXCLUSIONS = ("ablation", "multi-plugin", "other-plugin", "pinned", "model-unknown", "zero-cost",
-                  "duplicate", "run-cap")
+                  "duplicate", "duplicate-history", "run-cap")
 _STARTED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
 
 
@@ -116,6 +133,10 @@ class _Runs:
         self.budget = budget
         self.costs: dict[tuple[str, str], list[float]] = {}
         self.seen: set[tuple] = set()
+        self.unmatched: dict[tuple[str, str, str, float], int] = {}
+        self.history_read = 0
+        self.history_corrupt = 0
+        self.history_mis_shaped = 0
         self.excluded = dict.fromkeys(RUN_EXCLUSIONS, 0)
         self.files_read = 0
         self.files_skipped = dict.fromkeys(SKIP_REASONS, 0)
@@ -124,7 +145,7 @@ class _Runs:
         self.directories_expanded: set[tuple[int, int]] = set()
 
     def add(self, plugin: str, case: str, model: str | None, started: str | None, cost_usd: float | None,
-            total: float, reason: str | None) -> None:
+            total: float, reason: str | None, from_history: bool = False) -> None:
         if reason is None and model is None:
             reason = "model-unknown"
         if reason is None and not (cost_usd is not None and cost_usd > 0):
@@ -132,6 +153,10 @@ class _Runs:
         key = (plugin, case, model, started, total)
         if reason is None and started is not None and key in self.seen:
             reason = "duplicate"
+        match = (case, model, total, plugin)
+        if reason is None and from_history and self.unmatched.get(match, 0) > 0:
+            self.unmatched[match] -= 1
+            reason = "duplicate-history"
         if reason is None and self.budget.runs <= 0:
             reason = "run-cap"
         if reason is not None:
@@ -140,6 +165,8 @@ class _Runs:
         if started is not None:
             self.seen.add(key)
         self.budget.runs -= 1
+        if not from_history:
+            self.unmatched[match] = self.unmatched.get(match, 0) + 1
         self.costs.setdefault((case, model), []).append(total)
 
 
@@ -298,18 +325,22 @@ def _ingest_history(env: dict[str, str], plugin: str, runs: _Runs) -> None:
     try:
         for path in (history.rotated_path(env), history.history_path(env)):
             for raw in timings.history_lines(path):
+                runs.history_read += 1
                 try:
                     doc = json.loads(raw)
                 except Exception:
+                    runs.history_corrupt += 1
                     continue
                 dec = timings.decision(doc) if isinstance(doc, dict) else None
                 case = doc.get("case") if dec is not None else None
                 if dec is None or not (isinstance(case, str) and CASE_NAME.match(case)):
+                    runs.history_mis_shaped += 1
                     continue
                 reason = ("other-plugin" if doc["plugin"] != plugin
                           else "pinned" if doc["pinned_runner"] else None)
                 for r in dec["runs"]:
-                    runs.add(plugin, case, dec["model"], None, r["cost_usd"], r["cost"], reason)
+                    runs.add(plugin, case, dec["model"], None, r["cost_usd"], r["cost"], reason,
+                             from_history=True)
     except timings.TimingsError as e:
         raise CostError("history", str(e)) from None
 
@@ -393,7 +424,9 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     cuts = [("directory-bound", runs.files_skipped["directory-bound"]),
             ("listings-truncated", runs.listings_truncated),
             ("unlistable-directory", runs.files_skipped["unlistable-directory"]),
-            ("run-cap", runs.excluded["run-cap"])]
+            ("run-cap", runs.excluded["run-cap"]),
+            ("history-corrupt", runs.history_corrupt),
+            ("history-mis-shaped", runs.history_mis_shaped)]
     partial = ", ".join(f"{name} {n}" for name, n in cuts if n)
     if partial:
         closing += f" (partial: {partial})"
@@ -406,6 +439,8 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
            f"runner outputs: read {runs.files_read}; skipped: "
            + ", ".join(f"{r} {runs.files_skipped[r]}" for r in SKIP_REASONS)
            + f"; listings-truncated {runs.listings_truncated}",
+           f"history lines: read {runs.history_read}; skipped: corrupt {runs.history_corrupt}, "
+           f"mis-shaped {runs.history_mis_shaped}",
            f"runs: counted {counted} (matched {matched}); excluded: "
            + ", ".join(f"{r} {runs.excluded[r]}" for r in RUN_EXCLUSIONS),
            "procedure files:"]
