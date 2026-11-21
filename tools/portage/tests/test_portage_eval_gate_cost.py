@@ -669,3 +669,32 @@ class TestCommand:
                             "--runs-from", str(target)])
         err = capsys.readouterr().err
         assert rc == 2 and "runs-from unreadable" in err and "is not a directory" in err
+
+
+class TestSelectionCallsDoNotGrowWithProcedureFiles:
+    @staticmethod
+    def _git_calls(fx: Fx, monkeypatch, files: int) -> int:
+        from portage.eval_gate import select
+
+        for i in range(files):
+            fx.skill(f"s{i}.md")
+        fx.case("alpha", *(f"s{i}.md" for i in range(files)))
+        fx.commit()
+        calls: list[tuple] = []
+        real = select._git
+
+        def counting(repo, *args):
+            calls.append(args)
+            return real(repo, *args)
+
+        monkeypatch.setattr(select, "_git", counting)
+        fx.report()
+        return len(calls)
+
+    def test_the_git_invocations_are_the_same_for_two_files_as_for_twenty(self, tmp_path, monkeypatch):
+        counts_by_files = {}
+        for files in (2, 20):
+            sub = tmp_path / f"n{files}"
+            sub.mkdir()
+            counts_by_files[files] = self._git_calls(Fx(sub, monkeypatch), monkeypatch, files)
+        assert counts_by_files[2] == counts_by_files[20], counts_by_files

@@ -3,8 +3,10 @@
 A *procedure file* is a regular ``.md`` file under ``<plugin root>/skills/`` at HEAD (the plugin root
 is the parent of each ``evals/eval-gate.json`` whose directory name is the plugin) that at least one case
 selects. Files no case selects are listed apart and left out of every figure. For each procedure file the
-cases a one-file edit touches come from the gate's own ``select_touched`` with HEAD as the merge base
-(no git call of this module's own): the push tier is the touched cases not ``merge_only``, the merge
+cases a one-file edit touches come from one ``select_touched_by_path`` call for every procedure file,
+with HEAD as the merge base (no git call of this module's own): HEAD's tree, the base listing and each
+mapping are read once, so the git commands run grow with the mappings, not with the number of procedure
+files times the mappings. The push tier is the touched cases not ``merge_only``, the merge
 tier is every touched case. Both tiers price a case on its corpus ``runner.model``.
 
 A case's price is the median per-run cost (``costUsd`` plus ``judgeCostUsd`` where present) of the
@@ -62,7 +64,7 @@ from portage.eval_core.run import MAX_RUN_COST_USD, measure, run_record, runs_of
 
 from . import history, timings
 from .mapping import CASE_NAME, MappingError
-from .select import _BLOB_MODES, GitError, _head_tree, _is_mapping, select_touched
+from .select import _BLOB_MODES, GitError, _head_tree, _is_mapping, select_touched_by_path
 from .verdict import _safe
 
 MAX_FILE_BYTES = 1 << 20
@@ -266,12 +268,13 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     if not repo.is_dir():
         raise CostError("repo", f"{_safe(repo)} is not a directory")
     try:
-        by_root = _procedure_files(_head_tree(repo), plugin)
-        selected: dict[str, tuple[str, list[dict]]] = {}
-        for root, paths in by_root.items():
-            for path in paths:
-                touched = select_touched(repo, "HEAD", [path], merge_only_either=True)
-                selected[path] = (root, [c for c in touched if c["plugin_root"] == root])
+        tree = _head_tree(repo)
+        by_root = _procedure_files(tree, plugin)
+        every = [p for paths in by_root.values() for p in paths]
+        touched = select_touched_by_path(repo, "HEAD", every, merge_only_either=True, tree=tree)
+        selected: dict[str, tuple[str, list[dict]]] = {
+            path: (root, [c for c in touched[path] if c["plugin_root"] == root])
+            for root, paths in by_root.items() for path in paths}
     except GitError as e:
         raise CostError("repo", _safe(e)) from None
     except MappingError as e:
