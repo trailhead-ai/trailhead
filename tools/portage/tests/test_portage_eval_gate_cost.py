@@ -729,6 +729,17 @@ class TestOneBudgetOneLevelDown:
         lines = fx.report(fx.runs / "alpha", fx.runs)
         assert counts(lines, "runner outputs:")["read"] == 3
 
+    def test_the_report_does_not_depend_on_the_order_of_runs_from(self, fx):
+        self._request(fx)
+        (fx.runs / "alpha" / "deeper").mkdir()
+        runner_file(fx.runs / "alpha" / "deeper", "x.json", costs=((7.0, 0.0),),
+                    starts=["2026-11-18T04:09:00.000Z"])
+        forward = fx.report(fx.runs, fx.runs / "alpha")
+        backward = fx.report(fx.runs / "alpha", fx.runs)
+        assert forward == backward
+        assert counts(forward, "runner outputs:")["read"] == 4
+        assert priced(forward)["alpha"][2:4] == ["5.0000", "4"]
+
 
 class TestPartialFigure:
     def _cut(self, fx, name):

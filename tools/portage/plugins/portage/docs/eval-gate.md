@@ -269,7 +269,7 @@ at the push and merge tiers (the gate's own selection, HEAD as the base; push le
 case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
 timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
 subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
-named; a symlinked subdirectory is not followed and nothing deeper is read). A run repeated across those files is
+named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). A run repeated across those files is
 counted once; a repeat with no valid `startedAt` is not deduplicated. A file's total is its
 push-tier prices plus its merge-tier prices; the baseline is the median of the file totals, or
 `baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens

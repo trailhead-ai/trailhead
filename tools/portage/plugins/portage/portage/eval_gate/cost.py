@@ -27,7 +27,9 @@ Run sources, all read-only:
   are read without being named), read through ``eval_core.run.runs_of``, ``run_record`` and ``measure``.
   Each directory is opened ``O_NOFOLLOW | O_DIRECTORY`` and its files are opened relative to that
   descriptor; a symlinked subdirectory is not followed, no deeper level is read, and a directory whose
-  device and inode were already read (including one also passed as its own ``--runs-from``) is read once.
+  device and inode had their own files read already (including one also passed as its own ``--runs-from``)
+  has them read once; a directory passed as ``--runs-from`` always has its immediate subdirectories read, so
+  the result does not depend on the order of the ``--runs-from`` directories.
   A runner output counts for the one plugin named by ``suite.plugins``, the case named by
   ``cases[0].name`` and the model named by ``suite.modelOverride``.
 
@@ -119,6 +121,7 @@ class _Runs:
         self.files_skipped = dict.fromkeys(SKIP_REASONS, 0)
         self.listings_truncated = 0
         self.directories_read: set[tuple[int, int]] = set()
+        self.directories_expanded: set[tuple[int, int]] = set()
 
     def add(self, plugin: str, case: str, model: str | None, started: str | None, cost_usd: float | None,
             total: float, reason: str | None) -> None:
@@ -221,8 +224,9 @@ def _open_directory(name: str | Path, dir_fd: int | None = None) -> int:
     return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
 
 
-def _ingest_files(dir_fd: int, plugin: str, runs: _Runs) -> list[str]:
-    """Read the ``.json`` files of an open directory; the names of its subdirectories, sorted."""
+def _ingest_files(dir_fd: int, plugin: str, runs: _Runs, read_files: bool = True) -> list[str]:
+    """Read the ``.json`` files of an open directory (unless ``read_files`` is false); the names of its
+    subdirectories, sorted."""
     left = runs.budget.entries
     with os.scandir(dir_fd) as it:
         listed = [(e.name, e.is_dir(follow_symlinks=False)) for e in itertools.islice(it, left + 1)]
@@ -230,7 +234,7 @@ def _ingest_files(dir_fd: int, plugin: str, runs: _Runs) -> list[str]:
         runs.listings_truncated += 1
     listed = listed[:left]
     runs.budget.entries -= len(listed)
-    for name in sorted(n for n, _ in listed if n.endswith(".json")):
+    for name in sorted(n for n, _ in listed if read_files and n.endswith(".json")):
         skip, doc, nbytes = _read_file(name, dir_fd, runs.budget.bytes)
         runs.budget.bytes -= nbytes
         parsed = skip or _runner_output(doc)
@@ -249,12 +253,12 @@ def _ingest_files(dir_fd: int, plugin: str, runs: _Runs) -> list[str]:
     return sorted(n for n, is_dir in listed if is_dir)
 
 
-def _first_visit(fd: int, runs: _Runs) -> bool:
+def _first_visit(fd: int, seen: set[tuple[int, int]]) -> bool:
     st = os.fstat(fd)
     key = (st.st_dev, st.st_ino)
-    if key in runs.directories_read:
+    if key in seen:
         return False
-    runs.directories_read.add(key)
+    seen.add(key)
     return True
 
 
@@ -267,10 +271,10 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs) -> None:
     except OSError as e:
         raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
     try:
-        if not _first_visit(top, runs):
+        if not _first_visit(top, runs.directories_expanded):
             return
         try:
-            subdirectories = _ingest_files(top, plugin, runs)
+            subdirectories = _ingest_files(top, plugin, runs, _first_visit(top, runs.directories_read))
         except OSError as e:
             raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
         for name in subdirectories:
@@ -280,7 +284,7 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs) -> None:
                 runs.files_skipped["unlistable-directory"] += 1
                 continue
             try:
-                if _first_visit(sub, runs):
+                if _first_visit(sub, runs.directories_read):
                     _ingest_files(sub, plugin, runs)
             except OSError:
                 runs.files_skipped["unlistable-directory"] += 1
