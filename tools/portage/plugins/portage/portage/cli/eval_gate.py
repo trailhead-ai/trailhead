@@ -227,7 +227,10 @@ def _add_cost(group) -> None:
     p.add_argument("--repo", required=True, help="Path to the git repository")
     p.add_argument("--plugin", required=True, help="The plugin whose skills/ files are priced")
     p.add_argument("--runs-from", action="append", default=[], metavar="DIR",
-                   help="A directory of saved runner-output JSON files (repeatable)")
+                   help="A directory of saved runner-output JSON files, read at its top level and in each "
+                        "immediate subdirectory, not deeper (repeatable). One 64 MiB byte budget, one "
+                        "20000-entry listing budget and one 100000-run cap cover every directory; when a "
+                        "figure is marked (partial: ...), raise the bound or narrow --runs-from")
     p.set_defaults(func=cmd_cost)
 
 

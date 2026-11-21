@@ -22,28 +22,39 @@ Run sources, all read-only:
 - the gate's history (both generations), read with ``timings.history_lines`` and ``timings.decision``.
   A history run needs a ``model`` that has the shape of a model id: lines with none, a null, or a
   mis-shaped one are model-unknown. Lines of a pinned runner are excluded.
-- every ``*.json`` file directly in each ``--runs-from`` directory (a symlinked directory is refused),
-  read through ``eval_core.run.runs_of``, ``run_record`` and ``measure``. A runner output counts for
-  the one plugin named by ``suite.plugins``, the case named by ``cases[0].name`` and the model named by
-  ``suite.modelOverride``.
+- every ``*.json`` file in each ``--runs-from`` directory and in each of its immediate subdirectories,
+  in sorted name order (so a request directory's ``<case>/batch-2.json`` and ``<case>/aggregate-result.json``
+  are read without being named), read through ``eval_core.run.runs_of``, ``run_record`` and ``measure``.
+  Each directory is opened ``O_NOFOLLOW | O_DIRECTORY`` and its files are opened relative to that
+  descriptor; a symlinked subdirectory is not followed, no deeper level is read, and a directory whose
+  device and inode were already read (including one also passed as its own ``--runs-from``) is read once.
+  A runner output counts for the one plugin named by ``suite.plugins``, the case named by
+  ``cases[0].name`` and the model named by ``suite.modelOverride``.
 
 A run is counted unless it is excluded, for exactly one reason, checked in this order: ``ablation``
 (the runner output's ``suite.ablation`` is not ``none``), ``multi-plugin`` (``suite.plugins`` is not a
 single plugin), ``other-plugin`` (it is not ``--plugin``), ``pinned``, ``model-unknown``, ``zero-cost``
 (no positive ``costUsd``), ``duplicate`` (same plugin, case, model, ``startedAt`` and cost as a run
-already counted; a run without a valid ``startedAt`` is never a duplicate). A counted run is *matched*
-when a selected case maps to its (case, model).
+already counted, so a run repeated across a case's top-level output, its batch files and its aggregate
+result counts once; a repeat with no valid ``startedAt`` is not deduplicated), ``run-cap`` (the retained-run
+cap was already reached). A counted run is *matched* when a selected case maps to its (case, model).
 
 Hostile input. A runner-output file is read with ``O_NOFOLLOW | O_NONBLOCK``, at most ``MAX_FILE_BYTES``,
 and skipped (tallied by reason, never printed) when it is not a regular file or cannot be read
-(``not-regular``), is over the size bound (``too-large``), is past the directory's ``max_dir_bytes``
-budget (``directory-bound``), is not
-JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own limit (``too-deep``), has a
-shape the reader does not take or a case name outside the mapping's shape (``bad-shape``), or holds a
-``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and at most
-``MAX_RUN_COST_USD`` (``bad-number``). The directory budget is charged with every byte read, whether or
-not the file then parsed. A directory is scanned for at most ``MAX_ENTRIES`` entries, sorted by name
-after the cap; a directory that held more is tallied as ``listings-truncated``.
+(``not-regular``), is over the size bound (``too-large``), is past the call's byte budget
+(``directory-bound``), is not JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own
+limit (``too-deep``), has a shape the reader does not take or a case name outside the mapping's shape
+(``bad-shape``), or holds a ``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and
+at most ``MAX_RUN_COST_USD`` (``bad-number``). A subdirectory that cannot be opened or listed is tallied
+``unlistable-directory`` and the report goes on; an unlistable ``--runs-from`` itself raises ``CostError``.
+
+Three bounds cover the whole call, however many directories it reads: ``max_total_bytes`` (every byte read,
+whether or not the file then parsed), ``max_total_entries`` (every entry listed in any listing, whatever its
+kind or name; each listing takes at most what remains, and one cut short is tallied ``listings-truncated``)
+and ``max_retained_runs`` (the runs kept in memory; one past it is excluded as ``run-cap``). When any of
+``directory-bound``, ``listings-truncated``, ``unlistable-directory`` or ``run-cap`` is nonzero the figure is
+partial, and both ``baseline:`` lines end with ``(partial: <name> <n>, ...)`` naming those tallies. To get a
+full figure, raise the bound that was hit or narrow ``--runs-from`` to the directories that matter.
 Only names that passed the mapping's shapes and numbers computed here reach stdout; paths go through
 ``verdict._safe``.
 
@@ -68,15 +79,16 @@ from .select import _BLOB_MODES, GitError, _head_tree, _is_mapping, select_touch
 from .verdict import _safe
 
 MAX_FILE_BYTES = 1 << 20
-MAX_DIR_BYTES = 64 << 20
-MAX_ENTRIES = 20000
+MAX_TOTAL_BYTES = 64 << 20
+MAX_TOTAL_ENTRIES = 20000
+MAX_RETAINED_RUNS = 100000
 MAX_DEPTH = 10
 MAX_RUNS_PER_FILE = 1000
 THIN_RUNS = 2
 SKIP_REASONS = ("not-regular", "too-large", "directory-bound", "not-json", "too-deep", "bad-shape",
-                "bad-number")
+                "bad-number", "unlistable-directory")
 RUN_EXCLUSIONS = ("ablation", "multi-plugin", "other-plugin", "pinned", "model-unknown", "zero-cost",
-                  "duplicate")
+                  "duplicate", "run-cap")
 _STARTED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
 
 
@@ -86,16 +98,27 @@ class CostError(Exception):
         self.source = source
 
 
+class _Budget:
+    """What is left of a whole ``report`` call's byte, listing-entry and retained-run allowances."""
+
+    def __init__(self, nbytes: int, entries: int, runs: int) -> None:
+        self.bytes = nbytes
+        self.entries = entries
+        self.runs = runs
+
+
 class _Runs:
     """The counted runs by (case, model), with the tallies of what was left out."""
 
-    def __init__(self) -> None:
+    def __init__(self, budget: _Budget) -> None:
+        self.budget = budget
         self.costs: dict[tuple[str, str], list[float]] = {}
         self.seen: set[tuple] = set()
         self.excluded = dict.fromkeys(RUN_EXCLUSIONS, 0)
         self.files_read = 0
         self.files_skipped = dict.fromkeys(SKIP_REASONS, 0)
         self.listings_truncated = 0
+        self.directories_read: set[tuple[int, int]] = set()
 
     def add(self, plugin: str, case: str, model: str | None, started: str | None, cost_usd: float | None,
             total: float, reason: str | None) -> None:
@@ -103,14 +126,17 @@ class _Runs:
             reason = "model-unknown"
         if reason is None and not (cost_usd is not None and cost_usd > 0):
             reason = "zero-cost"
-        if reason is None and started is not None:
-            key = (plugin, case, model, started, total)
-            if key in self.seen:
-                reason = "duplicate"
-            self.seen.add(key)
+        key = (plugin, case, model, started, total)
+        if reason is None and started is not None and key in self.seen:
+            reason = "duplicate"
+        if reason is None and self.budget.runs <= 0:
+            reason = "run-cap"
         if reason is not None:
             self.excluded[reason] += 1
             return
+        if started is not None:
+            self.seen.add(key)
+        self.budget.runs -= 1
         self.costs.setdefault((case, model), []).append(total)
 
 
@@ -140,10 +166,10 @@ def _slurp(f, limit: int) -> bytes:
     return f.read(limit)
 
 
-def _read_file(path: Path, budget: int) -> tuple[str | None, object, int]:
+def _read_file(name: str, dir_fd: int, budget: int) -> tuple[str | None, object, int]:
     """``(skip reason or None, parsed JSON, bytes read)``."""
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dir_fd)
     except OSError:
         return "not-regular", None, 0
     try:
@@ -191,22 +217,22 @@ def _runner_output(doc: object):
     return plugins, suite.get("ablation"), history.runner_model(doc), case, runs
 
 
-def _ingest_directory(directory: Path, plugin: str, runs: _Runs, max_dir_bytes: int,
-                      max_entries: int) -> None:
-    try:
-        if not stat.S_ISDIR(os.lstat(directory).st_mode):
-            raise CostError("runs-from", f"{_safe(directory)} is not a directory")
-        with os.scandir(directory) as it:
-            listed = [e.name for e in itertools.islice(it, max_entries + 1)]
-    except OSError as e:
-        raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
-    if len(listed) > max_entries:
+def _open_directory(name: str | Path, dir_fd: int | None = None) -> int:
+    return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
+
+
+def _ingest_files(dir_fd: int, plugin: str, runs: _Runs) -> list[str]:
+    """Read the ``.json`` files of an open directory; the names of its subdirectories, sorted."""
+    left = runs.budget.entries
+    with os.scandir(dir_fd) as it:
+        listed = [(e.name, e.is_dir(follow_symlinks=False)) for e in itertools.islice(it, left + 1)]
+    if len(listed) > left:
         runs.listings_truncated += 1
-    names = sorted(n for n in listed[:max_entries] if n.endswith(".json"))
-    budget = max_dir_bytes
-    for name in names:
-        skip, doc, nbytes = _read_file(directory / name, budget)
-        budget -= nbytes
+    listed = listed[:left]
+    runs.budget.entries -= len(listed)
+    for name in sorted(n for n, _ in listed if n.endswith(".json")):
+        skip, doc, nbytes = _read_file(name, dir_fd, runs.budget.bytes)
+        runs.budget.bytes -= nbytes
         parsed = skip or _runner_output(doc)
         if isinstance(parsed, str):
             runs.files_skipped[parsed] += 1
@@ -220,6 +246,48 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs, max_dir_bytes: 
             started = raw.get("startedAt")
             started = started if isinstance(started, str) and _STARTED.fullmatch(started) else None
             runs.add(plugin, case, model, started, rec["cost_usd"], timings.run_cost(rec), reason)
+    return sorted(n for n, is_dir in listed if is_dir)
+
+
+def _first_visit(fd: int, runs: _Runs) -> bool:
+    st = os.fstat(fd)
+    key = (st.st_dev, st.st_ino)
+    if key in runs.directories_read:
+        return False
+    runs.directories_read.add(key)
+    return True
+
+
+def _ingest_directory(directory: Path, plugin: str, runs: _Runs) -> None:
+    """Read ``directory``'s ``.json`` files, then those of each immediate subdirectory."""
+    try:
+        if not stat.S_ISDIR(os.lstat(directory).st_mode):
+            raise CostError("runs-from", f"{_safe(directory)} is not a directory")
+        top = _open_directory(directory)
+    except OSError as e:
+        raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
+    try:
+        if not _first_visit(top, runs):
+            return
+        try:
+            subdirectories = _ingest_files(top, plugin, runs)
+        except OSError as e:
+            raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
+        for name in subdirectories:
+            try:
+                sub = _open_directory(name, top)
+            except OSError:
+                runs.files_skipped["unlistable-directory"] += 1
+                continue
+            try:
+                if _first_visit(sub, runs):
+                    _ingest_files(sub, plugin, runs)
+            except OSError:
+                runs.files_skipped["unlistable-directory"] += 1
+            finally:
+                os.close(sub)
+    finally:
+        os.close(top)
 
 
 def _ingest_history(env: dict[str, str], plugin: str, runs: _Runs) -> None:
@@ -262,7 +330,8 @@ def _table(rows: list[list[str]]) -> list[str]:
 
 
 def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
-           *, max_dir_bytes: int = MAX_DIR_BYTES, max_entries: int = MAX_ENTRIES) -> list[str]:
+           *, max_total_bytes: int = MAX_TOTAL_BYTES, max_total_entries: int = MAX_TOTAL_ENTRIES,
+           max_retained_runs: int = MAX_RETAINED_RUNS) -> list[str]:
     """The report's lines for ``plugin``'s procedure files in ``repo`` against the recorded runs."""
     repo = Path(repo)
     if not repo.is_dir():
@@ -284,12 +353,9 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     if not by_root:
         raise CostError("mapping", f"no eval-gate.json mapping for plugin {_safe(plugin)}")
 
-    runs = _Runs()
-    read: set[str] = set()
+    runs = _Runs(_Budget(max_total_bytes, max_total_entries, max_retained_runs))
     for directory in runs_from:
-        if os.path.realpath(directory) not in read:
-            _ingest_directory(Path(directory), plugin, runs, max_dir_bytes, max_entries)
-            read.add(os.path.realpath(directory))
+        _ingest_directory(Path(directory), plugin, runs)
     _ingest_history(env, plugin, runs)
 
     def price(entry: dict) -> tuple[float, int] | None:
@@ -320,6 +386,13 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         closing = f"baseline: incomplete ({len(unpriced)} cases unpriced); lower bound {_money(median)}"
     else:
         closing = f"baseline: {_money(median)}"
+    cuts = [("directory-bound", runs.files_skipped["directory-bound"]),
+            ("listings-truncated", runs.listings_truncated),
+            ("unlistable-directory", runs.files_skipped["unlistable-directory"]),
+            ("run-cap", runs.excluded["run-cap"])]
+    partial = ", ".join(f"{name} {n}" for name, n in cuts if n)
+    if partial:
+        closing += f" (partial: {partial})"
     mean = f"mean: {_money(statistics.mean(totals))} across {len(totals)} files" if totals \
         else "mean: none across 0 files"
     wanted = {(e["case"], e["runner"]["model"]) for e in cases.values()}

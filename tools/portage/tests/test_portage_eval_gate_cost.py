@@ -469,10 +469,14 @@ class TestHostileRunnerOutputs:
         (fx.runs / "x.json").mkdir()
         runner_file(fx.runs, "eio.json")
         monkeypatch.setattr(cost, "_slurp", lambda f, n: (_ for _ in ()).throw(OSError(5, "EIO")))
-        before = len(os.listdir("/proc/self/fd"))
-        for name in ("x.json", "eio.json"):
-            assert cost._read_file(fx.runs / name, cost.MAX_DIR_BYTES)[0] == "not-regular"
-        assert len(os.listdir("/proc/self/fd")) == before
+        dir_fd = os.open(fx.runs, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            before = len(os.listdir("/proc/self/fd"))
+            for name in ("x.json", "eio.json"):
+                assert cost._read_file(name, dir_fd, cost.MAX_TOTAL_BYTES)[0] == "not-regular"
+            assert len(os.listdir("/proc/self/fd")) == before
+        finally:
+            os.close(dir_fd)
 
     def test_a_read_error_on_a_regular_file_is_skipped(self, fx, monkeypatch):
         self._good(fx)
@@ -530,7 +534,7 @@ class TestHostileRunnerOutputs:
         basic(fx)
         first = runner_file(fx.runs, "a-good.json", costs=((1.0, 0.0), (3.0, 0.0)))
         runner_file(fx.runs, "b-more.json", costs=((50.0, 0.0),))
-        lines = fx.report(fx.runs, max_dir_bytes=first.stat().st_size + 1)
+        lines = fx.report(fx.runs, max_total_bytes=first.stat().st_size + 1)
         assert priced(lines)["alpha"][2:4] == ["2.0000", "2"]
         assert counts(lines, "runner outputs:")["directory-bound"] == 1
 
@@ -540,7 +544,7 @@ class TestHostileRunnerOutputs:
         for i in range(4):
             (fx.runs / f"m{i}.json").write_text("{not json" + pad)
         size = (fx.runs / "m0.json").stat().st_size
-        lines = fx.report(fx.runs, max_dir_bytes=2 * size + 1)
+        lines = fx.report(fx.runs, max_total_bytes=2 * size + 1)
         tally = counts(lines, "runner outputs:")
         assert (tally["not-json"], tally["directory-bound"]) == (2, 2)
 
@@ -548,7 +552,7 @@ class TestHostileRunnerOutputs:
         basic(fx)
         for i in range(5):
             runner_file(fx.runs, f"r{i}.json", costs=((1.0, 0.0),))
-        lines = fx.report(fx.runs, max_entries=3)
+        lines = fx.report(fx.runs, max_total_entries=3)
         tally = counts(lines, "runner outputs:")
         assert (tally["read"], tally["listings-truncated"]) == (3, 1)
 
@@ -557,7 +561,7 @@ class TestHostileRunnerOutputs:
         basic(fx)
         for i in range(5):
             runner_file(fx.runs, f"r{i}.json", costs=((1.0, 0.0),))
-        tally = counts(fx.report(fx.runs, max_entries=cap), "runner outputs:")
+        tally = counts(fx.report(fx.runs, max_total_entries=cap), "runner outputs:")
         assert (tally["read"], tally["listings-truncated"]) == (5, 0)
 
     @pytest.mark.parametrize("model", [None, 7, "claude-opus-5-5\x1b[31m", ["claude-opus-5-5"]])
@@ -575,12 +579,12 @@ class TestHostileRunnerOutputs:
         (fx.runs / "odd.json").write_text(doc)
         self._check(fx, "bad-shape")
 
-    def test_only_json_files_directly_in_the_directory_are_read(self, fx):
+    def test_only_json_files_in_the_directory_and_its_subdirectories_are_read(self, fx):
         basic(fx)
         runner_file(fx.runs, "good.json", costs=((1.0, 0.0), (3.0, 0.0)))
         (fx.runs / "notes.txt").write_text("x")
-        (fx.runs / "sub").mkdir()
-        runner_file(fx.runs / "sub", "nested.json", costs=((50.0, 0.0),))
+        (fx.runs / "sub" / "deeper").mkdir(parents=True)
+        runner_file(fx.runs / "sub" / "deeper", "nested.json", costs=((50.0, 0.0),))
         lines = fx.report(fx.runs)
         assert priced(lines)["alpha"][2] == "2.0000"
         skipped = counts(lines, "runner outputs:")
@@ -590,6 +594,196 @@ class TestHostileRunnerOutputs:
         basic(fx)
         runner_file(fx.runs, "good.json", costs=((1.0, 0.0), (3.0, 0.0)))
         assert counts(fx.report(fx.runs, fx.runs), "runner outputs:")["read"] == 1
+
+
+class TestOneBudgetOneLevelDown:
+    """One byte budget, one entry budget and one retained-run cap cover a whole report call."""
+
+    def _two_dirs(self, fx, per_dir=1):
+        basic(fx)
+        other = fx.runs.parent / "more"
+        other.mkdir()
+        for i in range(per_dir):
+            runner_file(fx.runs, f"r{i}.json", costs=((1.0, 0.0),))
+            runner_file(other, f"s{i}.json", costs=((50.0, 0.0),))
+        return other
+
+    def test_the_byte_budget_is_shared_by_every_runs_from_directory(self, fx):
+        other = self._two_dirs(fx)
+        a, b = (next(d.iterdir()).stat().st_size for d in (fx.runs, other))
+        lines = fx.report(fx.runs, other, max_total_bytes=max(a, b) + 1)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+        assert counts(lines, "runner outputs:")["directory-bound"] == 1
+
+    def test_a_byte_budget_that_fits_both_directories_prices_both(self, fx):
+        other = self._two_dirs(fx)
+        a, b = (next(d.iterdir()).stat().st_size for d in (fx.runs, other))
+        lines = fx.report(fx.runs, other, max_total_bytes=a + b + 1)
+        assert priced(lines)["alpha"][2:4] == ["25.5000", "2"]
+        assert counts(lines, "runner outputs:")["directory-bound"] == 0
+
+    def test_the_entry_budget_is_shared_by_every_listing(self, fx):
+        other = self._two_dirs(fx, per_dir=3)
+        lines = fx.report(fx.runs, other, max_total_entries=4)
+        tally = counts(lines, "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (4, 1)
+
+    def test_an_entry_budget_that_fits_every_listing_truncates_none(self, fx):
+        other = self._two_dirs(fx, per_dir=3)
+        tally = counts(fx.report(fx.runs, other, max_total_entries=6), "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (6, 0)
+
+    def test_empty_and_non_json_names_in_a_listing_use_up_the_entry_budget(self, fx):
+        basic(fx)
+        for i in range(4):
+            (fx.runs / f"n{i}.txt").write_text("x")
+        runner_file(fx.runs, "z.json", costs=((1.0, 0.0),))
+        tally = counts(fx.report(fx.runs, max_total_entries=4), "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (0, 1)
+
+    def test_many_subdirectories_exhaust_the_entry_budget(self, fx):
+        basic(fx)
+        for i in range(3):
+            (fx.runs / f"d{i}").mkdir()
+            runner_file(fx.runs / f"d{i}", "r.json", costs=((1.0, 0.0),))
+        tally = counts(fx.report(fx.runs, max_total_entries=4), "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (1, 2)
+        tally = counts(fx.report(fx.runs, max_total_entries=6), "runner outputs:")
+        assert (tally["read"], tally["listings-truncated"]) == (3, 0)
+
+    def _five_runs(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "r.json", costs=tuple((c, 0.0) for c in (1.0, 2.0, 3.0, 10.0, 20.0)))
+
+    def test_runs_past_the_retained_run_cap_are_excluded_and_not_priced(self, fx):
+        self._five_runs(fx)
+        lines = fx.report(fx.runs, max_retained_runs=3)
+        assert priced(lines)["alpha"][2:4] == ["2.0000", "3"]
+        assert counts(lines, "runs:")["run-cap"] == 2 and counts(lines, "runs:")["counted"] == 3
+
+    def test_a_raised_retained_run_cap_prices_every_run(self, fx):
+        self._five_runs(fx)
+        lines = fx.report(fx.runs, max_retained_runs=5)
+        assert priced(lines)["alpha"][2:4] == ["3.0000", "5"]
+        assert counts(lines, "runs:")["run-cap"] == 0
+
+    def _request(self, fx):
+        basic(fx)
+        stamps = ["2026-11-18T04:01:00.000Z", "2026-11-18T04:02:00.000Z", "2026-11-18T04:03:00.000Z"]
+        runner_file(fx.runs, "alpha.json", costs=((1.0, 0.0), (3.0, 0.0)), starts=stamps[:2])
+        (fx.runs / "alpha").mkdir()
+        runner_file(fx.runs / "alpha", "batch-2.json", costs=((9.0, 0.0),), starts=stamps[2:])
+        runner_file(fx.runs / "alpha", "aggregate-result.json", costs=((1.0, 0.0), (3.0, 0.0), (9.0, 0.0)),
+                    starts=stamps)
+
+    def test_a_request_shaped_directory_prices_the_case_from_every_batch_once(self, fx):
+        self._request(fx)
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["3.0000", "3"]
+        assert counts(lines, "runs:")["duplicate"] == 3
+
+    def test_a_file_two_levels_down_is_not_read(self, fx):
+        self._request(fx)
+        (fx.runs / "alpha" / "batch-2").mkdir()
+        runner_file(fx.runs / "alpha" / "batch-2", "x.json", costs=((50.0, 0.0),))
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["3.0000", "3"]
+        assert counts(lines, "runner outputs:")["read"] == 3
+
+    def test_a_symlinked_subdirectory_is_not_followed(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "good.json", costs=((1.0, 0.0),))
+        elsewhere = fx.runs.parent / "elsewhere"
+        elsewhere.mkdir()
+        runner_file(elsewhere, "real.json", costs=((50.0, 0.0),))
+        (fx.runs / "link").symlink_to(elsewhere, target_is_directory=True)
+        lines = fx.report(fx.runs)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+        assert counts(lines, "runner outputs:")["read"] == 1
+        assert counts(lines, "runner outputs:")["unlistable-directory"] == 0
+
+    def test_an_unreadable_subdirectory_is_tallied_and_the_report_completes(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "good.json", costs=((1.0, 0.0),))
+        locked = fx.runs / "locked"
+        locked.mkdir()
+        runner_file(locked, "hidden.json", costs=((50.0, 0.0),))
+        locked.chmod(0)
+        try:
+            lines = fx.report(fx.runs)
+        finally:
+            locked.chmod(0o700)
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+        assert counts(lines, "runner outputs:")["unlistable-directory"] == 1
+        assert lines[-1].startswith("baseline: ")
+
+    def test_a_subdirectory_read_as_its_own_runs_from_is_read_once(self, fx):
+        self._request(fx)
+        lines = fx.report(fx.runs, fx.runs / "alpha")
+        assert priced(lines)["alpha"][2:4] == ["3.0000", "3"]
+        assert counts(lines, "runner outputs:")["read"] == 3
+        assert counts(lines, "runs:")["duplicate"] == 3
+
+    def test_the_subdirectory_named_first_is_still_read_once(self, fx):
+        self._request(fx)
+        lines = fx.report(fx.runs / "alpha", fx.runs)
+        assert counts(lines, "runner outputs:")["read"] == 3
+
+
+class TestPartialFigure:
+    def _cut(self, fx, name):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        kw: dict = {}
+        if name == "directory-bound":
+            runner_file(fx.runs, "b.json", costs=((50.0, 0.0),))
+            kw["max_total_bytes"] = (fx.runs / "a.json").stat().st_size + 1
+        elif name == "listings-truncated":
+            runner_file(fx.runs, "b.json", costs=((50.0, 0.0),))
+            kw["max_total_entries"] = 1
+        elif name == "run-cap":
+            kw["max_retained_runs"] = 1
+        else:
+            locked = fx.runs / "locked"
+            locked.mkdir()
+            locked.chmod(0)
+            return locked, kw
+        return None, kw
+
+    @pytest.mark.parametrize("name", ["directory-bound", "listings-truncated", "unlistable-directory",
+                                      "run-cap"])
+    def test_a_cut_tally_puts_a_partial_suffix_on_the_opening_and_closing_lines(self, fx, name):
+        locked, kw = self._cut(fx, name)
+        try:
+            lines = fx.report(fx.runs, **kw)
+        finally:
+            if locked:
+                locked.chmod(0o700)
+        assert lines[0] == lines[-1]
+        assert lines[-1].startswith("baseline: ") and lines[-1].endswith(f" (partial: {name} 1)")
+
+    def test_every_cut_is_named_in_a_fixed_order(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        runner_file(fx.runs, "b.json", costs=((50.0, 0.0),))
+        lines = fx.report(fx.runs, max_total_bytes=(fx.runs / "a.json").stat().st_size + 1,
+                          max_retained_runs=1)
+        assert lines[-1] == "baseline: 2.0000 (partial: directory-bound 1, run-cap 1)"
+
+    def test_the_incomplete_baseline_carries_the_suffix_after_the_figure(self, fx):
+        _, kw = self._cut(fx, "run-cap")
+        fx.skill("b.md")
+        fx.case("beta", "b.md")
+        fx.commit()
+        lines = fx.report(fx.runs, **kw)
+        assert lines[-1] == ("baseline: incomplete (1 cases unpriced); lower bound 1.0000"
+                             " (partial: run-cap 1)")
+
+    def test_with_no_cut_the_baseline_lines_carry_no_suffix(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        lines = fx.report(fx.runs)
+        assert lines[0] == lines[-1] == "baseline: 4.0000"
 
 
 class TestSnapshotShape:

@@ -267,15 +267,23 @@ The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Fla
 regular `.md` file under the plugin's `skills/` that at least one case selects), the cases a one-file edit to it selects
 at the push and merge tiers (the gate's own selection, HEAD as the base; push leaves out `merge_only` cases). Each
 case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
-timing history and from every `*.json` runner output directly in each `--runs-from` directory. A file's total is its
+timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
+subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
+named; a symlinked subdirectory is not followed and nothing deeper is read). A run repeated across those files is
+counted once; a repeat with no valid `startedAt` is not deduplicated. A file's total is its
 push-tier prices plus its merge-tier prices; the baseline is the median of the file totals, or
 `baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens
 with the baseline, the mean and the unpriced count, then the counts of files and runs read, skipped and excluded
 by reason, a row per file, the unpriced and priced cases (a price from one or two runs is flagged `thin`) and the
-files no case selects; its last line is the `baseline:` line. The runner-output counts end with
-`listings-truncated <n>`, the number of run directories that held more entries than the scan cap (20000), so only a
-prefix of the listing was read. Every byte read from a runner output, parsed or not, counts against the directory's
-64 MiB read budget. It writes nothing. Exit 0 on a report, 2 with a
+files no case selects; its last line is the `baseline:` line. The runner-output counts end with `unlistable-directory <n>` among the skip reasons (a subdirectory that could not be
+opened or listed; a `--runs-from` that cannot be read is still exit 2) and then `listings-truncated <n>`.
+Three bounds cover the whole call, not each directory: 64 MiB of bytes read (every byte read from a runner output,
+parsed or not; a file past it is `directory-bound`), 20000 listing entries (every entry listed in any listing, files,
+subdirectories and other names alike; a listing cut short is `listings-truncated`), and 100000 retained runs (a run
+past it is excluded as `run-cap`). When any of `directory-bound`, `listings-truncated`, `unlistable-directory` or
+`run-cap` is nonzero, both `baseline:` lines end with `(partial: <name> <n>, ...)` after the figure, naming only
+the nonzero ones in that order. To get a full figure, raise the bound that was hit or narrow `--runs-from` to the
+directories that matter. It writes nothing. Exit 0 on a report, 2 with a
 `portage: eval-gate cost: <source> unreadable` line when the repo, mapping, a run directory or the history cannot be read.
 
 ## Cost and limits
