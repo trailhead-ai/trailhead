@@ -175,7 +175,7 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
 the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
 
-After those two lines come the marks, `needs-merge-model: <plugin_root>/<case> — "<reason>"` for each case
+After the `ignored:` lines (when any) come the marks, `needs-merge-model: <plugin_root>/<case> — "<reason>"` for each case
 the base marks (or `needs-merge-model: none`), then `needs-merge-model changed: <plugin_root>/<case>
 (added|altered|removed)` for each mark the branch adds, alters or removes (an added or altered one says it
 takes effect once merged). The same lines end the section. A failing case's counts line ends with the model it
@@ -255,8 +255,9 @@ head.
 exits 0, or 2 with a `portage:` message on a usage error or an unreadable mapping.
 
 A history line counts only when its `plugin` and `case` have the mapping's case-name shape and name a mapped case,
-its `fingerprint` equals the case's current pass-cache key computed from the repository, and `pinned_runner` is not
-true. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
+its `fingerprint` equals the case's current pass-cache key for the line's own tier (either tier's key when the line
+records none), computed from the repository, and `pinned_runner` is not true. Once a corpus sets `push_model`, one row
+mixes push-model and merge-model runs, so its median, batch-max and mean cost blend both models. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
 A history with no lines prints that no runs are recorded yet.
 
 The output is a provenance line (the history path, the dates of the counted lines, the runner versions seen), a
@@ -283,7 +284,7 @@ The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Fla
 `portage eval-gate cost --repo <path> --plugin <name> [--runs-from <dir>]...` prices, for each procedure file (a
 regular `.md` file under the plugin's `skills/` that at least one case selects), the cases a one-file edit to it selects
 at the push and merge tiers (the gate's own selection, HEAD as the base; push leaves out `merge_only` cases). Each
-case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
+case is priced at the median recorded cost per run (run plus judge cost) at each tier on the model that tier runs (push on `push_model`, or on `model` for a case the base marks `needs_merge_model`; merge on `model`), from the
 timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
 subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
 named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). That once-only check keys on device and inode numbers, so on a filesystem that reports non-unique or zero inode numbers (some FUSE and network mounts) distinct directories can be taken for one and the files of all but the first are dropped with no tally. A `--runs-from` that is itself a symlink is refused as not a directory (`portage: eval-gate cost: runs-from unreadable: <path> is not a directory`). A run repeated across those files is

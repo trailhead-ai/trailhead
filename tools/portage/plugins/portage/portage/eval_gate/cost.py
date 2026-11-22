@@ -3,11 +3,11 @@
 A *procedure file* is a regular ``.md`` file under ``<plugin root>/skills/`` at HEAD (the plugin root
 is the parent of each ``evals/eval-gate.json`` whose directory name is the plugin) that at least one case
 selects. Files no case selects are listed apart and left out of every figure. For each procedure file the
-cases a one-file edit touches come from one ``select_touched_by_path`` call for every procedure file,
-with HEAD as the merge base (no git call of this module's own): HEAD's tree, the base listing and each
-mapping are read once, so the git commands run grow with the mappings, not with the number of procedure
-files times the mappings. The push tier is the touched cases not ``merge_only``, the merge
-tier is every touched case. Each tier prices a case on the model it runs, as ``select_touched_by_path``
+cases a one-file edit touches come from one ``select_touched_by_path`` call per tier for every procedure
+file, with HEAD as the merge base (no git call of this module's own): HEAD's tree and the base listing are
+read once per call and each mapping twice (once per tier), so the git commands run grow with the mappings,
+not with the number of procedure files times the mappings. The push tier is the touched cases not ``merge_only``,
+the merge tier is every touched case. Each tier prices a case on the model it runs, as ``select_touched_by_path``
 resolves it for that tier: the merge tier on ``runner.model``, the push tier on ``runner.push_model``
 (``runner.model`` where the mapping has none or the base marks the case ``needs_merge_model``). A case with
 no recorded run on the model a tier uses is unpriced on that tier.

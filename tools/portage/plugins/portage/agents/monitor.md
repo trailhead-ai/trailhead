@@ -314,8 +314,8 @@ Then, with every PR still `done`:
     monitor again after the usage limit resets, or merge by hand.
 
   These two tokens are written even when the dispatch lists none. The case names go in the report,
-  never in the outcome line. The report also relays the verdict's line asking the operator about a
-  `needs-merge-model` mark (never add a mark yourself) and every `needs-merge-model changed:` line.
+  never in the outcome line. The report also relays every `needs-merge-model changed:` line
+  (never add a mark yourself).
 
 - **`portage merge` exits 2 with a first line `portage merge: eval-gate check failed for <repo>:
   <check> — <detail>`** (`head-mismatch` for a push that landed after the gate, say): the state no
