@@ -2347,3 +2347,38 @@ class TestSplitProcedureMergeOnlyRefusal:
         _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, head_merge_only=True)
         assert plan["mapping_invalid"] is None
         assert plan["status"] != "mapping-invalid"
+
+
+LIVE_PORTAGE = Path(__file__).resolve().parents[1] / "plugins" / "portage"
+
+
+class TestLiveCorpusMergeOnlyCases:
+    def _live_repo(self, repo: Path) -> dict:
+        live = json.loads((LIVE_PORTAGE / "evals" / "eval-gate.json").read_text())
+        shutil.copytree(LIVE_PORTAGE / "evals", repo / "p" / "evals")
+        measured = sorted({m for c in live["cases"].values() for m in c["measures"]})
+        for rel in measured:
+            _write(repo, f"p/{rel}", (LIVE_PORTAGE / rel).read_text())
+        _commit(repo)
+        _branch(repo)
+        for rel in measured:
+            _write(repo, f"p/{rel}", "changed\n")
+        _commit(repo)
+        return live["cases"]
+
+    def test_the_live_merge_only_cases_plan_as_merge_only_at_merge_and_are_left_out_at_push(
+        self, repo, capsys
+    ):
+        cases = self._live_repo(repo)
+        merge_only = sorted(n for n, c in cases.items() if c.get("merge_only"))
+        assert len(merge_only) >= 1
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        _, merge, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert push["status"] == "cases-selected" and merge["status"] == "cases-selected"
+        assert push["mapping_invalid"] is None and merge["mapping_invalid"] is None
+        assert _names(push) == sorted(set(cases) - set(merge_only))
+        assert push["merge_only_pending"] == len(merge_only)
+        assert _names(merge) == sorted(cases)
+        assert merge["merge_only_pending"] == 0
+        assert sorted(c["case"] for c in merge["cases"] if c["merge_only"]) == merge_only
+        assert not any(c["merge_only"] for c in push["cases"])
