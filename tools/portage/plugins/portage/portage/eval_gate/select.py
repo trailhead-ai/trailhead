@@ -28,7 +28,7 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
                                       # model: resolve_runner's choice for the tier
                 "needs_merge_model": "<base's reason>" | null,
-                "push_model": str | null, "merge_model": str,   # the base block's two ids (HEAD's when the corpus is new on the branch)
+                "push_model": str | null, "merge_model": str,   # the base block's two ids (HEAD's if new)
                 "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged
                 "merge_only": bool,
                 "new_runner_grants": bool,
