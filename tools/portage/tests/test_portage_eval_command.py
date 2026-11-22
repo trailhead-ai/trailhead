@@ -346,6 +346,24 @@ class TestStart:
         assert "derived: plugins/p decl: skills/e.md, skills/b.md, rules/core.md" in out.splitlines()
         assert re.search(r"^request: local-[a-z0-9]{12}$", out, re.M)
 
+    @pytest.mark.parametrize("rules", [19, 20, 21])
+    def test_start_prints_at_most_twenty_derived_files_then_how_many_more(self, ws, rules):
+        self._declare(ws)
+        plugin = ws.repo / "plugins" / "p"
+        names = [f"rules/r{i}.md" for i in range(rules)]
+        for n in names:
+            (plugin / n).write_text("r\n")
+        (plugin / "skills" / "e.md").write_text("Read " + ", ".join(f"`{n}`" for n in names) + ".\n")
+        (plugin / "evals" / "eval-gate.json").write_text(json.dumps(
+            {**MAPPING, "cases": {**MAPPING["cases"], "decl": {"entry": "skills/e.md"}}}))
+        ws.set("hold")
+        rc, out, err = ws.start("decl")
+        assert rc == 0, err
+        line = next(ln for ln in out.splitlines() if ln.startswith("derived:"))
+        files = ["skills/e.md", *names]
+        more = f", ... (+{len(files) - 20} more)" if len(files) > 20 else ""
+        assert line == f"derived: plugins/p decl: {', '.join(files[:20])}{more}"
+
     def test_a_hand_written_case_starts_with_no_derived_line(self, ws):
         self._declare(ws)
         ws.set("hold")

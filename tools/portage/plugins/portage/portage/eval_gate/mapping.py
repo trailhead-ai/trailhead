@@ -36,7 +36,9 @@ can never form such a link in a PR body. It does not stop GitHub's same-repo ref
 commit SHA still links.
 A fault names a case by its key and echoes any other mapping value only when ``echo`` finds it safe (it matches
 ``ECHO_SAFE``); otherwise it names the value by its position (``#2``), so mapping text never reaches a report.
-``MAX_MAPPING_FILES``, ``MAX_CASES_PER_MAPPING`` and ``MAX_PROCEDURE_FILES`` are the bounds later stages enforce.
+``MAX_MAPPING_FILES``, ``MAX_CASES_PER_MAPPING``, ``MAX_PROCEDURE_FILES`` and ``MAX_BLOB_BYTES`` (the most bytes
+one procedure file may hold) are the bounds later stages enforce. A case's ``measures`` and ``branches`` each hold at
+most ``MAX_CASE_LIST`` paths and no path twice.
 Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 
@@ -61,6 +63,8 @@ MAX_RUNS = 10
 MAX_MAPPING_FILES = 32
 MAX_CASES_PER_MAPPING = 256
 MAX_PROCEDURE_FILES = 2000
+MAX_BLOB_BYTES = 1 << 20
+MAX_CASE_LIST = 64
 ECHO_SAFE = re.compile(r"^[A-Za-z0-9._/-]{1,120}\Z")
 
 _TOP_KEYS = {"schema_version", "runner", "cases"}
@@ -101,6 +105,17 @@ def valid_corpus_path(root: object) -> bool:
     if root == "":
         return True
     return isinstance(root, str) and bool(CORPUS_PATH.match(root)) and ".." not in PurePosixPath(root).parts
+
+
+MAX_DERIVED_SHOWN = 20
+
+
+def derived_names(files) -> str:
+    """The derived files for a report line: the first ``MAX_DERIVED_SHOWN`` through ``echo``, then
+    ``... (+K more)`` for the rest."""
+    shown = ", ".join(echo(f, i) for i, f in enumerate(files[:MAX_DERIVED_SHOWN], 1))
+    extra = len(files) - MAX_DERIVED_SHOWN
+    return f"{shown}, ... (+{extra} more)" if extra > 0 else shown
 
 
 def echo(value: object, position: int) -> str:
@@ -183,6 +198,20 @@ def _path(path, what: str, case: str, position: int, file: str, plugin_root: Pat
     return PurePosixPath(path).as_posix()
 
 
+def _bounded_list(items: list, what: str, ref: str, file: str) -> None:
+    if len(items) > MAX_CASE_LIST:
+        raise MappingError(file, f"case {ref}: {what} holds {len(items)} paths, over the cap of {MAX_CASE_LIST}")
+
+
+def _distinct(paths: tuple[str, ...], raw: list, what: str, ref: str, file: str) -> tuple[str, ...]:
+    seen: set[str] = set()
+    for i, path in enumerate(paths, 1):
+        if path in seen:
+            raise MappingError(file, f"case {ref}: {what} path {_q(raw[i - 1], i)} repeats an earlier entry")
+        seen.add(path)
+    return paths
+
+
 def _case(position: int, name: str, obj, file: str, plugin_root: Path | None, evals_dir: Path | None) -> Case:
     ref = _q(name, position)
     if not CASE_NAME.match(name):
@@ -200,14 +229,17 @@ def _case(position: int, name: str, obj, file: str, plugin_root: Path | None, ev
         raise MappingError(file, f"case {ref}: branches requires entry")
     if not isinstance(branches, list) or not all(isinstance(b, str) for b in branches):
         raise MappingError(file, f"case {ref}: branches must be a list of strings")
-    branch_paths = tuple(_path(b, "branches", ref, i, file, plugin_root, markdown=True)
-                         for i, b in enumerate(branches, 1))
+    _bounded_list(branches, "branches", ref, file)
+    branch_paths = _distinct(tuple(_path(b, "branches", ref, i, file, plugin_root, markdown=True)
+                                   for i, b in enumerate(branches, 1)), branches, "branches", ref, file)
     measures = obj.get("measures", [])
     if not isinstance(measures, list):
         raise MappingError(file, f"case {ref}: measures must be a list")
     if not measures and entry is None:
         raise MappingError(file, f"case {ref} needs measures or entry")
-    paths = tuple(_path(m, "measures", ref, i, file, plugin_root) for i, m in enumerate(measures, 1))
+    _bounded_list(measures, "measures", ref, file)
+    paths = _distinct(tuple(_path(m, "measures", ref, i, file, plugin_root) for i, m in enumerate(measures, 1)),
+                      measures, "measures", ref, file)
     runs = obj.get("runs", DEFAULT_RUNS)
     if not _is_int(runs) or not 1 <= runs <= MAX_RUNS:
         raise MappingError(file, f"case {ref}: runs must be an integer in 1..{MAX_RUNS}")

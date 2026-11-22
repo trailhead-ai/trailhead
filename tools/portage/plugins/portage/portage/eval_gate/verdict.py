@@ -90,7 +90,7 @@ import re
 import stat
 from pathlib import Path
 
-from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, echo, valid_corpus_path
+from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, derived_names, valid_corpus_path
 from .select import TIERS
 from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
 
@@ -294,9 +294,9 @@ def _marks_lines(plan: dict) -> list[str]:
 
 
 def _derived_lines(plan: dict) -> list[str]:
-    """One ``derived:`` line per selected declared case; the files are named only through ``echo``."""
+    """One ``derived:`` line per selected declared case; the files are named only through ``derived_names``."""
     return [f"derived: {_corpus(c.get('plugin_root'))} {c['case']}: "
-            + ", ".join(echo(f, i) for i, f in enumerate(c["derived"], 1))
+            + derived_names(c["derived"])
             for c in plan["cases"] if "derived" in c]
 
 

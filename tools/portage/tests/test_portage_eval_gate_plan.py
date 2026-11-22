@@ -21,7 +21,7 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
-from portage.eval_gate import select, unmapped_runner_cases
+from portage.eval_gate import merge_check, select, unmapped_runner_cases
 
 RUNNER = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
 
@@ -1373,6 +1373,44 @@ class TestDeclaredCases:
         assert plan["mapping_invalid"]["fault"] == (
             f"case 'hand': measures path '{measure}' is or holds the split core '{core}'")
 
+    @pytest.mark.parametrize("core_text", [
+        "core\n\nRead `b-undeclared.md` when asked.\n",
+        "core, see [the branch](b-undeclared.md)\n",
+    ])
+    def test_a_hand_written_measure_holding_a_core_that_loads_or_links_a_branch_is_refused(
+        self, repo, capsys, core_text
+    ):
+        _declared_corpus(repo, cases={"hand": {"measures": ["skills/core.md"]}},
+                         files={"skills/core.md": core_text})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            "case 'hand': measures path 'skills/core.md' is or holds the split core 'skills/core.md'")
+
+    @pytest.mark.parametrize("core_text, split", [
+        ("core\n\nRead `rule-a.md` now.\n", False),
+        ("core, see [the branch](../skills/b-undeclared.md)\n", True),
+    ])
+    def test_a_branch_linked_below_the_entry_makes_the_case_split_and_leaves_the_branch_out_of_its_files(
+        self, repo, capsys, core_text, split
+    ):
+        _declared_corpus(repo, cases={"decl": {"entry": "skills/entry.md"}},
+                         files={"skills/entry.md": "# Entry\n\nRead `rules/core.md`.\n",
+                                "rules/core.md": core_text})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _write(repo, "p/rules/core.md", core_text + "\nmore\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        case = _entry_of(plan, "decl")
+        assert case["split_procedure"] is split
+        assert "skills/b-undeclared.md" not in case["derived"]
+
     def test_a_directory_with_no_split_core_is_a_fine_measure(self, repo, capsys):
         _declared_corpus(repo, cases={"hand": {"measures": ["rules"]}})
         _commit(repo)
@@ -2043,3 +2081,143 @@ class TestWholeChangeReviewFixes:
         assert line.split(": ", 1)[1] == (
             "p/evals/eval-gate.json: case 'hand' measures path 'skills/entry.md' is or holds the split core "
             "'skills/entry.md'")
+
+
+class TestBlobCap:
+    @staticmethod
+    def _plan_with_core_of(repo, capsys, size: int):
+        _declared_corpus(repo, cases={"decl": {"entry": "skills/entry.md"}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/rules/core.md", "x" * size)
+        _commit(repo)
+        return _plan(repo, capsys, "--base", "base")
+
+    def test_a_procedure_file_of_exactly_the_cap_is_read(self, repo, capsys):
+        from portage.eval_gate.mapping import MAX_BLOB_BYTES
+
+        _, plan, _ = self._plan_with_core_of(repo, capsys, MAX_BLOB_BYTES)
+        assert plan["status"] == "cases-selected"
+
+    def test_a_procedure_file_one_byte_over_the_cap_is_mapping_invalid_naming_it(self, repo, capsys):
+        from portage.eval_gate.mapping import MAX_BLOB_BYTES
+
+        _, plan, _ = self._plan_with_core_of(repo, capsys, MAX_BLOB_BYTES + 1)
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            f"case 'decl': 'rules/core.md' is larger than {MAX_BLOB_BYTES} bytes")
+
+
+class TestNonUtf8Path:
+    @pytest.fixture
+    def hostile(self, repo):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        bad = os.fsencode(repo) + b"/p/skills/bad\xff.md"
+        with open(bad, "wb") as f:
+            f.write(b"x\n")
+        _commit(repo)
+        return repo
+
+    def test_plan_refuses_a_committed_path_that_is_not_utf8_with_a_clean_exit(self, hostile, capsys):
+        capsys.readouterr()
+        rc = dispatch.main(["eval-gate", "plan", "--repo", str(hostile), "--base", "base"])
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert captured.err.startswith("eval-gate plan: ")
+        assert "Traceback" not in captured.err
+
+    def test_backstop_touched_raises_the_git_error_callers_already_handle(self, hostile):
+        with pytest.raises(select.GitError):
+            select.backstop_touched(hostile, "base")
+
+    def test_the_merge_check_refuses_with_selection_failed_instead_of_crashing(self, hostile):
+        refusal, head = merge_check.check_pair(str(hostile), None, lambda: "a" * 40)
+        assert head is None and refusal.check == "selection-failed"
+
+    def test_a_utf8_path_still_plans(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/caf\u00e9.md")
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert _names(plan) == ["alpha"]
+
+    def test_a_non_utf8_mapping_body_is_still_mapping_invalid_not_a_git_failure(self, repo, capsys):
+        _write(repo, "p/skills/a.md")
+        _write(repo, "p/evals/alpha/case.yaml")
+        (repo / "p/evals").mkdir(parents=True, exist_ok=True)
+        (repo / "p/evals/eval-gate.json").write_bytes(b'{"x": "\xff"}')
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0 and plan["status"] == "mapping-invalid" and "UTF-8" in plan["mapping_invalid"]["fault"]
+
+
+class TestCaseListCaps:
+    @staticmethod
+    def _case_with(key: str, paths: list[str]) -> dict:
+        case = {"entry": "skills/a.md", "measures": ["skills/b.md"]}
+        case[key] = paths
+        return {"alpha": case}
+
+    @pytest.mark.parametrize("key", ["measures", "branches"])
+    def test_a_list_of_exactly_the_cap_loads_and_one_more_is_refused(self, key):
+        from portage.eval_gate.mapping import MAX_CASE_LIST, MappingError, load_mapping
+
+        def paths(n):
+            return [f"skills/p{i}.md" for i in range(n)]
+
+        load_mapping(_mapping(self._case_with(key, paths(MAX_CASE_LIST))), "p/evals/eval-gate.json")
+        with pytest.raises(MappingError) as e:
+            load_mapping(_mapping(self._case_with(key, paths(MAX_CASE_LIST + 1))), "p/evals/eval-gate.json")
+        assert e.value.fault == f"case 'alpha': {key} holds {MAX_CASE_LIST + 1} paths, over the cap of {MAX_CASE_LIST}"
+
+    @pytest.mark.parametrize("key", ["measures", "branches"])
+    def test_a_path_repeated_in_a_list_is_refused_naming_its_position(self, key):
+        fault = _fault(_mapping(self._case_with(key, ["skills/p.md", "skills/q.md", "skills/./p.md"])))
+        assert fault == f"case 'alpha': {key} path 'skills/./p.md' repeats an earlier entry"
+
+    @pytest.mark.parametrize("key", ["measures", "branches"])
+    def test_distinct_paths_load(self, key):
+        from portage.eval_gate.mapping import load_mapping
+
+        load_mapping(_mapping(self._case_with(key, ["skills/p.md", "skills/q.md"])), "p/evals/eval-gate.json")
+
+
+class TestPlanPrintsTheFlagsTheMonitorReads:
+    CASES = {"split": {"entry": "skills/entry.md", "branches": ["skills/b-declared.md"]},
+             "only": {"measures": ["skills/other.md"], "merge_only": True},
+             "plain": {"measures": ["skills/other.md"]}}
+
+    def _flag_lines(self, repo, capsys, tier="merge"):
+        _declared_corpus(repo, cases=self.CASES)
+        _commit(repo)
+        _branch(repo)
+        for rel in ("skills/entry.md", "skills/other.md"):
+            _write(repo, f"p/{rel}", (repo / "p" / rel).read_text() + "\nchanged\n")
+        _commit(repo)
+        _, plan, out = _plan(repo, capsys, "--base", "base", "--tier", tier)
+        return plan, [ln for ln in out.splitlines() if ln.startswith("case-flags: ")]
+
+    def test_each_selected_case_prints_its_merge_only_and_split_procedure_flags(self, repo, capsys):
+        _, lines = self._flag_lines(repo, capsys)
+        assert lines == [
+            "case-flags: p:only merge_only=true split_procedure=false",
+            "case-flags: p:plain merge_only=false split_procedure=false",
+            "case-flags: p:split merge_only=false split_procedure=true"]
+
+    def test_the_push_tier_prints_flags_only_for_the_cases_it_selects(self, repo, capsys):
+        _, lines = self._flag_lines(repo, capsys, tier="push")
+        assert [ln.split()[1] for ln in lines] == ["p:plain", "p:split"]
+
+    def test_the_flags_agree_with_plan_json(self, repo, capsys):
+        plan, lines = self._flag_lines(repo, capsys)
+        want = [f"case-flags: p:{c['case']} merge_only={str(c['merge_only']).lower()} "
+                f"split_procedure={str(c['split_procedure']).lower()}" for c in plan["cases"]]
+        assert lines == want

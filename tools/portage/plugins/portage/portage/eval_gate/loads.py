@@ -42,7 +42,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from .mapping import MAX_PROCEDURE_FILES, _q
+from .mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES, _q
 
 _SAFE_CHARS = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNORECASE)
@@ -156,16 +156,15 @@ def _parsed(read, text: str) -> _Parsed:
 
 def loads_in(path: str, text: str, read) -> list[str]:
     """The plugin-relative paths ``path`` loads, in order, each once."""
-    found: list[str] = []
+    found: dict[str, None] = {}
     for position, raw in enumerate(_parsed(read, text).raw_loads, 1):
         if not _SAFE_CHARS.match(raw):
             raise LoadError(f"{_q(path, 1)} load #{position} has characters outside [A-Za-z0-9._/-]")
         resolved = _resolve(path, raw, read)
         if resolved is None:
             raise LoadError(f"{_q(path, 1)} loads {_q(raw, position)}, which is outside the plugin root")
-        if resolved not in found:
-            found.append(resolved)
-    return found
+        found.setdefault(resolved)
+    return list(found)
 
 
 def _is_branch(text: str) -> bool:
@@ -173,6 +172,21 @@ def _is_branch(text: str) -> bool:
         if line.strip():
             return bool(_BRANCH_OPENING.match(line.lstrip(" \t*_")))
     return False
+
+
+def _reached(current: str, text: str, read) -> list[str]:
+    """Every file ``current`` names: its parsed loads, then every ``.md`` token that resolves."""
+    reached = loads_in(current, text, read)
+    for raw in _parsed(read, text).md_tokens:
+        if _SAFE_CHARS.match(raw) and (resolved := _resolve(current, raw, read)) is not None:
+            reached.append(resolved)
+    return reached
+
+
+def reaches_branch(path: str, read) -> bool:
+    """Whether the file ``path`` loads or names (a ``.md`` token that resolves) a branch file."""
+    text = _get(read, path)
+    return text is not None and any(is_branch_file(t, read) for t in _reached(path, text, read))
 
 
 def is_branch(text: str, read=None) -> bool:
@@ -212,6 +226,7 @@ def cached(read):
         raise value
 
     wrapper.parses = {}
+    wrapper.derivations = {}
     return wrapper
 
 
@@ -229,12 +244,32 @@ def tree_reader(root: Path):
             return None
         if not stat.S_ISREG(st.st_mode):
             raise NotRegularFile(path)
+        if st.st_size > MAX_BLOB_BYTES:
+            raise LoadError(f"{_q(path, 1)} is larger than {MAX_BLOB_BYTES} bytes")
         return full.read_text(encoding="utf-8")
 
     return read
 
 
 def derive(entry: str, branches, read) -> Derived:
+    """The closure of ``entry`` with the declared ``branches``; remembered per reader (see ``cached``), so a
+    declaration shared by many cases is walked once."""
+    memo = getattr(read, "derivations", None)
+    if memo is None:
+        return _derive(entry, branches, read)
+    key = (entry, tuple(branches))
+    if key not in memo:
+        try:
+            memo[key] = (True, _derive(entry, branches, read))
+        except LoadError as exc:
+            memo[key] = (False, exc)
+    ok, value = memo[key]
+    if ok:
+        return value
+    raise value
+
+
+def _derive(entry: str, branches, read) -> Derived:
     entry_text = _get(read, entry)
     if entry_text is None:
         raise LoadError(f"entry {_q(entry, 1)} does not exist")
@@ -253,7 +288,7 @@ def derive(entry: str, branches, read) -> Derived:
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
         declared.append(norm)
-    split = any(is_branch_file(p, read) for p in entry_loads)
+    split = False
 
     files: list[str] = []
     seen: set[str] = set()
@@ -284,15 +319,14 @@ def derive(entry: str, branches, read) -> Derived:
             for target in parsed:
                 if is_branch_file(target, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
-        reached = list(parsed)
-        for raw in _parsed(read, text).md_tokens:
-            if _SAFE_CHARS.match(raw) and (resolved := _resolve(current, raw, read)) is not None:
-                reached.append(resolved)
-        for target in reached:
-            if target in seen:
-                continue
+        for target in _reached(current, text, read):
             body = _get(read, target)
-            if body is None or is_branch(body, read):
+            if body is None:
+                continue
+            if is_branch(body, read):
+                split = True
+                continue
+            if target in seen:
                 continue
             add(target)
             queue.append(target)

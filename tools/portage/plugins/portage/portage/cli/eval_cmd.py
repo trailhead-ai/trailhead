@@ -41,7 +41,7 @@ from pathlib import Path, PurePosixPath
 
 from ..eval_command import local, request
 from ..eval_gate.loads import LoadError, cached, derive, tree_reader
-from ..eval_gate.mapping import CASE_NAME, MappingError, _q, echo, load_mapping, valid_corpus_path
+from ..eval_gate.mapping import CASE_NAME, MappingError, _q, derived_names, load_mapping, valid_corpus_path
 from ..eval_gate.select import MAPPING_NAME
 
 
@@ -179,7 +179,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     print(f"request: {request_id}")
     print(f"wait: {request.wait_command(request_id)}")
     for name, files in derived.items():
-        print(f"derived: {root} {name}: " + ", ".join(echo(f, i) for i, f in enumerate(files, 1)))
+        print(f"derived: {root} {name}: " + derived_names(files))
     return 0
 
 

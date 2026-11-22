@@ -87,9 +87,9 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch_file, loads_in, missing_loads
-from .mapping import (MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q, is_procedure_path,
-                      load_mapping, valid_corpus_path)
+from .loads import LoadError, NotRegularFile, cached, derive, is_branch_file, missing_loads, reaches_branch
+from .mapping import (MAX_BLOB_BYTES, MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
+                      is_procedure_path, load_mapping, valid_corpus_path)
 
 MAPPING_NAME = "eval-gate.json"
 SCHEMA_VERSION = 1
@@ -103,11 +103,19 @@ class NotAWorkTree(GitError):
     pass
 
 
+class UndecodableOutput(GitError):
+    """Git answered with bytes that are not UTF-8: a path or a blob."""
+
+
 def _git(repo: Path, *args: str) -> str:
-    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    r = subprocess.run(["git", "-C", str(repo), *args], capture_output=True)
     if r.returncode != 0:
-        raise GitError(r.stderr.strip() or f"git {' '.join(args)} failed")
-    return r.stdout
+        raise GitError(r.stderr.decode("utf-8", "replace").strip() or f"git {' '.join(args)} failed")
+    try:
+        return r.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        raise UndecodableOutput(f"git {args[0]} printed output that is not valid UTF-8 "
+                                "(a committed path or file)") from None
 
 
 class Git:
@@ -150,10 +158,10 @@ def _resolve_base(repo: Path, base: str | None, git: Git = GIT) -> tuple[str, st
 def _show(repo: Path, rev: str, path: str, git: Git = GIT) -> str | None:
     try:
         return git.run(repo, "show", "--end-of-options", f"{rev}:{path}")
+    except UndecodableOutput:
+        raise MappingError(path, "not valid UTF-8") from None
     except GitError:
         return None
-    except UnicodeDecodeError:
-        raise MappingError(path, "not valid UTF-8") from None
 
 
 _BLOB_MODES = ("100644", "100755")
@@ -186,13 +194,12 @@ def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str],
     """The on-disk checks ``load_mapping`` can make, made against HEAD's committed tree.
 
     A measure is held by a committed blob at its path or by any path under it; ``dirs`` (built from
-    ``tree`` when not given) answers the second in one set lookup, and a measure a case repeats is
-    checked once."""
+    ``tree`` when not given) answers the second in one set lookup."""
     dirs = _tree_dirs(tree) if dirs is None else dirs
     plugin = PurePosixPath(path).parent.parent
     for position, (name, case) in enumerate(mapping.cases.items(), 1):
         ref = _q(name, position)
-        for i, m in enumerate(dict.fromkeys(case.measures), 1):
+        for i, m in enumerate(case.measures, 1):
             target = (plugin / m).as_posix()
             if not (tree.get(target) in _BLOB_MODES or target in dirs):
                 raise MappingError(path, f"case {ref}: measures path {_q(m, i)} does not exist "
@@ -215,7 +222,7 @@ def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]
         return None
     try:
         text = git.run(repo, "show", "--end-of-options", f"HEAD:{path}")
-    except UnicodeDecodeError:
+    except UndecodableOutput:
         raise MappingError(path, "not valid UTF-8") from None
     mapping = load_mapping(text, path)
     _check_against_tree(path, mapping, tree, dirs)
@@ -280,14 +287,20 @@ class _GitReader:
         if len(head) != 3 or head[1] != b"blob" or not head[2].isdigit():
             raise GitError("git cat-file --batch did not return a blob")
         size = int(head[2])
+        if size > MAX_BLOB_BYTES:
+            self.close(kill=True)
+            raise LoadError(f"{_q(full[len(self._root) + 1:] if self._root else full, 1)} is larger than "
+                            f"{MAX_BLOB_BYTES} bytes")
         data = proc.stdout.read(size)
         if len(data) != size or proc.stdout.read(1) != b"\n":
             raise GitError("git cat-file --batch returned a truncated object")
         return data.decode("utf-8")
 
-    def close(self) -> None:
+    def close(self, kill: bool = False) -> None:
         proc, self._proc = self._proc, None
         if proc is not None:
+            if kill:
+                proc.kill()
             try:
                 proc.stdin.close()
             except OSError:
@@ -325,8 +338,8 @@ def _fault(path: str, ref: str, err: LoadError, revision: str) -> MappingError:
 
 
 def _split_cores(procedures: list[str], read) -> list[str]:
-    """The procedure files (plugin-relative) that load at least one branch file."""
-    return [f for f in procedures if any(is_branch_file(t, read) for t in loads_in(f, _get(read, f), read))]
+    """The procedure files (plugin-relative) that load or name at least one branch file."""
+    return [f for f in procedures if reaches_branch(f, read)]
 
 
 def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, markdown: list[str],

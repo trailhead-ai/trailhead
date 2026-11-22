@@ -267,14 +267,14 @@ def _check(measures, tree):
     select._check_against_tree(_MAPPING_PATH, _mapping_of({"c": {"measures": measures}}), tree)
 
 
-@pytest.mark.parametrize("repeats", [1, 400])
-def test_tree_checking_scans_the_tree_at_most_once_however_often_a_measure_repeats(repeats):
+@pytest.mark.parametrize("measures", [1, 64])
+def test_tree_checking_scans_the_tree_at_most_once_however_many_measures_a_case_holds(measures):
     tally = {"scanned": 0, "gets": 0}
-    entries = [f"p/skills/dir{i}/x.md" for i in range(150)] + ["p/skills/f.md"]
+    entries = [f"p/skills/dir{i}/x.md" for i in range(150)]
     tree = _ScanCountingTree(_tree_of(*entries), tally)
-    _check(["skills/dir1", "skills/f.md"] * repeats + ["skills/dir149"], tree)
+    _check([f"skills/dir{i}" for i in range(measures)], tree)
     assert tally["scanned"] <= len(tree)
-    assert tally["gets"] <= 3 + 1
+    assert tally["gets"] <= measures + 1
 
 
 def test_a_tree_shared_by_several_mappings_is_scanned_twice_per_selection_not_per_mapping(shapes):
@@ -297,9 +297,8 @@ def test_a_tree_shared_by_several_mappings_is_scanned_twice_per_selection_not_pe
     (["skills/f.md"], ["p/skills/f.mdx"], False),
     (["skills/dir"], ["p/skills/dirty/x.md"], False),
     (["skills/dir", "skills/gone"], ["p/skills/dir/x.md"], False),
-    (["skills/dir", "skills/dir", "skills/f.md"], ["p/skills/dir/x.md", "p/skills/f.md"], True),
 ], ids=["file", "dir", "nested", "sibling-prefix-a-vs-ab", "sibling-prefix-ab-vs-a", "file-named-like-dir",
-        "missing", "file-prefix", "dir-prefix", "one-of-two-missing", "repeats-held"])
+        "missing", "file-prefix", "dir-prefix", "one-of-two-missing"])
 def test_a_measure_is_held_exactly_when_a_blob_or_a_path_under_it_is_committed(measures, entries, held):
     tree = _tree_of(*entries)
     if held:

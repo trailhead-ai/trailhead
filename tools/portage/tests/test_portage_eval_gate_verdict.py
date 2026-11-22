@@ -1280,6 +1280,26 @@ def test_a_derived_file_with_unsafe_characters_is_named_by_position(st, capsys):
     assert "evil.example" not in out
 
 
+@pytest.mark.parametrize("count", [20, 21, 25])
+def test_a_long_derived_list_prints_the_first_twenty_then_how_many_more(st, capsys, count):
+    files = [f"skills/f{i}.md" for i in range(count)]
+    st.plan([_declared("decl", files)])
+    st.result("decl")
+    line = next(ln for ln in verdict(capsys, st)[1].splitlines() if ln.startswith("derived:"))
+    shown = ", ".join(files[:20])
+    more = f", ... (+{count - 20} more)" if count > 20 else ""
+    assert line == f"derived: plugins/demo decl: {shown}{more}"
+
+
+def test_a_truncated_derived_list_still_names_unsafe_files_by_position(st, capsys):
+    files = [f"skills/f{i}.md" for i in range(30)]
+    files[2] = "skills/@victim\nevil.md"
+    st.plan([_declared("decl", files)])
+    st.result("decl")
+    out = verdict(capsys, st)[1]
+    assert "skills/f1.md, #3, skills/f3.md" in out and "evil" not in out
+
+
 @pytest.mark.parametrize("bad", ["skills/e.md", [3], {"a": 1}])
 def test_a_derived_field_that_is_not_a_list_of_strings_makes_the_plan_unusable(st, capsys, bad):
     st.plan([{**_entry("decl"), "derived": bad}])

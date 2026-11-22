@@ -17,7 +17,7 @@ from portage.eval_gate import loads
 from portage.eval_gate.loads import (
     LoadError, NotRegularFile, cached, derive, is_branch, loads_in, missing_loads, tree_reader,
 )
-from portage.eval_gate.mapping import MAX_PROCEDURE_FILES
+from portage.eval_gate.mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES
 
 REPO_TOOLS = Path(__file__).resolve().parents[2]
 
@@ -261,6 +261,86 @@ class TestFaults:
         read = tree_reader(tmp_path)
         assert read("a.md") == "hello\n"
         assert read("nope.md") is None
+
+
+class TestSplitReachesBelowTheEntry:
+    def test_a_branch_loaded_by_a_rule_file_the_entry_loads_makes_the_closure_split(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now.\n", R: "Rule.\n\nRead `../x/b1.md` when attended.\n"})
+        got = derive(ENTRY, [], reader(files))
+        assert got.split is True
+        assert B1 not in got.files
+
+    def test_a_branch_linked_only_as_a_markdown_token_from_a_rule_file_makes_the_closure_split(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now.\n", R: "See [the branch](../x/b1.md).\n"})
+        got = derive(ENTRY, [], reader(files))
+        assert got.split is True
+        assert B1 not in got.files
+
+    def test_a_closure_that_reaches_no_branch_anywhere_is_not_split(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now.\n", R: "See [other](r2.md).\n"})
+        assert derive(ENTRY, [], reader(files)).split is False
+
+    def test_a_branch_reached_below_the_entry_stays_out_of_the_files_even_when_another_is_declared(self):
+        files = corpus(**{R: "See [b2](../x/b2.md).\n"})
+        got = derive(ENTRY, [B1], reader(files))
+        assert B2 not in got.files and got.split is True
+
+
+class TestDeriveIsMemoisedPerReader:
+    def test_a_second_case_with_the_same_declaration_walks_nothing_again(self, monkeypatch):
+        read = cached(reader(corpus()))
+        first = derive(ENTRY, [B1], read)
+        walked: list[str] = []
+        real = loads._get
+        monkeypatch.setattr(loads, "_get", lambda r, path: walked.append(path) or real(r, path))
+        assert derive(ENTRY, [B1], read) == first
+        assert walked == []
+
+    def test_a_different_declaration_is_derived_on_its_own(self, monkeypatch):
+        read = cached(reader(corpus()))
+        one = derive(ENTRY, [B1], read)
+        walked: list[str] = []
+        real = loads._get
+        monkeypatch.setattr(loads, "_get", lambda r, path: walked.append(path) or real(r, path))
+        two = derive(ENTRY, [B2], read)
+        assert walked and two != one and B2 in two.files and B1 not in two.files
+
+    def test_a_declaration_that_faults_faults_the_same_way_again_without_walking(self, monkeypatch):
+        read = cached(reader(corpus()))
+        with pytest.raises(LoadError) as first:
+            derive(ENTRY, ["skills/x/nope.md"], read)
+        walked: list[str] = []
+        real = loads._get
+        monkeypatch.setattr(loads, "_get", lambda r, path: walked.append(path) or real(r, path))
+        with pytest.raises(LoadError) as again:
+            derive(ENTRY, ["skills/x/nope.md"], read)
+        assert str(again.value) == str(first.value) and walked == []
+
+    def test_an_uncached_reader_still_derives_every_time(self):
+        read, seen = counting(corpus())
+        derive(ENTRY, [B1], read)
+        before = len(seen)
+        derive(ENTRY, [B1], read)
+        assert len(seen) == 2 * before
+
+
+class TestLoadsInKeepsFirstOccurrenceOrder:
+    def test_many_repeats_collapse_to_each_path_once_in_first_seen_order(self):
+        names = [f"r{i % 3}.md" for i in range(300)]
+        text = "Read " + " ".join(f"`{n}`" for n in names) + ".\n"
+        assert loads_in(ENTRY, text, reader({})) == ["skills/x/r0.md", "skills/x/r1.md", "skills/x/r2.md"]
+
+
+class TestTreeReaderBlobCap:
+    def test_a_file_of_exactly_the_cap_is_read(self, tmp_path):
+        (tmp_path / "a.md").write_text("x" * MAX_BLOB_BYTES)
+        assert len(tree_reader(tmp_path)("a.md")) == MAX_BLOB_BYTES
+
+    def test_a_file_one_byte_over_the_cap_is_a_fault_naming_it(self, tmp_path):
+        (tmp_path / "a.md").write_text("x" * (MAX_BLOB_BYTES + 1))
+        with pytest.raises(LoadError) as e:
+            derive("a.md", [], tree_reader(tmp_path))
+        assert str(e.value) == f"'a.md' is larger than {MAX_BLOB_BYTES} bytes"
 
 
 class TestClosureCap:

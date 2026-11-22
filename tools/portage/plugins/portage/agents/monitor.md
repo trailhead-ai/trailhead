@@ -224,12 +224,12 @@ change touches no `merge_only` or `split_procedure` case skips it and behaves as
    portage eval-gate plan --repo <repo_path> --tier merge
    ```
 
-   It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, then one
-   `<plugin_root>:<case>` line per selected case. The merge tier selects every touched case, and the
-   printed lines do not say which are `merge_only` or `split_procedure`: read `<dir>/plan.json` with
-   `Read`, whose `cases` entries each carry `"merge_only": true|false` and `"split_procedure": true|false`.
-   - `status: cases-selected` and at least one entry has `"merge_only": true` or `"split_procedure": true`: the gate
-     applies.
+   It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>` line per
+   selected case, then one `case-flags: <plugin_root>:<case> merge_only=<true|false>
+   split_procedure=<true|false>` line per selected case. The merge tier selects every touched case; the
+   `case-flags:` lines say which are `merge_only` or `split_procedure`.
+   - `status: cases-selected` and at least one `case-flags:` line has `merge_only=true` or
+     `split_procedure=true`: the gate applies.
      Keep `<dir>`.
    - Any other `status` (`no-cases-mapped`, or `tree-dirty`, `base-unresolved`, `mapping-invalid`
      where the plan cannot tell), or no `merge_only` or `split_procedure` entry: no gate for this repo. Go straight on to
