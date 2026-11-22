@@ -7,7 +7,9 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.eval_gate import select
-from test_portage_eval_gate_plan import _branch, _commit, _corpus, _git, _mapping, _write, repo  # noqa: F401
+from test_portage_eval_gate_plan import (  # noqa: F401
+    _branch, _commit, _corpus, _declared_corpus, _git, _mapping, _write, repo,
+)
 
 PATHS = ["p/skills/a.md", "p/skills/b.md", "q/skills/a.md", "r/skills/a.md",
          "p/evals/alpha/case.yaml", "p/evals/delta/case.yaml", "nothing/touches/this.md"]
@@ -375,3 +377,23 @@ def test_a_node_reached_by_one_path_as_a_target_and_by_a_deeper_one_as_a_case_di
     assert [e["case"] for e in select.select_touched(repo, base, ["p/evals/g/x"])] == ["a", "g"]
     got = select.select_touched(repo, base, ["p/evals/g", "p/evals/g/x"])
     assert [e["case"] for e in got] == ["a", "g"]
+
+
+@pytest.mark.parametrize("changed, selected", [
+    ("skills/entry.md", True),
+    ("skills/b-declared.md", True),
+    ("rules/core.md", True),
+    ("rules/rule-a.md", True),
+    ("skills/b-undeclared.md", False),
+    ("rules/rule-b.md", False),
+])
+def test_a_declared_case_is_found_by_its_entry_declared_branch_and_loaded_rules_and_not_by_an_undeclared_branch(
+    repo, changed, selected  # noqa: F811
+):
+    _declared_corpus(repo)
+    _commit(repo)
+    base = _git(repo, "rev-parse", "HEAD")
+    by_path = select.select_touched_by_path(repo, base, [f"p/{changed}"])
+    assert [e["case"] for e in by_path[f"p/{changed}"]] == (["decl"] if selected else [])
+    assert [e["case"] for e in select.select_touched(repo, base, [f"p/{changed}"])] == (
+        ["decl"] if selected else [])

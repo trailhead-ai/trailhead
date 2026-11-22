@@ -1136,3 +1136,44 @@ def test_a_stored_fault_is_reprinted_only_through_the_allowlist(st, capsys):
     line = next(ln for ln in out.splitlines() if ln.startswith("mapping-invalid: "))
     assert "@" not in line and "https:" not in line
     assert "unknown key x in case 'a.b' https//evil.example/y (#2, ok-1)" in line
+
+
+def _declared(case, derived, root="plugins/demo"):
+    return {**_entry(case, root), "split_procedure": False, "derived": derived}
+
+
+def test_a_selected_declared_case_prints_its_derived_files_on_one_line_per_case(st, capsys):
+    st.plan([_declared("decl", ["skills/e.md", "rules/core.md"]), _entry("hand"),
+             _declared("other", ["skills/o.md"], root="plugins/two")])
+    for case in ("decl", "hand", "other"):
+        st.result(case)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    report = out.split("<!--")[0].splitlines()
+    assert [ln for ln in report if ln.startswith("derived:")] == [
+        "derived: plugins/demo decl: skills/e.md, rules/core.md",
+        "derived: plugins/two other: skills/o.md"]
+    assert report.index("derived: plugins/demo decl: skills/e.md, rules/core.md") < report.index(
+        "needs-merge-model: none")
+
+
+def test_a_plan_with_no_declared_case_prints_no_derived_line(st, capsys):
+    st.plan([_entry("hand")])
+    st.result("hand")
+    assert "derived:" not in verdict(capsys, st)[1]
+
+
+def test_a_derived_file_with_unsafe_characters_is_named_by_position(st, capsys):
+    st.plan([_declared("decl", ["skills/e.md", "skills/@victim\nevil.example.md"])])
+    st.result("decl")
+    out = verdict(capsys, st)[1]
+    assert "derived: plugins/demo decl: skills/e.md, #2" in out.splitlines()
+    assert "evil.example" not in out
+
+
+@pytest.mark.parametrize("bad", ["skills/e.md", [3], {"a": 1}])
+def test_a_derived_field_that_is_not_a_list_of_strings_makes_the_plan_unusable(st, capsys, bad):
+    st.plan([{**_entry("decl"), "derived": bad}])
+    st.result("decl")
+    code, _, err = verdict(capsys, st)
+    assert code == 2 and "plan.json unusable" in err

@@ -34,7 +34,9 @@ Markers, each on its own line, wrapping the section::
    ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
    push). ``case-removed-on-branch`` and ``corpus-new-on-branch`` are not persistent. ``persistent_reasons`` is the
    classification of reason codes;
-3. ``ignored:`` lines for result files whose case is not in the plan;
+3. ``ignored:`` lines for result files whose case is not in the plan, then one
+   ``derived: <plugin_root> <case>: <file>, <file>, ...`` line per selected declared case (the plan entry's
+   ``derived`` list, plugin-relative; a file that is not safe to print shows as ``#<position>``);
 4. the marks, on every status that read the mappings (``cases-selected``, ``no-cases-mapped``):
    ``needs-merge-model: <plugin_root>/<case> — "<reason>"`` per entry of the plan's ``needs_merge_model``
    (or ``needs-merge-model: none``), then ``needs-merge-model changed: <plugin_root>/<case>
@@ -83,7 +85,7 @@ import re
 import stat
 from pathlib import Path
 
-from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, valid_corpus_path
+from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, echo, valid_corpus_path
 from .select import TIERS
 from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
 
@@ -229,6 +231,9 @@ def _load_plan(state: Path) -> dict:
                 raise ValueError(f"case name {_safe(c['case'], 60)!r} must match {CASE_NAME.pattern}")
             if not isinstance(c["plugin_root"], str):
                 raise ValueError(f"plugin_root of case {c['case']!r} must be a string")
+            derived = c.get("derived")
+            if "derived" in c and not (isinstance(derived, list) and all(isinstance(f, str) for f in derived)):
+                raise ValueError(f"derived of case {c['case']!r} must be a list of strings")
         _check_marks(plan.get("needs_merge_model", []), "needs_merge_model", _MARK_KEYS)
         _check_marks(plan.get("mark_changes", []), "mark_changes", _CHANGE_KEYS)
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -276,6 +281,13 @@ def _marks_lines(plan: dict) -> list[str]:
             line += f" \u2014 \"{m['reason']}\"; takes effect once merged"
         out.append(line)
     return out
+
+
+def _derived_lines(plan: dict) -> list[str]:
+    """One ``derived:`` line per selected declared case; the files are named only through ``echo``."""
+    return [f"derived: {_corpus(c.get('plugin_root'))} {c['case']}: "
+            + ", ".join(echo(f, i) for i, f in enumerate(c["derived"], 1))
+            for c in plan["cases"] if "derived" in c]
 
 
 def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
@@ -457,6 +469,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         report.append("ignored: " + ", ".join(ignored))
     if invalid:
         report.append(f"ignored: {invalid} result with an invalid name")
+    report += _derived_lines(plan)
     report += marks
     if failed:
         report += _failure_details(rows, state, plan.get("tier") == "push")

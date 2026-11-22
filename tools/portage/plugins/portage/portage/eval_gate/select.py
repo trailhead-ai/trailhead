@@ -29,7 +29,11 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                                       # model: resolve_runner's choice for the tier
                 "needs_merge_model": "<base's reason>" | null,
                 "push_model": str | null, "merge_model": str,   # the base block's two ids (HEAD's if new)
-                "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged
+                "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged; a declared
+                                      # case's hand-written paths plus the files derived from its entry
+                "split_procedure": bool,   # the case's entry loads a branch file, at the base or at head
+                "derived": ["<path relative to plugin_root>", ...],   # only a declared case (one with an
+                                      # entry): the files derived at the base and at head, each once
                 "merge_only": bool,
                 "new_runner_grants": bool,
                 "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
@@ -49,7 +53,12 @@ nothing to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone a
 stays in the plan with ``case_removed`` true; ``run`` records it as not-run
 ``case-removed-on-branch`` without starting a runner, and it adds nothing to
 ``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the
-plan is ``mapping-invalid``. A tracked file modified in the working tree
+plan is ``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
+``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an
+empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
+fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
+at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
+procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in the working tree
 (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``: the
 gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a renamed
 file counts as both its old and its new path.
@@ -63,6 +72,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
+from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch, loads_in, missing_loads
 from .mapping import Mapping, MappingError, _q, load_mapping, valid_corpus_path
 
 MAPPING_NAME = "eval-gate.json"
@@ -112,10 +122,10 @@ def _show(repo: Path, rev: str, path: str) -> str | None:
 _BLOB_MODES = ("100644", "100755")
 
 
-def _head_tree(repo: Path) -> dict[str, str]:
-    """HEAD's committed tree as ``{path: mode}``. The working tree is never consulted."""
+def _head_tree(repo: Path, rev: str = "HEAD") -> dict[str, str]:
+    """``rev``'s committed tree (HEAD's by default) as ``{path: mode}``. The working tree is never consulted."""
     tree: dict[str, str] = {}
-    for entry in _git(repo, "ls-tree", "-r", "-z", "HEAD").split("\0"):
+    for entry in _git(repo, "ls-tree", "-r", "-z", rev).split("\0"):
         meta, sep, path = entry.partition("\t")
         if sep:
             tree[path] = meta.split(" ", 1)[0]
@@ -175,6 +185,132 @@ def _load_base(path: str, text: str) -> Mapping:
         raise err from None
 
 
+def _open_cat_file(repo: Path) -> subprocess.Popen:
+    return subprocess.Popen(["git", "-C", str(repo), "cat-file", "--batch"],
+                            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+
+class _GitReader:
+    """The plugin-relative reader ``loads`` builds on, over ``rev``'s committed tree under ``root``.
+
+    Modes come from ``tree`` (``{repo path: mode}``), so a path the tree lacks is ``None`` and anything but a
+    plain blob raises ``NotRegularFile``. Contents come from one lazily started ``git cat-file --batch``;
+    a process that dies, answers anything but a whole blob or stops short raises, never an empty text."""
+
+    def __init__(self, repo: Path, rev: str, tree: dict[str, str], root: str):
+        self._repo, self._rev, self._tree, self._root = repo, rev, tree, root
+        self._proc: subprocess.Popen | None = None
+
+    def __call__(self, path: str) -> str | None:
+        full = f"{self._root}/{path}" if self._root else path
+        mode = self._tree.get(full)
+        if mode is None:
+            return None
+        if mode not in _BLOB_MODES:
+            raise NotRegularFile(path)
+        if "\n" in full:
+            raise GitError("a path with a newline cannot be read through cat-file --batch")
+        if self._proc is None:
+            self._proc = _open_cat_file(self._repo)
+        proc = self._proc
+        proc.stdin.write(f"{self._rev}:{full}\n".encode())
+        proc.stdin.flush()
+        head = proc.stdout.readline().split()
+        if len(head) != 3 or head[1] != b"blob" or not head[2].isdigit():
+            raise GitError("git cat-file --batch did not return a blob")
+        size = int(head[2])
+        data = proc.stdout.read(size)
+        if len(data) != size or proc.stdout.read(1) != b"\n":
+            raise GitError("git cat-file --batch returned a truncated object")
+        return data.decode("utf-8")
+
+    def close(self) -> None:
+        proc, self._proc = self._proc, None
+        if proc is not None:
+            try:
+                proc.stdin.close()
+            except OSError:
+                pass
+            proc.stdout.close()
+            proc.wait()
+
+
+class _Readers:
+    """One ``cached`` reader per (revision, plugin root), each over its own cat-file process; closed together."""
+
+    def __init__(self, repo: Path):
+        self._repo = repo
+        self._made: dict[tuple[str, str], tuple[_GitReader, object]] = {}
+
+    def get(self, rev: str, tree: dict[str, str], root: str):
+        key = (rev, root)
+        if key not in self._made:
+            raw = _GitReader(self._repo, rev, tree, root)
+            self._made[key] = (raw, cached(raw))
+        return self._made[key][1]
+
+    def close(self) -> None:
+        for raw, _ in self._made.values():
+            raw.close()
+
+
+def _is_procedure(rel: str) -> bool:
+    parts = PurePosixPath(rel).parts
+    return rel.endswith(".md") and ((parts[0] == "skills" and len(parts) > 1)
+                                    or (parts[0] == "agents" and len(parts) == 2))
+
+
+def _fault(path: str, ref: str, err: LoadError, revision: str) -> MappingError:
+    if revision == "base":
+        fault = MappingError(path, f"the base revision's mapping is invalid: case {ref}: {err}")
+        fault.revision = "base"
+        return fault
+    return MappingError(path, f"case {ref}: {err}")
+
+
+def _split_cores(procedures: list[str], read) -> list[str]:
+    """The procedure files (plugin-relative) that load at least one branch file."""
+    cores = []
+    for f in procedures:
+        text = _get(read, f)
+        if any((body := _get(read, t)) is not None and is_branch(body, read) for t in loads_in(f, text, read)):
+            cores.append(f)
+    return cores
+
+
+def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, markdown: list[str],
+                           read) -> None:
+    """The scans of a mapped corpus's procedures at HEAD: a load of a missing file, and a hand-written
+    ``measures`` path that is or holds a split core."""
+    prefix = "" if str(plugin) == "." else plugin.as_posix() + "/"
+    procedures = sorted(p[len(prefix):] for p in markdown
+                        if p.startswith(prefix) and _is_procedure(p[len(prefix):]))
+    try:
+        missing = missing_loads(procedures, read)
+        cores = _split_cores(procedures, read)
+    except LoadError as e:
+        raise MappingError(path, str(e)) from None
+    if missing:
+        raise MappingError(path, f"{_q(missing[0][0], 1)} loads {_q(missing[0][1], 2)}, which does not exist")
+    for position, (name, case) in enumerate(head_map.cases.items(), 1):
+        for i, m in enumerate(case.measures, 1):
+            target = PurePosixPath(m).as_posix()
+            hit = next((c for c in cores if c == target or c.startswith(target.rstrip("/") + "/")), None)
+            if hit is not None:
+                raise MappingError(path, f"case {_q(name, position)}: measures path {_q(m, i)} is or holds "
+                                         f"the split core {_q(hit, 1)}")
+
+
+def _derive(path: str, mapping: Mapping | None, name: str, read, revision: str):
+    case = mapping.cases.get(name) if mapping else None
+    if case is None or case.entry is None:
+        return None
+    try:
+        return derive(case.entry, case.branches, read)
+    except LoadError as e:
+        raise _fault(path, _q(name, list(mapping.cases).index(name) + 1), e, revision) from None
+
+
 def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, changed: list[str]) -> bool:
     case_dir = (plugin / "evals" / name).as_posix() + "/"
     for c in changed:
@@ -209,53 +345,82 @@ def _mark_change(base_mark: str | None, head_mark: str | None) -> str | None:
 def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool, tier: str):
     """Every case in the merge-base's and HEAD's mappings as ``(plugin, measures, entry)``, in sorted
     mapping-path then case-name order, plus the base's marks and the mark changes. The changed paths
-    play no part: HEAD's tree, the base listing and each mapping are read once."""
-    tracked = set(tree)
-    at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
+    play no part: HEAD's tree, the base's tree and each mapping are read once, and each declared case's
+    files are derived at both revisions through one cached ``git cat-file --batch`` reader per
+    (revision, plugin root), started only when a file is read. An entry's ``measures`` are the
+    hand-written paths and the derived files of the base and of HEAD, each once."""
+    base_tree = _head_tree(repo, merge_base)
+    head_mappings: list[str] = []
+    markdown: list[str] = []
+    for p, mode in tree.items():
+        if _is_mapping(p):
+            head_mappings.append(p)
+        elif mode in _BLOB_MODES and p.endswith(".md"):
+            markdown.append(p)
     candidates: list[tuple[PurePosixPath, tuple[str, ...], dict]] = []
     marks: list[dict] = []
     changes: list[dict] = []
     dirs = _tree_dirs(tree)
-    for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
-        plugin = PurePosixPath(path).parent.parent
-        root = "" if str(plugin) == "." else plugin.as_posix()
-        if not valid_corpus_path(root):
-            raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
-        base_text = _show(repo, merge_base, path) if path in at_base else None
-        base_map = _load_base(path, base_text) if base_text is not None else None
-        head_map = _load_head(repo, path, tree, dirs)
-        names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
-        for name in names:
-            base_case = base_map.cases.get(name) if base_map else None
-            head_case = head_map.cases.get(name) if head_map else None
-            measures = tuple(dict.fromkeys(
-                (base_case.measures if base_case else ()) + (head_case.measures if head_case else ())
-            ))
-            case = base_case or head_case
-            marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
-            runner = (base_map or head_map).runner
-            base_mark = base_case.needs_merge_model if base_case else None
-            head_mark = head_case.needs_merge_model if head_case else None
-            if base_mark is not None:
-                marks.append({"plugin_root": root, "case": name, "reason": base_mark})
-            change = _mark_change(base_mark, head_mark)
-            if change:
-                changes.append({"plugin_root": root, "case": name, "change": change, "reason": head_mark})
-            candidates.append((plugin, measures, {
-                "plugin_root": root,
-                "case": name,
-                "runs": case.runs,
-                "pass_at": case.pass_at,
-                "runner": resolve_runner(runner, tier, base_mark),
-                "needs_merge_model": base_mark,
-                "push_model": runner.get("push_model"),
-                "merge_model": runner["model"],
-                "measures": list(measures),
-                "merge_only": marked,
-                "new_runner_grants": base_map is None,
-                "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
-                                not in _BLOB_MODES,
-            }))
+    readers = _Readers(repo)
+    owner: dict[str, str] = {}
+    try:
+        for path in sorted(set(head_mappings) | {p for p in base_tree if _is_mapping(p)}):
+            plugin = PurePosixPath(path).parent.parent
+            root = "" if str(plugin) == "." else plugin.as_posix()
+            if not valid_corpus_path(root):
+                raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
+            base_text = _show(repo, merge_base, path) if path in base_tree else None
+            base_map = _load_base(path, base_text) if base_text is not None else None
+            head_map = _load_head(repo, path, tree, dirs)
+            base_read = readers.get(merge_base, base_tree, root)
+            head_read = readers.get("HEAD", tree, root)
+            names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
+            for name in names:
+                if owner.setdefault(name, path) != path:
+                    raise MappingError(path, f"case {_q(name, names.index(name) + 1)} is declared by more "
+                                             "than one corpus")
+                base_case = base_map.cases.get(name) if base_map else None
+                head_case = head_map.cases.get(name) if head_map else None
+                base_derived = _derive(path, base_map, name, base_read, "base")
+                head_derived = _derive(path, head_map, name, head_read, "head")
+                declared = [d for d in (base_derived, head_derived) if d is not None]
+                measures = tuple(dict.fromkeys(
+                    (base_case.measures if base_case else ()) + (base_derived.files if base_derived else ())
+                    + (head_case.measures if head_case else ()) + (head_derived.files if head_derived else ())
+                ))
+                case = base_case or head_case
+                marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
+                runner = (base_map or head_map).runner
+                base_mark = base_case.needs_merge_model if base_case else None
+                head_mark = head_case.needs_merge_model if head_case else None
+                if base_mark is not None:
+                    marks.append({"plugin_root": root, "case": name, "reason": base_mark})
+                change = _mark_change(base_mark, head_mark)
+                if change:
+                    changes.append({"plugin_root": root, "case": name, "change": change, "reason": head_mark})
+                entry = {
+                    "plugin_root": root,
+                    "case": name,
+                    "runs": case.runs,
+                    "pass_at": case.pass_at,
+                    "runner": resolve_runner(runner, tier, base_mark),
+                    "needs_merge_model": base_mark,
+                    "push_model": runner.get("push_model"),
+                    "merge_model": runner["model"],
+                    "measures": list(measures),
+                    "split_procedure": any(d.split for d in declared),
+                    "merge_only": marked,
+                    "new_runner_grants": base_map is None,
+                    "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
+                                    not in _BLOB_MODES,
+                }
+                if declared:
+                    entry["derived"] = list(dict.fromkeys(f for d in declared for f in d.files))
+                candidates.append((plugin, measures, entry))
+            if head_map is not None:
+                _check_head_procedures(path, plugin, head_map, markdown, head_read)
+    finally:
+        readers.close()
     return candidates, marks, changes
 
 

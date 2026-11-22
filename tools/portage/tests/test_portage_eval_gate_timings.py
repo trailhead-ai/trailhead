@@ -564,3 +564,63 @@ class TestHostileInputs:
             fh.truncate(gate_timings.MAX_HISTORY_BYTES)
         rc, out, err = repo.timings(capsys)
         assert rc == 0
+
+
+class TestDeclaredCases:
+    FILES = {"skills/entry.md": "Read `rules/core.md`.\n\nRead `skills/b.md` for B.\n",
+             "skills/b.md": "Applies when B.\n\nRead `rules/rule-b.md`.\n",
+             "skills/b-undeclared.md": "Applies when C.\n",
+             "rules/core.md": "core\n", "rules/rule-b.md": "rule b\n"}
+
+    def declare(self, repo, entry="skills/entry.md", branches=("skills/b.md",)):
+        base = repo.root / "plugins" / "p"
+        for rel, text in self.FILES.items():
+            (base / rel).parent.mkdir(parents=True, exist_ok=True)
+            (base / rel).write_text(text)
+        (base / "evals" / "decl").mkdir(parents=True, exist_ok=True)
+        (base / "evals" / "decl" / "case.yaml").write_text("name: x\n")
+        (base / "evals" / "eval-gate.json").write_text(json.dumps(
+            {"schema_version": 1, "runner": RUNNER,
+             "cases": {"decl": {"entry": entry, "branches": list(branches)}}}))
+
+    def key(self, repo, measures):
+        entry = {"case": "decl", "runner": RUNNER, "runs": 3, "pass_at": 2,
+                 "plugin_root": "plugins/p", "measures": measures}
+        return _cache_key(repo.root / "plugins" / "p", entry)
+
+    DERIVED = ["skills/entry.md", "skills/b.md", "rules/core.md", "rules/rule-b.md"]
+
+    def line(self, repo, key):
+        return {**repo.line("decl", fingerprint=key), "case": "decl"}
+
+    def test_a_history_line_keyed_on_the_derived_files_is_counted(self, repo, capsys):
+        self.declare(repo)
+        repo.write(self.line(repo, self.key(repo, self.DERIVED)))
+        assert repo.rows(capsys)["decl"]["decisions"] == "1"
+
+    def test_a_history_line_keyed_on_no_derived_files_is_stale(self, repo, capsys):
+        self.declare(repo)
+        repo.write(self.line(repo, self.key(repo, [])))
+        rc, out, _ = repo.timings(capsys)
+        assert rc == 0 and "decl" not in table(out) and "stale 1" in out
+
+    def test_changing_a_file_the_entry_loads_makes_the_recorded_line_stale(self, repo, capsys):
+        self.declare(repo)
+        repo.write(self.line(repo, self.key(repo, self.DERIVED)))
+        (repo.root / "plugins" / "p" / "rules" / "rule-b.md").write_text("changed\n")
+        assert "decl" not in table(repo.timings(capsys)[1])
+
+    def test_changing_an_undeclared_branch_keeps_the_recorded_line_counted(self, repo, capsys):
+        self.declare(repo)
+        repo.write(self.line(repo, self.key(repo, self.DERIVED)))
+        (repo.root / "plugins" / "p" / "skills" / "b-undeclared.md").write_text("Applies when C.\n\nchanged\n")
+        assert repo.rows(capsys)["decl"]["decisions"] == "1"
+
+    def test_a_declaration_the_entry_does_not_back_is_reported_as_an_unreadable_mapping(self, repo, capsys):
+        self.declare(repo, branches=("skills/b-undeclared.md",))
+        rc, _, err = repo.timings(capsys)
+        assert rc != 0
+        assert ("mapping unreadable: case 'decl': entry 'skills/entry.md' does not load the declared branch "
+                "'skills/b.md'") not in err
+        assert "mapping unreadable: case 'decl': entry 'skills/entry.md' does not load the declared branch " \
+               "'skills/b-undeclared.md'" in err

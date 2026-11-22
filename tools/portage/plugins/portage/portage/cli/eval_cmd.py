@@ -3,7 +3,8 @@
 ``start --plugin <repo-relative plugin root> --case <name> [--case ...] [--backend local]
 [--repo <path>] [--require-version N]`` loads ``<plugin root>/evals/eval-gate.json`` from the working tree, creates a
 request (``portage.eval_command.request``), starts a detached worker and prints ``request: <id>``
-and ``wait: <paste-ready command>`` without waiting. Exit 0 started, 3 not run (the not-run block
+and ``wait: <paste-ready command>`` without waiting, then one ``derived: <plugin root> <case>: <files>`` line
+per named declared case (the files its entry's procedure derives, plugin-relative). Exit 0 started, 3 not run (the not-run block
 is printed), 2 refused (a stderr line names why: an undeclared case, a plugin root that leaves the
 repo, a mapping that does not load, a ``--require-version`` that is not 1 to 6 ASCII decimal digits).
 
@@ -39,7 +40,8 @@ import sys
 from pathlib import Path, PurePosixPath
 
 from ..eval_command import local, request
-from ..eval_gate.mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
+from ..eval_gate.loads import LoadError, cached, derive, tree_reader
+from ..eval_gate.mapping import CASE_NAME, MappingError, _q, echo, load_mapping, valid_corpus_path
 from ..eval_gate.select import MAPPING_NAME
 
 
@@ -82,7 +84,7 @@ def _repo(arg: str | None) -> Path:
     return Path(top.stdout.strip()).resolve()
 
 
-def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict]]:
+def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict], dict[str, tuple[str, ...]]]:
     repo = _repo(args.repo)
     root = args.plugin
     if not valid_corpus_path(root) or PurePosixPath(root).is_absolute():
@@ -104,9 +106,18 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict]]:
     for name in names:
         if not CASE_NAME.match(name) or name not in mapping.cases:
             raise request.Refused(f"case {name!r} is not declared in {mapping_file}")
+    read = cached(tree_reader(plugin_dir))
+    derived: dict[str, tuple[str, ...]] = {}
+    for position, name in enumerate(names, 1):
+        case = mapping.cases[name]
+        if case.entry is not None:
+            try:
+                derived[name] = derive(case.entry, case.branches, read).files
+            except LoadError as e:
+                raise request.Refused(f"case {_q(name, position)}: {e}") from None
     cases = [{"case": n, "runs": mapping.cases[n].runs, "pass_at": mapping.cases[n].pass_at,
               "runner": mapping.runner} for n in names]
-    return repo, root, cases
+    return repo, root, cases, derived
 
 
 def _leave_sandbox(args: argparse.Namespace) -> int:
@@ -155,7 +166,7 @@ def cmd_start(args: argparse.Namespace) -> int:
     if args.backend is None and "SANDBOX_RUNTIME" in os.environ:
         return _leave_sandbox(args)
     try:
-        repo, root, cases = _plan(args)
+        repo, root, cases, derived = _plan(args)
     except request.Refused as e:
         print(f"eval start: {e}", file=sys.stderr)
         return 2
@@ -167,6 +178,8 @@ def cmd_start(args: argparse.Namespace) -> int:
         return 3
     print(f"request: {request_id}")
     print(f"wait: {request.wait_command(request_id)}")
+    for name, files in derived.items():
+        print(f"derived: {root} {name}: " + ", ".join(echo(f, i) for i, f in enumerate(files, 1)))
     return 0
 
 

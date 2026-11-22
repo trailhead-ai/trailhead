@@ -12,6 +12,7 @@ import os
 import shutil
 import stat
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,7 +21,7 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
-from portage.eval_gate import unmapped_runner_cases
+from portage.eval_gate import select, unmapped_runner_cases
 
 RUNNER = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
 
@@ -1166,3 +1167,327 @@ class TestFaultsDoNotEchoMappingText:
         assert echo(HOSTILE, 3) == "#3"
         assert echo("a\nb", 4) == "#4"
         assert echo(5, 1) == "#1"
+
+
+ENTRY = ("# Entry\n\nRead `rules/core.md`.\n\n"
+         "Read `skills/b-declared.md` when the user asks for A.\n\n"
+         "Read `skills/b-undeclared.md` when the user asks for B.\n")
+DECLARED_FILES = {
+    "skills/entry.md": ENTRY,
+    "skills/b-declared.md": "Applies when the user asks for A.\n\nRead `rules/rule-a.md`.\n",
+    "skills/b-undeclared.md": "Applies when the user asks for B.\n\nRead `rules/rule-b.md`.\n",
+    "skills/other.md": "other\n",
+    "rules/core.md": "core\n",
+    "rules/rule-a.md": "rule a\n",
+    "rules/rule-b.md": "rule b\n",
+}
+DECL = {"entry": "skills/entry.md", "branches": ["skills/b-declared.md"]}
+DECLARED_MAPPING = {"decl": DECL, "hand": {"measures": ["skills/other.md"]}}
+DERIVED = {"skills/entry.md", "skills/b-declared.md", "rules/core.md", "rules/rule-a.md"}
+
+
+def _declared_corpus(repo: Path, plugin: str = "p", cases: dict | None = None, files: dict | None = None) -> None:
+    for rel, text in {**DECLARED_FILES, **(files or {})}.items():
+        _write(repo, f"{plugin}/{rel}", text)
+    cases = DECLARED_MAPPING if cases is None else cases
+    for name in cases:
+        _write(repo, f"{plugin}/evals/{name}/case.yaml", "name: x\n")
+    _write(repo, f"{plugin}/evals/eval-gate.json", _mapping(cases))
+
+
+def _declared_change(repo, capsys, *paths: str, plugin: str = "p"):
+    _declared_corpus(repo, plugin)
+    _commit(repo)
+    _branch(repo)
+    for path in paths:
+        _write(repo, f"{plugin}/{path}", (repo / plugin / path).read_text() + "\nchanged\n")
+    _commit(repo)
+    return _plan(repo, capsys, "--base", "base")
+
+
+def _entry_of(plan, case):
+    return next(c for c in plan["cases"] if c["case"] == case)
+
+
+class TestDeclaredCases:
+    def test_a_declared_case_and_a_hand_written_case_both_plan_and_the_declared_one_measures_its_files(
+        self, repo, capsys
+    ):
+        _, plan, _ = _declared_change(repo, capsys, "skills/entry.md", "skills/other.md")
+        assert _names(plan) == ["decl", "hand"]
+        measures = _entry_of(plan, "decl")["measures"]
+        assert sorted(measures) == sorted(DERIVED) and len(measures) == len(set(measures))
+        assert _entry_of(plan, "hand")["measures"] == ["skills/other.md"]
+
+    @pytest.mark.parametrize("changed", ["skills/entry.md", "skills/b-declared.md"])
+    def test_changing_the_entry_or_a_declared_branch_selects_the_case(self, repo, capsys, changed):
+        _, plan, _ = _declared_change(repo, capsys, changed)
+        assert _names(plan) == ["decl"]
+
+    @pytest.mark.parametrize("changed", ["rules/core.md", "rules/rule-a.md"])
+    def test_changing_a_rule_loaded_by_the_entry_or_by_a_declared_branch_selects_the_case(
+        self, repo, capsys, changed
+    ):
+        _, plan, _ = _declared_change(repo, capsys, changed)
+        assert _names(plan) == ["decl"]
+
+    @pytest.mark.parametrize("changed", ["skills/b-undeclared.md", "rules/rule-b.md"])
+    def test_changing_an_undeclared_branch_the_entry_loads_does_not_select_the_case(
+        self, repo, capsys, changed
+    ):
+        _, plan, _ = _declared_change(repo, capsys, changed)
+        assert plan["status"] == "no-cases-mapped"
+
+    def test_an_undeclared_branch_change_leaves_the_fingerprint_alone_and_the_stored_pass_is_reused(
+        self, tmp_path, monkeypatch
+    ):
+        from test_portage_eval_gate_run import PASS, Env, _result
+
+        e = Env(tmp_path, monkeypatch)
+        monkeypatch.setenv("PORTAGE_CACHE_DIR", str(tmp_path / "cache"))
+        try:
+            _git(e.repo, "init", "-q", "-b", "main")
+            _declared_corpus(e.repo, "plugins/p")
+            _commit(e.repo)
+            _branch(e.repo)
+            _write(e.repo, "plugins/p/skills/entry.md", ENTRY + "\nmore\n")
+            _commit(e.repo)
+            base = _git(e.repo, "merge-base", "base", "HEAD")
+            before = select.select_touched_by_path(e.repo, base, ["plugins/p/skills/entry.md"])[
+                "plugins/p/skills/entry.md"]
+            entry = next(c for c in before if c["case"] == "decl")
+            e.cases = [dict(entry, new_runner_grants=False)]
+            e.plan()
+            e.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+            assert e.run("decl") == 0
+            assert e.result("decl")["cached"] is False
+            calls = len(e.calls)
+            _write(e.repo, "plugins/p/skills/b-undeclared.md", "Applies when B.\n\nchanged\n")
+            _write(e.repo, "plugins/p/rules/rule-b.md", "changed\n")
+            e.commit()
+            after = select.select_touched_by_path(e.repo, base, ["plugins/p/skills/entry.md"])[
+                "plugins/p/skills/entry.md"]
+            entry_after = next(c for c in after if c["case"] == "decl")
+            from portage.eval_gate import cache
+
+            plugin_dir = e.repo / "plugins" / "p"
+            assert cache.fingerprint(plugin_dir, entry_after) == cache.fingerprint(plugin_dir, entry)
+            e.cases = [dict(entry_after, new_runner_grants=False)]
+            e.plan()
+            assert e.run("decl") == 0
+            assert e.result("decl")["cached"] is True
+            assert len(e.calls) == calls
+        finally:
+            shutil.rmtree(e.root, ignore_errors=True)
+
+    def test_the_entry_naming_a_declared_branch_it_never_loads_is_a_one_line_fault_naming_both(
+        self, repo, capsys
+    ):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", "# Entry\n\nRead `rules/core.md`.\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        fault = plan["mapping_invalid"]["fault"]
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert fault == ("case 'decl': entry 'skills/entry.md' does not load the declared branch "
+                         "'skills/b-declared.md'")
+
+    def test_the_same_fault_at_the_base_says_so(self, repo, capsys):
+        _declared_corpus(repo, files={"skills/entry.md": "# Entry\n\nRead `rules/core.md`.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", ENTRY)
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "base"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: case 'decl': entry 'skills/entry.md' does not "
+            "load the declared branch 'skills/b-declared.md'")
+
+    @pytest.mark.parametrize("gone, fault", [
+        ("skills/entry.md", "case 'decl': entry 'skills/entry.md' does not exist"),
+        ("skills/b-declared.md", "case 'decl': entry 'skills/entry.md' does not load the declared branch "
+                                 "'skills/b-declared.md'"),
+    ])
+    def test_an_entry_or_declared_branch_missing_at_head_is_a_fault_not_an_exception(
+        self, repo, capsys, gone, fault
+    ):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _git(repo, "rm", "-q", f"p/{gone}")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == fault
+
+    def test_a_load_in_a_mapped_corpus_naming_a_missing_file_is_a_fault_naming_both(self, repo, capsys):
+        _declared_corpus(repo, files={"skills/plain.md": "Read `rules/gone.md`.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            "'skills/plain.md' loads 'skills/rules/gone.md', which does not exist")
+
+    def test_prose_that_reads_a_value_rather_than_a_markdown_file_is_not_a_load(self, repo, capsys):
+        _declared_corpus(repo, files={"agents/monitor.md": "Read `review_bot_login` from the config.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+
+    def test_a_corpus_with_no_mapping_that_loads_a_missing_file_plans_normally(self, repo, capsys):
+        _declared_corpus(repo)
+        _write(repo, "q/skills/plain.md", "Read `rules/gone.md`.\n")
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _write(repo, "q/skills/plain.md", "Read `rules/gone.md`.\n\nmore\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected" and _names(plan) == ["hand"]
+
+    @pytest.mark.parametrize("measure, core", [
+        ("skills/entry.md", "skills/entry.md"),
+        ("skills", "skills/entry.md"),
+    ])
+    def test_a_hand_written_measure_that_is_or_holds_a_split_core_is_a_fault_naming_both(
+        self, repo, capsys, measure, core
+    ):
+        _declared_corpus(repo, cases={"hand": {"measures": [measure]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            f"case 'hand': measures path '{measure}' is or holds the split core '{core}'")
+
+    def test_a_directory_with_no_split_core_is_a_fine_measure(self, repo, capsys):
+        _declared_corpus(repo, cases={"hand": {"measures": ["rules"]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/rules/core.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected" and _names(plan) == ["hand"]
+
+    def test_a_hand_written_only_mapping_plans_exactly_as_the_pre_change_selection_built_it(
+        self, repo, capsys
+    ):
+        cases = {"alpha": {"measures": ["skills/a.md"]}, "beta": {"measures": ["skills/b.md", "skills"],
+                                                                 "runs": 5, "pass_at": 3, "merge_only": True,
+                                                                 "needs_merge_model": "judge drifts"}}
+        _corpus(repo, "p", cases, runner={**RUNNER, "push_model": "haiku"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _write(repo, "p/skills/b.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        old = []
+        for name, spec in sorted(cases.items()):
+            runs = spec.get("runs", 3)
+            old.append({"plugin_root": "p", "case": name, "runs": runs, "pass_at": spec.get("pass_at", 2),
+                        "runner": {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0},
+                        "needs_merge_model": spec.get("needs_merge_model"), "push_model": "haiku",
+                        "merge_model": "sonnet", "measures": list(spec["measures"]),
+                        "merge_only": spec.get("merge_only", False), "new_runner_grants": False,
+                        "case_removed": False})
+        new = [dict(c) for c in plan["cases"]]
+        assert [c.pop("split_procedure") for c in new] == [False, False]
+        assert json.dumps(new, sort_keys=True) == json.dumps(old, sort_keys=True)
+
+    def test_two_corpora_each_declaring_a_case_of_the_same_name_is_a_fault_naming_it(self, repo, capsys):
+        _declared_corpus(repo, "p", cases={"x": {"measures": ["skills/other.md"]}})
+        _declared_corpus(repo, "q", cases={"x": {"measures": ["skills/other.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == "case 'x' is declared by more than one corpus"
+
+    @pytest.mark.parametrize("script, what", [
+        ("import sys\nsys.exit(0)\n", "dies"),
+        ("import sys\nsys.stdin.buffer.readline()\n"
+         "sys.stdout.buffer.write(b'0' * 40 + b' blob 100\\nshort')\nsys.stdout.flush()\n", "truncates"),
+    ])
+    def test_a_cat_file_that_dies_or_truncates_mid_read_is_a_fault_never_an_empty_file(
+        self, repo, capsys, monkeypatch, script, what
+    ):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", ENTRY + "\nmore\n")
+        _commit(repo)
+        monkeypatch.setattr(select, "_open_cat_file", lambda repo_path: subprocess.Popen(
+            [sys.executable, "-c", script], stdin=subprocess.PIPE, stdout=subprocess.PIPE))
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert "could not be read" in plan["mapping_invalid"]["fault"]
+
+    @pytest.mark.parametrize("entry_text, split", [(ENTRY, True),
+                                                   ("# Entry\n\nRead `rules/core.md`.\n", False)])
+    def test_an_entry_that_loads_a_branch_is_a_split_procedure(self, repo, capsys, entry_text, split):
+        cases = {"decl": {"entry": "skills/entry.md"}}
+        _declared_corpus(repo, cases=cases, files={"skills/entry.md": entry_text})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", entry_text + "\nmore\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert _entry_of(plan, "decl")["split_procedure"] is split
+
+    def test_an_entry_that_split_only_at_the_base_is_still_a_split_procedure(self, repo, capsys):
+        cases = {"decl": {"entry": "skills/entry.md"}}
+        _declared_corpus(repo, cases=cases)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", "# Entry\n\nRead `rules/core.md`.\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert _entry_of(plan, "decl")["split_procedure"] is True
+
+    @pytest.mark.parametrize("base_branch, head_branch", [
+        ("skills/b-declared.md", "skills/b-undeclared.md"),
+        ("skills/b-undeclared.md", "skills/b-declared.md"),
+    ])
+    def test_base_and_head_derived_lists_merge_to_their_union_once_each(
+        self, repo, capsys, base_branch, head_branch
+    ):
+        def case(branch):
+            return {"decl": {"entry": "skills/entry.md", "branches": [branch]}}
+
+        _declared_corpus(repo, cases=case(base_branch))
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping(case(head_branch)))
+        _write(repo, "p/rules/core.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        rule = {"skills/b-declared.md": "rules/rule-a.md", "skills/b-undeclared.md": "rules/rule-b.md"}
+        expected = {"skills/entry.md", "rules/core.md", base_branch, head_branch,
+                    rule[base_branch], rule[head_branch]}
+        measures = _entry_of(plan, "decl")["measures"]
+        assert sorted(measures) == sorted(expected)
+        assert len(measures) == len(expected) == 6
+
+    def test_the_live_craft_lore_and_portage_mappings_plan_without_a_fault_and_no_entry_is_split(self):
+        repo = Path(__file__).resolve().parents[3]
+        tree = select._head_tree(repo)
+        touched = select.select_touched(repo, "HEAD", list(tree), merge_only_either=True, tree=tree)
+        roots = {c["plugin_root"] for c in touched}
+        assert {"tools/craft/plugins/craft", "tools/lore/plugins/lore", "tools/portage/plugins/portage"} <= roots
+        assert not [c for c in touched if c["split_procedure"]]

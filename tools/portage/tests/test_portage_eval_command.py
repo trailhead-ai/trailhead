@@ -326,6 +326,41 @@ class TestStart:
         assert "SECRET_KEY_NAME" not in err and "nope" not in err
         assert ws.count("canary-started") == 0
 
+    def _declare(self, ws, branches=("skills/b.md",)):
+        plugin = ws.repo / "plugins" / "p"
+        (plugin / "rules").mkdir()
+        (plugin / "rules" / "core.md").write_text("core\n")
+        (plugin / "skills" / "e.md").write_text("Read `rules/core.md`.\n\nRead `skills/b.md` for B.\n")
+        (plugin / "skills" / "b.md").write_text("Applies when B.\n")
+        (plugin / "evals" / "decl").mkdir()
+        (plugin / "evals" / "decl" / "case.yaml").write_text("name: x\n")
+        mapping = {**MAPPING, "cases": {**MAPPING["cases"],
+                                        "decl": {"entry": "skills/e.md", "branches": list(branches)}}}
+        (plugin / "evals" / "eval-gate.json").write_text(json.dumps(mapping))
+
+    def test_a_declared_case_starts_and_start_reports_the_files_derived_from_its_entry(self, ws):
+        self._declare(ws)
+        ws.set("hold")
+        rc, out, err = ws.start("decl")
+        assert rc == 0, err
+        assert "derived: plugins/p decl: skills/e.md, skills/b.md, rules/core.md" in out.splitlines()
+        assert re.search(r"^request: local-[a-z0-9]{12}$", out, re.M)
+
+    def test_a_hand_written_case_starts_with_no_derived_line(self, ws):
+        self._declare(ws)
+        ws.set("hold")
+        rc, out, _ = ws.start("c1")
+        assert rc == 0 and "derived:" not in out
+
+    def test_a_declared_case_whose_entry_does_not_load_its_branch_is_refused_naming_both(self, ws):
+        self._declare(ws)
+        (ws.repo / "plugins" / "p" / "skills" / "e.md").write_text("Read `rules/core.md`.\n")
+        rc, out, err = ws.start("decl")
+        assert rc == 2 and "request:" not in out
+        assert ("eval start: case 'decl': entry 'skills/e.md' does not load the declared branch "
+                "'skills/b.md'") in err
+        assert ws.count("case-started-decl") == 0
+
     def test_a_mapping_that_does_not_load_is_refused_naming_the_file(self, ws):
         (ws.repo / "plugins" / "p" / "evals" / "eval-gate.json").write_text("{nope")
         rc, out, err = ws.start("c1")
