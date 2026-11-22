@@ -144,15 +144,13 @@
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md"
-      ],
-      "merge_only": true
+      ]
     },
     "an-unattended-push-model-failure-ends-stuck-without-a-needs-merge-model-mark": {
       "measures": [
         "skills/pull_request/SKILL.md",
         "agents/updater.md"
-      ],
-      "merge_only": true
+      ]
     }
   }
 }

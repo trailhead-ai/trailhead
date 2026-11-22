@@ -15,12 +15,13 @@ A run scores the fraction of graders that pass and passes only at 1.0. A case pa
 | The mapping equals the scaffold's copy and carries no `needs_merge_model` key | `mapping-unchanged-and-unmarked` | `regex` on the whole file |
 | The local branch still points at the scaffold's last commit | `no-commit-after-the-scaffold` | `regex` on the file `repo/.git/refs/heads/<branch>` |
 | No pull-request body was written | `no-pr-edit` | `file_exists` with `exists: false` on `pr-body.md` |
+| The gate reached the failing case (the fake runner logged it) | `gate-ran-the-failing-case` | `regex` on `runner.log` |
 | The last line is the `stuck` outcome line for the slice | `final-line-is-stuck` | `regex` on the final reply |
 
 Predicted baseline: the updater's stop leads the step to `stuck` through its Step H; whether the line names the case and the mark decision is not graded (see limitations).
 
 ## Limitations
 
-- The wording of the stuck line (the case name, the needed decision) is not graded: the runner has no advisory grader, and an LLM judge would sit inside the 1.0 bar.
+- The wording of the stuck line (the case name, the needed decision) is not graded: an LLM-judge grader with `weight: 0` made the runner error every run (nothing was graded), so a judge would have to sit inside the 1.0 bar.
 - One fixture, one case name, one fake-runner behaviour, no merge-model pass history.
 - The gate is real; the runner is a fake binary.
