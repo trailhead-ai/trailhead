@@ -688,15 +688,248 @@ class TestOptionLikeBaseIsNotNoTouch:
         return repo
 
     def test_a_valid_base_finds_the_merge_only_case_untouched(self, untouched):
-        from portage.eval_gate.select import merge_only_touched
+        from portage.eval_gate.select import backstop_touched
 
-        assert merge_only_touched(untouched, "main") == ("ok", [])
+        assert backstop_touched(untouched, "main") == ("ok", [])
 
     @pytest.mark.parametrize("base", ["-x", "--all", "--output=leak"])
     def test_an_option_like_base_answers_every_merge_only_case(self, untouched, base):
-        from portage.eval_gate.select import merge_only_touched
+        from portage.eval_gate.select import backstop_touched
 
-        status, entries = merge_only_touched(untouched, base)
+        status, entries = backstop_touched(untouched, base)
         assert status == "base-unresolved"
         assert [e["case"] for e in entries] == ["slow"]
         assert not (untouched / "leak").exists()
+
+
+SPLIT_FILES = {
+    "skills/entry.md": "# Entry\n\nRead `skills/b.md` now.\n",
+    "skills/b.md": "Applies when the user asks for B.\n\nbody\n",
+}
+SPLIT_CASE = {"entry": "skills/entry.md", "branches": ["skills/b.md"]}
+SPLIT_RUNNER = {"model": "opus", "push_model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
+
+
+def make_split_repo(root: Path, name: str, *, case: dict | None = None, corpus_at_base: bool = True,
+                    remove_case: bool = False, files: dict | None = None,
+                    touch: str = "skills/b.md") -> tuple[Path, str]:
+    """A repo whose ``decl`` case is declared (entry loads branch ``skills/b.md``); the feature commit
+    touches ``touch`` (the branch by default). ``corpus_at_base=False`` lands the whole corpus on the feature branch;
+    ``remove_case`` drops the case on the branch (leaving a core case) instead of editing the branch."""
+    repo = root / name
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    for rel, text in (files or SPLIT_FILES).items():
+        (repo / "p" / rel).parent.mkdir(parents=True, exist_ok=True)
+        (repo / "p" / rel).write_text(text)
+
+    def corpus() -> None:
+        (repo / "p/evals/decl").mkdir(parents=True, exist_ok=True)
+        (repo / "p/evals/decl/case.yaml").write_text("name: x\n")
+        (repo / "p/evals/eval-gate.json").write_text(json.dumps(
+            {"schema_version": 1, "runner": SPLIT_RUNNER, "cases": {"decl": case or SPLIT_CASE}}))
+
+    if corpus_at_base:
+        corpus()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "base")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    _git(repo, "checkout", "-q", "-b", "feature")
+    if not corpus_at_base:
+        corpus()
+    if remove_case:
+        _git(repo, "rm", "-rq", "p/evals/decl")
+        (repo / "p/skills/other.md").write_text("other\n")
+        (repo / "p/evals/keep").mkdir()
+        (repo / "p/evals/keep/case.yaml").write_text("name: x\n")
+        (repo / "p/evals/eval-gate.json").write_text(json.dumps(
+            {"schema_version": 1, "runner": SPLIT_RUNNER,
+             "cases": {"keep": {"measures": ["skills/other.md"]}}}))
+    else:
+        (repo / "p" / touch).write_text(((repo / "p" / touch).read_text()) + "\nchanged\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "change")
+    return repo, _git(repo, "rev-parse", "HEAD")
+
+
+def set_result(state: Path, case: str, verdict: str, reason: str | None = None) -> None:
+    (state / "results").mkdir(mode=0o700, exist_ok=True)
+    doc = {"case": case, "verdict": verdict, "reason": reason, "runs": [],
+           "passed": 3 if verdict == "pass" else 0, "failed": 3 if verdict == "fail" else 0,
+           "errored": 0}
+    (state / "results" / f"{case}.json").write_text(json.dumps(doc))
+
+
+def planned_split(state: Path) -> dict:
+    (entry,) = [c for c in json.loads((state / "plan.json").read_text())["cases"] if c["case"] == "decl"]
+    assert entry["split_procedure"] is True
+    return entry
+
+
+@pytest.fixture
+def split(tmp_path):
+    return make_split_repo(tmp_path, "split")
+
+
+class TestSplitProcedureBackstop:
+    def _refuse(self, tmp_path, monkeypatch, capsys, repo, spy, *extra, check):
+        return refused(merge(tmp_path, monkeypatch, repo, spy, *extra), spy, capsys, repo, check)
+
+    def test_a_passing_merge_tier_state_merges_pinned_to_its_head(
+        self, tmp_path, monkeypatch, capsys, split
+    ):
+        repo, head = split
+        state = make_state(repo, capsys)
+        planned_split(state)
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}") == 0
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
+
+    def test_a_split_case_that_never_ran_stops_the_merge_naming_it_as_split_procedure(
+        self, tmp_path, monkeypatch, capsys, split
+    ):
+        repo, head = split
+        state = make_state(repo, capsys)
+        planned_split(state)
+        set_result(state, "decl", "not-run", "timeout")
+        spy = Spy(head)
+        err = self._refuse(tmp_path, monkeypatch, capsys, repo, spy, "--eval-state", f"{repo}={state}",
+                           check="verdict-stops-the-change")
+        assert "split-procedure-not-run: decl" in err
+
+    def test_a_failing_split_case_refuses(self, tmp_path, monkeypatch, capsys, split):
+        repo, head = split
+        state = make_state(repo, capsys, passing=False)
+        planned_split(state)
+        spy = Spy(head)
+        self._refuse(tmp_path, monkeypatch, capsys, repo, spy, "--eval-state", f"{repo}={state}",
+                     check="verdict-stops-the-change")
+
+    def test_a_plan_that_leaves_out_the_split_case_refuses_naming_it(
+        self, tmp_path, monkeypatch, capsys, split
+    ):
+        repo, head = split
+        state = make_state(repo, capsys)
+        plan = json.loads((state / "plan.json").read_text())
+        assert [c["split_procedure"] for c in plan["cases"]] == [True]
+        plan["cases"] = []
+        (state / "plan.json").write_text(json.dumps(plan))
+        spy = Spy(head)
+        err = self._refuse(tmp_path, monkeypatch, capsys, repo, spy, "--eval-state", f"{repo}={state}",
+                           check="plan-misses-split-procedure-case")
+        assert "the plan does not list decl (split-procedure)" in err
+
+    def test_no_state_is_refused_naming_split_procedure_cases(self, tmp_path, monkeypatch, capsys, split):
+        repo, head = split
+        spy = Spy(head)
+        err = self._refuse(tmp_path, monkeypatch, capsys, repo, spy, check="no-state")
+        assert "touches a merge-only or split-procedure eval case" in err
+
+    def test_a_push_tier_state_is_refused(self, tmp_path, monkeypatch, capsys, split):
+        repo, head = split
+        state = make_state(repo, capsys, tier="push")
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}")
+        assert rc == 2 and spy.merges == []
+        assert "state-tier-not-merge" in capsys.readouterr().err
+
+    def test_a_split_case_removed_on_the_branch_merges(self, tmp_path, monkeypatch, capsys):
+        repo, head = make_split_repo(tmp_path, "gone", remove_case=True)
+        state = make_state(repo, capsys)
+        entry = planned_split(state)
+        assert entry["case_removed"] is True
+        set_result(state, "decl", "not-run", "case-removed-on-branch")
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}") == 0
+        assert len(spy.merges) == 1
+
+    def test_a_split_case_in_a_corpus_new_on_the_branch_refuses_with_the_land_the_corpus_first_line(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_split_repo(tmp_path, "fresh", corpus_at_base=False)
+        state = make_state(repo, capsys)
+        assert planned_split(state)["new_runner_grants"] is True
+        set_result(state, "decl", "not-run", "corpus-new-on-branch")
+        spy = Spy(head)
+        err = self._refuse(tmp_path, monkeypatch, capsys, repo, spy, "--eval-state", f"{repo}={state}",
+                           check="verdict-stops-the-change")
+        assert "split-procedure-not-run: decl" in err
+
+    def test_an_unsplit_declared_case_is_not_applicable_and_keeps_the_stale_head_pin(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        repo, head = make_split_repo(
+            tmp_path, "unsplit", case={"entry": "skills/entry.md"},
+            files={**SPLIT_FILES, "skills/entry.md": "# Entry\n\nno branch\n"},
+            touch="skills/entry.md")
+        entry = [c for c in json.loads((make_state_plan_only(repo, capsys, "merge") / "plan.json")
+                                       .read_text())["cases"] if c["case"] == "decl"]
+        assert [c["split_procedure"] for c in entry] == [False]
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy) == 0
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
+        stale = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, stale)
+        assert rc == 2 and stale.merges == []
+        assert "local-head-stale" in capsys.readouterr().err
+
+    def test_with_the_base_unresolved_every_split_case_the_mappings_hold_applies(self, tmp_path):
+        from portage.eval_gate.select import backstop_touched
+
+        repo, _ = make_split_repo(tmp_path, "unresolved")
+        (repo / "p/skills/entry.md").write_text("# Entry\n\nRead `skills/b.md` now.\n\nmore\n")
+        status, entries = backstop_touched(repo, "no-such-ref")
+        assert status == "base-unresolved"
+        assert [(e["case"], e["split_procedure"]) for e in entries] == [("decl", True)]
+
+
+class TestMarkedSplitCaseReusesItsPushRun:
+    def test_a_marked_split_case_run_at_push_is_a_cache_hit_at_merge_and_the_merge_goes_ahead(
+        self, tmp_path, monkeypatch, capsys, request
+    ):
+        from portage.eval_gate import cache
+
+        repo, head = make_split_repo(
+            tmp_path, "marked", case={**SPLIT_CASE, "needs_merge_model": "judges a long transcript"})
+
+        real_path = os.environ["PATH"]
+        (tmp_path / "runner").mkdir()
+        runner = Env(tmp_path / "runner", monkeypatch)
+        request.addfinalizer(lambda: shutil.rmtree(runner.root, ignore_errors=True))
+        monkeypatch.setenv("PORTAGE_CACHE_DIR", str(tmp_path / "cache"))
+        runner.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+
+        def plan_and_run(tier: str) -> tuple[Path, dict]:
+            monkeypatch.setenv("PATH", real_path)
+            state = make_state_plan_only(repo, capsys, tier)
+            entry = planned_split(state)
+            monkeypatch.setenv("PATH", str(runner.bin))
+            assert run_case(state, "decl")["verdict"] == "pass"
+            monkeypatch.setenv("PATH", real_path)
+            return state, entry
+
+        push_state, push_entry = plan_and_run("push")
+        calls = len(runner.calls)
+        assert calls > 0
+        merge_state, merge_entry = plan_and_run("merge")
+        assert merge_entry["needs_merge_model"] == "judges a long transcript"
+        plugin = repo / "p"
+        assert cache.fingerprint(plugin, push_entry) == cache.fingerprint(plugin, merge_entry)
+        assert json.loads((merge_state / "results" / "decl.json").read_text())["cached"] is True
+        assert len(runner.calls) == calls
+
+        assert dispatch.main(["eval-gate", "verdict", "--state", str(merge_state)]) == 0
+        capsys.readouterr()
+        spy = Spy(head)
+        assert merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={merge_state}") == 0
+        assert len(spy.merges) == 1
+
+
+def make_state_plan_only(repo: Path, capsys, tier: str) -> Path:
+    capsys.readouterr()
+    assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--tier", tier]) == 0
+    out = capsys.readouterr().out
+    return Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])

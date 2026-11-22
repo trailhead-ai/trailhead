@@ -62,7 +62,11 @@ change too: exit 1, the report line ``merge-only-not-run: <cases>``, then one li
 not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: raise the
 case's ``max_cost_usd`` or merge by hand; ``runner-error`` and ``runs-errored``: re-run after the usage limit
 resets, or merge by hand; ``head-moved``: re-plan at the current head; any other reason: merge by hand),
-repeated in the section. A merge-only case that can never run (``case-removed-on-branch``,
+repeated in the section. A ``split_procedure`` case (its entry loads a branch file) stops the same way at the
+merge tier, under the report line ``split-procedure-not-run: <cases>`` with the same per-case lines; a case
+that is both is named under the split line only. Unlike a merge-only case, a split case in a corpus new on the
+branch (``corpus-new-on-branch``) stops too, its line saying to land the corpus mapping first; one removed on
+the branch (``case-removed-on-branch``) is exempt. A merge-only case that can never run (``case-removed-on-branch``,
 ``corpus-new-on-branch``) is reported as on push and does not stop the change. A not-run core case
 still lets the change through, as on push.
 
@@ -105,6 +109,8 @@ END_MARKER = "<!-- portage:eval-gate:end -->"
 SECTION_FILE = "eval-gate-section.md"
 NO_RESULT = "no-result-recorded"
 MERGE_ONLY_NOT_RUN = "merge-only-not-run"
+SPLIT_NOT_RUN = "split-procedure-not-run"
+STOP_LINES = (MERGE_ONLY_NOT_RUN, SPLIT_NOT_RUN)
 
 UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW)
 
@@ -325,6 +331,7 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
                      "merge_model": _model(c.get("merge_model"), None),
                      "grants": c.get("new_runner_grants") is True,
                      "merge_only": c.get("merge_only") is True,
+                     "split": c.get("split_procedure") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
                                        "passed": 0, "failed": 0, "errored": 0}})
     return rows, ignored, invalid
@@ -391,6 +398,8 @@ def _merge_only_recovery(reason: str) -> str:
         return "re-run after the usage limit resets, or merge by hand"
     if reason == HEAD_MOVED:
         return "re-plan at the current head"
+    if reason == CORPUS_NEW:
+        return "the corpus is new on the branch; land the corpus mapping first, then re-plan"
     return f"{REASONS[reason]}; merge by hand"
 
 
@@ -468,8 +477,11 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
-    unrun_merge_only = ([r for r in notrun if r["merge_only"] and r["result"]["reason"] not in UNRUNNABLE]
-                        if plan.get("tier") == "merge" else [])
+    merge_tier = plan.get("tier") == "merge"
+    unrun_split = ([r for r in notrun if r["split"] and r["result"]["reason"] != CASE_REMOVED]
+                   if merge_tier else [])
+    unrun_merge_only = ([r for r in notrun if r["merge_only"] and not r["split"]
+                         and r["result"]["reason"] not in UNRUNNABLE] if merge_tier else [])
     outcome = "failed" if failed else "not-run" if notrun else "passed"
     report = [f"eval-gate: {outcome}", f"persistent: {','.join(persistent) or 'none'}"]
     if ignored:
@@ -483,6 +495,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if unrun_merge_only:
         report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
         report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
+    if unrun_split:
+        report.append(f"{SPLIT_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_split))
+        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_split)]
 
     body: list[str] = []
     if failed:
@@ -505,12 +520,16 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
                      "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + ".", ""]
         body += _bullets(_merge_only_stop_lines(unrun_merge_only))
+    if unrun_split:
+        body += ["", f"Stopped — `{SPLIT_NOT_RUN}`: a split-procedure case must run before merge, and "
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_split) + ".", ""]
+        body += _bullets(_merge_only_stop_lines(unrun_split))
     tier = _tier_lines(plan)
     if tier:
         body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
     body += ["", *marks]
-    return (1 if failed or unrun_merge_only else 0), report, _wrap(body)
+    return (1 if failed or unrun_merge_only or unrun_split else 0), report, _wrap(body)
 
 
 def render_gate_error(step: str) -> str:

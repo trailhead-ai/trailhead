@@ -42,7 +42,7 @@ The push tier leaves out the cases mapped ``merge_only``; the merge tier selects
 case. ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters
 by tier. Both mappings and the case files are read from commits (the merge-base and HEAD), never the
 working tree. On the push tier the base takes precedence for ``merge_only``; at the merge tier (and in
-``merge_only_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
+``backstop_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
 base cannot hide a flag. Base takes precedence over the branch for the rest: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. The base also supplies the mark and both model ids: a mark added on the branch
@@ -620,15 +620,16 @@ def _require_work_tree(repo: Path) -> None:
         raise GitError("git does not report an enclosing work tree")
 
 
-def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[dict]]:
-    """The ``merge_only`` cases a change to ``repo`` touches, as ``(status, entries)``.
+def backstop_touched(repo: Path, base: str | None = None) -> tuple[str, list[dict]]:
+    """The cases a change to ``repo`` touches that the merge backstop covers, as ``(status, entries)``:
+    those that are ``merge_only`` or ``split_procedure``.
 
     The merge backstop asks this to decide whether it applies, using the same selection as
-    ``plan``. ``status`` is ``ok`` (``entries`` are exactly the touched ``merge_only`` cases),
-    ``base-unresolved`` (the changed files are unknown, so ``entries`` is every ``merge_only`` case
+    ``plan``. ``status`` is ``ok`` (``entries`` are exactly the touched covered cases),
+    ``base-unresolved`` (the changed files are unknown, so ``entries`` is every covered case
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
     and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
-    mapping marks it, so a stale base cannot hide a flag. Only commits are read: the mappings and
+    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it. Only commits are read: the mappings and
     the case files come from the merge-base and HEAD, never the working tree, so an uncommitted
     edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
     and ``GitError`` on any other git failure."""
@@ -644,7 +645,8 @@ def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[d
                                      merge_only_either=True)
     except MappingError:
         return "mapping-invalid", []
-    return ("base-unresolved" if resolved is None else "ok"), [c for c in touched if c["merge_only"]]
+    return ("base-unresolved" if resolved is None else "ok"), [
+        c for c in touched if c["merge_only"] or c["split_procedure"]]
 
 
 def repo_has_mapping(repo: Path, base: str | None = None) -> bool:

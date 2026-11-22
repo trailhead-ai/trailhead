@@ -705,13 +705,13 @@ class TestTier:
 
 
 class TestMergeOnlyReadsCommittedContent:
-    """``merge_only_touched`` answers from what is committed: the merge-base and HEAD mappings
+    """``backstop_touched`` answers from what is committed: the merge-base and HEAD mappings
     (either marking a case is enough) and HEAD's tree, never the working tree."""
 
     def _touched(self, repo, base="base"):
-        from portage.eval_gate.select import merge_only_touched
+        from portage.eval_gate.select import backstop_touched
 
-        return merge_only_touched(repo, base)
+        return backstop_touched(repo, base)
 
     def test_a_case_the_branch_marks_merge_only_is_returned_though_the_base_unmarks_it(self, repo):
         _touch_a(repo, {"core": {"measures": ["skills/a.md"]},
@@ -1537,7 +1537,7 @@ class TestMappingFileCap:
         _branch(repo)
         _write(repo, "p0/skills/a.md", "changed\n")
         _commit(repo)
-        assert select.merge_only_touched(repo, "base") == ("mapping-invalid", [])
+        assert select.backstop_touched(repo, "base") == ("mapping-invalid", [])
 
 
 def _wide_corpus(repo: Path, n: int) -> None:
