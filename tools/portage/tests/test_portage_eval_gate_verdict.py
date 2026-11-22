@@ -889,12 +889,24 @@ class TestNeedsMergeModelReport:
         st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha"), _mark("beta", "Slow; very slow")])
         st.result("a-case")
         code, out, _ = verdict(capsys, st)
-        line_a = "needs-merge-model: tools/craft/plugins/craft/alpha \u2014 \"Needs deep multi-file reasoning\""
-        line_b = "needs-merge-model: tools/craft/plugins/craft/beta \u2014 \"Slow; very slow\""
+        line_a = "needs-merge-model: `tools/craft/plugins/craft/alpha` \u2014 \"Needs deep multi-file reasoning\""
+        line_b = "needs-merge-model: `tools/craft/plugins/craft/beta` \u2014 \"Slow; very slow\""
         assert code == 0
         assert line_a in _head(out) and line_b in _head(out)
         assert line_a in section_of(out).splitlines() and line_b in section_of(out).splitlines()
         assert "needs-merge-model: none" not in out
+
+    def test_a_mark_target_that_looks_like_a_web_address_prints_inside_a_code_span(self, st, capsys):
+        st.plan([_entry("a-case")],
+                needs_merge_model=[_mark("www.example", root="")],
+                mark_changes=[_change("www.example", "added", root="")])
+        st.result("a-case")
+        _, out, _ = verdict(capsys, st)
+        marked = "needs-merge-model: `www.example` \u2014 \"Needs deep multi-file reasoning\""
+        changed = ("needs-merge-model changed: `www.example` (added) \u2014 "
+                   "\"Flaky on the push model\"; takes effect once merged")
+        for text in (_head(out), section_of(out).splitlines()):
+            assert marked in text and changed in text
 
     def test_no_marks_prints_none(self, st, capsys):
         st.plan([_entry("a-case")], needs_merge_model=[], mark_changes=[])
@@ -909,9 +921,9 @@ class TestNeedsMergeModelReport:
                 mark_changes=[_change("beta", "added"), _change("gamma", "removed")])
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
-        added = ("needs-merge-model changed: tools/craft/plugins/craft/beta (added) \u2014 "
+        added = ("needs-merge-model changed: `tools/craft/plugins/craft/beta` (added) \u2014 "
                  "\"Flaky on the push model\"; takes effect once merged")
-        removed = "needs-merge-model changed: tools/craft/plugins/craft/gamma (removed)"
+        removed = "needs-merge-model changed: `tools/craft/plugins/craft/gamma` (removed)"
         for text in (_head(out), section_of(out).splitlines()):
             assert added in text and removed in text
 
@@ -919,7 +931,7 @@ class TestNeedsMergeModelReport:
         st.plan([_entry("a-case")], mark_changes=[_change("beta", "altered", "New reason")])
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
-        assert ("needs-merge-model changed: tools/craft/plugins/craft/beta (altered) \u2014 "
+        assert ("needs-merge-model changed: `tools/craft/plugins/craft/beta` (altered) \u2014 "
                 "\"New reason\"; takes effect once merged") in _head(out)
 
     def test_a_marked_and_changed_plan_orders_lines_after_ignored_and_before_failure_detail(self, st, capsys):
@@ -943,7 +955,7 @@ class TestNeedsMergeModelReport:
         head = _head(out)
         assert head[:2] == ["eval-gate: no-cases-mapped", "persistent: none"]
         assert "needs-merge-model: none" in head
-        assert any(ln.startswith("needs-merge-model changed: tools/craft/plugins/craft/beta (added)")
+        assert any(ln.startswith("needs-merge-model changed: `tools/craft/plugins/craft/beta` (added)")
                    for ln in head)
         assert any(ln.startswith("needs-merge-model changed:") for ln in section_of(out).splitlines())
 
@@ -959,7 +971,7 @@ class TestNeedsMergeModelReport:
         st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha", root="")])
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
-        assert "needs-merge-model: alpha \u2014 \"Needs deep multi-file reasoning\"" in _head(out)
+        assert "needs-merge-model: `alpha` \u2014 \"Needs deep multi-file reasoning\"" in _head(out)
 
     def test_statuses_that_did_not_read_the_mappings_print_no_marks_lines(self, st, capsys):
         st.plan(status="tree-dirty")

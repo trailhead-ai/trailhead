@@ -23,7 +23,8 @@ which the merge tier uses); it is carried in the runner dict only when configure
 reason of 1-200 characters, one line, starting with a letter or digit and otherwise letters, digits,
 space and ``.,;'()_-``, and never containing ``www.`` in any case. A GitHub autolink needs a scheme (``:``),
 a path (``/``), an address (``@``) or a ``www.`` prefix, and the charset or the ``www.`` rule excludes each, so a reason
-can never form a link in a PR body.
+can never form such a link in a PR body. It does not stop GitHub's same-repo references: text such as ``GH-123`` or a
+commit SHA still links.
 Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 

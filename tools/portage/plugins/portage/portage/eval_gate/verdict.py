@@ -257,7 +257,8 @@ def _check_marks(items: object, field: str, keys: set[str]) -> None:
 
 
 def _mark_target(m: dict) -> str:
-    return f"{m['plugin_root']}/{m['case']}" if m["plugin_root"] else m["case"]
+    target = f"{m['plugin_root']}/{m['case']}" if m["plugin_root"] else m["case"]
+    return f"`{target}`"
 
 
 def _marks_lines(plan: dict) -> list[str]:

@@ -55,7 +55,7 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
   is used, as for `runs` and `pass_at`.
 - `needs_merge_model` is optional: a reason, 1-200 characters on one line, that marks a case the push tier
   cannot trust to `push_model` and so runs on `model` at both tiers. It starts with a letter or digit and
-  otherwise uses letters, digits, space and `.,;'()_-` (no `:` or `/`). It is read from the base mapping, so a
+  otherwise uses letters, digits, space and `.,;'()_-` (no `:`, `/` or `@`, and no `www.`), so it cannot form a scheme, path, address or `www.` link; GitHub's same-repo references such as `GH-123` or a commit SHA still link. It is read from the base mapping, so a
   mark takes effect once it is merged. Agents never add one: when a case fails on the push model, ask the
   operator whether to mark it.
 - `runner.push_model` is optional and has the same model-id shape as `model`. The push tier runs every case on
@@ -175,10 +175,10 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
 the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
 
-After the `ignored:` lines (when any) come the marks, `needs-merge-model: <plugin_root>/<case> — "<reason>"` for each case
-the base marks (or `needs-merge-model: none`), then `needs-merge-model changed: <plugin_root>/<case>
-(added|altered|removed)` for each mark the branch adds, alters or removes (an added or altered one says it
-takes effect once merged). The same lines end the section. A failing case's counts line ends with the model it
+After the `ignored:` lines (when any) come the marks, ``needs-merge-model: `<plugin_root>/<case>` — "<reason>"`` for each case
+the base marks (or `needs-merge-model: none`), then ``needs-merge-model changed: `<plugin_root>/<case>`
+(added|altered|removed)`` for each mark the branch adds, alters or removes (an added or altered one says it
+takes effect once merged); the target is in a code span so a case or corpus name cannot autolink. The same lines end the section. A failing case's counts line ends with the model it
 ran on; when a push-tier case failed on a `push_model` that differs from `model`, the output also asks the
 operator whether to add a mark.
 
