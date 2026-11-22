@@ -24,10 +24,10 @@ END = "<!-- portage:eval-gate:end -->"
 SECRET = "sk-ant-api03-LEAKED0123456789abcdef"
 
 
-def _entry(case, root="plugins/demo", grants=False):
+def _entry(case, root="plugins/demo", grants=False, model="sonnet", push_model=None):
     return {"plugin_root": root, "case": case, "runs": 3, "pass_at": 2,
-            "runner": {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 1.0},
-            "new_runner_grants": grants}
+            "runner": {"model": model, "allow_tools": ["Read"], "max_cost_usd": 1.0},
+            "push_model": push_model, "new_runner_grants": grants}
 
 
 def _result(case, verdict="pass", passed=3, failed=0, errored=0, reason=None, runs=None):
@@ -41,10 +41,17 @@ class State:
         self.dir.mkdir(mode=0o700)
         os.chmod(self.dir, 0o700)
 
-    def plan(self, cases=(), status="cases-selected", mapping_invalid=None, grants=False):
+    def plan(self, cases=(), status="cases-selected", mapping_invalid=None, grants=False,
+             needs_merge_model=None, mark_changes=None, tier=None):
         doc = {"schema_version": 1, "status": status, "repo": "/r", "base": "main",
                "merge_base": "abc", "changed_files": [], "mapping_invalid": mapping_invalid,
                "new_runner_grants": grants, "total_max_cost_usd": 1.0, "cases": list(cases)}
+        if needs_merge_model is not None:
+            doc["needs_merge_model"] = needs_merge_model
+        if mark_changes is not None:
+            doc["mark_changes"] = mark_changes
+        if tier is not None:
+            doc["tier"] = tier
         (self.dir / "plan.json").write_text(json.dumps(doc))
 
     def result(self, case, doc=None, **kw):
@@ -165,7 +172,8 @@ def test_no_cases_mapped_exits_0_with_single_line_section(st, capsys):
     assert code == 0
     sec = section_of(out)
     assert "No eval cases are mapped to this change." in sec
-    assert len([ln for ln in sec.splitlines() if ln.strip() and ln not in (START, END, "## Eval gate")]) == 1
+    assert len([ln for ln in sec.splitlines() if ln.strip() and ln not in (START, END, "## Eval gate")
+                and not ln.startswith("needs-merge-model")]) == 1
 
 
 def _invalid_plan(st, revision):
@@ -846,3 +854,235 @@ class TestMergeOnlyNotRunRecovery:
         assert "merge by hand" not in timeout_out
         assert "usage limit resets" not in timeout_out
         assert "usage limit resets" in other_out
+
+
+def _mark(case, reason="Needs deep multi-file reasoning", root="tools/craft/plugins/craft"):
+    return {"plugin_root": root, "case": case, "reason": reason}
+
+
+def _change(case, change, reason="Flaky on the push model", root="tools/craft/plugins/craft"):
+    return {"plugin_root": root, "case": case, "change": change,
+            "reason": None if change == "removed" else reason}
+
+
+def _head(out):
+    return out.split("<!--", 1)[0].splitlines()
+
+
+class TestNeedsMergeModelReport:
+    def test_two_marked_cases_print_with_reasons_in_stdout_and_section(self, st, capsys):
+        st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha"), _mark("beta", "Slow; very slow")])
+        st.result("a-case")
+        code, out, _ = verdict(capsys, st)
+        line_a = "needs-merge-model: tools/craft/plugins/craft/alpha \u2014 Needs deep multi-file reasoning"
+        line_b = "needs-merge-model: tools/craft/plugins/craft/beta \u2014 Slow; very slow"
+        assert code == 0
+        assert line_a in _head(out) and line_b in _head(out)
+        assert line_a in section_of(out).splitlines() and line_b in section_of(out).splitlines()
+        assert "needs-merge-model: none" not in out
+
+    def test_no_marks_prints_none(self, st, capsys):
+        st.plan([_entry("a-case")], needs_merge_model=[], mark_changes=[])
+        st.result("a-case")
+        _, out, _ = verdict(capsys, st)
+        assert "needs-merge-model: none" in _head(out)
+        assert "needs-merge-model: none" in section_of(out).splitlines()
+        assert "needs-merge-model changed" not in out
+
+    def test_an_added_and_a_removed_change_print_two_changed_lines_removal_without_reason(self, st, capsys):
+        st.plan([_entry("a-case")], needs_merge_model=[],
+                mark_changes=[_change("beta", "added"), _change("gamma", "removed")])
+        st.result("a-case")
+        _, out, _ = verdict(capsys, st)
+        added = ("needs-merge-model changed: tools/craft/plugins/craft/beta (added) \u2014 "
+                 "Flaky on the push model; takes effect once merged")
+        removed = "needs-merge-model changed: tools/craft/plugins/craft/gamma (removed)"
+        for text in (_head(out), section_of(out).splitlines()):
+            assert added in text and removed in text
+
+    def test_an_altered_change_says_it_takes_effect_once_merged(self, st, capsys):
+        st.plan([_entry("a-case")], mark_changes=[_change("beta", "altered", "New reason")])
+        st.result("a-case")
+        _, out, _ = verdict(capsys, st)
+        assert ("needs-merge-model changed: tools/craft/plugins/craft/beta (altered) \u2014 "
+                "New reason; takes effect once merged") in _head(out)
+
+    def test_a_marked_and_changed_plan_orders_lines_after_ignored_and_before_failure_detail(self, st, capsys):
+        st.plan([_entry("bad")], needs_merge_model=[_mark("alpha")],
+                mark_changes=[_change("beta", "added")])
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        st.result("stray")
+        _, out, _ = verdict(capsys, st)
+        lines = _head(out)
+        idx = {k: next(i for i, ln in enumerate(lines) if ln.startswith(k))
+               for k in ("eval-gate:", "persistent:", "ignored:", "needs-merge-model:",
+                         "needs-merge-model changed:", "bad:")}
+        assert list(idx.values()) == sorted(idx.values())
+        assert idx["eval-gate:"] == 0 and idx["persistent:"] == 1
+
+    def test_no_cases_mapped_with_an_added_change_still_prints_it(self, st, capsys):
+        st.plan(status="no-cases-mapped", needs_merge_model=[],
+                mark_changes=[_change("beta", "added")])
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        head = _head(out)
+        assert head[:2] == ["eval-gate: no-cases-mapped", "persistent: none"]
+        assert "needs-merge-model: none" in head
+        assert any(ln.startswith("needs-merge-model changed: tools/craft/plugins/craft/beta (added)")
+                   for ln in head)
+        assert any(ln.startswith("needs-merge-model changed:") for ln in section_of(out).splitlines())
+
+    def test_a_plan_written_before_the_fields_reads_as_none_and_no_changes(self, st, capsys):
+        st.plan([_entry("a-case")])
+        st.result("a-case")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert _head(out)[:3] == ["eval-gate: passed", "persistent: none", "needs-merge-model: none"]
+        assert "needs-merge-model changed" not in out
+
+    def test_an_empty_plugin_root_prints_the_bare_case(self, st, capsys):
+        st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha", root="")])
+        st.result("a-case")
+        _, out, _ = verdict(capsys, st)
+        assert "needs-merge-model: alpha \u2014 Needs deep multi-file reasoning" in _head(out)
+
+    def test_statuses_that_did_not_read_the_mappings_print_no_marks_lines(self, st, capsys):
+        st.plan(status="tree-dirty")
+        _, out, _ = verdict(capsys, st)
+        assert "needs-merge-model" not in out
+
+
+BAD_REASONS = ["has `tick`", "a <b> tag", "two\nlines", "", "x" * 201, " leading", "trail\n"]
+BAD_ROOTS = ["a/../b", "x y", "bad\n", 5, None]
+BAD_CASES = ["Bad Case", "x\n", "", 5, None]
+
+
+def _refused(st, capsys, **plan_kw):
+    st.plan([_entry("a-case")])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    (st.dir / "plan.json").write_text(json.dumps({**doc, **plan_kw}))
+    st.result("a-case")
+    code, out, err = verdict(capsys, st)
+    assert code == 2 and out == ""
+    return err
+
+
+class TestNeedsMergeModelValidation:
+    @pytest.mark.parametrize("field", ["needs_merge_model", "mark_changes"])
+    @pytest.mark.parametrize("bad", [{}, "x", None, 3])
+    def test_a_field_that_is_not_a_list_is_refused(self, st, capsys, field, bad):
+        _refused(st, capsys, **{field: bad})
+
+    @pytest.mark.parametrize("field", ["needs_merge_model", "mark_changes"])
+    @pytest.mark.parametrize("bad", ["x", 3, None, ["x"]])
+    def test_an_item_that_is_not_an_object_is_refused(self, st, capsys, field, bad):
+        _refused(st, capsys, **{field: [bad]})
+
+    @pytest.mark.parametrize("drop", ["plugin_root", "case", "reason"])
+    def test_a_mark_missing_a_key_is_refused(self, st, capsys, drop):
+        m = _mark("alpha")
+        del m[drop]
+        _refused(st, capsys, needs_merge_model=[m])
+
+    def test_a_mark_with_an_extra_key_is_refused(self, st, capsys):
+        _refused(st, capsys, needs_merge_model=[{**_mark("alpha"), "extra": "x"}])
+
+    @pytest.mark.parametrize("reason", BAD_REASONS)
+    def test_a_mark_reason_failing_its_loader_shape_is_refused_and_not_echoed(self, st, capsys, reason):
+        err = _refused(st, capsys, needs_merge_model=[_mark("alpha", reason)])
+        assert "tick" not in err and "<b>" not in err
+
+    def test_a_mark_reason_that_is_not_a_string_is_refused(self, st, capsys):
+        _refused(st, capsys, needs_merge_model=[_mark("alpha", None)])
+
+    @pytest.mark.parametrize("case", BAD_CASES)
+    def test_a_mark_case_failing_its_loader_shape_is_refused(self, st, capsys, case):
+        _refused(st, capsys, needs_merge_model=[_mark(case)])
+
+    @pytest.mark.parametrize("root", BAD_ROOTS)
+    def test_a_mark_plugin_root_failing_its_loader_shape_is_refused(self, st, capsys, root):
+        _refused(st, capsys, needs_merge_model=[_mark("alpha", root=root)])
+
+    @pytest.mark.parametrize("drop", ["plugin_root", "case", "change", "reason"])
+    def test_a_change_missing_a_key_is_refused(self, st, capsys, drop):
+        c = _change("beta", "added")
+        del c[drop]
+        _refused(st, capsys, mark_changes=[c])
+
+    def test_a_change_with_an_extra_key_is_refused(self, st, capsys):
+        _refused(st, capsys, mark_changes=[{**_change("beta", "added"), "extra": "x"}])
+
+    @pytest.mark.parametrize("change", ["renamed", "ADDED", "", None, 3])
+    def test_a_change_outside_the_three_values_is_refused(self, st, capsys, change):
+        _refused(st, capsys, mark_changes=[{**_change("beta", "added"), "change": change}])
+
+    @pytest.mark.parametrize("reason", BAD_REASONS)
+    @pytest.mark.parametrize("change", ["added", "altered"])
+    def test_a_change_reason_failing_its_loader_shape_is_refused_and_not_echoed(self, st, capsys, change, reason):
+        err = _refused(st, capsys, mark_changes=[_change("beta", change, reason)])
+        assert "tick" not in err and "<b>" not in err
+
+    @pytest.mark.parametrize("change", ["added", "altered"])
+    def test_a_change_that_takes_effect_with_a_null_reason_is_refused(self, st, capsys, change):
+        _refused(st, capsys, mark_changes=[{**_change("beta", change), "reason": None}])
+
+    def test_a_removal_that_carries_a_reason_is_refused(self, st, capsys):
+        _refused(st, capsys, mark_changes=[{**_change("beta", "removed"), "reason": "still here"}])
+
+    @pytest.mark.parametrize("case", BAD_CASES)
+    def test_a_change_case_failing_its_loader_shape_is_refused(self, st, capsys, case):
+        _refused(st, capsys, mark_changes=[_change(case, "added")])
+
+    @pytest.mark.parametrize("root", BAD_ROOTS)
+    def test_a_change_plugin_root_failing_its_loader_shape_is_refused(self, st, capsys, root):
+        _refused(st, capsys, mark_changes=[_change("beta", "added", root=root)])
+
+    def test_a_malformed_field_is_refused_on_a_status_that_prints_no_marks_too(self, st, capsys):
+        st.plan(status="no-cases-mapped")
+        doc = json.loads((st.dir / "plan.json").read_text())
+        (st.dir / "plan.json").write_text(json.dumps({**doc, "needs_merge_model": "oops"}))
+        code, out, _ = verdict(capsys, st)
+        assert code == 2 and out == ""
+
+    def test_a_refused_plan_writes_no_section_file(self, st, capsys):
+        _refused(st, capsys, needs_merge_model=[_mark("alpha", "has `tick`")])
+        assert not (st.dir / "eval-gate-section.md").exists()
+
+
+ASK = "needs-merge-model mark"
+
+
+class TestModelOnFailure:
+    def test_a_push_tier_failure_on_the_push_model_names_the_model_and_asks_the_operator(self, st, capsys):
+        st.plan([_entry("bad", model="sonnet", push_model="sonnet")], tier="push")
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        code, out, _ = verdict(capsys, st)
+        head = _head(out)
+        assert code == 1
+        assert "bad: passed 0, failed 3, errored 0 (model: sonnet)" in head
+        ask = [ln for ln in head if ASK in ln]
+        assert len(ask) == 1 and "bad" in ask[0] and "merge model" in ask[0]
+        assert "once" in ask[0] and "main" in ask[0] and "do not add one yourself" in ask[0].lower()
+        assert "`bad`: passed 0, failed 3, errored 0 (model: sonnet)" in section_of(out)
+
+    def test_a_merge_tier_failure_names_the_model_without_the_ask(self, st, capsys):
+        st.plan([_entry("bad", model="opus", push_model="sonnet"), _entry("same", model="sonnet", push_model="sonnet")],
+                tier="merge")
+        st.result("same", verdict="fail", passed=0, failed=3)
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        _, out, _ = verdict(capsys, st)
+        assert "bad: passed 0, failed 3, errored 0 (model: opus)" in _head(out)
+        assert "same: passed 0, failed 3, errored 0 (model: sonnet)" in _head(out)
+        assert ASK not in out
+
+    def test_a_push_tier_failure_on_a_marked_case_running_the_merge_model_has_no_ask(self, st, capsys):
+        st.plan([_entry("bad", model="opus", push_model="sonnet")], tier="push")
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        _, out, _ = verdict(capsys, st)
+        assert "(model: opus)" in out and ASK not in out
+
+    def test_a_push_tier_failure_with_no_push_model_configured_has_no_ask(self, st, capsys):
+        st.plan([_entry("bad", model="sonnet", push_model=None)], tier="push")
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        _, out, _ = verdict(capsys, st)
+        assert "(model: sonnet)" in out and ASK not in out
