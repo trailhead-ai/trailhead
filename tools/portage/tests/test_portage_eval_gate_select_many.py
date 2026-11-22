@@ -210,3 +210,168 @@ def test_per_path_work_is_linear_in_the_path_length(shapes, monkeypatch, path):
     assert [e["case"] for e in many[path]] == ["dirm", "multi"]
     assert tally["lookups"] <= path.count("/") + 1
     assert tally["chars"] <= len(path)
+
+
+class _ScanCountingTree(dict):
+    """A tree that counts the entries handed out by iteration and the keyed lookups made."""
+
+    def __init__(self, data, tally):
+        super().__init__(data)
+        self.tally = tally
+
+    def __iter__(self):
+        for k in super().__iter__():
+            self.tally["scanned"] += 1
+            yield k
+
+    def keys(self):
+        return iter(self)
+
+    def items(self):
+        for k, v in super().items():
+            self.tally["scanned"] += 1
+            yield k, v
+
+    def values(self):
+        for v in super().values():
+            self.tally["scanned"] += 1
+            yield v
+
+    def get(self, key, default=None):
+        self.tally["gets"] += 1
+        return super().get(key, default)
+
+
+_MAPPING_PATH = "p/evals/eval-gate.json"
+_BLOB = "100644"
+
+
+def _mapping_of(cases):
+    import json
+
+    from portage.eval_gate.mapping import load_mapping
+    runner = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 1.0}
+    return load_mapping(json.dumps({"schema_version": 1, "runner": runner, "cases": cases}), _MAPPING_PATH)
+
+
+def _tree_of(*paths, extra=None):
+    tree = {p: _BLOB for p in paths}
+    tree["p/evals/c/case.yaml"] = _BLOB
+    tree.update(extra or {})
+    return tree
+
+
+def _check(measures, tree):
+    select._check_against_tree(_MAPPING_PATH, _mapping_of({"c": {"measures": measures}}), tree)
+
+
+@pytest.mark.parametrize("repeats", [1, 400])
+def test_tree_checking_scans_the_tree_at_most_once_however_often_a_measure_repeats(repeats):
+    tally = {"scanned": 0, "gets": 0}
+    entries = [f"p/skills/dir{i}/x.md" for i in range(150)] + ["p/skills/f.md"]
+    tree = _ScanCountingTree(_tree_of(*entries), tally)
+    _check(["skills/dir1", "skills/f.md"] * repeats + ["skills/dir149"], tree)
+    assert tally["scanned"] <= len(tree)
+    assert tally["gets"] <= 3 + 1
+
+
+def test_a_tree_shared_by_several_mappings_is_scanned_twice_per_selection_not_per_mapping(shapes):
+    base = _git(shapes, "rev-parse", "HEAD")
+    tally = {"scanned": 0, "gets": 0}
+    tree = _ScanCountingTree(select._head_tree(shapes), tally)
+    got = select.select_touched(shapes, base, ["p/skills/dir/x.md"], tree=tree)
+    assert [e["case"] for e in got] == ["dirm", "multi"]
+    assert tally["scanned"] <= 2 * len(tree)
+
+
+@pytest.mark.parametrize("measures, entries, held", [
+    (["skills/f.md"], ["p/skills/f.md"], True),
+    (["skills/dir"], ["p/skills/dir/x.md"], True),
+    (["skills/dir/inner"], ["p/skills/dir/inner/y.md"], True),
+    (["skills/a"], ["p/skills/ab/x"], False),
+    (["skills/ab"], ["p/skills/a/x"], False),
+    (["skills/a"], ["p/skills/a"], True),
+    (["skills/nope"], ["p/skills/dir/x.md"], False),
+    (["skills/f.md"], ["p/skills/f.mdx"], False),
+    (["skills/dir"], ["p/skills/dirty/x.md"], False),
+    (["skills/dir", "skills/gone"], ["p/skills/dir/x.md"], False),
+    (["skills/dir", "skills/dir", "skills/f.md"], ["p/skills/dir/x.md", "p/skills/f.md"], True),
+], ids=["file", "dir", "nested", "sibling-prefix-a-vs-ab", "sibling-prefix-ab-vs-a", "file-named-like-dir",
+        "missing", "file-prefix", "dir-prefix", "one-of-two-missing", "repeats-held"])
+def test_a_measure_is_held_exactly_when_a_blob_or_a_path_under_it_is_committed(measures, entries, held):
+    tree = _tree_of(*entries)
+    if held:
+        _check(measures, tree)
+        return
+    with pytest.raises(select.MappingError) as e:
+        _check(measures, tree)
+    assert "case 'c': measures path " in e.value.fault
+    assert "does not exist under the plugin root" in e.value.fault
+    assert e.value.file == _MAPPING_PATH
+
+
+def test_a_non_blob_entry_named_by_a_measure_is_not_held_but_one_under_it_holds_it():
+    tree = _tree_of(extra={"p/skills/link": "120000", "p/skills/sub": "160000", "p/skills/d/x": _BLOB})
+    with pytest.raises(select.MappingError, match="'skills/link'"):
+        _check(["skills/link"], tree)
+    with pytest.raises(select.MappingError, match="'skills/sub'"):
+        _check(["skills/sub"], tree)
+    _check(["skills/d"], tree)
+
+
+def test_the_first_missing_measure_in_declaration_order_is_the_one_named():
+    tree = _tree_of("p/skills/dir/x.md")
+    with pytest.raises(select.MappingError) as e:
+        _check(["skills/dir", "skills/two", "skills/one", "skills/two"], tree)
+    assert "'skills/two'" in e.value.fault
+
+
+def test_a_case_without_a_committed_case_yaml_is_a_fault_after_its_measures_pass():
+    tree = {"p/skills/f.md": _BLOB}
+    with pytest.raises(select.MappingError, match="case 'c' has no case.yaml"):
+        _check(["skills/f.md"], tree)
+
+
+class _CountingList(list):
+    def __init__(self, tally):
+        super().__init__()
+        self.tally = tally
+
+    def __iter__(self):
+        for i in super().__iter__():
+            self.tally["absorbed"] += 1
+            yield i
+
+
+@pytest.mark.parametrize("candidates, paths", [(1, 300), (300, 1), (300, 300)])
+def test_candidate_sets_absorbed_grow_with_candidates_plus_paths_not_their_product(repo, monkeypatch,  # noqa: F811
+                                                                                    candidates, paths):
+    cases = {f"c{i}": {"measures": ["skills/dir"]} for i in range(candidates)}
+    _corpus(repo, "p", cases, files=("skills/dir/x.md",))
+    _commit(repo)
+    base = _git(repo, "rev-parse", "HEAD")
+    tally = {"absorbed": 0}
+    real_node = select._Node
+
+    class Counting(real_node):
+        def __init__(self):
+            super().__init__()
+            self.targets = _CountingList(tally)
+            self.cases = _CountingList(tally)
+
+    monkeypatch.setattr(select, "_Node", Counting)
+    changed = [f"p/skills/dir/n{i}.md" for i in range(paths)]
+    got = select.select_touched(repo, base, changed)
+    assert [e["case"] for e in got] == sorted(cases)
+    assert tally["absorbed"] <= candidates + paths
+
+
+def test_a_node_reached_by_one_path_as_a_target_and_by_a_deeper_one_as_a_case_dir_adds_both_sets(repo):  # noqa: F811
+    _corpus(repo, "p", {"a": {"measures": ["evals/g"]}, "g": {"measures": ["skills/f.md"]}},
+            files=("skills/f.md",))
+    _commit(repo)
+    base = _git(repo, "rev-parse", "HEAD")
+    assert [e["case"] for e in select.select_touched(repo, base, ["p/evals/g"])] == ["a"]
+    assert [e["case"] for e in select.select_touched(repo, base, ["p/evals/g/x"])] == ["a", "g"]
+    got = select.select_touched(repo, base, ["p/evals/g", "p/evals/g/x"])
+    assert [e["case"] for e in got] == ["a", "g"]

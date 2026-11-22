@@ -122,22 +122,38 @@ def _head_tree(repo: Path) -> dict[str, str]:
     return tree
 
 
-def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str]) -> None:
-    """The on-disk checks ``load_mapping`` can make, made against HEAD's committed tree."""
+def _tree_dirs(tree: dict[str, str]) -> frozenset[str]:
+    """Every directory that has a committed path under it: each tree path contributes its ancestors.
+    One pass over the tree, charged once per tree."""
+    dirs: set[str] = set()
+    for p in tree:
+        end = p.rfind("/")
+        while end > 0 and p[:end] not in dirs:
+            dirs.add(p[:end])
+            end = p.rfind("/", 0, end)
+    return frozenset(dirs)
+
+
+def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str],
+                        dirs: frozenset[str] | None = None) -> None:
+    """The on-disk checks ``load_mapping`` can make, made against HEAD's committed tree.
+
+    A measure is held by a committed blob at its path or by any path under it; ``dirs`` (built from
+    ``tree`` when not given) answers the second in one set lookup, and a measure a case repeats is
+    checked once."""
+    dirs = _tree_dirs(tree) if dirs is None else dirs
     plugin = PurePosixPath(path).parent.parent
     for name, case in mapping.cases.items():
-        for m in case.measures:
+        for m in dict.fromkeys(case.measures):
             target = (plugin / m).as_posix()
-            prefix = target + "/"
-            held = tree.get(target) in _BLOB_MODES or any(p.startswith(prefix) for p in tree)
-            if not held:
+            if not (tree.get(target) in _BLOB_MODES or target in dirs):
                 raise MappingError(path, f"case {name!r}: measures path {m!r} does not exist "
                                          "under the plugin root")
         if tree.get((plugin / "evals" / name / "case.yaml").as_posix()) not in _BLOB_MODES:
             raise MappingError(path, f"case {name!r} has no case.yaml")
 
 
-def _load_head(repo: Path, path: str, tree: dict[str, str]) -> Mapping | None:
+def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]) -> Mapping | None:
     if path not in tree:
         return None
     try:
@@ -145,7 +161,7 @@ def _load_head(repo: Path, path: str, tree: dict[str, str]) -> Mapping | None:
     except UnicodeDecodeError:
         raise MappingError(path, "not valid UTF-8") from None
     mapping = load_mapping(text, path)
-    _check_against_tree(path, mapping, tree)
+    _check_against_tree(path, mapping, tree, dirs)
     return mapping
 
 
@@ -198,6 +214,7 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
     candidates: list[tuple[PurePosixPath, tuple[str, ...], dict]] = []
     marks: list[dict] = []
     changes: list[dict] = []
+    dirs = _tree_dirs(tree)
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
         plugin = PurePosixPath(path).parent.parent
         root = "" if str(plugin) == "." else plugin.as_posix()
@@ -205,7 +222,7 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
             raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
         base_text = _show(repo, merge_base, path) if path in at_base else None
         base_map = _load_base(path, base_text) if base_text is not None else None
-        head_map = _load_head(repo, path, tree)
+        head_map = _load_head(repo, path, tree, dirs)
         names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
         for name in names:
             base_case = base_map.cases.get(name) if base_map else None
@@ -269,17 +286,30 @@ def _build_index(candidates) -> _Node:
     return root
 
 
-def _touching(root: _Node, path: str) -> set[int]:
+def _touching(root: _Node, path: str, absorbed: tuple[set, set] | None = None) -> set[int]:
     """The candidates ``_touches`` accepts for ``path``, found by walking its components: one child
-    lookup per component, each component hashed once, stopping at the first component the index lacks."""
+    lookup per component, each component hashed once, stopping at the first component the index lacks.
+
+    ``absorbed`` is the (target nodes, case nodes) a caller has already folded into its result across
+    paths; a node found there contributes nothing again, so the candidate sets added over many paths
+    grow with the candidates and the paths, not their product."""
     hit: set[int] = set()
+    done_targets, done_cases = absorbed if absorbed is not None else (None, None)
     node = root
     for part in path.split("/"):
-        hit.update(node.cases)
+        if done_cases is None:
+            hit.update(node.cases)
+        elif node.cases and node not in done_cases:
+            done_cases.add(node)
+            hit.update(node.cases)
         node = node.children.get(part)
         if node is None:
             return hit
-        hit.update(node.targets)
+        if done_targets is None:
+            hit.update(node.targets)
+        elif node.targets and node not in done_targets:
+            done_targets.add(node)
+            hit.update(node.targets)
     return hit
 
 
@@ -289,8 +319,9 @@ def _select(repo: Path, merge_base: str, changed: list[str], merge_only_either: 
     candidates, marks, changes = _candidates(repo, merge_base, tree, merge_only_either, tier)
     index = _build_index(candidates)
     hit: set[int] = set()
+    absorbed: tuple[set, set] = (set(), set())
     for c in changed:
-        hit |= _touching(index, c)
+        hit |= _touching(index, c, absorbed)
     return [candidates[i][2] for i in sorted(hit)], marks, changes
 
 
