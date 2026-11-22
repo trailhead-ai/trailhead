@@ -42,8 +42,10 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 
 ```json
 {"schema_version": 1,
- "runner": {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
- "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false}}}
+ "runner": {"model": "claude-opus-5-5", "push_model": "claude-sonnet-4-5",
+            "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
+ "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false,
+                      "needs_merge_model": "judges a long diff the smaller model truncates"}}}
 ```
 
 - `measures` are plugin-relative paths of the prose the case's `expected.md` names as under test.
@@ -51,6 +53,14 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 - `merge_only` is optional and defaults to false; it must be a boolean. A `merge_only` case is left out of the
   push tier and runs at the merge tier. For a corpus that already has a mapping on the base, the base's value
   is used, as for `runs` and `pass_at`.
+- `needs_merge_model` is optional: a reason, 1-200 characters on one line, that marks a case the push tier
+  cannot trust to `push_model` and so runs on `model` at both tiers. It starts with a letter or digit and
+  otherwise uses letters, digits, space and `.,;'()_-` (no `:` or `/`). It is read from the base mapping, so a
+  mark takes effect once it is merged. Agents never add one: when a case fails on the push model, ask the
+  operator whether to mark it.
+- `runner.push_model` is optional and has the same model-id shape as `model`. The push tier runs every case on
+  it, except the marked ones; absent, the push tier uses `model`. The merge tier always uses `model`. It is
+  read from the base mapping like the rest of the runner block.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.
@@ -164,6 +174,13 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `<!-- portage:eval-gate:start -->` and `<!-- portage:eval-gate:end -->`. The section is also saved to
 `<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
 the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
+
+After those two lines come the marks, `needs-merge-model: <plugin_root>/<case> — "<reason>"` for each case
+the base marks (or `needs-merge-model: none`), then `needs-merge-model changed: <plugin_root>/<case>
+(added|altered|removed)` for each mark the branch adds, alters or removes (an added or altered one says it
+takes effect once merged). The same lines end the section. A failing case's counts line ends with the model it
+ran on; when a push-tier case failed on a `push_model` that differs from `model`, the output also asks the
+operator whether to add a mark.
 
 - Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
   (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
