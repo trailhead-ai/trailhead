@@ -114,3 +114,98 @@ def test_many_paths_are_answered_without_testing_each_candidate(shapes, monkeypa
     assert [e["case"] for e in many["p/skills/dir/n7.md"]] == ["dirm", "multi"]
     assert [e["case"] for e in many["p/skills/ab/x"]] == ["pab"]
     assert many["p/skills/abc"] == []
+
+
+def _reference(checkout, base, path, **kw):
+    """What the per-candidate ``_touches`` scan answers for ``path`` alone."""
+    tree = select._head_tree(checkout)
+    candidates = select._candidates(checkout, base, tree, kw.get("merge_only_either", False), kw.get("tier", "merge"))[0]
+    return [entry for plugin, measures, entry in candidates
+            if select._touches(entry["case"], measures, plugin, [path])]
+
+
+@pytest.mark.parametrize("tier", ["push", "merge"])
+def test_every_path_shape_selects_what_the_touches_scan_selects(shapes, tier):
+    base = _git(shapes, "rev-parse", "HEAD")
+    many = select.select_touched_by_path(shapes, base, SHAPE_PATHS, tier=tier)
+    for path in SHAPE_PATHS:
+        assert many[path] == _reference(shapes, base, path, tier=tier), path
+        assert select.select_touched(shapes, base, [path], tier=tier) == many[path], path
+
+
+def test_a_changed_set_selects_the_union_in_candidate_order_without_repeats(shapes):
+    base = _git(shapes, "rev-parse", "HEAD")
+    got = select.select_touched(shapes, base, ["p/skills/a/x", "p/skills/ab/x", "p/skills/a", "p/skills/abc"])
+    assert [e["case"] for e in got] == ["multi", "pa", "pab"]
+
+
+def test_selection_does_not_scan_candidates_per_changed_path(shapes, monkeypatch):
+    base = _git(shapes, "rev-parse", "HEAD")
+
+    def boom(*a, **k):
+        raise AssertionError("_touches called")
+
+    monkeypatch.setattr(select, "_touches", boom)
+    changed = SHAPE_PATHS + [f"p/skills/dir/n{i}.md" for i in range(200)]
+    got = select.select_touched(shapes, base, changed)
+    assert {"dirm", "multi", "pab", "pa", "slash"} <= {e["case"] for e in got}
+
+
+def test_plan_does_not_scan_candidates_per_changed_path(shapes, monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("_touches called")
+
+    monkeypatch.setattr(select, "_touches", boom)
+    _git(shapes, "branch", "base")
+    _git(shapes, "checkout", "-q", "-b", "feature")
+    for i in range(30):
+        _write(shapes, f"p/skills/dir/n{i}.md", "x\n")
+    _write(shapes, "p/skills/ab/x", "changed\n")
+    _commit(shapes)
+    state, result = select.plan(shapes, "base", tier="merge")
+    assert result["status"] == "cases-selected"
+    assert [c["case"] for c in result["cases"]] == ["dirm", "multi", "pab"]
+
+
+class _CountingDict(dict):
+    def __init__(self, tally):
+        super().__init__()
+        self.tally = tally
+
+    def get(self, key, default=None):
+        self.tally["lookups"] += 1
+        self.tally["chars"] += len(key)
+        return super().get(key, default)
+
+    def __getitem__(self, key):
+        self.tally["lookups"] += 1
+        self.tally["chars"] += len(key)
+        return super().__getitem__(key)
+
+    def __contains__(self, key):
+        self.tally["lookups"] += 1
+        self.tally["chars"] += len(key)
+        return super().__contains__(key)
+
+
+@pytest.mark.parametrize("path", [
+    "p/skills/dir/" + "x" * 100_000,
+    "p/skills/dir/" + "/".join("seg" for _ in range(20_000)),
+    "p/skills/dir/" + "/" * 50_000,
+    "p/skills/dir/" + "/".join(["abcdefgh"] * 12_000),
+], ids=["one-long-name", "many-components", "many-empty-components", "long-and-many"])
+def test_per_path_work_is_linear_in_the_path_length(shapes, monkeypatch, path):
+    tally = {"lookups": 0, "chars": 0}
+    real_node = select._Node
+
+    class Counting(real_node):
+        def __init__(self):
+            super().__init__()
+            self.children = _CountingDict(tally)
+
+    monkeypatch.setattr(select, "_Node", Counting)
+    base = _git(shapes, "rev-parse", "HEAD")
+    many = select.select_touched_by_path(shapes, base, [path])
+    assert [e["case"] for e in many[path]] == ["dirm", "multi"]
+    assert tally["lookups"] <= path.count("/") + 1
+    assert tally["chars"] <= len(path)

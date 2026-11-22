@@ -241,12 +241,57 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
     return candidates, marks, changes
 
 
+class _Node:
+    """One path component in the index: ``targets`` are the candidates whose measure target ends here
+    (they match this path and everything under it), ``cases`` those whose case directory ends here
+    (they match only what lies strictly under it)."""
+    __slots__ = ("children", "targets", "cases")
+
+    def __init__(self):
+        self.children: dict[str, _Node] = {}
+        self.targets: list[int] = []
+        self.cases: list[int] = []
+
+
+def _build_index(candidates) -> _Node:
+    root = _Node()
+
+    def node_for(path: str) -> _Node:
+        node = root
+        for part in path.split("/"):
+            node = node.children.setdefault(part, _Node())
+        return node
+
+    for i, (plugin, measures, entry) in enumerate(candidates):
+        node_for((plugin / "evals" / entry["case"]).as_posix()).cases.append(i)
+        for m in measures:
+            node_for((plugin / m).as_posix()).targets.append(i)
+    return root
+
+
+def _touching(root: _Node, path: str) -> set[int]:
+    """The candidates ``_touches`` accepts for ``path``, found by walking its components: one child
+    lookup per component, each component hashed once, stopping at the first component the index lacks."""
+    hit: set[int] = set()
+    node = root
+    for part in path.split("/"):
+        hit.update(node.cases)
+        node = node.children.get(part)
+        if node is None:
+            return hit
+        hit.update(node.targets)
+    return hit
+
+
 def _select(repo: Path, merge_base: str, changed: list[str], merge_only_either: bool,
             tree: dict[str, str] | None, tier: str) -> tuple[list[dict], list[dict], list[dict]]:
     tree = _head_tree(repo) if tree is None else tree
     candidates, marks, changes = _candidates(repo, merge_base, tree, merge_only_either, tier)
-    return ([entry for plugin, measures, entry in candidates if _touches(entry["case"], measures, plugin, changed)],
-            marks, changes)
+    index = _build_index(candidates)
+    hit: set[int] = set()
+    for c in changed:
+        hit |= _touching(index, c)
+    return [candidates[i][2] for i in sorted(hit)], marks, changes
 
 
 def select_touched(repo: Path, merge_base: str, changed: list[str], *,
@@ -273,23 +318,8 @@ def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
     directories, so the work grows with the paths and their depth, not with the candidates."""
     tree = _head_tree(repo) if tree is None else tree
     candidates = _candidates(repo, merge_base, tree, merge_only_either, tier)[0]
-    case_dirs: dict[str, list[int]] = {}
-    targets: dict[str, list[int]] = {}
-    for i, (plugin, measures, entry) in enumerate(candidates):
-        case_dirs.setdefault((plugin / "evals" / entry["case"]).as_posix(), []).append(i)
-        for m in measures:
-            targets.setdefault((plugin / m).as_posix(), []).append(i)
-
-    def touching(path: str) -> list[dict]:
-        hit = set(targets.get(path, ()))
-        for end, ch in enumerate(path):
-            if ch == "/":
-                ancestor = path[:end]
-                hit.update(case_dirs.get(ancestor, ()))
-                hit.update(targets.get(ancestor, ()))
-        return [candidates[i][2] for i in sorted(hit)]
-
-    return {path: touching(path) for path in paths}
+    index = _build_index(candidates)
+    return {path: [candidates[i][2] for i in sorted(_touching(index, path))] for path in paths}
 
 
 def _runs(case: dict) -> bool:
