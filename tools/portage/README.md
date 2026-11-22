@@ -74,7 +74,7 @@ A sandbox-write canary runs first. If the runner's sandbox cannot write, the cas
 `runner-sandbox-unwritable` rather than scored as failures. `PORTAGE_EVAL_RUNNER` (an absolute path to
 an executable) pins the runner binary the gate uses on this machine, for the canary and the cases.
 Cases mapped `merge_only` run at the merge tier instead: `portage merge --eval-state <repo>=<state_dir>`
-(repeatable) refuses a change that touches one unless the state is a current, passing
+(repeatable) refuses a change that touches one, or that touches a split-procedure case, unless the state is a current, passing
 `portage eval-gate plan --tier merge` state for the PR's current head, and pins the merge to that head
 (`gh pr merge --match-head-commit`). `--operator-directed` does not waive it.
 
