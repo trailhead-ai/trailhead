@@ -36,9 +36,9 @@ Markers, each on its own line, wrapping the section::
    classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan;
 4. the marks, on every status that read the mappings (``cases-selected``, ``no-cases-mapped``):
-   ``needs-merge-model: <plugin_root>/<case> — <reason>`` per entry of the plan's ``needs_merge_model``
+   ``needs-merge-model: <plugin_root>/<case> — "<reason>"`` per entry of the plan's ``needs_merge_model``
    (or ``needs-merge-model: none``), then ``needs-merge-model changed: <plugin_root>/<case>
-   (added|altered|removed) — <reason>`` per entry of ``mark_changes`` (no reason on removal; an
+   (added|altered|removed) — "<reason>"`` per entry of ``mark_changes`` (no reason on removal; an
    added or altered mark says it takes effect once merged). A plan without either field reads as
    none and no changes; a malformed field makes the plan unusable (exit 2). The same lines end the section;
 5. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
@@ -263,12 +263,12 @@ def _mark_target(m: dict) -> str:
 def _marks_lines(plan: dict) -> list[str]:
     """The ``needs-merge-model`` lines; plan fields are already shape-checked by ``_load_plan``."""
     marks = plan.get("needs_merge_model", [])
-    out = ([f"needs-merge-model: {_mark_target(m)} \u2014 {m['reason']}" for m in marks]
+    out = ([f"needs-merge-model: {_mark_target(m)} \u2014 \"{m['reason']}\"" for m in marks]
            or ["needs-merge-model: none"])
     for m in plan.get("mark_changes", []):
         line = f"needs-merge-model changed: {_mark_target(m)} ({m['change']})"
         if m["change"] != "removed":
-            line += f" \u2014 {m['reason']}; takes effect once merged"
+            line += f" \u2014 \"{m['reason']}\"; takes effect once merged"
         out.append(line)
     return out
 
@@ -351,7 +351,8 @@ def _tier_lines(plan: dict) -> list[str]:
 
 
 def _pass_item(row: dict) -> str:
-    return f"`{row['case']}` — pass (cached)" if row["result"]["cached"] else f"`{row['case']}`"
+    cached = " — pass (cached)" if row["result"]["cached"] else ""
+    return f"`{row['case']}`{cached} (model: {row['model']})"
 
 
 def _not_run_items(rows: list[dict]) -> list[str]:

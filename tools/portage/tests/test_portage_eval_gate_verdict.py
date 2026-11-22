@@ -666,8 +666,23 @@ class TestCachedPass:
         assert code == 0
         assert out.splitlines()[0] == "eval-gate: passed"
         lines = section_of(out).splitlines()
-        assert [ln for ln in lines if "`reused`" in ln] == ["- `reused` — pass (cached)"]
-        assert [ln for ln in lines if "`fresh`" in ln] == ["- `fresh`"]
+        assert [ln for ln in lines if "`reused`" in ln] == ["- `reused` — pass (cached) (model: sonnet)"]
+        assert [ln for ln in lines if "`fresh`" in ln] == ["- `fresh` (model: sonnet)"]
+
+    def test_a_pass_bullet_names_the_model_its_case_ran_on(self, st, capsys):
+        st.plan([_entry("on-opus", model="opus"), _entry("on-sonnet")])
+        st.result("on-opus")
+        st.result("on-sonnet")
+        _, out, _ = verdict(capsys, st)
+        lines = section_of(out).splitlines()
+        assert "- `on-opus` (model: opus)" in lines
+        assert "- `on-sonnet` (model: sonnet)" in lines
+
+    def test_a_pass_bullet_with_an_unusable_model_reads_unknown_model(self, st, capsys):
+        st.plan([_entry("odd", model="has `tick`")])
+        st.result("odd")
+        _, out, _ = verdict(capsys, st)
+        assert "- `odd` (model: <unknown-model>)" in section_of(out).splitlines()
 
     def test_a_result_without_cached_is_a_plain_pass(self, st, capsys):
         st.plan([_entry("old")])
@@ -874,8 +889,8 @@ class TestNeedsMergeModelReport:
         st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha"), _mark("beta", "Slow; very slow")])
         st.result("a-case")
         code, out, _ = verdict(capsys, st)
-        line_a = "needs-merge-model: tools/craft/plugins/craft/alpha \u2014 Needs deep multi-file reasoning"
-        line_b = "needs-merge-model: tools/craft/plugins/craft/beta \u2014 Slow; very slow"
+        line_a = "needs-merge-model: tools/craft/plugins/craft/alpha \u2014 \"Needs deep multi-file reasoning\""
+        line_b = "needs-merge-model: tools/craft/plugins/craft/beta \u2014 \"Slow; very slow\""
         assert code == 0
         assert line_a in _head(out) and line_b in _head(out)
         assert line_a in section_of(out).splitlines() and line_b in section_of(out).splitlines()
@@ -895,7 +910,7 @@ class TestNeedsMergeModelReport:
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
         added = ("needs-merge-model changed: tools/craft/plugins/craft/beta (added) \u2014 "
-                 "Flaky on the push model; takes effect once merged")
+                 "\"Flaky on the push model\"; takes effect once merged")
         removed = "needs-merge-model changed: tools/craft/plugins/craft/gamma (removed)"
         for text in (_head(out), section_of(out).splitlines()):
             assert added in text and removed in text
@@ -905,7 +920,7 @@ class TestNeedsMergeModelReport:
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
         assert ("needs-merge-model changed: tools/craft/plugins/craft/beta (altered) \u2014 "
-                "New reason; takes effect once merged") in _head(out)
+                "\"New reason\"; takes effect once merged") in _head(out)
 
     def test_a_marked_and_changed_plan_orders_lines_after_ignored_and_before_failure_detail(self, st, capsys):
         st.plan([_entry("bad")], needs_merge_model=[_mark("alpha")],
@@ -944,7 +959,7 @@ class TestNeedsMergeModelReport:
         st.plan([_entry("a-case")], needs_merge_model=[_mark("alpha", root="")])
         st.result("a-case")
         _, out, _ = verdict(capsys, st)
-        assert "needs-merge-model: alpha \u2014 Needs deep multi-file reasoning" in _head(out)
+        assert "needs-merge-model: alpha \u2014 \"Needs deep multi-file reasoning\"" in _head(out)
 
     def test_statuses_that_did_not_read_the_mappings_print_no_marks_lines(self, st, capsys):
         st.plan(status="tree-dirty")
