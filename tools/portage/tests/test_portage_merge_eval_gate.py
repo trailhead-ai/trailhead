@@ -856,6 +856,8 @@ class TestSplitProcedureBackstop:
         err = self._refuse(tmp_path, monkeypatch, capsys, repo, spy, "--eval-state", f"{repo}={state}",
                            check="verdict-stops-the-change")
         assert "split-procedure-not-run: decl" in err
+        assert ("decl: corpus-new-on-branch — the corpus is new on the branch; "
+                "land the corpus mapping first, then re-plan") in err
 
     def test_an_unsplit_declared_case_is_not_applicable_and_keeps_the_stale_head_pin(
         self, tmp_path, monkeypatch, capsys

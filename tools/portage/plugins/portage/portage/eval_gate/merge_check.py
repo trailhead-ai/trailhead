@@ -178,7 +178,15 @@ def check_pair(
         return refuse("verdict-stops-the-change", f"verdict could not be computed: "
                                                    f"{gate_verdict.one_line(e)}"), None
     if code != 0:
-        stops = [ln for ln in report[3:] if ln.startswith(gate_verdict.STOP_LINES)]
+        stops, under_stop = [], False
+        for ln in report[3:]:
+            if ln.startswith(gate_verdict.STOP_LINES):
+                stops.append(ln)
+                under_stop = True
+            elif under_stop and ln.startswith("  "):
+                stops.append(ln.strip())
+            else:
+                under_stop = False
         return refuse("verdict-stops-the-change", "; ".join(report[:3] + stops)), None
     return None, planned_head
 
