@@ -22,6 +22,7 @@ from portage.cli import dispatch
 from portage.eval_gate import canary, history
 from portage.eval_gate import timings as gate_timings
 from portage.eval_gate.run import MAX_TIMEOUT_SECONDS, _cache_key
+from portage.eval_gate.select import resolve_runner
 from test_portage_eval_gate_run import PASS, RUNNER as GATE_RUNNER, Env, _result
 
 LEFT = MAX_TIMEOUT_SECONDS - canary.TIMEOUT_SECONDS
@@ -357,6 +358,52 @@ class TestGateToTimingsSeam:
             assert hist["model"] == "claude-opus-5-5"
         finally:
             shutil.rmtree(env.root, ignore_errors=True)
+
+
+class TestPushModelKeys:
+    def _setup(self, repo, tmp_path, *, marked=False):
+        repo.case("c1")
+        runner = dict(RUNNER, model="opus", push_model="sonnet")
+        spec = dict(repo.cases["p"]["c1"])
+        if marked:
+            spec["needs_merge_model"] = "needs the larger model"
+        (repo.root / "plugins" / "p" / "evals" / "eval-gate.json").write_text(json.dumps(
+            {"schema_version": 1, "runner": runner, "cases": {"c1": spec}}))
+        return runner, spec
+
+    def _line(self, repo, runner, spec, tier):
+        entry = {"case": "c1", "runner": resolve_runner(runner, tier, spec.get("needs_merge_model")),
+                 "runs": spec["runs"], "pass_at": spec["pass_at"], "plugin_root": "plugins/p",
+                 "measures": spec["measures"]}
+        return dict(repo.line("c1", fingerprint=_cache_key(repo.root / "plugins" / "p", entry)), tier=tier)
+
+    def test_lines_written_at_each_tier_are_counted_not_stale(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path)
+        push, merge = (self._line(repo, runner, spec, t) for t in ("push", "merge"))
+        assert push["fingerprint"] != merge["fingerprint"]
+        repo.write(push, merge)
+        rc, out, _ = repo.timings(capsys)
+        assert rc == 0
+        assert table(out)["c1"]["decisions"] == "2"
+        assert "stale 0" in out
+
+    def test_a_line_whose_fingerprint_belongs_to_the_other_tier_is_stale(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path)
+        push = self._line(repo, runner, spec, "push")
+        merge = self._line(repo, runner, spec, "merge")
+        repo.write(dict(push, fingerprint=merge["fingerprint"]), merge)
+        rc, out, _ = repo.timings(capsys)
+        assert table(out)["c1"]["decisions"] == "1"
+        assert "stale 1" in out
+
+    def test_a_marked_case_counts_its_merge_model_line_at_the_push_tier(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path, marked=True)
+        push, merge = (self._line(repo, runner, spec, t) for t in ("push", "merge"))
+        assert push["fingerprint"] == merge["fingerprint"]
+        repo.write(push)
+        rc, out, _ = repo.timings(capsys)
+        assert table(out)["c1"]["decisions"] == "1"
+        assert "stale 0" in out
 
 
 class TestFailures:
