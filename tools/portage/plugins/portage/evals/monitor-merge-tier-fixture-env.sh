@@ -77,8 +77,8 @@ case "$sub" in
         tier="$(flag tier "$@")"
         rm -rf "$STATE"; mkdir -m 700 "$STATE"
         if [ "$tier" = "merge" ]; then
-          printf '{"schema_version":1,"status":"cases-selected","repo":"%s","tier":"merge","cases":[{"case":"%s","merge_only":true}]}\n' "$(flag repo "$@")" "$CASE" > "$STATE/plan.json"
-          printf 'state: %s\nstatus: cases-selected\ncases: 1\nmax_cost_usd: 12\ntools/portage/plugins/portage:%s\n' "$STATE" "$CASE"
+          printf '{"schema_version":1,"status":"cases-selected","repo":"%s","tier":"merge","cases":[{"case":"%s","merge_only":true,"split_procedure":false}]}\n' "$(flag repo "$@")" "$CASE" > "$STATE/plan.json"
+          printf 'state: %s\nstatus: cases-selected\ncases: 1\nmax_cost_usd: 12\ntools/portage/plugins/portage:%s\ncase-flags: tools/portage/plugins/portage:%s merge_only=true split_procedure=false\n' "$STATE" "$CASE" "$CASE"
         else
           printf '{"schema_version":1,"status":"no-cases-mapped","tier":"push","cases":[]}\n' > "$STATE/plan.json"
           printf 'state: %s\nstatus: no-cases-mapped\ncases: 0\nmax_cost_usd: 0\n' "$STATE"
