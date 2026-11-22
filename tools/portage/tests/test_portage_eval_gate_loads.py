@@ -6,6 +6,8 @@ on what came back, including the exact fault text for each refusal.
 
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 import pytest
@@ -367,6 +369,58 @@ class TestCachedReader:
         assert calls == ["gone.md", "boom.md"]
 
 
+class TestParseOncePerRevision:
+    @staticmethod
+    def _parse_counter(monkeypatch):
+        calls: list[str] = []
+        real = getattr(loads, "_parse", lambda text: None)
+
+        def counting_parse(text):
+            calls.append(text)
+            return real(text)
+
+        monkeypatch.setattr(loads, "_parse", counting_parse, raising=False)
+        return calls
+
+    def test_two_cases_sharing_a_rule_file_parse_it_once_per_revision_cache(self, monkeypatch):
+        calls = self._parse_counter(monkeypatch)
+        files = corpus()
+        shared = cached(reader(files))
+        derive(ENTRY, [B1], shared)
+        derive(ENTRY, [B1, B2], shared)
+        missing_loads(list(files), shared)
+        assert len(calls) == len(set(calls)) == len(set(files.values()))
+
+    def test_without_a_cache_wrapper_each_call_still_parses_and_answers(self):
+        assert derive(ENTRY, [B1], reader(corpus())).files == derive(ENTRY, [B1], cached(reader(corpus()))).files
+
+    def test_separate_revision_caches_do_not_share_parses_for_the_same_path(self):
+        base = {ENTRY: "Read `old.md` now.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
+        head = {ENTRY: "Read `new.md` now.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
+        base_read, head_read = cached(reader(base)), cached(reader(head))
+        assert derive(ENTRY, [], base_read).files == (ENTRY, "skills/x/old.md")
+        assert derive(ENTRY, [], head_read).files == (ENTRY, "skills/x/new.md")
+        assert loads_in(ENTRY, base[ENTRY], base_read) == ["skills/x/old.md"]
+        assert loads_in(ENTRY, head[ENTRY], head_read) == ["skills/x/new.md"]
+        assert missing_loads([ENTRY], head_read) == []
+
+
+class TestLinearSentences:
+    def test_twenty_thousand_abbreviations_in_one_sentence_are_split_in_linear_time(self):
+        text = "Read `r.md` now, " + "go e.g. " * 20000 + "then read `late.md`. Read `last.md` now.\n"
+        files = {ENTRY: text, "skills/x/r.md": "r\n", "skills/x/late.md": "l\n", "skills/x/last.md": "l\n"}
+        started = time.perf_counter()
+        got = loads_in(ENTRY, text, reader(files))
+        elapsed = time.perf_counter() - started
+        assert got == ["skills/x/r.md", "skills/x/late.md", "skills/x/last.md"]
+        assert elapsed < 1.0
+
+    def test_e_g_and_i_e_do_not_end_a_sentence_but_a_word_ending_in_them_does(self):
+        text = "Read `a.md` e.g. now and (i.e. later) then `b.md`. Read `c.md` once. Mre.g. x. Read `d.md` too.\n"
+        files = {ENTRY: text, **{f"skills/x/{n}.md": "x\n" for n in "abcd"}}
+        assert loads_in(ENTRY, text, reader(files)) == [f"skills/x/{n}.md" for n in "abc"] + ["skills/x/d.md"]
+
+
 PLUGINS = ("craft", "lore", "portage", "outpost")
 
 
@@ -388,3 +442,21 @@ class TestLiveCorpus:
             assert missing_loads(files, read) == [], name
             assert [f for f in files if is_branch(read(f))] == [], name
         assert total > 20
+
+    def test_craft_skill_cases_and_every_procedure_derive_and_check_in_under_a_second(self):
+        started = time.perf_counter()
+        craft = REPO_TOOLS / "craft" / "plugins" / "craft"
+        read = cached(tree_reader(craft))
+        cases = json.loads((craft / "evals" / "eval-gate.json").read_text(encoding="utf-8"))["cases"]
+        derived = 0
+        for case in cases.values():
+            entry = next((m for m in case["measures"] if m.startswith("skills/") and m.endswith("/SKILL.md")), None)
+            if entry is not None:
+                derive(entry, (), read)
+                derived += 1
+        for name in PLUGINS:
+            root = REPO_TOOLS / name / "plugins" / name
+            assert missing_loads(_procedures(root), cached(tree_reader(root))) == [], name
+        elapsed = time.perf_counter() - started
+        assert derived > 20
+        assert elapsed < 1.0, f"{elapsed:.2f}s"

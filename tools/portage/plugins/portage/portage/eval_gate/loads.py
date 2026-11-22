@@ -22,7 +22,9 @@ is never an empty file. ``tree_reader(root)`` is the working-tree reader; a git 
 
 The cache is held per revision by the caller: wrap that revision's reader once with ``cached(read)`` and pass
 the wrapper to every ``derive`` and ``missing_loads`` call for that revision, so a file is read at most once
-across every case. ``None`` and raised exceptions are remembered too.
+across every case. ``None`` and raised exceptions are remembered too. The wrapper also carries ``parses``, the
+parse of each file text (its loads, its backticked ``.md`` mentions and whether it is a branch), so a text is
+parsed once per revision; keyed by text, two revisions never share a parse.
 
 Every fault is a ``LoadError`` with a one-line message that names values only through ``mapping.echo``.
 A closure holds at most ``MAX_PROCEDURE_FILES`` distinct files, the entry and the branches included.
@@ -90,7 +92,7 @@ def _sentences(paragraph: str) -> list[str]:
         if ch == "`":
             inside = not inside
         elif ch in ".:;" and not inside and (i + 1 == len(paragraph) or paragraph[i + 1].isspace()):
-            if ch == "." and _ABBREVIATION.search(paragraph[start:i]):
+            if ch == "." and _ABBREVIATION.search(paragraph[max(start, i - 4):i]):
                 continue
             out.append(paragraph[start:i + 1])
             start = i + 1
@@ -122,42 +124,60 @@ def _resolve(file: str, raw: str, read) -> str | None:
         directory = posixpath.dirname(directory)
 
 
-def _md_spans(text: str) -> list[str]:
-    found = []
+@dataclass(frozen=True)
+class _Parsed:
+    raw_loads: tuple[str, ...]
+    md_spans: tuple[str, ...]
+    branch: bool
+
+
+def _parse(text: str) -> _Parsed:
+    raw_loads: list[str] = []
+    md_spans: list[str] = []
     for paragraph in _paragraphs(text):
         for sentence in _sentences(paragraph):
-            found.extend(s for s in _spans(sentence)[1] if s.endswith(".md"))
-    return found
+            outside, inside = _spans(sentence)
+            mds = [s for s in inside if s.endswith(".md")]
+            md_spans.extend(mds)
+            first = next((i for i, seg in enumerate(outside[:len(inside)])
+                          if _READ_BEFORE_SPAN.search(seg) and inside[i].endswith(".md")), None)
+            if first is not None:
+                raw_loads.extend(s for s in inside[first:] if s.endswith(".md"))
+    return _Parsed(tuple(raw_loads), tuple(md_spans), _is_branch(text))
+
+
+def _parsed(read, text: str) -> _Parsed:
+    memo = getattr(read, "parses", None)
+    if memo is None:
+        return _parse(text)
+    if text not in memo:
+        memo[text] = _parse(text)
+    return memo[text]
 
 
 def loads_in(path: str, text: str, read) -> list[str]:
     """The plugin-relative paths ``path`` loads, in order, each once."""
     found: list[str] = []
-    position = 0
-    for paragraph in _paragraphs(text):
-        for sentence in _sentences(paragraph):
-            outside, inside = _spans(sentence)
-            first = next((i for i, seg in enumerate(outside[:len(inside)])
-                          if _READ_BEFORE_SPAN.search(seg) and inside[i].endswith(".md")), None)
-            if first is None:
-                continue
-            for raw in (s for s in inside[first:] if s.endswith(".md")):
-                position += 1
-                if not _SAFE_CHARS.match(raw):
-                    raise LoadError(f"{_q(path, 1)} load #{position} has characters outside [A-Za-z0-9._/-]")
-                resolved = _resolve(path, raw, read)
-                if resolved is None:
-                    raise LoadError(f"{_q(path, 1)} loads {_q(raw, position)}, which is outside the plugin root")
-                if resolved not in found:
-                    found.append(resolved)
+    for position, raw in enumerate(_parsed(read, text).raw_loads, 1):
+        if not _SAFE_CHARS.match(raw):
+            raise LoadError(f"{_q(path, 1)} load #{position} has characters outside [A-Za-z0-9._/-]")
+        resolved = _resolve(path, raw, read)
+        if resolved is None:
+            raise LoadError(f"{_q(path, 1)} loads {_q(raw, position)}, which is outside the plugin root")
+        if resolved not in found:
+            found.append(resolved)
     return found
 
 
-def is_branch(text: str) -> bool:
+def _is_branch(text: str) -> bool:
     for line in text.splitlines():
         if line.strip():
             return bool(_BRANCH_OPENING.match(line.lstrip(" \t*_")))
     return False
+
+
+def is_branch(text: str, read=None) -> bool:
+    return _is_branch(text) if read is None else _parsed(read, text).branch
 
 
 def _get(read, path: str) -> str | None:
@@ -184,6 +204,7 @@ def cached(read):
             return value
         raise value
 
+    wrapper.parses = {}
     return wrapper
 
 
@@ -220,7 +241,7 @@ def derive(entry: str, branches, read) -> Derived:
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
         declared.append(norm)
-    split = any((t := _get(read, p)) is not None and is_branch(t) for p in entry_loads)
+    split = any((t := _get(read, p)) is not None and is_branch(t, read) for p in entry_loads)
 
     files: list[str] = []
     seen: set[str] = set()
@@ -248,17 +269,17 @@ def derive(entry: str, branches, read) -> Derived:
         if current in declared:
             for target in parsed:
                 body = _get(read, target)
-                if body is not None and is_branch(body):
+                if body is not None and is_branch(body, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
         reached = list(parsed)
-        for raw in _md_spans(text):
+        for raw in _parsed(read, text).md_spans:
             if _SAFE_CHARS.match(raw) and (resolved := _resolve(current, raw, read)) is not None:
                 reached.append(resolved)
         for target in reached:
             if target in seen:
                 continue
             body = _get(read, target)
-            if body is None or is_branch(body):
+            if body is None or is_branch(body, read):
                 continue
             add(target)
             queue.append(target)
