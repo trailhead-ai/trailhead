@@ -91,6 +91,12 @@ def _keys(obj: dict, allowed: set[str], where: str, file: str) -> None:
         raise MappingError(file, f"unknown key {unknown[0]!r} in {where}")
 
 
+def _model_id(obj: dict, key: str, file: str) -> str:
+    if not isinstance(obj[key], str) or not MODEL_ID.match(obj[key]):
+        raise MappingError(file, f"runner.{key} must match {MODEL_ID.pattern}")
+    return obj[key]
+
+
 def _runner(obj, file: str) -> dict:
     if not isinstance(obj, dict):
         raise MappingError(file, "runner must be an object")
@@ -98,8 +104,7 @@ def _runner(obj, file: str) -> dict:
     missing = sorted(_RUNNER_REQUIRED - set(obj))
     if missing:
         raise MappingError(file, f"runner is missing {missing[0]!r}")
-    if not isinstance(obj["model"], str) or not MODEL_ID.match(obj["model"]):
-        raise MappingError(file, f"runner.model must match {MODEL_ID.pattern}")
+    _model_id(obj, "model", file)
     tools = obj["allow_tools"]
     if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
         raise MappingError(file, "runner.allow_tools must be a list of strings")
@@ -112,9 +117,7 @@ def _runner(obj, file: str) -> dict:
         raise MappingError(file, f"runner.max_cost_usd must be a finite number in (0, {MAX_COST_USD}]")
     runner = {"model": obj["model"], "allow_tools": list(tools), "max_cost_usd": cost}
     if "push_model" in obj:
-        if not isinstance(obj["push_model"], str) or not MODEL_ID.match(obj["push_model"]):
-            raise MappingError(file, f"runner.push_model must match {MODEL_ID.pattern}")
-        runner["push_model"] = obj["push_model"]
+        runner["push_model"] = _model_id(obj, "push_model", file)
     return runner
 
 

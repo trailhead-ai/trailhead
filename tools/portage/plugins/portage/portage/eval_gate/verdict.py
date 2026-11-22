@@ -377,14 +377,18 @@ def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
             for r in rows]
 
 
+def _counts(row: dict) -> str:
+    res = row["result"]
+    return f"passed {res['passed']}, failed {res['failed']}, errored {res['errored']} (model: {row['model']})"
+
+
 def _failure_details(rows: list[dict], state: Path, push_tier: bool) -> list[str]:
     out = []
     for r in rows:
         res = r["result"]
         if res["verdict"] != "fail":
             continue
-        out.append(f"{r['case']}: passed {res['passed']}, failed {res['failed']}, errored "
-                   f"{res['errored']} (model: {r['model']})")
+        out.append(f"{r['case']}: {_counts(r)}")
         for i, graders in enumerate(res["runs"], 1):
             verdicts = " ".join(f"{g['name']}={'pass' if g['passed'] else 'fail'}" for g in graders)
             out.append(f"  run {i}: {verdicts}".rstrip())
@@ -456,9 +460,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     body: list[str] = []
     if failed:
         body += ["Failed — the gate stopped the push.", ""]
-        body += _bullets([f"`{r['case']}`: passed {r['result']['passed']}, failed "
-                          f"{r['result']['failed']}, errored {r['result']['errored']} "
-                          f"(model: {r['model']})" for r in failed])
+        body += _bullets([f"`{r['case']}`: {_counts(r)}" for r in failed])
     passed = [r for r in rows if r["result"]["verdict"] == "pass"]
     if not failed and not notrun:
         reused = sum(1 for r in passed if r["result"]["cached"])

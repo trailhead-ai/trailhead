@@ -416,6 +416,9 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         costs = runs.costs.get((entry["case"], entry["runner"]["model"]))
         return (statistics.median(costs), len(costs)) if costs else None
 
+    def gap(tiers: dict[str, dict]) -> bool:
+        return any(price(e) is None for e in tiers.values())
+
     rows, excluded, totals = [], [], []
     cases: dict[tuple[str, str], dict[str, dict]] = {}
     for path, (root, entries, push) in selected.items():
@@ -425,17 +428,15 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         cost_of = lambda es: sum(p[0] for p in map(price, es) if p)  # noqa: E731
         total = cost_of(push) + cost_of(entries)
         totals.append(total)
-        pushed = {e["case"] for e in push}
-        gaps = sum(1 for e in entries if price(e) is None
-                   or (e["case"] in pushed and price(next(p for p in push if p["case"] == e["case"])) is None))
+        by_case = {e["case"]: {"merge": e} for e in entries}
+        for e in push:
+            by_case[e["case"]]["push"] = e
+        gaps = sum(1 for tiers in by_case.values() if gap(tiers))
         rows.append([_safe(path), str(len(push)), str(len(entries)), _money(cost_of(push)),
                      _money(cost_of(entries)), _money(total), str(gaps)])
-        for e in entries:
-            cases[(root, e["case"])] = {"merge": e}
-        for e in push:
-            cases[(root, e["case"])]["push"] = e
+        cases.update({(root, case): tiers for case, tiers in by_case.items()})
     unpriced = sorted((k[1], "+".join(t for t in ("push", "merge") if t in tiers and price(tiers[t]) is None))
-                      for k, tiers in cases.items() if any(price(e) is None for e in tiers.values()))
+                      for k, tiers in cases.items() if gap(tiers))
     median = statistics.median(totals) if totals else None
     if median is None:
         closing = "baseline: none (no procedure file is selected by a case)"
