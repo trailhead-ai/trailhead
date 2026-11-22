@@ -55,8 +55,20 @@ git remote set-head origin main >/dev/null
 cd "$W"
 
 # The gate's runner is a fake binary that fails the case on every run.
-sed -i '/^export PATH=/a export PORTAGE_EVAL_RUNNER="$W/fake-runner"' "$W/portage"
-sed -i '/^export PATH=/a export XDG_CACHE_HOME="$(mktemp -d /tmp/pg.XXXXXX)"' "$W/portage"
+# The stand-in gets the fake runner everywhere and a fresh cache dir on its eval-gate branch only.
+awk '
+  /^export PATH=/ { print; print "export PORTAGE_EVAL_RUNNER=\"$W/fake-runner\""; next }
+  /^  detect-repos\|/ {
+    getline run
+    print "  eval-gate)"
+    print "    export XDG_CACHE_HOME=\"$(mktemp -d /tmp/pg.XXXXXX)\""
+    print run
+    print; print run; next
+  }
+  { print }
+' "$W/portage" > "$W/portage.new"
+cat "$W/portage.new" > "$W/portage"
+rm "$W/portage.new"
 cat > "$W/fake-runner" <<'RUNNER'
 #!/usr/bin/env bash
 # A stand-in for the eval runner binary: the canary passes; every other case scores 0.5 on every run.

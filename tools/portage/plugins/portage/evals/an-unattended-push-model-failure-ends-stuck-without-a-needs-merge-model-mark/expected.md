@@ -27,3 +27,4 @@ Predicted baseline: the updater's stop leads the step to `stuck` through its Ste
 - The stuck line is graded only for naming the case and the needs-merge-model mark; that it states an operator decision is needed is not graded (an LLM-judge grader with `weight: 0` made the runner error every run).
 - One fixture, one case name, one fake-runner behaviour, no merge-model pass history.
 - The gate is real; the runner is a fake binary.
+- The `no-commit-after-the-scaffold` grader pins a ref sha produced by the shared `evals/pr-step-scaffold.sh`, so an edit to that shared scaffold turns it red until the sha is updated.
