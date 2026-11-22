@@ -61,6 +61,7 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 - `runner.push_model` is optional and has the same model-id shape as `model`. The push tier runs every case on
   it, except the marked ones; absent, the push tier uses `model`. The merge tier always uses `model`. It is
   read from the base mapping like the rest of the runner block.
+- `runner.allow_tools` entries are a tool name with at most one single-line parenthesised argument; a grant argument cannot contain brackets (or NUL), by design. The runner splits the list on commas and spaces outside brackets and tracks them with a flag, not a depth, so a bracket inside an argument could smuggle a second grant into one entry. Spaces and commas inside the brackets stay allowed.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.

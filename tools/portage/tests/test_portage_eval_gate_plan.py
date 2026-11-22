@@ -538,6 +538,7 @@ class TestRunnerBlockValidation:
     @pytest.mark.parametrize("grant", [
         "Bash(./lore *)", "Bash(*/scripts/maturity_bars.py *)", "Bash(:)", "Bash(: *)",
         "Bash(git *)", "Bash(./gh *)", "Bash(./portage *)", "Read", "Bash(git:*)", "mcp__x_1",
+        "Write", "Bash(mktemp)", "Bash()", "Read(a,b)",
     ])
     def test_real_grant_shapes_load(self, grant):
         from portage.eval_gate.mapping import load_mapping
@@ -550,6 +551,17 @@ class TestRunnerBlockValidation:
     ])
     def test_a_malformed_grant_is_refused_naming_the_field(self, grant):
         assert "allow_tools" in _fault(_runner_doc(allow_tools=[grant]))
+
+    @pytest.mark.parametrize("grant, rejected", [
+        ("Bash(a) Bash(*)", "bracket"), ("Read(x),Bash(*)", "bracket"), ("Bash(git *) Write()", "bracket"),
+        ("Bash(a) -Bash(*)", "bracket"), ("Bash(a(b))", "bracket"), ("Read(a(b),Bash(*))", "bracket"),
+        ("Bash(a\x00b)", "NUL"), ("Bash(a\nb)", "line break"), ("Bash(a\rb)", "line break"),
+    ])
+    def test_a_grant_argument_holding_a_bracket_nul_or_line_break_is_refused_by_position_and_class(
+            self, grant, rejected):
+        fault = _fault(_runner_doc(allow_tools=["Read", grant]))
+        assert "allow_tools entry #2 " in fault
+        assert rejected in fault
 
     @pytest.mark.parametrize("cost", [0, -1, 25.01, 1e9, float("inf"), float("nan"), True])
     def test_a_cost_cap_outside_the_bound_is_refused(self, cost):

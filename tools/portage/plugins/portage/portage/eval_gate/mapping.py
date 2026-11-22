@@ -24,7 +24,9 @@ gate that understands it, so land the gate before any mapping that uses the key.
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
 presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model id, each
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
-single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25].
+single-line parenthesised argument that holds no bracket and no NUL (a grant argument cannot contain
+brackets, by design: the runner splits the list on commas and spaces outside brackets and tracks them with a flag,
+not a depth, so a bracket inside an argument could carry a second grant in one entry), and ``runner.max_cost_usd`` a finite number in (0, 25].
 ``merge_only`` marks a case the push tier leaves out; it must be a boolean.
 ``runner.push_model`` is the model the push tier runs every case on (same shape as ``runner.model``,
 which the merge tier uses); it is carried in the runner dict only when configured.
@@ -54,7 +56,7 @@ DEFAULT_RUNS = 3
 DEFAULT_PASS_AT = 2
 CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
-TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^\n\r]*\))?\Z")
+TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^()\x00\n\r]*\))?\Z")
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 NEEDS_MERGE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,;'()_-]{0,199}\Z")
 _AUTOLINK = "www."
@@ -130,6 +132,18 @@ def _q(value: object, position: int) -> str:
     return shown if shown.startswith("#") else f"'{shown}'"
 
 
+def _grant_rejection(grant: str) -> str:
+    _, opened, argument = grant.partition("(")
+    if not opened:
+        return ""
+    for char, name in (("\x00", "a NUL"), ("\n", "a line break"), ("\r", "a line break")):
+        if char in argument:
+            return f"; the argument holds {name}, which is not allowed"
+    if "(" in argument or ")" in argument[:-1]:
+        return "; the argument holds a bracket, which is not allowed"
+    return ""
+
+
 def _is_int(v) -> bool:
     return isinstance(v, int) and not isinstance(v, bool)
 
@@ -160,7 +174,8 @@ def _runner(obj, file: str) -> dict:
     for position, t in enumerate(tools, 1):
         if not TOOL_GRANT.match(t):
             raise MappingError(file, f"runner.allow_tools entry {_q(t, position)} must be a tool name, "
-                                     "optionally followed by one parenthesised argument on one line")
+                                     "optionally followed by one parenthesised argument on one line"
+                                     f"{_grant_rejection(t)}")
     cost = obj["max_cost_usd"]
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:
         raise MappingError(file, f"runner.max_cost_usd must be a finite number in (0, {MAX_COST_USD}]")
