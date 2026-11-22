@@ -222,7 +222,10 @@ How every write to the block is made (this one and each later one):
 - A diff that does not apply is retried once: read the record fresh, rebuild the diff, write again.
 - A write that still fails ends the session with
   `outcome: stuck task/<name> parked=0 — run-section write failed; update trailhead so lore accepts a block write on a closed task, or fix the error shown, then run the PR step again unattended`.
-  Nothing further is written, held, pushed or dispatched. It is never skipped over.
+  Nothing further is written, held, pushed or dispatched, and no temp file is cleaned up: make no
+  further tool call, and send one final message whose last line is that outcome line, as plain text
+  outside any code block, with nothing after it and no other line in the message starting
+  `outcome:`. It is never skipped over.
 
 ### Step B — hold the branch
 
