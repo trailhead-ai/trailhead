@@ -996,6 +996,18 @@ class TestMarkRecords:
             {"plugin_root": "p", "case": "gamma", "change": "removed", "reason": None}]
         assert len(plan["needs_merge_model"]) == 3
 
+    def test_a_base_marked_case_renamed_on_the_branch_is_removed_and_the_new_name_added(self, repo, capsys):
+        self._base(repo)
+        _git(repo, "mv", "p/evals/gamma", "p/evals/gamma-two")
+        _write(repo, "p/evals/eval-gate.json", _mapping({
+            "alpha": self.M2["alpha"], "beta": self.M2["beta"],
+            "gamma-two": _marked(MARK, ["skills/c.md"])}, TIERED))
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["mark_changes"] == [
+            {"plugin_root": "p", "case": "gamma", "change": "removed", "reason": None},
+            {"plugin_root": "p", "case": "gamma-two", "change": "added", "reason": MARK}]
+
     def test_records_are_written_when_the_plan_selects_nothing(self, repo, capsys):
         self._base(repo)
         _write(repo, "p/evals/eval-gate.json", _mapping({**self.M2, "alpha": _marked("later")}, TIERED))
