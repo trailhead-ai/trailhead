@@ -26,7 +26,7 @@ Markers, each on its own line, wrapping the section::
 
 1. the leading report line ``eval-gate: <outcome>`` with outcome one of ``passed``,
    ``failed``, ``not-run``, ``no-cases-mapped``, ``base-unresolved``,
-   ``mapping-invalid``, ``tree-dirty``, ``gate-error``;
+   ``base-invalid``, ``mapping-invalid``, ``tree-dirty``, ``gate-error``;
 2. ``persistent: <codes>`` — the sorted, comma-joined persistent reason codes among
    the not-run cases (``runner-missing``, ``harness-has-no-eval-runner``,
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
@@ -46,7 +46,8 @@ Markers, each on its own line, wrapping the section::
 5. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
    ``state kept: <dir>``, per-run grader verdicts (``run N: <grader>=pass|fail ...``) and
    the sanctioned ways forward, or ``mapping-invalid: <file>: <fault>``; for ``tree-dirty``
-   (exit 1) the one line telling the user to commit or stash and push again. Each failing case's
+   (exit 1) the one line telling the user to commit or stash and push again, and for ``base-invalid`` (exit 1)
+   ``base-invalid: the base must not start with '-'``. Each failing case's
    counts line ends ``(model: <runner.model>)``; a push-tier failure on the push model (``runner.model``
    equals ``push_model``) adds a line telling the agent to ask the operator about a mark, never to add one;
 6. the section, markers included.
@@ -131,7 +132,10 @@ REASONS = {
 
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 _GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "mapping-invalid", "tree-dirty")
+_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "base-invalid", "mapping-invalid",
+             "tree-dirty")
+
+BASE_INVALID = "the base must not start with '-'"
 
 TREE_DIRTY = ("the working tree has uncommitted changes to tracked files; the gate grades committed "
               "prose — commit or stash, then push again")
@@ -446,6 +450,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if status == "tree-dirty":
         return 1, ["eval-gate: tree-dirty", "persistent: none", TREE_DIRTY], _wrap(
             [f"The eval gate stopped the push: {TREE_DIRTY}."])
+    if status == "base-invalid":
+        return 1, ["eval-gate: base-invalid", "persistent: none", f"base-invalid: {BASE_INVALID}"], _wrap(
+            [f"The eval gate stopped the push: {BASE_INVALID}; pass a branch name or a commit id."])
     if status == "base-unresolved":
         return 0, ["eval-gate: base-unresolved", "persistent: base-unresolved"], _wrap(
             ["The eval gate could not determine the changed files (the base ref did not resolve), "

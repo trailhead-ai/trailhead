@@ -1310,8 +1310,7 @@ class TestDeclaredCases:
 
     @pytest.mark.parametrize("gone, fault", [
         ("skills/entry.md", "case 'decl': entry 'skills/entry.md' does not exist"),
-        ("skills/b-declared.md", "case 'decl': entry 'skills/entry.md' does not load the declared branch "
-                                 "'skills/b-declared.md'"),
+        ("skills/b-declared.md", "case 'decl': declared branch 'skills/b-declared.md' does not exist"),
     ])
     def test_an_entry_or_declared_branch_missing_at_head_is_a_fault_not_an_exception(
         self, repo, capsys, gone, fault
@@ -1491,3 +1490,335 @@ class TestDeclaredCases:
         roots = {c["plugin_root"] for c in touched}
         assert {"tools/craft/plugins/craft", "tools/lore/plugins/lore", "tools/portage/plugins/portage"} <= roots
         assert not [c for c in touched if c["split_procedure"]]
+
+
+def _many_corpora(repo: Path, names: list[str]) -> None:
+    for n in names:
+        _corpus(repo, n, {f"c-{n}": {"measures": ["skills/a.md"]}})
+
+
+def _bounded(repo, capsys, *, head_corpora: int, base_corpora: int):
+    """A base holding ``base_corpora`` mapping files and a branch holding ``head_corpora``, with a change
+    to a measured file of ``p0`` so the selection has something to select."""
+    names = [f"p{i}" for i in range(max(head_corpora, base_corpora))]
+    _many_corpora(repo, names[:base_corpora])
+    _commit(repo)
+    _branch(repo)
+    _many_corpora(repo, names[base_corpora:head_corpora])
+    for gone in names[head_corpora:]:
+        _git(repo, "rm", "-rq", gone)
+    _write(repo, "p0/skills/a.md", "changed\n")
+    _commit(repo)
+    return _plan(repo, capsys, "--base", "base")
+
+
+class TestMappingFileCap:
+    @pytest.mark.parametrize("head_n, base_n", [(32, 1), (32, 32), (1, 32)])
+    def test_up_to_the_cap_of_mapping_files_at_either_revision_still_selects(self, repo, capsys, head_n, base_n):
+        _, plan, _ = _bounded(repo, capsys, head_corpora=head_n, base_corpora=base_n)
+        assert plan["status"] == "cases-selected", plan["mapping_invalid"]
+        assert "c-p0" in _names(plan)
+
+    def test_33_mapping_files_at_head_is_refused_naming_the_cap_and_the_count(self, repo, capsys):
+        _, plan, _ = _bounded(repo, capsys, head_corpora=33, base_corpora=1)
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == "33 mapping files at HEAD exceed the cap of 32"
+        assert plan["mapping_invalid"]["revision"] == "head"
+
+    def test_33_mapping_files_at_the_base_is_refused_naming_the_revision_and_says_so(self, repo, capsys):
+        _, plan, _ = _bounded(repo, capsys, head_corpora=1, base_corpora=33)
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == "33 mapping files at the base revision exceed the cap of 32"
+        assert plan["mapping_invalid"]["revision"] == "base"
+
+    def test_the_backstop_selection_answers_mapping_invalid_over_the_cap(self, repo):
+        _many_corpora(repo, [f"p{i}" for i in range(33)])
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p0/skills/a.md", "changed\n")
+        _commit(repo)
+        assert select.merge_only_touched(repo, "base") == ("mapping-invalid", [])
+
+
+def _wide_corpus(repo: Path, n: int) -> None:
+    cases = {f"k{i}": {"measures": ["skills/a.md"]} for i in range(n)}
+    _corpus(repo, "p", cases)
+
+
+class TestCaseCap:
+    @pytest.mark.parametrize("at_base", [False, True])
+    def test_256_cases_in_a_mapping_load(self, repo, capsys, at_base):
+        if at_base:
+            _wide_corpus(repo, 256)
+        else:
+            _corpus(repo, "p", {"k0": {"measures": ["skills/a.md"]}})
+        _commit(repo)
+        _branch(repo)
+        if not at_base:
+            _wide_corpus(repo, 256)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected", plan["mapping_invalid"]
+        assert len(plan["cases"]) == 256
+
+    def test_257_cases_in_a_mapping_at_head_is_refused_naming_the_cap_the_mapping_and_the_count(
+        self, repo, capsys
+    ):
+        _corpus(repo, "p", {"k0": {"measures": ["skills/a.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _wide_corpus(repo, 257)
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["file"] == "p/evals/eval-gate.json"
+        assert plan["mapping_invalid"]["fault"] == (
+            "257 cases in 'p/evals/eval-gate.json' exceed the cap of 256")
+        assert plan["mapping_invalid"]["revision"] == "head"
+
+    def test_257_cases_in_a_mapping_at_the_base_is_refused_and_says_it_is_the_base(self, repo, capsys):
+        _wide_corpus(repo, 257)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "base"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: 257 cases in 'p/evals/eval-gate.json' "
+            "exceed the cap of 256")
+
+
+def _chain_corpus(repo: Path, files: int) -> None:
+    """An entry that loads ``files - 1`` other procedure files in one sentence: ``files`` distinct
+    procedure files in all."""
+    names = [f"f{i}.md" for i in range(files - 1)]
+    entry = "# Entry\n\nRead " + ", ".join(f"`{n}`" for n in names) + ".\n"
+    cases = {"big": {"entry": "skills/entry.md"}}
+    _corpus(repo, "p", cases, files=())
+    _write(repo, "p/skills/entry.md", entry)
+    for n in names:
+        _write(repo, f"p/skills/{n}", "leaf\n")
+
+
+class TestProcedureFileCap:
+    def test_2000_procedure_files_at_a_revision_still_derive(self, repo, capsys):
+        _chain_corpus(repo, 2000)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/f0.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected", plan["mapping_invalid"]
+        assert len(_entry_of(plan, "big")["measures"]) == 2000
+
+    def test_2001_procedure_files_at_head_is_refused_naming_the_case_the_cap_and_the_count(self, repo, capsys):
+        _chain_corpus(repo, 1)
+        _commit(repo)
+        _branch(repo)
+        _chain_corpus(repo, 2001)
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert plan["mapping_invalid"]["fault"] == (
+            "case 'big': 2001 procedure files read at HEAD exceed the cap of 2000")
+
+    def test_2001_procedure_files_at_the_base_is_refused_and_says_it_is_the_base(self, repo, capsys):
+        _chain_corpus(repo, 2001)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/f0.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "base"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: case 'big': 2001 procedure files read at the base "
+            "revision exceed the cap of 2000")
+
+    def test_the_cap_counts_the_files_read_across_every_case_of_a_revision(self, repo, capsys):
+        def corpus(name: str) -> None:
+            names = [f"{name}{i}.md" for i in range(1099)]
+            _corpus(repo, name, {f"big-{name}": {"entry": "skills/entry.md"}}, files=())
+            _write(repo, f"{name}/skills/entry.md", "# Entry\n\nRead " + ", ".join(f"`{n}`" for n in names) + ".\n")
+            for n in names:
+                _write(repo, f"{name}/skills/{n}", "leaf\n")
+
+        corpus("p")
+        _commit(repo)
+        _branch(repo)
+        corpus("q")
+        _write(repo, "p/skills/p0.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert plan["mapping_invalid"]["fault"] == (
+            "case 'big-q': 2001 procedure files read at HEAD exceed the cap of 2000")
+
+
+class _CountingGit(select.Git):
+    def __init__(self):
+        self.calls: list[tuple[str, ...]] = []
+        self.cat_files = 0
+
+    def run(self, repo, *args):
+        self.calls.append(args)
+        return super().run(repo, *args)
+
+    def open_cat_file(self, repo):
+        self.cat_files += 1
+        return super().open_cat_file(repo)
+
+    @property
+    def processes(self) -> int:
+        return len(self.calls) + self.cat_files
+
+
+def _declared_corpora(repo: Path, mappings: int, cases_each: int) -> None:
+    for m in range(mappings):
+        plugin = f"p{m}"
+        cases = {f"c{m}-{i}": {"entry": "skills/entry.md"} for i in range(cases_each)}
+        _corpus(repo, plugin, cases, files=())
+        _write(repo, f"{plugin}/skills/entry.md", "# Entry\n\nRead `rules/core.md`.\n")
+        _write(repo, f"{plugin}/rules/core.md", "core\n")
+
+
+class TestGitProcessCount:
+    def _count(self, repo, mappings: int, cases_each: int) -> _CountingGit:
+        _declared_corpora(repo, mappings, cases_each)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p0/rules/core.md", "changed\n")
+        _commit(repo)
+        git = _CountingGit()
+        _, plan = select.plan(repo, "base", git=git)
+        assert plan["status"] == "cases-selected", plan["mapping_invalid"]
+        assert len(plan["cases"]) == cases_each
+        return git
+
+    def test_with_32_mappings_the_processes_stay_within_the_bound_for_the_mappings_and_revisions(self, repo):
+        git = self._count(repo, 32, 2)
+        fixed = 8        # work-tree, HEAD, base, merge-base, status, diff and one ls-tree per revision
+        per_mapping = 4  # a show and a cat-file reader at each of the two revisions
+        assert git.processes <= fixed + per_mapping * 32, (git.processes, git.calls[:12])
+
+    def test_the_processes_do_not_grow_with_the_cases(self, tmp_path):
+        counts = {}
+        for cases_each in (1, 6):
+            sub = tmp_path / f"n{cases_each}"
+            sub.mkdir()
+            r = sub / "repo"
+            r.mkdir()
+            _git(r, "init", "-b", "main")
+            counts[cases_each] = self._count(r, 4, cases_each).processes
+        assert counts[1] == counts[6], counts
+
+    def test_every_git_call_that_takes_a_revision_passes_it_after_end_of_options(self, repo):
+        git = self._count(repo, 2, 1)
+        taking = [c for c in git.calls if c[0] in ("merge-base", "diff", "ls-tree", "show")
+                  or c[:2] == ("rev-parse", "--verify")]
+        assert {c[0] for c in taking} == {"merge-base", "diff", "ls-tree", "show", "rev-parse"}
+        for call in taking:
+            flag = call.index("--end-of-options")
+            assert all(not a.startswith("-") for a in call[flag + 1:]), call
+
+
+class TestEndOfOptions:
+    def test_a_revision_that_looks_like_an_option_is_never_read_as_one_by_diff(self, repo, tmp_path):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        leak = tmp_path / "leak"
+        with pytest.raises(select.GitError):
+            select._changed_since(repo, f"--output={leak}")
+        assert not list(tmp_path.glob("leak*"))
+
+    def test_a_revision_that_looks_like_an_option_is_never_read_as_one_by_show(self, repo, tmp_path):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        leak = tmp_path / "leak"
+        assert select._show(repo, f"--output={leak}", "a.md") is None
+        assert not list(tmp_path.glob("leak*"))
+
+
+class TestOptionLikeBase:
+    @pytest.mark.parametrize("base", ["--all", "-x", "-", "--output=leak"])
+    def test_a_base_starting_with_a_dash_is_base_invalid_with_no_git_error_or_traceback(
+        self, repo, capsys, tmp_path, base
+    ):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        capsys.readouterr()
+        state, plan = select.plan(repo, base)
+        assert plan["status"] == "base-invalid"
+        assert plan["cases"] == [] and plan["merge_base"] is None
+        assert json.loads((state / "plan.json").read_text())["status"] == "base-invalid"
+        err = capsys.readouterr().err
+        assert err == ""
+        assert not (repo / "leak").exists()
+
+    def test_the_plan_command_and_verdict_stop_on_it_with_the_base_line(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        rc, plan, out = _plan(repo, capsys, "--base=--all")
+        assert rc == 0 and plan["status"] == "base-invalid"
+        state = next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):]
+        capsys.readouterr()
+        code = dispatch.main(["eval-gate", "verdict", "--state", state])
+        captured = capsys.readouterr()
+        assert code == 1
+        assert captured.out.splitlines()[:3] == ["eval-gate: base-invalid", "persistent: none",
+                                                 "base-invalid: the base must not start with '-'"]
+        assert "Traceback" not in captured.err and "usage:" not in captured.err
+
+    def test_a_real_ref_still_resolves(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+
+
+class _KillNth(select.Git):
+    """A git whose ``n``th ``cat-file --batch`` reader is dead on arrival."""
+
+    def __init__(self, n: int):
+        self.n, self.opened = n, 0
+
+    def open_cat_file(self, repo):
+        self.opened += 1
+        proc = super().open_cat_file(repo)
+        if self.opened == self.n:
+            proc.kill()
+            proc.wait()
+        return proc
+
+
+class TestReaderFailureNamesItsRevision:
+    def _both_sides_declare(self, repo):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", ENTRY + "\nmore\n")
+        _commit(repo)
+
+    def test_a_reader_that_dies_reading_head_gives_a_fault_naming_head(self, repo):
+        self._both_sides_declare(repo)
+        _, plan = select.plan(repo, "base", git=_KillNth(2))
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert plan["mapping_invalid"]["fault"] == "case 'decl': 'skills/entry.md' could not be read at HEAD"
+
+    def test_a_reader_that_dies_reading_the_base_gives_a_fault_naming_the_base(self, repo):
+        self._both_sides_declare(repo)
+        _, plan = select.plan(repo, "base", git=_KillNth(1))
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "base"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: case 'decl': 'skills/entry.md' could not be read "
+            "at the base revision")

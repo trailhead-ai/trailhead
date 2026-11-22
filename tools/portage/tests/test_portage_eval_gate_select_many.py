@@ -345,7 +345,7 @@ class _CountingList(list):
             yield i
 
 
-@pytest.mark.parametrize("candidates, paths", [(1, 300), (300, 1), (300, 300)])
+@pytest.mark.parametrize("candidates, paths", [(1, 300), (256, 1), (256, 300)])
 def test_candidate_sets_absorbed_grow_with_candidates_plus_paths_not_their_product(repo, monkeypatch,  # noqa: F811
                                                                                     candidates, paths):
     cases = {f"c{i}": {"measures": ["skills/dir"]} for i in range(candidates)}

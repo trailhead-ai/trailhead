@@ -27,7 +27,8 @@ parse of each file text (its loads, its backticked ``.md`` mentions and whether 
 parsed once per revision; keyed by text, two revisions never share a parse.
 
 Every fault is a ``LoadError`` with a one-line message that names values only through ``mapping.echo``.
-A closure holds at most ``MAX_PROCEDURE_FILES`` distinct files, the entry and the branches included.
+A closure holds at most ``MAX_PROCEDURE_FILES`` distinct files, the entry and the branches included. A reader may
+raise a ``LoadError`` of its own (a cap, a failed read naming its revision): ``read`` lets it through unchanged.
 """
 
 from __future__ import annotations
@@ -185,6 +186,8 @@ def _get(read, path: str) -> str | None:
         return read(path)
     except NotRegularFile:
         raise LoadError(f"{_q(path, 1)} is a symlink or not a regular file") from None
+    except LoadError:
+        raise
     except Exception:
         raise LoadError(f"{_q(path, 1)} could not be read") from None
 
@@ -233,11 +236,11 @@ def derive(entry: str, branches, read) -> Derived:
     declared = []
     for position, branch in enumerate(branches, 1):
         norm = posixpath.normpath(branch)
-        if norm not in entry_loads:
-            raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         text = _get(read, norm)
         if text is None:
             raise LoadError(f"declared branch {_q(branch, position)} does not exist")
+        if norm not in entry_loads:
+            raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
         declared.append(norm)

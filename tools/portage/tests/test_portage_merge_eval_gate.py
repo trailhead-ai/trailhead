@@ -674,3 +674,29 @@ class TestUsage:
         err = capsys.readouterr().err
         assert "merge: --eval-state expects <repo_path>=<state_dir>" in err
         assert "eval-gate check failed" not in err
+
+
+class TestOptionLikeBaseIsNotNoTouch:
+    """A base that starts with ``-`` gives the backstop's selection no changed files to trust, so a repo
+    holding a merge-only case answers with every one of them. The change here touches only a core file, so
+    a valid base answers none and a wrongly empty answer for the option-like base would differ."""
+
+    @pytest.fixture
+    def untouched(self, tmp_path):
+        repo, _ = make_repo(tmp_path, "repo", {"core": CORE, "slow": {"measures": ["skills/b.md"],
+                                                                        "merge_only": True}})
+        return repo
+
+    def test_a_valid_base_finds_the_merge_only_case_untouched(self, untouched):
+        from portage.eval_gate.select import merge_only_touched
+
+        assert merge_only_touched(untouched, "main") == ("ok", [])
+
+    @pytest.mark.parametrize("base", ["-x", "--all", "--output=leak"])
+    def test_an_option_like_base_answers_every_merge_only_case(self, untouched, base):
+        from portage.eval_gate.select import merge_only_touched
+
+        status, entries = merge_only_touched(untouched, base)
+        assert status == "base-unresolved"
+        assert [e["case"] for e in entries] == ["slow"]
+        assert not (untouched / "leak").exists()

@@ -539,6 +539,16 @@ def test_base_unresolved_is_a_persistent_reason(st, capsys):
     assert out.splitlines()[:2] == ["eval-gate: base-unresolved", "persistent: base-unresolved"]
 
 
+def test_base_invalid_stops_the_push_with_the_base_line(st, capsys):
+    st.plan([], status="base-invalid")
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    assert out.splitlines()[:3] == ["eval-gate: base-invalid", "persistent: none",
+                                    "base-invalid: the base must not start with '-'"]
+    assert "the base must not start with '-'" in section_of(out)
+    assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
 def test_case_removed_on_branch_is_listed_with_its_gloss_and_is_not_persistent(st, capsys):
     st.plan([_entry("gone")])
     st.result("gone", verdict="not-run", passed=0, failed=0, errored=3, reason="case-removed-on-branch")

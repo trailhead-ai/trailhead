@@ -183,7 +183,8 @@ ran on; when a push-tier case failed on a `push_model` that differs from `model`
 operator whether to add a mark.
 
 - Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
-  (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
+  (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again), or the base starts with `-`
+  (`eval-gate: base-invalid`: the base must not start with `-`). A corpus new on the branch
   is recorded not-run `corpus-new-on-branch`, which is not persistent and does not stop the push.
   After a failed case or a broken mapping the state directory is kept, with the per-run grader
   verdicts, and the output lists the ways forward (fix the prose or the case, or re-run; there is no

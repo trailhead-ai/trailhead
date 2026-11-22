@@ -5,8 +5,8 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 ``run``/``verdict``/``splice`` subcommands::
 
     {"schema_version": 1,
-     "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "mapping-invalid"
-               | "tree-dirty",
+     "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "base-invalid"
+               | "mapping-invalid" | "tree-dirty",
      "repo": "<absolute repo path>",
      "base": "<ref as given or resolved>" | null,
      "merge_base": "<sha>" | null,
@@ -62,6 +62,20 @@ procedure that loads a branch file); or two corpora hold a case of the same name
 (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``: the
 gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a renamed
 file counts as both its old and its new path.
+
+Bounds. A revision (the merge-base, HEAD) holds at most ``MAX_MAPPING_FILES`` mapping files, charged on
+the count of ``evals/eval-gate.json`` paths in its tree before any is read; a mapping holds at most
+``MAX_CASES_PER_MAPPING`` cases, charged on the count its loader returns; and the reader of a revision
+fetches at most ``MAX_PROCEDURE_FILES`` distinct files, counted across every plugin root and every case, and
+charged when a file is first fetched from git (a path the tree lacks, a symlink and a file read again from the
+cache cost nothing). The scans of a mapped corpus's procedures at HEAD read through that same reader, so their
+files count. Going over any cap is ``mapping-invalid``, with a fault of one shape: ``<count> <things> at
+<HEAD | the base revision> exceed the cap of <cap>`` (``<count> cases in '<mapping>' exceed ...`` for the case
+cap, ``case '<name>': <count> procedure files read at ...`` for the file cap, whose count is the file the cap
+stopped at); a fault at the base says so and is ``revision`` ``base``. A base that starts with ``-`` is
+``base-invalid``, decided before any git process starts; every git call that takes a revision passes it after
+``--end-of-options``. ``cat-file --batch`` takes its revisions on stdin, always the merge-base's commit id or
+``HEAD``, never the base as given. ``plan`` takes a ``Git`` so a caller can count or fail the processes it starts.
 """
 
 from __future__ import annotations
@@ -73,7 +87,8 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch, loads_in, missing_loads
-from .mapping import Mapping, MappingError, _q, load_mapping, valid_corpus_path
+from .mapping import (MAX_CASES_PER_MAPPING, MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
+                      load_mapping, valid_corpus_path)
 
 MAPPING_NAME = "eval-gate.json"
 SCHEMA_VERSION = 1
@@ -94,25 +109,46 @@ def _git(repo: Path, *args: str) -> str:
     return r.stdout
 
 
+class Git:
+    """Every git process the selection starts. ``plan`` takes one, so a test can count the processes or
+    make one fail; the default runs real git."""
+
+    def run(self, repo: Path, *args: str) -> str:
+        return _git(repo, *args)
+
+    def open_cat_file(self, repo: Path) -> subprocess.Popen:
+        return _open_cat_file(repo)
+
+
+GIT = Git()
+
+
+def _option_like(base: str | None) -> bool:
+    return base is not None and base.startswith("-")
+
+
 def _is_mapping(path: str) -> bool:
     p = PurePosixPath(path)
     return p.name == MAPPING_NAME and p.parent.name == "evals"
 
 
-def _resolve_base(repo: Path, base: str | None) -> tuple[str, str] | None:
-    """Return ``(ref, merge_base_sha)`` or None when the base cannot be resolved."""
+def _resolve_base(repo: Path, base: str | None, git: Git = GIT) -> tuple[str, str] | None:
+    """Return ``(ref, merge_base_sha)`` or None when the base cannot be resolved. A base that starts with
+    ``-`` never resolves: no git process starts for it."""
+    if _option_like(base):
+        return None
     try:
         if base is None:
-            base = _git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
-        _git(repo, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")
-        return base, _git(repo, "merge-base", base, "HEAD").strip()
+            base = git.run(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD").strip()
+        git.run(repo, "rev-parse", "--verify", "--quiet", "--end-of-options", f"{base}^{{commit}}")
+        return base, git.run(repo, "merge-base", "--end-of-options", base, "HEAD").strip()
     except GitError:
         return None
 
 
-def _show(repo: Path, rev: str, path: str) -> str | None:
+def _show(repo: Path, rev: str, path: str, git: Git = GIT) -> str | None:
     try:
-        return _git(repo, "show", f"{rev}:{path}")
+        return git.run(repo, "show", "--end-of-options", f"{rev}:{path}")
     except GitError:
         return None
     except UnicodeDecodeError:
@@ -122,10 +158,10 @@ def _show(repo: Path, rev: str, path: str) -> str | None:
 _BLOB_MODES = ("100644", "100755")
 
 
-def _head_tree(repo: Path, rev: str = "HEAD") -> dict[str, str]:
+def _head_tree(repo: Path, rev: str = "HEAD", git: Git = GIT) -> dict[str, str]:
     """``rev``'s committed tree (HEAD's by default) as ``{path: mode}``. The working tree is never consulted."""
     tree: dict[str, str] = {}
-    for entry in _git(repo, "ls-tree", "-r", "-z", rev).split("\0"):
+    for entry in git.run(repo, "ls-tree", "-r", "-z", "--end-of-options", rev).split("\0"):
         meta, sep, path = entry.partition("\t")
         if sep:
             tree[path] = meta.split(" ", 1)[0]
@@ -164,21 +200,39 @@ def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str],
             raise MappingError(path, f"case {ref} has no case.yaml")
 
 
-def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]) -> Mapping | None:
+def _check_case_count(path: str, mapping: Mapping) -> None:
+    if len(mapping.cases) > MAX_CASES_PER_MAPPING:
+        raise MappingError(path, f"{len(mapping.cases)} cases in {_q(path, 1)} exceed the cap of "
+                                 f"{MAX_CASES_PER_MAPPING}")
+
+
+def _check_mapping_count(mappings: list[str], label: str, revision: str) -> None:
+    if len(mappings) > MAX_MAPPING_FILES:
+        err = MappingError(mappings[MAX_MAPPING_FILES],
+                           f"{len(mappings)} mapping files at {label} exceed the cap of {MAX_MAPPING_FILES}")
+        err.revision = revision
+        raise err
+
+
+def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str],
+               git: Git = GIT) -> Mapping | None:
     if path not in tree:
         return None
     try:
-        text = _git(repo, "show", f"HEAD:{path}")
+        text = git.run(repo, "show", "--end-of-options", f"HEAD:{path}")
     except UnicodeDecodeError:
         raise MappingError(path, "not valid UTF-8") from None
     mapping = load_mapping(text, path)
+    _check_case_count(path, mapping)
     _check_against_tree(path, mapping, tree, dirs)
     return mapping
 
 
 def _load_base(path: str, text: str) -> Mapping:
     try:
-        return load_mapping(text, path)
+        mapping = load_mapping(text, path)
+        _check_case_count(path, mapping)
+        return mapping
     except MappingError as e:
         err = MappingError(path, f"the base revision's mapping is invalid: {e.fault}")
         err.revision = "base"
@@ -197,8 +251,10 @@ class _GitReader:
     plain blob raises ``NotRegularFile``. Contents come from one lazily started ``git cat-file --batch``;
     a process that dies, answers anything but a whole blob or stops short raises, never an empty text."""
 
-    def __init__(self, repo: Path, rev: str, tree: dict[str, str], root: str):
-        self._repo, self._rev, self._tree, self._root = repo, rev, tree, root
+    def __init__(self, repo: Path, rev: str, tree: dict[str, str], root: str, git: Git = GIT,
+                 charged: set[str] | None = None):
+        self._repo, self._rev, self._tree, self._root, self._git = repo, rev, tree, root, git
+        self._charged = set() if charged is None else charged
         self._proc: subprocess.Popen | None = None
 
     def __call__(self, path: str) -> str | None:
@@ -208,10 +264,22 @@ class _GitReader:
             return None
         if mode not in _BLOB_MODES:
             raise NotRegularFile(path)
+        label = "HEAD" if self._rev == "HEAD" else "the base revision"
+        if full not in self._charged:
+            if len(self._charged) >= MAX_PROCEDURE_FILES:
+                raise LoadError(f"{MAX_PROCEDURE_FILES + 1} procedure files read at {label} exceed the cap "
+                                f"of {MAX_PROCEDURE_FILES}")
+            self._charged.add(full)
+        try:
+            return self._fetch(full)
+        except (GitError, OSError, ValueError):
+            raise LoadError(f"{_q(path, 1)} could not be read at {label}") from None
+
+    def _fetch(self, full: str) -> str:
         if "\n" in full:
             raise GitError("a path with a newline cannot be read through cat-file --batch")
         if self._proc is None:
-            self._proc = _open_cat_file(self._repo)
+            self._proc = self._git.open_cat_file(self._repo)
         proc = self._proc
         proc.stdin.write(f"{self._rev}:{full}\n".encode())
         proc.stdin.flush()
@@ -238,14 +306,15 @@ class _GitReader:
 class _Readers:
     """One ``cached`` reader per (revision, plugin root), each over its own cat-file process; closed together."""
 
-    def __init__(self, repo: Path):
-        self._repo = repo
+    def __init__(self, repo: Path, git: Git = GIT):
+        self._repo, self._git = repo, git
         self._made: dict[tuple[str, str], tuple[_GitReader, object]] = {}
+        self._charged: dict[str, set[str]] = {}
 
     def get(self, rev: str, tree: dict[str, str], root: str):
         key = (rev, root)
         if key not in self._made:
-            raw = _GitReader(self._repo, rev, tree, root)
+            raw = _GitReader(self._repo, rev, tree, root, self._git, self._charged.setdefault(rev, set()))
             self._made[key] = (raw, cached(raw))
         return self._made[key][1]
 
@@ -342,14 +411,15 @@ def _mark_change(base_mark: str | None, head_mark: str | None) -> str | None:
     return "removed" if head_mark is None else "altered"
 
 
-def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool, tier: str):
+def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool, tier: str,
+                git: Git = GIT):
     """Every case in the merge-base's and HEAD's mappings as ``(plugin, measures, entry)``, in sorted
     mapping-path then case-name order, plus the base's marks and the mark changes. The changed paths
     play no part: HEAD's tree, the base's tree and each mapping are read once, and each declared case's
     files are derived at both revisions through one cached ``git cat-file --batch`` reader per
     (revision, plugin root), started only when a file is read. An entry's ``measures`` are the
     hand-written paths and the derived files of the base and of HEAD, each once."""
-    base_tree = _head_tree(repo, merge_base)
+    base_tree = _head_tree(repo, merge_base, git)
     head_mappings: list[str] = []
     markdown: list[str] = []
     for p, mode in tree.items():
@@ -357,21 +427,24 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
             head_mappings.append(p)
         elif mode in _BLOB_MODES and p.endswith(".md"):
             markdown.append(p)
+    base_mappings = sorted(p for p in base_tree if _is_mapping(p))
+    _check_mapping_count(sorted(head_mappings), "HEAD", "head")
+    _check_mapping_count(base_mappings, "the base revision", "base")
     candidates: list[tuple[PurePosixPath, tuple[str, ...], dict]] = []
     marks: list[dict] = []
     changes: list[dict] = []
     dirs = _tree_dirs(tree)
-    readers = _Readers(repo)
+    readers = _Readers(repo, git)
     owner: dict[str, str] = {}
     try:
-        for path in sorted(set(head_mappings) | {p for p in base_tree if _is_mapping(p)}):
+        for path in sorted(set(head_mappings) | set(base_mappings)):
             plugin = PurePosixPath(path).parent.parent
             root = "" if str(plugin) == "." else plugin.as_posix()
             if not valid_corpus_path(root):
                 raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
-            base_text = _show(repo, merge_base, path) if path in base_tree else None
+            base_text = _show(repo, merge_base, path, git) if path in base_tree else None
             base_map = _load_base(path, base_text) if base_text is not None else None
-            head_map = _load_head(repo, path, tree, dirs)
+            head_map = _load_head(repo, path, tree, dirs, git)
             base_read = readers.get(merge_base, base_tree, root)
             head_read = readers.get("HEAD", tree, root)
             names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
@@ -480,9 +553,10 @@ def _touching(root: _Node, path: str, absorbed: tuple[set, set] | None = None) -
 
 
 def _select(repo: Path, merge_base: str, changed: list[str], merge_only_either: bool,
-            tree: dict[str, str] | None, tier: str) -> tuple[list[dict], list[dict], list[dict]]:
-    tree = _head_tree(repo) if tree is None else tree
-    candidates, marks, changes = _candidates(repo, merge_base, tree, merge_only_either, tier)
+            tree: dict[str, str] | None, tier: str,
+            git: Git = GIT) -> tuple[list[dict], list[dict], list[dict]]:
+    tree = _head_tree(repo, "HEAD", git) if tree is None else tree
+    candidates, marks, changes = _candidates(repo, merge_base, tree, merge_only_either, tier, git)
     index = _build_index(candidates)
     hit: set[int] = set()
     absorbed: tuple[set, set] = (set(), set())
@@ -526,8 +600,9 @@ def _runs(case: dict) -> bool:
 TIERS = ("push", "merge")
 
 
-def _changed_since(repo: Path, merge_base: str) -> list[str]:
-    diff_out = _git(repo, "diff", "--name-only", "--no-renames", "-z", f"{merge_base}...HEAD")
+def _changed_since(repo: Path, merge_base: str, git: Git = GIT) -> list[str]:
+    diff_out = git.run(repo, "diff", "--name-only", "--no-renames", "-z", "--end-of-options",
+                       f"{merge_base}...HEAD")
     return [c for c in diff_out.split("\0") if c]
 
 
@@ -581,42 +656,46 @@ def repo_has_mapping(repo: Path, base: str | None = None) -> bool:
     resolved = _resolve_base(repo, base)
     if resolved is None:
         return False
-    at_base = _git(repo, "ls-tree", "-r", "-z", "--name-only", resolved[1]).split("\0")
+    at_base = _git(repo, "ls-tree", "-r", "-z", "--name-only", "--end-of-options", resolved[1]).split("\0")
     return any(_is_mapping(p) for p in at_base)
 
 
 def local_head(repo: Path) -> str:
     """The full commit id of ``repo``'s ``HEAD``. Raises ``GitError``."""
-    return _git(Path(repo).resolve(), "rev-parse", "HEAD").strip()
+    return _git(Path(repo).resolve(), "rev-parse", "--verify", "--end-of-options", "HEAD").strip()
 
 
-def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
+def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT) -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
 
     ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case).
 
-    Raises ``GitError`` when ``repo`` is not a git work tree."""
+    A ``base`` that starts with ``-`` is ``base-invalid``. Raises ``GitError`` when ``repo`` is not a git
+    work tree."""
     repo = Path(repo).resolve()
-    _git(repo, "rev-parse", "--is-inside-work-tree")
+    git.run(repo, "rev-parse", "--is-inside-work-tree")
     result: dict = {
         "schema_version": SCHEMA_VERSION, "status": "no-cases-mapped", "repo": str(repo),
         "base": base, "merge_base": None, "tier": tier,
-        "head": _git(repo, "rev-parse", "HEAD").strip(), "merge_only_pending": 0,
+        "head": git.run(repo, "rev-parse", "--verify", "--end-of-options", "HEAD").strip(),
+        "merge_only_pending": 0,
         "changed_files": [], "mapping_invalid": None,
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
         "needs_merge_model": [], "mark_changes": [],
     }
-    resolved = _resolve_base(repo, base)
-    if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
+    resolved = _resolve_base(repo, base, git)
+    if _option_like(base):
+        result["status"] = "base-invalid"
+    elif git.run(repo, "status", "--porcelain", "--untracked-files=no").strip():
         result["status"] = "tree-dirty"
     elif resolved is None:
         result["status"] = "base-unresolved"
     else:
         result["base"], result["merge_base"] = resolved
-        changed = _changed_since(repo, resolved[1])
+        changed = _changed_since(repo, resolved[1], git)
         result["changed_files"] = changed
         try:
-            touched, marks, changes = _select(repo, resolved[1], changed, tier == "merge", None, tier)
+            touched, marks, changes = _select(repo, resolved[1], changed, tier == "merge", None, tier, git)
         except MappingError as e:
             result["status"] = "mapping-invalid"
             result["mapping_invalid"] = {"file": e.file, "fault": e.fault, "revision": e.revision}
