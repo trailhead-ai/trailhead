@@ -85,6 +85,7 @@ echo "portage \$*" >> "\$W/portage.log"
 export PATH="\$W:\$PATH" TRAILHEAD_ROOT="\$W/trailhead-src" TRAILHEAD_CLAUDE_DIR="\$W/claude-dir" TMPDIR="\$W/tmp"
 export PORTAGE_EVAL_RUNNER="\$W/fake-runner"
 if [ "\${1:-}" = "eval-gate" ]; then
+  export XDG_CACHE_HOME="\$(mktemp -d /tmp/pg.XXXXXX)"
   exec python3 "$plugin_root/cli/portage" "\$@"
 fi
 # The gate is a feature of the prose under test, not something the stand-in advertises: every

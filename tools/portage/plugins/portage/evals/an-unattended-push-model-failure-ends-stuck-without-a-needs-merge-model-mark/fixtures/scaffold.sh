@@ -56,6 +56,7 @@ cd "$W"
 
 # The gate's runner is a fake binary that fails the case on every run.
 sed -i '/^export PATH=/a export PORTAGE_EVAL_RUNNER="$W/fake-runner"' "$W/portage"
+sed -i '/^export PATH=/a export XDG_CACHE_HOME="$(mktemp -d /tmp/pg.XXXXXX)"' "$W/portage"
 cat > "$W/fake-runner" <<'RUNNER'
 #!/usr/bin/env bash
 # A stand-in for the eval runner binary: the canary passes; every other case scores 0.5 on every run.
