@@ -267,15 +267,38 @@ The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Fla
 regular `.md` file under the plugin's `skills/` that at least one case selects), the cases a one-file edit to it selects
 at the push and merge tiers (the gate's own selection, HEAD as the base; push leaves out `merge_only` cases). Each
 case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
-timing history and from every `*.json` runner output directly in each `--runs-from` directory. A file's total is its
+timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
+subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
+named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). That once-only check keys on device and inode numbers, so on a filesystem that reports non-unique or zero inode numbers (some FUSE and network mounts) distinct directories can be taken for one and the files of all but the first are dropped with no tally. A `--runs-from` that is itself a symlink is refused as not a directory (`portage: eval-gate cost: runs-from unreadable: <path> is not a directory`). A run repeated across those files is
+counted once; a repeat with no valid `startedAt` is not deduplicated. Every runner output is read before any
+history line, and a counted history run is then matched one-to-one against the counted runner-output runs of the same
+plugin, case and model with exactly the same per-run cost (run plus judge); a match is excluded as `duplicate-history`,
+so a gate run that is in both sources is priced once. Matching consumes runner-output runs only, so two identical
+history runs need a counterpart each, and an excluded run (history `other-plugin` or `pinned`; runner-output
+`ablation`, `multi-plugin`, `other-plugin` or `run-cap`) neither matches nor is matched. A history run with no
+counterpart is counted. The rule accepts one false merge: two distinct runs of one case on one model with bit-identical
+cost, one in each source, count once. A file's total is its
 push-tier prices plus its merge-tier prices; the baseline is the median of the file totals, or
 `baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens
 with the baseline, the mean and the unpriced count, then the counts of files and runs read, skipped and excluded
 by reason, a row per file, the unpriced and priced cases (a price from one or two runs is flagged `thin`) and the
-files no case selects; its last line is the `baseline:` line. The runner-output counts end with
-`listings-truncated <n>`, the number of run directories that held more entries than the scan cap (20000), so only a
-prefix of the listing was read. Every byte read from a runner output, parsed or not, counts against the directory's
-64 MiB read budget. It writes nothing. Exit 0 on a report, 2 with a
+files no case selects; its last line is the `baseline:` line. The runner-output counts end with `unlistable-directory <n>` and `too-many-runs <n>` among the skip reasons (a subdirectory that could not be
+opened or listed; a `--runs-from` that cannot be read is still exit 2) and then `listings-truncated <n>`.
+A `history lines: read <n>; skipped: corrupt <n>, mis-shaped <n>` line follows (the words and order
+`eval-gate timings` uses for the same file): `corrupt` is a line that is not a JSON object, `mis-shaped` any other unusable line (a field, `plugin` or `case` outside its shape); the two commands classify a line with the same function.
+Three bounds cover the whole call, not each directory: 64 MiB of bytes read (every byte read from a runner output,
+parsed or not; a file past it is `directory-bound`), 20000 listing entries (every entry listed in any listing, files,
+subdirectories and other names alike; a listing cut short is `listings-truncated`), and 100000 retained runs (a run
+past it is excluded as `run-cap`). When any of `directory-bound`, `listings-truncated`, `unlistable-directory` or
+`run-cap`, `too-large` (a file over 1 MiB) or `too-many-runs` (a file with more than 1000 runs, which has its own
+runner-output skip reason; `bad-shape` stays a malformed document) is nonzero, or any history line was skipped, both
+`baseline:` lines end with `(partial: <name> <n>, ...)` after the figure, naming only the nonzero ones in that order,
+the history skips last as `history-corrupt` and `history-mis-shaped`. The malformed-file reasons (`not-json`,
+`too-deep`, `bad-shape`, `bad-number`, `not-regular`) stay out of the suffix because they are bad input, not a bound.
+The byte bound is checked against a file's size before the file is read, so a call can exceed it by at most one file (`MAX_FILE_BYTES` + 1). The bounds are fixed constants in the reader (`MAX_FILE_BYTES`, `MAX_RUNS_PER_FILE`, `MAX_TOTAL_BYTES`,
+`MAX_TOTAL_ENTRIES`, `MAX_RETAINED_RUNS`) and the command has no flag for them, so to get a full figure narrow
+`--runs-from` to the directories that matter. A partial naming `history-corrupt` or `history-mis-shaped` means the
+history file holds lines the reader cannot use; they are skipped, not repaired, so inspect the history file. It writes nothing. Exit 0 on a report, 2 with a
 `portage: eval-gate cost: <source> unreadable` line when the repo, mapping, a run directory or the history cannot be read.
 
 ## Cost and limits

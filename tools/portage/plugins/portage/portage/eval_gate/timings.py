@@ -185,6 +185,22 @@ def history_lines(path: Path) -> list[bytes]:
         raise TimingsError(f"history {path.name} unreadable: {e.strerror}") from None
 
 
+def classify_line(raw: bytes) -> tuple[str, dict | None, dict | None]:
+    """``("corrupt" | "mis-shaped" | "ok", doc, decision)`` of one history line: ``corrupt`` is a line that
+    is not a JSON object, ``mis-shaped`` an object whose fields, ``plugin`` or ``case`` are outside their shapes."""
+    try:
+        doc = json.loads(raw)
+    except Exception:
+        doc = None
+    if not isinstance(doc, dict):
+        return "corrupt", None, None
+    dec = decision(doc)
+    plugin, name = doc.get("plugin"), doc.get("case")
+    if dec is None or not CASE_NAME.match(name) or not (plugin == "" or CASE_NAME.match(plugin)):
+        return "mis-shaped", doc, None
+    return "ok", doc, dec
+
+
 def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugin: str | None):
     tally = {"corrupt": 0, "mis-shaped": 0, "stale": 0, "pinned": 0}
     stamps: list[str] = []
@@ -193,18 +209,11 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
     for path in (history.rotated_path(env), history.history_path(env)):
         for raw in history_lines(path):
             total += 1
-            try:
-                doc = json.loads(raw)
-            except Exception:
-                doc = None
-            if not isinstance(doc, dict):
-                tally["corrupt"] += 1
+            shape, doc, dec = classify_line(raw)
+            if dec is None:
+                tally[shape] += 1
                 continue
-            dec = decision(doc)
-            plugin, name = doc.get("plugin"), doc.get("case")
-            if dec is None or not CASE_NAME.match(name) or not (plugin == "" or CASE_NAME.match(plugin)):
-                tally["mis-shaped"] += 1
-                continue
+            plugin, name = doc["plugin"], doc["case"]
             if only_plugin is not None and plugin != only_plugin:
                 continue
             case = cases.get((plugin, name))

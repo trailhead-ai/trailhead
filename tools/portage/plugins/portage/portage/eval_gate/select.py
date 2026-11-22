@@ -162,17 +162,13 @@ def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, change
     return False
 
 
-def select_touched(repo: Path, merge_base: str, changed: list[str], *,
-                   merge_only_either: bool = False) -> list[dict]:
-    """Every case the ``changed`` files touch, whatever its tier, as plan entries.
-
-    Everything is read from commits: the merge-base's and HEAD's mappings and HEAD's tree. An entry's
-    ``merge_only`` is the base's value (the base takes precedence); with ``merge_only_either`` it is
-    true when the base's or HEAD's mapping marks the case."""
-    tree = _head_tree(repo)
+def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool):
+    """Every case in the merge-base's and HEAD's mappings as ``(plugin, measures, entry)``, in sorted
+    mapping-path then case-name order. The changed paths play no part: HEAD's tree, the base listing
+    and each mapping are read once."""
     tracked = set(tree)
     at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
-    selected: list[dict] = []
+    candidates: list[tuple[PurePosixPath, tuple[str, ...], dict]] = []
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
         plugin = PurePosixPath(path).parent.parent
         root = "" if str(plugin) == "." else plugin.as_posix()
@@ -188,12 +184,10 @@ def select_touched(repo: Path, merge_base: str, changed: list[str], *,
             measures = tuple(dict.fromkeys(
                 (base_case.measures if base_case else ()) + (head_case.measures if head_case else ())
             ))
-            if not _touches(name, measures, plugin, changed):
-                continue
             case = base_case or head_case
             marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
             runner = (base_map or head_map).runner
-            selected.append({
+            candidates.append((plugin, measures, {
                 "plugin_root": root,
                 "case": name,
                 "runs": case.runs,
@@ -204,8 +198,34 @@ def select_touched(repo: Path, merge_base: str, changed: list[str], *,
                 "new_runner_grants": base_map is None,
                 "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
                                 not in _BLOB_MODES,
-            })
-    return selected
+            }))
+    return candidates
+
+
+def select_touched(repo: Path, merge_base: str, changed: list[str], *,
+                   merge_only_either: bool = False, tree: dict[str, str] | None = None) -> list[dict]:
+    """Every case the ``changed`` files touch, whatever its tier, as plan entries.
+
+    Everything is read from commits: the merge-base's and HEAD's mappings and HEAD's tree (``tree``,
+    when the caller has already read it). An entry's ``merge_only`` is the base's value (the base takes
+    precedence); with ``merge_only_either`` it is true when the base's or HEAD's mapping marks the case."""
+    tree = _head_tree(repo) if tree is None else tree
+    return [entry for plugin, measures, entry in _candidates(repo, merge_base, tree, merge_only_either)
+            if _touches(entry["case"], measures, plugin, changed)]
+
+
+def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
+                           merge_only_either: bool = False,
+                           tree: dict[str, str] | None = None) -> dict[str, list[dict]]:
+    """For each of ``paths``, the entries ``select_touched`` returns when that path alone changed.
+
+    HEAD's tree, the base listing and each mapping are read once for all the paths, so the git
+    commands run grow with the mappings, not with ``len(paths)``."""
+    tree = _head_tree(repo) if tree is None else tree
+    candidates = _candidates(repo, merge_base, tree, merge_only_either)
+    return {path: [entry for plugin, measures, entry in candidates
+                   if _touches(entry["case"], measures, plugin, [path])]
+            for path in paths}
 
 
 def _runs(case: dict) -> bool:
@@ -251,7 +271,8 @@ def merge_only_touched(repo: Path, base: str | None = None) -> tuple[str, list[d
     resolved = _resolve_base(repo, base)
     try:
         if resolved is None:
-            touched = select_touched(repo, "HEAD", list(_head_tree(repo)), merge_only_either=True)
+            tree = _head_tree(repo)
+            touched = select_touched(repo, "HEAD", list(tree), merge_only_either=True, tree=tree)
         else:
             touched = select_touched(repo, resolved[1], _changed_since(repo, resolved[1]),
                                      merge_only_either=True)
