@@ -4,7 +4,8 @@
 [--repo <path>] [--require-version N]`` loads ``<plugin root>/evals/eval-gate.json`` from the working tree, creates a
 request (``portage.eval_command.request``), starts a detached worker and prints ``request: <id>``
 and ``wait: <paste-ready command>`` without waiting, then one ``derived: <plugin root> <case>: <files>`` line
-per named declared case (the files its entry's procedure derives, plugin-relative). Exit 0 started, 3 not run (the not-run block
+per named declared case (the files its entry's procedure derives, plugin-relative). Exit 0 started, 3 not run (the
+not-run block
 is printed), 2 refused (a stderr line names why: an undeclared case, a plugin root that leaves the
 repo, a mapping that does not load, a ``--require-version`` that is not 1 to 6 ASCII decimal digits).
 

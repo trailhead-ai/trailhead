@@ -3,7 +3,8 @@
 A load is the word ``Read`` followed by a backticked path ending ``.md``, plus every further backticked ``.md``
 path in the same sentence. A sentence spans the lines of its paragraph and ends at ``.``, ``:`` or ``;``
 followed by whitespace or the end of the paragraph, outside backticks (``e.g.`` and ``i.e.`` do not end one).
-Fenced code blocks are skipped. Each path resolves against the loading file's directory first, then each ancestor directory up to the plugin
+Fenced code blocks are skipped. Each path resolves against the loading file's directory first, then each ancestor
+directory up to the plugin
 root, taking the first that holds a file (a path found nowhere resolves to its loading-directory form, which
 ``missing_loads`` reports); it must match
 ``[A-Za-z0-9._/-]`` and must stay inside the plugin root. A *branch file* opens (first non-blank line, after

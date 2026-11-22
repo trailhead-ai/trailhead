@@ -1088,7 +1088,8 @@ class TestCaseDeclarations:
         assert "needs measures or entry" in _fault(_mapping({"alpha": {"runs": 3}}))
 
     def test_branches_without_entry_is_refused(self):
-        assert "branches requires entry" in _fault(_mapping({"alpha": {"branches": ["skills/b.md"], "measures": ["skills/a.md"]}}))
+        case = {"branches": ["skills/b.md"], "measures": ["skills/a.md"]}
+        assert "branches requires entry" in _fault(_mapping({"alpha": case}))
 
     @pytest.mark.parametrize("key", ["entry", "branch"])
     @pytest.mark.parametrize("path, fault", [

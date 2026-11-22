@@ -58,7 +58,8 @@ plan is ``mapping-invalid``. So is a plan where, with every file read from the c
 empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
 fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
 at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
-procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in the working tree
+procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in the working
+tree
 (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``: the
 gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a renamed
 file counts as both its old and its new path.
@@ -629,7 +630,8 @@ def backstop_touched(repo: Path, base: str | None = None) -> tuple[str, list[dic
     ``base-unresolved`` (the changed files are unknown, so ``entries`` is every covered case
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
     and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
-    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it. Only commits are read: the mappings and
+    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it. Only commits
+    are read: the mappings and
     the case files come from the merge-base and HEAD, never the working tree, so an uncommitted
     edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
     and ``GitError`` on any other git failure."""
