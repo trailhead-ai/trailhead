@@ -52,6 +52,7 @@ class Fx:
         _git(self.root, "init", "-b", "main")
         self.cases: dict[str, dict] = {}
         self.model = MODEL
+        self.push_model: str | None = None
 
     def write(self, rel: str, text: str = "prose\n") -> None:
         p = self.root / rel
@@ -61,16 +62,21 @@ class Fx:
     def skill(self, name: str) -> None:
         self.write(f"{SKILLS}/{name}")
 
-    def case(self, name: str, *measures: str, merge_only: bool = False) -> None:
+    def case(self, name: str, *measures: str, merge_only: bool = False,
+             needs_merge_model: str | None = None) -> None:
         spec: dict = {"measures": [f"skills/{m}" for m in measures]}
         if merge_only:
             spec["merge_only"] = True
+        if needs_merge_model:
+            spec["needs_merge_model"] = needs_merge_model
         self.cases[name] = spec
 
     def commit(self) -> None:
         for name in self.cases:
             self.write(f"plugins/{PLUGIN}/evals/{name}/case.yaml", "name: x\n")
         runner = {"model": self.model, "allow_tools": ["Read"], "max_cost_usd": 2.0}
+        if self.push_model:
+            runner["push_model"] = self.push_model
         self.write(f"plugins/{PLUGIN}/evals/eval-gate.json",
                    json.dumps({"schema_version": 1, "runner": runner, "cases": self.cases}))
         _git(self.root, "add", "-A")
@@ -271,6 +277,70 @@ class TestTotals:
         row = files(fx.report(fx.runs))[f"{SKILLS}/a.md"]
         assert (row["push-cases"], row["merge-cases"]) == ("1", "2")
         assert (row["push-cost"], row["merge-cost"], row["total"]) == ("1.0000", "5.0000", "6.0000")
+
+
+class TestTierModels:
+    def test_the_push_tier_is_priced_on_the_push_model_and_the_merge_tier_on_the_merge_model(self, fx):
+        basic(fx)
+        fx.push_model = OTHER_MODEL
+        fx.commit()
+        runner_file(fx.runs, "opus.json", costs=((5.0, 0.0), (5.0, 0.0)), model=MODEL)
+        runner_file(fx.runs, "sonnet.json", costs=((1.0, 0.0), (1.0, 0.0)), model=OTHER_MODEL)
+        lines = fx.report(fx.runs)
+        row = files(lines)[f"{SKILLS}/a.md"]
+        assert (row["push-cost"], row["merge-cost"], row["total"]) == ("1.0000", "5.0000", "6.0000")
+        assert baseline(lines) == "baseline: 6.0000"
+        rows = section(lines, "priced cases:")
+        assert [r[:3] for r in rows] == [["alpha", "push", "1.0000"], ["alpha", "merge", "5.0000"]]
+
+    def test_a_case_marked_in_the_base_is_priced_on_the_merge_model_at_both_tiers(self, fx):
+        fx.skill("a.md")
+        fx.case("alpha", "a.md", needs_merge_model="judges a long transcript")
+        fx.push_model = OTHER_MODEL
+        fx.commit()
+        runner_file(fx.runs, "opus.json", costs=((5.0, 0.0), (5.0, 0.0)), model=MODEL)
+        runner_file(fx.runs, "sonnet.json", costs=((1.0, 0.0), (1.0, 0.0)), model=OTHER_MODEL)
+        lines = fx.report(fx.runs)
+        row = files(lines)[f"{SKILLS}/a.md"]
+        assert (row["push-cost"], row["merge-cost"], row["total"]) == ("5.0000", "5.0000", "10.0000")
+        assert [r[:3] for r in section(lines, "priced cases:")] == [["alpha", "push+merge", "5.0000"]]
+
+    def test_a_push_case_with_runs_only_on_the_merge_model_is_unpriced_on_the_push_tier(self, fx):
+        basic(fx)
+        fx.push_model = OTHER_MODEL
+        fx.commit()
+        runner_file(fx.runs, "opus.json", costs=((5.0, 0.0), (5.0, 0.0)), model=MODEL)
+        lines = fx.report(fx.runs)
+        row = files(lines)[f"{SKILLS}/a.md"]
+        assert (row["push-cost"], row["merge-cost"], row["unpriced"]) == ("0.0000", "5.0000", "1")
+        assert baseline(lines) == "baseline: incomplete (1 cases unpriced); lower bound 5.0000"
+        assert section(lines, "unpriced cases:") == [["alpha", "push"]]
+        assert [r[:3] for r in section(lines, "priced cases:")] == [["alpha", "merge", "5.0000"]]
+
+    def test_a_case_unpriced_on_the_merge_tier_only_is_reported_on_the_merge_tier(self, fx):
+        basic(fx)
+        fx.push_model = OTHER_MODEL
+        fx.commit()
+        runner_file(fx.runs, "sonnet.json", costs=((1.0, 0.0), (1.0, 0.0)), model=OTHER_MODEL)
+        assert section(fx.report(fx.runs), "unpriced cases:") == [["alpha", "merge"]]
+
+    def test_without_a_push_model_both_tiers_price_on_the_runner_model_as_before(self, fx):
+        fx.skill("a.md")
+        fx.case("alpha", "a.md")
+        fx.case("mo", "a.md", merge_only=True)
+        fx.case("beta", "a.md")
+        fx.commit()
+        two_runs(fx, "alpha", 1.0, 1.0)
+        two_runs(fx, "mo", 4.0, 4.0)
+        runner_file(fx.runs, "other.json", case="alpha", costs=((9.0, 0.0),), model=OTHER_MODEL)
+        lines = fx.report(fx.runs)
+        row = files(lines)[f"{SKILLS}/a.md"]
+        assert (row["push-cost"], row["merge-cost"], row["total"], row["unpriced"]) == (
+            "1.0000", "5.0000", "6.0000", "1")
+        assert baseline(lines) == "baseline: incomplete (1 cases unpriced); lower bound 6.0000"
+        assert section(lines, "unpriced cases:") == [["beta", "push+merge"]]
+        assert [r[:3] for r in section(lines, "priced cases:")] == [
+            ["alpha", "push+merge", "1.0000"], ["mo", "merge", "4.0000"]]
 
 
 class TestPricing:

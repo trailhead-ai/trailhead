@@ -4,8 +4,10 @@ Reads the timing history (``history.py``, both generations) and the ``evals/eval
 mappings under a repository, and reports per case how long its decisions took. Writes nothing.
 
 A history line is *counted* only when its ``plugin`` and ``case`` have the mapping's case-name
-shape and name a mapped case, its ``fingerprint`` equals that case's current pass-cache key
-(computed from the repository the way the gate computes it), and ``pinned_runner`` is not true.
+shape and name a mapped case, its ``fingerprint`` equals that case's current pass-cache key for the
+line's own tier (either tier's when the line records none), computed from the repository the way the gate
+computes it, and ``pinned_runner`` is not true. Once a corpus sets ``push_model`` one row mixes push-model
+and merge-model runs, so its median, batch-max and mean cost blend both models.
 Every other line is tallied as ``corrupt`` (not a JSON object), ``mis-shaped`` (a field outside
 its shape or bounds), ``pinned`` or ``stale`` (an old fingerprint, or a case the mappings do not
 hold) and nothing from it is printed. Only validated names and numbers computed here reach stdout.
@@ -40,7 +42,7 @@ from . import history
 from .canary import TIMEOUT_SECONDS as CANARY_SECONDS
 from .mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
 from .run import MAX_TIMEOUT_SECONDS, _cache_key
-from .select import MAPPING_NAME
+from .select import MAPPING_NAME, TIERS, resolve_runner
 from .verdict import _safe
 
 DEFAULT_DECLARED_TIMEOUT = 300
@@ -60,7 +62,7 @@ class _Case:
     name: str
     merge_only: bool
     first_batch: int
-    key: str | None
+    keys: dict[str, str | None]
     declared: str
     decisions: list[dict] = field(default_factory=list)
 
@@ -116,11 +118,13 @@ def _mapped_cases(repo: Path, only_plugin: str | None) -> dict[tuple[str, str], 
         if only_plugin is not None and plugin != only_plugin:
             continue
         for name, case in mapping.cases.items():
-            entry = {"case": name, "runner": mapping.runner, "runs": case.runs, "pass_at": case.pass_at,
-                     "plugin_root": root, "measures": list(case.measures)}
+            keys = {tier: _cache_key(plugin_dir, {
+                "case": name, "runner": resolve_runner(mapping.runner, tier, case.needs_merge_model),
+                "runs": case.runs, "pass_at": case.pass_at, "plugin_root": root,
+                "measures": list(case.measures)}) for tier in TIERS}
             cases[(plugin, name)] = _Case(
                 plugin, name, case.merge_only, core._first_batch(case.runs, case.pass_at),
-                _cache_key(plugin_dir, entry), _declared_timeout(base / name))
+                keys, _declared_timeout(base / name))
     return cases
 
 
@@ -201,6 +205,13 @@ def classify_line(raw: bytes) -> tuple[str, dict | None, dict | None]:
     return "ok", doc, dec
 
 
+def _line_keys(case: _Case, doc: dict) -> set[str]:
+    """The keys a line may carry: its own tier's when it records one, else either tier's."""
+    tier = doc.get("tier")
+    tiers = (tier,) if isinstance(tier, str) and tier in case.keys else TIERS
+    return {case.keys[t] for t in tiers if case.keys[t] is not None}
+
+
 def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugin: str | None):
     tally = {"corrupt": 0, "mis-shaped": 0, "stale": 0, "pinned": 0}
     stamps: list[str] = []
@@ -219,7 +230,7 @@ def _ingest(env: dict[str, str], cases: dict[tuple[str, str], _Case], only_plugi
             case = cases.get((plugin, name))
             if doc["pinned_runner"]:
                 tally["pinned"] += 1
-            elif case is None or case.key is None or doc["fingerprint"] != case.key:
+            elif case is None or doc["fingerprint"] is None or doc["fingerprint"] not in _line_keys(case, doc):
                 tally["stale"] += 1
             else:
                 case.decisions.append(dec)

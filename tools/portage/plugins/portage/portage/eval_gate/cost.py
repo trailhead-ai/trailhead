@@ -3,11 +3,14 @@
 A *procedure file* is a regular ``.md`` file under ``<plugin root>/skills/`` at HEAD (the plugin root
 is the parent of each ``evals/eval-gate.json`` whose directory name is the plugin) that at least one case
 selects. Files no case selects are listed apart and left out of every figure. For each procedure file the
-cases a one-file edit touches come from one ``select_touched_by_path`` call for every procedure file,
-with HEAD as the merge base (no git call of this module's own): HEAD's tree, the base listing and each
-mapping are read once, so the git commands run grow with the mappings, not with the number of procedure
-files times the mappings. The push tier is the touched cases not ``merge_only``, the merge
-tier is every touched case. Both tiers price a case on its corpus ``runner.model``.
+cases a one-file edit touches come from one ``select_touched_by_path`` call per tier for every procedure
+file, with HEAD as the merge base (no git call of this module's own): HEAD's tree and the base listing are
+read once per call and each mapping twice (once per tier), so the git commands run grow with the mappings,
+not with the number of procedure files times the mappings. The push tier is the touched cases not ``merge_only``,
+the merge tier is every touched case. Each tier prices a case on the model it runs, as ``select_touched_by_path``
+resolves it for that tier: the merge tier on ``runner.model``, the push tier on ``runner.push_model``
+(``runner.model`` where the mapping has none or the base marks the case ``needs_merge_model``). A case with
+no recorded run on the model a tier uses is unpriced on that tier.
 
 A case's price is the median per-run cost (``costUsd`` plus ``judgeCostUsd`` where present) of the
 recorded runs of that (plugin, case, model). A file's total is the sum of its push-tier prices plus the
@@ -388,9 +391,12 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         tree = _head_tree(repo)
         by_root = _procedure_files(tree, plugin)
         every = [p for paths in by_root.values() for p in paths]
-        touched = select_touched_by_path(repo, "HEAD", every, merge_only_either=True, tree=tree)
-        selected: dict[str, tuple[str, list[dict]]] = {
-            path: (root, [c for c in touched[path] if c["plugin_root"] == root])
+        touched = {tier: select_touched_by_path(repo, "HEAD", every, merge_only_either=True, tree=tree, tier=tier)
+                   for tier in ("push", "merge")}
+        selected: dict[str, tuple[str, list[dict], list[dict]]] = {
+            path: (root,
+                   [c for c in touched["merge"][path] if c["plugin_root"] == root],
+                   [c for c in touched["push"][path] if c["plugin_root"] == root and not c["merge_only"]])
             for root, paths in by_root.items() for path in paths}
     except GitError as e:
         raise CostError("repo", _safe(e)) from None
@@ -410,23 +416,27 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         costs = runs.costs.get((entry["case"], entry["runner"]["model"]))
         return (statistics.median(costs), len(costs)) if costs else None
 
+    def gap(tiers: dict[str, dict]) -> bool:
+        return any(price(e) is None for e in tiers.values())
+
     rows, excluded, totals = [], [], []
-    cases: dict[tuple[str, str], dict] = {}
-    for path, (root, entries) in selected.items():
+    cases: dict[tuple[str, str], dict[str, dict]] = {}
+    for path, (root, entries, push) in selected.items():
         if not entries:
             excluded.append(path)
             continue
-        push = [e for e in entries if not e["merge_only"]]
         cost_of = lambda es: sum(p[0] for p in map(price, es) if p)  # noqa: E731
         total = cost_of(push) + cost_of(entries)
         totals.append(total)
-        gaps = sum(1 for e in entries if price(e) is None)
+        by_case = {e["case"]: {"merge": e} for e in entries}
+        for e in push:
+            by_case[e["case"]]["push"] = e
+        gaps = sum(1 for tiers in by_case.values() if gap(tiers))
         rows.append([_safe(path), str(len(push)), str(len(entries)), _money(cost_of(push)),
                      _money(cost_of(entries)), _money(total), str(gaps)])
-        for e in entries:
-            cases[(root, e["case"])] = e
-    unpriced = sorted((k[1], "merge" if e["merge_only"] else "push+merge")
-                      for k, e in cases.items() if price(e) is None)
+        cases.update({(root, case): tiers for case, tiers in by_case.items()})
+    unpriced = sorted((k[1], "+".join(t for t in ("push", "merge") if t in tiers and price(tiers[t]) is None))
+                      for k, tiers in cases.items() if gap(tiers))
     median = statistics.median(totals) if totals else None
     if median is None:
         closing = "baseline: none (no procedure file is selected by a case)"
@@ -447,7 +457,7 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
         closing += f" (partial: {partial})"
     mean = f"mean: {_money(statistics.mean(totals))} across {len(totals)} files" if totals \
         else "mean: none across 0 files"
-    wanted = {(e["case"], e["runner"]["model"]) for e in cases.values()}
+    wanted = {(e["case"], e["runner"]["model"]) for tiers in cases.values() for e in tiers.values()}
     counted = sum(len(v) for v in runs.costs.values())
     matched = sum(len(v) for k, v in runs.costs.items() if k in wanted)
     out = [closing, mean, f"unpriced: {len(unpriced)} cases",
@@ -464,8 +474,12 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     out.append("unpriced cases:")
     out += _table([[c, t] for c, t in unpriced]) if unpriced else ["  none"]
     out.append("priced cases:")
-    priced = sorted((k[1], "merge" if e["merge_only"] else "push+merge", *price(e))
-                    for k, e in cases.items() if price(e))
+    priced = []
+    for (_, case), tiers in cases.items():
+        if "push" in tiers and tiers["push"]["runner"]["model"] == tiers["merge"]["runner"]["model"]:
+            tiers = {"push+merge": tiers["merge"]}
+        priced += [(case, label, *price(e)) for label, e in tiers.items() if price(e)]
+    priced.sort(key=lambda r: (r[0], r[1] != "push", r[1:]))
     out += _table([[c, t, _money(p), str(n), "thin" if n <= THIN_RUNS else "-"]
                    for c, t, p, n in priced]) if priced else ["  none"]
     out.append("files no case selects:")

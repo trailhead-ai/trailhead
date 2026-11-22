@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -22,6 +23,7 @@ from portage.cli import dispatch
 from portage.eval_gate import canary, history
 from portage.eval_gate import timings as gate_timings
 from portage.eval_gate.run import MAX_TIMEOUT_SECONDS, _cache_key
+from portage.eval_gate.select import resolve_runner
 from test_portage_eval_gate_run import PASS, RUNNER as GATE_RUNNER, Env, _result
 
 LEFT = MAX_TIMEOUT_SECONDS - canary.TIMEOUT_SECONDS
@@ -357,6 +359,112 @@ class TestGateToTimingsSeam:
             assert hist["model"] == "claude-opus-5-5"
         finally:
             shutil.rmtree(env.root, ignore_errors=True)
+
+    def test_a_push_tier_case_the_gate_ran_is_counted_not_stale(self, tmp_path, monkeypatch, capsys):
+        env = Env(tmp_path, monkeypatch)
+        try:
+            cache = tmp_path / "cache"
+            monkeypatch.setenv("PORTAGE_CACHE_DIR", str(cache))
+            monkeypatch.delenv("PORTAGE_EVAL_RUNNER", raising=False)
+            plugin = env.repo / "plugins" / "p"
+            (plugin / "evals" / "c1").mkdir(parents=True)
+            (plugin / "evals" / "c1" / "case.yaml").write_text("name: x\n")
+            (plugin / "skills").mkdir()
+            (plugin / "skills" / "s.md").write_text("prose\n")
+            runner = dict(GATE_RUNNER, model="opus", push_model="sonnet")
+            (plugin / "evals" / "eval-gate.json").write_text(json.dumps(
+                {"schema_version": 1, "runner": runner,
+                 "cases": {"c1": {"measures": ["skills"], "runs": 3, "pass_at": 2}}}))
+            env.commit()
+            env.git("branch", "base")
+            env.git("checkout", "-q", "-b", "feature")
+            (plugin / "skills" / "s.md").write_text("changed\n")
+            env.commit()
+            capsys.readouterr()
+            assert dispatch.main(["eval-gate", "plan", "--repo", str(env.repo),
+                                  "--base", "base", "--tier", "push"]) == 0
+            planned = capsys.readouterr().out
+            env.state = Path(next(x for x in planned.splitlines()
+                                  if x.startswith("state: "))[len("state: "):])
+            assert "plugins/p:c1" in planned.splitlines()
+            env.fake(pool=_result([PASS] * 12, costUsd=0.1), code=0)
+            assert env.run() == 0
+            rc = dispatch.main(["eval-gate", "timings", "--repo", str(env.repo)])
+            out = capsys.readouterr().out
+            assert rc == 0
+            assert table(out)["c1"]["decisions"] == "1"
+            assert "stale 0" in out
+            hist = json.loads((cache / "eval-gate" / history.HISTORY_NAME).read_text())
+            assert hist["tier"] == "push"
+        finally:
+            shutil.rmtree(env.root, ignore_errors=True)
+
+
+class TestPushModelKeys:
+    def _setup(self, repo, tmp_path, *, marked=False):
+        repo.case("c1")
+        runner = dict(RUNNER, model="opus", push_model="sonnet")
+        spec = dict(repo.cases["p"]["c1"])
+        if marked:
+            spec["needs_merge_model"] = "needs the larger model"
+        (repo.root / "plugins" / "p" / "evals" / "eval-gate.json").write_text(json.dumps(
+            {"schema_version": 1, "runner": runner, "cases": {"c1": spec}}))
+        return runner, spec
+
+    def _line(self, repo, runner, spec, tier):
+        entry = {"case": "c1", "runner": resolve_runner(runner, tier, spec.get("needs_merge_model")),
+                 "runs": spec["runs"], "pass_at": spec["pass_at"], "plugin_root": "plugins/p",
+                 "measures": spec["measures"]}
+        return dict(repo.line("c1", fingerprint=_cache_key(repo.root / "plugins" / "p", entry)), tier=tier)
+
+    def test_lines_written_at_each_tier_are_counted_not_stale(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path)
+        push, merge = (self._line(repo, runner, spec, t) for t in ("push", "merge"))
+        assert push["fingerprint"] != merge["fingerprint"]
+        repo.write(push, merge)
+        rc, out, _ = repo.timings(capsys)
+        assert rc == 0
+        assert table(out)["c1"]["decisions"] == "2"
+        assert "stale 0" in out
+
+    def test_a_line_whose_fingerprint_belongs_to_the_other_tier_is_stale(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path)
+        push = self._line(repo, runner, spec, "push")
+        merge = self._line(repo, runner, spec, "merge")
+        repo.write(dict(push, fingerprint=merge["fingerprint"]), merge)
+        rc, out, _ = repo.timings(capsys)
+        assert table(out)["c1"]["decisions"] == "1"
+        assert "stale 1" in out
+
+    def test_a_marked_case_counts_its_merge_model_line_at_the_push_tier(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path, marked=True)
+        push, merge = (self._line(repo, runner, spec, t) for t in ("push", "merge"))
+        assert push["fingerprint"] == merge["fingerprint"]
+        repo.write(push)
+        rc, out, _ = repo.timings(capsys)
+        assert table(out)["c1"]["decisions"] == "1"
+        assert "stale 0" in out
+
+    @pytest.mark.parametrize("tier", [None, "unknown", ["push"]])
+    def test_a_line_with_no_usable_tier_matches_either_tiers_key(self, repo, tmp_path, capsys, tier):
+        runner, spec = self._setup(repo, tmp_path)
+        push, merge = (self._line(repo, runner, spec, t) for t in ("push", "merge"))
+        untiered = [dict(x, tier=tier) for x in (push, merge)]
+        if tier is None:
+            untiered = [{k: v for k, v in x.items() if k != "tier"} for x in untiered]
+        repo.write(*untiered)
+        rc, out, err = repo.timings(capsys)
+        assert rc == 0 and "Traceback" not in err
+        assert table(out)["c1"]["decisions"] == "2"
+        assert "stale 0" in out
+
+    def test_a_line_with_no_usable_tier_and_a_foreign_fingerprint_is_stale(self, repo, tmp_path, capsys):
+        runner, spec = self._setup(repo, tmp_path)
+        line = dict(self._line(repo, runner, spec, "push"), tier=["push"], fingerprint="f" * 64)
+        repo.write(line)
+        rc, out, _ = repo.timings(capsys)
+        assert rc == 0
+        assert "stale 1" in out
 
 
 class TestFailures:

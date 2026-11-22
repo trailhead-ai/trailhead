@@ -42,8 +42,10 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 
 ```json
 {"schema_version": 1,
- "runner": {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
- "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false}}}
+ "runner": {"model": "claude-opus-5-5", "push_model": "claude-sonnet-5-5",
+            "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
+ "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false,
+                      "needs_merge_model": "judges a long diff the smaller model truncates"}}}
 ```
 
 - `measures` are plugin-relative paths of the prose the case's `expected.md` names as under test.
@@ -51,6 +53,14 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 - `merge_only` is optional and defaults to false; it must be a boolean. A `merge_only` case is left out of the
   push tier and runs at the merge tier. For a corpus that already has a mapping on the base, the base's value
   is used, as for `runs` and `pass_at`.
+- `needs_merge_model` is optional: a reason, 1-200 characters on one line, that marks a case the push tier
+  cannot trust to `push_model` and so runs on `model` at both tiers. It starts with a letter or digit and
+  otherwise uses letters, digits, space and `.,;'()_-` (no `:`, `/` or `@`, and no `www.`), so it cannot form a scheme, path, address or `www.` link; GitHub's same-repo references such as `GH-123` or a commit SHA still link. It is read from the base mapping, so a
+  mark takes effect once it is merged. Agents never add one: when a case fails on the push model, ask the
+  operator whether to mark it.
+- `runner.push_model` is optional and has the same model-id shape as `model`. The push tier runs every case on
+  it, except the marked ones; absent, the push tier uses `model`. The merge tier always uses `model`. It is
+  read from the base mapping like the rest of the runner block.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.
@@ -165,6 +175,13 @@ with `eval-gate: <outcome>` and `persistent: <codes>|none`, and ends with the PR
 `<state>/eval-gate-section.md`. The section names the tier (`Tier: push.`); on a push it adds a line counting
 the touched merge-only cases that will run before merge, so a reviewer knows they are pending, not skipped.
 
+After the `ignored:` lines (when any) come the marks, ``needs-merge-model: `<plugin_root>/<case>` — "<reason>"`` for each case
+the base marks (or `needs-merge-model: none`), then ``needs-merge-model changed: `<plugin_root>/<case>`
+(added|altered|removed)`` for each mark the branch adds, alters or removes (an added or altered one says it
+takes effect once merged); the target is in a code span so a case or corpus name cannot autolink. The same lines end the section. A failing case's counts line ends with the model it
+ran on; when a push-tier case failed on a `push_model` that differs from `model`, the output also asks the
+operator whether to add a mark.
+
 - Exit 1: a case failed, the mapping is broken, or the working tree has uncommitted tracked changes
   (`eval-gate: tree-dirty`; nothing is pushed, commit or stash and push again). A corpus new on the branch
   is recorded not-run `corpus-new-on-branch`, which is not persistent and does not stop the push.
@@ -238,8 +255,9 @@ head.
 exits 0, or 2 with a `portage:` message on a usage error or an unreadable mapping.
 
 A history line counts only when its `plugin` and `case` have the mapping's case-name shape and name a mapped case,
-its `fingerprint` equals the case's current pass-cache key computed from the repository, and `pinned_runner` is not
-true. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
+its `fingerprint` equals the case's current pass-cache key for the line's own tier (either tier's key when the line
+records none), computed from the repository, and `pinned_runner` is not true. Once a corpus sets `push_model`, one row
+mixes push-model and merge-model runs, so its median, batch-max and mean cost blend both models. The closing line tallies the others (`corrupt`, `mis-shaped`, `stale`, `pinned`); nothing from them is printed.
 A history with no lines prints that no runs are recorded yet.
 
 The output is a provenance line (the history path, the dates of the counted lines, the runner versions seen), a
@@ -266,7 +284,7 @@ The budget left is `MAX_TIMEOUT_SECONDS` minus the canary's timeout (420 s). Fla
 `portage eval-gate cost --repo <path> --plugin <name> [--runs-from <dir>]...` prices, for each procedure file (a
 regular `.md` file under the plugin's `skills/` that at least one case selects), the cases a one-file edit to it selects
 at the push and merge tiers (the gate's own selection, HEAD as the base; push leaves out `merge_only` cases). Each
-case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
+case is priced at the median recorded cost per run (run plus judge cost) at each tier on the model that tier runs (push on `push_model`, or on `model` for a case the base marks `needs_merge_model`; merge on `model`), from the
 timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
 subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
 named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). That once-only check keys on device and inode numbers, so on a filesystem that reports non-unique or zero inode numbers (some FUSE and network mounts) distinct directories can be taken for one and the files of all but the first are dropped with no tally. A `--runs-from` that is itself a symlink is refused as not a directory (`portage: eval-gate cost: runs-from unreadable: <path> is not a directory`). A run repeated across those files is

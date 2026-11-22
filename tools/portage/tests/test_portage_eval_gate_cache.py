@@ -333,3 +333,50 @@ class TestNeverCachedOrServed:
         assert env.run() == 0
         assert env.result()["verdict"] == "pass"
         assert _cache_files(env) == []
+
+
+class TestCrossModelReuse:
+    def _entries(self, tmp_path, capsys):
+        import json as _json
+        import subprocess
+        from portage.cli import dispatch
+        repo = tmp_path / "xrepo"
+        (repo / "p" / "evals" / "c").mkdir(parents=True)
+        (repo / "p" / "skills").mkdir()
+        (repo / "p" / "skills" / "a.md").write_text("x\n")
+        (repo / "p" / "evals" / "c" / "case.yaml").write_text("name: c\n")
+        (repo / "p" / "evals" / "eval-gate.json").write_text(_json.dumps({
+            "schema_version": 1,
+            "runner": {"model": "opus", "push_model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0},
+            "cases": {"c": {"measures": ["skills/a.md"]}}}))
+
+        def git(*a):
+            subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                            "-c", "commit.gpgsign=false", *a], check=True, capture_output=True)
+        git("init", "-b", "main")
+        git("add", "-A")
+        git("commit", "-m", "c")
+        git("branch", "base")
+        git("checkout", "-b", "feature")
+        (repo / "p" / "skills" / "a.md").write_text("changed\n")
+        git("commit", "-am", "c2")
+        entries = {}
+        for tier in ("push", "merge"):
+            capsys.readouterr()
+            dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--base", "base", "--tier", tier])
+            out = capsys.readouterr().out
+            state = next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):]
+            entries[tier] = _json.loads((Path(state) / "plan.json").read_text())["cases"][0]
+        return repo / "p", entries
+
+    @pytest.mark.parametrize("stored,looked_up", [("push", "merge"), ("merge", "push")])
+    def test_a_pass_stored_for_one_tier_is_not_found_for_the_other(self, tmp_path, monkeypatch, capsys,
+                                                                    stored, looked_up):
+        cdir = {"PORTAGE_CACHE_DIR": str(tmp_path / "cache")}
+        plugin, entries = self._entries(tmp_path, capsys)
+        assert entries["push"]["runner"]["model"] != entries["merge"]["runner"]["model"]
+        result = {"verdict": "pass", "passed": 2, "failed": 0, "errored": 0, "runs": []}
+        fp = {t: cache.fingerprint(plugin, e) for t, e in entries.items()}
+        cache.store(fp[stored], result, cdir)
+        assert cache.lookup(fp[stored], cdir) is not None
+        assert cache.lookup(fp[looked_up], cdir) is None

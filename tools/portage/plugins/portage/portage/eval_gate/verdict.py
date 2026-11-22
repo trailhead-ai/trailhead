@@ -35,11 +35,19 @@ Markers, each on its own line, wrapping the section::
    push). ``case-removed-on-branch`` and ``corpus-new-on-branch`` are not persistent. ``persistent_reasons`` is the
    classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan;
-4. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
+4. the marks, on every status that read the mappings (``cases-selected``, ``no-cases-mapped``):
+   ``needs-merge-model: <plugin_root>/<case> — "<reason>"`` per entry of the plan's ``needs_merge_model``
+   (or ``needs-merge-model: none``), then ``needs-merge-model changed: <plugin_root>/<case>
+   (added|altered|removed) — "<reason>"`` per entry of ``mark_changes`` (no reason on removal; an
+   added or altered mark says it takes effect once merged). A plan without either field reads as
+   none and no changes; a malformed field makes the plan unusable (exit 2). The same lines end the section;
+5. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
    ``state kept: <dir>``, per-run grader verdicts (``run N: <grader>=pass|fail ...``) and
    the sanctioned ways forward, or ``mapping-invalid: <file>: <fault>``; for ``tree-dirty``
-   (exit 1) the one line telling the user to commit or stash and push again;
-5. the section, markers included.
+   (exit 1) the one line telling the user to commit or stash and push again. Each failing case's
+   counts line ends ``(model: <runner.model>)``; a push-tier failure on the push model (``runner.model``
+   equals ``push_model``) adds a line telling the agent to ask the operator about a mark, never to add one;
+6. the section, markers included.
 
 The section is also written to ``<state>/eval-gate-section.md`` (the printed section
 plus a final newline) so an agent that cannot redirect shell output can hand it to
@@ -75,7 +83,7 @@ import re
 import stat
 from pathlib import Path
 
-from .mapping import CASE_NAME, valid_corpus_path
+from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, valid_corpus_path
 from .select import TIERS
 from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
 
@@ -127,6 +135,11 @@ TREE_DIRTY = ("the working tree has uncommitted changes to tracked files; the ga
               "prose — commit or stash, then push again")
 
 
+_CHANGES = ("added", "altered", "removed")
+_MARK_KEYS = {"plugin_root", "case", "reason"}
+_CHANGE_KEYS = {"plugin_root", "case", "change", "reason"}
+
+
 class Fault(Exception):
     """Usage, state or marker fault — exit 2."""
 
@@ -148,6 +161,10 @@ def _corpus(root: object) -> str:
     if isinstance(root, str) and root and valid_corpus_path(root):
         return root
     return "<invalid-corpus-path>"
+
+
+def _model(model: object, fallback: str | None = "<unknown-model>") -> str | None:
+    return model if isinstance(model, str) and MODEL_ID.match(model) else fallback
 
 
 def _count(doc: dict, key: str) -> int:
@@ -208,9 +225,53 @@ def _load_plan(state: Path) -> dict:
                 raise ValueError(f"case name {_safe(c['case'], 60)!r} must match {CASE_NAME.pattern}")
             if not isinstance(c["plugin_root"], str):
                 raise ValueError(f"plugin_root of case {c['case']!r} must be a string")
+        _check_marks(plan.get("needs_merge_model", []), "needs_merge_model", _MARK_KEYS)
+        _check_marks(plan.get("mark_changes", []), "mark_changes", _CHANGE_KEYS)
     except (OSError, ValueError, KeyError, TypeError) as e:
         raise Fault(f"plan.json unusable: {_safe(e)}") from e
     return plan
+
+
+def _check_marks(items: object, field: str, keys: set[str]) -> None:
+    """Each entry's shape re-checked against the loader's; messages never carry the offending value."""
+    if not isinstance(items, list):
+        raise ValueError(f"{field} must be a list")
+    for n, m in enumerate(items):
+        where = f"{field}[{n}]"
+        if not isinstance(m, dict) or set(m) != keys:
+            raise ValueError(f"{where} must be an object with keys {sorted(keys)}")
+        if not isinstance(m["case"], str) or not CASE_NAME.match(m["case"]):
+            raise ValueError(f"{where}.case must match {CASE_NAME.pattern}")
+        if not isinstance(m["plugin_root"], str) or not valid_corpus_path(m["plugin_root"]):
+            raise ValueError(f"{where}.plugin_root is not a valid corpus path")
+        removal = False
+        if "change" in keys:
+            if m["change"] not in _CHANGES:
+                raise ValueError(f"{where}.change must be one of {list(_CHANGES)}")
+            removal = m["change"] == "removed"
+        if removal:
+            if m["reason"] is not None:
+                raise ValueError(f"{where}.reason must be null on removal")
+        elif not isinstance(m["reason"], str) or not NEEDS_MERGE_MODEL.match(m["reason"]):
+            raise ValueError(f"{where}.reason must match {NEEDS_MERGE_MODEL.pattern}")
+
+
+def _mark_target(m: dict) -> str:
+    target = f"{m['plugin_root']}/{m['case']}" if m["plugin_root"] else m["case"]
+    return f"`{target}`"
+
+
+def _marks_lines(plan: dict) -> list[str]:
+    """The ``needs-merge-model`` lines; plan fields are already shape-checked by ``_load_plan``."""
+    marks = plan.get("needs_merge_model", [])
+    out = ([f"needs-merge-model: {_mark_target(m)} \u2014 \"{m['reason']}\"" for m in marks]
+           or ["needs-merge-model: none"])
+    for m in plan.get("mark_changes", []):
+        line = f"needs-merge-model changed: {_mark_target(m)} ({m['change']})"
+        if m["change"] != "removed":
+            line += f" \u2014 \"{m['reason']}\"; takes effect once merged"
+        out.append(line)
+    return out
 
 
 def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
@@ -238,7 +299,10 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
     rows = []
     for c in plan["cases"]:
         res = found.get(c["case"])
+        runner = c.get("runner") if isinstance(c.get("runner"), dict) else {}
         rows.append({"case": c["case"], "corpus": _corpus(c.get("plugin_root")),
+                     "model": _model(runner.get("model")), "push_model": _model(c.get("push_model"), None),
+                     "merge_model": _model(c.get("merge_model"), None),
                      "grants": c.get("new_runner_grants") is True,
                      "merge_only": c.get("merge_only") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
@@ -289,7 +353,8 @@ def _tier_lines(plan: dict) -> list[str]:
 
 
 def _pass_item(row: dict) -> str:
-    return f"`{row['case']}` — pass (cached)" if row["result"]["cached"] else f"`{row['case']}`"
+    cached = " — pass (cached)" if row["result"]["cached"] else ""
+    return f"`{row['case']}`{cached} (model: {row['model']})"
 
 
 def _not_run_items(rows: list[dict]) -> list[str]:
@@ -314,16 +379,26 @@ def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
             for r in rows]
 
 
-def _failure_details(rows: list[dict], state: Path) -> list[str]:
+def _counts(row: dict) -> str:
+    res = row["result"]
+    return f"passed {res['passed']}, failed {res['failed']}, errored {res['errored']} (model: {row['model']})"
+
+
+def _failure_details(rows: list[dict], state: Path, push_tier: bool) -> list[str]:
     out = []
     for r in rows:
         res = r["result"]
         if res["verdict"] != "fail":
             continue
-        out.append(f"{r['case']}: passed {res['passed']}, failed {res['failed']}, errored {res['errored']}")
+        out.append(f"{r['case']}: {_counts(r)}")
         for i, graders in enumerate(res["runs"], 1):
             verdicts = " ".join(f"{g['name']}={'pass' if g['passed'] else 'fail'}" for g in graders)
             out.append(f"  run {i}: {verdicts}".rstrip())
+        if (push_tier and r["push_model"] is not None and r["model"] == r["push_model"]
+                and r["push_model"] != r["merge_model"]):
+            out.append(f"  {r['case']} failed on the push model ({r['model']}). If it passes on the merge "
+                       "model, ask the operator whether to add a needs-merge-model mark (a mark takes "
+                       "effect once it is on main); do not add one yourself.")
     out.append(f"state kept: {state}")
     out.append("Ways forward: fix the prose or the case on the branch, or re-run the gate. "
                "There is no override.")
@@ -361,10 +436,12 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
              "so it selected no cases."])
     if status == "no-cases-mapped" or not plan["cases"]:
         pending = _pending_line(plan)
-        return 0, ["eval-gate: no-cases-mapped", "persistent: none"], _wrap(
-            ["No eval cases are mapped to this change.", *([""] + pending if pending else [])])
+        marks = _marks_lines(plan)
+        return 0, ["eval-gate: no-cases-mapped", "persistent: none", *marks], _wrap(
+            ["No eval cases are mapped to this change.", *([""] + pending if pending else []), "", *marks])
 
     rows, ignored, invalid = _collect(state, plan)
+    marks = _marks_lines(plan)
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
@@ -376,8 +453,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
         report.append("ignored: " + ", ".join(ignored))
     if invalid:
         report.append(f"ignored: {invalid} result with an invalid name")
+    report += marks
     if failed:
-        report += _failure_details(rows, state)
+        report += _failure_details(rows, state, plan.get("tier") == "push")
     if unrun_merge_only:
         report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
         report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
@@ -385,8 +463,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     body: list[str] = []
     if failed:
         body += ["Failed — the gate stopped the push.", ""]
-        body += _bullets([f"`{r['case']}`: passed {r['result']['passed']}, failed "
-                          f"{r['result']['failed']}, errored {r['result']['errored']}" for r in failed])
+        body += _bullets([f"`{r['case']}`: {_counts(r)}" for r in failed])
     passed = [r for r in rows if r["result"]["verdict"] == "pass"]
     if not failed and not notrun:
         reused = sum(1 for r in passed if r["result"]["cached"])
@@ -408,6 +485,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if tier:
         body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
+    body += ["", *marks]
     return (1 if failed or unrun_merge_only else 0), report, _wrap(body)
 
 
