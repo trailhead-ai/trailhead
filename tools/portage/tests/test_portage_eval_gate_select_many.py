@@ -7,7 +7,9 @@ import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.eval_gate import select
-from test_portage_eval_gate_plan import _branch, _commit, _corpus, _git, _mapping, _write, repo  # noqa: F401
+from test_portage_eval_gate_plan import (  # noqa: F401
+    _branch, _commit, _corpus, _declared_corpus, _git, _mapping, _write, repo,
+)
 
 PATHS = ["p/skills/a.md", "p/skills/b.md", "q/skills/a.md", "r/skills/a.md",
          "p/evals/alpha/case.yaml", "p/evals/delta/case.yaml", "nothing/touches/this.md"]
@@ -265,14 +267,14 @@ def _check(measures, tree):
     select._check_against_tree(_MAPPING_PATH, _mapping_of({"c": {"measures": measures}}), tree)
 
 
-@pytest.mark.parametrize("repeats", [1, 400])
-def test_tree_checking_scans_the_tree_at_most_once_however_often_a_measure_repeats(repeats):
+@pytest.mark.parametrize("measures", [1, 64])
+def test_tree_checking_scans_the_tree_at_most_once_however_many_measures_a_case_holds(measures):
     tally = {"scanned": 0, "gets": 0}
-    entries = [f"p/skills/dir{i}/x.md" for i in range(150)] + ["p/skills/f.md"]
+    entries = [f"p/skills/dir{i}/x.md" for i in range(150)]
     tree = _ScanCountingTree(_tree_of(*entries), tally)
-    _check(["skills/dir1", "skills/f.md"] * repeats + ["skills/dir149"], tree)
+    _check([f"skills/dir{i}" for i in range(measures)], tree)
     assert tally["scanned"] <= len(tree)
-    assert tally["gets"] <= 3 + 1
+    assert tally["gets"] <= measures + 1
 
 
 def test_a_tree_shared_by_several_mappings_is_scanned_twice_per_selection_not_per_mapping(shapes):
@@ -295,9 +297,8 @@ def test_a_tree_shared_by_several_mappings_is_scanned_twice_per_selection_not_pe
     (["skills/f.md"], ["p/skills/f.mdx"], False),
     (["skills/dir"], ["p/skills/dirty/x.md"], False),
     (["skills/dir", "skills/gone"], ["p/skills/dir/x.md"], False),
-    (["skills/dir", "skills/dir", "skills/f.md"], ["p/skills/dir/x.md", "p/skills/f.md"], True),
 ], ids=["file", "dir", "nested", "sibling-prefix-a-vs-ab", "sibling-prefix-ab-vs-a", "file-named-like-dir",
-        "missing", "file-prefix", "dir-prefix", "one-of-two-missing", "repeats-held"])
+        "missing", "file-prefix", "dir-prefix", "one-of-two-missing"])
 def test_a_measure_is_held_exactly_when_a_blob_or_a_path_under_it_is_committed(measures, entries, held):
     tree = _tree_of(*entries)
     if held:
@@ -343,7 +344,7 @@ class _CountingList(list):
             yield i
 
 
-@pytest.mark.parametrize("candidates, paths", [(1, 300), (300, 1), (300, 300)])
+@pytest.mark.parametrize("candidates, paths", [(1, 300), (256, 1), (256, 300)])
 def test_candidate_sets_absorbed_grow_with_candidates_plus_paths_not_their_product(repo, monkeypatch,  # noqa: F811
                                                                                     candidates, paths):
     cases = {f"c{i}": {"measures": ["skills/dir"]} for i in range(candidates)}
@@ -375,3 +376,23 @@ def test_a_node_reached_by_one_path_as_a_target_and_by_a_deeper_one_as_a_case_di
     assert [e["case"] for e in select.select_touched(repo, base, ["p/evals/g/x"])] == ["a", "g"]
     got = select.select_touched(repo, base, ["p/evals/g", "p/evals/g/x"])
     assert [e["case"] for e in got] == ["a", "g"]
+
+
+@pytest.mark.parametrize("changed, selected", [
+    ("skills/entry.md", True),
+    ("skills/b-declared.md", True),
+    ("rules/core.md", True),
+    ("rules/rule-a.md", True),
+    ("skills/b-undeclared.md", False),
+    ("rules/rule-b.md", False),
+])
+def test_a_declared_case_is_found_by_its_entry_declared_branch_and_loaded_rules_and_not_by_an_undeclared_branch(
+    repo, changed, selected  # noqa: F811
+):
+    _declared_corpus(repo)
+    _commit(repo)
+    base = _git(repo, "rev-parse", "HEAD")
+    by_path = select.select_touched_by_path(repo, base, [f"p/{changed}"])
+    assert [e["case"] for e in by_path[f"p/{changed}"]] == (["decl"] if selected else [])
+    assert [e["case"] for e in select.select_touched(repo, base, [f"p/{changed}"])] == (
+        ["decl"] if selected else [])

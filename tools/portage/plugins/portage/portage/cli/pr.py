@@ -137,7 +137,7 @@ def _add_merge(sub) -> None:
             "branch is held (`portage hold`) is refused before any merge, whatever "
             "--operator-directed says; a hold is local to this machine's portage state "
             "directory and the repo's real path, so it does not bind a merge made by hand "
-            "or through the host. When the change touches a merge-only eval case, the merge "
+            "or through the host. When the change touches a merge-only or split-procedure eval case, the merge "
             "is refused (exit 2) unless --eval-state names a current merge-tier eval-gate "
             "state for that repo whose head is the PR's current head; --operator-directed "
             "does not waive it, and the merge is pinned to that head."

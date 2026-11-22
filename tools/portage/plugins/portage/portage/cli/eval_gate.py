@@ -8,7 +8,8 @@ push tier, the default, leaves out ``merge_only`` cases; the merge tier keeps th
 writes ``<state>/plan.json`` into a fresh 0700 state directory (shape documented in
 ``portage.eval_gate.select``). Output: ``state: <dir>``, ``status: <status>``,
 ``cases: <n>``, ``max_cost_usd: <sum>``, then one ``<plugin_root>:<case>`` line per
-selected case (and a ``mapping-invalid: <file>: <fault>`` line when a mapping is
+selected case, then one ``case-flags: <plugin_root>:<case> merge_only=<true|false>
+split_procedure=<true|false>`` line per selected case (and a ``mapping-invalid: <file>: <fault>`` line when a mapping is
 refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0 whenever a plan was written,
 including every non-selecting status; exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
 
@@ -81,9 +82,12 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"max_cost_usd: {result['total_max_cost_usd']}")
     if result["mapping_invalid"]:
         bad = result["mapping_invalid"]
-        print(f"mapping-invalid: {gate_verdict._safe(bad['file'])}: {gate_verdict._safe(bad['fault'])}")
+        print(f"mapping-invalid: {gate_verdict._corpus(bad['file'])}: {gate_verdict._safe_fault(bad['fault'])}")
     for c in result["cases"]:
         print(f"{gate_verdict._safe(c['plugin_root'])}:{gate_verdict._safe(c['case'])}")
+    for c in result["cases"]:
+        print(f"case-flags: {gate_verdict._safe(c['plugin_root'])}:{gate_verdict._safe(c['case'])} "
+              f"merge_only={str(c['merge_only']).lower()} split_procedure={str(c['split_procedure']).lower()}")
     return 0
 
 

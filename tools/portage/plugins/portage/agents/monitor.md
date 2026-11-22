@@ -216,7 +216,7 @@ observation: however complete the dispatch says the work is, run the watch loop 
 When **all** PRs report `done` in that sense, before anything merges (and, under `stop_at_ready`,
 before `READY` is written), run the merge-tier gate for each repo in `pr_pairs`, **one repo at a
 time, never two at once**: each case holds a runner open for minutes on one login. A repo whose
-change touches no `merge_only` case skips it and behaves as it always has.
+change touches no `merge_only` or `split_procedure` case skips it and behaves as it always has.
 
 1. **Plan.** Run, as one command on its own line:
 
@@ -224,14 +224,15 @@ change touches no `merge_only` case skips it and behaves as it always has.
    portage eval-gate plan --repo <repo_path> --tier merge
    ```
 
-   It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, then one
-   `<plugin_root>:<case>` line per selected case. The merge tier selects every touched case, and the
-   printed lines do not say which are `merge_only`: read `<dir>/plan.json` with `Read`, whose
-   `cases` entries each carry `"merge_only": true|false`.
-   - `status: cases-selected` and at least one entry has `"merge_only": true`: the gate applies.
+   It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>` line per
+   selected case, then one `case-flags: <plugin_root>:<case> merge_only=<true|false>
+   split_procedure=<true|false>` line per selected case. The merge tier selects every touched case; the
+   `case-flags:` lines say which are `merge_only` or `split_procedure`.
+   - `status: cases-selected` and at least one `case-flags:` line has `merge_only=true` or
+     `split_procedure=true`: the gate applies.
      Keep `<dir>`.
    - Any other `status` (`no-cases-mapped`, or `tree-dirty`, `base-unresolved`, `mapping-invalid`
-     where the plan cannot tell), or no `merge_only` entry: no gate for this repo. Go straight on to
+     where the plan cannot tell), or no `merge_only` or `split_procedure` entry: no gate for this repo. Go straight on to
      its `portage merge` pair with no `--eval-state`; `portage merge` makes the same decision from
      the repo itself and refuses when the gate was needed.
    - `plan` exits non-zero: it is a fault, not a verdict. Do not guess at one: treat the repo as
@@ -240,7 +241,7 @@ change touches no `merge_only` case skips it and behaves as it always has.
 
 2. **Run each planned case: one foreground call per case, one case at a time.** Pass the case name
    alone, the part after the last colon of the printed line, for every case the plan lists
-   (`merge_only` or not):
+   (`merge_only`, `split_procedure` or neither):
 
    ```bash
    portage eval-gate run --state <dir> --case <case>
@@ -267,7 +268,8 @@ change touches no `merge_only` case skips it and behaves as it always has.
    Its stdout starts `eval-gate: <outcome>` then `persistent: <codes>|none`, and ends with the
    section between `<!-- portage:eval-gate:start -->` and `<!-- portage:eval-gate:end -->`, which is
    also saved at `<dir>/eval-gate-section.md`. Exit **0** means go; exit **1** means stop. A stop
-   prints `merge-only-not-run: <case>` when a `merge_only` case could not run; a case that failed
+   prints `merge-only-not-run: <case>` when a `merge_only` case could not run, or
+   `split-procedure-not-run: <case>` when a `split_procedure` case could not run; a case that failed
    makes the first line `eval-gate: fail…` instead. Any other exit (a fault) is neither: report
    `BLOCKED other` naming the exit and its stderr line, and merge nothing.
 
@@ -310,8 +312,10 @@ Then, with every PR still `done`:
     could not run). Recovery: fix the prose or the case and push; the monitor, run again, re-runs
     only the repos that changed.
   - `printf '%s\n' 'BLOCKED eval-gate-not-run' > <outcome_file>` when no case failed and a
-    `merge_only` case could not run (the verdict's reason `merge-only-not-run`). Recovery: run the
-    monitor again after the usage limit resets, or merge by hand.
+    `merge_only` or `split_procedure` case could not run (the verdict's `merge-only-not-run` or
+    `split-procedure-not-run`). Recovery: run the monitor again after the usage limit resets, or
+    merge by hand. A reason line `<case>: corpus-new-on-branch` for a `split_procedure` case means
+    the corpus is new on the branch: land the corpus mapping first, then run the monitor again.
 
   These two tokens are written even when the dispatch lists none. The case names go in the report,
   never in the outcome line. The report also relays every `needs-merge-model changed:` line

@@ -26,7 +26,7 @@ Markers, each on its own line, wrapping the section::
 
 1. the leading report line ``eval-gate: <outcome>`` with outcome one of ``passed``,
    ``failed``, ``not-run``, ``no-cases-mapped``, ``base-unresolved``,
-   ``mapping-invalid``, ``tree-dirty``, ``gate-error``;
+   ``base-invalid``, ``mapping-invalid``, ``tree-dirty``, ``gate-error``;
 2. ``persistent: <codes>`` — the sorted, comma-joined persistent reason codes among
    the not-run cases (``runner-missing``, ``harness-has-no-eval-runner``,
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
@@ -34,7 +34,9 @@ Markers, each on its own line, wrapping the section::
    ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
    push). ``case-removed-on-branch`` and ``corpus-new-on-branch`` are not persistent. ``persistent_reasons`` is the
    classification of reason codes;
-3. ``ignored:`` lines for result files whose case is not in the plan;
+3. ``ignored:`` lines for result files whose case is not in the plan, then one
+   ``derived: <plugin_root> <case>: <file>, <file>, ...`` line per selected declared case (the plan entry's
+   ``derived`` list, plugin-relative; a file that is not safe to print shows as ``#<position>``);
 4. the marks, on every status that read the mappings (``cases-selected``, ``no-cases-mapped``):
    ``needs-merge-model: <plugin_root>/<case> — "<reason>"`` per entry of the plan's ``needs_merge_model``
    (or ``needs-merge-model: none``), then ``needs-merge-model changed: <plugin_root>/<case>
@@ -44,7 +46,8 @@ Markers, each on its own line, wrapping the section::
 5. on exit 1, the failing cases with counts (``<case>: passed P, failed F, errored E``),
    ``state kept: <dir>``, per-run grader verdicts (``run N: <grader>=pass|fail ...``) and
    the sanctioned ways forward, or ``mapping-invalid: <file>: <fault>``; for ``tree-dirty``
-   (exit 1) the one line telling the user to commit or stash and push again. Each failing case's
+   (exit 1) the one line telling the user to commit or stash and push again, and for ``base-invalid`` (exit 1)
+   ``base-invalid: the base must not start with '-'``. Each failing case's
    counts line ends ``(model: <runner.model>)``; a push-tier failure on the push model (``runner.model``
    equals ``push_model``) adds a line telling the agent to ask the operator about a mark, never to add one;
 6. the section, markers included.
@@ -59,7 +62,11 @@ change too: exit 1, the report line ``merge-only-not-run: <cases>``, then one li
 not-run reason and the matching recovery (``timeout``: re-run the merge-tier gate; ``cost-cap``: raise the
 case's ``max_cost_usd`` or merge by hand; ``runner-error`` and ``runs-errored``: re-run after the usage limit
 resets, or merge by hand; ``head-moved``: re-plan at the current head; any other reason: merge by hand),
-repeated in the section. A merge-only case that can never run (``case-removed-on-branch``,
+repeated in the section. A ``split_procedure`` case (its entry loads a branch file) stops the same way at the
+merge tier, under the report line ``split-procedure-not-run: <cases>`` with the same per-case lines; a case
+that is both is named under the split line only. Unlike a merge-only case, a split case in a corpus new on the
+branch (``corpus-new-on-branch``) stops too, its line saying to land the corpus mapping first; one removed on
+the branch (``case-removed-on-branch``) is exempt. A merge-only case that can never run (``case-removed-on-branch``,
 ``corpus-new-on-branch``) is reported as on push and does not stop the change. A not-run core case
 still lets the change through, as on push.
 
@@ -83,7 +90,7 @@ import re
 import stat
 from pathlib import Path
 
-from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, valid_corpus_path
+from .mapping import CASE_NAME, MODEL_ID, NEEDS_MERGE_MODEL, derived_names, valid_corpus_path
 from .select import TIERS
 from portage.eval_core.run import NO_RUNNER, RUNNER_MISSING
 
@@ -102,6 +109,8 @@ END_MARKER = "<!-- portage:eval-gate:end -->"
 SECTION_FILE = "eval-gate-section.md"
 NO_RESULT = "no-result-recorded"
 MERGE_ONLY_NOT_RUN = "merge-only-not-run"
+SPLIT_NOT_RUN = "split-procedure-not-run"
+STOP_LINES = (MERGE_ONLY_NOT_RUN, SPLIT_NOT_RUN)
 
 UNRUNNABLE = (CASE_REMOVED, CORPUS_NEW)
 
@@ -129,7 +138,10 @@ REASONS = {
 
 _STEP = re.compile(r"^[a-z][a-z0-9-]{0,31}\Z")
 _GRADER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
-_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "mapping-invalid", "tree-dirty")
+_STATUSES = ("cases-selected", "no-cases-mapped", "base-unresolved", "base-invalid", "mapping-invalid",
+             "tree-dirty")
+
+BASE_INVALID = "the base must not start with '-'"
 
 TREE_DIRTY = ("the working tree has uncommitted changes to tracked files; the gate grades committed "
               "prose — commit or stash, then push again")
@@ -151,6 +163,10 @@ def persistent_reasons(reasons) -> list[str]:
 
 def _safe(text: object, limit: int = 300) -> str:
     return "".join(c for c in str(text) if c.isprintable())[:limit]
+
+
+def _safe_fault(text: object, limit: int = 300) -> str:
+    return re.sub(r"[^A-Za-z0-9 ._/'#,()-]", "", str(text))[:limit]
 
 
 def one_line(exc: BaseException) -> str:
@@ -225,6 +241,9 @@ def _load_plan(state: Path) -> dict:
                 raise ValueError(f"case name {_safe(c['case'], 60)!r} must match {CASE_NAME.pattern}")
             if not isinstance(c["plugin_root"], str):
                 raise ValueError(f"plugin_root of case {c['case']!r} must be a string")
+            derived = c.get("derived")
+            if "derived" in c and not (isinstance(derived, list) and all(isinstance(f, str) for f in derived)):
+                raise ValueError(f"derived of case {c['case']!r} must be a list of strings")
         _check_marks(plan.get("needs_merge_model", []), "needs_merge_model", _MARK_KEYS)
         _check_marks(plan.get("mark_changes", []), "mark_changes", _CHANGE_KEYS)
     except (OSError, ValueError, KeyError, TypeError) as e:
@@ -274,6 +293,13 @@ def _marks_lines(plan: dict) -> list[str]:
     return out
 
 
+def _derived_lines(plan: dict) -> list[str]:
+    """One ``derived:`` line per selected declared case; the files are named only through ``derived_names``."""
+    return [f"derived: {_corpus(c.get('plugin_root'))} {c['case']}: "
+            + derived_names(c["derived"])
+            for c in plan["cases"] if "derived" in c]
+
+
 def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
     """Per planned case its usable result (or None); ignored valid names; invalid-name count."""
     results_dir = state / "results"
@@ -305,6 +331,7 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
                      "merge_model": _model(c.get("merge_model"), None),
                      "grants": c.get("new_runner_grants") is True,
                      "merge_only": c.get("merge_only") is True,
+                     "split": c.get("split_procedure") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
                                        "passed": 0, "failed": 0, "errored": 0}})
     return rows, ignored, invalid
@@ -362,7 +389,7 @@ def _not_run_items(rows: list[dict]) -> list[str]:
             for r in rows if r["result"]["verdict"] == "not-run"]
 
 
-def _merge_only_recovery(reason: str) -> str:
+def _stop_recovery(reason: str) -> str:
     if reason == "timeout":
         return "the runs split and the budget ran out; re-run the merge-tier gate"
     if reason == "cost-cap":
@@ -371,11 +398,13 @@ def _merge_only_recovery(reason: str) -> str:
         return "re-run after the usage limit resets, or merge by hand"
     if reason == HEAD_MOVED:
         return "re-plan at the current head"
+    if reason == CORPUS_NEW:
+        return "the corpus is new on the branch; land the corpus mapping first, then re-plan"
     return f"{REASONS[reason]}; merge by hand"
 
 
-def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
-    return [f"{r['case']}: {r['result']['reason']} — {_merge_only_recovery(r['result']['reason'])}"
+def _stop_lines(rows: list[dict]) -> list[str]:
+    return [f"{r['case']}: {r['result']['reason']} — {_stop_recovery(r['result']['reason'])}"
             for r in rows]
 
 
@@ -414,7 +443,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
 
     if status == "mapping-invalid":
         bad = plan.get("mapping_invalid") if isinstance(plan.get("mapping_invalid"), dict) else {}
-        file, fault = _corpus(bad.get("file")), _safe(bad.get("fault", "unspecified"))
+        file, fault = _corpus(bad.get("file")), _safe_fault(bad.get("fault", "unspecified"))
         if bad.get("revision") == "base":
             section = _wrap([f"The eval-case mapping `{file}` is invalid at the base revision, so no case "
                              "was selected. Fixing it on the branch will not clear this: the fix must "
@@ -430,6 +459,9 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if status == "tree-dirty":
         return 1, ["eval-gate: tree-dirty", "persistent: none", TREE_DIRTY], _wrap(
             [f"The eval gate stopped the push: {TREE_DIRTY}."])
+    if status == "base-invalid":
+        return 1, ["eval-gate: base-invalid", "persistent: none", f"base-invalid: {BASE_INVALID}"], _wrap(
+            [f"The eval gate stopped the push: {BASE_INVALID}; pass a branch name or a commit id."])
     if status == "base-unresolved":
         return 0, ["eval-gate: base-unresolved", "persistent: base-unresolved"], _wrap(
             ["The eval gate could not determine the changed files (the base ref did not resolve), "
@@ -445,20 +477,26 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     failed = [r for r in rows if r["result"]["verdict"] == "fail"]
     notrun = [r for r in rows if r["result"]["verdict"] == "not-run"]
     persistent = persistent_reasons(r["result"]["reason"] for r in notrun)
-    unrun_merge_only = ([r for r in notrun if r["merge_only"] and r["result"]["reason"] not in UNRUNNABLE]
-                        if plan.get("tier") == "merge" else [])
+    merge_tier = plan.get("tier") == "merge"
+    unrun_split = ([r for r in notrun if r["split"] and r["result"]["reason"] != CASE_REMOVED]
+                   if merge_tier else [])
+    unrun_merge_only = ([r for r in notrun if r["merge_only"] and not r["split"]
+                         and r["result"]["reason"] not in UNRUNNABLE] if merge_tier else [])
     outcome = "failed" if failed else "not-run" if notrun else "passed"
     report = [f"eval-gate: {outcome}", f"persistent: {','.join(persistent) or 'none'}"]
     if ignored:
         report.append("ignored: " + ", ".join(ignored))
     if invalid:
         report.append(f"ignored: {invalid} result with an invalid name")
+    report += _derived_lines(plan)
     report += marks
     if failed:
         report += _failure_details(rows, state, plan.get("tier") == "push")
-    if unrun_merge_only:
-        report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
-        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
+    stops = [stop for stop in ((MERGE_ONLY_NOT_RUN, "merge-only", unrun_merge_only),
+                               (SPLIT_NOT_RUN, "split-procedure", unrun_split)) if stop[2]]
+    for line, _, unrun in stops:
+        report.append(f"{line}: " + ", ".join(r["case"] for r in unrun))
+        report += [f"  {ln}" for ln in _stop_lines(unrun)]
 
     body: list[str] = []
     if failed:
@@ -477,16 +515,16 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))
-    if unrun_merge_only:
-        body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
-                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + ".", ""]
-        body += _bullets(_merge_only_stop_lines(unrun_merge_only))
+    for line, kind, unrun in stops:
+        body += ["", f"Stopped — `{line}`: a {kind} case must run before merge, and "
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun) + ".", ""]
+        body += _bullets(_stop_lines(unrun))
     tier = _tier_lines(plan)
     if tier:
         body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
     body += ["", *marks]
-    return (1 if failed or unrun_merge_only else 0), report, _wrap(body)
+    return (1 if failed or stops else 0), report, _wrap(body)
 
 
 def render_gate_error(step: str) -> str:

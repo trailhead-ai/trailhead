@@ -539,6 +539,16 @@ def test_base_unresolved_is_a_persistent_reason(st, capsys):
     assert out.splitlines()[:2] == ["eval-gate: base-unresolved", "persistent: base-unresolved"]
 
 
+def test_base_invalid_stops_the_push_with_the_base_line(st, capsys):
+    st.plan([], status="base-invalid")
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    assert out.splitlines()[:3] == ["eval-gate: base-invalid", "persistent: none",
+                                    "base-invalid: the base must not start with '-'"]
+    assert "the base must not start with '-'" in section_of(out)
+    assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
 def test_case_removed_on_branch_is_listed_with_its_gloss_and_is_not_persistent(st, capsys):
     st.plan([_entry("gone")])
     st.result("gone", verdict="not-run", passed=0, failed=0, errored=3, reason="case-removed-on-branch")
@@ -871,6 +881,105 @@ class TestMergeOnlyNotRunRecovery:
         assert "usage limit resets" in other_out
 
 
+def _split_plan(st, tier="merge", *, result="pass", reason=None, cached=False, merge_only=False,
+                split=True):
+    """A merge-tier plan of a core case and one case (``sp``) that is split-procedure unless told
+    otherwise; ``sp``'s result is ``pass``, ``missing`` or a not-run with ``reason``."""
+    sp = {**_entry("sp"), "merge_only": merge_only, "split_procedure": split}
+    core = {**_entry("core"), "merge_only": False, "split_procedure": False}
+    st.plan([core, sp])
+    doc = json.loads((st.dir / "plan.json").read_text())
+    doc.update({"tier": tier, "head": "a" * 40, "merge_only_pending": 0})
+    (st.dir / "plan.json").write_text(json.dumps(doc))
+    st.result("core")
+    plan_case = next(c for c in doc["cases"] if c["case"] == "sp")
+    assert plan_case["split_procedure"] is split
+    if result == "pass":
+        st.result("sp", doc={**_result("sp"), "cached": cached})
+    elif result == "not-run":
+        st.result("sp", verdict="not-run", passed=0, errored=0, reason=reason)
+
+
+class TestSplitProcedureBackstopVerdict:
+    @pytest.mark.parametrize("result,reason", [("not-run", "timeout"), ("missing", None)])
+    def test_a_not_run_split_procedure_case_stops_the_change_naming_it_as_split_procedure(
+        self, st, capsys, result, reason
+    ):
+        _split_plan(st, result=result, reason=reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        assert "split-procedure-not-run: sp" in out.split("<!--", 1)[0]
+        section = section_of(out)
+        assert "`split-procedure-not-run`" in section and "`sp`" in section
+        assert "merge-only-not-run" not in out
+
+    @pytest.mark.parametrize("cached", [False, True])
+    def test_a_passing_split_procedure_case_fresh_or_cached_lets_the_change_through(
+        self, st, capsys, cached
+    ):
+        _split_plan(st, cached=cached)
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out
+
+    def test_the_same_not_run_split_case_does_not_stop_a_push_tier_state(self, st, capsys):
+        _split_plan(st, "push", result="not-run", reason="timeout")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out
+
+    def test_a_not_run_case_that_is_neither_split_nor_merge_only_still_lets_the_change_through(
+        self, st, capsys
+    ):
+        _split_plan(st, result="not-run", reason="timeout", split=False)
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out and "merge-only-not-run" not in out
+
+    def test_a_split_case_removed_on_the_branch_does_not_stop_the_change(self, st, capsys):
+        _split_plan(st, result="not-run", reason="case-removed-on-branch")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out
+
+    def test_a_split_case_in_a_corpus_new_on_the_branch_stops_with_the_land_the_corpus_first_line(
+        self, st, capsys
+    ):
+        _split_plan(st, result="not-run", reason="corpus-new-on-branch")
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        for text in (out.split("<!--", 1)[0], section_of(out)):
+            line = next(ln for ln in text.splitlines() if "sp: corpus-new-on-branch" in ln)
+            assert "land the corpus mapping first" in line
+
+    def test_an_unsplit_merge_only_case_in_a_new_corpus_still_does_not_stop_the_change(self, st, capsys):
+        _split_plan(st, result="not-run", reason="corpus-new-on-branch", merge_only=True, split=False)
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+
+    @pytest.mark.parametrize("reason,recovery", [
+        ("timeout", "the runs split and the budget ran out; re-run the merge-tier gate"),
+        ("cost-cap", "the case hit its own cost ceiling; raise its `max_cost_usd` or merge by hand"),
+        ("runner-error", "re-run after the usage limit resets, or merge by hand"),
+        ("head-moved", "re-plan at the current head"),
+    ])
+    def test_the_stop_reuses_the_merge_only_recovery_lines(self, st, capsys, reason, recovery):
+        _split_plan(st, result="not-run", reason=reason)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        for text in (out.split("<!--", 1)[0], section_of(out)):
+            line = next(ln for ln in text.splitlines() if "sp" in ln and recovery in ln)
+            assert reason in line
+
+    def test_a_split_case_that_is_also_merge_only_is_named_once_as_split_procedure(self, st, capsys):
+        _split_plan(st, result="not-run", reason="timeout", merge_only=True)
+        code, out, _ = verdict(capsys, st)
+        assert code == 1
+        head = out.split("<!--", 1)[0]
+        assert "split-procedure-not-run: sp" in head
+        assert "merge-only-not-run" not in head
+
+
 def _mark(case, reason="Needs deep multi-file reasoning", root="tools/craft/plugins/craft"):
     return {"plugin_root": root, "case": case, "reason": reason}
 
@@ -1125,3 +1234,75 @@ class TestModelOnFailure:
         st.result("bad", verdict="fail", passed=0, failed=3)
         _, out, _ = verdict(capsys, st)
         assert "(model: sonnet)" in out and ASK not in out
+
+
+def test_a_stored_fault_is_reprinted_only_through_the_allowlist(st, capsys):
+    st.plan(status="mapping-invalid",
+            mapping_invalid={"file": "plugins/demo/evals/eval-gate.json",
+                             "fault": "unknown key @x in case 'a.b' https://evil.example/y (#2, ok-1)"})
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    line = next(ln for ln in out.splitlines() if ln.startswith("mapping-invalid: "))
+    assert "@" not in line and "https:" not in line
+    assert "unknown key x in case 'a.b' https//evil.example/y (#2, ok-1)" in line
+
+
+def _declared(case, derived, root="plugins/demo"):
+    return {**_entry(case, root), "split_procedure": False, "derived": derived}
+
+
+def test_a_selected_declared_case_prints_its_derived_files_on_one_line_per_case(st, capsys):
+    st.plan([_declared("decl", ["skills/e.md", "rules/core.md"]), _entry("hand"),
+             _declared("other", ["skills/o.md"], root="plugins/two")])
+    for case in ("decl", "hand", "other"):
+        st.result(case)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    report = out.split("<!--")[0].splitlines()
+    assert [ln for ln in report if ln.startswith("derived:")] == [
+        "derived: plugins/demo decl: skills/e.md, rules/core.md",
+        "derived: plugins/two other: skills/o.md"]
+    assert report.index("derived: plugins/demo decl: skills/e.md, rules/core.md") < report.index(
+        "needs-merge-model: none")
+
+
+def test_a_plan_with_no_declared_case_prints_no_derived_line(st, capsys):
+    st.plan([_entry("hand")])
+    st.result("hand")
+    assert "derived:" not in verdict(capsys, st)[1]
+
+
+def test_a_derived_file_with_unsafe_characters_is_named_by_position(st, capsys):
+    st.plan([_declared("decl", ["skills/e.md", "skills/@victim\nevil.example.md"])])
+    st.result("decl")
+    out = verdict(capsys, st)[1]
+    assert "derived: plugins/demo decl: skills/e.md, #2" in out.splitlines()
+    assert "evil.example" not in out
+
+
+@pytest.mark.parametrize("count", [20, 21, 25])
+def test_a_long_derived_list_prints_the_first_twenty_then_how_many_more(st, capsys, count):
+    files = [f"skills/f{i}.md" for i in range(count)]
+    st.plan([_declared("decl", files)])
+    st.result("decl")
+    line = next(ln for ln in verdict(capsys, st)[1].splitlines() if ln.startswith("derived:"))
+    shown = ", ".join(files[:20])
+    more = f", ... (+{count - 20} more)" if count > 20 else ""
+    assert line == f"derived: plugins/demo decl: {shown}{more}"
+
+
+def test_a_truncated_derived_list_still_names_unsafe_files_by_position(st, capsys):
+    files = [f"skills/f{i}.md" for i in range(30)]
+    files[2] = "skills/@victim\nevil.md"
+    st.plan([_declared("decl", files)])
+    st.result("decl")
+    out = verdict(capsys, st)[1]
+    assert "skills/f1.md, #3, skills/f3.md" in out and "evil" not in out
+
+
+@pytest.mark.parametrize("bad", ["skills/e.md", [3], {"a": 1}])
+def test_a_derived_field_that_is_not_a_list_of_strings_makes_the_plan_unusable(st, capsys, bad):
+    st.plan([{**_entry("decl"), "derived": bad}])
+    st.result("decl")
+    code, _, err = verdict(capsys, st)
+    assert code == 2 and "plan.json unusable" in err

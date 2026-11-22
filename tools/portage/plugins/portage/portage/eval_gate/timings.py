@@ -40,7 +40,8 @@ from portage.eval_core import run as core
 
 from . import history
 from .canary import TIMEOUT_SECONDS as CANARY_SECONDS
-from .mapping import CASE_NAME, MappingError, load_mapping, valid_corpus_path
+from .loads import LoadError, cached, derive, tree_reader
+from .mapping import CASE_NAME, MappingError, _q, load_mapping, valid_corpus_path
 from .run import MAX_TIMEOUT_SECONDS, _cache_key
 from .select import MAPPING_NAME, TIERS, resolve_runner
 from .verdict import _safe
@@ -117,11 +118,17 @@ def _mapped_cases(repo: Path, only_plugin: str | None) -> dict[tuple[str, str], 
         plugin = PurePosixPath(root).name
         if only_plugin is not None and plugin != only_plugin:
             continue
-        for name, case in mapping.cases.items():
+        read = cached(tree_reader(plugin_dir))
+        for position, (name, case) in enumerate(mapping.cases.items(), 1):
+            try:
+                derived = derive(case.entry, case.branches, read).files if case.entry else ()
+            except LoadError as e:
+                raise TimingsError(f"mapping unreadable: case {_q(name, position)}: {e}") from None
+            measures = list(dict.fromkeys((*case.measures, *derived)))
             keys = {tier: _cache_key(plugin_dir, {
                 "case": name, "runner": resolve_runner(mapping.runner, tier, case.needs_merge_model),
                 "runs": case.runs, "pass_at": case.pass_at, "plugin_root": root,
-                "measures": list(case.measures)}) for tier in TIERS}
+                "measures": measures}) for tier in TIERS}
             cases[(plugin, name)] = _Case(
                 plugin, name, case.merge_only, core._first_batch(case.runs, case.pass_at),
                 keys, _declared_timeout(base / name))

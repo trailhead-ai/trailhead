@@ -1,10 +1,10 @@
 """The merge-tier backstop behind ``portage merge --eval-state``.
 
 ``check_pair`` decides, for one pull request's repo, whether a merge may go ahead and which head
-commit to pin it to. It applies only when the repo's change touches a ``merge_only`` eval case
-(decided by ``select.merge_only_touched``, the selection ``plan`` uses); anywhere else it answers
-"not applicable" and the merge is unchanged. Where it applies, every one of these refuses, and the
-check name is what the refusal prints::
+commit to pin it to. It applies only when the repo's change touches a ``merge_only`` or a
+``split_procedure`` eval case (one whose entry loads a branch file; decided by ``select.backstop_touched``, the
+selection ``plan`` uses); anywhere else it answers "not applicable" and the merge is unchanged. Where it
+applies, every one of these refuses, and the check name is what the refusal prints::
 
     no-state                    no ``--eval-state`` was given for the repo
     state-unusable              ``run.check_state`` refused the state directory
@@ -15,23 +15,30 @@ check name is what the refusal prints::
                                 mapping, an unresolved base, or nothing selected)
     plan-head-malformed         the plan's ``head`` is not a full lowercase hex commit id
     plan-misses-merge-only-case the plan does not list a merge-only case this change touches
+    plan-misses-split-procedure-case
+                                the plan does not list a split-procedure case this change touches
+                                (and no merge-only one)
     head-unreadable             the PR's remote head could not be read
     head-mismatch               the plan's ``head`` is not the PR's current remote head
-    verdict-stops-the-change    ``verdict`` on the state exits non-zero, or cannot be computed
+    verdict-stops-the-change    ``verdict`` on the state exits non-zero (a failed case, a merge-only case
+                                not run, a split-procedure case not run or in a corpus new on the
+                                branch), or cannot be computed; the detail carries the report's stop line
     selection-failed            git could not answer which cases the change touches
-    local-head-stale            the change touches no merge-only case, but the repo holds an eval-gate
-                                mapping and the PR's remote head is not the local ``HEAD`` the
-                                "touches" answer was computed from (a remote-only commit); pull the
-                                PR head and retry
+    local-head-stale            the change touches no merge-only or split-procedure case, but the repo
+                                holds an eval-gate mapping and the PR's remote head is not the local
+                                ``HEAD`` the "touches" answer was computed from (a remote-only commit);
+                                pull the PR head and retry
 
-A case is merge-only when the merge-base's or HEAD's committed mapping marks it; a dirty working
-tree changes nothing. When the applicability is unknown (the base does not resolve, or a mapping is
-invalid) the check applies: an unknown answer is never read as "no merge-only case". Where the check
-does not apply but the repo holds any ``eval-gate.json`` mapping (at HEAD or the merge-base), the merge
-is pinned to the remote head, and refused when that head is not local ``HEAD``; a repo with no mapping
-merges unpinned, with no head read. A failure of git or the OS to answer is ``selection-failed``, and
-only git's explicit "not a git repository" makes the check not applicable. The contents of ``plan.json`` are
-untrusted; the head is shape-checked before it is compared or reaches a ``gh`` argv.
+A case is merge-only when the merge-base's or HEAD's committed mapping marks it, and split-procedure when
+its declared entry loads a branch file at the base or at HEAD; a dirty working tree changes nothing. A split
+case removed on the branch passes the check as its verdict does. When the applicability is unknown (the base
+does not resolve, or a mapping is invalid) the check applies: an unknown answer is never read as "no
+merge-only or split-procedure case". Where the check does not apply but the repo holds any
+``eval-gate.json`` mapping (at HEAD or the merge-base), the merge is pinned to the remote head, and refused
+when that head is not local ``HEAD``; a repo with no mapping merges unpinned, with no head read. A failure of
+git or the OS to answer is ``selection-failed``, and only git's explicit "not a git repository" makes the
+check not applicable. The contents of ``plan.json`` are untrusted; the head is shape-checked before it is
+compared or reaches a ``gh`` argv.
 
 The stderr form is ``portage merge: eval-gate check failed for <repo>: <check> — <detail>``
 followed by the remedy commands; ``format_refusal`` builds it.
@@ -47,7 +54,7 @@ from pathlib import Path
 from trailhead.vcs.github import InvalidInputError, validate_commit_sha
 
 from .run import RunRefused, check_state
-from .select import GitError, NotAWorkTree, local_head, merge_only_touched, repo_has_mapping
+from .select import GitError, NotAWorkTree, local_head, backstop_touched, repo_has_mapping
 from . import verdict as gate_verdict
 
 
@@ -76,9 +83,9 @@ def parse_eval_states(values: list[str]) -> dict[str, Path]:
 
 
 def _applies(repo: Path) -> tuple[bool, str, list[dict]]:
-    """``(applies, status, merge_only_entries)``; raises ``GitError`` when git cannot answer."""
+    """``(applies, status, backstop_entries)``; raises ``GitError`` when git cannot answer."""
     try:
-        status, entries = merge_only_touched(repo)
+        status, entries = backstop_touched(repo)
     except NotAWorkTree:
         return False, "not-a-work-tree", []
     return (status == "mapping-invalid" or bool(entries)), status, entries
@@ -112,7 +119,7 @@ def check_pair(
     merge to ``head``), ``(Refusal, None)`` when the merge must be refused."""
     repo = Path(repo_path)
     try:
-        applies, status, merge_only = _applies(repo)
+        applies, status, covered = _applies(repo)
     except (GitError, OSError) as e:
         return Refusal("selection-failed", gate_verdict.one_line(e)), None
     if not applies:
@@ -122,7 +129,7 @@ def check_pair(
         return Refusal(check, detail, unresolved or status == "base-unresolved")
 
     if state is None:
-        return refuse("no-state", "this change touches a merge-only eval case and no --eval-state "
+        return refuse("no-state", "this change touches a merge-only or split-procedure eval case and no --eval-state "
                                    "was given for this repo"), None
     try:
         check_state(state)
@@ -151,10 +158,14 @@ def check_pair(
         return refuse("plan-head-malformed", str(e)), None
     if status == "ok":
         planned = {(c.get("plugin_root"), c["case"]) for c in plan["cases"]}
-        missing = sorted(c["case"] for c in merge_only if (c["plugin_root"], c["case"]) not in planned)
+        missing = sorted((c for c in covered if (c["plugin_root"], c["case"]) not in planned),
+                         key=lambda c: c["case"])
         if missing:
-            return refuse("plan-misses-merge-only-case",
-                           "the plan does not list " + ", ".join(missing)), None
+            check = ("plan-misses-merge-only-case" if any(c["merge_only"] and not c["split_procedure"]
+                                                         for c in missing)
+                     else "plan-misses-split-procedure-case")
+            return refuse(check, "the plan does not list " + ", ".join(
+                c["case"] + (" (split-procedure)" if c["split_procedure"] else "") for c in missing)), None
     try:
         remote_head = validate_commit_sha(read_head())
     except (RuntimeError, InvalidInputError) as e:
@@ -168,7 +179,16 @@ def check_pair(
         return refuse("verdict-stops-the-change", f"verdict could not be computed: "
                                                    f"{gate_verdict.one_line(e)}"), None
     if code != 0:
-        return refuse("verdict-stops-the-change", "; ".join(report[:3])), None
+        stops, under_stop = [], False
+        for ln in report[3:]:
+            if ln.startswith(gate_verdict.STOP_LINES):
+                stops.append(ln)
+                under_stop = True
+            elif under_stop and ln.startswith("  "):
+                stops.append(ln.strip())
+            else:
+                under_stop = False
+        return refuse("verdict-stops-the-change", "; ".join(report[:3] + stops)), None
     return None, planned_head
 
 
@@ -183,7 +203,7 @@ def format_refusal(repo_path: str, refusal: Refusal) -> str:
                                   "remote head) and retry the merge."])
     return "\n".join([
         first,
-        "portage merge: a change that touches a merge-only eval case needs a current merge-tier "
+        "portage merge: a change that touches a merge-only or split-procedure eval case needs a current merge-tier "
         "verdict before it merges (--operator-directed does not waive this). To produce one:",
         f"  portage eval-gate plan --repo {quoted} --tier merge{base}     # prints `state: <dir>`",
         "  portage eval-gate run --state <dir> --case <case>      # once per planned case",
