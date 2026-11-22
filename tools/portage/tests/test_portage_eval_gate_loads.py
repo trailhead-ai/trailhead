@@ -120,10 +120,59 @@ class TestDerive:
         got = derive(ENTRY, [], reader(corpus(**{ENTRY: text})))
         assert R2 in got.files
 
+    @pytest.mark.parametrize("text", [
+        "See [the rules](../_shared/r.md#step) for detail.\n",
+        "See [the rules](../_shared/r.md) for detail.\n",
+        "Rules at `../_shared/r.md#step` apply.\n",
+        "Rules at ``../_shared/r.md`` apply.\n",
+        "A stray ` backtick, then ../_shared/r.md applies\n",
+        "```\ncat ../_shared/r.md\n```\n",
+    ], ids=["link-anchor", "link", "backtick-anchor", "double-backtick", "unpaired-backtick", "fence"])
+    def test_a_rule_file_named_only_in_a_link_anchor_double_backtick_unpaired_backtick_or_fence_is_in_the_closure(
+        self, text
+    ):
+        files = corpus(**{ENTRY: text})
+        assert R in derive(ENTRY, [], reader(files)).files
+
+    def test_an_anchored_or_linked_mention_of_an_undeclared_branch_is_not_in_the_closure(self):
+        files = corpus(**{ENTRY: "See [b](b2.md#top) and ``b2.md#top``.\n```\nb2.md\n```\n"})
+        assert B2 not in derive(ENTRY, [], reader(files)).files
+
+    def test_a_linked_path_that_resolves_nowhere_or_escapes_is_silently_ignored(self):
+        files = corpus(**{ENTRY: "See [x](../_shared/gone.md#a) and [y](../../../../x.md) and [z](/abs/x.md).\n"})
+        assert derive(ENTRY, [], reader(files)).files == (ENTRY,)
+        assert missing_loads([ENTRY], reader(files)) == []
+
+    def test_a_mention_inside_a_branch_file_is_followed_through_a_link(self):
+        files = corpus(**{B1: BRANCH_HEAD + "See [rule two](../_shared/r2.md#x).\n"})
+        assert R2 in derive(ENTRY, [B1], reader(files)).files
+
     def test_a_missing_entry_is_a_fault(self):
         with pytest.raises(LoadError) as e:
             derive(ENTRY, [], reader({}))
         assert str(e.value) == f"entry '{ENTRY}' does not exist"
+
+    def test_an_entry_that_is_a_branch_file_is_refused_naming_it(self):
+        with pytest.raises(LoadError) as e:
+            derive(B1, [], reader(corpus()))
+        assert str(e.value) == (f"entry '{B1}' is a branch file; declare its core as entry "
+                                "and the branch under branches")
+
+    def test_an_entry_that_is_a_branch_file_is_refused_even_when_a_branch_is_declared(self):
+        with pytest.raises(LoadError) as e:
+            derive(B1, [B2], reader(corpus()))
+        assert str(e.value).startswith(f"entry '{B1}' is a branch file")
+
+    def test_a_missing_text_is_a_fault_not_an_attribute_error(self):
+        reads = []
+
+        def vanishing(path: str):
+            reads.append(path)
+            return "Plain text.\n" if len(reads) == 1 else None
+
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [], vanishing)
+        assert str(e.value) == f"'{ENTRY}' does not exist"
 
 
 class TestFaults:

@@ -58,14 +58,15 @@ plan is ``mapping-invalid``. So is a plan where, with every file read from the c
 empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
 fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
 at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
-procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in
+procedure that loads a branch file) or a branch file; two corpora hold a case of the same name at one revision;
+or a case moves from one corpus at the base to another at HEAD. A tracked file modified in
 the working tree (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``:
 the gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a
 renamed file counts as both its old and its new path.
 
 Bounds. A revision (the merge-base, HEAD) holds at most ``MAX_MAPPING_FILES`` mapping files, charged on
 the count of ``evals/eval-gate.json`` paths in its tree before any is read; a mapping holds at most
-``MAX_CASES_PER_MAPPING`` cases, charged on the count its loader returns; and the reader of a revision
+``MAX_CASES_PER_MAPPING`` cases, charged by the loader before any case is validated; and the reader of a revision
 fetches at most ``MAX_PROCEDURE_FILES`` distinct files, counted across every plugin root and every case, and
 charged when a file is first fetched from git (a path the tree lacks, a symlink and a file read again from the
 cache cost nothing). The scans of a mapped corpus's procedures at HEAD read through that same reader, so their
@@ -87,7 +88,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch_file, loads_in, missing_loads
-from .mapping import (MAX_CASES_PER_MAPPING, MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
+from .mapping import (MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
                       load_mapping, valid_corpus_path)
 
 MAPPING_NAME = "eval-gate.json"
@@ -200,12 +201,6 @@ def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str],
             raise MappingError(path, f"case {ref} has no case.yaml")
 
 
-def _check_case_count(path: str, mapping: Mapping) -> None:
-    if len(mapping.cases) > MAX_CASES_PER_MAPPING:
-        raise MappingError(path, f"{len(mapping.cases)} cases in {_q(path, 1)} exceed the cap of "
-                                 f"{MAX_CASES_PER_MAPPING}")
-
-
 def _check_mapping_count(mappings: list[str], label: str, revision: str) -> None:
     if len(mappings) > MAX_MAPPING_FILES:
         err = MappingError(mappings[MAX_MAPPING_FILES],
@@ -223,7 +218,6 @@ def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]
     except UnicodeDecodeError:
         raise MappingError(path, "not valid UTF-8") from None
     mapping = load_mapping(text, path)
-    _check_case_count(path, mapping)
     _check_against_tree(path, mapping, tree, dirs)
     return mapping
 
@@ -231,7 +225,6 @@ def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]
 def _load_base(path: str, text: str) -> Mapping:
     try:
         mapping = load_mapping(text, path)
-        _check_case_count(path, mapping)
         return mapping
     except MappingError as e:
         err = MappingError(path, f"the base revision's mapping is invalid: {e.fault}")
@@ -345,13 +338,14 @@ def _split_cores(procedures: list[str], read) -> list[str]:
 def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, markdown: list[str],
                            read) -> None:
     """The scans of a mapped corpus's procedures at HEAD: a load of a missing file, and a hand-written
-    ``measures`` path that is or holds a split core."""
+    ``measures`` path that is or holds a split core or a branch file."""
     prefix = "" if str(plugin) == "." else plugin.as_posix() + "/"
     procedures = sorted(p[len(prefix):] for p in markdown
                         if p.startswith(prefix) and _is_procedure(p[len(prefix):]))
     try:
         missing = missing_loads(procedures, read)
         cores = _split_cores(procedures, read)
+        branch_files = [f for f in procedures if is_branch_file(f, read)]
     except LoadError as e:
         raise MappingError(path, str(e)) from None
     if missing:
@@ -363,6 +357,10 @@ def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, 
             if hit is not None:
                 raise MappingError(path, f"case {_q(name, position)}: measures path {_q(m, i)} is or holds "
                                          f"the split core {_q(hit, 1)}")
+            hit = next((b for b in branch_files if b == target or b.startswith(target.rstrip("/") + "/")), None)
+            if hit is not None:
+                raise MappingError(path, f"case {_q(name, position)}: measures path {_q(m, i)} is or holds "
+                                         f"the branch file {_q(hit, 1)}")
 
 
 def _derive(path: str, mapping: Mapping | None, name: str, read, revision: str):
@@ -430,13 +428,14 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
     changes: list[dict] = []
     dirs = _tree_dirs(tree)
     readers = _Readers(repo, git)
-    owner: dict[str, str] = {}
+    owners: dict[str, dict[str, str]] = {"base": {}, "head": {}}
     try:
         for path in sorted(set(head_mappings) | set(base_mappings)):
             plugin = PurePosixPath(path).parent.parent
             root = "" if str(plugin) == "." else plugin.as_posix()
             if not valid_corpus_path(root):
-                raise MappingError(path, "the corpus path has characters outside A-Za-z0-9._/- or a '..' segment")
+                raise MappingError(path, f"the corpus path {_q(root, 1)} has characters outside A-Za-z0-9._/- or a "
+                                         "'..' segment")
             base_text = _show(repo, merge_base, path, git) if path in base_tree else None
             base_map = _load_base(path, base_text) if base_text is not None else None
             head_map = _load_head(repo, path, tree, dirs, git)
@@ -444,9 +443,11 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
             head_read = readers.get("HEAD", tree, root)
             names = sorted(set(base_map.cases if base_map else ()) | set(head_map.cases if head_map else ()))
             for name in names:
-                if owner.setdefault(name, path) != path:
-                    raise MappingError(path, f"case {_q(name, names.index(name) + 1)} is declared by more "
-                                             "than one corpus")
+                for label, mapping in (("base", base_map), ("head", head_map)):
+                    if mapping is not None and name in mapping.cases \
+                            and owners[label].setdefault(name, path) != path:
+                        raise MappingError(path, f"case {_q(name, names.index(name) + 1)} is declared by more "
+                                                 "than one corpus")
                 base_case = base_map.cases.get(name) if base_map else None
                 head_case = head_map.cases.get(name) if head_map else None
                 base_derived = _derive(path, base_map, name, base_read, "base")
@@ -487,6 +488,14 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                 candidates.append((plugin, measures, entry))
             if head_map is not None:
                 _check_head_procedures(path, plugin, head_map, markdown, head_read)
+        for name, was in owners["base"].items():
+            now = owners["head"].get(name)
+            if now is not None and now != was:
+                roots = [PurePosixPath(q).parent.parent.as_posix() for q in (was, now)]
+                roots = ["" if r == "." else r for r in roots]
+                raise MappingError(now, f"case {_q(name, 1)} moves from corpus {_q(roots[0], 1)} to corpus "
+                                        f"{_q(roots[1], 2)}; a case is identified by its bare name, so rename "
+                                        "it instead")
     finally:
         readers.close()
     return candidates, marks, changes

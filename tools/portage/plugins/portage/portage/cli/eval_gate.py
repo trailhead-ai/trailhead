@@ -81,7 +81,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
     print(f"max_cost_usd: {result['total_max_cost_usd']}")
     if result["mapping_invalid"]:
         bad = result["mapping_invalid"]
-        print(f"mapping-invalid: {gate_verdict._safe(bad['file'])}: {gate_verdict._safe(bad['fault'])}")
+        print(f"mapping-invalid: {gate_verdict._corpus(bad['file'])}: {gate_verdict._safe(bad['fault'])}")
     for c in result["cases"]:
         print(f"{gate_verdict._safe(c['plugin_root'])}:{gate_verdict._safe(c['case'])}")
     return 0

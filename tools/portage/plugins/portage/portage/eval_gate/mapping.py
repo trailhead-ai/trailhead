@@ -243,6 +243,9 @@ def load_mapping(
     runner = _runner(data["runner"], file)
     if not isinstance(data["cases"], dict):
         raise MappingError(file, "cases must be an object")
+    if len(data["cases"]) > MAX_CASES_PER_MAPPING:
+        raise MappingError(file, f"{len(data['cases'])} cases in {_q(file, 1)} exceed the cap of "
+                                 f"{MAX_CASES_PER_MAPPING}")
     cases = {n: _case(i, n, o, file, plugin_root, evals_dir)
              for i, (n, o) in enumerate(data["cases"].items(), 1)}
     return Mapping(runner, cases)

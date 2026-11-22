@@ -10,9 +10,12 @@ the plugin root. A *branch file* opens (first non-blank line, after optional ``*
 "Applies only when". A *split core* loads at least one.
 
 ``derive`` fails safe: its closure is the entry, the declared branches and every non-branch file reached from
-them, transitively, by any backticked ``.md`` path that resolves to an existing file, whether or not its
-sentence parsed as a load, so a misread load over-selects and never under-selects. An undeclared branch is
-never in it. The parsed loads serve only the refusals (``LoadError``) and ``missing_loads``.
+them, transitively, by any ``[A-Za-z0-9._/-]+.md`` token in the raw text (a ``#anchor`` ends the token) that
+resolves to an existing file, wherever it sits (a link, a code span of any kind, a fence, loose prose) and
+whether or not its sentence parsed as a load, so a misread load over-selects and never under-selects. A token
+that resolves to nothing or escapes the plugin root is ignored. An undeclared branch is never in the closure.
+The parsed loads serve only the refusals (``LoadError``) and ``missing_loads``. An entry that is itself a
+branch file is refused: its core is the entry and the branch goes under ``branches``.
 
 The reader contract, which every caller builds against: ``read(path) -> str | None`` takes a plugin-relative
 posix path. ``None`` means the file does not exist. A symlink or any other non-regular file is signalled by
@@ -45,6 +48,7 @@ _SAFE_CHARS = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNORECASE)
 _READ_BEFORE_SPAN = re.compile(r"\bRead\s+$")
 _ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e)$", re.IGNORECASE)
+_WORD = re.compile(r"[A-Za-z0-9._/-]+")
 _LIST_OR_HEADING = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 
 
@@ -123,23 +127,22 @@ def _resolve(file: str, raw: str, read) -> str | None:
 @dataclass(frozen=True)
 class _Parsed:
     raw_loads: tuple[str, ...]
-    md_spans: tuple[str, ...]
+    md_tokens: tuple[str, ...]
     branch: bool
 
 
 def _parse(text: str) -> _Parsed:
     raw_loads: list[str] = []
-    md_spans: list[str] = []
     for paragraph in _paragraphs(text):
         for sentence in _sentences(paragraph):
             outside, inside = _spans(sentence)
-            mds = [s for s in inside if s.endswith(".md")]
-            md_spans.extend(mds)
             first = next((i for i, seg in enumerate(outside[:len(inside)])
                           if _READ_BEFORE_SPAN.search(seg) and inside[i].endswith(".md")), None)
             if first is not None:
                 raw_loads.extend(s for s in inside[first:] if s.endswith(".md"))
-    return _Parsed(tuple(raw_loads), tuple(md_spans), _is_branch(text))
+    tokens = (w.rstrip(".") for w in _WORD.findall(text))
+    return _Parsed(tuple(raw_loads), tuple(dict.fromkeys(t for t in tokens if t.endswith(".md"))),
+                   _is_branch(text))
 
 
 def _parsed(read, text: str) -> _Parsed:
@@ -233,6 +236,9 @@ def derive(entry: str, branches, read) -> Derived:
     entry_text = _get(read, entry)
     if entry_text is None:
         raise LoadError(f"entry {_q(entry, 1)} does not exist")
+    if is_branch(entry_text, read):
+        raise LoadError(f"entry {_q(entry, 1)} is a branch file; declare its core as entry and the branch "
+                        "under branches")
     entry_loads = loads_in(entry, entry_text, read)
     declared = []
     for position, branch in enumerate(branches, 1):
@@ -269,13 +275,15 @@ def derive(entry: str, branches, read) -> Derived:
         current = queue[index]
         index += 1
         text = _get(read, current)
+        if text is None:
+            raise LoadError(f"{_q(current, 1)} does not exist")
         parsed = loads_in(current, text, read)
         if current in declared:
             for target in parsed:
                 if is_branch_file(target, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
         reached = list(parsed)
-        for raw in _parsed(read, text).md_spans:
+        for raw in _parsed(read, text).md_tokens:
             if _SAFE_CHARS.match(raw) and (resolved := _resolve(current, raw, read)) is not None:
                 reached.append(resolved)
         for target in reached:
