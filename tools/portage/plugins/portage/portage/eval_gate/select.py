@@ -19,9 +19,16 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
      "head": "<sha of HEAD at plan time>",
      "merge_only_pending": int,          # touched merge_only cases this tier leaves out (push) or 0 (merge)
      "total_max_cost_usd": number,       # sum of the runner.max_cost_usd of the selected cases that will run
+     "needs_merge_model": [{"plugin_root": str, "case": str, "reason": str}, ...],
+                          # every case the base mappings mark, touched or not, sorted; [] until the mappings are read
+     "mark_changes": [{"plugin_root": str, "case": str, "change": "added" | "altered" | "removed",
+                       "reason": str | null}, ...],   # base vs head; reason is head's, null on removal
      "cases": [{"plugin_root": "<repo-relative>", "case": "<name>",
                 "runs": int, "pass_at": int,
                 "runner": {"model": str, "allow_tools": [str], "max_cost_usd": number},
+                                      # model: resolve_runner's choice for the tier
+                "needs_merge_model": "<base's reason>" | null,
+                "push_model": str | null, "merge_model": str,   # the base block's two ids
                 "measures": ["<path relative to plugin_root>", ...],   # base's and head's, merged
                 "merge_only": bool,
                 "new_runner_grants": bool,
@@ -34,7 +41,8 @@ working tree. On the push tier the base takes precedence for ``merge_only``; at 
 ``merge_only_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
 base cannot hide a flag. Base takes precedence over the branch for the rest: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
-base's runner block, runs and pass_at. A corpus new on the branch uses its own and
+base's runner block, runs and pass_at. The base also supplies the mark and both model ids: a mark added on the branch
+takes effect once merged. A corpus new on the branch uses its own and
 is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
 ``corpus-new-on-branch`` without starting a runner (the grants are unreviewed), and they add
 nothing to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head
@@ -162,13 +170,34 @@ def _touches(name: str, measures: tuple[str, ...], plugin: PurePosixPath, change
     return False
 
 
-def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool):
+def resolve_runner(runner: dict, tier: str, needs_merge_model: str | None) -> dict:
+    """The runner block a case runs under at ``tier``: ``runner`` is the base mapping's block and
+    ``needs_merge_model`` the base's mark for the case. The merge tier runs ``model``; the push tier
+    runs ``push_model`` unless the case is marked or the block has none, then ``model``. The result
+    never carries ``push_model``."""
+    model = runner["model"]
+    if tier == "push" and needs_merge_model is None:
+        model = runner.get("push_model") or model
+    return {"model": model, "allow_tools": runner["allow_tools"], "max_cost_usd": runner["max_cost_usd"]}
+
+
+def _mark_change(base_mark: str | None, head_mark: str | None) -> str | None:
+    if base_mark == head_mark:
+        return None
+    if base_mark is None:
+        return "added"
+    return "removed" if head_mark is None else "altered"
+
+
+def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_either: bool, tier: str):
     """Every case in the merge-base's and HEAD's mappings as ``(plugin, measures, entry)``, in sorted
-    mapping-path then case-name order. The changed paths play no part: HEAD's tree, the base listing
-    and each mapping are read once."""
+    mapping-path then case-name order, plus the base's marks and the mark changes. The changed paths
+    play no part: HEAD's tree, the base listing and each mapping are read once."""
     tracked = set(tree)
     at_base = set(_git(repo, "ls-tree", "-r", "-z", "--name-only", merge_base).split("\0")) - {""}
     candidates: list[tuple[PurePosixPath, tuple[str, ...], dict]] = []
+    marks: list[dict] = []
+    changes: list[dict] = []
     for path in sorted(p for p in tracked | at_base if _is_mapping(p)):
         plugin = PurePosixPath(path).parent.parent
         root = "" if str(plugin) == "." else plugin.as_posix()
@@ -187,42 +216,61 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
             case = base_case or head_case
             marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
             runner = (base_map or head_map).runner
+            base_mark = base_case.needs_merge_model if base_case else None
+            head_mark = head_case.needs_merge_model if head_case else None
+            if base_mark is not None:
+                marks.append({"plugin_root": root, "case": name, "reason": base_mark})
+            change = _mark_change(base_mark, head_mark)
+            if change:
+                changes.append({"plugin_root": root, "case": name, "change": change, "reason": head_mark})
             candidates.append((plugin, measures, {
                 "plugin_root": root,
                 "case": name,
                 "runs": case.runs,
                 "pass_at": case.pass_at,
-                "runner": runner,
+                "runner": resolve_runner(runner, tier, base_mark),
+                "needs_merge_model": base_mark,
+                "push_model": runner.get("push_model"),
+                "merge_model": runner["model"],
                 "measures": list(measures),
                 "merge_only": marked,
                 "new_runner_grants": base_map is None,
                 "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
                                 not in _BLOB_MODES,
             }))
-    return candidates
+    return candidates, marks, changes
+
+
+def _select(repo: Path, merge_base: str, changed: list[str], merge_only_either: bool,
+            tree: dict[str, str] | None, tier: str) -> tuple[list[dict], list[dict], list[dict]]:
+    tree = _head_tree(repo) if tree is None else tree
+    candidates, marks, changes = _candidates(repo, merge_base, tree, merge_only_either, tier)
+    return ([entry for plugin, measures, entry in candidates if _touches(entry["case"], measures, plugin, changed)],
+            marks, changes)
 
 
 def select_touched(repo: Path, merge_base: str, changed: list[str], *,
-                   merge_only_either: bool = False, tree: dict[str, str] | None = None) -> list[dict]:
+                   merge_only_either: bool = False, tree: dict[str, str] | None = None,
+                   tier: str = "merge") -> list[dict]:
     """Every case the ``changed`` files touch, whatever its tier, as plan entries.
 
     Everything is read from commits: the merge-base's and HEAD's mappings and HEAD's tree (``tree``,
     when the caller has already read it). An entry's ``merge_only`` is the base's value (the base takes
-    precedence); with ``merge_only_either`` it is true when the base's or HEAD's mapping marks the case."""
-    tree = _head_tree(repo) if tree is None else tree
-    return [entry for plugin, measures, entry in _candidates(repo, merge_base, tree, merge_only_either)
-            if _touches(entry["case"], measures, plugin, changed)]
+    precedence); with ``merge_only_either`` it is true when the base's or HEAD's mapping marks the case.
+    An entry's ``runner`` is ``resolve_runner``'s block for ``tier``."""
+    return _select(repo, merge_base, changed, merge_only_either, tree, tier)[0]
 
 
 def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
                            merge_only_either: bool = False,
-                           tree: dict[str, str] | None = None) -> dict[str, list[dict]]:
+                           tree: dict[str, str] | None = None,
+                           tier: str = "merge") -> dict[str, list[dict]]:
     """For each of ``paths``, the entries ``select_touched`` returns when that path alone changed.
 
     HEAD's tree, the base listing and each mapping are read once for all the paths, so the git
     commands run grow with the mappings, not with ``len(paths)``."""
     tree = _head_tree(repo) if tree is None else tree
-    candidates = _candidates(repo, merge_base, tree, merge_only_either)
+    candidates = _candidates(repo, merge_base, tree, merge_only_either, tier)[0]
     return {path: [entry for plugin, measures, entry in candidates
                    if _touches(entry["case"], measures, plugin, [path])]
             for path in paths}
@@ -313,6 +361,7 @@ def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
         "head": _git(repo, "rev-parse", "HEAD").strip(), "merge_only_pending": 0,
         "changed_files": [], "mapping_invalid": None,
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
+        "needs_merge_model": [], "mark_changes": [],
     }
     resolved = _resolve_base(repo, base)
     if _git(repo, "status", "--porcelain", "--untracked-files=no").strip():
@@ -324,11 +373,12 @@ def plan(repo: Path, base: str | None, tier: str = "push") -> tuple[Path, dict]:
         changed = _changed_since(repo, resolved[1])
         result["changed_files"] = changed
         try:
-            touched = select_touched(repo, resolved[1], changed, merge_only_either=tier == "merge")
+            touched, marks, changes = _select(repo, resolved[1], changed, tier == "merge", None, tier)
         except MappingError as e:
             result["status"] = "mapping-invalid"
             result["mapping_invalid"] = {"file": e.file, "fault": e.fault, "revision": e.revision}
         else:
+            result["needs_merge_model"], result["mark_changes"] = marks, changes
             cases = [c for c in touched if tier == "merge" or not c["merge_only"]]
             if tier == "push":
                 result["merge_only_pending"] = len(touched) - len(cases)

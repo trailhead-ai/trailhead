@@ -872,3 +872,154 @@ class TestPushModelAndNeedsMergeModel:
         m = load_mapping(_mapping_with(), "f")
         assert m.runner == {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 2.0}
         assert m.cases["alpha"].merge_only is False and m.cases["alpha"].needs_merge_model is None
+
+
+TIERED = {"model": "opus", "push_model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
+UNTIERED = {"model": "opus", "allow_tools": ["Read"], "max_cost_usd": 2.0}
+MARK = "needs the larger model"
+
+
+def _marked(reason: str | None, measures=("skills/a.md",)) -> dict:
+    case = {"measures": list(measures)}
+    if reason is not None:
+        case["needs_merge_model"] = reason
+    return case
+
+
+def _touch_all(repo: Path) -> None:
+    _write(repo, "p/skills/a.md", "changed\n")
+    _write(repo, "p/skills/b.md", "changed\n")
+    _commit(repo)
+
+
+def _case_entry(plan: dict, case: str) -> dict:
+    return next(c for c in plan["cases"] if c["case"] == case)
+
+
+class TestModelByTier:
+    def _base(self, repo, cases, runner=TIERED):
+        _corpus(repo, "p", cases, runner)
+        _commit(repo)
+        _branch(repo)
+
+    def test_push_tier_runs_an_unmarked_case_on_push_model(self, repo, capsys):
+        self._base(repo, {"alpha": _marked(None)})
+        _touch_all(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        entry = _case_entry(plan, "alpha")
+        assert entry["runner"]["model"] == "sonnet"
+        assert (entry["push_model"], entry["merge_model"]) == ("sonnet", "opus")
+        assert entry["needs_merge_model"] is None
+
+    def test_merge_tier_runs_every_case_on_model(self, repo, capsys):
+        self._base(repo, {"alpha": _marked(None), "beta": _marked(MARK, ["skills/b.md"])})
+        _touch_all(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert {c["case"]: c["runner"]["model"] for c in plan["cases"]} == {"alpha": "opus", "beta": "opus"}
+
+    def test_a_base_marked_case_runs_on_model_at_both_tiers(self, repo, capsys):
+        self._base(repo, {"alpha": _marked(MARK), "beta": _marked(None, ["skills/b.md"])})
+        _touch_all(repo)
+        for tier in ("push", "merge"):
+            _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", tier)
+            assert _case_entry(plan, "alpha")["runner"]["model"] == "opus"
+            assert _case_entry(plan, "alpha")["needs_merge_model"] == MARK
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        assert _case_entry(push, "beta")["runner"]["model"] == "sonnet"
+
+    def test_a_base_without_push_model_stays_on_model_when_the_branch_adds_one(self, repo, capsys):
+        self._base(repo, {"alpha": _marked(None)}, UNTIERED)
+        _write(repo, "p/evals/eval-gate.json", _mapping({"alpha": _marked(None)}, TIERED))
+        _touch_all(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        entry = _case_entry(plan, "alpha")
+        assert entry["runner"]["model"] == "opus"
+        assert entry["push_model"] is None
+
+    def test_a_mark_added_on_the_branch_leaves_the_case_on_push_model(self, repo, capsys):
+        self._base(repo, {"alpha": _marked(None)})
+        _write(repo, "p/evals/eval-gate.json", _mapping({"alpha": _marked(MARK)}, TIERED))
+        _touch_all(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        entry = _case_entry(plan, "alpha")
+        assert entry["runner"]["model"] == "sonnet"
+        assert entry["needs_merge_model"] is None
+        assert plan["mark_changes"] == [
+            {"plugin_root": "p", "case": "alpha", "change": "added", "reason": MARK}]
+        assert plan["needs_merge_model"] == []
+
+
+class TestMarkRecords:
+    M2 = {"alpha": _marked(MARK), "beta": _marked(MARK, ["skills/b.md"]),
+          "gamma": _marked(MARK, ["skills/c.md"])}
+
+    def _base(self, repo):
+        _corpus(repo, "p", self.M2, TIERED, files=("skills/a.md", "skills/b.md", "skills/c.md"))
+        _commit(repo)
+        _branch(repo)
+
+    def test_every_base_marked_case_is_listed_sorted_including_untouched(self, repo, capsys):
+        self._base(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [c["case"] for c in plan["cases"]] == ["alpha"]
+        assert plan["needs_merge_model"] == [
+            {"plugin_root": "p", "case": n, "reason": MARK} for n in ("alpha", "beta", "gamma")]
+        assert plan["mark_changes"] == []
+
+    def test_altered_removed_and_deleted_marks_are_listed_and_unchanged_is_not(self, repo, capsys):
+        self._base(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping({
+            "alpha": _marked("a new reason"),
+            "beta": _marked(None, ["skills/b.md"]),
+            "gamma": _marked(MARK, ["skills/c.md"]),
+            "delta": _marked(MARK, ["skills/a.md"]),
+        }, TIERED))
+        _write(repo, "p/evals/delta/case.yaml", "name: d\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["mark_changes"] == [
+            {"plugin_root": "p", "case": "alpha", "change": "altered", "reason": "a new reason"},
+            {"plugin_root": "p", "case": "beta", "change": "removed", "reason": None},
+            {"plugin_root": "p", "case": "delta", "change": "added", "reason": MARK},
+        ]
+
+    def test_a_base_marked_case_missing_at_head_is_removed(self, repo, capsys):
+        self._base(repo)
+        _write(repo, "p/evals/eval-gate.json",
+               _mapping({k: v for k, v in self.M2.items() if k != "gamma"}, TIERED))
+        (repo / "p/evals/gamma/case.yaml").unlink()
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["mark_changes"] == [
+            {"plugin_root": "p", "case": "gamma", "change": "removed", "reason": None}]
+        assert len(plan["needs_merge_model"]) == 3
+
+    def test_records_are_written_when_the_plan_selects_nothing(self, repo, capsys):
+        self._base(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping({**self.M2, "alpha": _marked("later")}, TIERED))
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "no-cases-mapped"
+        assert plan["mark_changes"][0]["change"] == "altered"
+        assert len(plan["needs_merge_model"]) == 3
+
+
+class TestSelectTouchedByPathModel:
+    def test_resolves_the_model_plan_resolves_at_each_tier(self, repo, capsys):
+        _corpus(repo, "p", {"alpha": _marked(MARK), "beta": _marked(None, ["skills/b.md"])}, TIERED)
+        _commit(repo)
+        _branch(repo)
+        _touch_all(repo)
+        mb = _git(repo, "merge-base", "base", "HEAD")
+        from portage.eval_gate.select import select_touched_by_path
+        for tier in ("push", "merge"):
+            _, plan, _ = _plan(repo, capsys, "--base", "base", "--tier", tier)
+            got = select_touched_by_path(repo, mb, ["p/skills/a.md", "p/skills/b.md"], tier=tier)
+            by_path = {e["case"]: e["runner"] for es in got.values() for e in es}
+            assert by_path == {c["case"]: c["runner"] for c in plan["cases"]}
+        assert by_path["alpha"]["model"] == "opus"
+        assert {c["case"]: c["runner"]["model"] for c in plan["cases"]} == {"alpha": "opus", "beta": "opus"}
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        assert _case_entry(push, "beta")["runner"]["model"] == "sonnet"
