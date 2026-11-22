@@ -639,8 +639,12 @@ class TestOneBudgetOneLevelDown:
         for i in range(4):
             (fx.runs / f"n{i}.txt").write_text("x")
         runner_file(fx.runs, "z.json", costs=((1.0, 0.0),))
-        tally = counts(fx.report(fx.runs, max_total_entries=4), "runner outputs:")
-        assert (tally["read"], tally["listings-truncated"]) == (0, 1)
+        # The listing is read in filesystem order, so which entry the cut drops is not fixed; that the
+        # four non-json names plus the json file overrun a budget of four is.
+        cut = counts(fx.report(fx.runs, max_total_entries=4), "runner outputs:")
+        assert cut["listings-truncated"] == 1
+        fits = counts(fx.report(fx.runs, max_total_entries=5), "runner outputs:")
+        assert (fits["read"], fits["listings-truncated"]) == (1, 0)
 
     def test_many_subdirectories_exhaust_the_entry_budget(self, fx):
         basic(fx)
