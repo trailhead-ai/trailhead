@@ -17,11 +17,13 @@ A run scores the fraction of graders that pass and passes only at 1.0. A case pa
 | No pull-request body was written | `no-pr-edit` | `file_exists` with `exists: false` on `pr-body.md` |
 | The gate reached the failing case (the fake runner logged it) | `gate-ran-the-failing-case` | `regex` on `runner.log` |
 | The last line is the `stuck` outcome line for the slice | `final-line-is-stuck` | `regex` on the final reply |
+| That outcome line names the failing case | `stuck-line-names-the-case` | `regex` anchored on the `outcome: stuck` line, `ledger-roundtrip` on it |
+| That outcome line names the needs-merge-model mark decision | `stuck-line-names-the-mark-decision` | `regex` anchored on the `outcome: stuck` line, `[Nn]eeds[-_ ][Mm]erge[-_ ][Mm]odel` on it |
 
-Predicted baseline: the updater's stop leads the step to `stuck` through its Step H; whether the line names the case and the mark decision is not graded (see limitations).
+Predicted baseline: the updater's stop leads the step to `stuck` through its Step H; the line is expected to name the case and the mark decision, which the two `stuck-line-*` graders now check.
 
 ## Limitations
 
-- The wording of the stuck line (the case name, the needed decision) is not graded: an LLM-judge grader with `weight: 0` made the runner error every run (nothing was graded), so a judge would have to sit inside the 1.0 bar.
+- The stuck line is graded only for naming the case and the needs-merge-model mark; that it states an operator decision is needed is not graded (an LLM-judge grader with `weight: 0` made the runner error every run).
 - One fixture, one case name, one fake-runner behaviour, no merge-model pass history.
 - The gate is real; the runner is a fake binary.
