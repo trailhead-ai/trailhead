@@ -52,3 +52,65 @@ def test_the_fixture_exercises_each_case_the_contract_names(mixed):
     assert flags["delta"]["case_removed"] is True
     assert flags["ra"]["new_runner_grants"] is True
     assert many["nothing/touches/this.md"] == []
+
+
+@pytest.fixture
+def shapes(repo):  # noqa: F811
+    cases = {"dirm": {"measures": ["skills/dir"]},
+             "nested": {"measures": ["skills/dir/inner"]},
+             "filem": {"measures": ["skills/f.md"]},
+             "pa": {"measures": ["skills/a"]},
+             "pab": {"measures": ["skills/ab"]},
+             "slash": {"measures": ["skills/s/"]},
+             "dot": {"measures": ["./skills/d"]},
+             "multi": {"measures": ["skills/a", "skills/dir"]},
+             "dir": {"measures": ["skills/z"]}}
+    _corpus(repo, "p", cases, files=("skills/f.md", "skills/dir/x.md", "skills/dir/inner/y.md", "skills/a/x",
+                                  "skills/ab/x", "skills/s/x", "skills/d/x", "skills/z"))
+    _corpus(repo, "root", {"rc": {"measures": ["skills/a"]}}, files=("skills/a",))
+    _commit(repo)
+    return repo
+
+
+SHAPE_PATHS = [
+    "p/skills/dir", "p/skills/dir/x.md", "p/skills/dir/inner", "p/skills/dir/inner/y.md",
+    "p/skills/dir/innerx", "p/skills/f.md", "p/skills/f.md/under", "p/skills/f.mdx",
+    "p/skills/a", "p/skills/a/x", "p/skills/ab", "p/skills/ab/x", "p/skills/abc", "p/skills/aa",
+    "p/skills/s", "p/skills/s/x", "p/skills/d", "p/skills/d/x",
+    "p/evals/dir", "p/evals/dir/case.yaml", "p/evals/dir/deep/x", "p/evals/dirx/case.yaml",
+    "p/evals/dirm/case.yaml", "p/evals", "p", "", "p/skills", "p/skills/dirty",
+    "skills/a", "skills/a/x", "root/skills/a", "other/skills/a", "p//skills/dir/x.md", "p/skills/dir/",
+]
+
+
+def test_every_path_shape_matches_select_touched_alone(shapes):
+    base = _git(shapes, "rev-parse", "HEAD")
+    many = select.select_touched_by_path(shapes, base, SHAPE_PATHS)
+    assert list(many) == SHAPE_PATHS
+    for path in SHAPE_PATHS:
+        assert many[path] == select.select_touched(shapes, base, [path]), path
+
+
+def test_the_shape_corpus_selects_for_some_paths_and_not_others(shapes):
+    base = _git(shapes, "rev-parse", "HEAD")
+    names = lambda p: [e["case"] for e in select.select_touched_by_path(shapes, base, [p])[p]]  # noqa: E731
+    assert names("p/skills/a/x") == ["multi", "pa"]
+    assert names("p/skills/ab") == ["pab"]
+    assert names("p/skills/abc") == []
+    assert names("p/skills/s/x") == ["slash"]
+    assert names("p/skills/d") == ["dot"]
+    assert names("p/evals/dir/deep/x") == ["dir"]
+
+
+def test_many_paths_are_answered_without_testing_each_candidate(shapes, monkeypatch):
+    base = _git(shapes, "rev-parse", "HEAD")
+
+    def boom(*a, **k):
+        raise AssertionError("_touches called per path")
+
+    monkeypatch.setattr(select, "_touches", boom)
+    paths = SHAPE_PATHS + [f"p/skills/dir/n{i}.md" for i in range(200)]
+    many = select.select_touched_by_path(shapes, base, paths)
+    assert [e["case"] for e in many["p/skills/dir/n7.md"]] == ["dirm", "multi"]
+    assert [e["case"] for e in many["p/skills/ab/x"]] == ["pab"]
+    assert many["p/skills/abc"] == []

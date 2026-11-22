@@ -268,12 +268,28 @@ def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
     """For each of ``paths``, the entries ``select_touched`` returns when that path alone changed.
 
     HEAD's tree, the base listing and each mapping are read once for all the paths, so the git
-    commands run grow with the mappings, not with ``len(paths)``."""
+    commands run grow with the mappings, not with ``len(paths)``. An index from each case directory
+    and each measure target to its candidates is built once; a path looks up itself and its ancestor
+    directories, so the work grows with the paths and their depth, not with the candidates."""
     tree = _head_tree(repo) if tree is None else tree
     candidates = _candidates(repo, merge_base, tree, merge_only_either, tier)[0]
-    return {path: [entry for plugin, measures, entry in candidates
-                   if _touches(entry["case"], measures, plugin, [path])]
-            for path in paths}
+    case_dirs: dict[str, list[int]] = {}
+    targets: dict[str, list[int]] = {}
+    for i, (plugin, measures, entry) in enumerate(candidates):
+        case_dirs.setdefault((plugin / "evals" / entry["case"]).as_posix(), []).append(i)
+        for m in measures:
+            targets.setdefault((plugin / m).as_posix(), []).append(i)
+
+    def touching(path: str) -> list[dict]:
+        hit = set(targets.get(path, ()))
+        for end, ch in enumerate(path):
+            if ch == "/":
+                ancestor = path[:end]
+                hit.update(case_dirs.get(ancestor, ()))
+                hit.update(targets.get(ancestor, ()))
+        return [candidates[i][2] for i in sorted(hit)]
+
+    return {path: touching(path) for path in paths}
 
 
 def _runs(case: dict) -> bool:
