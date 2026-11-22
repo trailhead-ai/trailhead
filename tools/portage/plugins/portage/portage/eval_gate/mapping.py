@@ -16,8 +16,9 @@ Shape::
 A case names what a change can affect by ``measures`` (every file it reads), by a declaration, or both. The
 declaration is ``entry``, the skill or agent the case starts from, plus ``branches``, the procedure files it may
 descend into; a pure declaration has an empty ``measures``. A case with neither ``measures`` nor ``entry`` is a
-fault, as is ``branches`` without ``entry``. ``entry`` and every branch are plugin-relative ``.md`` paths with no
-``..`` segment, present under the plugin root when it is given. A mapping that declares ``entry`` is read only by a
+fault, as is ``branches`` without ``entry``. ``entry`` and every branch are plugin-relative skill or agent
+files (``skills/<...>.md`` or ``agents/<name>.md``) with no ``..`` segment, present under the plugin root when it
+is given. A mapping that declares ``entry`` is read only by a
 gate that understands it, so land the gate before any mapping that uses the key.
 ``pass_at`` defaults to 2 when ``runs`` is 3; any other ``runs`` must declare its
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
@@ -154,6 +155,13 @@ def _runner(obj, file: str) -> dict:
     return runner
 
 
+def is_procedure_path(rel: str) -> bool:
+    """A skill file (``skills/<...>.md``, below the skill directory) or an agent file (``agents/<name>.md``)."""
+    parts = PurePosixPath(rel).parts
+    return rel.endswith(".md") and bool(parts) and ((parts[0] == "skills" and len(parts) > 1)
+                                                     or (parts[0] == "agents" and len(parts) == 2))
+
+
 def _path(path, what: str, case: str, position: int, file: str, plugin_root: Path | None,
           *, markdown: bool = False) -> str:
     if not isinstance(path, str) or not path:
@@ -165,6 +173,9 @@ def _path(path, what: str, case: str, position: int, file: str, plugin_root: Pat
         raise MappingError(file, f"case {case}: {what} path {shown} must not contain '..'")
     if markdown and not path.endswith(".md"):
         raise MappingError(file, f"case {case}: {what} path {shown} must end in .md")
+    if markdown and not is_procedure_path(PurePosixPath(path).as_posix()):
+        raise MappingError(file, f"case {case}: {what} path {shown} must be a skill or agent file "
+                                 "(skills/.../x.md or agents/x.md)")
     if plugin_root is not None:
         target = (plugin_root / path).resolve()
         if not target.is_relative_to(plugin_root.resolve()) or not target.exists():

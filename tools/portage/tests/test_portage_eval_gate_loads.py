@@ -509,3 +509,28 @@ class TestLiveCorpus:
         elapsed = time.perf_counter() - started
         assert derived > 20
         assert elapsed < 1.0, f"{elapsed:.2f}s"
+
+
+class TestTreeReaderContainment:
+    def test_a_directory_symlink_inside_the_plugin_cannot_read_a_file_outside_it(self, tmp_path):
+        root = tmp_path / "plugin"
+        (root / "skills").mkdir(parents=True)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "secret.md").write_text("secret\n")
+        (root / "skills" / "link").symlink_to(outside, target_is_directory=True)
+        with pytest.raises(NotRegularFile):
+            tree_reader(root)("skills/link/secret.md")
+
+    def test_a_real_directory_inside_the_plugin_reads_normally(self, tmp_path):
+        root = tmp_path / "plugin"
+        (root / "skills" / "real").mkdir(parents=True)
+        (root / "skills" / "real" / "a.md").write_text("fine\n")
+        assert tree_reader(root)("skills/real/a.md") == "fine\n"
+
+    def test_a_plugin_root_that_is_itself_reached_through_a_symlink_still_reads(self, tmp_path):
+        real = tmp_path / "real"
+        real.mkdir()
+        (real / "a.md").write_text("fine\n")
+        (tmp_path / "via").symlink_to(real, target_is_directory=True)
+        assert tree_reader(tmp_path / "via")("a.md") == "fine\n"

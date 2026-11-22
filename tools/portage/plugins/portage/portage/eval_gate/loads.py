@@ -222,6 +222,8 @@ def tree_reader(root: Path):
     def read(path: str):
         full = root / path
         try:
+            if any(parent.is_symlink() for parent in full.parents if parent != root and root in parent.parents):
+                raise NotRegularFile(path)
             st = full.lstat()
         except FileNotFoundError:
             return None

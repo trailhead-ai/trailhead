@@ -1464,7 +1464,8 @@ class TestDeclaredCases:
         _commit(repo)
         _, plan, _ = _plan(repo, capsys, "--base", "base")
         assert plan["status"] == "mapping-invalid"
-        assert plan["mapping_invalid"]["fault"] == "case 'x' is declared by more than one corpus"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: case 'x' is declared by more than one corpus")
 
     def test_a_case_that_moves_between_corpora_is_a_fault_saying_it_moved_not_that_it_is_declared_twice(
         self, repo, capsys
@@ -1950,3 +1951,95 @@ class TestPlanOutputIsAllowlisted:
         _commit(repo)
         _, _, out = _plan(repo, capsys, "--base", "base")
         assert any(ln.startswith("mapping-invalid: p/evals/eval-gate.json: ") for ln in out.splitlines())
+
+
+class TestWholeChangeReviewFixes:
+    @pytest.mark.parametrize("measure", [".", "./"])
+    def test_a_measure_of_the_plugin_root_holds_the_split_core_and_is_refused(self, repo, capsys, measure):
+        _declared_corpus(repo, cases={"hand": {"measures": [measure]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            "case 'hand': measures path '.' is or holds the split core 'skills/entry.md'")
+
+    def test_a_measure_of_the_plugin_root_is_fine_when_nothing_in_it_is_split(self, repo, capsys):
+        _corpus(repo, "p", {"hand": {"measures": ["."]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected" and _names(plan) == ["hand"]
+
+    @pytest.mark.parametrize("key, value", [
+        ("entry", "rules/core.md"),
+        ("entry", "README.md"),
+        ("branches", ["rules/rule-a.md"]),
+    ])
+    def test_an_entry_or_branch_that_is_not_a_procedure_path_is_a_mapping_fault(self, repo, capsys, key, value):
+        case = {"entry": "skills/entry.md", "branches": ["skills/b-declared.md"], key: value}
+        _declared_corpus(repo, files={"README.md": "readme\n", "skills/entry.md": ENTRY + "Read `README.md`.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _mapping({"decl": case}))
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        shown = value if isinstance(value, str) else value[0]
+        assert plan["mapping_invalid"]["fault"] == (
+            f"case 'decl': {key} path '{shown}' must be a skill or agent file (skills/.../x.md or agents/x.md)")
+
+    @pytest.mark.parametrize("entry", ["skills/entry.md", "agents/monitor.md"])
+    def test_an_entry_under_skills_or_agents_is_accepted(self, repo, capsys, entry):
+        _declared_corpus(repo, cases={"decl": {"entry": entry}},
+                         files={"agents/monitor.md": "Read `rules/core.md`.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] != "mapping-invalid"
+
+    def test_a_duplicate_case_at_the_base_is_blamed_on_the_base_not_the_branch(self, repo, capsys):
+        _declared_corpus(repo, "p", cases={"x": {"measures": ["skills/other.md"]}})
+        _declared_corpus(repo, "q", cases={"x": {"measures": ["skills/other.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _declared_corpus(repo, "q", cases={"y": {"measures": ["skills/other.md"]}})
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "base"
+        assert plan["mapping_invalid"]["fault"] == (
+            "the base revision's mapping is invalid: case 'x' is declared by more than one corpus")
+
+    def test_a_duplicate_case_at_the_head_is_still_blamed_on_the_head(self, repo, capsys):
+        _declared_corpus(repo, "p", cases={"x": {"measures": ["skills/other.md"]}})
+        _declared_corpus(repo, "q", cases={"y": {"measures": ["skills/other.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _declared_corpus(repo, "q", cases={"x": {"measures": ["skills/other.md"]}})
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert plan["mapping_invalid"]["fault"] == "case 'x' is declared by more than one corpus"
+
+    def test_the_cli_prints_a_mapping_fault_through_the_fault_allowlist(self, repo, capsys):
+        _declared_corpus(repo, cases={"hand": {"measures": ["skills/entry.md"]}})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, out = _plan(repo, capsys, "--base", "base")
+        assert "case 'hand': measures" in plan["mapping_invalid"]["fault"]
+        line = next(ln for ln in out.splitlines() if ln.startswith("mapping-invalid: "))
+        assert line.split(": ", 1)[1] == (
+            "p/evals/eval-gate.json: case 'hand' measures path 'skills/entry.md' is or holds the split core "
+            "'skills/entry.md'")

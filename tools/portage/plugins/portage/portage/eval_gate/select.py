@@ -88,7 +88,7 @@ import tempfile
 from pathlib import Path, PurePosixPath
 
 from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch_file, loads_in, missing_loads
-from .mapping import (MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
+from .mapping import (MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q, is_procedure_path,
                       load_mapping, valid_corpus_path)
 
 MAPPING_NAME = "eval-gate.json"
@@ -316,12 +316,6 @@ class _Readers:
             raw.close()
 
 
-def _is_procedure(rel: str) -> bool:
-    parts = PurePosixPath(rel).parts
-    return rel.endswith(".md") and ((parts[0] == "skills" and len(parts) > 1)
-                                    or (parts[0] == "agents" and len(parts) == 2))
-
-
 def _fault(path: str, ref: str, err: LoadError, revision: str) -> MappingError:
     if revision == "base":
         fault = MappingError(path, f"the base revision's mapping is invalid: case {ref}: {err}")
@@ -341,7 +335,7 @@ def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, 
     ``measures`` path that is or holds a split core or a branch file."""
     prefix = "" if str(plugin) == "." else plugin.as_posix() + "/"
     procedures = sorted(p[len(prefix):] for p in markdown
-                        if p.startswith(prefix) and _is_procedure(p[len(prefix):]))
+                        if p.startswith(prefix) and is_procedure_path(p[len(prefix):]))
     try:
         missing = missing_loads(procedures, read)
         cores = _split_cores(procedures, read)
@@ -353,11 +347,15 @@ def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, 
     for position, (name, case) in enumerate(head_map.cases.items(), 1):
         for i, m in enumerate(case.measures, 1):
             target = PurePosixPath(m).as_posix()
-            hit = next((c for c in cores if c == target or c.startswith(target.rstrip("/") + "/")), None)
+
+            def holds(f: str) -> bool:
+                return target == "." or f == target or f.startswith(target.rstrip("/") + "/")
+
+            hit = next((c for c in cores if holds(c)), None)
             if hit is not None:
                 raise MappingError(path, f"case {_q(name, position)}: measures path {_q(m, i)} is or holds "
                                          f"the split core {_q(hit, 1)}")
-            hit = next((b for b in branch_files if b == target or b.startswith(target.rstrip("/") + "/")), None)
+            hit = next((b for b in branch_files if holds(b)), None)
             if hit is not None:
                 raise MappingError(path, f"case {_q(name, position)}: measures path {_q(m, i)} is or holds "
                                          f"the branch file {_q(hit, 1)}")
@@ -446,8 +444,12 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                 for label, mapping in (("base", base_map), ("head", head_map)):
                     if mapping is not None and name in mapping.cases \
                             and owners[label].setdefault(name, path) != path:
-                        raise MappingError(path, f"case {_q(name, names.index(name) + 1)} is declared by more "
-                                                 "than one corpus")
+                        fault = f"case {_q(name, names.index(name) + 1)} is declared by more than one corpus"
+                        if label == "base":
+                            err = MappingError(path, f"the base revision's mapping is invalid: {fault}")
+                            err.revision = "base"
+                            raise err
+                        raise MappingError(path, fault)
                 base_case = base_map.cases.get(name) if base_map else None
                 head_case = head_map.cases.get(name) if head_map else None
                 base_derived = _derive(path, base_map, name, base_read, "base")
