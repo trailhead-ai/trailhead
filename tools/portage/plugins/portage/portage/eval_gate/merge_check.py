@@ -3,9 +3,8 @@
 ``check_pair`` decides, for one pull request's repo, whether a merge may go ahead and which head
 commit to pin it to. It applies only when the repo's change touches a ``merge_only`` or a
 ``split_procedure`` eval case (one whose entry loads a branch file; decided by ``select.backstop_touched``, the
-selection ``plan`` uses); anywhere else it answers
-"not applicable" and the merge is unchanged. Where it applies, every one of these refuses, and the
-check name is what the refusal prints::
+selection ``plan`` uses); anywhere else it answers "not applicable" and the merge is unchanged. Where it
+applies, every one of these refuses, and the check name is what the refusal prints::
 
     no-state                    no ``--eval-state`` was given for the repo
     state-unusable              ``run.check_state`` refused the state directory
@@ -25,22 +24,21 @@ check name is what the refusal prints::
                                 not run, a split-procedure case not run or in a corpus new on the
                                 branch), or cannot be computed; the detail carries the report's stop line
     selection-failed            git could not answer which cases the change touches
-    local-head-stale            the change touches no merge-only or split-procedure case, but the repo holds an
-                                eval-gate
-                                mapping and the PR's remote head is not the local ``HEAD`` the
-                                "touches" answer was computed from (a remote-only commit); pull the
-                                PR head and retry
+    local-head-stale            the change touches no merge-only or split-procedure case, but the repo
+                                holds an eval-gate mapping and the PR's remote head is not the local
+                                ``HEAD`` the "touches" answer was computed from (a remote-only commit);
+                                pull the PR head and retry
 
 A case is merge-only when the merge-base's or HEAD's committed mapping marks it, and split-procedure when
 its declared entry loads a branch file at the base or at HEAD; a dirty working tree changes nothing. A split
-case removed on the branch passes the check as its verdict does. When the applicability is unknown (the base does not
-resolve, or a mapping is
-invalid) the check applies: an unknown answer is never read as "no merge-only or split-procedure case". Where the check
-does not apply but the repo holds any ``eval-gate.json`` mapping (at HEAD or the merge-base), the merge
-is pinned to the remote head, and refused when that head is not local ``HEAD``; a repo with no mapping
-merges unpinned, with no head read. A failure of git or the OS to answer is ``selection-failed``, and
-only git's explicit "not a git repository" makes the check not applicable. The contents of ``plan.json`` are
-untrusted; the head is shape-checked before it is compared or reaches a ``gh`` argv.
+case removed on the branch passes the check as its verdict does. When the applicability is unknown (the base
+does not resolve, or a mapping is invalid) the check applies: an unknown answer is never read as "no
+merge-only or split-procedure case". Where the check does not apply but the repo holds any
+``eval-gate.json`` mapping (at HEAD or the merge-base), the merge is pinned to the remote head, and refused
+when that head is not local ``HEAD``; a repo with no mapping merges unpinned, with no head read. A failure of
+git or the OS to answer is ``selection-failed``, and only git's explicit "not a git repository" makes the
+check not applicable. The contents of ``plan.json`` are untrusted; the head is shape-checked before it is
+compared or reaches a ``gh`` argv.
 
 The stderr form is ``portage merge: eval-gate check failed for <repo>: <check> — <detail>``
 followed by the remedy commands; ``format_refusal`` builds it.

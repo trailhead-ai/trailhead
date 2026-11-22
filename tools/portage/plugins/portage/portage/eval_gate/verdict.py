@@ -389,7 +389,7 @@ def _not_run_items(rows: list[dict]) -> list[str]:
             for r in rows if r["result"]["verdict"] == "not-run"]
 
 
-def _merge_only_recovery(reason: str) -> str:
+def _stop_recovery(reason: str) -> str:
     if reason == "timeout":
         return "the runs split and the budget ran out; re-run the merge-tier gate"
     if reason == "cost-cap":
@@ -403,8 +403,8 @@ def _merge_only_recovery(reason: str) -> str:
     return f"{REASONS[reason]}; merge by hand"
 
 
-def _merge_only_stop_lines(rows: list[dict]) -> list[str]:
-    return [f"{r['case']}: {r['result']['reason']} — {_merge_only_recovery(r['result']['reason'])}"
+def _stop_lines(rows: list[dict]) -> list[str]:
+    return [f"{r['case']}: {r['result']['reason']} — {_stop_recovery(r['result']['reason'])}"
             for r in rows]
 
 
@@ -492,12 +492,11 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     report += marks
     if failed:
         report += _failure_details(rows, state, plan.get("tier") == "push")
-    if unrun_merge_only:
-        report.append(f"{MERGE_ONLY_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_merge_only))
-        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_merge_only)]
-    if unrun_split:
-        report.append(f"{SPLIT_NOT_RUN}: " + ", ".join(r["case"] for r in unrun_split))
-        report += [f"  {ln}" for ln in _merge_only_stop_lines(unrun_split)]
+    stops = [stop for stop in ((MERGE_ONLY_NOT_RUN, "merge-only", unrun_merge_only),
+                               (SPLIT_NOT_RUN, "split-procedure", unrun_split)) if stop[2]]
+    for line, _, unrun in stops:
+        report.append(f"{line}: " + ", ".join(r["case"] for r in unrun))
+        report += [f"  {ln}" for ln in _stop_lines(unrun)]
 
     body: list[str] = []
     if failed:
@@ -516,20 +515,16 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
     if notrun:
         body += ["", "Did not run:", ""] if body else ["Did not run — no verdict was reached for:", ""]
         body += _bullets(_not_run_items(rows))
-    if unrun_merge_only:
-        body += ["", f"Stopped — `{MERGE_ONLY_NOT_RUN}`: a merge-only case must run before merge, and "
-                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_merge_only) + ".", ""]
-        body += _bullets(_merge_only_stop_lines(unrun_merge_only))
-    if unrun_split:
-        body += ["", f"Stopped — `{SPLIT_NOT_RUN}`: a split-procedure case must run before merge, and "
-                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun_split) + ".", ""]
-        body += _bullets(_merge_only_stop_lines(unrun_split))
+    for line, kind, unrun in stops:
+        body += ["", f"Stopped — `{line}`: a {kind} case must run before merge, and "
+                     "did not: " + ", ".join(f"`{r['case']}`" for r in unrun) + ".", ""]
+        body += _bullets(_stop_lines(unrun))
     tier = _tier_lines(plan)
     if tier:
         body += ["", *tier]
     body += _extras(plan, rows, ignored, invalid)
     body += ["", *marks]
-    return (1 if failed or unrun_merge_only or unrun_split else 0), report, _wrap(body)
+    return (1 if failed or stops else 0), report, _wrap(body)
 
 
 def render_gate_error(step: str) -> str:

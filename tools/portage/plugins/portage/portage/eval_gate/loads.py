@@ -4,11 +4,10 @@ A load is the word ``Read`` followed by a backticked path ending ``.md``, plus e
 path in the same sentence. A sentence spans the lines of its paragraph and ends at ``.``, ``:`` or ``;``
 followed by whitespace or the end of the paragraph, outside backticks (``e.g.`` and ``i.e.`` do not end one).
 Fenced code blocks are skipped. Each path resolves against the loading file's directory first, then each ancestor
-directory up to the plugin
-root, taking the first that holds a file (a path found nowhere resolves to its loading-directory form, which
-``missing_loads`` reports); it must match
-``[A-Za-z0-9._/-]`` and must stay inside the plugin root. A *branch file* opens (first non-blank line, after
-optional ``*``/``_``) with "Applies when" or "Applies only when". A *split core* loads at least one.
+directory up to the plugin root, taking the first that holds a file (a path found nowhere resolves to its
+loading-directory form, which ``missing_loads`` reports); it must match ``[A-Za-z0-9._/-]`` and must stay inside
+the plugin root. A *branch file* opens (first non-blank line, after optional ``*``/``_``) with "Applies when" or
+"Applies only when". A *split core* loads at least one.
 
 ``derive`` fails safe: its closure is the entry, the declared branches and every non-branch file reached from
 them, transitively, by any backticked ``.md`` path that resolves to an existing file, whether or not its
@@ -40,7 +39,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-from .mapping import MAX_PROCEDURE_FILES, echo
+from .mapping import MAX_PROCEDURE_FILES, _q
 
 _SAFE_CHARS = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNORECASE)
@@ -61,11 +60,6 @@ class NotRegularFile(Exception):
 class Derived:
     files: tuple[str, ...]
     split: bool
-
-
-def _q(value: object, position: int) -> str:
-    shown = echo(value, position)
-    return shown if shown.startswith("#") else f"'{shown}'"
 
 
 def _paragraphs(text: str) -> list[str]:
@@ -182,6 +176,12 @@ def is_branch(text: str, read=None) -> bool:
     return _is_branch(text) if read is None else _parsed(read, text).branch
 
 
+def is_branch_file(path: str, read) -> bool:
+    """Whether ``path`` exists and is a branch file."""
+    text = _get(read, path)
+    return text is not None and is_branch(text, read)
+
+
 def _get(read, path: str) -> str | None:
     try:
         return read(path)
@@ -245,7 +245,7 @@ def derive(entry: str, branches, read) -> Derived:
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
         declared.append(norm)
-    split = any((t := _get(read, p)) is not None and is_branch(t, read) for p in entry_loads)
+    split = any(is_branch_file(p, read) for p in entry_loads)
 
     files: list[str] = []
     seen: set[str] = set()
@@ -272,8 +272,7 @@ def derive(entry: str, branches, read) -> Derived:
         parsed = loads_in(current, text, read)
         if current in declared:
             for target in parsed:
-                body = _get(read, target)
-                if body is not None and is_branch(body, read):
+                if is_branch_file(target, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
         reached = list(parsed)
         for raw in _parsed(read, text).md_spans:

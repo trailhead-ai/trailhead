@@ -58,11 +58,10 @@ plan is ``mapping-invalid``. So is a plan where, with every file read from the c
 empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
 fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
 at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
-procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in the working
-tree
-(``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``: the
-gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a renamed
-file counts as both its old and its new path.
+procedure that loads a branch file); or two corpora hold a case of the same name. A tracked file modified in
+the working tree (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``:
+the gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a
+renamed file counts as both its old and its new path.
 
 Bounds. A revision (the merge-base, HEAD) holds at most ``MAX_MAPPING_FILES`` mapping files, charged on
 the count of ``evals/eval-gate.json`` paths in its tree before any is read; a mapping holds at most
@@ -87,7 +86,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch, loads_in, missing_loads
+from .loads import LoadError, NotRegularFile, _get, cached, derive, is_branch_file, loads_in, missing_loads
 from .mapping import (MAX_CASES_PER_MAPPING, MAX_MAPPING_FILES, MAX_PROCEDURE_FILES, Mapping, MappingError, _q,
                       load_mapping, valid_corpus_path)
 
@@ -340,12 +339,7 @@ def _fault(path: str, ref: str, err: LoadError, revision: str) -> MappingError:
 
 def _split_cores(procedures: list[str], read) -> list[str]:
     """The procedure files (plugin-relative) that load at least one branch file."""
-    cores = []
-    for f in procedures:
-        text = _get(read, f)
-        if any((body := _get(read, t)) is not None and is_branch(body, read) for t in loads_in(f, text, read)):
-            cores.append(f)
-    return cores
+    return [f for f in procedures if any(is_branch_file(t, read) for t in loads_in(f, _get(read, f), read))]
 
 
 def _check_head_procedures(path: str, plugin: PurePosixPath, head_map: Mapping, markdown: list[str],
@@ -630,11 +624,10 @@ def backstop_touched(repo: Path, base: str | None = None) -> tuple[str, list[dic
     ``base-unresolved`` (the changed files are unknown, so ``entries`` is every covered case
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
     and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
-    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it. Only commits
-    are read: the mappings and
-    the case files come from the merge-base and HEAD, never the working tree, so an uncommitted
-    edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a git work tree
-    and ``GitError`` on any other git failure."""
+    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it.
+    Only commits are read: the mappings and the case files come from the merge-base and HEAD, never the
+    working tree, so an uncommitted edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a
+    git work tree and ``GitError`` on any other git failure."""
     repo = Path(repo).resolve()
     _require_work_tree(repo)
     resolved = _resolve_base(repo, base)
