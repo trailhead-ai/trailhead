@@ -117,20 +117,14 @@ class CostError(Exception):
         self.source = source
 
 
-class _Budget:
-    """What is left of a whole ``report`` call's byte, listing-entry and retained-run allowances."""
-
-    def __init__(self, nbytes: int, entries: int, runs: int) -> None:
-        self.bytes = nbytes
-        self.entries = entries
-        self.runs = runs
-
-
 class _Runs:
-    """The counted runs by (case, model), with the tallies of what was left out."""
+    """The counted runs by (case, model), with the tallies of what was left out and what is left of the
+    whole ``report`` call's byte, listing-entry and retained-run allowances."""
 
-    def __init__(self, budget: _Budget) -> None:
-        self.budget = budget
+    def __init__(self, bytes_left: int, entries_left: int, runs_left: int) -> None:
+        self.bytes_left = bytes_left
+        self.entries_left = entries_left
+        self.runs_left = runs_left
         self.costs: dict[tuple[str, str], list[float]] = {}
         self.seen: set[tuple] = set()
         self.unmatched: dict[tuple[str, str, str, float], int] = {}
@@ -157,14 +151,14 @@ class _Runs:
         if reason is None and from_history and self.unmatched.get(match, 0) > 0:
             self.unmatched[match] -= 1
             reason = "duplicate-history"
-        if reason is None and self.budget.runs <= 0:
+        if reason is None and self.runs_left <= 0:
             reason = "run-cap"
         if reason is not None:
             self.excluded[reason] += 1
             return
         if started is not None:
             self.seen.add(key)
-        self.budget.runs -= 1
+        self.runs_left -= 1
         if not from_history:
             self.unmatched[match] = self.unmatched.get(match, 0) + 1
         self.costs.setdefault((case, model), []).append(total)
@@ -254,16 +248,16 @@ def _open_directory(name: str | Path, dir_fd: int | None = None) -> int:
 def _ingest_files(dir_fd: int, plugin: str, runs: _Runs, read_files: bool = True) -> list[str]:
     """Read the ``.json`` files of an open directory (unless ``read_files`` is false); the names of its
     subdirectories, sorted."""
-    left = runs.budget.entries
+    left = runs.entries_left
     with os.scandir(dir_fd) as it:
         listed = [(e.name, e.is_dir(follow_symlinks=False)) for e in itertools.islice(it, left + 1)]
     if len(listed) > left:
         runs.listings_truncated += 1
     listed = listed[:left]
-    runs.budget.entries -= len(listed)
+    runs.entries_left -= len(listed)
     for name in sorted(n for n, _ in listed if read_files and n.endswith(".json")):
-        skip, doc, nbytes = _read_file(name, dir_fd, runs.budget.bytes)
-        runs.budget.bytes -= nbytes
+        skip, doc, nbytes = _read_file(name, dir_fd, runs.bytes_left)
+        runs.bytes_left -= nbytes
         parsed = skip or _runner_output(doc)
         if isinstance(parsed, str):
             runs.files_skipped[parsed] += 1
@@ -388,7 +382,7 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
     if not by_root:
         raise CostError("mapping", f"no eval-gate.json mapping for plugin {_safe(plugin)}")
 
-    runs = _Runs(_Budget(max_total_bytes, max_total_entries, max_retained_runs))
+    runs = _Runs(max_total_bytes, max_total_entries, max_retained_runs)
     for directory in runs_from:
         _ingest_directory(Path(directory), plugin, runs)
     _ingest_history(env, plugin, runs)
