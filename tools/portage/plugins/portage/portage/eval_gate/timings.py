@@ -4,8 +4,10 @@ Reads the timing history (``history.py``, both generations) and the ``evals/eval
 mappings under a repository, and reports per case how long its decisions took. Writes nothing.
 
 A history line is *counted* only when its ``plugin`` and ``case`` have the mapping's case-name
-shape and name a mapped case, its ``fingerprint`` equals that case's current pass-cache key
-(computed from the repository the way the gate computes it), and ``pinned_runner`` is not true.
+shape and name a mapped case, its ``fingerprint`` equals that case's current pass-cache key for the
+line's own tier (either tier's when the line records none), computed from the repository the way the gate
+computes it, and ``pinned_runner`` is not true. Once a corpus sets ``push_model`` one row mixes push-model
+and merge-model runs, so its median, batch-max and mean cost blend both models.
 Every other line is tallied as ``corrupt`` (not a JSON object), ``mis-shaped`` (a field outside
 its shape or bounds), ``pinned`` or ``stale`` (an old fingerprint, or a case the mappings do not
 hold) and nothing from it is printed. Only validated names and numbers computed here reach stdout.
@@ -205,7 +207,8 @@ def classify_line(raw: bytes) -> tuple[str, dict | None, dict | None]:
 
 def _line_keys(case: _Case, doc: dict) -> set[str]:
     """The keys a line may carry: its own tier's when it records one, else either tier's."""
-    tiers = (doc["tier"],) if doc.get("tier") in case.keys else TIERS
+    tier = doc.get("tier")
+    tiers = (tier,) if isinstance(tier, str) and tier in case.keys else TIERS
     return {case.keys[t] for t in tiers if case.keys[t] is not None}
 
 
