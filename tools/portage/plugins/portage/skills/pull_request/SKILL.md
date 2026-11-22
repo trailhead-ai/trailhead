@@ -64,7 +64,9 @@ updater's own words:
 
 - It says the push was **stopped**: a case scored below its bar and nothing was pushed or updated in any
   repo. Name the failing case(s) and the kept state path it gives, pass on its ways forward, and do not
-  launch `monitor` (there are no PRs to watch).
+  launch `monitor` (there are no PRs to watch). When the line asks about a `needs_merge_model` mark for a
+  case that failed on the push model, put that question to the operator as the line words it, naming the
+  case, and add no mark yourself.
 - It says the gate **did not run**: the push went ahead and the PR body says why. When the line marks the
   reason as persistent, tell the operator plainly that every push will skip the gate until they fix it, and
   repeat the remedy the line gives.
@@ -243,7 +245,10 @@ Pass the same inputs as `create` Step 1. Read the report's `**Eval gate:**` line
 - The push was stopped (a case below its bar, or a dirty tree), the preflight failed, or `pr_pairs`
   is empty: end `stuck` through Step H (`the eval gate stopped the push`, `the preflight failed`,
   `no pull request was opened`), with the repo and case the report names logged in the block. Nothing
-  is retried, no PR is watched, and nothing is asked.
+  is retried, no PR is watched, and nothing is asked. When the report asks about a `needs_merge_model`
+  mark, the reason on the outcome line also names the failing case and says an operator decision on a
+  needs-merge-model mark is needed (`the eval gate stopped the push: case <case> failed on the push model,
+  an operator decision on a needs-merge-model mark is needed`); no mark is added.
 - The gate did not run, or passed, or mapped no cases: carry on, and log one decision in the block
   when it did not run.
 
