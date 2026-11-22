@@ -468,6 +468,11 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                 base_derived = _derive(path, base_map, name, base_read, "base")
                 head_derived = _derive(path, head_map, name, head_read, "head")
                 declared = [d for d in (base_derived, head_derived) if d is not None]
+                if head_case and head_case.merge_only and head_case.needs_merge_model is None \
+                        and any(d.split for d in declared):
+                    raise MappingError(path, f"case {_q(name, list(head_map.cases).index(name) + 1)}: its entry is a "
+                                             "split procedure core, which runs on the push model; mark it "
+                                             "needs_merge_model with a reason, or drop merge_only")
                 measures = tuple(dict.fromkeys(
                     (base_case.measures if base_case else ()) + (base_derived.files if base_derived else ())
                     + (head_case.measures if head_case else ()) + (head_derived.files if head_derived else ())

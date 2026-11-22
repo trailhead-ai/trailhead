@@ -2233,3 +2233,117 @@ class TestPlanPrintsTheFlagsTheMonitorReads:
         want = [f"case-flags: p:{c['case']} merge_only={str(c['merge_only']).lower()} "
                 f"split_procedure={str(c['split_procedure']).lower()}" for c in plan["cases"]]
         assert lines == want
+
+
+SPLIT_RUNNER = {"model": "opus", "push_model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
+UNSPLIT_ENTRY = "# Entry\n\nDo A when the user asks for A. Do B when the user asks for B.\n"
+CORE_ENTRY = "# Entry\n\nRead `rules/core.md`.\n\nRead `skills/b-a.md` when the user asks for A.\n"
+BRANCH_A = "Applies when the user asks for A.\n\nDo A.\n"
+SPLIT_MAPPING_PATH = "p/evals/eval-gate.json"
+
+
+def _split_mapping(split: bool, *, merge_only: bool = False, mark: bool = False) -> str:
+    one = {"entry": "skills/entry.md"}
+    two: dict = {"entry": "skills/entry.md"}
+    if split:
+        two["branches"] = ["skills/b-a.md"]
+    if merge_only:
+        two["merge_only"] = True
+    if mark:
+        two["needs_merge_model"] = "needs the larger model"
+    return json.dumps({"schema_version": 1, "runner": SPLIT_RUNNER, "cases": {"one": one, "two": two}})
+
+
+def _split_repo(repo, capsys, *, base_split: bool, head_split: bool, base_mark: bool = False,
+                head_merge_only: bool = False, head_mark: bool = False, tier: str = "push"):
+    """Case ``two`` is the case under test; ``one`` always declares the bare entry. The entry is a split core
+    at a revision when its text names a branch file, which the mapping then declares."""
+    _git(repo, "init", "-b", "main")
+    for name in ("one", "two"):
+        _write(repo, f"p/evals/{name}/case.yaml", "name: x\n")
+    _write(repo, "p/rules/core.md", "core\n")
+    _write(repo, "p/skills/entry.md", CORE_ENTRY if base_split else UNSPLIT_ENTRY)
+    if base_split:
+        _write(repo, "p/skills/b-a.md", BRANCH_A)
+    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(base_split, mark=base_mark))
+    _commit(repo)
+    _branch(repo)
+    _write(repo, "p/skills/entry.md", CORE_ENTRY if head_split else UNSPLIT_ENTRY)
+    if head_split and not base_split:
+        _write(repo, "p/skills/b-a.md", BRANCH_A)
+    if base_split and not head_split:
+        (repo / "p/skills/b-a.md").unlink()
+    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(head_split, merge_only=head_merge_only, mark=head_mark))
+    _commit(repo)
+    return _plan(repo, capsys, "--base", "base", "--tier", tier)
+
+
+REFUSAL_FIX = "mark it needs_merge_model with a reason, or drop merge_only"
+
+
+class TestSplitProcedureCaseRunsOnThePushModel:
+    def test_a_split_selects_every_case_declared_on_the_entry_and_an_unmarked_failure_stops_the_push(
+        self, repo, capsys
+    ):
+        rc, plan, out = _split_repo(repo, capsys, base_split=False, head_split=True)
+        assert rc == 0 and plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+        assert _entry_of(plan, "two")["split_procedure"] is True
+        for c in plan["cases"]:
+            assert c["runner"]["model"] == "sonnet"
+        state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
+        (state / "results").mkdir(exist_ok=True, mode=0o700)
+        for c in plan["cases"]:
+            fail = c["case"] == "one"
+            (state / "results" / f"{c['case']}.json").write_text(json.dumps(
+                {"case": c["case"], "verdict": "fail" if fail else "pass", "passed": 0 if fail else 3,
+                 "failed": 3 if fail else 0, "errored": 0, "reason": None, "runs": []}))
+        capsys.readouterr()
+        code = dispatch.main(["eval-gate", "verdict", "--state", str(state)])
+        report = capsys.readouterr().out
+        assert code == 1, report
+        assert "one failed on the push model (sonnet)" in report
+        assert "ask the operator whether to add a needs-merge-model mark" in report
+        assert "two failed on the push model" not in report
+
+    def test_a_case_the_base_marks_needs_merge_model_resolves_to_the_merge_model(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, base_mark=True,
+                                 head_mark=True)
+        assert _names(plan) == ["one", "two"]
+        assert _entry_of(plan, "two")["runner"]["model"] == "opus"
+        assert _entry_of(plan, "one")["runner"]["model"] == "sonnet"
+
+
+class TestSplitProcedureMergeOnlyRefusal:
+    @pytest.mark.parametrize("tier", ["push", "merge"])
+    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, False), (True, True)])
+    def test_a_merge_only_case_on_an_entry_split_at_either_revision_without_a_mark_is_refused(
+        self, repo, capsys, tier, base_split, head_split
+    ):
+        rc, plan, out = _split_repo(repo, capsys, base_split=base_split, head_split=head_split,
+                                    head_merge_only=True, tier=tier)
+        assert plan["status"] == "mapping-invalid", plan
+        assert plan["cases"] == []
+        bad = plan["mapping_invalid"]
+        assert bad["file"] == SPLIT_MAPPING_PATH
+        assert "case 'two'" in bad["fault"] and REFUSAL_FIX in bad["fault"]
+        assert "\n" not in bad["fault"]
+        assert f"mapping-invalid: {SPLIT_MAPPING_PATH}:" in out
+
+    def test_the_fault_echoes_no_mapping_text(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, head_merge_only=True)
+        fault = plan["mapping_invalid"]["fault"]
+        assert "skills/entry.md" not in fault and "skills/b-a.md" not in fault
+        assert "true" not in fault
+
+    @pytest.mark.parametrize("tier", ["push", "merge"])
+    def test_a_marked_merge_only_case_on_a_split_entry_is_allowed(self, repo, capsys, tier):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, head_merge_only=True,
+                                 head_mark=True, tier=tier)
+        assert plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+
+    def test_a_merge_only_case_on_an_entry_split_at_neither_revision_plans_as_before(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, head_merge_only=True)
+        assert plan["mapping_invalid"] is None
+        assert plan["status"] != "mapping-invalid"
