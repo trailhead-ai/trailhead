@@ -652,6 +652,16 @@ class TestOneBudgetOneLevelDown:
         tally = counts(fx.report(fx.runs, max_total_entries=6), "runner outputs:")
         assert (tally["read"], tally["listings-truncated"]) == (3, 0)
 
+    def test_a_runs_from_already_read_as_a_subdirectory_is_listed_once_in_either_order(self, fx):
+        self._request(fx)
+        sub = fx.runs / "alpha"
+        forward = fx.report(fx.runs, sub, max_total_entries=4)
+        reverse = fx.report(sub, fx.runs, max_total_entries=4)
+        assert counts(forward, "runner outputs:")["listings-truncated"] == 0
+        assert forward == reverse
+        assert "(partial" not in forward[-1]
+        assert counts(forward, "runner outputs:")["read"] == 3
+
     def _five_runs(self, fx):
         basic(fx)
         runner_file(fx.runs, "r.json", costs=tuple((c, 0.0) for c in (1.0, 2.0, 3.0, 10.0, 20.0)))
@@ -661,6 +671,14 @@ class TestOneBudgetOneLevelDown:
         lines = fx.report(fx.runs, max_retained_runs=3)
         assert priced(lines)["alpha"][2:4] == ["2.0000", "3"]
         assert counts(lines, "runs:")["run-cap"] == 2 and counts(lines, "runs:")["counted"] == 3
+
+    def test_a_run_past_the_cap_is_not_a_counterpart_for_a_history_run(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "r.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        fx.history(hline(cost_usd=3.0))
+        lines = fx.report(fx.runs, max_retained_runs=1)
+        tally = counts(lines, "runs:")
+        assert (tally["counted"], tally["duplicate-history"], tally["run-cap"]) == (1, 0, 2)
 
     def test_a_raised_retained_run_cap_prices_every_run(self, fx):
         self._five_runs(fx)
@@ -851,22 +869,38 @@ class TestHistoryLineTally:
         self._mixed(fx)
         lines = fx.report(fx.runs)
         at = next(i for i, x in enumerate(lines) if x.startswith("runner outputs:"))
-        assert lines[at + 1] == "history lines: read 5; skipped: corrupt 1, mis-shaped 3"
+        assert lines[at + 1] == "history lines: read 5; skipped: corrupt 2, mis-shaped 2"
         assert lines[at + 2].startswith("runs: counted 1")
         assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+
+    def test_the_skip_tallies_match_what_timings_reports_for_the_same_file(self, fx, capsys):
+        basic(fx)
+        wrong_plugin = {**hline(), "plugin": 7}
+        bad_plugin_name = hline(plugin="Bad Plugin!")
+        self._lines(fx, json.dumps(hline(cost_usd=1.0)), "{not json", json.dumps([1, 2]), "5", '"text"',
+                    "null", json.dumps({**hline(), "verdict": "nonsense"}),
+                    json.dumps(hline(case="Bad Case!")), json.dumps(wrong_plugin),
+                    json.dumps(bad_plugin_name), json.dumps(hline(plugin="")),
+                    json.dumps(hline(plugin="other")))
+        assert dispatch.main(["eval-gate", "timings", "--repo", str(fx.root)]) == 0
+        timings_line = next(x for x in capsys.readouterr().out.splitlines() if "skipped lines:" in x)
+        want = {k: v for k, v in re.findall(r"(corrupt|mis-shaped) (\d+)", timings_line)}
+        got = counts(fx.report(fx.runs), "history lines:")
+        assert (str(got["corrupt"]), str(got["mis-shaped"])) == (want["corrupt"], want["mis-shaped"])
+        assert (got["corrupt"], got["mis-shaped"]) == (5, 4)
 
     def test_a_history_skip_makes_the_baseline_lines_partial(self, fx):
         basic(fx)
         self._mixed(fx)
         lines = fx.report(fx.runs)
-        want = "baseline: 2.0000 (partial: history-corrupt 1, history-mis-shaped 3)"
+        want = "baseline: 2.0000 (partial: history-corrupt 2, history-mis-shaped 2)"
         assert lines[0] == lines[-1] == want
 
     def test_each_history_skip_is_named_on_its_own(self, fx):
         basic(fx)
         self._lines(fx, json.dumps(hline(cost_usd=1.0)), "{not json")
         assert fx.report(fx.runs)[-1] == "baseline: 2.0000 (partial: history-corrupt 1)"
-        self._lines(fx, json.dumps(hline(cost_usd=1.0)), json.dumps([1]))
+        self._lines(fx, json.dumps(hline(cost_usd=1.0)), json.dumps({**hline(), "verdict": "nonsense"}))
         assert fx.report(fx.runs)[-1] == "baseline: 2.0000 (partial: history-mis-shaped 1)"
 
     def test_a_clean_history_has_no_suffix(self, fx):
@@ -912,6 +946,58 @@ class TestPartialFigure:
                 locked.chmod(0o700)
         assert lines[0] == lines[-1]
         assert lines[-1].startswith("baseline: ") and lines[-1].endswith(f" (partial: {name} 1)")
+
+    def test_a_file_over_the_size_bound_makes_the_figure_partial(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        big = runner_file(fx.runs, "big.json", costs=((50.0, 0.0),))
+        big.write_text(big.read_text() + " " * (cost.MAX_FILE_BYTES + 1))
+        assert fx.report(fx.runs)[-1] == "baseline: 4.0000 (partial: too-large 1)"
+
+    def test_a_file_within_the_size_bound_leaves_the_figure_whole(self, fx):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        assert fx.report(fx.runs)[-1] == "baseline: 4.0000"
+
+    def test_a_file_with_more_runs_than_the_per_file_bound_makes_the_figure_partial(self, fx, monkeypatch):
+        basic(fx)
+        monkeypatch.setattr(cost, "MAX_RUNS_PER_FILE", 2)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        runner_file(fx.runs, "many.json", costs=((50.0, 0.0),) * 3)
+        lines = fx.report(fx.runs)
+        assert lines[-1] == "baseline: 4.0000 (partial: too-many-runs 1)"
+        tally = counts(lines, "runner outputs:")
+        assert (tally["too-many-runs"], tally["bad-shape"]) == (1, 0)
+
+    def test_a_file_with_exactly_the_per_file_bound_of_runs_is_read(self, fx, monkeypatch):
+        basic(fx)
+        monkeypatch.setattr(cost, "MAX_RUNS_PER_FILE", 2)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        lines = fx.report(fx.runs)
+        assert lines[-1] == "baseline: 4.0000"
+        assert counts(lines, "runner outputs:")["too-many-runs"] == 0
+
+    @pytest.mark.parametrize("junk", ["{not json", "[1, 2]"])
+    def test_a_malformed_file_is_bad_input_and_leaves_the_figure_whole(self, fx, junk):
+        basic(fx)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        (fx.runs / "junk.json").write_text(junk)
+        assert fx.report(fx.runs)[-1] == "baseline: 4.0000"
+
+    def test_the_new_cuts_come_after_the_runner_output_cuts_and_before_the_history_ones(self, fx, monkeypatch):
+        basic(fx)
+        monkeypatch.setattr(cost, "MAX_RUNS_PER_FILE", 2)
+        runner_file(fx.runs, "a.json", costs=((1.0, 0.0), (3.0, 0.0)))
+        runner_file(fx.runs, "many.json", costs=((50.0, 0.0),) * 3)
+        big = runner_file(fx.runs, "big.json", costs=((50.0, 0.0),))
+        big.write_text(big.read_text() + " " * (cost.MAX_FILE_BYTES + 1))
+        self_lines = ["{not json"]
+        d = fx.cache / "eval-gate"
+        d.mkdir(parents=True)
+        (d / history.HISTORY_NAME).write_text("".join(x + "\n" for x in self_lines))
+        lines = fx.report(fx.runs, max_retained_runs=1)
+        assert lines[-1] == ("baseline: 2.0000 (partial: run-cap 1, too-large 1, too-many-runs 1, "
+                             "history-corrupt 1)")
 
     def test_every_cut_is_named_in_a_fixed_order(self, fx):
         basic(fx)

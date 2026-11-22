@@ -58,7 +58,8 @@ and skipped (tallied by reason, never printed) when it is not a regular file or 
 (``not-regular``), is over the size bound (``too-large``), is past the call's byte budget
 (``directory-bound``), is not JSON (``not-json``), nests deeper than ``MAX_DEPTH`` or past the parser's own
 limit (``too-deep``), has a shape the reader does not take or a case name outside the mapping's shape
-(``bad-shape``), or holds a ``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and
+(``bad-shape``), holds more runs than ``MAX_RUNS_PER_FILE`` (``too-many-runs``), or holds a
+``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and
 at most ``MAX_RUN_COST_USD`` (``bad-number``). A subdirectory that cannot be opened or listed is tallied
 ``unlistable-directory`` and the report goes on; an unlistable ``--runs-from`` itself raises ``CostError``.
 
@@ -66,14 +67,20 @@ Three bounds cover the whole call, however many directories it reads: ``max_tota
 whether or not the file then parsed), ``max_total_entries`` (every entry listed in any listing, whatever its
 kind or name; each listing takes at most what remains, and one cut short is tallied ``listings-truncated``)
 and ``max_retained_runs`` (the runs kept in memory; one past it is excluded as ``run-cap``). When any of
-``directory-bound``, ``listings-truncated``, ``unlistable-directory`` or ``run-cap`` is nonzero the figure is
-partial, and both ``baseline:`` lines end with ``(partial: <name> <n>, ...)`` naming those tallies. To get a
-full figure, raise the bound that was hit or narrow ``--runs-from`` to the directories that matter.
+``directory-bound``, ``listings-truncated``, ``unlistable-directory``, ``run-cap``, ``too-large`` or
+``too-many-runs`` is nonzero the figure is partial, and both ``baseline:`` lines end with
+``(partial: <name> <n>, ...)`` naming those tallies. The malformed-file reasons (``not-json``, ``too-deep``,
+``bad-shape``, ``bad-number``, ``not-regular``) stay out of the suffix: they are bad input, not a bound.
+The bounds are the fixed module constants ``MAX_FILE_BYTES``, ``MAX_RUNS_PER_FILE``, ``MAX_TOTAL_BYTES``,
+``MAX_TOTAL_ENTRIES`` and ``MAX_RETAINED_RUNS``, and the command has no flag for any of them: to get a full
+figure, narrow ``--runs-from`` to the directories that matter.
 History lines are tallied as ``history lines: read <n>; skipped: corrupt <n>, mis-shaped <n>`` (the words
-and order of ``portage eval-gate timings``): ``corrupt`` is a line that is not JSON, ``mis-shaped`` any other
-unusable line (not an object, failing ``timings.decision``, a case name outside the mapping's shape). Either
-count nonzero also makes the figure partial, named ``history-corrupt`` and ``history-mis-shaped`` after the
-bound tallies.
+and order of ``portage eval-gate timings``, classified by ``timings.classify_line`` so the two agree on one
+file): ``corrupt`` is a line that is not a JSON object, ``mis-shaped`` any other unusable line (failing
+``timings.decision``, a case or plugin name outside the mapping's shape). Either count nonzero also makes
+the figure partial, named ``history-corrupt`` and ``history-mis-shaped`` after the bound tallies. Those
+lines are skipped, never repaired, and no flag changes that: inspect the history file for the lines the
+reader cannot use.
 Only names that passed the mapping's shapes and numbers computed here reach stdout; paths go through
 ``verdict._safe``.
 
@@ -105,7 +112,7 @@ MAX_DEPTH = 10
 MAX_RUNS_PER_FILE = 1000
 THIN_RUNS = 2
 SKIP_REASONS = ("not-regular", "too-large", "directory-bound", "not-json", "too-deep", "bad-shape",
-                "bad-number", "unlistable-directory")
+                "bad-number", "unlistable-directory", "too-many-runs")
 RUN_EXCLUSIONS = ("ablation", "multi-plugin", "other-plugin", "pinned", "model-unknown", "zero-cost",
                   "duplicate", "duplicate-history", "run-cap")
 _STARTED = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?Z")
@@ -135,7 +142,7 @@ class _Runs:
         self.files_read = 0
         self.files_skipped = dict.fromkeys(SKIP_REASONS, 0)
         self.listings_truncated = 0
-        self.directories_read: set[tuple[int, int]] = set()
+        self.directories_read: dict[tuple[int, int], list[str]] = {}
         self.directories_expanded: set[tuple[int, int]] = set()
 
     def add(self, plugin: str, case: str, model: str | None, started: str | None, cost_usd: float | None,
@@ -231,9 +238,10 @@ def _runner_output(doc: object):
     plugins = _plugins_of(suite) if isinstance(suite, dict) else None
     runs = runs_of(doc)
     case = doc["cases"][0].get("name") if runs is not None else None
-    if (plugins is None or runs is None or len(runs) > MAX_RUNS_PER_FILE
-            or not (isinstance(case, str) and CASE_NAME.match(case))):
+    if (plugins is None or runs is None or not (isinstance(case, str) and CASE_NAME.match(case))):
         return "bad-shape"
+    if len(runs) > MAX_RUNS_PER_FILE:
+        return "too-many-runs"
     for run in runs:
         for key in ("costUsd", "judgeCostUsd"):
             if run.get(key) is not None and measure(run[key], MAX_RUN_COST_USD) is None:
@@ -245,9 +253,14 @@ def _open_directory(name: str | Path, dir_fd: int | None = None) -> int:
     return os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dir_fd)
 
 
-def _ingest_files(dir_fd: int, plugin: str, runs: _Runs, read_files: bool = True) -> list[str]:
-    """Read the ``.json`` files of an open directory (unless ``read_files`` is false); the names of its
-    subdirectories, sorted."""
+def _ingest_files(dir_fd: int, plugin: str, runs: _Runs) -> list[str]:
+    """Read the ``.json`` files of an open directory the first time it is reached, and list it once; the
+    names of its subdirectories, sorted, as listed then."""
+    st = os.fstat(dir_fd)
+    key = (st.st_dev, st.st_ino)
+    if key in runs.directories_read:
+        return runs.directories_read[key]
+    runs.directories_read[key] = []
     left = runs.entries_left
     with os.scandir(dir_fd) as it:
         listed = [(e.name, e.is_dir(follow_symlinks=False)) for e in itertools.islice(it, left + 1)]
@@ -255,7 +268,7 @@ def _ingest_files(dir_fd: int, plugin: str, runs: _Runs, read_files: bool = True
         runs.listings_truncated += 1
     listed = listed[:left]
     runs.entries_left -= len(listed)
-    for name in sorted(n for n, _ in listed if read_files and n.endswith(".json")):
+    for name in sorted(n for n, _ in listed if n.endswith(".json")):
         skip, doc, nbytes = _read_file(name, dir_fd, runs.bytes_left)
         runs.bytes_left -= nbytes
         parsed = skip or _runner_output(doc)
@@ -271,7 +284,9 @@ def _ingest_files(dir_fd: int, plugin: str, runs: _Runs, read_files: bool = True
             started = raw.get("startedAt")
             started = started if isinstance(started, str) and _STARTED.fullmatch(started) else None
             runs.add(plugin, case, model, started, rec["cost_usd"], timings.run_cost(rec), reason)
-    return sorted(n for n, is_dir in listed if is_dir)
+    subdirectories = sorted(n for n, is_dir in listed if is_dir)
+    runs.directories_read[key] = subdirectories
+    return subdirectories
 
 
 def _first_visit(fd: int, seen: set[tuple[int, int]]) -> bool:
@@ -295,7 +310,7 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs) -> None:
         if not _first_visit(top, runs.directories_expanded):
             return
         try:
-            subdirectories = _ingest_files(top, plugin, runs, _first_visit(top, runs.directories_read))
+            subdirectories = _ingest_files(top, plugin, runs)
         except OSError as e:
             raise CostError("runs-from", f"{_safe(directory)}: {e.strerror}") from None
         for name in subdirectories:
@@ -305,8 +320,7 @@ def _ingest_directory(directory: Path, plugin: str, runs: _Runs) -> None:
                 runs.files_skipped["unlistable-directory"] += 1
                 continue
             try:
-                if _first_visit(sub, runs.directories_read):
-                    _ingest_files(sub, plugin, runs)
+                _ingest_files(sub, plugin, runs)
             except OSError:
                 runs.files_skipped["unlistable-directory"] += 1
             finally:
@@ -320,16 +334,14 @@ def _ingest_history(env: dict[str, str], plugin: str, runs: _Runs) -> None:
         for path in (history.rotated_path(env), history.history_path(env)):
             for raw in timings.history_lines(path):
                 runs.history_read += 1
-                try:
-                    doc = json.loads(raw)
-                except Exception:
-                    runs.history_corrupt += 1
+                shape, doc, dec = timings.classify_line(raw)
+                if dec is None:
+                    if shape == "corrupt":
+                        runs.history_corrupt += 1
+                    else:
+                        runs.history_mis_shaped += 1
                     continue
-                dec = timings.decision(doc) if isinstance(doc, dict) else None
-                case = doc.get("case") if dec is not None else None
-                if dec is None or not (isinstance(case, str) and CASE_NAME.match(case)):
-                    runs.history_mis_shaped += 1
-                    continue
+                case = doc["case"]
                 reason = ("other-plugin" if doc["plugin"] != plugin
                           else "pinned" if doc["pinned_runner"] else None)
                 for r in dec["runs"]:
@@ -419,6 +431,8 @@ def report(repo: Path, plugin: str, runs_from: list[Path], env: dict[str, str],
             ("listings-truncated", runs.listings_truncated),
             ("unlistable-directory", runs.files_skipped["unlistable-directory"]),
             ("run-cap", runs.excluded["run-cap"]),
+            ("too-large", runs.files_skipped["too-large"]),
+            ("too-many-runs", runs.files_skipped["too-many-runs"]),
             ("history-corrupt", runs.history_corrupt),
             ("history-mis-shaped", runs.history_mis_shaped)]
     partial = ", ".join(f"{name} {n}" for name, n in cuts if n)

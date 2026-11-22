@@ -230,7 +230,9 @@ def _add_cost(group) -> None:
                    help="A directory of saved runner-output JSON files, read at its top level and in each "
                         "immediate subdirectory, not deeper (repeatable). One 64 MiB byte budget, one "
                         "20000-entry listing budget and one 100000-run cap cover every directory; when a "
-                        "figure is marked (partial: ...), raise the bound or narrow --runs-from")
+                        "figure is marked (partial: ...), the bounds are fixed (not flags), so narrow --runs-from; a "
+                        "partial naming history-corrupt or history-mis-shaped means history lines the reader "
+                        "cannot use were skipped, not repaired: inspect the history file")
     p.set_defaults(func=cmd_cost)
 
 

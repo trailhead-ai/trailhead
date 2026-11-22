@@ -282,18 +282,23 @@ push-tier prices plus its merge-tier prices; the baseline is the median of the f
 `baseline: incomplete (<n> cases unpriced); lower bound <median>` while a selected case has no run. The report opens
 with the baseline, the mean and the unpriced count, then the counts of files and runs read, skipped and excluded
 by reason, a row per file, the unpriced and priced cases (a price from one or two runs is flagged `thin`) and the
-files no case selects; its last line is the `baseline:` line. The runner-output counts end with `unlistable-directory <n>` among the skip reasons (a subdirectory that could not be
+files no case selects; its last line is the `baseline:` line. The runner-output counts end with `unlistable-directory <n>` and `too-many-runs <n>` among the skip reasons (a subdirectory that could not be
 opened or listed; a `--runs-from` that cannot be read is still exit 2) and then `listings-truncated <n>`.
 A `history lines: read <n>; skipped: corrupt <n>, mis-shaped <n>` line follows (the words and order
-`eval-gate timings` uses for the same file): `corrupt` is a line that is not JSON, `mis-shaped` any other unusable line.
+`eval-gate timings` uses for the same file): `corrupt` is a line that is not a JSON object, `mis-shaped` any other unusable line (a field, `plugin` or `case` outside its shape); the two commands classify a line with the same function.
 Three bounds cover the whole call, not each directory: 64 MiB of bytes read (every byte read from a runner output,
 parsed or not; a file past it is `directory-bound`), 20000 listing entries (every entry listed in any listing, files,
 subdirectories and other names alike; a listing cut short is `listings-truncated`), and 100000 retained runs (a run
 past it is excluded as `run-cap`). When any of `directory-bound`, `listings-truncated`, `unlistable-directory` or
-`run-cap` is nonzero, or any history line was skipped, both `baseline:` lines end with `(partial: <name> <n>, ...)`
-after the figure, naming only the nonzero ones in that order, the history skips last as `history-corrupt` and
-`history-mis-shaped`. To get a full figure, raise the bound that was hit or narrow `--runs-from` to the
-directories that matter. It writes nothing. Exit 0 on a report, 2 with a
+`run-cap`, `too-large` (a file over 1 MiB) or `too-many-runs` (a file with more than 1000 runs, which has its own
+runner-output skip reason; `bad-shape` stays a malformed document) is nonzero, or any history line was skipped, both
+`baseline:` lines end with `(partial: <name> <n>, ...)` after the figure, naming only the nonzero ones in that order,
+the history skips last as `history-corrupt` and `history-mis-shaped`. The malformed-file reasons (`not-json`,
+`too-deep`, `bad-shape`, `bad-number`, `not-regular`) stay out of the suffix because they are bad input, not a bound.
+The bounds are fixed constants in the reader (`MAX_FILE_BYTES`, `MAX_RUNS_PER_FILE`, `MAX_TOTAL_BYTES`,
+`MAX_TOTAL_ENTRIES`, `MAX_RETAINED_RUNS`) and the command has no flag for them, so to get a full figure narrow
+`--runs-from` to the directories that matter. A partial naming `history-corrupt` or `history-mis-shaped` means the
+history file holds lines the reader cannot use; they are skipped, not repaired, so inspect the history file. It writes nothing. Exit 0 on a report, 2 with a
 `portage: eval-gate cost: <source> unreadable` line when the repo, mapping, a run directory or the history cannot be read.
 
 ## Cost and limits
