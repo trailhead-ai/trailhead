@@ -21,7 +21,9 @@ single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number 
 which the merge tier uses); it is carried in the runner dict only when configured.
 ``needs_merge_model`` marks a case the push tier cannot trust to the cheaper model and states why: a
 reason of 1-200 characters, one line, starting with a letter or digit and otherwise letters, digits,
-space and ``.,;'()_-`` (no ``:`` or ``/``, so a reason can never form a URL in a PR body).
+space and ``.,;'()_-``, and never containing ``www.`` in any case. A GitHub autolink needs a scheme (``:``),
+a path (``/``), an address (``@``) or a ``www.`` prefix, and the charset or the ``www.`` rule excludes each, so a reason
+can never form a link in a PR body.
 Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 
@@ -40,6 +42,7 @@ CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
 TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^\n\r]*\))?\Z")
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 NEEDS_MERGE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,;'()_-]{0,199}\Z")
+_AUTOLINK = "www."
 MAX_COST_USD = 25
 MAX_RUNS = 10
 
@@ -164,9 +167,11 @@ def _case(name: str, obj, file: str, plugin_root: Path | None, evals_dir: Path |
     needs_merge_model = obj.get("needs_merge_model")
     if "needs_merge_model" in obj and not (
         isinstance(needs_merge_model, str) and NEEDS_MERGE_MODEL.match(needs_merge_model)
+        and _AUTOLINK not in needs_merge_model.lower()
     ):
         raise MappingError(file, f"case {name!r}: needs_merge_model must be a reason of 1-200 characters on one line, "
-                                 "starting with a letter or digit, using only letters, digits, space and .,;'()_-")
+                                 "starting with a letter or digit, using only letters, digits, space and .,;'()_- "
+                                 "and not containing 'www.'")
     return Case(name, paths, runs, pass_at, merge_only, needs_merge_model)
 
 

@@ -866,6 +866,23 @@ class TestPushModelAndNeedsMergeModel:
         assert "case 'alpha'" in fault and "needs_merge_model" in fault
         assert "200" in fault and "letters, digits, space" in fault
 
+    @pytest.mark.parametrize("bad", [
+        "see www.attacker.example", "WWW.attacker.example", "a Www.b", "www.x", "needs the bigger model www.",
+    ], ids=repr)
+    def test_a_reason_that_could_autolink_is_refused_without_echoing_it(self, bad):
+        fault = _fault(_mapping_with(case_over={"needs_merge_model": bad}))
+        assert "\n" not in fault
+        assert "case 'alpha'" in fault and "needs_merge_model" in fault
+        assert "www." in fault
+        assert bad not in fault
+
+    def test_a_reason_with_www_inside_a_word_part_is_judged_by_the_same_rule(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        reason = "needs the www model"
+        m = load_mapping(_mapping_with(case_over={"needs_merge_model": reason}), "f")
+        assert m.cases["alpha"].needs_merge_model == reason
+
     def test_a_mapping_with_neither_key_loads_as_before(self):
         from portage.eval_gate.mapping import load_mapping
 
