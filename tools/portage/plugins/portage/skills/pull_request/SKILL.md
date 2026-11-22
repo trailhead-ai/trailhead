@@ -467,12 +467,13 @@ Every camp group member is a peer — there is no privileged member.
       portage eval-gate plan --repo <repo_path> --tier merge
       ```
 
-      It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, then one
-      `<plugin_root>:<case>` line per selected case. The merge tier selects every touched case and the
-      printed lines do not mark `merge_only` ones, so read `<dir>/plan.json`: its `cases` entries each
-      carry `"merge_only": true|false`. With `status: cases-selected` and at least one `merge_only`
-      entry the gate applies; keep `<dir>`. With any other `status`, or none, there is no gate for this
-      repo: skip it and give `portage merge` no `--eval-state` for it (`portage merge` makes the same
+      It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>`
+      line per selected case, then one `case-flags: <plugin_root>:<case> merge_only=<true|false>
+      split_procedure=<true|false>` line per selected case. The merge tier selects every touched case;
+      the `case-flags:` lines say which are `merge_only` or `split_procedure`. With
+      `status: cases-selected` and at least one `case-flags:` line with `merge_only=true` or
+      `split_procedure=true` the gate applies; keep `<dir>`. With any other `status`, or no such line,
+      there is no gate for this repo: skip it and give `portage merge` no `--eval-state` for it (`portage merge` makes the same
       decision itself and refuses when one was needed). If `plan` exits non-zero, say so in the
       report and rely on that refusal.
    2. Run every planned case, one foreground call each, one at a time, passing the case name alone
