@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
+import _portage_cli  # prepends the plugin root onto sys.path
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
@@ -2235,7 +2235,6 @@ class TestPlanPrintsTheFlagsTheMonitorReads:
         assert lines == want
 
 
-SPLIT_RUNNER = {"model": "opus", "push_model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
 UNSPLIT_ENTRY = "# Entry\n\nDo A when the user asks for A. Do B when the user asks for B.\n"
 CORE_ENTRY = "# Entry\n\nRead `rules/core.md`.\n\nRead `skills/b-a.md` when the user asks for A.\n"
 BRANCH_A = "Applies when the user asks for A.\n\nDo A.\n"
@@ -2250,8 +2249,8 @@ def _split_mapping(split: bool, *, merge_only: bool = False, mark: bool = False)
     if merge_only:
         two["merge_only"] = True
     if mark:
-        two["needs_merge_model"] = "needs the larger model"
-    return json.dumps({"schema_version": 1, "runner": SPLIT_RUNNER, "cases": {"one": one, "two": two}})
+        two["needs_merge_model"] = MARK
+    return json.dumps({"schema_version": 1, "runner": TIERED, "cases": {"one": one, "two": two}})
 
 
 def _split_repo(repo, capsys, *, base_split: bool, head_split: bool, base_mark: bool = False,
@@ -2349,16 +2348,13 @@ class TestSplitProcedureMergeOnlyRefusal:
         assert plan["status"] != "mapping-invalid"
 
 
-LIVE_PORTAGE = Path(__file__).resolve().parents[1] / "plugins" / "portage"
-
-
 class TestLiveCorpusMergeOnlyCases:
     def _live_repo(self, repo: Path) -> dict:
-        live = json.loads((LIVE_PORTAGE / "evals" / "eval-gate.json").read_text())
-        shutil.copytree(LIVE_PORTAGE / "evals", repo / "p" / "evals")
+        live = json.loads((_portage_cli.PLUGIN_ROOT / "evals" / "eval-gate.json").read_text())
+        shutil.copytree(_portage_cli.PLUGIN_ROOT / "evals", repo / "p" / "evals")
         measured = sorted({m for c in live["cases"].values() for m in c["measures"]})
         for rel in measured:
-            _write(repo, f"p/{rel}", (LIVE_PORTAGE / rel).read_text())
+            _write(repo, f"p/{rel}", (_portage_cli.PLUGIN_ROOT / rel).read_text())
         _commit(repo)
         _branch(repo)
         for rel in measured:
