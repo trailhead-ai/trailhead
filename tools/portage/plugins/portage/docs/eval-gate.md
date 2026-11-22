@@ -42,7 +42,7 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 
 ```json
 {"schema_version": 1,
- "runner": {"model": "claude-opus-5-5", "push_model": "claude-sonnet-4-5",
+ "runner": {"model": "claude-opus-5-5", "push_model": "claude-sonnet-5-5",
             "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 1.5},
  "cases": {"<case>": {"measures": ["skills/correct/SKILL.md"], "runs": 3, "pass_at": 2, "merge_only": false,
                       "needs_merge_model": "judges a long diff the smaller model truncates"}}}
