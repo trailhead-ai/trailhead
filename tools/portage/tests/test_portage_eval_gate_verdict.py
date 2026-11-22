@@ -24,10 +24,10 @@ END = "<!-- portage:eval-gate:end -->"
 SECRET = "sk-ant-api03-LEAKED0123456789abcdef"
 
 
-def _entry(case, root="plugins/demo", grants=False, model="sonnet", push_model=None):
+def _entry(case, root="plugins/demo", grants=False, model="sonnet", push_model=None, merge_model=None):
     return {"plugin_root": root, "case": case, "runs": 3, "pass_at": 2,
             "runner": {"model": model, "allow_tools": ["Read"], "max_cost_usd": 1.0},
-            "push_model": push_model, "new_runner_grants": grants}
+            "push_model": push_model, "merge_model": merge_model, "new_runner_grants": grants}
 
 
 def _result(case, verdict="pass", passed=3, failed=0, errored=0, reason=None, runs=None):
@@ -1079,6 +1079,18 @@ class TestModelOnFailure:
         assert len(ask) == 1 and "bad" in ask[0] and "merge model" in ask[0]
         assert "once" in ask[0] and "main" in ask[0] and "do not add one yourself" in ask[0].lower()
         assert "`bad`: passed 0, failed 3, errored 0 (model: sonnet)" in section_of(out)
+
+    def test_a_push_tier_failure_where_push_and_merge_models_match_has_no_ask(self, st, capsys):
+        st.plan([_entry("bad", model="sonnet", push_model="sonnet", merge_model="sonnet")], tier="push")
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        _, out, _ = verdict(capsys, st)
+        assert "bad: passed 0, failed 3, errored 0 (model: sonnet)" in out and ASK not in out
+
+    def test_a_push_tier_failure_on_a_cheaper_push_model_asks_when_merge_model_differs(self, st, capsys):
+        st.plan([_entry("bad", model="sonnet", push_model="sonnet", merge_model="opus")], tier="push")
+        st.result("bad", verdict="fail", passed=0, failed=3)
+        _, out, _ = verdict(capsys, st)
+        assert ASK in out
 
     def test_a_merge_tier_failure_names_the_model_without_the_ask(self, st, capsys):
         st.plan([_entry("bad", model="opus", push_model="sonnet"), _entry("same", model="sonnet", push_model="sonnet")],

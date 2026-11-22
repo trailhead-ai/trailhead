@@ -301,6 +301,7 @@ def _collect(state: Path, plan: dict) -> tuple[list[dict], list[str], int]:
         runner = c.get("runner") if isinstance(c.get("runner"), dict) else {}
         rows.append({"case": c["case"], "corpus": _corpus(c.get("plugin_root")),
                      "model": _model(runner.get("model")), "push_model": _model(c.get("push_model"), None),
+                     "merge_model": _model(c.get("merge_model"), None),
                      "grants": c.get("new_runner_grants") is True,
                      "merge_only": c.get("merge_only") is True,
                      "result": res or {"verdict": "not-run", "reason": NO_RESULT, "runs": [],
@@ -392,7 +393,8 @@ def _failure_details(rows: list[dict], state: Path, push_tier: bool) -> list[str
         for i, graders in enumerate(res["runs"], 1):
             verdicts = " ".join(f"{g['name']}={'pass' if g['passed'] else 'fail'}" for g in graders)
             out.append(f"  run {i}: {verdicts}".rstrip())
-        if push_tier and r["push_model"] is not None and r["model"] == r["push_model"]:
+        if (push_tier and r["push_model"] is not None and r["model"] == r["push_model"]
+                and r["push_model"] != r["merge_model"]):
             out.append(f"  {r['case']} failed on the push model ({r['model']}). If it passes on the merge "
                        "model, ask the operator whether to add a needs-merge-model mark (a mark takes "
                        "effect once it is on main); do not add one yourself.")
