@@ -119,7 +119,8 @@ def test_many_paths_are_answered_without_testing_each_candidate(shapes, monkeypa
 def _reference(checkout, base, path, **kw):
     """What the per-candidate ``_touches`` scan answers for ``path`` alone."""
     tree = select._head_tree(checkout)
-    candidates = select._candidates(checkout, base, tree, kw.get("merge_only_either", False), kw.get("tier", "merge"))[0]
+    either, tier = kw.get("merge_only_either", False), kw.get("tier", "merge")
+    candidates = select._candidates(checkout, base, tree, either, tier)[0]
     return [entry for plugin, measures, entry in candidates
             if select._touches(entry["case"], measures, plugin, [path])]
 
