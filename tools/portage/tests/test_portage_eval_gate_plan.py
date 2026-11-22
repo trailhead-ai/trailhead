@@ -2254,7 +2254,8 @@ def _split_mapping(split: bool, *, merge_only: bool = False, mark: bool = False)
 
 
 def _split_repo(repo, capsys, *, base_split: bool, head_split: bool, base_mark: bool = False,
-                head_merge_only: bool = False, head_mark: bool = False, tier: str = "push"):
+                head_merge_only: bool = False, head_mark: bool = False, tier: str = "push",
+                base_merge_only: bool = False):
     """Case ``two`` is the case under test; ``one`` always declares the bare entry. The entry is a split core
     at a revision when its text names a branch file, which the mapping then declares."""
     _git(repo, "init", "-b", "main")
@@ -2264,10 +2265,10 @@ def _split_repo(repo, capsys, *, base_split: bool, head_split: bool, base_mark: 
     _write(repo, "p/skills/entry.md", CORE_ENTRY if base_split else UNSPLIT_ENTRY)
     if base_split:
         _write(repo, "p/skills/b-a.md", BRANCH_A)
-    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(base_split, mark=base_mark))
+    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(base_split, merge_only=base_merge_only, mark=base_mark))
     _commit(repo)
     _branch(repo)
-    _write(repo, "p/skills/entry.md", CORE_ENTRY if head_split else UNSPLIT_ENTRY)
+    _write(repo, "p/skills/entry.md", (CORE_ENTRY if head_split else UNSPLIT_ENTRY) + "edited\n")
     if head_split and not base_split:
         _write(repo, "p/skills/b-a.md", BRANCH_A)
     if base_split and not head_split:
@@ -2342,10 +2343,24 @@ class TestSplitProcedureMergeOnlyRefusal:
         assert plan["status"] == "cases-selected", plan
         assert _names(plan) == ["one", "two"]
 
+    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, True)])
+    def test_a_branch_that_drops_merge_only_from_a_split_core_case_selects_it_at_push(
+        self, repo, capsys, base_split, head_split
+    ):
+        _, plan, _ = _split_repo(repo, capsys, base_split=base_split, head_split=head_split,
+                                 base_merge_only=True, head_merge_only=False)
+        assert plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+        assert plan["merge_only_pending"] == 0
+        assert not _entry_of(plan, "two")["merge_only"]
+
     def test_a_merge_only_case_on_an_entry_split_at_neither_revision_plans_as_before(self, repo, capsys):
-        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, head_merge_only=True)
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, base_merge_only=True,
+                                 head_merge_only=True)
         assert plan["mapping_invalid"] is None
         assert plan["status"] != "mapping-invalid"
+        assert plan["merge_only_pending"] == 1
+        assert _names(plan) == ["one"]
 
 
 class TestLiveCorpusMergeOnlyCases:

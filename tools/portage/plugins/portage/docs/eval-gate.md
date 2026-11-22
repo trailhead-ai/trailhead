@@ -58,7 +58,10 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
   case on such an entry that HEAD's mapping marks `merge_only` without a `needs_merge_model` reason, at both
   tiers; the fault is one line naming the mapping file and the case. A split slice that trips it reverts one
   of three ways: mark the case `needs_merge_model` with a reason, drop `merge_only`, or revert the refusal
-  commit. No persisted state changes. A `merge_only` case whose entry is not a split core plans as before.
+  commit. A case on such an entry whose HEAD mapping does not say `merge_only` is selected at push even when
+  the base's mapping marks it `merge_only`, so a branch may drop `merge_only` from a split-core case. No
+  persisted state changes. A `merge_only` case whose entry is not a split core plans as before, with the base's
+  value deciding.
 - `needs_merge_model` is optional: a reason, 1-200 characters on one line, that marks a case the push tier
   cannot trust to `push_model` and so runs on `model` at both tiers. It starts with a letter or digit and
   otherwise uses letters, digits, space and `.,;'()_-` (no `:`, `/` or `@`, and no `www.`), so it cannot form a scheme, path, address or `www.` link; GitHub's same-repo references such as `GH-123` or a commit SHA still link. It is read from the base mapping, so a

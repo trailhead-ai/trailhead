@@ -479,6 +479,8 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                 ))
                 case = base_case or head_case
                 marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
+                if head_case and not head_case.merge_only and any(d.split for d in declared):
+                    marked = False
                 runner = (base_map or head_map).runner
                 base_mark = base_case.needs_merge_model if base_case else None
                 head_mark = head_case.needs_merge_model if head_case else None
