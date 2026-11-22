@@ -153,6 +153,10 @@ def _safe(text: object, limit: int = 300) -> str:
     return "".join(c for c in str(text) if c.isprintable())[:limit]
 
 
+def _safe_fault(text: object, limit: int = 300) -> str:
+    return re.sub(r"[^A-Za-z0-9 ._/'#,()-]", "", str(text))[:limit]
+
+
 def one_line(exc: BaseException) -> str:
     return _safe(" ".join(str(exc).split()))
 
@@ -414,7 +418,7 @@ def verdict(state: Path) -> tuple[int, list[str], str]:
 
     if status == "mapping-invalid":
         bad = plan.get("mapping_invalid") if isinstance(plan.get("mapping_invalid"), dict) else {}
-        file, fault = _corpus(bad.get("file")), _safe(bad.get("fault", "unspecified"))
+        file, fault = _corpus(bad.get("file")), _safe_fault(bad.get("fault", "unspecified"))
         if bad.get("revision") == "base":
             section = _wrap([f"The eval-case mapping `{file}` is invalid at the base revision, so no case "
                              "was selected. Fixing it on the branch will not clear this: the fix must "

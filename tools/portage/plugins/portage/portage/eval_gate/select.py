@@ -63,7 +63,7 @@ import subprocess
 import tempfile
 from pathlib import Path, PurePosixPath
 
-from .mapping import Mapping, MappingError, load_mapping, valid_corpus_path
+from .mapping import Mapping, MappingError, _q, load_mapping, valid_corpus_path
 
 MAPPING_NAME = "eval-gate.json"
 SCHEMA_VERSION = 1
@@ -143,14 +143,15 @@ def _check_against_tree(path: str, mapping: Mapping, tree: dict[str, str],
     checked once."""
     dirs = _tree_dirs(tree) if dirs is None else dirs
     plugin = PurePosixPath(path).parent.parent
-    for name, case in mapping.cases.items():
-        for m in dict.fromkeys(case.measures):
+    for position, (name, case) in enumerate(mapping.cases.items(), 1):
+        ref = _q(name, position)
+        for i, m in enumerate(dict.fromkeys(case.measures), 1):
             target = (plugin / m).as_posix()
             if not (tree.get(target) in _BLOB_MODES or target in dirs):
-                raise MappingError(path, f"case {name!r}: measures path {m!r} does not exist "
+                raise MappingError(path, f"case {ref}: measures path {_q(m, i)} does not exist "
                                          "under the plugin root")
         if tree.get((plugin / "evals" / name / "case.yaml").as_posix()) not in _BLOB_MODES:
-            raise MappingError(path, f"case {name!r} has no case.yaml")
+            raise MappingError(path, f"case {ref} has no case.yaml")
 
 
 def _load_head(repo: Path, path: str, tree: dict[str, str], dirs: frozenset[str]) -> Mapping | None:

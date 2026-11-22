@@ -1052,3 +1052,117 @@ class TestSelectTouchedByPathModel:
         assert {c["case"]: c["runner"]["model"] for c in plan["cases"]} == {"alpha": "opus", "beta": "opus"}
         _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
         assert _case_entry(push, "beta")["runner"]["model"] == "sonnet"
+
+
+HOSTILE = "@victim https://evil.example/x"
+
+
+def _load(cases: dict, tmp_path: Path | None = None, runner: dict | None = None, raw: dict | None = None):
+    from portage.eval_gate.mapping import load_mapping
+
+    text = json.dumps(raw) if raw is not None else _mapping(cases, runner)
+    if tmp_path is None:
+        return load_mapping(text, "p/evals/eval-gate.json")
+    (tmp_path / "skills").mkdir(exist_ok=True)
+    (tmp_path / "skills" / "a.md").write_text("x\n")
+    (tmp_path / "skills" / "b.md").write_text("x\n")
+    return load_mapping(text, "p/evals/eval-gate.json", plugin_root=tmp_path)
+
+
+class TestCaseDeclarations:
+    def test_entry_and_branches_without_measures_load_with_empty_measures(self):
+        case = _load({"alpha": {"entry": "skills/a.md", "branches": ["skills/b.md"]}}).cases["alpha"]
+        assert (case.entry, case.branches, case.measures) == ("skills/a.md", ("skills/b.md",), ())
+
+    def test_entry_branches_and_measures_are_all_kept(self):
+        case = _load({"alpha": {"entry": "skills/a.md", "branches": ["skills/b.md"],
+                                "measures": ["skills/c.md"]}}).cases["alpha"]
+        assert (case.entry, case.branches, case.measures) == ("skills/a.md", ("skills/b.md",), ("skills/c.md",))
+
+    def test_a_measures_only_case_has_no_entry_and_no_branches(self):
+        case = _load({"alpha": {"measures": ["skills/a.md"]}}).cases["alpha"]
+        assert (case.entry, case.branches) == (None, ())
+
+    def test_a_case_with_neither_measures_nor_entry_is_refused(self):
+        assert "needs measures or entry" in _fault(_mapping({"alpha": {"runs": 3}}))
+
+    def test_branches_without_entry_is_refused(self):
+        assert "branches requires entry" in _fault(_mapping({"alpha": {"branches": ["skills/b.md"], "measures": ["skills/a.md"]}}))
+
+    @pytest.mark.parametrize("key", ["entry", "branch"])
+    @pytest.mark.parametrize("path, fault", [
+        ("/etc/x.md", "relative"),
+        ("skills/../a.md", "must not contain '..'"),
+        ("skills/a.txt", ".md"),
+        ("skills/missing.md", "does not exist"),
+    ])
+    def test_an_unsafe_or_missing_entry_or_branch_path_is_refused(self, tmp_path, key, path, fault):
+        case = {"entry": path} if key == "entry" else {"entry": "skills/a.md", "branches": [path]}
+        from portage.eval_gate.mapping import MappingError
+
+        with pytest.raises(MappingError) as e:
+            _load({"alpha": case}, tmp_path)
+        assert fault in e.value.fault
+
+    def test_an_entry_that_is_not_a_string_is_refused(self):
+        assert "entry must be a string" in _fault(_mapping({"alpha": {"entry": 5}}))
+
+    def test_branches_that_is_not_a_list_is_refused(self):
+        assert "branches must be a list of strings" in _fault(
+            _mapping({"alpha": {"entry": "skills/a.md", "branches": "skills/b.md"}}))
+
+    def test_a_branch_item_that_is_not_a_string_is_refused(self):
+        assert "branches must be a list of strings" in _fault(
+            _mapping({"alpha": {"entry": "skills/a.md", "branches": [7]}}))
+
+
+class TestFaultsDoNotEchoMappingText:
+    @pytest.mark.parametrize("where", ["top-key", "case-key", "case-name", "allow-tool", "measures", "entry"])
+    def test_hostile_value_reaches_neither_the_plan_nor_the_verdict(self, repo, capsys, where):
+        cases = {"alpha": {"measures": ["skills/a.md"]}}
+        runner = dict(RUNNER)
+        raw = {"schema_version": 1, "runner": runner, "cases": cases}
+        if where == "top-key":
+            raw[HOSTILE] = 1
+        elif where == "case-key":
+            cases["alpha"][HOSTILE] = 1
+        elif where == "case-name":
+            cases[HOSTILE] = {"measures": ["skills/a.md"]}
+        elif where == "allow-tool":
+            runner["allow_tools"] = [HOSTILE]
+        elif where == "measures":
+            cases["alpha"]["measures"] = [HOSTILE + ".md"]
+        else:
+            cases["alpha"] = {"entry": "/" + HOSTILE + ".md"}
+        _, plan, out = _invalid(repo, capsys, json.dumps(raw))
+        assert plan["status"] == "mapping-invalid"
+        state = next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):]
+        capsys.readouterr()
+        dispatch.main(["eval-gate", "verdict", "--state", state])
+        report = capsys.readouterr().out
+        for text in (out, report, plan["mapping_invalid"]["fault"]):
+            assert "@victim" not in text and "evil.example" not in text
+        assert "mapping-invalid" in report and "p/evals/eval-gate.json" in report
+
+    def test_a_safe_unknown_key_is_still_named(self):
+        assert "colour" in _fault(_mapping({"alpha": {"measures": ["skills/a.md"], "colour": 1}}))
+
+    def test_an_unsafe_unknown_key_is_named_by_position(self):
+        fault = _fault(_mapping({"alpha": {"measures": ["skills/a.md"], HOSTILE: 1}}))
+        assert "unknown key #2 in case 'alpha'" in fault
+
+    def test_an_unknown_key_in_a_safe_named_case_names_that_case_by_its_key(self):
+        assert "case 'alpha'" in _fault(_mapping({"alpha": {"measures": ["skills/a.md"], "colour": 1}}))
+
+    def test_an_unsafe_case_name_is_named_by_position(self):
+        assert "case name #2" in _fault(_mapping({"alpha": {"measures": ["skills/a.md"]},
+                                             HOSTILE: {"measures": ["skills/a.md"]}}))
+
+    def test_the_echo_helper_passes_safe_values_and_describes_unsafe_ones(self):
+        from portage.eval_gate.mapping import echo
+
+        assert echo("skills/a.md", 3) == "skills/a.md"
+        assert echo("x" * 121, 3) == "#3"
+        assert echo(HOSTILE, 3) == "#3"
+        assert echo("a\nb", 4) == "#4"
+        assert echo(5, 1) == "#1"

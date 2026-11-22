@@ -1125,3 +1125,14 @@ class TestModelOnFailure:
         st.result("bad", verdict="fail", passed=0, failed=3)
         _, out, _ = verdict(capsys, st)
         assert "(model: sonnet)" in out and ASK not in out
+
+
+def test_a_stored_fault_is_reprinted_only_through_the_allowlist(st, capsys):
+    st.plan(status="mapping-invalid",
+            mapping_invalid={"file": "plugins/demo/evals/eval-gate.json",
+                             "fault": "unknown key @x in case 'a.b' https://evil.example/y (#2, ok-1)"})
+    code, out, _ = verdict(capsys, st)
+    assert code == 1
+    line = next(ln for ln in out.splitlines() if ln.startswith("mapping-invalid: "))
+    assert "@" not in line and "https:" not in line
+    assert "unknown key x in case 'a.b' https//evil.example/y (#2, ok-1)" in line
