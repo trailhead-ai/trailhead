@@ -811,3 +811,64 @@ class TestMergeOnlyReadsCommittedContent:
         _write(repo, "p/evals/core/case.yaml", "name: x\n")
         (entry,) = select_touched(repo, base, ["p/skills/a.md"])
         assert entry["case_removed"] is True
+
+
+def _mapping_with(runner_over: dict | None = None, case_over: dict | None = None, drop: tuple = ()) -> str:
+    runner = {**json.loads(_runner_doc())["runner"], **(runner_over or {})}
+    case = {"measures": ["x"], **(case_over or {})}
+    for k in drop:
+        case.pop(k, None)
+    return json.dumps({"schema_version": 1, "runner": runner, "cases": {"alpha": case}})
+
+
+class TestPushModelAndNeedsMergeModel:
+    def test_a_push_model_loads_and_rides_in_the_runner(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        runner = load_mapping(_mapping_with({"push_model": "claude-sonnet-4.5"}), "f").runner
+        assert runner["push_model"] == "claude-sonnet-4.5"
+        assert runner["model"] == "claude-opus-5-5"
+
+    @pytest.mark.parametrize("bad", ["a b", "--flag", "a\nb", "x" * 65, 7, None, ["sonnet"]])
+    def test_a_malformed_push_model_is_refused_naming_the_field(self, bad):
+        assert "runner.push_model" in _fault(_mapping_with({"push_model": bad}))
+
+    def test_a_missing_required_runner_key_is_still_refused_when_push_model_is_set(self):
+        doc = json.loads(_mapping_with({"push_model": "sonnet"}))
+        del doc["runner"]["model"]
+        assert "'model'" in _fault(json.dumps(doc))
+
+    def test_a_valid_reason_loads_onto_the_case(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        reason = "Needs deep tool-use reasoning (multi-step), see 3.5_notes-v2"
+        m = load_mapping(_mapping_with(case_over={"needs_merge_model": reason}), "f")
+        assert m.cases["alpha"].needs_merge_model == reason
+
+    def test_a_case_without_the_key_has_none(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_mapping_with(), "f").cases["alpha"].needs_merge_model is None
+
+    def test_a_200_character_reason_loads(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        m = load_mapping(_mapping_with(case_over={"needs_merge_model": "a" * 200}), "f")
+        assert m.cases["alpha"].needs_merge_model == "a" * 200
+
+    @pytest.mark.parametrize("bad", [
+        True, "", "   ", "a" * 201, "line one\nline two", "has `tick`", "a < b", "a | b",
+        "see: this", "see a/b", " leading space", "-leading dash", 5, None, ["x"],
+    ], ids=repr)
+    def test_a_bad_reason_is_refused_naming_the_case_and_the_rules(self, bad):
+        fault = _fault(_mapping_with(case_over={"needs_merge_model": bad}))
+        assert "\n" not in fault
+        assert "case 'alpha'" in fault and "needs_merge_model" in fault
+        assert "200" in fault and "letters, digits, space" in fault
+
+    def test_a_mapping_with_neither_key_loads_as_before(self):
+        from portage.eval_gate.mapping import load_mapping
+
+        m = load_mapping(_mapping_with(), "f")
+        assert m.runner == {"model": "claude-opus-5-5", "allow_tools": ["Bash(./lore *)"], "max_cost_usd": 2.0}
+        assert m.cases["alpha"].merge_only is False and m.cases["alpha"].needs_merge_model is None

@@ -3,11 +3,13 @@
 Shape::
 
     {"schema_version": 1,
-     "runner": {"model": str, "allow_tools": [str, ...], "max_cost_usd": number},
+     "runner": {"model": str, "allow_tools": [str, ...], "max_cost_usd": number,
+                "push_model": str (optional)},
      "cases": {"<case>": {"measures": ["<plugin-relative path>", ...],
                           "runs": int (optional, default 3),
                           "pass_at": int (optional),
-                          "merge_only": bool (optional, default false)}}}
+                          "merge_only": bool (optional, default false),
+                          "needs_merge_model": str (optional)}}}
 
 ``pass_at`` defaults to 2 when ``runs`` is 3; any other ``runs`` must declare its
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
@@ -15,6 +17,11 @@ presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model 
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
 single-line parenthesised argument, and ``runner.max_cost_usd`` a finite number in (0, 25].
 ``merge_only`` marks a case the push tier leaves out; it must be a boolean.
+``runner.push_model`` is the model the push tier runs every case on (same shape as ``runner.model``,
+which the merge tier uses); it is carried in the runner dict only when configured.
+``needs_merge_model`` marks a case the push tier cannot trust to the cheaper model and states why: a
+reason of 1-200 characters, one line, starting with a letter or digit and otherwise letters, digits,
+space and ``.,;'()_-`` (no ``:`` or ``/``, so a reason can never form a URL in a PR body).
 Every fault raises ``MappingError`` carrying the mapping file and a one-line fault, never a traceback.
 """
 
@@ -32,12 +39,14 @@ CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
 TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^\n\r]*\))?\Z")
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+NEEDS_MERGE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,;'()_-]{0,199}\Z")
 MAX_COST_USD = 25
 MAX_RUNS = 10
 
 _TOP_KEYS = {"schema_version", "runner", "cases"}
-_RUNNER_KEYS = {"model", "allow_tools", "max_cost_usd"}
-_CASE_KEYS = {"measures", "runs", "pass_at", "merge_only"}
+_RUNNER_REQUIRED = {"model", "allow_tools", "max_cost_usd"}
+_RUNNER_KEYS = _RUNNER_REQUIRED | {"push_model"}
+_CASE_KEYS = {"measures", "runs", "pass_at", "merge_only", "needs_merge_model"}
 
 
 class MappingError(Exception):
@@ -55,6 +64,7 @@ class Case:
     runs: int
     pass_at: int
     merge_only: bool = False
+    needs_merge_model: str | None = None
 
 
 @dataclass(frozen=True)
@@ -85,7 +95,7 @@ def _runner(obj, file: str) -> dict:
     if not isinstance(obj, dict):
         raise MappingError(file, "runner must be an object")
     _keys(obj, _RUNNER_KEYS, "runner", file)
-    missing = sorted(_RUNNER_KEYS - set(obj))
+    missing = sorted(_RUNNER_REQUIRED - set(obj))
     if missing:
         raise MappingError(file, f"runner is missing {missing[0]!r}")
     if not isinstance(obj["model"], str) or not MODEL_ID.match(obj["model"]):
@@ -100,7 +110,12 @@ def _runner(obj, file: str) -> dict:
     cost = obj["max_cost_usd"]
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:
         raise MappingError(file, f"runner.max_cost_usd must be a finite number in (0, {MAX_COST_USD}]")
-    return {"model": obj["model"], "allow_tools": list(tools), "max_cost_usd": cost}
+    runner = {"model": obj["model"], "allow_tools": list(tools), "max_cost_usd": cost}
+    if "push_model" in obj:
+        if not isinstance(obj["push_model"], str) or not MODEL_ID.match(obj["push_model"]):
+            raise MappingError(file, f"runner.push_model must match {MODEL_ID.pattern}")
+        runner["push_model"] = obj["push_model"]
+    return runner
 
 
 def _measure(path, case: str, file: str, plugin_root: Path | None) -> str:
@@ -143,7 +158,13 @@ def _case(name: str, obj, file: str, plugin_root: Path | None, evals_dir: Path |
     merge_only = obj.get("merge_only", False)
     if not isinstance(merge_only, bool):
         raise MappingError(file, f"case {name!r}: merge_only must be a boolean")
-    return Case(name, paths, runs, pass_at, merge_only)
+    needs_merge_model = obj.get("needs_merge_model")
+    if "needs_merge_model" in obj and not (
+        isinstance(needs_merge_model, str) and NEEDS_MERGE_MODEL.match(needs_merge_model)
+    ):
+        raise MappingError(file, f"case {name!r}: needs_merge_model must be a reason of 1-200 characters on one line, "
+                                 "starting with a letter or digit, using only letters, digits, space and .,;'()_-")
+    return Case(name, paths, runs, pass_at, merge_only, needs_merge_model)
 
 
 def load_mapping(

@@ -12,7 +12,8 @@ none::
     request.json          {"schema_version": 1, "id", "backend", "repo", "plugin_root",
                            "started_in_sandbox": bool (the sandbox marker was set when it started),
                            "cases": [{"case", "runs", "pass_at",
-                                      "runner": {"model", "allow_tools", "max_cost_usd"}}, ...]}
+                                      "runner": {"model", "allow_tools", "max_cost_usd",
+                                                 "push_model" (only when the mapping sets it)}}, ...]}
     results/<case>.json   one case's result, written when that case is decided (below)
     result.json           {"schema_version": 1, "cases": [<case result>, ...]}, in request order,
                           written last and always: the request is finished exactly when it exists
