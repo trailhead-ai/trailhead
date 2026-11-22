@@ -30,6 +30,9 @@ Run sources, all read-only:
   device and inode had their own files read already (including one also passed as its own ``--runs-from``)
   has them read once; a directory passed as ``--runs-from`` always has its immediate subdirectories read, so
   the result does not depend on the order of the ``--runs-from`` directories.
+  That check keys on ``(st_dev, st_ino)``, so on a filesystem that reports non-unique or zero inode numbers
+  (some FUSE and network mounts) distinct directories can be taken for one and the files of all but the
+  first are dropped with no tally.
   A runner output counts for the one plugin named by ``suite.plugins``, the case named by
   ``cases[0].name`` and the model named by ``suite.modelOverride``.
 
@@ -61,10 +64,14 @@ limit (``too-deep``), has a shape the reader does not take or a case name outsid
 (``bad-shape``), holds more runs than ``MAX_RUNS_PER_FILE`` (``too-many-runs``), or holds a
 ``costUsd`` or ``judgeCostUsd`` that is present and not finite, non-negative and
 at most ``MAX_RUN_COST_USD`` (``bad-number``). A subdirectory that cannot be opened or listed is tallied
-``unlistable-directory`` and the report goes on; an unlistable ``--runs-from`` itself raises ``CostError``.
+``unlistable-directory`` and the report goes on; an unlistable ``--runs-from`` itself raises ``CostError``,
+as does one that is itself a symlink or not a directory (the CLI prints
+``runs-from unreadable: <path> is not a directory``).
 
 Three bounds cover the whole call, however many directories it reads: ``max_total_bytes`` (every byte read,
-whether or not the file then parsed), ``max_total_entries`` (every entry listed in any listing, whatever its
+whether or not the file then parsed; a file's size is checked against what remains before it is read, so the
+call can exceed the budget by at most one file, ``MAX_FILE_BYTES`` + 1),
+``max_total_entries`` (every entry listed in any listing, whatever its
 kind or name; each listing takes at most what remains, and one cut short is tallied ``listings-truncated``)
 and ``max_retained_runs`` (the runs kept in memory; one past it is excluded as ``run-cap``). When any of
 ``directory-bound``, ``listings-truncated``, ``unlistable-directory``, ``run-cap``, ``too-large`` or

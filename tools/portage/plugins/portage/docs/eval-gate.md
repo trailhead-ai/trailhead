@@ -269,7 +269,7 @@ at the push and merge tiers (the gate's own selection, HEAD as the base; push le
 case is priced at the median recorded cost per run (run plus judge cost) on the model its mapping names, from the
 timing history and from every `*.json` runner output in each `--runs-from` directory and in each of its immediate
 subdirectories (so a request directory's `<case>/batch-2.json` and `<case>/aggregate-result.json` are read without being
-named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). A run repeated across those files is
+named; a symlinked subdirectory is not followed and nothing deeper is read; a directory's own files are read once however it was reached, and a `--runs-from` directory always has its subdirectories read, so the order of the `--runs-from` directories does not change the report). That once-only check keys on device and inode numbers, so on a filesystem that reports non-unique or zero inode numbers (some FUSE and network mounts) distinct directories can be taken for one and the files of all but the first are dropped with no tally. A `--runs-from` that is itself a symlink is refused as not a directory (`portage: eval-gate cost: runs-from unreadable: <path> is not a directory`). A run repeated across those files is
 counted once; a repeat with no valid `startedAt` is not deduplicated. Every runner output is read before any
 history line, and a counted history run is then matched one-to-one against the counted runner-output runs of the same
 plugin, case and model with exactly the same per-run cost (run plus judge); a match is excluded as `duplicate-history`,
@@ -295,7 +295,7 @@ runner-output skip reason; `bad-shape` stays a malformed document) is nonzero, o
 `baseline:` lines end with `(partial: <name> <n>, ...)` after the figure, naming only the nonzero ones in that order,
 the history skips last as `history-corrupt` and `history-mis-shaped`. The malformed-file reasons (`not-json`,
 `too-deep`, `bad-shape`, `bad-number`, `not-regular`) stay out of the suffix because they are bad input, not a bound.
-The bounds are fixed constants in the reader (`MAX_FILE_BYTES`, `MAX_RUNS_PER_FILE`, `MAX_TOTAL_BYTES`,
+The byte bound is checked against a file's size before the file is read, so a call can exceed it by at most one file (`MAX_FILE_BYTES` + 1). The bounds are fixed constants in the reader (`MAX_FILE_BYTES`, `MAX_RUNS_PER_FILE`, `MAX_TOTAL_BYTES`,
 `MAX_TOTAL_ENTRIES`, `MAX_RETAINED_RUNS`) and the command has no flag for them, so to get a full figure narrow
 `--runs-from` to the directories that matter. A partial naming `history-corrupt` or `history-mis-shaped` means the
 history file holds lines the reader cannot use; they are skipped, not repaired, so inspect the history file. It writes nothing. Exit 0 on a report, 2 with a

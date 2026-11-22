@@ -721,6 +721,32 @@ class TestOneBudgetOneLevelDown:
         assert counts(lines, "runner outputs:")["read"] == 1
         assert counts(lines, "runner outputs:")["unlistable-directory"] == 0
 
+    def test_a_subdirectory_swapped_for_a_symlink_after_listing_is_refused(self, fx, monkeypatch):
+        basic(fx)
+        runner_file(fx.runs, "good.json", costs=((1.0, 0.0),))
+        sub = fx.runs / "sub"
+        sub.mkdir()
+        runner_file(sub, "own.json", costs=((2.0, 0.0),))
+        elsewhere = fx.runs.parent / "elsewhere"
+        elsewhere.mkdir()
+        runner_file(elsewhere, "real.json", costs=((50.0, 0.0),))
+        real = cost._ingest_files
+        swapped = []
+
+        def swap_after_listing(dir_fd, plugin, runs):
+            listed = real(dir_fd, plugin, runs)
+            if not swapped:
+                swapped.append(True)
+                (fx.runs / "sub" / "own.json").unlink()
+                (fx.runs / "sub").rmdir()
+                (fx.runs / "sub").symlink_to(elsewhere, target_is_directory=True)
+            return listed
+
+        monkeypatch.setattr(cost, "_ingest_files", swap_after_listing)
+        lines = fx.report(fx.runs)
+        assert counts(lines, "runner outputs:")["unlistable-directory"] == 1
+        assert priced(lines)["alpha"][2:4] == ["1.0000", "1"]
+
     def test_an_unreadable_subdirectory_is_tallied_and_the_report_completes(self, fx):
         basic(fx)
         runner_file(fx.runs, "good.json", costs=((1.0, 0.0),))
