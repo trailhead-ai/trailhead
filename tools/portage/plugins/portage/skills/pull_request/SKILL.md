@@ -222,7 +222,10 @@ How every write to the block is made (this one and each later one):
 - A diff that does not apply is retried once: read the record fresh, rebuild the diff, write again.
 - A write that still fails ends the session with
   `outcome: stuck task/<name> parked=0 — run-section write failed; update trailhead so lore accepts a block write on a closed task, or fix the error shown, then run the PR step again unattended`.
-  Nothing further is written, held, pushed or dispatched. It is never skipped over.
+  Nothing further is written, held, pushed or dispatched, and no temp file is cleaned up: make no
+  further tool call, and send one final message whose last line is that outcome line, as plain text
+  outside any code block, with nothing after it and no other line in the message starting
+  `outcome:`. It is never skipped over.
 
 ### Step B — hold the branch
 
@@ -243,7 +246,10 @@ Pass the same inputs as `create` Step 1. Read the report's `**Eval gate:**` line
 - The push was stopped (a case below its bar, or a dirty tree), the preflight failed, or `pr_pairs`
   is empty: end `stuck` through Step H (`the eval gate stopped the push`, `the preflight failed`,
   `no pull request was opened`), with the repo and case the report names logged in the block. Nothing
-  is retried, no PR is watched, and nothing is asked.
+  is retried, no PR is watched, and nothing is asked. When the report asks about a `needs_merge_model`
+  mark, the reason on the outcome line also names the failing case and says an operator decision on a
+  needs-merge-model mark is needed (`the eval gate stopped the push: case <case> failed on the push model,
+  an operator decision on a needs-merge-model mark is needed`); no mark is added.
 - The gate did not run, or passed, or mapped no cases: carry on, and log one decision in the block
   when it did not run.
 

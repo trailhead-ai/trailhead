@@ -43,7 +43,9 @@ case. ``select_touched`` returns every touched case, ``merge_only`` included; ``
 by tier. Both mappings and the case files are read from commits (the merge-base and HEAD), never the
 working tree. On the push tier the base takes precedence for ``merge_only``; at the merge tier (and in
 ``backstop_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
-base cannot hide a flag. Base takes precedence over the branch for the rest: cases are selected from the base and head
+base cannot hide a flag. A case that HEAD still declares, whose entry is a split procedure core at either
+revision and whose HEAD case does not say ``merge_only``, is not ``merge_only`` at any tier, even when the
+base marks it. Base takes precedence over the branch for the rest: cases are selected from the base and head
 mappings combined, and a corpus whose mapping exists at the base runs under the
 base's runner block, runs and pass_at. The base also supplies the mark and both model ids: a mark added on the branch
 takes effect once merged. A corpus new on the branch uses its own and
@@ -59,7 +61,8 @@ empty file): a declared case's entry or branch is missing, or the entry never lo
 fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
 at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
 procedure that loads a branch file) or a branch file; two corpora hold a case of the same name at one revision;
-or a case moves from one corpus at the base to another at HEAD. A tracked file modified in
+a case moves from one corpus at the base to another at HEAD; or HEAD's case is ``merge_only`` with no
+``needs_merge_model`` mark while its entry is a split procedure core at either revision. A tracked file modified in
 the working tree (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``:
 the gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a
 renamed file counts as both its old and its new path.
@@ -468,12 +471,19 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                 base_derived = _derive(path, base_map, name, base_read, "base")
                 head_derived = _derive(path, head_map, name, head_read, "head")
                 declared = [d for d in (base_derived, head_derived) if d is not None]
+                if head_case and head_case.merge_only and head_case.needs_merge_model is None \
+                        and any(d.split for d in declared):
+                    raise MappingError(path, f"case {_q(name, list(head_map.cases).index(name) + 1)}: its entry is a "
+                                             "split procedure core, which runs on the push model; mark it "
+                                             "needs_merge_model with a reason, or drop merge_only")
                 measures = tuple(dict.fromkeys(
                     (base_case.measures if base_case else ()) + (base_derived.files if base_derived else ())
                     + (head_case.measures if head_case else ()) + (head_derived.files if head_derived else ())
                 ))
                 case = base_case or head_case
                 marked = case.merge_only or bool(merge_only_either and head_case and head_case.merge_only)
+                if head_case and not head_case.merge_only and any(d.split for d in declared):
+                    marked = False
                 runner = (base_map or head_map).runner
                 base_mark = base_case.needs_merge_model if base_case else None
                 head_mark = head_case.needs_merge_model if head_case else None
@@ -592,6 +602,8 @@ def select_touched(repo: Path, merge_base: str, changed: list[str], *,
     Everything is read from commits: the merge-base's and HEAD's mappings and HEAD's tree (``tree``,
     when the caller has already read it). An entry's ``merge_only`` is the base's value (the base takes
     precedence); with ``merge_only_either`` it is true when the base's or HEAD's mapping marks the case.
+    Either way it is false for a case HEAD still declares, whose entry is a split procedure core at either
+    revision and whose HEAD case does not say ``merge_only``.
     An entry's ``runner`` is ``resolve_runner``'s block for ``tier``."""
     return _select(repo, merge_base, changed, merge_only_either, tree, tier)[0]
 
@@ -648,7 +660,9 @@ def backstop_touched(repo: Path, base: str | None = None) -> tuple[str, list[dic
     ``base-unresolved`` (the changed files are unknown, so ``entries`` is every covered case
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
     and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
-    mapping marks it, so a stale base cannot hide a flag; ``split_procedure`` is as ``plan`` reports it.
+    mapping marks it, so a stale base cannot hide a flag, unless HEAD still declares it, its entry is a
+    split procedure core at either revision and its HEAD case does not say ``merge_only``;
+    ``split_procedure`` is as ``plan`` reports it.
     Only commits are read: the mappings and the case files come from the merge-base and HEAD, never the
     working tree, so an uncommitted edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a
     git work tree and ``GitError`` on any other git failure."""

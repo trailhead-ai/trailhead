@@ -109,3 +109,7 @@ loop back to `portage wait-for-actionable`. `blocked` means you could not reach 
 - Don't merge or decide merge order — that's `monitor`'s call once you report `ready`.
 - Don't apply the `human-approved` label or post an approving review on any PR — the approval
   signal is human-applied only; no drain, portage, or dispatched-agent component ever applies it.
+- Never add a `needs_merge_model` mark to an `eval-gate.json` yourself, even when a case failing on the
+  push model is what keeps the PR from going green. A mark is the operator's decision: report the case,
+  the graders that failed and a proposed reason in the `**Summary:**` and the verdict `blocked`, and
+  leave the mapping as it is.

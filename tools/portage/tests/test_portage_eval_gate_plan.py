@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
+import _portage_cli  # prepends the plugin root onto sys.path
 from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
@@ -538,6 +538,7 @@ class TestRunnerBlockValidation:
     @pytest.mark.parametrize("grant", [
         "Bash(./lore *)", "Bash(*/scripts/maturity_bars.py *)", "Bash(:)", "Bash(: *)",
         "Bash(git *)", "Bash(./gh *)", "Bash(./portage *)", "Read", "Bash(git:*)", "mcp__x_1",
+        "Write", "Bash(mktemp)", "Bash()", "Read(a,b)",
     ])
     def test_real_grant_shapes_load(self, grant):
         from portage.eval_gate.mapping import load_mapping
@@ -550,6 +551,17 @@ class TestRunnerBlockValidation:
     ])
     def test_a_malformed_grant_is_refused_naming_the_field(self, grant):
         assert "allow_tools" in _fault(_runner_doc(allow_tools=[grant]))
+
+    @pytest.mark.parametrize("grant, rejected", [
+        ("Bash(a) Bash(*)", "bracket"), ("Read(x),Bash(*)", "bracket"), ("Bash(git *) Write()", "bracket"),
+        ("Bash(a) -Bash(*)", "bracket"), ("Bash(a(b))", "bracket"), ("Read(a(b),Bash(*))", "bracket"),
+        ("Bash(a\x00b)", "NUL"), ("Bash(a\nb)", "line break"), ("Bash(a\rb)", "line break"),
+    ])
+    def test_a_grant_argument_holding_a_bracket_nul_or_line_break_is_refused_by_position_and_class(
+            self, grant, rejected):
+        fault = _fault(_runner_doc(allow_tools=["Read", grant]))
+        assert "allow_tools entry #2 " in fault
+        assert rejected in fault
 
     @pytest.mark.parametrize("cost", [0, -1, 25.01, 1e9, float("inf"), float("nan"), True])
     def test_a_cost_cap_outside_the_bound_is_refused(self, cost):
@@ -2221,3 +2233,164 @@ class TestPlanPrintsTheFlagsTheMonitorReads:
         want = [f"case-flags: p:{c['case']} merge_only={str(c['merge_only']).lower()} "
                 f"split_procedure={str(c['split_procedure']).lower()}" for c in plan["cases"]]
         assert lines == want
+
+
+UNSPLIT_ENTRY = "# Entry\n\nDo A when the user asks for A. Do B when the user asks for B.\n"
+CORE_ENTRY = "# Entry\n\nRead `rules/core.md`.\n\nRead `skills/b-a.md` when the user asks for A.\n"
+BRANCH_A = "Applies when the user asks for A.\n\nDo A.\n"
+SPLIT_MAPPING_PATH = "p/evals/eval-gate.json"
+
+
+def _split_mapping(split: bool, *, merge_only: bool = False, mark: bool = False) -> str:
+    one = {"entry": "skills/entry.md"}
+    two: dict = {"entry": "skills/entry.md"}
+    if split:
+        two["branches"] = ["skills/b-a.md"]
+    if merge_only:
+        two["merge_only"] = True
+    if mark:
+        two["needs_merge_model"] = MARK
+    return json.dumps({"schema_version": 1, "runner": TIERED, "cases": {"one": one, "two": two}})
+
+
+def _split_repo(repo, capsys, *, base_split: bool, head_split: bool, base_mark: bool = False,
+                head_merge_only: bool = False, head_mark: bool = False, tier: str = "push",
+                base_merge_only: bool = False):
+    """Case ``two`` is the case under test; ``one`` always declares the bare entry. The entry is a split core
+    at a revision when its text names a branch file, which the mapping then declares."""
+    _git(repo, "init", "-b", "main")
+    for name in ("one", "two"):
+        _write(repo, f"p/evals/{name}/case.yaml", "name: x\n")
+    _write(repo, "p/rules/core.md", "core\n")
+    _write(repo, "p/skills/entry.md", CORE_ENTRY if base_split else UNSPLIT_ENTRY)
+    if base_split:
+        _write(repo, "p/skills/b-a.md", BRANCH_A)
+    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(base_split, merge_only=base_merge_only, mark=base_mark))
+    _commit(repo)
+    _branch(repo)
+    _write(repo, "p/skills/entry.md", (CORE_ENTRY if head_split else UNSPLIT_ENTRY) + "edited\n")
+    if head_split and not base_split:
+        _write(repo, "p/skills/b-a.md", BRANCH_A)
+    if base_split and not head_split:
+        (repo / "p/skills/b-a.md").unlink()
+    _write(repo, SPLIT_MAPPING_PATH, _split_mapping(head_split, merge_only=head_merge_only, mark=head_mark))
+    _commit(repo)
+    return _plan(repo, capsys, "--base", "base", "--tier", tier)
+
+
+REFUSAL_FIX = "mark it needs_merge_model with a reason, or drop merge_only"
+
+
+class TestSplitProcedureCaseRunsOnThePushModel:
+    def test_a_split_selects_every_case_declared_on_the_entry_and_an_unmarked_failure_stops_the_push(
+        self, repo, capsys
+    ):
+        rc, plan, out = _split_repo(repo, capsys, base_split=False, head_split=True)
+        assert rc == 0 and plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+        assert _entry_of(plan, "two")["split_procedure"] is True
+        for c in plan["cases"]:
+            assert c["runner"]["model"] == "sonnet"
+        state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
+        (state / "results").mkdir(exist_ok=True, mode=0o700)
+        for c in plan["cases"]:
+            fail = c["case"] == "one"
+            (state / "results" / f"{c['case']}.json").write_text(json.dumps(
+                {"case": c["case"], "verdict": "fail" if fail else "pass", "passed": 0 if fail else 3,
+                 "failed": 3 if fail else 0, "errored": 0, "reason": None, "runs": []}))
+        capsys.readouterr()
+        code = dispatch.main(["eval-gate", "verdict", "--state", str(state)])
+        report = capsys.readouterr().out
+        assert code == 1, report
+        assert "one failed on the push model (sonnet)" in report
+        assert "ask the operator whether to add a needs-merge-model mark" in report
+        assert "two failed on the push model" not in report
+
+    def test_a_case_the_base_marks_needs_merge_model_resolves_to_the_merge_model(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, base_mark=True,
+                                 head_mark=True)
+        assert _names(plan) == ["one", "two"]
+        assert _entry_of(plan, "two")["runner"]["model"] == "opus"
+        assert _entry_of(plan, "one")["runner"]["model"] == "sonnet"
+
+
+class TestSplitProcedureMergeOnlyRefusal:
+    @pytest.mark.parametrize("tier", ["push", "merge"])
+    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, False), (True, True)])
+    def test_a_merge_only_case_on_an_entry_split_at_either_revision_without_a_mark_is_refused(
+        self, repo, capsys, tier, base_split, head_split
+    ):
+        rc, plan, out = _split_repo(repo, capsys, base_split=base_split, head_split=head_split,
+                                    head_merge_only=True, tier=tier)
+        assert plan["status"] == "mapping-invalid", plan
+        assert plan["cases"] == []
+        bad = plan["mapping_invalid"]
+        assert bad["file"] == SPLIT_MAPPING_PATH
+        assert "case 'two'" in bad["fault"] and REFUSAL_FIX in bad["fault"]
+        assert "\n" not in bad["fault"]
+        assert f"mapping-invalid: {SPLIT_MAPPING_PATH}:" in out
+
+    def test_the_fault_echoes_no_mapping_text(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, head_merge_only=True)
+        fault = plan["mapping_invalid"]["fault"]
+        assert "skills/entry.md" not in fault and "skills/b-a.md" not in fault
+        assert "true" not in fault
+
+    @pytest.mark.parametrize("tier", ["push", "merge"])
+    def test_a_marked_merge_only_case_on_a_split_entry_is_allowed(self, repo, capsys, tier):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=True, head_merge_only=True,
+                                 head_mark=True, tier=tier)
+        assert plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+
+    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, True), (True, False)])
+    def test_a_branch_that_drops_merge_only_from_a_split_core_case_selects_it_at_push(
+        self, repo, capsys, base_split, head_split
+    ):
+        _, plan, _ = _split_repo(repo, capsys, base_split=base_split, head_split=head_split,
+                                 base_merge_only=True, head_merge_only=False)
+        assert plan["status"] == "cases-selected", plan
+        assert _names(plan) == ["one", "two"]
+        assert plan["merge_only_pending"] == 0
+        assert not _entry_of(plan, "two")["merge_only"]
+        assert _entry_of(plan, "two")["runner"]["model"] == TIERED["push_model"]
+
+    def test_a_merge_only_case_on_an_entry_split_at_neither_revision_plans_as_before(self, repo, capsys):
+        _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, base_merge_only=True,
+                                 head_merge_only=True)
+        assert plan["mapping_invalid"] is None
+        assert plan["status"] != "mapping-invalid"
+        assert plan["merge_only_pending"] == 1
+        assert _names(plan) == ["one"]
+
+
+class TestLiveCorpusMergeOnlyCases:
+    def _live_repo(self, repo: Path) -> dict:
+        live = json.loads((_portage_cli.PLUGIN_ROOT / "evals" / "eval-gate.json").read_text())
+        shutil.copytree(_portage_cli.PLUGIN_ROOT / "evals", repo / "p" / "evals")
+        measured = sorted({m for c in live["cases"].values() for m in c["measures"]})
+        for rel in measured:
+            _write(repo, f"p/{rel}", (_portage_cli.PLUGIN_ROOT / rel).read_text())
+        _commit(repo)
+        _branch(repo)
+        for rel in measured:
+            _write(repo, f"p/{rel}", "changed\n")
+        _commit(repo)
+        return live["cases"]
+
+    def test_the_live_merge_only_cases_plan_as_merge_only_at_merge_and_are_left_out_at_push(
+        self, repo, capsys
+    ):
+        cases = self._live_repo(repo)
+        merge_only = sorted(n for n, c in cases.items() if c.get("merge_only"))
+        assert len(merge_only) >= 1
+        _, push, _ = _plan(repo, capsys, "--base", "base", "--tier", "push")
+        _, merge, _ = _plan(repo, capsys, "--base", "base", "--tier", "merge")
+        assert push["status"] == "cases-selected" and merge["status"] == "cases-selected"
+        assert push["mapping_invalid"] is None and merge["mapping_invalid"] is None
+        assert _names(push) == sorted(set(cases) - set(merge_only))
+        assert push["merge_only_pending"] == len(merge_only)
+        assert _names(merge) == sorted(cases)
+        assert merge["merge_only_pending"] == 0
+        assert sorted(c["case"] for c in merge["cases"] if c["merge_only"]) == merge_only
+        assert not any(c["merge_only"] for c in push["cases"])

@@ -139,6 +139,18 @@
       "measures": [
         "skills/pull_request/SKILL.md"
       ]
+    },
+    "a-push-model-failure-asks-the-operator-before-any-needs-merge-model-mark": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md"
+      ]
+    },
+    "an-unattended-push-model-failure-ends-stuck-without-a-needs-merge-model-mark": {
+      "measures": [
+        "skills/pull_request/SKILL.md",
+        "agents/updater.md"
+      ]
     }
   }
 }

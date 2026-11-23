@@ -53,6 +53,15 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 - `merge_only` is optional and defaults to false; it must be a boolean. A `merge_only` case is left out of the
   push tier and runs at the merge tier. For a corpus that already has a mapping on the base, the base's value
   is used, as for `runs` and `pass_at`.
+- A case whose entry is a split core (a procedure that loads a branch file), at the base or at HEAD, either
+  runs on `push_model` at push or carries a `needs_merge_model` mark. `plan` refuses, as `mapping-invalid`, a
+  case on such an entry that HEAD's mapping marks `merge_only` without a `needs_merge_model` reason, at both
+  tiers; the fault is one line naming the mapping file and the case. A split slice that trips it reverts one
+  of three ways: mark the case `needs_merge_model` with a reason, drop `merge_only`, or revert the refusal
+  commit. A case on such an entry whose HEAD mapping does not say `merge_only` is selected at push even when
+  the base's mapping marks it `merge_only`, so a branch may drop `merge_only` from a split-core case. No
+  persisted state changes. A `merge_only` case whose entry is not a split core plans as before, with the base's
+  value deciding.
 - `needs_merge_model` is optional: a reason, 1-200 characters on one line, that marks a case the push tier
   cannot trust to `push_model` and so runs on `model` at both tiers. It starts with a letter or digit and
   otherwise uses letters, digits, space and `.,;'()_-` (no `:`, `/` or `@`, and no `www.`), so it cannot form a scheme, path, address or `www.` link; GitHub's same-repo references such as `GH-123` or a commit SHA still link. It is read from the base mapping, so a
@@ -61,6 +70,7 @@ Each corpus (`tools/<tool>/plugins/<tool>/evals/`) carries an `eval-gate.json`:
 - `runner.push_model` is optional and has the same model-id shape as `model`. The push tier runs every case on
   it, except the marked ones; absent, the push tier uses `model`. The merge tier always uses `model`. It is
   read from the base mapping like the rest of the runner block.
+- `runner.allow_tools` entries are a tool name with at most one single-line parenthesised argument; a grant argument cannot contain brackets (or NUL), by design. The runner splits the list on commas and spaces outside brackets and tracks them with a flag, not a depth, so a bracket inside an argument could smuggle a second grant into one entry. Spaces and commas inside the brackets stay allowed.
 - `runner` holds the grants and model that case runs under. For a corpus that already has a mapping on the
   base, the base's runner block is used, so a branch cannot widen its own grants. A corpus new on the branch
   runs under its own block and the section flags it.
@@ -222,7 +232,9 @@ a change that touches one, or a split-procedure case, without a current verdict.
 
 The check applies to a repo only when its change touches a `merge_only` or split-procedure case, decided by the selection
 `plan` uses. A case counts as `merge_only` when the merge-base's mapping or HEAD's committed mapping marks it,
-so a stale `origin/HEAD` cannot hide a flag a newer base carries. Only commits are read: the mappings, the
+so a stale `origin/HEAD` cannot hide a flag a newer base carries; the exception is a case whose entry is a
+split procedure core at either revision and whose HEAD case does not say `merge_only`, which is not
+`merge_only`. Only commits are read: the mappings, the
 measured paths and the `case.yaml` files come from the merge-base and HEAD, and an uncommitted edit changes
 no answer. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
 applies. Where it does not apply and the repo holds no `eval-gate.json` mapping (at HEAD or the merge-base),
