@@ -195,7 +195,8 @@ def _runner(obj, file: str) -> dict:
         if not TOOL_GRANT.match(t):
             raise MappingError(file, f"runner.allow_tools entry {_q(t, position)} must be a tool name, "
                                      "optionally followed by one parenthesised argument of printable ASCII "
-                                     "(space to tilde) on one line, with no parentheses, square brackets, quotes or backslashes inside"
+                                     "(space to tilde) on one line, with no parentheses, square brackets, "
+                                     "quotes or backslashes inside"
                                      f"{_grant_rejection(t)}")
     cost = obj["max_cost_usd"]
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:

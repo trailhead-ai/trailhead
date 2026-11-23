@@ -1,5 +1,6 @@
 """The set-aside branch-load A/B: the shared driver's trace readers, the arm-diff check, the
-branch-read grader, the fixture scaffolds, and the per-arm plugin copy. Everything is run through the experiments' own driver (`ab.py`) and the real
+branch-read grader, the fixture scaffolds, and the per-arm plugin copy. Everything is run through the
+experiments' own driver (`ab.py`) and the real
 scaffold scripts."""
 
 from __future__ import annotations
@@ -175,9 +176,18 @@ def test_each_arm_copy_carries_that_arms_procedure_and_leaves_the_live_tree_alon
     live = (CRAFT / "skills" / "_shared" / "execute.md").read_bytes()
     inline = shared.build_arm_plugin("inline", CASE_A, tmp_path / "i", exp=ab.EXPERIMENT)
     branch = shared.build_arm_plugin("branch", CASE_A, tmp_path / "b", exp=ab.EXPERIMENT)
-    assert (inline / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "inline" / "execute.md").read_bytes()
-    assert (branch / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "branch" / "execute.md").read_bytes()
-    assert (branch / "skills" / "_shared" / "waiting-criterion.md").read_bytes() == (EXP / "arms" / "branch" / "waiting-criterion.md").read_bytes()
+    assert (
+        (inline / "skills" / "_shared" / "execute.md").read_bytes()
+        == (EXP / "arms" / "inline" / "execute.md").read_bytes()
+    )
+    assert (
+        (branch / "skills" / "_shared" / "execute.md").read_bytes()
+        == (EXP / "arms" / "branch" / "execute.md").read_bytes()
+    )
+    assert (
+        (branch / "skills" / "_shared" / "waiting-criterion.md").read_bytes()
+        == (EXP / "arms" / "branch" / "waiting-criterion.md").read_bytes()
+    )
     assert not (inline / "skills" / "_shared" / "waiting-criterion.md").exists()
     assert (CRAFT / "skills" / "_shared" / "execute.md").read_bytes() == live
 
@@ -276,5 +286,7 @@ def test_the_recorded_fingerprints_match_each_experiments_bar():
     for exp in (ab.EXPERIMENT, shared.FOUND_WORK):
         text = (exp.dir / "expected.md").read_text()
         recorded = re.search(r"recorded before any cell: `([0-9a-f]{40})`", text).group(1)
-        done = subprocess.run(["git", "hash-object", "--stdin"], input=shared.bar_text(exp=exp), capture_output=True, text=True)
+        done = subprocess.run(
+            ["git", "hash-object", "--stdin"], input=shared.bar_text(exp=exp), capture_output=True, text=True
+        )
         assert done.stdout.strip() == recorded, exp.dir.name

@@ -564,7 +564,8 @@ class TestRunnerBlockValidation:
         assert rejected in fault
 
     @pytest.mark.parametrize("grant, rejected", [
-        ("Bash(a[b],c)", "holds a square bracket"), ("Bash(a]b)", "holds a square bracket"), ("Bash([x)", "holds a square bracket"),
+        ("Bash(a[b],c)", "holds a square bracket"), ("Bash(a]b)", "holds a square bracket"),
+        ("Bash([x)", "holds a square bracket"),
         ("Bash(git status\x0b*)", "holds a control character"), ("Bash(git status\x0c*)", "holds a control character"),
         ("Bash(git\tstatus *)", "holds a control character"), ("Bash(git\x1bstatus *)", "holds a control character"),
         ("Bash(git\x1cstatus)", "holds a control character"), ("Bash(git\x1dstatus)", "holds a control character"),
@@ -588,7 +589,9 @@ class TestRunnerBlockValidation:
                 assert char not in fault
         assert argument not in fault
 
-    @pytest.mark.parametrize("grant", ['Bash(a"b)', "Bash(a'b)", "Bash(a`b)", "Bash(a\\b)", 'Bash(echo "x")', "Bash(a\\)"])
+    @pytest.mark.parametrize(
+        "grant", ['Bash(a"b)', "Bash(a'b)", "Bash(a`b)", "Bash(a\\b)", 'Bash(echo "x")', "Bash(a\\)"]
+    )
     def test_a_grant_argument_holding_a_quote_or_backslash_is_refused_without_echoing_it(self, grant):
         fault = _fault(_runner_doc(allow_tools=["Read", grant]))
         assert "allow_tools entry #2 " in fault
@@ -608,7 +611,9 @@ class TestRunnerBlockValidation:
         assert f"; {reason}" in fault
         assert "the argument holds" not in fault
 
-    @pytest.mark.parametrize("grant", ["Bash(ab c)", "Bash(git status *)", "Bash(a,b c)", "Bash(~|{}!@#$%^&*+=;:<>?/-.)"])
+    @pytest.mark.parametrize(
+        "grant", ["Bash(ab c)", "Bash(git status *)", "Bash(a,b c)", "Bash(~|{}!@#$%^&*+=;:<>?/-.)"]
+    )
     def test_the_nearest_accepted_neighbour_of_each_refused_shape_still_loads(self, grant):
         from portage.eval_gate.mapping import load_mapping
 

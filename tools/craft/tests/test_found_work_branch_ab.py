@@ -141,16 +141,28 @@ def test_the_arm_copy_does_not_follow_symlinks(tmp_path, fake_craft):
     ab.build_arm_plugin("inline", None, dest, craft_root=fake_craft)
     assert os.path.islink(dest / "skills" / "escape")
     assert os.readlink(dest / "skills" / "escape") == str(tmp_path / "outside")
-    assert (dest / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "inline" / "execute.md").read_bytes()
+    assert (
+        (dest / "skills" / "_shared" / "execute.md").read_bytes()
+        == (EXP / "arms" / "inline" / "execute.md").read_bytes()
+    )
 
 
 def test_each_arm_copy_carries_that_arms_procedure_and_leaves_the_live_tree_alone(tmp_path):
     live = (CRAFT / "skills" / "_shared" / "execute.md").read_bytes()
     inline = ab.build_arm_plugin("inline", "ab-found-work-a-spec-in-prompt", tmp_path / "i")
     branch = ab.build_arm_plugin("branch", "ab-found-work-a-spec-in-prompt", tmp_path / "b")
-    assert (inline / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "inline" / "execute.md").read_bytes()
-    assert (branch / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "branch" / "execute.md").read_bytes()
-    assert (branch / "skills" / "_shared" / "found-work.md").read_bytes() == (EXP / "arms" / "branch" / "found-work.md").read_bytes()
+    assert (
+        (inline / "skills" / "_shared" / "execute.md").read_bytes()
+        == (EXP / "arms" / "inline" / "execute.md").read_bytes()
+    )
+    assert (
+        (branch / "skills" / "_shared" / "execute.md").read_bytes()
+        == (EXP / "arms" / "branch" / "execute.md").read_bytes()
+    )
+    assert (
+        (branch / "skills" / "_shared" / "found-work.md").read_bytes()
+        == (EXP / "arms" / "branch" / "found-work.md").read_bytes()
+    )
     assert not (inline / "skills" / "_shared" / "found-work.md").exists()
     assert (CRAFT / "skills" / "_shared" / "execute.md").read_bytes() == live
 
@@ -322,8 +334,12 @@ def _symlink_the_procedure(root, outside):
     os.symlink(outside, target)
 
 
-@pytest.mark.parametrize("arm, linked", [("inline", "execute.md"), ("branch", "execute.md"), ("branch", "found-work.md")])
-def test_the_arm_copy_refuses_a_symlinked_destination_file_and_leaves_what_it_points_at(arm, linked, tmp_path, fake_craft):
+@pytest.mark.parametrize(
+    "arm, linked", [("inline", "execute.md"), ("branch", "execute.md"), ("branch", "found-work.md")]
+)
+def test_the_arm_copy_refuses_a_symlinked_destination_file_and_leaves_what_it_points_at(
+    arm, linked, tmp_path, fake_craft
+):
     outside = tmp_path / "live-file.md"
     outside.write_text("the live file\n")
     if linked == "found-work.md":
@@ -391,7 +407,10 @@ def test_procedure_evidence_skips_a_read_with_no_id_or_a_non_object_input_and_st
 
 
 @pytest.mark.parametrize("python_dir", ["plain", "with space", "it's quoted"])
-@pytest.mark.parametrize("case", ["ab-found-work-a-spec-in-prompt", "ab-found-work-b-spec-on-record-only", "ab-found-work-c-no-spec-link"])
+@pytest.mark.parametrize(
+    "case",
+    ["ab-found-work-a-spec-in-prompt", "ab-found-work-b-spec-on-record-only", "ab-found-work-c-no-spec-link"],
+)
 def test_the_scaffold_wrapper_runs_the_interpreter_whatever_its_path_holds(case, python_dir, tmp_path):
     import shlex
 
@@ -408,13 +427,17 @@ def test_the_scaffold_wrapper_runs_the_interpreter_whatever_its_path_holds(case,
     shutil.copy(EXP / case / "fixtures" / "scaffold.sh", fixtures / "scaffold.sh")
     (fixtures / "review.md").write_text("review\n")
     (fixtures / "wrapper.txt").write_text(
-        f'#!/bin/sh\nPYTHONPATH="$here" exec {shlex.quote(str(fake_python))} {shlex.quote(str(repo / "cli" / "lore"))} "$@"\n')
+        f'#!/bin/sh\nPYTHONPATH="$here" exec {shlex.quote(str(fake_python))} '
+        f'{shlex.quote(str(repo / "cli" / "lore"))} "$@"\n'
+    )
     (fixtures / "seed.sh").write_text('cp "$(dirname "${BASH_SOURCE[0]}")/wrapper.txt" lore\n')
     (tmp_path / "exp" / "repo-root").write_text(f"{repo}\n")
 
     done = _run_scaffold(fixtures / "scaffold.sh", tmp_path / "run")
     assert done.returncode == 0, done.stderr
-    ran = subprocess.run([str(done.cwd / "lore"), "record", "show"], cwd=done.cwd, capture_output=True, text=True, timeout=30)
+    ran = subprocess.run(
+        [str(done.cwd / "lore"), "record", "show"], cwd=done.cwd, capture_output=True, text=True, timeout=30
+    )
     assert ran.returncode == 0, ran.stderr
     assert ran.stdout.startswith("ran-by-fake-python: ")
     assert ran.stdout.strip().endswith("/lore-plugin/cli/lore record show")
