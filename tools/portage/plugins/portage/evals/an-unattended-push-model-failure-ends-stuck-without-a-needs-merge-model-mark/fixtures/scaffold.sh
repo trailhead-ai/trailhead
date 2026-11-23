@@ -69,6 +69,10 @@ awk '
 ' "$W/portage" > "$W/portage.new"
 cat "$W/portage.new" > "$W/portage"
 rm "$W/portage.new"
+if ! grep -q '^  eval-gate)$' "$W/portage" || ! grep -q 'export XDG_CACHE_HOME=' "$W/portage"; then
+  echo "scaffold: the portage stand-in has no eval-gate) arm exporting XDG_CACHE_HOME after the awk rewrite" >&2
+  exit 1
+fi
 cat > "$W/fake-runner" <<'RUNNER'
 #!/usr/bin/env bash
 # A stand-in for the eval runner binary: the canary passes; every other case scores 0.5 on every run.
