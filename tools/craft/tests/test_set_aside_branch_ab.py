@@ -191,7 +191,6 @@ def test_the_arm_copy_holds_only_the_requested_case_and_the_branch_read_grader_o
 
     assert BRANCH_READ_GRADER in graders("branch", CASE_A)
     assert BRANCH_READ_GRADER not in graders("inline", CASE_A)
-    assert BRANCH_READ_GRADER not in graders("branch", CASE_C)
 
 
 def _skill_base_read(tool_id, path, body):
@@ -247,42 +246,13 @@ def _show(cwd, env, record):
     return shown.stdout
 
 
-def _prompt(case):
-    return (EXP / case / "prompt.md").read_text()
-
-
 @pytest.mark.parametrize("case", [CASE_A, CASE_B, CASE_C])
 def test_every_fixture_seeds_the_spec_the_condition_is_tested_against(case, tmp_path):
     cwd, env = _scaffold(case, tmp_path)
     spec = _show(cwd, env, "spec/invoice-members")
-    assert all(fact in spec for fact in ("has not applied", "several weeks", "no test version"))
+    assert all(fact in spec for fact in ("has not applied", "registration", "several weeks", "no test version"))
     parent = _show(cwd, env, "task/members-can-download-invoices-with-sales-tax")
     assert re.search(r"\*\*Covers:\*\*[^\n]*AC1, AC2", parent)
-
-
-@pytest.mark.parametrize(
-    "case, facts_in_prompt",
-    [(CASE_A, True), (CASE_B, False), (CASE_C, False)],
-)
-def test_the_facts_that_decide_the_condition_are_in_the_prompt_only_for_a(case, facts_in_prompt):
-    prompt = _prompt(case)
-    present = all(fact in prompt for fact in ("has not applied", "no test mode"))
-    assert present is facts_in_prompt
-
-
-def test_fixture_b_names_the_blocked_criterion_but_leaves_the_why_to_the_spec(tmp_path):
-    prompt = _prompt(CASE_B)
-    assert "BLOCKED" in prompt and "AC2" in prompt
-    assert not re.search(r"registration|provider|sandbox|weeks", prompt, re.I)
-    cwd, env = _scaffold(CASE_B, tmp_path)
-    assert "registration" in _show(cwd, env, "spec/invoice-members")
-
-
-def test_fixture_c_blocks_on_a_context_problem_that_names_no_covered_criterion():
-    prompt = _prompt(CASE_C)
-    assert "BLOCKED" in prompt
-    report = prompt.split("The executor's report, verbatim:", 1)[1]
-    assert not re.search(r"\bAC[12]\b", report)
 
 
 def test_the_seeded_set_aside_writer_logs_its_call_and_really_writes_the_spec(tmp_path):

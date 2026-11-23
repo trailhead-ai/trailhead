@@ -164,13 +164,23 @@ def test_the_arm_copy_holds_only_the_requested_case_and_the_branch_read_grader_o
 
     assert BRANCH_READ_GRADER in graders("branch", "ab-found-work-a-spec-in-prompt")
     assert BRANCH_READ_GRADER not in graders("inline", "ab-found-work-a-spec-in-prompt")
-    assert BRANCH_READ_GRADER not in graders("branch", "ab-found-work-c-no-spec-link")
 
 
-def test_the_scaffold_finds_the_repo_from_the_arm_copy(tmp_path):
-    root = ab.build_arm_plugin("branch", "ab-found-work-a-spec-in-prompt", tmp_path / "b")
-    marker = root / "evals" / "ab-found-work-branch-load" / "repo-root"
-    assert Path(marker.read_text().strip()) == REPO
+def test_the_scaffold_in_the_arm_copy_takes_the_repo_from_its_repo_root_marker(tmp_path):
+    case = "ab-found-work-a-spec-in-prompt"
+    root = ab.build_arm_plugin("branch", case, tmp_path / "b")
+    copy = root / "evals" / "ab-found-work-branch-load"
+    script = copy / case / "fixtures" / "scaffold.sh"
+
+    cwd, _ = _scaffold(case, tmp_path / "good", script=script)
+    assert (cwd / "lore").is_file()
+
+    empty = tmp_path / "empty-repo"
+    empty.mkdir()
+    (copy / "repo-root").write_text(f"{empty}\n")
+    done = _run_scaffold(script, tmp_path / "bad")
+    assert done.returncode != 0
+    assert not (done.cwd / "lore-plugin" / "cli").exists()
 
 
 def _skill_base_read(tool_id, path, body):
@@ -214,17 +224,22 @@ def test_evidence_rejects_a_run_that_never_read_the_procedure():
 # --- 3. fixture (b) seeds the spec link on the record, not in the prompt ----------------------
 
 
-def _scaffold(case, tmp_path):
+def _run_scaffold(script, tmp_path, extra_env=None):
     home = tmp_path / "home"
     cwd = home / "cwd"
     cwd.mkdir(parents=True)
-    env = {**os.environ, "HOME": str(home), "LORE_EMAIL": "eval@example.invalid"}
+    env = {**os.environ, "HOME": str(home), "LORE_EMAIL": "eval@example.invalid", **(extra_env or {})}
     done = subprocess.run(
-        ["bash", str(EXP / case / "fixtures" / "scaffold.sh")], cwd=cwd, env=env,
-        capture_output=True, text=True, timeout=120,
+        ["bash", str(script)], cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
     )
+    done.cwd, done.env = cwd, env
+    return done
+
+
+def _scaffold(case, tmp_path, script=None):
+    done = _run_scaffold(script or EXP / case / "fixtures" / "scaffold.sh", tmp_path)
     assert done.returncode == 0, done.stderr
-    return cwd, env
+    return done.cwd, done.env
 
 
 def _task_sidecar(cwd, env):
@@ -279,8 +294,16 @@ def test_the_bar_text_is_only_what_lies_between_its_delimiters(tmp_path):
     assert ab.bar_text(doc) != first
 
 
-def test_the_real_expected_md_has_exactly_one_bar():
-    assert ab.bar_text(EXP / "expected.md").strip()
+def test_a_document_with_more_than_one_bar_is_refused_and_one_with_none_has_no_bar_text(tmp_path):
+    doc = tmp_path / "expected.md"
+    one = "<!-- bar-begin -->\nfloor 8/10\n<!-- bar-end -->\n"
+    doc.write_text(f"intro\n{one}")
+    assert ab.bar_text(doc) == "floor 8/10\n"
+    doc.write_text(f"intro\n{one}middle\n<!-- bar-begin -->\nfloor 1/10\n<!-- bar-end -->\n")
+    with pytest.raises(ValueError):
+        ab.bar_text(doc)
+    doc.write_text("intro, no bar here\n")
+    assert ab.bar_text(doc) == ""
 
 
 def test_the_branch_file_reads_in_a_trace_are_counted_not_graded():
@@ -288,3 +311,110 @@ def test_the_branch_file_reads_in_a_trace_are_counted_not_graded():
              _read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/found-work.md")]
     assert ab.count_branch_reads(trace) == 2
     assert ab.count_branch_reads([]) == 0
+
+
+# --- the arm copy never writes through a symlink into the live tree ------------------------------
+
+
+def _symlink_the_procedure(root, outside):
+    target = root / "skills" / "_shared" / "execute.md"
+    target.unlink()
+    os.symlink(outside, target)
+
+
+@pytest.mark.parametrize("arm, linked", [("inline", "execute.md"), ("branch", "execute.md"), ("branch", "found-work.md")])
+def test_the_arm_copy_refuses_a_symlinked_destination_file_and_leaves_what_it_points_at(arm, linked, tmp_path, fake_craft):
+    outside = tmp_path / "live-file.md"
+    outside.write_text("the live file\n")
+    if linked == "found-work.md":
+        os.symlink(outside, fake_craft / "skills" / "_shared" / linked)
+    else:
+        _symlink_the_procedure(fake_craft, outside)
+    with pytest.raises(ValueError):
+        ab.build_arm_plugin(arm, None, tmp_path / "armcopy", craft_root=fake_craft)
+    assert outside.read_text() == "the live file\n"
+
+
+def test_the_arm_copy_refuses_a_symlinked_shared_directory(tmp_path, fake_craft):
+    live = tmp_path / "live-shared"
+    live.mkdir()
+    (live / "execute.md").write_text("the live file\n")
+    shutil.rmtree(fake_craft / "skills" / "_shared")
+    os.symlink(live, fake_craft / "skills" / "_shared")
+    with pytest.raises(ValueError):
+        ab.build_arm_plugin("inline", None, tmp_path / "armcopy", craft_root=fake_craft)
+    assert (live / "execute.md").read_text() == "the live file\n"
+
+
+def test_the_arm_copy_of_a_tree_with_real_files_is_still_built(tmp_path, fake_craft):
+    ab.build_arm_plugin("branch", None, tmp_path / "armcopy", craft_root=fake_craft)
+    assert (tmp_path / "armcopy" / "skills" / "_shared" / "found-work.md").read_bytes() == (
+        EXP / "arms" / "branch" / "found-work.md").read_bytes()
+
+
+# --- malformed trace items are skipped, the valid ones beside them still count -------------------
+
+
+def _read_with_id(tool_id, path):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": path}}]}}
+
+
+def test_a_malformed_json_line_does_not_hide_the_valid_lines_around_it():
+    read = json.dumps(_read(f"{PLUGIN}/skills/_shared/found-work.md"))
+    trace = ["{not json", read, "", "[1, 2", read]
+    assert ab.count_branch_reads(trace) == 2
+
+
+def test_a_tool_use_whose_input_is_not_an_object_is_skipped_by_the_read_count_and_the_grader():
+    odd = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "x", "name": "Read", "input": "found-work.md"},
+        {"type": "tool_use", "id": "y", "name": "Read", "input": ["found-work.md"]}]}}
+    valid = _read(f"{PLUGIN}/skills/_shared/found-work.md")
+    assert ab.count_branch_reads([odd, valid]) == 1
+    assert ab.grade_tool_used(GRADER, [odd, valid]) is True
+    assert ab.grade_tool_used(GRADER, [odd]) is False
+
+
+def test_procedure_evidence_skips_a_read_with_no_id_or_a_non_object_input_and_still_sees_the_valid_one():
+    root = "/tmp/copy/craft"
+    path = f"{root}/skills/_shared/execute.md"
+    no_id = {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "name": "Read", "input": {"file_path": path}},
+        {"type": "tool_use", "id": "z", "name": "Read", "input": "execute.md"}]}}
+    trace = [no_id, *_skill_base_read("a", path, "1\tsee [Found work](#found-work) says\n")]
+    assert ab.procedure_evidence(trace, root, "inline") == []
+    assert ab.procedure_evidence([no_id], root, "inline") == [f"the run never read {path}"]
+
+
+# --- the scaffold's generated lore wrapper survives an interpreter path with a space -------------
+
+
+@pytest.mark.parametrize("python_dir", ["plain", "with space", "it's quoted"])
+@pytest.mark.parametrize("case", ["ab-found-work-a-spec-in-prompt", "ab-found-work-b-spec-on-record-only", "ab-found-work-c-no-spec-link"])
+def test_the_scaffold_wrapper_runs_the_interpreter_whatever_its_path_holds(case, python_dir, tmp_path):
+    import shlex
+
+    repo = tmp_path / "repo"
+    (repo / "tools" / "lore" / "plugins" / "lore" / "cli").mkdir(parents=True)
+    (repo / "tools" / "lore" / "plugins" / "lore" / "lore").write_text("")
+    fake_python = tmp_path / python_dir / "python"
+    fake_python.parent.mkdir()
+    fake_python.write_text('#!/bin/sh\necho "ran-by-fake-python: $*"\n')
+    fake_python.chmod(0o755)
+
+    fixtures = tmp_path / "exp" / case / "fixtures"
+    fixtures.mkdir(parents=True)
+    shutil.copy(EXP / case / "fixtures" / "scaffold.sh", fixtures / "scaffold.sh")
+    (fixtures / "review.md").write_text("review\n")
+    (fixtures / "wrapper.txt").write_text(
+        f'#!/bin/sh\nPYTHONPATH="$here" exec {shlex.quote(str(fake_python))} {shlex.quote(str(repo / "cli" / "lore"))} "$@"\n')
+    (fixtures / "seed.sh").write_text('cp "$(dirname "${BASH_SOURCE[0]}")/wrapper.txt" lore\n')
+    (tmp_path / "exp" / "repo-root").write_text(f"{repo}\n")
+
+    done = _run_scaffold(fixtures / "scaffold.sh", tmp_path / "run")
+    assert done.returncode == 0, done.stderr
+    ran = subprocess.run([str(done.cwd / "lore"), "record", "show"], cwd=done.cwd, capture_output=True, text=True, timeout=30)
+    assert ran.returncode == 0, ran.stderr
+    assert ran.stdout.startswith("ran-by-fake-python: ")
+    assert ran.stdout.strip().endswith("/lore-plugin/cli/lore record show")

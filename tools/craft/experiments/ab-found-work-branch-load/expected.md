@@ -1,7 +1,7 @@
 # Found-work branch-load A/B
 
-One-time experiment, not a gate case: none of its cases is in `evals/eval-gate.json`, and the folder holds no
-`case.yaml`, so the gate never selects or counts them. Written before any arm is run.
+One-time experiment, not a gate case: the experiment lives under `tools/craft/experiments/`, outside the craft plugin's `evals/` corpus, so the push
+gate never sees it; the driver's `prepare` copies one case into a temporary plugin to run it. Written before any arm is run.
 
 ## Verdict
 
@@ -21,6 +21,8 @@ the one place the result is recorded; the manual eval log and the criterion obse
   asked, one decision line per finding, the separate and brainstorm tasks. Sonnet's report put the operator's
   items second, after a status paragraph, rather than first. The runs ran 29 to 42 turns with no runner error and
   differing costs, so this is a result, not an environment failure, and no rerun was taken.
+  The bar allows one rerun for identical partial scores, and it was not taken: fixture (b) at 1 of 5 caps the
+  inline arm at 6 of 10, under the 8 of 10 floor, so the result is void either way.
 - **Mechanism observed.** Every inline run Read the arm copy's own `skills/_shared/execute.md` (3 or 4 chunked
   reads) and never the live file, checked from the kept transcripts.
 - **What this does and does not say.** It says nothing about branch loading: no branch run exists. It does say
@@ -55,7 +57,7 @@ the build procedure's contents list still names the section.
 Each arm runs against a temp copy of the craft plugin made without following symlinks (`ab.py prepare`), with
 that arm's procedure swapped in. The live `skills/` tree is never edited.
 
-## Fixtures (one case folder each, names unique across the craft evals tree)
+## Fixtures (one case folder each)
 
 | Case | Spec link on the task record | Prompt says the task is linked to the spec | Role |
 |---|---|---|---|
@@ -69,7 +71,7 @@ so there is no `origin`.
 
 ## Graders
 
-The seven graders of `build-triages-found-work` (the plan counted six; the case holds seven: the six clauses
+The seven graders of `build-triages-found-work` (the six clauses
 of its pass table plus `no-found-work-question-was-asked`), copied into (a) and (b). Plus
 `branch-file-was-read` on (a) and (b), a `tool_used` grader (tool `Read`, input matching
 `_shared/found-work\.md`, 1 to 20 calls). The driver removes it from the inline arm's copy of the case, where

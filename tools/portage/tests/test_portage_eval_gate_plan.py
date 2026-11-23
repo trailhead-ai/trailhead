@@ -588,7 +588,27 @@ class TestRunnerBlockValidation:
                 assert char not in fault
         assert argument not in fault
 
-    @pytest.mark.parametrize("grant", ["Bash(ab c)", "Bash(git status *)", "Bash(a,b c)", "Bash(~|{}\"'`!@#$%^&*+=;:<>?/\\-.)"])
+    @pytest.mark.parametrize("grant", ['Bash(a"b)', "Bash(a'b)", "Bash(a`b)", "Bash(a\\b)", 'Bash(echo "x")', "Bash(a\\)"])
+    def test_a_grant_argument_holding_a_quote_or_backslash_is_refused_without_echoing_it(self, grant):
+        fault = _fault(_runner_doc(allow_tools=["Read", grant]))
+        assert "allow_tools entry #2 " in fault
+        assert "; the argument holds a quote or backslash, which is not allowed" in fault
+        assert grant not in fault
+
+    @pytest.mark.parametrize("grant, reason", [
+        ("", "the tool name is empty or holds"), ("-Bash", "the tool name is empty or holds"),
+        ("Bash (x)", "the tool name is empty or holds"), ("(x)", "the tool name is empty or holds"),
+        ("Ba.sh(x)", "the tool name is empty or holds"),
+        ("Bash(a)b", "text follows the closing parenthesis"), ("Bash(a) ", "text follows the closing parenthesis"),
+        ("Bash()x", "text follows the closing parenthesis"),
+        ("Bash(x", "the grant has no closing parenthesis"), ("Bash(", "the grant has no closing parenthesis"),
+    ])
+    def test_a_grant_with_a_bad_name_or_a_broken_closing_parenthesis_gets_its_own_reason(self, grant, reason):
+        fault = _fault(_runner_doc(allow_tools=["Read", grant]))
+        assert f"; {reason}" in fault
+        assert "the argument holds" not in fault
+
+    @pytest.mark.parametrize("grant", ["Bash(ab c)", "Bash(git status *)", "Bash(a,b c)", "Bash(~|{}!@#$%^&*+=;:<>?/-.)"])
     def test_the_nearest_accepted_neighbour_of_each_refused_shape_still_loads(self, grant):
         from portage.eval_gate.mapping import load_mapping
 

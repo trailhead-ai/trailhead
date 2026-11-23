@@ -103,11 +103,19 @@ def check_arms(inline_dir, branch_dir, exp: Experiment = FOUND_WORK) -> list[str
 def _blocks(trace):
     for entry in trace:
         if isinstance(entry, str):
-            entry = json.loads(entry)
+            try:
+                entry = json.loads(entry)
+            except ValueError:
+                continue
         message = entry.get("message") if isinstance(entry, dict) else None
         content = message.get("content") if isinstance(message, dict) else None
         if isinstance(content, list):
             yield from (b for b in content if isinstance(b, dict))
+
+
+def _input(block) -> dict:
+    value = block.get("input")
+    return value if isinstance(value, dict) else {}
 
 
 def _front_matter(path) -> dict[str, str]:
@@ -129,7 +137,7 @@ def grade_tool_used(grader_path, trace) -> bool:
     n = sum(
         1 for b in _blocks(trace)
         if b.get("type") == "tool_use" and b.get("name") == g["tool"]
-        and rx.search("\n".join(v for v in (b.get("input") or {}).values() if isinstance(v, str)))
+        and rx.search("\n".join(v for v in _input(b).values() if isinstance(v, str)))
     )
     return int(g.get("min", 0)) <= n <= int(g.get("max", 10**9))
 
@@ -138,7 +146,7 @@ def count_branch_reads(trace, exp: Experiment = FOUND_WORK) -> int:
     return sum(
         1 for b in _blocks(trace)
         if b.get("type") == "tool_use" and b.get("name") == "Read"
-        and re.search(rf"_shared/{re.escape(exp.branch_file)}$", str((b.get("input") or {}).get("file_path", "")))
+        and re.search(rf"_shared/{re.escape(exp.branch_file)}$", str(_input(b).get("file_path", "")))
     )
 
 
@@ -151,8 +159,8 @@ def procedure_evidence(trace, plugin_root, arm, exp: Experiment = FOUND_WORK) ->
     """Problems showing the run did not read ARM's own procedure from the arm's plugin copy."""
     want = f"{str(plugin_root).rstrip('/')}/skills/_shared/{PROCEDURE}"
     blocks = list(_blocks(trace))
-    reads = {b["id"]: b["input"].get("file_path", "") for b in blocks
-             if b.get("type") == "tool_use" and b.get("name") == "Read"}
+    reads = {b["id"]: str(_input(b).get("file_path", "")) for b in blocks
+             if b.get("type") == "tool_use" and b.get("name") == "Read" and isinstance(b.get("id"), str)}
     problems = [f"read {p} instead of the arm copy's procedure"
                 for p in reads.values() if p.endswith(f"skills/_shared/{PROCEDURE}") and p != want]
     text = "\n".join(_result_text(b) for b in blocks
@@ -175,10 +183,13 @@ def build_arm_plugin(arm, case, dest, craft_root=None, exp: Experiment = FOUND_W
         ignore=lambda d, names: [n for n in names if n == "__pycache__" or (Path(d) == craft_root and n == "evals")],
     )
     shared = dest / "skills" / "_shared"
+    written = [PROCEDURE] + ([exp.branch_file] if arm == "branch" else [])
+    for path in (shared, *(shared / name for name in written)):
+        if path.is_symlink():
+            raise ValueError(f"{path} is a symlink; writing the arm file would reach outside the copy")
     shared.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(exp.arms / arm / PROCEDURE, shared / PROCEDURE)
-    if arm == "branch":
-        shutil.copyfile(exp.arms / arm / exp.branch_file, shared / exp.branch_file)
+    for name in written:
+        shutil.copyfile(exp.arms / arm / name, shared / name)
     if case:
         copy = dest / "evals" / exp.dir.name
         shutil.copytree(exp.dir / case, copy / case, symlinks=True)
@@ -194,8 +205,11 @@ def runner_args(craft_root=None, exp: Experiment = FOUND_WORK) -> list[str]:
 
 
 def bar_text(expected_md=None, exp: Experiment = FOUND_WORK) -> str:
-    """The text between the bar's delimiters in expected.md, one trailing newline per line."""
+    """The text between the bar's delimiters in expected.md, one trailing newline per line; empty when
+there is none. More than one bar is refused."""
     text = Path(expected_md or exp.dir / "expected.md").read_text()
+    if text.count("<!-- bar-begin -->") > 1 or text.count("<!-- bar-end -->") > 1:
+        raise ValueError("expected.md holds more than one bar")
     found = re.search(r"^<!-- bar-begin -->\n(.*?)^<!-- bar-end -->\n", text, re.S | re.M)
     return found.group(1) if found else ""
 

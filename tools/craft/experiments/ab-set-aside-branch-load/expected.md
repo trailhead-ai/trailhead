@@ -1,7 +1,7 @@
 # Set-aside branch-load A/B
 
-One-time experiment, not a gate case: none of its cases is in `evals/eval-gate.json`, and the folder holds no
-`case.yaml`, so the gate never selects or counts them. Written before any arm is run. It re-asks the question of
+One-time experiment, not a gate case: the experiment lives under `tools/craft/experiments/`, outside the craft plugin's `evals/` corpus, so the push
+gate never sees it; the driver's `prepare` copies one case into a temporary plugin to run it. Written before any arm is run. It re-asks the question of
 [`../ab-found-work-branch-load/expected.md`](../ab-found-work-branch-load/expected.md) on new material, because
 that experiment came out void (its inline arm failed an unrelated report-order grader, so it could not rank the
 arms).
@@ -69,7 +69,7 @@ Each arm runs against a temp copy of the craft plugin made without following sym
 that arm's procedure swapped in. The live `skills/` tree is never edited. The driver logic is the first
 experiment's `ab.py`, shared; this folder's `ab.py` only names the section, branch file, load sentence and citation.
 
-## Fixtures (one case folder each, names unique across the craft evals tree)
+## Fixtures (one case folder each)
 
 | Case | Where the facts that decide the condition are | Role |
 |---|---|---|

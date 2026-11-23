@@ -58,7 +58,7 @@ DEFAULT_RUNS = 3
 DEFAULT_PASS_AT = 2
 CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
-TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([\x20-\x27\x2a-\x5a\x5c\x5e-\x7e]*\))?\Z")
+TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([\x20\x21\x23-\x26\x2a-\x5a\x5e\x5f\x61-\x7e]*\))?\Z")
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 NEEDS_MERGE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,;'()_-]{0,199}\Z")
 _AUTOLINK = "www."
@@ -135,19 +135,27 @@ def _q(value: object, position: int) -> str:
 
 
 def _grant_rejection(grant: str) -> str:
-    _, opened, argument = grant.partition("(")
+    name, opened, rest = grant.partition("(")
+    if not name or not re.fullmatch(r"[A-Za-z0-9_]+", name):
+        return "; the tool name is empty or holds a character other than letters, digits and underscore"
     if not opened:
         return ""
-    for char, name in (("\x00", "a NUL"), ("\n", "a line break"), ("\r", "a line break")):
+    if ")" not in rest:
+        return "; the grant has no closing parenthesis"
+    if not rest.endswith(")"):
+        return "; text follows the closing parenthesis"
+    argument = rest[:-1]
+    for char, what in (("\x00", "a NUL"), ("\n", "a line break"), ("\r", "a line break")):
         if char in argument:
-            return f"; the argument holds {name}, which is not allowed"
-    if "(" in argument or ")" in argument[:-1]:
+            return f"; the argument holds {what}, which is not allowed"
+    if "(" in argument or ")" in argument:
         return "; the argument holds a bracket, which is not allowed"
     if "[" in argument or "]" in argument:
         return "; the argument holds a square bracket, which is not allowed"
-    for char in argument:
-        if char in "\u2028\u2029":
-            return "; the argument holds a line terminator, which is not allowed"
+    if any(char in argument for char in "\"'`\\"):
+        return "; the argument holds a quote or backslash, which is not allowed"
+    if "\u2028" in argument or "\u2029" in argument:
+        return "; the argument holds a line terminator, which is not allowed"
     for char in argument:
         if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f:
             return "; the argument holds a control character, which is not allowed"
@@ -187,7 +195,7 @@ def _runner(obj, file: str) -> dict:
         if not TOOL_GRANT.match(t):
             raise MappingError(file, f"runner.allow_tools entry {_q(t, position)} must be a tool name, "
                                      "optionally followed by one parenthesised argument of printable ASCII "
-                                     "(space to tilde) on one line, with no parentheses or square brackets inside"
+                                     "(space to tilde) on one line, with no parentheses, square brackets, quotes or backslashes inside"
                                      f"{_grant_rejection(t)}")
     cost = obj["max_cost_usd"]
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:
