@@ -136,7 +136,7 @@ Run from a shell outside any Claude Code session sandbox: inside one, the eval's
 as a fail. TMPDIR must be outside `/tmp` and at most 51 characters. From the repo root:
 
 ```
-E=tools/craft/plugins/craft/evals/ab-found-work-branch-load
+E=tools/craft/experiments/ab-found-work-branch-load
 export TMPDIR=$(mktemp -d ~/.cache/ee.XXXXXXXX); out=$(mktemp -d ~/.cache/eo.XXXXXXXX)
 arm=$(mktemp -d ~/.cache/ea.XXXXXXXX); rm -rf "$arm"
 root=$(.venv/bin/python $E/ab.py prepare <inline|branch> <case name> "$arm/craft")

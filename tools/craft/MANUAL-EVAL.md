@@ -5611,8 +5611,8 @@ The whole-change review's folded fixes (step 8 counts the unchosen surfaces' cri
 ## Case set: Found-work branch-load versus inline A/B (2026-11-22)
 
 **Status: run, void.** A pre-registered A/B for spec AC32 (a branch load is followed as reliably as the same text
-inline) on `## Found work` of `skills/_shared/execute.md`, under `evals/ab-found-work-branch-load/`, unmapped and
-nested so the gate never selects it. The inline arm scored 1 of 10 on Sonnet against the 8 of 10 floor, so the
+inline) on `## Found work` of `skills/_shared/execute.md`, under `tools/craft/experiments/ab-found-work-branch-load/`,
+outside the plugin's eval corpus so the gate never selects it. The inline arm scored 1 of 10 on Sonnet against the 8 of 10 floor, so the
 instrument cannot rank the arms and no branch run was spent. Every failing run failed only the report-order grader
 and passed the six Found work graders. The verdict, per-cell counts and the decision asked for are in that
 folder's `expected.md` `## Verdict` block. Runs used the direct runner from an unsandboxed terminal: inside a
@@ -5622,7 +5622,8 @@ run counts or kept transcripts.
 ## Case set: set-aside branch-load versus inline A/B (2026-11-23)
 
 **Status: run, pass.** The second pre-registered A/B for spec AC32, on `### A criterion waiting on something
-outside the work` of `skills/_shared/execute.md`, under `evals/ab-set-aside-branch-load/`, unmapped and nested.
+outside the work` of `skills/_shared/execute.md`, under `tools/craft/experiments/ab-set-aside-branch-load/`, outside the
+plugin's eval corpus.
 The operator chose this material after the Found-work A/B came out void. Sonnet: inline 10/10, branch 10/10;
 Opus: inline 3/3, branch 3/3; every branch run read the branch file and reached the decision point. Disclosed:
 on the false-condition fixture all 5 branch runs loaded the branch file anyway and 1 of 5 made a set-aside it

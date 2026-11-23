@@ -48,11 +48,11 @@ class Experiment:
 
     @property
     def craft(self) -> Path:
-        return self.dir.parents[1]
+        return self.dir.parents[1] / "plugins" / "craft"
 
     @property
     def repo(self) -> Path:
-        return self.dir.parents[5]
+        return self.dir.parents[3]
 
 
 EXP = Path(__file__).resolve().parent

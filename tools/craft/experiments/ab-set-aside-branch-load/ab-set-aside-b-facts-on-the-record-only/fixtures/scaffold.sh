@@ -4,12 +4,12 @@
 # and a ready spec plus an in-progress slice parent with one child whose second criterion the build found waiting on an outside service.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# The repo root is the file ../../repo-root when the arm driver wrote one (a temp plugin copy), else eight
-# directories above this one (fixtures -> case -> experiment -> evals -> plugin -> plugins -> tool -> tools -> repo).
+# The repo root is the file ../../repo-root when the arm driver wrote one (a temp plugin copy), else six
+# directories above this one (fixtures -> case -> experiment -> experiments -> tool -> tools -> repo).
 if [ -f "$here/../../repo-root" ]; then
   repo="$(cat "$here/../../repo-root")"
 else
-  repo="$(cd "$here/../../../../../../../.." && pwd)"
+  repo="$(cd "$here/../../../../../.." && pwd)"
 fi
 export AB_REPO_ROOT="$repo"
 bash "$here/seed.sh"

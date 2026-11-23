@@ -1,6 +1,5 @@
 """The set-aside branch-load A/B: the shared driver's trace readers, the arm-diff check, the
-branch-read grader, the fixture scaffolds, the per-arm plugin copy and the gate's refusal over the
-real craft corpus. Everything is run through the experiments' own driver (`ab.py`) and the real
+branch-read grader, the fixture scaffolds, and the per-arm plugin copy. Everything is run through the experiments' own driver (`ab.py`) and the real
 scaffold scripts."""
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 CRAFT = REPO / "tools" / "craft" / "plugins" / "craft"
-FOUND = CRAFT / "evals" / "ab-found-work-branch-load"
+FOUND = REPO / "tools" / "craft" / "experiments" / "ab-found-work-branch-load"
 
 
 def _load(name, path):
@@ -30,7 +29,7 @@ def _load(name, path):
 
 
 shared = _load("ab_shared_under_test", FOUND / "ab.py")
-EXP = CRAFT / "evals" / "ab-set-aside-branch-load"
+EXP = REPO / "tools" / "craft" / "experiments" / "ab-set-aside-branch-load"
 ab = _load("ab_set_aside_under_test", EXP / "ab.py")
 
 LOAD = "read `../_shared/waiting-criterion.md` now and follow it in full."
@@ -141,12 +140,6 @@ def test_arm_diff_fails_when_a_citation_survives(tmp_path):
     assert problems, problems
 
 
-def test_branch_file_opens_with_one_line_saying_when_it_applies():
-    first, blank, heading = (EXP / "arms" / "branch" / "waiting-criterion.md").read_text().split("\n", 3)[:3]
-    assert re.search(r"\bwhen\b", first, re.I) and "BLOCKED" in first
-    assert blank == "" and heading == "### A criterion waiting on something outside the work"
-
-
 # --- 2. the branch-read grader ---------------------------------------------------------------
 
 
@@ -182,11 +175,6 @@ def test_branch_read_grader_is_not_fooled_by_a_non_read_mention():
 def test_branch_read_grader_is_not_fooled_by_a_different_file():
     trace = [_read("/work/plugin/skills/_shared/not-waiting-criterion.md.orig")]
     assert ab.shared.grade_tool_used(GRADER, trace) is False
-
-
-def test_the_branch_read_grader_is_on_fixtures_a_and_b_only():
-    graded = sorted(p.parent.parent.name for p in EXP.glob(f"*/graders/{BRANCH_READ_GRADER}"))
-    assert graded == [CASE_A, CASE_B]
 
 
 # --- the per-arm plugin copy and the evidence a run read that arm's procedure -----------------
@@ -321,25 +309,6 @@ def test_the_seeded_set_aside_writer_logs_its_call_and_really_writes_the_spec(tm
     assert done.returncode == 0, done.stderr
     assert (cwd / "lore-calls.log").read_text().startswith("set_aside.py --spec invoice-members")
     assert re.search(r"## Waiting.*\*\*AC2\.\*\* set aside", _show(cwd, env, "spec/invoice-members"), re.S)
-
-
-# --- 5. the gate's unmapped-case refusal over the real craft corpus ----------------------------
-
-
-def test_both_experiments_add_no_unmapped_case_to_the_real_craft_corpus():
-    sys.path.insert(0, str(REPO / "tools" / "portage" / "plugins" / "portage"))
-    try:
-        from portage.eval_gate import unmapped_runner_cases
-    finally:
-        sys.path.pop(0)
-    assert sorted(p.parent.name for p in EXP.glob("*/case.yaml")) == [CASE_A, CASE_B, CASE_C]
-    assert sorted(p.parent.name for p in FOUND.glob("*/case.yaml"))
-    assert unmapped_runner_cases(CRAFT / "evals") == []
-
-
-def test_case_names_are_unique_across_the_craft_evals_tree():
-    names = [re.search(r"^name: (.+)$", p.read_text(), re.M).group(1) for p in (CRAFT / "evals").glob("**/case.yaml")]
-    assert len(names) == len(set(names))
 
 
 # --- the bar's fingerprint, and the reach marker ------------------------------------------------

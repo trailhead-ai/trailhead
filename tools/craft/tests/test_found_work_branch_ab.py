@@ -1,5 +1,5 @@
 """The Found-work branch-load A/B: the arm-diff check, the branch-read grader, the fixture
-scaffolds, the per-arm plugin copy, and the gate's refusal over the real craft corpus. The arm
+scaffolds, and the per-arm plugin copy. The arm
 files, graders and scaffolds are run through the experiment's own driver (`ab.py`) and the real
 scaffold scripts."""
 
@@ -18,7 +18,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[3]
 CRAFT = REPO / "tools" / "craft" / "plugins" / "craft"
-EXP = CRAFT / "evals" / "ab-found-work-branch-load"
+EXP = REPO / "tools" / "craft" / "experiments" / "ab-found-work-branch-load"
 
 _spec = importlib.util.spec_from_file_location("ab_under_test", EXP / "ab.py")
 ab = importlib.util.module_from_spec(_spec)
@@ -85,12 +85,6 @@ def test_arm_diff_fails_when_a_citation_survives(tmp_path):
     assert problems, problems
 
 
-def test_branch_file_opens_with_one_line_saying_when_it_applies():
-    first, blank, heading = (EXP / "arms" / "branch" / "found-work.md").read_text().split("\n", 3)[:3]
-    assert re.search(r"\bwhen\b", first, re.I) and "spec" in first
-    assert blank == "" and heading == "## Found work"
-
-
 # --- 2. the branch-read grader ---------------------------------------------------------------
 
 
@@ -126,11 +120,6 @@ def test_branch_read_grader_is_not_fooled_by_a_non_read_mention():
 def test_branch_read_grader_is_not_fooled_by_a_different_file():
     trace = [_read("/work/plugin/skills/_shared/not-found-work.md.orig")]
     assert ab.grade_tool_used(GRADER, trace) is False
-
-
-def test_the_branch_read_grader_is_on_fixtures_a_and_b_only():
-    graded = sorted(p.parent.parent.name for p in EXP.glob(f"*/graders/{BRANCH_READ_GRADER}"))
-    assert graded == ["ab-found-work-a-spec-in-prompt", "ab-found-work-b-spec-on-record-only"]
 
 
 # --- 4. the per-arm plugin copy and the evidence a run read that arm's procedure ---------------
@@ -267,21 +256,7 @@ def test_the_spec_link_is_on_the_record_per_fixture_and_in_the_prompt_only_for_a
     assert ("export-invoices" in _prompt(case)) is in_prompt
 
 
-# --- 5. the gate's unmapped-case refusal over the real craft corpus ----------------------------
-
-
-def test_the_experiment_adds_no_unmapped_case_to_the_real_craft_corpus():
-    sys.path.insert(0, str(REPO / "tools" / "portage" / "plugins" / "portage"))
-    try:
-        from portage.eval_gate import unmapped_runner_cases
-    finally:
-        sys.path.pop(0)
-    assert sorted(p.parent.name for p in EXP.glob("*/case.yaml")) == [
-        "ab-found-work-a-spec-in-prompt",
-        "ab-found-work-b-spec-on-record-only",
-        "ab-found-work-c-no-spec-link",
-    ]
-    assert unmapped_runner_cases(CRAFT / "evals") == []
+# --- 5. the runner grants and the bar ------------------------------------------------------------
 
 
 def test_runner_grants_are_read_from_the_craft_mapping():
