@@ -234,11 +234,16 @@ def test_the_branch_file_reads_in_a_trace_are_counted_not_graded():
 # --- 3. the fixtures' scaffold seeding, checked through the seeded tools -----------------------
 
 
+def _inherited_env():
+    """The ambient environment minus XDG roots, so the scaffold's HOME is the only root it resolves."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+
+
 def _scaffold(case, tmp_path):
     home = tmp_path / "home"
     cwd = home / "cwd"
     cwd.mkdir(parents=True)
-    env = {**os.environ, "HOME": str(home), "LORE_EMAIL": "eval@example.invalid"}
+    env = {**_inherited_env(), "HOME": str(home), "LORE_EMAIL": "eval@example.invalid"}
     done = subprocess.run(
         ["bash", str(EXP / case / "fixtures" / "scaffold.sh")], cwd=cwd, env=env,
         capture_output=True, text=True, timeout=180,

@@ -236,11 +236,16 @@ def test_evidence_rejects_a_run_that_never_read_the_procedure():
 # --- 3. fixture (b) seeds the spec link on the record, not in the prompt ----------------------
 
 
+def _inherited_env():
+    """The ambient environment minus XDG roots, so the scaffold's HOME is the only root it resolves."""
+    return {k: v for k, v in os.environ.items() if not k.startswith("XDG_")}
+
+
 def _run_scaffold(script, tmp_path, extra_env=None):
     home = tmp_path / "home"
     cwd = home / "cwd"
     cwd.mkdir(parents=True)
-    env = {**os.environ, "HOME": str(home), "LORE_EMAIL": "eval@example.invalid", **(extra_env or {})}
+    env = {**_inherited_env(), "HOME": str(home), "LORE_EMAIL": "eval@example.invalid", **(extra_env or {})}
     done = subprocess.run(
         ["bash", str(script)], cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
     )
