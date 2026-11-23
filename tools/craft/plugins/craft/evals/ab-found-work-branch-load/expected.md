@@ -5,8 +5,31 @@ One-time experiment, not a gate case: none of its cases is in `evals/eval-gate.j
 
 ## Verdict
 
-Pending. Nothing has been run. This block is the one place the result is recorded (verdict, per-cell counts,
-mechanism observed, the decision asked for); the manual eval log and the criterion observation cite it.
+**VOID (2026-11-22).** The inline arm passed 1 of 10 on Sonnet, under the 8 of 10 the bar requires before the
+arms can be ranked. No branch-arm run, Opus cell or fixture (c) run was spent, as the bar directs. This block is
+the one place the result is recorded; the manual eval log and the criterion observation cite it.
+
+| Cell | Arm | Model | Runs | Passed (score 1.0) | Scores |
+|---|---|---|---|---|---|
+| fixture (a) `ab-found-work-a-spec-in-prompt` | inline | Sonnet 5.5 | 5 | 0 | 0.857 x5 |
+| fixture (b) `ab-found-work-b-spec-on-record-only` | inline | Sonnet 5.5 | 5 | 1 | 0.857, 0.857, 1, 0.857, 0.857 |
+| every other registered cell | | | 0 | not run (void) | |
+
+- **Why the runs failed.** Every failing run failed one grader, `report-opens-with-the-operators-items` (an llm
+  grader on the final message), and passed the other six, which observe the Found work rules themselves:
+  decision logged before any write, the deferred entry, no follow-up entry for the folded finding, no question
+  asked, one decision line per finding, the separate and brainstorm tasks. Sonnet's report put the operator's
+  items second, after a status paragraph, rather than first. The runs ran 29 to 42 turns with no runner error and
+  differing costs, so this is a result, not an environment failure, and no rerun was taken.
+- **Mechanism observed.** Every inline run Read the arm copy's own `skills/_shared/execute.md` (3 or 4 chunked
+  reads) and never the live file, checked from the kept transcripts.
+- **What this does and does not say.** It says nothing about branch loading: no branch run exists. It does say
+  this instrument cannot rank the arms on Sonnet, because the inline arm fails the report-order grader regardless
+  of where the Found work text lives.
+- **Bar.** Fingerprint before the first cell and before this verdict: `e9be50bfa90a7f9e65e9485f9bfc6e704b35a464`
+  both times; the bar did not move.
+- **Decision asked for.** Choose new material: one of the fallback sections below, or a re-registered instrument
+  on this same section. Neither the ADR nor the spec changes on a void.
 
 ## Under test
 
