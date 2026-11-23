@@ -1,0 +1,17 @@
+[
+ {
+  "kind": "spec",
+  "title": "Export invoices",
+  "status": "ready",
+  "body": "# Export invoices\n\n## Acceptance Criteria\n\n- **AC1.** Invoices can be exported as CSV. *Verified by: manual check.*\n\n- **AC2.** Exports include the invoice total. *Verified by: manual check.*\n\n## Slices\n\n- **Export CSV** \u2014 You can export invoices as CSV. (`task/export-csv-build`, covers AC1)\n"
+ },
+ {
+  "kind": "task",
+  "title": "Export CSV build",
+  "status": "in-progress",
+  "body": "# Export CSV build\n\nBuild the CSV export for invoices.\n",
+  "related": [
+   "spec=export-invoices"
+  ]
+ }
+]

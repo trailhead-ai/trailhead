@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: ab-found-work-b-spec-on-record-only
+runs: 5
+context:
+  scaffold_script: fixtures/scaffold.sh
