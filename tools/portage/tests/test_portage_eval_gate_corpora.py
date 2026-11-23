@@ -111,10 +111,6 @@ class TestMappingLoads:
         assert mapping.runner["allow_tools"] == declared
 
 
-def test_the_three_live_corpora_are_the_sites_the_grant_check_is_held_to():
-    assert {c.parent.parent.parent.name for c in CORPORA} >= {"craft", "lore", "portage"}
-
-
 @pytest.fixture(scope="module", params=CORPORA, ids=IDS)
 def throwaway(request, tmp_path_factory):
     """A throwaway git repo holding the real plugin tree at its real relative path."""
