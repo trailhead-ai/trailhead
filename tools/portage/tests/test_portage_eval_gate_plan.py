@@ -563,6 +563,37 @@ class TestRunnerBlockValidation:
         assert "allow_tools entry #2 " in fault
         assert rejected in fault
 
+    @pytest.mark.parametrize("grant, rejected", [
+        ("Bash(a[b],c)", "holds a square bracket"), ("Bash(a]b)", "holds a square bracket"), ("Bash([x)", "holds a square bracket"),
+        ("Bash(git status\x0b*)", "holds a control character"), ("Bash(git status\x0c*)", "holds a control character"),
+        ("Bash(git\tstatus *)", "holds a control character"), ("Bash(git\x1bstatus *)", "holds a control character"),
+        ("Bash(git\x1cstatus)", "holds a control character"), ("Bash(git\x1dstatus)", "holds a control character"),
+        ("Bash(git\x1estatus)", "holds a control character"), ("Bash(git\x7fstatus)", "holds a control character"),
+        ("Bash(git\x85status)", "holds a control character"), ("Bash(git\x9fstatus)", "holds a control character"),
+        ("Bash(git status\u2028*)", "holds a line terminator"), ("Bash(git status\u2029*)", "holds a line terminator"),
+        ("Bash(git\u00a0status)", "holds a non-ASCII"), ("Bash(git\u200bstatus)", "holds a non-ASCII"),
+        ("Bash(git\u202estatus)", "holds a non-ASCII"), ("Bash(git\ufeffstatus)", "holds a non-ASCII"),
+        ("Bash(g\u00e9)", "holds a non-ASCII"),
+    ])
+    def test_a_grant_argument_holding_a_re_derived_shape_is_refused_by_position_class_and_allowed_shape(
+            self, grant, rejected):
+        fault = _fault(_runner_doc(allow_tools=["Read", grant]))
+        argument = grant[grant.index("(") + 1:-1]
+        assert "allow_tools entry #2 " in fault
+        assert rejected in fault
+        assert "printable ASCII" in fault
+        assert "\n" not in fault
+        for char in argument:
+            if not " " <= char <= "~" or char in "[]":
+                assert char not in fault
+        assert argument not in fault
+
+    @pytest.mark.parametrize("grant", ["Bash(ab c)", "Bash(git status *)", "Bash(a,b c)", "Bash(~|{}\"'`!@#$%^&*+=;:<>?/\\-.)"])
+    def test_the_nearest_accepted_neighbour_of_each_refused_shape_still_loads(self, grant):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_runner_doc(allow_tools=[grant]), "f").runner["allow_tools"] == [grant]
+
     @pytest.mark.parametrize("cost", [0, -1, 25.01, 1e9, float("inf"), float("nan"), True])
     def test_a_cost_cap_outside_the_bound_is_refused(self, cost):
         assert "max_cost_usd" in _fault(_runner_doc(max_cost_usd=cost).replace("Infinity", "1e999"))

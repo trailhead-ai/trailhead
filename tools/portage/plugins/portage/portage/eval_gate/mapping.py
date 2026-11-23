@@ -24,9 +24,10 @@ gate that understands it, so land the gate before any mapping that uses the key.
 own ``pass_at``, which must lie in ``1..runs``. ``case.yaml`` is checked for
 presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model id, each
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
-single-line parenthesised argument that holds no bracket and no NUL (a grant argument cannot contain
-brackets, by design: the runner splits the list on commas and spaces outside brackets and tracks them with a flag,
-not a depth, so a bracket inside an argument could carry a second grant in one entry), and
+single-line parenthesised argument of printable ASCII (0x20-0x7E) holding no parenthesis and no square bracket
+(a grant argument cannot contain either, by design: the runner splits the list on commas and spaces outside
+brackets and tracks them with a flag, not a depth, so a bracket inside an argument could carry a second grant in one
+entry; control characters, line terminators and all other non-ASCII are refused too), and
 ``runner.max_cost_usd`` a finite number in (0, 25].
 ``merge_only`` marks a case the push tier leaves out; it must be a boolean.
 ``runner.push_model`` is the model the push tier runs every case on (same shape as ``runner.model``,
@@ -57,7 +58,7 @@ DEFAULT_RUNS = 3
 DEFAULT_PASS_AT = 2
 CASE_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]*\Z")
 CORPUS_PATH = re.compile(r"^[A-Za-z0-9._][A-Za-z0-9._/-]{0,199}\Z")
-TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([^()\x00\n\r]*\))?\Z")
+TOOL_GRANT = re.compile(r"^[A-Za-z0-9_]+(?:\([\x20-\x27\x2a-\x5a\x5c\x5e-\x7e]*\))?\Z")
 MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 NEEDS_MERGE_MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,;'()_-]{0,199}\Z")
 _AUTOLINK = "www."
@@ -142,6 +143,16 @@ def _grant_rejection(grant: str) -> str:
             return f"; the argument holds {name}, which is not allowed"
     if "(" in argument or ")" in argument[:-1]:
         return "; the argument holds a bracket, which is not allowed"
+    if "[" in argument or "]" in argument:
+        return "; the argument holds a square bracket, which is not allowed"
+    for char in argument:
+        if char in "\u2028\u2029":
+            return "; the argument holds a line terminator, which is not allowed"
+    for char in argument:
+        if ord(char) < 0x20 or 0x7f <= ord(char) <= 0x9f:
+            return "; the argument holds a control character, which is not allowed"
+    if not argument.isascii():
+        return "; the argument holds a non-ASCII character, which is not allowed"
     return ""
 
 
@@ -175,7 +186,8 @@ def _runner(obj, file: str) -> dict:
     for position, t in enumerate(tools, 1):
         if not TOOL_GRANT.match(t):
             raise MappingError(file, f"runner.allow_tools entry {_q(t, position)} must be a tool name, "
-                                     "optionally followed by one parenthesised argument on one line"
+                                     "optionally followed by one parenthesised argument of printable ASCII "
+                                     "(space to tilde) on one line, with no parentheses or square brackets inside"
                                      f"{_grant_rejection(t)}")
     cost = obj["max_cost_usd"]
     if isinstance(cost, bool) or not isinstance(cost, (int, float)) or not 0 < cost <= MAX_COST_USD:

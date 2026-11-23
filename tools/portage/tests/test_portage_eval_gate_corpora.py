@@ -100,6 +100,21 @@ class TestMappingLoads:
         assert sorted(mapping.cases) == _runner_cases(corpus)
 
 
+    def test_every_live_grant_is_accepted_by_the_tightened_grant_check(self, corpus):
+        mapping_file = corpus / "eval-gate.json"
+        declared = json.loads(mapping_file.read_text())["runner"]["allow_tools"]
+        mapping = load_mapping(
+            mapping_file.read_text(), str(mapping_file),
+            plugin_root=_plugin_root(corpus), evals_dir=corpus,
+        )
+        assert declared
+        assert mapping.runner["allow_tools"] == declared
+
+
+def test_the_three_live_corpora_are_the_sites_the_grant_check_is_held_to():
+    assert {c.parent.parent.parent.name for c in CORPORA} >= {"craft", "lore", "portage"}
+
+
 @pytest.fixture(scope="module", params=CORPORA, ids=IDS)
 def throwaway(request, tmp_path_factory):
     """A throwaway git repo holding the real plugin tree at its real relative path."""
