@@ -5619,3 +5619,13 @@ folder's `expected.md` `## Verdict` block. Runs used the direct runner from an u
 sandboxed session the runs' Bash calls fail, and the `portage-eval` shim cannot run nested unmapped cases, fixed
 run counts or kept transcripts.
 
+## Case set: set-aside branch-load versus inline A/B (2026-11-23)
+
+**Status: run, pass.** The second pre-registered A/B for spec AC32, on `### A criterion waiting on something
+outside the work` of `skills/_shared/execute.md`, under `evals/ab-set-aside-branch-load/`, unmapped and nested.
+The operator chose this material after the Found-work A/B came out void. Sonnet: inline 10/10, branch 10/10;
+Opus: inline 3/3, branch 3/3; every branch run read the branch file and reached the decision point. Disclosed:
+on the false-condition fixture all 5 branch runs loaded the branch file anyway and 1 of 5 made a set-aside it
+should not have. The verdict, per-cell counts and the decision asked for are in that folder's `expected.md`
+`## Verdict` block. Runs used the direct runner from an unsandboxed terminal.
+

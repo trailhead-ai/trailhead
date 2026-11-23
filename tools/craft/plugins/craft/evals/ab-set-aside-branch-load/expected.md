@@ -8,7 +8,41 @@ arms).
 
 ## Verdict
 
-Pending: no cell has been run.
+**PASS (2026-11-23).** On both models the branch arm matched the inline arm, met the absolute floor, and every
+branch-arm run read the branch file. This block is the one place the result is recorded; the manual eval log and
+the criterion observation cite it.
+
+| Cell | Arm | Model | Runs | Passed (score 1.0) | Read the branch file | Reached the decision point |
+|---|---|---|---|---|---|---|
+| fixture (a) `ab-set-aside-a-facts-in-the-report` | inline | Sonnet 5.5 | 5 | 5 | n/a (0 reads) | 5 |
+| fixture (b) `ab-set-aside-b-facts-on-the-record-only` | inline | Sonnet 5.5 | 5 | 5 | n/a (0 reads) | 5 |
+| fixture (a) | branch | Sonnet 5.5 | 5 | 5 | 5 | 5 |
+| fixture (b) | branch | Sonnet 5.5 | 5 | 5 | 5 | 5 |
+| fixture (a) | inline | Opus 5.5 | 3 | 3 | n/a (0 reads) | 3 |
+| fixture (a) | branch | Opus 5.5 | 3 | 3 | 3 | 3 |
+| fixture (c) `ab-set-aside-c-context-problem` (disclosure) | branch | Sonnet 5.5 | 5 | 4 | 5 | 1 |
+
+- **Against the bar.** Sonnet: inline 10/10 (not void), branch 10/10, at least inline minus 1 and at least 8/10.
+  Fixture (a) 5/5 against 5/5 and fixture (b) 5/5 against 5/5, reported separately. Opus: inline 3/3 (not void),
+  branch 3/3. Every one of the 13 branch-arm runs read `_shared/waiting-criterion.md` once (the `tool_used`
+  grader, and `ab.py count-reads` on the kept transcript) and reached the decision point (a `set_aside.py ` line
+  in `lore-calls.log`). No runner error, no rerun.
+- **Fixture (c), disclosed, cannot rescue or sink the verdict.** The condition is false (the executor's BLOCKED
+  names no covered criterion), yet all 5 branch-arm runs read the branch file: the wrong-load count is 5 of 5. In
+  4 of them the run then applied the section's own rule and made no set-aside; in 1 it called the set-aside
+  writer and failed `no-set-aside-was-made`. No inline run of (c) was registered, so this does not say whether
+  the same text inline would mis-fire at the same rate. It does say the load directive's condition was not used
+  as a gate: on this material the agent loaded the branch whenever an executor BLOCKED arrived.
+- **Mechanism observed.** Every run in every cell read its own arm copy's `skills/_shared/execute.md` and never
+  the live file, checked from the kept transcripts.
+- **What 10 runs per arm can and cannot detect.** Against 10 of 10 it would have shown a branch arm at 6 of 10 or
+  worse (one-sided Fisher exact p = 0.043); it cannot tell 10 of 10 from 8 or 9 of 10 (p = 0.24 and 0.50). A
+  real drop of one or two runs in ten would not be visible here.
+- **Bar.** Fingerprint `9fc8f9010afa890dd4d747244ede8b90ec35b85f` before the first cell, after the last, and
+  before this verdict; the bar did not move.
+- **Decision asked for.** Narrow `adr/extraction-is-permitted-when-every-citation-is-unconditional` to permit
+  a conditional read directive at the point its condition is tested, one level deep (spec AC32). The operator
+  applies it, or declines, through the record-correction path.
 
 ## Under test
 
