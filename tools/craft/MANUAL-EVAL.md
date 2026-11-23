@@ -5608,3 +5608,25 @@ The regression cost 139.12 USD. Two sentences the task's review flagged were the
 
 The whole-change review's folded fixes (step 8 counts the unchosen surfaces' criteria, the polish-ordering sentence reworded and then scoped to surfaces with only polish left, a set-aside criterion stated not to be a cut, the commitment guard's "slices" repointed to "work") were re-measured on the cases that read those sentences. On the prose after the first four fixes, request `local-7mh75pdzstdt`: `slice-states-a-polish-slice-as-a-recommendation-with-its-reason`, `slice-sets-aside-what-needs-an-outside-account` and `slice-builds-against-a-stand-in-instead-of-setting-aside` green 1/1 each. On the final prose (`skills/_shared/slice.md` `2265630…`, `skills/slice/SKILL.md` `516322e…`), request `local-tm7mlk6zv9li`: the polish-recommendation and polish-out-of-core cases green 1/1 each. No case discriminates these wording fixes; the runs show they changed none of the measured answers.
 
+## Case set: Found-work branch-load versus inline A/B (2026-11-22)
+
+**Status: run, void.** A pre-registered A/B for spec AC32 (a branch load is followed as reliably as the same text
+inline) on `## Found work` of `skills/_shared/execute.md`, under `tools/craft/experiments/ab-found-work-branch-load/`,
+outside the plugin's eval corpus so the gate never selects it. The inline arm scored 1 of 10 on Sonnet against the 8 of 10 floor, so the
+instrument cannot rank the arms and no branch run was spent. Every failing run failed only the report-order grader
+and passed the six Found work graders. The verdict, per-cell counts and the decision asked for are in that
+folder's `expected.md` `## Verdict` block. Runs used the direct runner from an unsandboxed terminal: inside a
+sandboxed session the runs' Bash calls fail, and the `portage-eval` shim cannot run nested unmapped cases, fixed
+run counts or kept transcripts.
+
+## Case set: set-aside branch-load versus inline A/B (2026-11-23)
+
+**Status: run, pass.** The second pre-registered A/B for spec AC32, on `### A criterion waiting on something
+outside the work` of `skills/_shared/execute.md`, under `tools/craft/experiments/ab-set-aside-branch-load/`, outside the
+plugin's eval corpus.
+The operator chose this material after the Found-work A/B came out void. Sonnet: inline 10/10, branch 10/10;
+Opus: inline 3/3, branch 3/3; every branch run read the branch file and reached the decision point. Disclosed:
+on the false-condition fixture all 5 branch runs loaded the branch file anyway and 1 of 5 made a set-aside it
+should not have. The verdict, per-cell counts and the decision asked for are in that folder's `expected.md`
+`## Verdict` block. Runs used the direct runner from an unsandboxed terminal.
+
