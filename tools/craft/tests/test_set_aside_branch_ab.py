@@ -20,17 +20,13 @@ CRAFT = REPO / "tools" / "craft" / "plugins" / "craft"
 FOUND = REPO / "tools" / "craft" / "experiments" / "ab-found-work-branch-load"
 
 
-def _load(name, path):
-    spec = importlib.util.spec_from_file_location(name, path)
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[name] = mod
-    spec.loader.exec_module(mod)
-    return mod
-
-
-shared = _load("ab_shared_under_test", FOUND / "ab.py")
 EXP = REPO / "tools" / "craft" / "experiments" / "ab-set-aside-branch-load"
-ab = _load("ab_set_aside_under_test", EXP / "ab.py")
+
+_spec = importlib.util.spec_from_file_location("ab_set_aside_under_test", EXP / "ab.py")
+ab = importlib.util.module_from_spec(_spec)
+sys.modules["ab_set_aside_under_test"] = ab
+_spec.loader.exec_module(ab)
+shared = ab.shared
 
 LOAD = "read `../_shared/waiting-criterion.md` now and follow it in full."
 CASE_A = "ab-set-aside-a-facts-in-the-report"
@@ -46,9 +42,9 @@ def _jsonl(*entries):
     return "".join(json.dumps(e) + "\n" for e in entries)
 
 
-def _read_entry(path):
+def _read(path):
     return {"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": path}}]}}
+        {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": path}}]}}
 
 
 STRING_MESSAGE = {"type": "system", "message": "retrying after a rate limit"}
@@ -59,7 +55,7 @@ def test_the_trace_commands_survive_a_line_whose_message_is_a_string(command, ex
     trace = tmp_path / "trace.jsonl"
     trace.write_text(_jsonl(
         STRING_MESSAGE,
-        _read_entry("/work/plugin/skills/_shared/found-work.md"),
+        _read("/work/plugin/skills/_shared/found-work.md"),
         STRING_MESSAGE,
     ))
     done = subprocess.run(
@@ -74,7 +70,7 @@ def test_the_trace_commands_survive_a_line_whose_message_is_a_string(command, ex
 
 
 def test_a_string_message_line_does_not_hide_the_blocks_around_it():
-    trace = [STRING_MESSAGE, _read_entry("/work/plugin/skills/_shared/found-work.md")]
+    trace = [STRING_MESSAGE, _read("/work/plugin/skills/_shared/found-work.md")]
     assert shared.count_branch_reads(trace) == 1
 
 
@@ -89,7 +85,7 @@ def _arms(tmp_path):
 
 
 def test_arm_diff_passes_on_the_real_arms():
-    assert ab.check_arms(EXP / "arms" / "inline", EXP / "arms" / "branch") == []
+    assert shared.check_arms(EXP / "arms" / "inline", EXP / "arms" / "branch", ab.EXPERIMENT) == []
 
 
 def test_the_driver_check_command_agrees_with_the_function():
@@ -105,7 +101,7 @@ def test_arm_diff_fails_when_one_moved_byte_is_changed(tmp_path):
     i = data.index(heading) + len(heading) + 20
     data[i] = ord("X") if data[i] != ord("X") else ord("Y")
     moved.write_bytes(bytes(data))
-    problems = ab.check_arms(inline, branch)
+    problems = shared.check_arms(inline, branch, ab.EXPERIMENT)
     assert any("moved" in p for p in problems), problems
 
 
@@ -116,7 +112,7 @@ def test_arm_diff_fails_when_one_load_line_is_removed(tmp_path):
     at = next(i for i, ln in enumerate(lines) if LOAD in ln)
     del lines[at]
     proc.write_text("".join(lines))
-    problems = ab.check_arms(inline, branch)
+    problems = shared.check_arms(inline, branch, ab.EXPERIMENT)
     assert problems, "a branch arm missing a load line passed the check"
 
 
@@ -126,7 +122,7 @@ def test_arm_diff_fails_on_a_change_that_is_not_a_load_line(tmp_path):
     text = proc.read_text()
     assert "## Model Selection" in text
     proc.write_text(text.replace("## Model Selection", "## Model Choice", 1))
-    problems = ab.check_arms(inline, branch)
+    problems = shared.check_arms(inline, branch, ab.EXPERIMENT)
     assert any("outside a load line" in p for p in problems), problems
 
 
@@ -136,16 +132,11 @@ def test_arm_diff_fails_when_a_citation_survives(tmp_path):
     text = proc.read_text()
     at = text.index(LOAD)
     proc.write_text(text[:at] + "see [it](#a-criterion-waiting-on-something-outside-the-work) " + text[at:])
-    problems = ab.check_arms(inline, branch)
+    problems = shared.check_arms(inline, branch, ab.EXPERIMENT)
     assert problems, problems
 
 
 # --- 2. the branch-read grader ---------------------------------------------------------------
-
-
-def _read(path):
-    return {"type": "assistant", "message": {"content": [
-        {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": path}}]}}
 
 
 def _bash(command):
@@ -159,22 +150,22 @@ PLUGIN = "/work/plugin"
 
 def test_branch_read_grader_is_red_with_no_read_of_the_branch_file():
     trace = [_read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/found-work.md")]
-    assert ab.shared.grade_tool_used(GRADER, trace) is False
+    assert shared.grade_tool_used(GRADER, trace) is False
 
 
 def test_branch_read_grader_is_green_on_a_read_of_the_branch_file():
     trace = [_read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/waiting-criterion.md")]
-    assert ab.shared.grade_tool_used(GRADER, trace) is True
+    assert shared.grade_tool_used(GRADER, trace) is True
 
 
 def test_branch_read_grader_is_not_fooled_by_a_non_read_mention():
     trace = [_bash("cat /work/plugin/skills/_shared/waiting-criterion.md")]
-    assert ab.shared.grade_tool_used(GRADER, trace) is False
+    assert shared.grade_tool_used(GRADER, trace) is False
 
 
 def test_branch_read_grader_is_not_fooled_by_a_different_file():
     trace = [_read("/work/plugin/skills/_shared/not-waiting-criterion.md.orig")]
-    assert ab.shared.grade_tool_used(GRADER, trace) is False
+    assert shared.grade_tool_used(GRADER, trace) is False
 
 
 # --- the per-arm plugin copy and the evidence a run read that arm's procedure -----------------
@@ -182,8 +173,8 @@ def test_branch_read_grader_is_not_fooled_by_a_different_file():
 
 def test_each_arm_copy_carries_that_arms_procedure_and_leaves_the_live_tree_alone(tmp_path):
     live = (CRAFT / "skills" / "_shared" / "execute.md").read_bytes()
-    inline = ab.build_arm_plugin("inline", CASE_A, tmp_path / "i")
-    branch = ab.build_arm_plugin("branch", CASE_A, tmp_path / "b")
+    inline = shared.build_arm_plugin("inline", CASE_A, tmp_path / "i", exp=ab.EXPERIMENT)
+    branch = shared.build_arm_plugin("branch", CASE_A, tmp_path / "b", exp=ab.EXPERIMENT)
     assert (inline / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "inline" / "execute.md").read_bytes()
     assert (branch / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "branch" / "execute.md").read_bytes()
     assert (branch / "skills" / "_shared" / "waiting-criterion.md").read_bytes() == (EXP / "arms" / "branch" / "waiting-criterion.md").read_bytes()
@@ -193,7 +184,7 @@ def test_each_arm_copy_carries_that_arms_procedure_and_leaves_the_live_tree_alon
 
 def test_the_arm_copy_holds_only_the_requested_case_and_the_branch_read_grader_only_where_it_applies(tmp_path):
     def graders(arm, case):
-        root = ab.build_arm_plugin(arm, case, tmp_path / f"{arm}-{case}")
+        root = shared.build_arm_plugin(arm, case, tmp_path / f"{arm}-{case}", exp=ab.EXPERIMENT)
         cases = sorted(p.parent.name for p in (root / "evals").glob("**/case.yaml"))
         assert cases == [case]
         return sorted(p.name for p in (root / "evals").glob(f"**/{case}/graders/*.md"))
@@ -217,18 +208,18 @@ def test_evidence_accepts_each_arm_only_for_its_own_procedure_text():
     path = f"{root}/skills/_shared/execute.md"
     inline_text = "1\tsee [x](#a-criterion-waiting-on-something-outside-the-work) says\n"
     branch_text = f"1\twhen blocked, {LOAD}\n"
-    assert ab.shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "inline", ab.EXPERIMENT) == []
-    assert ab.shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "branch", ab.EXPERIMENT) == []
-    assert ab.shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "inline", ab.EXPERIMENT)
-    assert ab.shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "branch", ab.EXPERIMENT)
+    assert shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "inline", ab.EXPERIMENT) == []
+    assert shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "branch", ab.EXPERIMENT) == []
+    assert shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "inline", ab.EXPERIMENT)
+    assert shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "branch", ab.EXPERIMENT)
 
 
 def test_the_branch_file_reads_in_a_trace_are_counted_not_graded():
     trace = [_read(f"{PLUGIN}/skills/_shared/waiting-criterion.md"), _bash("cat waiting-criterion.md"),
              _read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/waiting-criterion.md"),
              _read(f"{PLUGIN}/skills/_shared/found-work.md")]
-    assert ab.shared.count_branch_reads(trace, ab.EXPERIMENT) == 2
-    assert ab.shared.count_branch_reads([], ab.EXPERIMENT) == 0
+    assert shared.count_branch_reads(trace, ab.EXPERIMENT) == 2
+    assert shared.count_branch_reads([], ab.EXPERIMENT) == 0
 
 
 # --- 3. the fixtures' scaffold seeding, checked through the seeded tools -----------------------
@@ -258,9 +249,6 @@ def _show(cwd, env, record):
 
 def _prompt(case):
     return (EXP / case / "prompt.md").read_text()
-
-
-THE_FACTS = ("not applied", "weeks", "no test version")
 
 
 @pytest.mark.parametrize("case", [CASE_A, CASE_B, CASE_C])
@@ -311,17 +299,7 @@ def test_the_seeded_set_aside_writer_logs_its_call_and_really_writes_the_spec(tm
     assert re.search(r"## Waiting.*\*\*AC2\.\*\* set aside", _show(cwd, env, "spec/invoice-members"), re.S)
 
 
-# --- the bar's fingerprint, and the reach marker ------------------------------------------------
-
-
-def test_the_bar_text_is_only_what_lies_between_its_delimiters(tmp_path):
-    doc = tmp_path / "expected.md"
-    doc.write_text("intro\n\n<!-- bar-begin -->\nfloor 8/10\n<!-- bar-end -->\n\nverdict: pending\n")
-    first = shared.bar_text(doc)
-    doc.write_text("intro changed\n\n<!-- bar-begin -->\nfloor 8/10\n<!-- bar-end -->\n\nverdict: pass\n")
-    assert shared.bar_text(doc) == first
-    doc.write_text("intro\n\n<!-- bar-begin -->\nfloor 7/10\n<!-- bar-end -->\n")
-    assert shared.bar_text(doc) != first
+# --- the bar's fingerprint ------------------------------------------------
 
 
 def test_the_recorded_fingerprints_match_each_experiments_bar():

@@ -27,8 +27,5 @@ EXPERIMENT = shared.Experiment(
     citation="(#a-criterion-waiting-on-something-outside-the-work)",
 )
 
-check_arms = lambda inline, branch: shared.check_arms(inline, branch, EXPERIMENT)  # noqa: E731
-build_arm_plugin = lambda arm, case, dest, craft_root=None: shared.build_arm_plugin(arm, case, dest, craft_root, EXPERIMENT)  # noqa: E731
-
 if __name__ == "__main__":
     sys.exit(shared.main(sys.argv, EXPERIMENT))
