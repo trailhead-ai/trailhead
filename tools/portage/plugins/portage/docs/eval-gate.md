@@ -232,7 +232,9 @@ a change that touches one, or a split-procedure case, without a current verdict.
 
 The check applies to a repo only when its change touches a `merge_only` or split-procedure case, decided by the selection
 `plan` uses. A case counts as `merge_only` when the merge-base's mapping or HEAD's committed mapping marks it,
-so a stale `origin/HEAD` cannot hide a flag a newer base carries. Only commits are read: the mappings, the
+so a stale `origin/HEAD` cannot hide a flag a newer base carries; the exception is a case whose entry is a
+split procedure core at either revision and whose HEAD case does not say `merge_only`, which is not
+`merge_only`. Only commits are read: the mappings, the
 measured paths and the `case.yaml` files come from the merge-base and HEAD, and an uncommitted edit changes
 no answer. Where the base does not resolve or a mapping is invalid the answer is unknown, so the check
 applies. Where it does not apply and the repo holds no `eval-gate.json` mapping (at HEAD or the merge-base),
