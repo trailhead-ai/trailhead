@@ -1,0 +1,363 @@
+"""The set-aside branch-load A/B: the shared driver's trace readers, the arm-diff check, the
+branch-read grader, the fixture scaffolds, the per-arm plugin copy and the gate's refusal over the
+real craft corpus. Everything is run through the experiments' own driver (`ab.py`) and the real
+scaffold scripts."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+REPO = Path(__file__).resolve().parents[3]
+CRAFT = REPO / "tools" / "craft" / "plugins" / "craft"
+FOUND = CRAFT / "evals" / "ab-found-work-branch-load"
+
+
+def _load(name, path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules[name] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+shared = _load("ab_shared_under_test", FOUND / "ab.py")
+EXP = CRAFT / "evals" / "ab-set-aside-branch-load"
+ab = _load("ab_set_aside_under_test", EXP / "ab.py")
+
+LOAD = "read `../_shared/waiting-criterion.md` now and follow it in full."
+CASE_A = "ab-set-aside-a-facts-in-the-report"
+CASE_B = "ab-set-aside-b-facts-on-the-record-only"
+CASE_C = "ab-set-aside-c-context-problem"
+BRANCH_READ_GRADER = "branch-file-was-read.md"
+
+
+# --- 6. a trace line whose `message` is a string, not an object -------------------------------
+
+
+def _jsonl(*entries):
+    return "".join(json.dumps(e) + "\n" for e in entries)
+
+
+def _read_entry(path):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "r1", "name": "Read", "input": {"file_path": path}}]}}
+
+
+STRING_MESSAGE = {"type": "system", "message": "retrying after a rate limit"}
+
+
+@pytest.mark.parametrize("command, extra", [("count-reads", []), ("evidence", ["/work/plugin", "inline"])])
+def test_the_trace_commands_survive_a_line_whose_message_is_a_string(command, extra, tmp_path):
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(_jsonl(
+        STRING_MESSAGE,
+        _read_entry("/work/plugin/skills/_shared/found-work.md"),
+        STRING_MESSAGE,
+    ))
+    done = subprocess.run(
+        [sys.executable, str(FOUND / "ab.py"), command, str(trace), *extra],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert "AttributeError" not in done.stderr, done.stderr
+    if command == "count-reads":
+        assert (done.returncode, done.stdout.strip()) == (0, "1")
+    else:
+        assert "never read" in done.stdout
+
+
+def test_a_string_message_line_does_not_hide_the_blocks_around_it():
+    trace = [STRING_MESSAGE, _read_entry("/work/plugin/skills/_shared/found-work.md")]
+    assert shared.count_branch_reads(trace) == 1
+
+
+def _arms(tmp_path):
+    """A scratch copy of both arms the mutation tests may damage."""
+    dest = tmp_path / "arms"
+    shutil.copytree(EXP / "arms", dest)
+    return dest / "inline", dest / "branch"
+
+
+# --- 1. the arm-diff check -------------------------------------------------------------------
+
+
+def test_arm_diff_passes_on_the_real_arms():
+    assert ab.check_arms(EXP / "arms" / "inline", EXP / "arms" / "branch") == []
+
+
+def test_the_driver_check_command_agrees_with_the_function():
+    done = subprocess.run([sys.executable, str(EXP / "ab.py"), "check"], capture_output=True, text=True, timeout=60)
+    assert (done.returncode, done.stdout.strip()) == (0, "arm diff ok")
+
+
+def test_arm_diff_fails_when_one_moved_byte_is_changed(tmp_path):
+    inline, branch = _arms(tmp_path)
+    moved = branch / "waiting-criterion.md"
+    data = bytearray(moved.read_bytes())
+    heading = b"### A criterion waiting on something outside the work\n"
+    i = data.index(heading) + len(heading) + 20
+    data[i] = ord("X") if data[i] != ord("X") else ord("Y")
+    moved.write_bytes(bytes(data))
+    problems = ab.check_arms(inline, branch)
+    assert any("moved" in p for p in problems), problems
+
+
+def test_arm_diff_fails_when_one_load_line_is_removed(tmp_path):
+    inline, branch = _arms(tmp_path)
+    proc = branch / "execute.md"
+    lines = proc.read_text().splitlines(keepends=True)
+    at = next(i for i, ln in enumerate(lines) if LOAD in ln)
+    del lines[at]
+    proc.write_text("".join(lines))
+    problems = ab.check_arms(inline, branch)
+    assert problems, "a branch arm missing a load line passed the check"
+
+
+def test_arm_diff_fails_on_a_change_that_is_not_a_load_line(tmp_path):
+    inline, branch = _arms(tmp_path)
+    proc = branch / "execute.md"
+    text = proc.read_text()
+    assert "## Model Selection" in text
+    proc.write_text(text.replace("## Model Selection", "## Model Choice", 1))
+    problems = ab.check_arms(inline, branch)
+    assert any("outside a load line" in p for p in problems), problems
+
+
+def test_arm_diff_fails_when_a_citation_survives(tmp_path):
+    inline, branch = _arms(tmp_path)
+    proc = branch / "execute.md"
+    text = proc.read_text()
+    at = text.index(LOAD)
+    proc.write_text(text[:at] + "see [it](#a-criterion-waiting-on-something-outside-the-work) " + text[at:])
+    problems = ab.check_arms(inline, branch)
+    assert problems, problems
+
+
+def test_branch_file_opens_with_one_line_saying_when_it_applies():
+    first, blank, heading = (EXP / "arms" / "branch" / "waiting-criterion.md").read_text().split("\n", 3)[:3]
+    assert re.search(r"\bwhen\b", first, re.I) and "BLOCKED" in first
+    assert blank == "" and heading == "### A criterion waiting on something outside the work"
+
+
+# --- 2. the branch-read grader ---------------------------------------------------------------
+
+
+def _read(path):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": path}}]}}
+
+
+def _bash(command):
+    return {"type": "assistant", "message": {"content": [
+        {"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": command}}]}}
+
+
+GRADER = EXP / CASE_A / "graders" / BRANCH_READ_GRADER
+PLUGIN = "/work/plugin"
+
+
+def test_branch_read_grader_is_red_with_no_read_of_the_branch_file():
+    trace = [_read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/found-work.md")]
+    assert ab.shared.grade_tool_used(GRADER, trace) is False
+
+
+def test_branch_read_grader_is_green_on_a_read_of_the_branch_file():
+    trace = [_read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/waiting-criterion.md")]
+    assert ab.shared.grade_tool_used(GRADER, trace) is True
+
+
+def test_branch_read_grader_is_not_fooled_by_a_non_read_mention():
+    trace = [_bash("cat /work/plugin/skills/_shared/waiting-criterion.md")]
+    assert ab.shared.grade_tool_used(GRADER, trace) is False
+
+
+def test_branch_read_grader_is_not_fooled_by_a_different_file():
+    trace = [_read("/work/plugin/skills/_shared/not-waiting-criterion.md.orig")]
+    assert ab.shared.grade_tool_used(GRADER, trace) is False
+
+
+def test_the_branch_read_grader_is_on_fixtures_a_and_b_only():
+    graded = sorted(p.parent.parent.name for p in EXP.glob(f"*/graders/{BRANCH_READ_GRADER}"))
+    assert graded == [CASE_A, CASE_B]
+
+
+# --- the per-arm plugin copy and the evidence a run read that arm's procedure -----------------
+
+
+def test_each_arm_copy_carries_that_arms_procedure_and_leaves_the_live_tree_alone(tmp_path):
+    live = (CRAFT / "skills" / "_shared" / "execute.md").read_bytes()
+    inline = ab.build_arm_plugin("inline", CASE_A, tmp_path / "i")
+    branch = ab.build_arm_plugin("branch", CASE_A, tmp_path / "b")
+    assert (inline / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "inline" / "execute.md").read_bytes()
+    assert (branch / "skills" / "_shared" / "execute.md").read_bytes() == (EXP / "arms" / "branch" / "execute.md").read_bytes()
+    assert (branch / "skills" / "_shared" / "waiting-criterion.md").read_bytes() == (EXP / "arms" / "branch" / "waiting-criterion.md").read_bytes()
+    assert not (inline / "skills" / "_shared" / "waiting-criterion.md").exists()
+    assert (CRAFT / "skills" / "_shared" / "execute.md").read_bytes() == live
+
+
+def test_the_arm_copy_holds_only_the_requested_case_and_the_branch_read_grader_only_where_it_applies(tmp_path):
+    def graders(arm, case):
+        root = ab.build_arm_plugin(arm, case, tmp_path / f"{arm}-{case}")
+        cases = sorted(p.parent.name for p in (root / "evals").glob("**/case.yaml"))
+        assert cases == [case]
+        return sorted(p.name for p in (root / "evals").glob(f"**/{case}/graders/*.md"))
+
+    assert BRANCH_READ_GRADER in graders("branch", CASE_A)
+    assert BRANCH_READ_GRADER not in graders("inline", CASE_A)
+    assert BRANCH_READ_GRADER not in graders("branch", CASE_C)
+
+
+def _skill_base_read(tool_id, path, body):
+    return [
+        {"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": path}}]}},
+        {"type": "user", "message": {"content": [
+            {"type": "tool_result", "tool_use_id": tool_id, "content": body}]}},
+    ]
+
+
+def test_evidence_accepts_each_arm_only_for_its_own_procedure_text():
+    root = "/tmp/copy/craft"
+    path = f"{root}/skills/_shared/execute.md"
+    inline_text = "1\tsee [x](#a-criterion-waiting-on-something-outside-the-work) says\n"
+    branch_text = f"1\twhen blocked, {LOAD}\n"
+    assert ab.shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "inline", ab.EXPERIMENT) == []
+    assert ab.shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "branch", ab.EXPERIMENT) == []
+    assert ab.shared.procedure_evidence(_skill_base_read("a", path, branch_text), root, "inline", ab.EXPERIMENT)
+    assert ab.shared.procedure_evidence(_skill_base_read("a", path, inline_text), root, "branch", ab.EXPERIMENT)
+
+
+def test_the_branch_file_reads_in_a_trace_are_counted_not_graded():
+    trace = [_read(f"{PLUGIN}/skills/_shared/waiting-criterion.md"), _bash("cat waiting-criterion.md"),
+             _read(f"{PLUGIN}/skills/_shared/execute.md"), _read(f"{PLUGIN}/skills/_shared/waiting-criterion.md"),
+             _read(f"{PLUGIN}/skills/_shared/found-work.md")]
+    assert ab.shared.count_branch_reads(trace, ab.EXPERIMENT) == 2
+    assert ab.shared.count_branch_reads([], ab.EXPERIMENT) == 0
+
+
+# --- 3. the fixtures' scaffold seeding, checked through the seeded tools -----------------------
+
+
+def _scaffold(case, tmp_path):
+    home = tmp_path / "home"
+    cwd = home / "cwd"
+    cwd.mkdir(parents=True)
+    env = {**os.environ, "HOME": str(home), "LORE_EMAIL": "eval@example.invalid"}
+    done = subprocess.run(
+        ["bash", str(EXP / case / "fixtures" / "scaffold.sh")], cwd=cwd, env=env,
+        capture_output=True, text=True, timeout=180,
+    )
+    assert done.returncode == 0, done.stderr
+    return cwd, env
+
+
+def _show(cwd, env, record):
+    shown = subprocess.run(
+        [str(cwd / "lore"), "record", "show", record], cwd=cwd, env=env,
+        capture_output=True, text=True, timeout=60,
+    )
+    assert shown.returncode == 0, shown.stderr
+    return shown.stdout
+
+
+def _prompt(case):
+    return (EXP / case / "prompt.md").read_text()
+
+
+THE_FACTS = ("not applied", "weeks", "no test version")
+
+
+@pytest.mark.parametrize("case", [CASE_A, CASE_B, CASE_C])
+def test_every_fixture_seeds_the_spec_the_condition_is_tested_against(case, tmp_path):
+    cwd, env = _scaffold(case, tmp_path)
+    spec = _show(cwd, env, "spec/invoice-members")
+    assert all(fact in spec for fact in ("has not applied", "several weeks", "no test version"))
+    parent = _show(cwd, env, "task/members-can-download-invoices-with-sales-tax")
+    assert re.search(r"\*\*Covers:\*\*[^\n]*AC1, AC2", parent)
+
+
+@pytest.mark.parametrize(
+    "case, facts_in_prompt",
+    [(CASE_A, True), (CASE_B, False), (CASE_C, False)],
+)
+def test_the_facts_that_decide_the_condition_are_in_the_prompt_only_for_a(case, facts_in_prompt):
+    prompt = _prompt(case)
+    present = all(fact in prompt for fact in ("has not applied", "no test mode"))
+    assert present is facts_in_prompt
+
+
+def test_fixture_b_names_the_blocked_criterion_but_leaves_the_why_to_the_spec(tmp_path):
+    prompt = _prompt(CASE_B)
+    assert "BLOCKED" in prompt and "AC2" in prompt
+    assert not re.search(r"registration|provider|sandbox|weeks", prompt, re.I)
+    cwd, env = _scaffold(CASE_B, tmp_path)
+    assert "registration" in _show(cwd, env, "spec/invoice-members")
+
+
+def test_fixture_c_blocks_on_a_context_problem_that_names_no_covered_criterion():
+    prompt = _prompt(CASE_C)
+    assert "BLOCKED" in prompt
+    report = prompt.split("The executor's report, verbatim:", 1)[1]
+    assert not re.search(r"\bAC[12]\b", report)
+
+
+def test_the_seeded_set_aside_writer_logs_its_call_and_really_writes_the_spec(tmp_path):
+    cwd, env = _scaffold(CASE_A, tmp_path)
+    entries = tmp_path / "entries.json"
+    entries.write_text(json.dumps([{"criterion": "AC2", "waits_on": "the provider's tax registration"}]))
+    done = subprocess.run(
+        [str(cwd / "scripts" / "set_aside.py"), "--spec", "invoice-members", "--entries", str(entries),
+         "--vault", "eval", "--parent", "members-can-download-invoices-with-sales-tax"],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=120,
+    )
+    assert done.returncode == 0, done.stderr
+    assert (cwd / "lore-calls.log").read_text().startswith("set_aside.py --spec invoice-members")
+    assert re.search(r"## Waiting.*\*\*AC2\.\*\* set aside", _show(cwd, env, "spec/invoice-members"), re.S)
+
+
+# --- 5. the gate's unmapped-case refusal over the real craft corpus ----------------------------
+
+
+def test_both_experiments_add_no_unmapped_case_to_the_real_craft_corpus():
+    sys.path.insert(0, str(REPO / "tools" / "portage" / "plugins" / "portage"))
+    try:
+        from portage.eval_gate import unmapped_runner_cases
+    finally:
+        sys.path.pop(0)
+    assert sorted(p.parent.name for p in EXP.glob("*/case.yaml")) == [CASE_A, CASE_B, CASE_C]
+    assert sorted(p.parent.name for p in FOUND.glob("*/case.yaml"))
+    assert unmapped_runner_cases(CRAFT / "evals") == []
+
+
+def test_case_names_are_unique_across_the_craft_evals_tree():
+    names = [re.search(r"^name: (.+)$", p.read_text(), re.M).group(1) for p in (CRAFT / "evals").glob("**/case.yaml")]
+    assert len(names) == len(set(names))
+
+
+# --- the bar's fingerprint, and the reach marker ------------------------------------------------
+
+
+def test_the_bar_text_is_only_what_lies_between_its_delimiters(tmp_path):
+    doc = tmp_path / "expected.md"
+    doc.write_text("intro\n\n<!-- bar-begin -->\nfloor 8/10\n<!-- bar-end -->\n\nverdict: pending\n")
+    first = shared.bar_text(doc)
+    doc.write_text("intro changed\n\n<!-- bar-begin -->\nfloor 8/10\n<!-- bar-end -->\n\nverdict: pass\n")
+    assert shared.bar_text(doc) == first
+    doc.write_text("intro\n\n<!-- bar-begin -->\nfloor 7/10\n<!-- bar-end -->\n")
+    assert shared.bar_text(doc) != first
+
+
+def test_the_recorded_fingerprints_match_each_experiments_bar():
+    for exp in (ab.EXPERIMENT, shared.FOUND_WORK):
+        text = (exp.dir / "expected.md").read_text()
+        recorded = re.search(r"recorded before any cell: `([0-9a-f]{40})`", text).group(1)
+        done = subprocess.run(["git", "hash-object", "--stdin"], input=shared.bar_text(exp=exp), capture_output=True, text=True)
+        assert done.stdout.strip() == recorded, exp.dir.name
