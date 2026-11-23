@@ -661,7 +661,8 @@ def backstop_touched(repo: Path, base: str | None = None) -> tuple[str, list[dic
     the repo's mappings hold: a superset, never a miss) or ``mapping-invalid`` (``entries`` is empty
     and the answer is unknown). A case is ``merge_only`` when the merge-base's mapping or HEAD's
     mapping marks it, so a stale base cannot hide a flag, unless HEAD still declares it, its entry is a
-    split procedure core at either revision and its HEAD case does not say ``merge_only``; ``split_procedure`` is as ``plan`` reports it.
+    split procedure core at either revision and its HEAD case does not say ``merge_only``;
+    ``split_procedure`` is as ``plan`` reports it.
     Only commits are read: the mappings and the case files come from the merge-base and HEAD, never the
     working tree, so an uncommitted edit changes nothing. Raises ``NotAWorkTree`` when ``repo`` is not a
     git work tree and ``GitError`` on any other git failure."""

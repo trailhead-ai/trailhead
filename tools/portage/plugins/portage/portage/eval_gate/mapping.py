@@ -26,7 +26,8 @@ presence only. ``runs`` lies in 1..10; ``runner.model`` is a conservative model 
 ``runner.allow_tools`` entry a tool name (letters, digits, ``_``) with at most one
 single-line parenthesised argument that holds no bracket and no NUL (a grant argument cannot contain
 brackets, by design: the runner splits the list on commas and spaces outside brackets and tracks them with a flag,
-not a depth, so a bracket inside an argument could carry a second grant in one entry), and ``runner.max_cost_usd`` a finite number in (0, 25].
+not a depth, so a bracket inside an argument could carry a second grant in one entry), and
+``runner.max_cost_usd`` a finite number in (0, 25].
 ``merge_only`` marks a case the push tier leaves out; it must be a boolean.
 ``runner.push_model`` is the model the push tier runs every case on (same shape as ``runner.model``,
 which the merge tier uses); it is carried in the runner dict only when configured.
