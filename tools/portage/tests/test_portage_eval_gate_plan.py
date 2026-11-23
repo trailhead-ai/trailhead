@@ -2343,7 +2343,7 @@ class TestSplitProcedureMergeOnlyRefusal:
         assert plan["status"] == "cases-selected", plan
         assert _names(plan) == ["one", "two"]
 
-    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, True)])
+    @pytest.mark.parametrize("base_split,head_split", [(False, True), (True, True), (True, False)])
     def test_a_branch_that_drops_merge_only_from_a_split_core_case_selects_it_at_push(
         self, repo, capsys, base_split, head_split
     ):
@@ -2353,6 +2353,7 @@ class TestSplitProcedureMergeOnlyRefusal:
         assert _names(plan) == ["one", "two"]
         assert plan["merge_only_pending"] == 0
         assert not _entry_of(plan, "two")["merge_only"]
+        assert _entry_of(plan, "two")["runner"]["model"] == TIERED["push_model"]
 
     def test_a_merge_only_case_on_an_entry_split_at_neither_revision_plans_as_before(self, repo, capsys):
         _, plan, _ = _split_repo(repo, capsys, base_split=False, head_split=False, base_merge_only=True,
