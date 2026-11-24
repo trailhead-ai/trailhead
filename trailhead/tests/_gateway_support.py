@@ -18,6 +18,7 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -340,6 +341,27 @@ def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) ->
     return path
 
 
+def await_session_key(
+    pid: int,
+    *,
+    resolve: Callable[..., str | None] = session_key,
+    timeout: float = 5.0,
+    interval: float = 0.02,
+) -> str:
+    """The session key of the fake harness *pid*, once the process table shows it.
+
+    A just-spawned process is not always readable as a harness the instant ``Popen``
+    returns, so this waits for the key to resolve instead of reading it once.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        key = resolve(start_pid=pid)
+        if key is not None:
+            return key
+        assert time.monotonic() < deadline, "fake harness did not resolve to a session key"
+        time.sleep(interval)
+
+
 @dataclass
 class RunResult:
     proc: subprocess.CompletedProcess[str]
@@ -365,8 +387,7 @@ def run_gateway_runner(
     env_dump.unlink(missing_ok=True)
 
     def started(pid: int) -> None:
-        key = session_key(start_pid=pid)
-        assert key is not None, "fake harness did not resolve to a session key"
+        key = await_session_key(pid)
         if seed is not None:
             seed(key)
 
