@@ -140,8 +140,7 @@ def await_ready(procs, proc, port, attempts=5):
         if proc.stdout.readline() == b"ready\n":
             return proc
         err = proc.stderr.read().decode()
-        proc.wait()
-        assert err.startswith(f"port {port}:"), err
+        assert proc.wait() == 1 and err.startswith(f"port {port}:") and "in use" in err, err
         port = free_ports(1)[0]
         proc = launch_one_port(procs, port)
     raise AssertionError(f"{attempts} ports in a row were taken before the relay could bind them")
@@ -369,9 +368,29 @@ def test_await_ready_replaces_a_relay_whose_port_another_process_took(procs):
         taken_port = taken.getsockname()[1]
         proc = await_ready(procs, launch_one_port(procs, taken_port), taken_port)
         assert proc.poll() is None
-        assert f"127.0.0.1:{taken_port}:" not in " ".join(proc.args)
+        new_port = int(proc.args[-1].split(":")[1])
+        assert new_port != taken_port
+        assert not can_bind(new_port)
     finally:
         taken.close()
+
+
+def test_await_ready_gives_up_after_its_attempts_when_every_port_is_taken(procs):
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    try:
+        port = taken.getsockname()[1]
+        with pytest.raises(AssertionError, match="taken"):
+            await_ready(procs, launch_one_port(procs, port), port, attempts=1)
+    finally:
+        taken.close()
+
+
+def test_await_ready_does_not_hide_a_relay_that_failed_for_another_reason(procs):
+    bad = launch(procs, [sys.executable, "-m", "camp.env.relay", "-N", "-L", "127.0.0.1:1023:127.0.0.1:2000"])
+    with pytest.raises(AssertionError, match="usage"):
+        await_ready(procs, bad, 1023)
 
 
 def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
