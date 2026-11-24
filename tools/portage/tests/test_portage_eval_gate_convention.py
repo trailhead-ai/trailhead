@@ -197,6 +197,18 @@ class TestSharedFilesStayOneHop:
                  "skills/_shared/b.md": OPENING}
         assert faults_of(tmp_path, files) == []
 
+    SIBLING_LOAD = {"skills/x/SKILL.md": "# S\n\n" + BRANCH.format(p="../_shared/b.md"),
+                    "skills/_shared/b.md": "Applies when the run is unattended.\n\n" + FULL.format(p="r.md"),
+                    "skills/_shared/r.md": "R\n"}
+
+    def test_a_shared_branch_file_loading_a_sibling_unconditionally_is_refused_at_its_line(self, tmp_path):
+        faults = rule_faults(faults_of(tmp_path, self.SIBLING_LOAD), "shared-sibling-named")
+        assert [f.split(": ")[0] for f in faults] == ["skills/_shared/b.md:3"]
+
+    def test_the_same_shared_branch_file_without_that_load_passes(self, tmp_path):
+        files = {**self.SIBLING_LOAD, "skills/_shared/b.md": OPENING}
+        assert faults_of(tmp_path, files) == []
+
     def test_a_core_that_also_names_the_sibling_outside_the_branch_load_is_refused(self, tmp_path):
         files = {"skills/_shared/core.md": "# C\n\n" + BRANCH.format(p="b.md") + "\nThe shape `b.md` fixes.\n",
                  "skills/_shared/b.md": OPENING}

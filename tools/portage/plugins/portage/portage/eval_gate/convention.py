@@ -152,7 +152,7 @@ def _check_file(root: Path, read, file: str, faults: _Faults) -> None:
     if str(Path(file).parent) == "skills/_shared":
         pattern = _sibling_pattern(root, file)
         if pattern is not None:
-            in_load = {n for load in directives.loads for n in range(load.line, load.end_line + 1)}
+            in_load = {n for load in directives.loads if load.kind == "branch" for n in range(load.line, load.end_line + 1)}
             for number, line in enumerate(_visible_lines(text), 1):
                 if number in in_load:
                     continue
