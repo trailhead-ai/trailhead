@@ -1238,9 +1238,9 @@ class TestFaultsDoNotEchoMappingText:
         assert echo(5, 1) == "#1"
 
 
-ENTRY = ("# Entry\n\nRead `rules/core.md`.\n\n"
-         "Read `skills/b-declared.md` when the user asks for A.\n\n"
-         "Read `skills/b-undeclared.md` when the user asks for B.\n")
+ENTRY = ("# Entry\n\nRead `../rules/core.md` now and follow it in full.\n\n"
+         "When the user asks for A, read `b-declared.md` now and follow it in full.\n\n"
+         "When the user asks for B, read `b-undeclared.md` now and follow it in full.\n")
 DECLARED_FILES = {
     "skills/entry.md": ENTRY,
     "skills/b-declared.md": "Applies when the user asks for A.\n\nRead `rules/rule-a.md`.\n",
@@ -1363,6 +1363,19 @@ class TestDeclaredCases:
         assert plan["mapping_invalid"]["revision"] == "head"
         assert fault == ("case 'decl': entry 'skills/entry.md' does not load the declared branch "
                          "'skills/b-declared.md'")
+
+    def test_an_entry_that_only_mentions_its_declared_branch_is_a_head_fault(self, repo, capsys):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", "# Entry\n\nRead `../rules/core.md` now and follow it in full.\n\n"
+                                          "The branch `b-declared.md` exists.\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["revision"] == "head"
+        assert plan["mapping_invalid"]["fault"] == ("case 'decl': entry 'skills/entry.md' does not load the "
+                                                    "declared branch 'skills/b-declared.md'")
 
     def test_the_same_fault_at_the_base_says_so(self, repo, capsys):
         _declared_corpus(repo, files={"skills/entry.md": "# Entry\n\nRead `rules/core.md`.\n"})
@@ -2292,7 +2305,8 @@ class TestPlanPrintsTheFlagsTheMonitorReads:
 
 
 UNSPLIT_ENTRY = "# Entry\n\nDo A when the user asks for A. Do B when the user asks for B.\n"
-CORE_ENTRY = "# Entry\n\nRead `rules/core.md`.\n\nRead `skills/b-a.md` when the user asks for A.\n"
+CORE_ENTRY = ("# Entry\n\nRead `../rules/core.md` now and follow it in full.\n\n"
+              "When the user asks for A, read `b-a.md` now and follow it in full.\n")
 BRANCH_A = "Applies when the user asks for A.\n\nDo A.\n"
 SPLIT_MAPPING_PATH = "p/evals/eval-gate.json"
 
@@ -2516,7 +2530,9 @@ class TestSelectionFollowsLoadsAndUndeclaredMentions:
             "'skills/plain.md' loads 'skills/rules/core.md', which does not exist")
 
     def test_a_base_still_in_the_old_wording_with_ancestor_paths_plans_without_a_base_fault(self, repo, capsys):
-        _declared_corpus(repo)
+        old = ("# Entry\n\nRead `rules/core.md`.\n\n"
+               "Read `skills/b-declared.md` when the user asks for A.\n")
+        _declared_corpus(repo, files={"skills/entry.md": old})
         _commit(repo)
         _branch(repo)
         _write(repo, "p/skills/entry.md", FIXED_ENTRY)

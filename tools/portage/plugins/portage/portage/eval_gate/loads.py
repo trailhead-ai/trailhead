@@ -12,9 +12,15 @@ ancestor, wherever it sits: a link, a code span, a fence, loose prose) and that 
 plain mention. The declared mentions are ``<plugin-root>/declared-mentions.json`` (``read_declared_mentions``),
 a file mapping a mentioning file to the paths it names only as plain mentions; a declared mention is not
 followed. A mention is followed whether or not its sentence parsed as a load, so a load phrased outside the
-fixed wording over-selects and never under-selects, and a base revision still in an older wording or with
-ancestor-resolved paths derives without a fault. A load that resolves to nothing is ignored by ``derive``;
-``missing_loads`` reports it. An undeclared branch is never in the closure. An entry that is itself a branch
+fixed wording over-selects and never under-selects. A mention token must end in an extension, so an
+extensionless file is reachable only through a fixed-wording load. A reached file that exists but is not UTF-8
+(an image, say) is a leaf: it is in the closure, so an edit to it selects the case, and it is not parsed for
+further names; a symlink or a file that cannot be read is still a fault. A load that resolves to nothing is
+ignored by ``derive``; ``missing_loads`` reports it. An undeclared branch is never in the closure.
+
+A declared branch must be a parsed load of the entry, so the head revision refuses a case whose entry only
+mentions it. The merge-base revision is derived with ``base_tolerant=True``, which accepts a mention too: a base
+still in an older wording, or with ancestor-resolved paths, predates the strict declaration and must not fault. An entry that is itself a branch
 file is refused: its core is the entry and the branch goes under ``branches``.
 
 The reader contract, which every caller builds against: ``read(path) -> str | None`` takes a plugin-relative
@@ -58,6 +64,10 @@ _LIST_OR_HEADING = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 
 class LoadError(Exception):
     """A one-line fault in a case's procedure files."""
+
+
+class BinaryFile(LoadError):
+    """A regular file whose bytes are not UTF-8: reached, never parsed."""
 
 
 class NotRegularFile(Exception):
@@ -150,7 +160,7 @@ def _find_mentioned(file: str, raw: str, read) -> str | None:
     directory = posixpath.dirname(file)
     while True:
         candidate = posixpath.normpath(posixpath.join(directory, raw))
-        if not (candidate == ".." or candidate.startswith("../")) and _get(read, candidate) is not None:
+        if not (candidate == ".." or candidate.startswith("../")) and _exists(read, candidate):
             return candidate
         if not directory:
             return None
@@ -184,8 +194,19 @@ def is_branch(text: str) -> bool:
 
 def is_branch_file(path: str, read) -> bool:
     """Whether ``path`` exists and is a branch file."""
-    text = _get(read, path)
+    try:
+        text = _get(read, path)
+    except BinaryFile:
+        return False
     return text is not None and _is_branch(text)
+
+
+def _exists(read, path: str) -> bool:
+    """Whether ``path`` is a regular file, binary included."""
+    try:
+        return _get(read, path) is not None
+    except BinaryFile:
+        return True
 
 
 def _get(read, path: str) -> str | None:
@@ -195,6 +216,8 @@ def _get(read, path: str) -> str | None:
         raise LoadError(f"{_q(path, 1)} is a symlink or not a regular file") from None
     except LoadError:
         raise
+    except UnicodeDecodeError:
+        raise BinaryFile(f"{_q(path, 1)} could not be read") from None
     except Exception:
         raise LoadError(f"{_q(path, 1)} could not be read") from None
 
@@ -244,16 +267,17 @@ def tree_reader(root: Path):
     return read
 
 
-def derive(entry: str, branches, read) -> Derived:
+def derive(entry: str, branches, read, *, base_tolerant: bool = False) -> Derived:
     """The closure of ``entry`` with the declared ``branches``; remembered per reader (see ``cached``), so a
-    declaration shared by many cases is walked once."""
+    declaration shared by many cases is walked once. A declared branch must be a parsed load of the entry;
+    ``base_tolerant`` (the merge-base revision only) accepts one the entry merely mentions."""
     memo = getattr(read, "derivations", None)
     if memo is None:
-        return _derive(entry, branches, read)
-    key = (entry, tuple(branches))
+        return _derive(entry, branches, read, base_tolerant)
+    key = (entry, tuple(branches), base_tolerant)
     if key not in memo:
         try:
-            memo[key] = (True, _derive(entry, branches, read))
+            memo[key] = (True, _derive(entry, branches, read, base_tolerant))
         except LoadError as exc:
             memo[key] = (False, exc)
     ok, value = memo[key]
@@ -262,21 +286,22 @@ def derive(entry: str, branches, read) -> Derived:
     raise value
 
 
-def _derive(entry: str, branches, read) -> Derived:
+def _derive(entry: str, branches, read, base_tolerant: bool) -> Derived:
     entry_text = _get(read, entry)
     if entry_text is None:
         raise LoadError(f"entry {_q(entry, 1)} does not exist")
     if is_branch(entry_text):
         raise LoadError(f"entry {_q(entry, 1)} is a branch file; declare its core as entry and the branch "
                         "under branches")
-    entry_reached = _reached(entry, entry_text, read)[1]
+    entry_loaded, entry_reached = _reached(entry, entry_text, read)
+    accepted = entry_reached if base_tolerant else entry_loaded
     declared = []
     for position, branch in enumerate(branches, 1):
         norm = posixpath.normpath(branch)
         text = _get(read, norm)
         if text is None:
             raise LoadError(f"declared branch {_q(branch, position)} does not exist")
-        if norm not in entry_reached:
+        if norm not in accepted:
             raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
@@ -313,7 +338,11 @@ def _derive(entry: str, branches, read) -> Derived:
                 if is_branch_file(target, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
         for target in reached:
-            body = _get(read, target)
+            try:
+                body = _get(read, target)
+            except BinaryFile:
+                add(target)
+                continue
             if body is None:
                 continue
             if is_branch(body):
@@ -330,11 +359,14 @@ def missing_loads(files, read) -> list[tuple[str, str]]:
     """``(loading file, missing file)`` for every parsed load that names a file that does not exist."""
     missing = []
     for path in files:
-        text = _get(read, path)
+        try:
+            text = _get(read, path)
+        except BinaryFile:
+            continue
         if text is None:
             continue
         for target in _load_targets(path, text, read):
-            if _get(read, target) is None:
+            if not _exists(read, target):
                 missing.append((path, target))
     return missing
 

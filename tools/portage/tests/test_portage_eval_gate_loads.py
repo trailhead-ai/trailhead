@@ -31,7 +31,8 @@ BRANCH_HEAD = "Applies when the run is unattended.\n\n"
 
 ENTRY_TEXT = (
     "Read `../_shared/r.md` now and follow it in full.\n\n"
-    "Read `b1.md` when the run is unattended. Read `b2.md` when the run is attended.\n"
+    "When the run is unattended, read `b1.md` now and follow it in full.\n\n"
+    "When the run is attended, read `b2.md` now and follow it in full.\n"
 )
 
 
@@ -181,6 +182,24 @@ class TestFaults:
         with pytest.raises(LoadError) as e:
             derive(ENTRY, [B1], reader(files))
         assert str(e.value) == f"entry '{ENTRY}' does not load the declared branch '{B1}'"
+
+    def test_a_declared_branch_the_entry_only_mentions_is_refused_on_head(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nThe branch `b1.md` exists.\n"})
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [B1], reader(files))
+        assert str(e.value) == f"entry '{ENTRY}' does not load the declared branch '{B1}'"
+
+    def test_a_declared_branch_the_entry_only_mentions_derives_on_the_base_revision(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nThe branch `b1.md` exists.\n"})
+        got = derive(ENTRY, [B1], reader(files), base_tolerant=True)
+        assert B1 in got.files
+
+    def test_the_two_modes_do_not_share_a_remembered_derivation(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nThe branch `b1.md` exists.\n"})
+        read = loads.cached(reader(files))
+        assert B1 in derive(ENTRY, [B1], read, base_tolerant=True).files
+        with pytest.raises(LoadError):
+            derive(ENTRY, [B1], read)
 
     def test_a_declared_file_that_is_not_a_branch_file_is_refused(self):
         with pytest.raises(LoadError) as e:
@@ -352,7 +371,7 @@ class TestClosureCap:
 
     def test_the_cap_counts_the_entry_and_the_declared_branches(self):
         files = self._fan(MAX_PROCEDURE_FILES - 2)
-        files[ENTRY] = files[ENTRY].rstrip("\n") + " Read `b1.md` now.\n"
+        files[ENTRY] = files[ENTRY].rstrip("\n") + "\nRead `b1.md` now and follow it in full.\n"
         files[B1] = BRANCH_HEAD
         assert len(derive(ENTRY, [B1], reader(files)).files) == MAX_PROCEDURE_FILES
         files["skills/x/extra.md"] = "e\n"
@@ -806,7 +825,7 @@ class TestClosureFollowsLoadsAndUndeclaredMentions:
         text = ("Read `r.md` now.\n\nUse the rest.\n\n"
                 "Read `b1.md` when the run is unattended.\n")
         files = {ENTRY: text, B1: BRANCH_HEAD + "Branch.\n", "skills/x/r.md": "r\n"}
-        got = derive(ENTRY, [B1], reader(files))
+        got = derive(ENTRY, [B1], reader(files), base_tolerant=True)
         assert got.files == (ENTRY, B1, "skills/x/r.md") and got.split is True
 
     def test_an_old_wording_load_resolved_only_through_an_ancestor_is_still_followed(self):
@@ -840,3 +859,50 @@ class TestStrictLoadResolution:
         with pytest.raises(LoadError) as e:
             missing_loads([self.G], reader({self.G: text}))
         assert str(e.value) == f"'{self.G}' load #1 has characters outside [A-Za-z0-9._/-]"
+
+
+class TestBinaryMentions:
+    PNG = "skills/x/pic.png"
+
+    def _binary_reader(self, files: dict[str, str]):
+        def read(path: str):
+            if path == self.PNG:
+                raise UnicodeDecodeError("utf-8", b"\x89PNG", 0, 1, "invalid start byte")
+            return files.get(path)
+        return read
+
+    def test_a_mentioned_binary_file_is_a_leaf_in_the_closure(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nSee pic.png for the layout.\n"})
+        got = derive(ENTRY, [], self._binary_reader(files))
+        assert self.PNG in got.files
+
+    def test_a_binary_file_reached_through_a_fixed_wording_load_is_a_leaf(self):
+        files = corpus(**{ENTRY: "Read `pic.png` now and follow it in full.\n"})
+        got = derive(ENTRY, [], self._binary_reader(files))
+        assert self.PNG in got.files
+        assert loads.missing_loads(got.files, self._binary_reader(files)) == []
+
+    def test_a_real_binary_file_through_the_tree_reader_is_a_leaf(self, tmp_path):
+        write_tree(tmp_path, corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nSee pic.png.\n"}))
+        (tmp_path / self.PNG).write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+        got = derive(ENTRY, [], loads.tree_reader(tmp_path))
+        assert self.PNG in got.files
+
+    def test_a_symlinked_mention_still_faults(self, tmp_path):
+        write_tree(tmp_path, corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nSee pic.png.\n"}))
+        (tmp_path / "outside.png").write_bytes(b"\xff\xfe")
+        (tmp_path / self.PNG).symlink_to(tmp_path / "outside.png")
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [], loads.tree_reader(tmp_path))
+        assert str(e.value) == f"'{self.PNG}' is a symlink or not a regular file"
+
+    def test_an_unreadable_mention_still_faults(self):
+        files = corpus(**{ENTRY: "Read `../_shared/r.md` now and follow it in full.\n\nSee pic.png.\n"})
+
+        def read(path: str):
+            if path == self.PNG:
+                raise PermissionError(path)
+            return files.get(path)
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [], read)
+        assert str(e.value) == f"'{self.PNG}' could not be read"

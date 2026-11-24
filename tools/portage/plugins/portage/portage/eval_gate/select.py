@@ -57,8 +57,9 @@ stays in the plan with ``case_removed`` true; ``run`` records it as not-run
 ``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the
 plan is ``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
 ``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an
-empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
-fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
+empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (at HEAD
+the branch must be a parsed load; the base revision is lenient and also accepts one the entry merely mentions,
+so an older wording does not fault; a base fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
 at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
 procedure that loads a branch file) or a branch file; two corpora hold a case of the same name at one revision;
 a case moves from one corpus at the base to another at HEAD; or HEAD's case is ``merge_only`` with no
@@ -382,7 +383,7 @@ def _derive(path: str, mapping: Mapping | None, name: str, read, revision: str):
     if case is None or case.entry is None:
         return None
     try:
-        return derive(case.entry, case.branches, read)
+        return derive(case.entry, case.branches, read, base_tolerant=revision == "base")
     except LoadError as e:
         raise _fault(path, _q(name, list(mapping.cases).index(name) + 1), e, revision) from None
 
