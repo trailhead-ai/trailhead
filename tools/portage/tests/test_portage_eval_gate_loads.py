@@ -18,6 +18,7 @@ from portage.eval_gate.loads import (
     LoadError, NotRegularFile, cached, derive, is_branch, loads_in, missing_loads, tree_reader,
 )
 from portage.eval_gate.mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES
+from portage.eval_gate.loads import parse_declared_mentions, parse_directives, read_declared_mentions
 
 REPO_TOOLS = Path(__file__).resolve().parents[2]
 
@@ -614,3 +615,157 @@ class TestTreeReaderContainment:
         (real / "a.md").write_text("fine\n")
         (tmp_path / "via").symlink_to(real, target_is_directory=True)
         assert tree_reader(tmp_path / "via")("a.md") == "fine\n"
+
+
+def write_tree(root: Path, files: dict[str, str]) -> None:
+    for rel, body in files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body, encoding="utf-8")
+
+
+def directives(tmp_path: Path, text: str, extra: dict[str, str] | None = None, path: str = "skills/x/SKILL.md"):
+    """Parse ``text`` as the file ``path`` of a real plugin tree that also holds ``extra`` files."""
+    root = tmp_path / "plugin"
+    write_tree(root, {path: text, "skills/x/a.md": "A\n", "skills/x/b.md": "B\n",
+                      "skills/_shared/r.md": "R\n", **(extra or {})})
+    return parse_directives(path, text, tree_reader(root))
+
+
+class TestParseDirectivesFixedForms:
+    @pytest.mark.parametrize(("text", "kind", "raw", "condition"), [
+        ("Read `a.md` now and follow it in full.\n", "full", "a.md", ""),
+        ("Read `a.md` now. Use its second section only.\n", "section", "a.md", ""),
+        ("When the run is unattended, read `a.md` now and follow it in full.\n", "branch", "a.md",
+         "the run is unattended"),
+        ("- Read `a.md` now and follow it in full.\n", "full", "a.md", ""),
+        ("1. When it is `x`, read `a.md` now and follow it in full.\n", "branch", "a.md", "it is `x`"),
+    ])
+    def test_each_fixed_form_is_one_load_of_its_kind(self, tmp_path, text, kind, raw, condition):
+        result = directives(tmp_path, "# T\n\n" + text)
+        assert result.misworded == ()
+        assert [(load.kind, load.raw, load.condition, load.line) for load in result.loads] == [
+            (kind, raw, condition, 3)]
+
+    def test_a_load_wrapped_over_two_lines_reports_the_line_it_starts_on(self, tmp_path):
+        result = directives(tmp_path, "# T\n\nRead `a.md`\nnow and follow it in full.\n")
+        assert [(load.raw, load.line) for load in result.loads] == [("a.md", 3)]
+
+    def test_two_loads_in_one_paragraph_are_both_found_in_order(self, tmp_path):
+        result = directives(tmp_path, "Read `a.md` now and follow it in full. "
+                                      "When x, read `b.md` now and follow it in full.\n")
+        assert [load.raw for load in result.loads] == ["a.md", "b.md"]
+
+
+class TestParseDirectivesStrictResolution:
+    def test_a_path_resolves_against_the_loading_files_own_directory(self, tmp_path):
+        result = directives(tmp_path, "Read `a.md` now and follow it in full.\n")
+        assert result.loads[0].target == "skills/x/a.md"
+
+    def test_a_shared_path_written_from_the_loading_directory_reaches_the_shared_file(self, tmp_path):
+        result = directives(tmp_path, "Read `../_shared/r.md` now and follow it in full.\n")
+        assert result.loads[0].target == "skills/_shared/r.md"
+
+    def test_a_path_that_exists_only_through_an_ancestor_does_not_resolve_there(self, tmp_path):
+        result = directives(tmp_path, "Read `_shared/r.md` now and follow it in full.\n")
+        assert result.loads[0].target == "skills/x/_shared/r.md"
+
+    @pytest.mark.parametrize("raw", ["/etc/passwd", "../../../out.md", "../../../../a.md"])
+    def test_an_absolute_or_escaping_path_has_no_target(self, tmp_path, raw):
+        result = directives(tmp_path, f"Read `{raw}` now and follow it in full.\n")
+        assert [load.target for load in result.loads] == [None]
+
+
+class TestParseDirectivesMisworded:
+    @pytest.mark.parametrize("text", [
+        "Read `a.md` from the top and follow it in full.\n",
+        "Read `a.md` in full, together with `b.md`.\n",
+        "Read both `a.md` and `b.md` now and follow them in full.\n",
+        "Read `a.md` now: its Steps section.\n",
+        "read `a.md` now and follow it in full.\n",
+        "See [the steps](a.md) for details.\n",
+        "Apply `a.md` before you start.\n",
+        "Per `a.md`, check the result.\n",
+        "When x, read `a.md` now.\n",
+        "Read `a.md` now and follow it in full, and read `b.md` now and follow it in full.\n",
+    ])
+    def test_a_directive_naming_an_existing_file_outside_the_fixed_wording_is_reported(self, tmp_path, text):
+        result = directives(tmp_path, "# T\n\n" + text)
+        assert result.loads == ()
+        assert [m.line for m in result.misworded] == [3]
+
+    def test_a_load_naming_two_files_is_reported_with_both_paths(self, tmp_path):
+        result = directives(tmp_path, "Read `a.md` and `b.md` now and follow it in full.\n")
+        assert result.misworded[0].paths == ("a.md", "b.md")
+
+    @pytest.mark.parametrize("text", [
+        "The attribution lists `a.md` and `b.md`.\n",
+        "See `missing.md` for details.\n",
+        "Read `a.md` now and follow it in full.\n\n```\nsee `b.md`\n```\n",
+        "<!-- see `b.md` -->\n",
+        "Use the `git status` command.\n",
+    ])
+    def test_text_that_names_no_existing_file_after_a_directive_is_not_reported(self, tmp_path, text):
+        assert directives(tmp_path, text).misworded == ()
+
+    def test_a_directive_verb_only_counts_before_the_path_it_names(self, tmp_path):
+        assert directives(tmp_path, "`a.md` is the file to use.\n").misworded == ()
+
+    def test_a_section_read_with_nothing_after_it_is_reported(self, tmp_path):
+        result = directives(tmp_path, "Read `a.md` now.\n")
+        assert result.loads == ()
+        assert [m.line for m in result.misworded] == [1]
+
+    def test_a_section_read_followed_by_a_sentence_in_the_next_paragraph_is_reported(self, tmp_path):
+        result = directives(tmp_path, "Read `a.md` now.\n\nUse the Steps section.\n")
+        assert [m.line for m in result.misworded] == [1]
+
+    def test_an_existing_file_is_found_from_the_loading_directory_or_an_ancestor(self, tmp_path):
+        result = directives(tmp_path, "See `skills/_shared/r.md`.\n")
+        assert [m.paths for m in result.misworded] == [("skills/_shared/r.md",)]
+
+
+def declared(tmp_path: Path, body: str | None) -> dict[str, tuple[str, ...]]:
+    root = tmp_path / "plugin"
+    root.mkdir()
+    if body is not None:
+        (root / "declared-mentions.json").write_text(body, encoding="utf-8")
+    return read_declared_mentions(root)
+
+
+class TestDeclaredMentions:
+    def test_a_missing_file_is_an_empty_list(self, tmp_path):
+        assert declared(tmp_path, None) == {}
+
+    def test_each_mentioning_file_maps_to_the_paths_it_names(self, tmp_path):
+        body = json.dumps({"skills/x/SKILL.md": ["skills/_shared/r.md", "skills/y/a.md"], "agents/e.md": []})
+        assert declared(tmp_path, body) == {"skills/x/SKILL.md": ("skills/_shared/r.md", "skills/y/a.md"),
+                                            "agents/e.md": ()}
+
+    def test_the_same_text_parses_the_same_without_a_file(self):
+        assert parse_declared_mentions('{"a.md": ["b.md"]}') == {"a.md": ("b.md",)}
+
+    @pytest.mark.parametrize(("body", "fragment"), [
+        ("{not json", "is not valid JSON"),
+        ("[]", "must be a JSON object"),
+        ('{"a.md": "b.md"}', "must map to a list"),
+        ('{"a.md": [1]}', "path #1"),
+        ('{"a.md": ["../b.md"]}', "path '../b.md'"),
+        ('{"a.md": ["/b.md"]}', "path '/b.md'"),
+        ('{"a.md": ["b c.md"]}', "path #1"),
+        ('{"a.md": ["b\\\\c.md"]}', "path #1"),
+        ('{"../a.md": []}', "file '../a.md'"),
+        ('{"a b.md": []}', "file #1"),
+    ])
+    def test_a_malformed_list_is_refused_in_one_line(self, tmp_path, body, fragment):
+        with pytest.raises(LoadError) as caught:
+            declared(tmp_path, body)
+        message = str(caught.value)
+        assert fragment in message
+        assert "\n" not in message
+        assert "declared-mentions.json" in message
+
+    def test_an_unsafe_value_is_echoed_by_position_only(self, tmp_path):
+        with pytest.raises(LoadError) as caught:
+            declared(tmp_path, '{"a.md": ["b c.md"]}')
+        assert "b c.md" not in str(caught.value)

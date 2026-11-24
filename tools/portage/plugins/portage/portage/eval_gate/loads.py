@@ -29,6 +29,11 @@ across every case. ``None`` and raised exceptions are remembered too. The wrappe
 parse of each file text (its loads, its backticked ``.md`` mentions and whether it is a branch), so a text is
 parsed once per revision; keyed by text, two revisions never share a parse.
 
+``parse_directives(path, text, read) -> Directives`` is the one definition of a load the convention check
+(``convention.py``) enforces; the gate's own ``derive`` still reads loads with the parser above until it switches.
+``read_declared_mentions(root)`` reads ``<root>/declared-mentions.json``, the per-plugin list of paths a file
+names only as plain mentions.
+
 Every fault is a ``LoadError`` with a one-line message that names values only through ``mapping.echo``.
 A closure holds at most ``MAX_PROCEDURE_FILES`` distinct files, the entry and the branches included. A reader may
 raise a ``LoadError`` of its own (a cap, a failed read naming its revision): ``read`` lets it through unchanged.
@@ -36,6 +41,7 @@ raise a ``LoadError`` of its own (a cap, a failed read naming its revision): ``r
 
 from __future__ import annotations
 
+import json
 import posixpath
 import re
 import stat
@@ -84,8 +90,8 @@ def _paragraphs(text: str) -> list[str]:
     return [" ".join(p) for p in paragraphs if p]
 
 
-def _sentences(paragraph: str) -> list[str]:
-    out: list[str] = []
+def _sentence_spans(paragraph: str) -> list[tuple[int, int]]:
+    out: list[tuple[int, int]] = []
     start = 0
     inside = False
     for i, ch in enumerate(paragraph):
@@ -94,10 +100,14 @@ def _sentences(paragraph: str) -> list[str]:
         elif ch in ".:;" and not inside and (i + 1 == len(paragraph) or paragraph[i + 1].isspace()):
             if ch == "." and _ABBREVIATION.search(paragraph[max(start, i - 4):i]):
                 continue
-            out.append(paragraph[start:i + 1])
+            out.append((start, i + 1))
             start = i + 1
-    out.append(paragraph[start:])
+    out.append((start, len(paragraph)))
     return out
+
+
+def _sentences(paragraph: str) -> list[str]:
+    return [paragraph[start:end] for start, end in _sentence_spans(paragraph)]
 
 
 def _spans(sentence: str) -> tuple[list[str], list[str]]:
@@ -344,3 +354,241 @@ def missing_loads(files, read) -> list[tuple[str, str]]:
             if _get(read, target) is None:
                 missing.append((path, target))
     return missing
+
+
+DECLARED_MENTIONS = "declared-mentions.json"
+FULL_LOAD = "Read `<path>` now and follow it in full."
+SECTION_LOAD = "Read `<path>` now." + " Then a sentence naming the section to use."
+BRANCH_LOAD = "When <condition>, read `<path>` now and follow it in full."
+
+_FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
+_LINE_END = re.compile(r"\r\n|\r|\n")
+_LOAD_FULL = re.compile(r"Read `([^`]+)` now and follow it in full\.")
+_LOAD_SECTION = re.compile(r"Read `([^`]+)` now\.")
+_LOAD_BRANCH = re.compile(r"When (.+), read `([^`]+)` now and follow it in full\.")
+_LIST_MARKER = re.compile(r"^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)+")
+_DIRECTIVE_VERB = re.compile(r"\b(?:read|load|follow|consult|open|see|apply|use|per)\b", re.IGNORECASE)
+_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
+_PATHISH = re.compile(r"^[A-Za-z0-9._/-]+\Z")
+
+
+@dataclass(frozen=True)
+class Load:
+    """A load in the fixed wording. ``kind`` is ``full``, ``section`` or ``branch``; ``raw`` is the path as
+    written; ``target`` is the plugin-relative file it names, resolved strictly against the loading file's own
+    directory (``None`` when ``raw`` is absolute or leaves the plugin root); ``condition`` is the text between
+    ``When`` and the comma of a branch load, else empty. ``line`` and ``end_line`` are the 1-based lines the
+    sentence starts and ends on."""
+    line: int
+    end_line: int
+    kind: str
+    raw: str
+    target: str | None
+    condition: str
+
+
+@dataclass(frozen=True)
+class Misworded:
+    """A sentence whose directive verb names an existing plugin file outside the fixed wording, or a load that
+    names several files, or a section read with no following sentence. ``paths`` are the paths as written."""
+    line: int
+    paths: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True)
+class Directives:
+    loads: tuple[Load, ...]
+    misworded: tuple[Misworded, ...]
+
+
+def _visible_lines(text: str) -> list[str]:
+    """``text`` split on CommonMark line endings, a line inside a fenced code block or an HTML comment blanked
+    so the line numbers survive. A fence closes on a same-character marker at least as long as the one that
+    opened it; an unterminated fence or comment runs to the end of the text."""
+    out: list[str] = []
+    fence: tuple[str, int] | None = None
+    in_comment = False
+    for line in _LINE_END.split(text):
+        stripped = line.strip()
+        if in_comment:
+            in_comment = "-->" not in line
+            out.append("")
+        elif fence is not None:
+            out.append("")
+            if stripped and set(stripped) == {fence[0]} and len(stripped) >= fence[1]:
+                fence = None
+        elif stripped.startswith("<!--"):
+            in_comment = "-->" not in stripped
+            out.append("")
+        elif opened := _FENCE_OPEN.match(stripped):
+            fence = (opened.group(1)[0], len(opened.group(1)))
+            out.append("")
+        else:
+            out.append(line)
+    return out
+
+
+def _located_paragraphs(lines: list[str]) -> list[tuple[str, list[tuple[int, int]]]]:
+    """Each paragraph as its joined text and ``(offset, line number)`` for each of its lines."""
+    blocks: list[list[tuple[int, str]]] = [[]]
+    for number, line in enumerate(lines, 1):
+        if not line.strip():
+            blocks.append([])
+            continue
+        if _LIST_OR_HEADING.match(line):
+            blocks.append([])
+        blocks[-1].append((number, line))
+    out = []
+    for block in blocks:
+        if not block:
+            continue
+        starts, offset = [], 0
+        for number, line in block:
+            starts.append((offset, number))
+            offset += len(line) + 1
+        out.append((" ".join(line for _, line in block), starts))
+    return out
+
+
+def _line_at(starts: list[tuple[int, int]], offset: int) -> int:
+    line = starts[0][1]
+    for start, number in starts:
+        if start > offset:
+            break
+        line = number
+    return line
+
+
+def _present(read, path: str) -> bool:
+    try:
+        return read(path) is not None
+    except NotRegularFile:
+        return False
+    except LoadError:
+        raise
+    except Exception:
+        return False
+
+
+def resolve_existing(file: str, raw: str, read) -> str | None:
+    """The plugin-relative regular file ``raw`` names from ``file``, looking in the loading directory and then each
+    ancestor up to the plugin root; ``None`` when none holds one (a directory or a symlink is not one). This is how a mention is told from a
+    path to nothing, not how a load resolves (a load resolves strictly: see ``Load.target``)."""
+    if raw.startswith("/") or posixpath.basename(raw) in ("", ".", ".."):
+        return None
+    directory = posixpath.dirname(file)
+    while True:
+        candidate = posixpath.normpath(posixpath.join(directory, raw))
+        if not (candidate == ".." or candidate.startswith("../")) and _present(read, candidate):
+            return candidate
+        if not directory:
+            return None
+        directory = posixpath.dirname(directory)
+
+
+def _strict_target(file: str, raw: str) -> str | None:
+    if raw.startswith("/"):
+        return None
+    candidate = posixpath.normpath(posixpath.join(posixpath.dirname(file), raw))
+    return None if candidate == ".." or candidate.startswith("../") else candidate
+
+
+def _named_files(sentence: str, file: str, read) -> list[tuple[int, str]]:
+    """``(offset, path as written)`` for each backticked span or link target in ``sentence`` that names an
+    existing plugin file, in order of appearance."""
+    found: list[tuple[int, str]] = []
+    offset = 0
+    for index, part in enumerate(sentence.split("`")):
+        if index % 2 == 1 and _PATHISH.match(part):
+            found.append((offset, part))
+        elif index % 2 == 0:
+            found.extend((offset + m.start(1), m.group(1).split("#")[0]) for m in _LINK_TARGET.finditer(part))
+        offset += len(part) + 1
+    return [(at, raw) for at, raw in found if _PATHISH.match(raw) and resolve_existing(file, raw, read)]
+
+
+def parse_directives(path: str, text: str, read) -> Directives:
+    """Every load in ``text``, the file ``path``, and every sentence that tries to be one and is not.
+
+    A load is one sentence in exactly one of the three fixed forms, naming one file: ``FULL_LOAD``,
+    ``SECTION_LOAD`` (the section read, which must be followed by a sentence in its own paragraph) or
+    ``BRANCH_LOAD``. A sentence is a mis-worded directive when a directive verb (read, load, follow, consult,
+    open, see, apply, use, per) comes before a backticked or linked path to an existing plugin file and the
+    sentence is not a load, or when a load sentence names more than one existing file. Fenced code blocks and
+    HTML comments are invisible. ``read`` is the reader contract of this module and is used only to tell
+    whether a named path is an existing file."""
+    loads: list[Load] = []
+    misworded: list[Misworded] = []
+    for paragraph, starts in _located_paragraphs(_visible_lines(text)):
+        spans = _sentence_spans(paragraph)
+        for index, (begin, end) in enumerate(spans):
+            raw_sentence = paragraph[begin:end]
+            if not raw_sentence.strip():
+                continue
+            lead = len(raw_sentence) - len(raw_sentence.lstrip())
+            marker = _LIST_MARKER.match(raw_sentence)
+            body = raw_sentence[marker.end():].strip() if marker else raw_sentence.strip()
+            line = _line_at(starts, begin + lead)
+            end_line = _line_at(starts, max(begin + lead, end - 1))
+            named = _named_files(body, path, read)
+            distinct = tuple(dict.fromkeys(raw for _, raw in named))
+            full = _LOAD_FULL.fullmatch(body)
+            branch = _LOAD_BRANCH.fullmatch(body)
+            section = _LOAD_SECTION.fullmatch(body)
+            match = full or branch or section
+            if match is None:
+                if named and _DIRECTIVE_VERB.search(body[:body.index(named[0][1])]):
+                    reason = "names several files" if len(distinct) > 1 else "is not in the fixed wording"
+                    misworded.append(Misworded(line, distinct, reason))
+                continue
+            raw = match.group(match.lastindex)
+            if len(distinct) > 1:
+                misworded.append(Misworded(line, distinct, "names several files"))
+            elif section and not any(spans_text.strip() for spans_text in
+                                     (paragraph[b:e] for b, e in spans[index + 1:])):
+                misworded.append(Misworded(line, (raw,), "is a section read with no sentence naming the section"))
+            else:
+                kind = "full" if full else "branch" if branch else "section"
+                loads.append(Load(line, end_line, kind, raw, _strict_target(path, raw),
+                                  branch.group(1) if branch else ""))
+    return Directives(tuple(loads), tuple(misworded))
+
+
+def _declared_fault(detail: str) -> LoadError:
+    return LoadError(f"{DECLARED_MENTIONS} {detail}")
+
+
+def _is_plugin_path(value: object) -> bool:
+    return (isinstance(value, str) and bool(_SAFE_CHARS.match(value)) and posixpath.normpath(value) == value
+            and not value.startswith("/") and value != ".." and not value.startswith("../"))
+
+
+def parse_declared_mentions(text: str) -> dict[str, tuple[str, ...]]:
+    """The declared-mentions list: a JSON object mapping a mentioning file (plugin-relative posix path) to the
+    plugin-relative paths it names only as plain mentions. Malformed JSON, a non-object, a value that is not a
+    list, a path that is not a string or is not a safe plugin-relative path raise a one-line ``LoadError``."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        raise _declared_fault("is not valid JSON") from None
+    if not isinstance(data, dict):
+        raise _declared_fault("must be a JSON object mapping a file to the paths it only mentions")
+    out: dict[str, tuple[str, ...]] = {}
+    for position, (file, paths) in enumerate(data.items(), 1):
+        if not _is_plugin_path(file):
+            raise _declared_fault(f"file {_q(file, position)} is not a safe plugin-relative path")
+        if not isinstance(paths, list):
+            raise _declared_fault(f"entry for file {_q(file, position)} must map to a list of paths")
+        for number, value in enumerate(paths, 1):
+            if not _is_plugin_path(value):
+                raise _declared_fault(f"entry for file {_q(file, position)} has path {_q(value, number)} "
+                                      "that is not a safe plugin-relative path")
+        out[file] = tuple(paths)
+    return out
+
+
+def read_declared_mentions(root: Path) -> dict[str, tuple[str, ...]]:
+    """``parse_declared_mentions`` of ``<root>/declared-mentions.json``; a missing file is an empty list."""
+    text = _get(tree_reader(root), DECLARED_MENTIONS)
+    return {} if text is None else parse_declared_mentions(text)
