@@ -21,7 +21,7 @@ Execute a plan task-by-task — or a standalone task as its own single slice, wi
 present to answer escalations. With the whole token `--unattended` (and `--then-pr`) on the
 invocation, no operator answers anything: `../_shared/execute.md`'s Unattended request section
 states what each stop does, and `../_shared/unattended.md` defines the contract it points at. **Read
-`../_shared/unattended.md` now when `--unattended` is present, and follow it in full.**
+`../_shared/unattended.md` now and follow it in full.**
 
 **The procedure lives in `../_shared/execute.md`** (a sibling of this skill's directory), alongside
 six documents: four its rules draw on without naming — `../_shared/status-ownership.md` (task-status
@@ -30,11 +30,16 @@ ownership), `../_shared/refine.md` (the standalone refine procedure), `../_share
 untrusted-value validation rules) — `../_shared/escalation.md` (the escalation rule: how each
 found-work call is decided and when the blocking prompt is raised), and `../_shared/council.md`,
 whose "How a finding reads" section governs how a code review finding is shown to the user at the
-end of a build (it does not ask a build to convene a council). Read all seven and follow
-`execute.md` end to end — the subagent roles, the task-shape branch, the per-task loop, the
-end-of-run phase pipeline, and the status-handling rules are all defined there, and `execute.md`'s
-task-shape branch decides when each of the other four applies. This skill does **not** restate any
-of it: a second copy here is how the wrapper and the procedure would drift apart.
+end of a build (it does not ask a build to convene a council). Read `../_shared/execute.md` now and
+follow it in full. Read `../_shared/status-ownership.md` now and follow it in full. Read
+`../_shared/refine.md` now and follow it in full. Read `../receiving-code-review/SKILL.md` now and
+follow it in full. Read `../_shared/slice.md` now and follow it in full. Read
+`../_shared/security.md` now and follow it in full. Read `../_shared/escalation.md` now and follow
+it in full. Read `../_shared/council.md` now and follow it in full. `execute.md` is followed end to
+end — the subagent roles, the task-shape branch, the per-task loop, the end-of-run phase pipeline,
+and the status-handling rules are all defined there, and `execute.md`'s task-shape branch decides
+when each of the other four applies. This skill does **not** restate any of it: a second copy here
+is how the wrapper and the procedure would drift apart.
 
 ## When to Use
 
@@ -51,11 +56,12 @@ of it: a second copy here is how the wrapper and the procedure would drift apart
 
 In those cases, build it yourself following TDD and verification. Subagent overhead isn't free.
 
-On a standalone task this gate is an explicit judgment, never an automatic one — see
-`../_shared/execute.md`'s Skip Gate section for the full rule.
+On a standalone task this gate is an explicit judgment, never an automatic one — as
+`../_shared/execute.md`'s Skip Gate section sets out in full.
 
 ## Everything else
 
-Read `../_shared/execute.md` from the top: subagent roles and model selection, the task-shape branch
-(plan vs. standalone), the per-task Loop, the After All Tasks phase pipeline, Handling
-Assumption-Prover Status, Handling Executor Status, and the Red Flags. All of it applies verbatim.
+Read `../_shared/execute.md` now and follow it in full. It covers subagent roles and model
+selection, the task-shape branch (plan vs. standalone), the per-task Loop, the After All Tasks phase
+pipeline, Handling Assumption-Prover Status, Handling Executor Status, and the Red Flags. All of it
+applies verbatim.

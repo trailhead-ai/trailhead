@@ -85,8 +85,8 @@ unconditionally on every entry, resume included, would hit that refusal and die 
 checkpoint was ever read. Only run the slice selection below when there is no open slice parent to
 resume against.
 
-Query for a slice parent already open on this spec, using the same detection `../slice/SKILL.md`'s
-own guard applies at its step 5, run exactly as that guard runs it:
+Query for a slice parent already in flight on this spec, using the same detection
+`../slice/SKILL.md`'s own guard applies at its step 5, run exactly as that guard runs it:
 `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`
 — no `--vault` flag. `lore search` carries no such flag at all — it is cross-vault by design — and
 passing one errors the call outright; an unqualified `lore search` reads across every configured
@@ -131,7 +131,7 @@ open child and the plan record's `## Council Review` section, and halt, rather t
 build phase as though the question had been answered. This check is itself fail-closed, matching
 `../slice/SKILL.md`'s own guard: if the `lore search` call errors, or its output cannot be parsed
 into a definite list, treat that exactly like finding an open escalation and stop. Only once this
-comes back empty does the driver resolve the branch's state before building anything. Read the
+comes back empty does the driver resolve the branch's state before building anything. Check the
 parent's `craft/branch` label (`_shared/status-ownership.md`, Label conventions) and, if the named
 branch already carries commits, the driver never re-enters the build phase onto it on the assumption
 it is starting clean: a second build's commits stacked onto a partial one is exactly the corruption
@@ -151,9 +151,10 @@ that fails. Then run
 
 - **Exit 0, printing `stuck: ACn, ...`.** The build is finished and only a manual check nobody has
   carried out keeps the slice open, so there is nothing to resume or re-plan. Read
-  `../_shared/execute.md` and the documents step 9 reads alongside it, then run its Phase 6 inline
-  against this parent as the caller that says **run Phase 6 as a no-ask close** — asking no one
-  about the check. The branch is recovered before the push by execute's own paragraph ([the
+  `../_shared/execute.md` now and follow it in full. Phase 6 also needs the documents step 9 reads
+  alongside it, so read those as step 9 lists them. Run its Phase 6 inline against this parent as
+  the caller that says **run Phase 6 as a no-ask close** — asking no one about the check. The branch
+  is recovered before the push by execute's own paragraph ([the
   recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill never restates it. A
   close that finishes ends this run at the slice boundary: report the closed slice, say its branch
   is pushed and that a pull request is owed, naming the branch and `/portage:pull_request`, and
@@ -169,10 +170,11 @@ that fails. Then run
 A skill-to-skill chain is unreliable, by `/craft:plan`'s own council-dispatch rule
 (`skills/plan/SKILL.md`, step 8.5). The driver therefore reads `../slice/SKILL.md`'s full procedure
 and follows it inline, the way `execute/SKILL.md` already defers to `../_shared/execute.md`, rather
-than invoking `/craft:slice` as a slash command. Read `../slice/SKILL.md` now, in full, and run its
-numbered steps 1 through 10 exactly as written — including its own `--vault` binding, its own status
-guard, and its own value-claim statement to the operator — against `spec/<spec-name>`. This skill
-never restates that procedure: a second copy here is exactly how the two would drift apart.
+than invoking `/craft:slice` as a slash command. Read `../slice/SKILL.md` now and follow it in full.
+Run its numbered steps 1 through 10 exactly as written — including its own `--vault` binding, its
+own status guard, and its own value-claim statement to the operator — against `spec/<spec-name>`.
+This skill never restates that procedure: a second copy here is exactly how the two would drift
+apart.
 
 #### Checkpoint the run
 
@@ -223,7 +225,7 @@ the **camp group's member count**, read from the group manifest — not repo att
 records, which does not exist yet. **Derive the camp workspace root as the parent directory of the
 repo checkout the driver session is running in** — the unified workspace layout puts every member
 worktree, `manifest.json`, and the workspace's own `CLAUDE.md` there as siblings, one level up from
-the repo the driver reads and writes in. Read `manifest.json` at that derived root (the same file
+the repo the driver reads and writes in. Parse `manifest.json` at that derived root (the same file
 `camp status` reports from, and the same file `_shared/execute.md` already reads to enumerate member
 repos) and count its `members` array.
 
@@ -281,13 +283,13 @@ exists, so planning updates it in place and creates no second parent.
 
 **Read it, don't invoke it.** A skill-to-skill chain is unreliable, by `/craft:plan`'s own
 council-dispatch rule (`../plan/SKILL.md`, step 8.5) — the same deferral step 4 above already
-applies to `../slice/SKILL.md`. Read `../plan/SKILL.md` now, in full, and follow it inline in this
-session, running its Process steps 1 through 8 against the slice parent — stopping before that
-skill's own Council Review step (`../plan/SKILL.md`, step 8.5), which step 8 below runs instead,
-because the driver hangs its own checkpoint and its `plan-critical` escalation off that gate.
-Planning's Present for Approval step (`../plan/SKILL.md`, step 9) follows that gate rather than this
-one, exactly where planning's own ordering puts it — step 8 below runs it. This skill never restates
-that procedure: a second copy here is exactly how the two would drift apart.
+applies to `../slice/SKILL.md`. Read `../plan/SKILL.md` now. Run it inline in this session, running
+its Process steps 1 through 8 against the slice parent — stopping before that skill's own Council
+Review step (`../plan/SKILL.md`, step 8.5), which step 8 below runs instead, because the driver
+hangs its own checkpoint and its `plan-critical` escalation off that gate. Planning's Present for
+Approval step (`../plan/SKILL.md`, step 9) follows that gate rather than this one, exactly where
+planning's own ordering puts it — step 8 below runs it. This skill never restates that procedure: a
+second copy here is exactly how the two would drift apart.
 
 **Running it inline is what makes the plan phase attended, and that is the point.** A human is
 present in this session, so planning's own Clarify step asks the operator in this session rather
@@ -308,22 +310,23 @@ review below.
 
 ### 8. Run the council review
 
-Step 7's inline read of `../plan/SKILL.md` deliberately stopped before that skill's own Council
+Step 7's inline pass over `../plan/SKILL.md` deliberately stopped before that skill's own Council
 Review step (`../plan/SKILL.md`, step 8.5), so the plan now on the slice parent has not passed the
 mandatory council gate. The driver runs that gate itself here, in this session, against the plan
 step 7 just wrote — this is where the checkpoint and the `plan-critical` escalation hang off it,
 which is why the gate lives at the driver's altitude rather than inside the read above.
 
-Dispatch the four council lenses — `builder`, `breaker`, `attacker`, `advocate` — per
-`_shared/council.md`'s dispatch contract. Read it; do not restate its roster, prompt template, or
-bars here — a second copy is exactly how the two documents would drift apart. Make all four `Agent`
-calls in a single message so they run concurrently. Fill the context-pointer line with
-`Plan: <slice-parent-task-id>` and `Spec: <spec-path>` — the slice parent's resolved path
+Dispatch the four council lenses — `builder`, `breaker`, `attacker`, `advocate` — as
+`_shared/council.md`'s dispatch contract sets out. Read `../_shared/council.md` now and follow it in
+full. Do not restate its roster, prompt template, or bars here — a second copy is exactly how the
+two documents would drift apart. Make all four `Agent` calls in a single message so they run
+concurrently. Fill the context-pointer line with `Plan: <slice-parent-task-id>` and
+`Spec: <spec-path>` — the slice parent's resolved path
 (`lore record show <slice-parent-task-id> --vault <elected-vault> --json` carries it) and the linked
 spec's resolved path (`lore record show spec/<spec-name> --vault <elected-vault> --json` carries
 it), matching the `Plan:`/`Spec:` pair `plan/SKILL.md`'s own step 8.5 passes each lens so it can
-read the spec it is told to review against. Fill `<lens-critical-bars>` with the plan-altitude
-"Per-lens Critical bars" block `_shared/council.md` defines, matching planning's own Council Review
+read the spec it is told to review against. Fill `<lens-critical-bars>` with the plan-altitude block
+`_shared/council.md` defines under "Per-lens Critical bars", matching planning's own Council Review
 step, and `<cross-cutting>` with `plan/SKILL.md`'s own plan-altitude cross-cutting Critical block
 (`plan/SKILL.md`, step 8.5) — never the empty string, which is `consult`'s substitution, not
 planning's: the dropped "plan's tasks, summed, don't satisfy spec's acceptance criteria" Critical is
@@ -339,7 +342,7 @@ agent-instruction file so the absent-stamp fallback is reachable:
 lore record show spec/<spec-name> --vault <elected-vault> | \
   ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
 ```
-**A non-zero exit refuses the dispatch** — do not review at an uncalibrated severity. Read the
+**A non-zero exit refuses the dispatch** — do not review at an uncalibrated severity. Take the
 `reason-code:` stderr line and refuse with the remedy the code names — mirror `plan/SKILL.md`'s step
 8.5 remedy table and worked refusal example rather than re-deriving a second one. A council refusal
 here is a `plan-failed`-shaped escalation: the driver has not produced a review at all, so it
@@ -361,8 +364,8 @@ Cross-cutting Critical you may also raise (any lens):
 ```
 
 The driver is the synthesizer, in session, never a subagent — de-duplicating by issue, weighting
-cross-pass convergence, and auto-downgrading speculative Criticals, per `_shared/council.md`'s
-synthesis rules.
+cross-pass convergence, and auto-downgrading speculative Criticals, as `_shared/council.md`'s
+synthesis rules set out.
 
 **Persist the findings before escalating.** Append a `## Council Review` section to the slice parent
 — the plan record chosen or resumed at step 4 above — mirroring the schema `plan/SKILL.md` defines
@@ -408,18 +411,21 @@ following the escalation contract below, with no retry.
 Once step 8 advances with no council Critical surviving, build the chosen slice parent's child task
 graph by running craft's shared execute procedure against it.
 
-**Read it, don't invoke it** — the same deferral step 7 above applies to `../plan/SKILL.md` and step
-4 applies to `../slice/SKILL.md`. Read `../_shared/execute.md` now, in full, alongside
-`../_shared/refine.md`, `../_shared/slice.md`, `../_shared/status-ownership.md`, and
-`../_shared/security.md` — the four documents its rules draw on without naming — and read
-`../_shared/escalation.md` (the escalation rule execute.md applies to every found-work call) and
-`../_shared/council.md` too, whose "How a finding reads" section governs how a code review finding
-is shown to the user at the end of the build (this does not ask the build to convene a council).
-Follow `execute.md` inline in this session, running its controller loop against the slice parent's
-children. This skill never restates that procedure: a second copy here is exactly how the two would
-drift apart. The driver never invokes `/craft:execute` either — a skill-to-skill chain is unreliable
-by the same rule, so the shared procedure is read directly rather than reached through the skill
-that wraps it.
+The same deferral step 7 above applies to `../plan/SKILL.md` and step 4 applies to
+`../slice/SKILL.md`: **read it, don't invoke it.** Read `../_shared/execute.md` now and follow it in
+full. Read `../_shared/refine.md` now and follow it in full. Read
+`../receiving-code-review/SKILL.md` now and follow it in full. Read `../_shared/slice.md` now and
+follow it in full. Read `../_shared/status-ownership.md` now and follow it in full. Read
+`../_shared/security.md` now and follow it in full. Read `../_shared/escalation.md` now and follow
+it in full. Read `../_shared/council.md` now and follow it in full. Several of these are the
+documents its rules draw on without naming, and the escalation rule is the one execute.md applies to
+every found-work call. The "How a finding reads" section of the council file governs how a code
+review finding is shown to the user at the end of the build (this does not ask the build to convene
+a council). Follow `execute.md` inline in this session, running its controller loop against the
+slice parent's children. This skill never restates that procedure: a second copy here is exactly how
+the two would drift apart. The driver never invokes `/craft:execute` either — a skill-to-skill chain
+is unreliable by the same rule, so the shared procedure is read directly rather than reached through
+the skill that wraps it.
 
 The build phase has no one to answer a found-work question. The driver runs to the slice boundary
 and stops there, so a found-work call that the escalation rule would put to the operator is handled
@@ -434,13 +440,13 @@ as its own controller loop prescribes; those are its dispatches, not the driver'
 synchronous.
 
 The signal the shared procedure reads is this skill's own wording: the driver runs Phase 6 as the
-caller that says **run Phase 6 as a no-ask close**, per [execute's no-ask
-close](../_shared/execute.md#no-ask-close). The driver never stops for a check (AC14) or for a
-found-work question: a slice covering a manual check closes, every check not yet carried out goes on
-the check list, and the build phase ends with the slice completed. After a normal build the run
-still goes on to step 10, the PR tail; stopping with a pull request owed is the step-4 stuck close's
-rule alone. Its completion report carries the wording for a driver caller, and this skill never
-restates it.
+caller that says **run Phase 6 as a no-ask close**, as [execute's no-ask
+close](../_shared/execute.md#no-ask-close) sets out. The driver never stops for a check (AC14) or
+for a found-work question: a slice covering a manual check closes, every check not yet carried out
+goes on the check list, and the build phase ends with the slice completed. After a normal build the
+run still goes on to step 10, the PR tail; stopping with a pull request owed is the step-4 stuck
+close's rule alone. Its completion report carries the wording for a driver caller, and this skill
+never restates it.
 
 **The checkpoint at this boundary is written before and after the build phase**: the `## Driver run`
 block recording `**Phase:** plan` already written at step 8 is the before-checkpoint, and writing
@@ -579,8 +585,8 @@ vocabulary and follows the contract below, and the same is true of any dispatch-
 phase adds. This rule carries four named exceptions, none a dispatch failure or an escalation, each
 stated as writing nothing at the site that defines it: the missing-argument stop (`## Argument`
 above — nothing is resolved yet to write against), the shape-check refusal at step 1 (a
-vault-sourced value failing the safe-value shape — refusing loudly, writing nothing), the read-only
-refusal at step 3 (a spec whose status is not `ready` — refusing is read-only by its own explicit
+vault-sourced value failing the safe-value shape — refusing loudly, writing nothing), the no-write
+refusal at step 3 (a spec whose status is not `ready` — refusing writes nothing by its own explicit
 contract), and the clean terminal halts at step 6 (spec complete, early stop — `../slice/SKILL.md`'s
 own termination outcomes, reported verbatim rather than escalated, each stating at its own site that
 it writes nothing of its own). Naming them here keeps the rule non-vacuous: a future stop path is

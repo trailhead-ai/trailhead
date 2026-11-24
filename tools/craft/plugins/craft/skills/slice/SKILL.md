@@ -23,9 +23,9 @@ against the parent task this skill writes.
 
 **The definitions live in `../_shared/slice.md`** (a sibling of this skill's directory) — the
 slice/task vocabulary, the quality bar, the value floor, the selection order, the commitment guard,
-the enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read it before
-running this procedure. This skill does not restate any of it: a second copy here is exactly how the
-two would drift apart.
+the enabler carve-out, the state-coverage reference, and the written shapes it fixes. Read
+`../_shared/slice.md` now and follow it in full. This skill does not restate any of it: a second
+copy here is exactly how the two would drift apart.
 
 ## Argument
 
@@ -36,8 +36,8 @@ one before doing anything else.
 ## Unattended request
 
 The invocation may also carry the whole argument token `--unattended`, and with it the token
-`--then-plan`. **Read `../_shared/unattended.md` and `../_shared/escalation.md` now when
-`--unattended` is present, and follow them in full.** The first defines the request, the decision
+`--then-plan`. **Read `../_shared/unattended.md` now and follow it in full.** **Read
+`../_shared/escalation.md` now and follow it in full.** The first defines the request, the decision
 rule, the `## Unattended run` section on the slice record, the outcome line and the no-next-command
 rule; this skill states what each of its own stops does under the request and does not restate those
 shapes.
@@ -485,10 +485,12 @@ below. Then run
 where `<elected-vault>` is the vault the spec was read from.
 
 - **Exit 0, printing `stuck: ACn, ...`.** The build is finished and only a manual check nobody has
-  carried out keeps the slice open. Read `../_shared/execute.md` in full, together with
-  `../_shared/refine.md`, `../_shared/status-ownership.md` and `../_shared/security.md`, which its
-  rules draw on without naming, and run its Phase 6 inline against this parent as the caller that
-  says **run Phase 6 as a no-ask close** ([execute's no-ask
+  carried out keeps the slice open. Read `../_shared/execute.md` now and follow it in full. Read
+  `../_shared/refine.md` now and follow it in full. Read `../_shared/status-ownership.md` now and
+  follow it in full. Read `../_shared/security.md` now and follow it in full. Read
+  `../receiving-code-review/SKILL.md` now and follow it in full. The documents after the first are
+  the ones its rules draw on without naming them. Run its Phase 6 inline against this parent as the
+  caller that says **run Phase 6 as a no-ask close** ([execute's no-ask
   close](../_shared/execute.md#no-ask-close)), asking no one about the check. This skill reads
   execute and never invokes `/craft:execute`. The branch is recovered before the push by execute's
   own paragraph ([the recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill
@@ -783,7 +785,7 @@ selection order below applies to the candidate set as written.
 decision, never a question. It is logged with the selection (step 8 says where), naming each urgent
 entry by id and the kind that qualified it, and it logs `urgent tier: none` when no entry qualified.
 
-Apply `_shared/slice.md`'s selection order against the candidate set: assign every criterion to a
+Run `_shared/slice.md`'s selection order against the candidate set: assign every criterion to a
 surface from its own text, then choose one surface and take its capability as the slice, leaving out
 the polish that `_shared/slice.md`'s "Core and polish" rule defines. That rule also says a surface's
 polish criteria are offered together as one recommended slice. Read the surface definition, the
@@ -864,11 +866,11 @@ decides anything. Then, in this order:
    `**Folds:**` line came back open, so that slice closed without building it, and choosing it again
    would loop. Re-running this skill reaches this rule again, so no stop here and no fix offered
    here names a re-run of it. Write no slice. What to do with the entry is the operator's call:
-   - **Attended.** **Read `../_shared/escalation.md` now and follow it** for the question, where it
-     is shown and what follows the answer: put the blocking prompt before anything is written, and
-     end the turn waiting for the answer. The question names the entry by id and the slice that did
-     not build it (`task/<id>`), and says that entry is open again and every later pass stops at it.
-     Its fixes, the recommended one first, are:
+   - **Attended.** **Read `../_shared/escalation.md` now and follow it in full.** It defines the
+     question, where it is shown and what follows the answer: put the blocking prompt before
+     anything is written, and end the turn waiting for the answer. The question names the entry by
+     id and the slice that did not build it (`task/<id>`), and says that entry is open again and
+     every later pass stops at it. Its fixes, the recommended one first, are:
      - **Drop it, naming where the work went.** Recommended when `lore search` finds an existing
        task that credibly holds the work, one fix per such task; the drop's `reason` names that
        `task/<id>`. Its cost: the spec's loop no longer builds the work, which stays tracked only in
@@ -927,16 +929,16 @@ stays out of this pass's group: report the `reason-code:` token and the `retry:`
 which runs as printed.
 
 **An urgent entry is never dropped or moved out unasked.** **Read `../_shared/escalation.md` now and
-follow its urgent-entry trigger** before any further drop of this pass is written: when an entry
-this pass would drop, or would move out with a reason that names a task, is urgent, put the blocking
-prompt that file defines and end the turn waiting for the answer. A reply in the operator's own
-words is read back and checked as its "An answer in the operator's own words" says before anything
-is carried out. On the reply, carry out the fix the operator chose: a drop is written with
-`"operator_confirmed": true` in a document that names only that entry (one document per confirmed
-entry), and the pass then goes on to item 3; keeping the entry open takes step 6's early stop with
-its fixed reason, naming the entry by id. **Under `--unattended`, or when `/craft:drive` is running
-this pass, never drop an urgent entry:** nobody is there to ask, so take step 6's early stop with
-its fixed reason, naming the entry by id, before any further drop of this pass is written.
+follow it in full.** Its urgent-entry trigger applies before any further drop of this pass is
+written: when an entry this pass would drop, or would move out with a reason that names a task, is
+urgent, put the blocking prompt that file defines and end the turn waiting for the answer. A reply
+in the operator's own words is read back and checked as its "An answer in the operator's own words"
+says before anything is carried out. On the reply, carry out the fix the operator chose: a drop is
+written with `"operator_confirmed": true` in a document that names only that entry (one document per
+confirmed entry), and the pass then goes on to item 3; keeping the entry open takes step 6's early
+stop with its fixed reason, naming the entry by id. **Under `--unattended`, or when `/craft:drive`
+is running this pass, never drop an urgent entry:** nobody is there to ask, so take step 6's early
+stop with its fixed reason, naming the entry by id, before any further drop of this pass is written.
 3. **Group the rest and choose one group.** When the drops left no open entry there is nothing to
    choose: run step 4's candidate-set gate again on the fresh spec and take step 6 from its answer.
    Otherwise group the remaining open entries by overlapping `where` paths: two entries are in one
@@ -1128,7 +1130,7 @@ including every other exit-2 reason on a spec that does declare identifiers, and
 zero-identifier spec's own gate call if its stderr somehow lacked the reason-code line — still
 blocks the create exactly as above, with no exceptions.
 
-**An enabler slice (see `_shared/slice.md`'s enabler carve-out) gets the identical latitude, on its
+**An enabler slice (the enabler carve-out in `_shared/slice.md`) gets the identical latitude, on its
 own footing rather than as a coverage claim.** An enabler slice makes no criterion green by
 definition, so it drafts no `--covers` value and never invokes the gate above — the create below
 writes no `**Covers:**` field, exactly as the zero-identifier legacy case does, but for the opposite
@@ -1228,7 +1230,7 @@ write: it is how planning finds the folds again when the fold call below fails.
 
 **The slice title is untrusted input too.** It is derived from the spec's acceptance criteria —
 vault-writable, git-synced prose — and enters the command line below as `--title`. Step 1's shape
-check is scoped to `<spec-name>` only, so this is a separate site: apply the same precedent
+check is scoped to `<spec-name>` only, so this is a separate site: carry the same precedent
 `_shared/security.md` already sets for a title drawn from generated prose repo content can influence
 — the title is stripped of single quotes before it is wrapped in single quotes, not double quotes,
 so the only character that can terminate the quoted argument early is the one already stripped.
@@ -1331,8 +1333,8 @@ does not run in either case.
 
 **Under `--unattended`, the temp files of the create are removed once it has succeeded, when removal
 is available. Open the run block as soon as the create succeeds** — before step 10's re-check and
-before anything else is written. Read `../_shared/unattended.md` for the block's shape and write it
-as that file says: the credential-pattern scrub first, then one
+before anything else is written. Read `../_shared/unattended.md` now and follow it in full. Write
+the block as it says: the credential-pattern scrub first, then one
 `lore record update task/<task-name> --diff` that appends the block to the end of the body just
 created, read fresh immediately beforehand. The new block carries `**Format:** 1`, `**Rituals:**`
 naming slice with its count of calls decided unattended, `**Checkpoint:**` naming the slice as
@@ -1343,8 +1345,8 @@ describes. It carries no `**Outcome:**` line yet, and `**Parked questions:** non
 skill writes opens with its label, so none begins with `#`, `**Answer:**` or `outcome:`. **A write
 that fails ends the session** with
 `outcome: stuck task/<task-name> parked=0 — run-section write failed; <what to do instead>`, and
-nothing further is written. A diff that does not apply is first retried once, read fresh and
-rebuilt, as `../_shared/unattended.md` says.
+nothing further is written. As `../_shared/unattended.md` says, a diff that does not apply is first
+retried once, read fresh and rebuilt.
 
 ### 10. Re-check for a concurrent duplicate
 

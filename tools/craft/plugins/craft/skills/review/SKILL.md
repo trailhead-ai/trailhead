@@ -56,8 +56,8 @@ complementary.
 - `{DESCRIPTION}` - Brief summary
 
 **5. Act on feedback:**
-- Read `../_shared/council.md` now: its "How a finding reads" section governs how you tell the user
-  what the reviewer found
+- Read `../_shared/council.md` now. Use its "How a finding reads" section, which governs how you
+  tell the user what the reviewer found
 - Fix Critical issues immediately
 - Fix Important issues before proceeding
 - Note Minor issues for later, except a verified finding that a different record is wrong with a
