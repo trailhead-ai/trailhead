@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from trailhead.harness import session_key
+from trailhead.harness.process import format_session_key, harness_process
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATEWAY_RUNNER = Path(__file__).with_name("_gateway_runner.py")
@@ -341,24 +341,26 @@ def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) ->
     return path
 
 
-def await_session_key(
+def await_harness(
     pid: int,
     *,
-    resolve: Callable[..., str | None] = session_key,
+    resolve: Callable[..., tuple[int, int] | None] = harness_process,
     timeout: float = 5.0,
     interval: float = 0.02,
-) -> str:
-    """The session key of the fake harness *pid*, once the process table shows it.
+) -> tuple[int, int]:
+    """``(pid, start_time)`` of the fake harness *pid*, once the process table shows it.
 
     A just-spawned process is not always readable as a harness the instant ``Popen``
-    returns, so this waits for the key to resolve instead of reading it once.
+    returns, and until it is, the walk can land on an outer session instead; this waits
+    for the answer to be *pid* itself rather than reading once.
     """
     deadline = time.monotonic() + timeout
     while True:
-        key = resolve(start_pid=pid)
-        if key is not None:
-            return key
-        assert time.monotonic() < deadline, "fake harness did not resolve to a session key"
+        found = resolve(start_pid=pid)
+        if found is not None and found[0] == pid:
+            return found
+        if time.monotonic() >= deadline:
+            raise AssertionError("fake harness did not resolve to a session key")
         time.sleep(interval)
 
 
@@ -387,7 +389,7 @@ def run_gateway_runner(
     env_dump.unlink(missing_ok=True)
 
     def started(pid: int) -> None:
-        key = await_session_key(pid)
+        key = format_session_key(*await_harness(pid))
         if seed is not None:
             seed(key)
 

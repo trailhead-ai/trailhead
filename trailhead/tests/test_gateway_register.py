@@ -7,8 +7,8 @@ import time
 
 import pytest
 
-from trailhead.harness import harness_process
 from trailhead.tests._gateway_support import (
+    await_harness,
     REGISTRATION_AUTHORITY,
     StubOutpost,
     free_port,
@@ -50,7 +50,7 @@ def run(launcher, outpost_state, trailhead_state):
             launcher,
             register_runner_cmd(port, list(argv)),
             env=runner_env(outpost_state, trailhead_state=trailhead_state, extra=extra_env),
-            on_start=lambda pid: found.append(harness_process(start_pid=pid)),
+            on_start=lambda pid: found.append(await_harness(pid)),
             stdin=stdin,
         )
         return proc, found[0]
