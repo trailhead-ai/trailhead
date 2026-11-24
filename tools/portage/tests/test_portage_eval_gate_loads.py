@@ -657,6 +657,32 @@ class TestParseDirectivesFixedForms:
         assert [load.raw for load in result.loads] == ["a.md", "b.md"]
 
 
+class TestParseDirectivesBold:
+    @pytest.mark.parametrize(("text", "kind", "condition"), [
+        ("**Read `a.md` now and follow it in full.**\n", "full", ""),
+        ("**Read `a.md` now.** Use its second section only.\n", "section", ""),
+        ("**When the run is unattended, read `a.md` now and follow it in full.**\n", "branch",
+         "the run is unattended"),
+        ("**Do not skip this.** Read `a.md` now and follow it in full.\n", "full", ""),
+        ("**Read `a.md` now and follow it in full.** Then stop.\n", "full", ""),
+    ])
+    def test_a_fixed_sentence_wrapped_whole_in_bold_is_a_load_of_its_kind(self, tmp_path, text, kind, condition):
+        result = directives(tmp_path, "# T\n\n" + text)
+        assert result.misworded == ()
+        assert [(load.kind, load.raw, load.condition, load.line) for load in result.loads] == [
+            (kind, "a.md", condition, 3)]
+
+    @pytest.mark.parametrize("text", [
+        "**Read `a.md` from the top and follow it in full.**\n",
+        "**Read `a.md` and `b.md` now and follow them in full.**\n",
+        "**Read `a.md` now.**\n",
+    ])
+    def test_a_bold_sentence_outside_the_fixed_wording_is_still_misworded(self, tmp_path, text):
+        result = directives(tmp_path, "# T\n\n" + text)
+        assert result.loads == ()
+        assert [m.line for m in result.misworded] == [3]
+
+
 class TestParseDirectivesStrictResolution:
     def test_a_path_resolves_against_the_loading_files_own_directory(self, tmp_path):
         result = directives(tmp_path, "Read `a.md` now and follow it in full.\n")

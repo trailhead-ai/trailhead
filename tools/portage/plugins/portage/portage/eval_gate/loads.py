@@ -30,7 +30,7 @@ parse of each file text (its loads, its backticked ``.md`` mentions and whether 
 parsed once per revision; keyed by text, two revisions never share a parse.
 
 ``parse_directives(path, text, read) -> Directives`` is the one definition of a load the convention check
-(``convention.py``) enforces; the gate's own ``derive`` still reads loads with the parser above until it switches.
+(``convention.py``) enforces (a fixed sentence wrapped whole in bold, ``**...**``, is that sentence); the gate's own ``derive`` still reads loads with the parser above until it switches.
 ``read_declared_mentions(root)`` reads ``<root>/declared-mentions.json``, the per-plugin list of paths a file
 names only as plain mentions.
 
@@ -90,18 +90,23 @@ def _paragraphs(text: str) -> list[str]:
     return [" ".join(p) for p in paragraphs if p]
 
 
-def _sentence_spans(paragraph: str) -> list[tuple[int, int]]:
+def _sentence_spans(paragraph: str, bold: bool = False) -> list[tuple[int, int]]:
     out: list[tuple[int, int]] = []
     start = 0
     inside = False
     for i, ch in enumerate(paragraph):
         if ch == "`":
             inside = not inside
-        elif ch in ".:;" and not inside and (i + 1 == len(paragraph) or paragraph[i + 1].isspace()):
+        elif ch in ".:;" and not inside:
+            stop = i + 1
+            if bold and paragraph.startswith("**", stop):
+                stop += 2
+            if not (stop == len(paragraph) or paragraph[stop].isspace()):
+                continue
             if ch == "." and _ABBREVIATION.search(paragraph[max(start, i - 4):i]):
                 continue
-            out.append((start, i + 1))
-            start = i + 1
+            out.append((start, stop))
+            start = stop
     out.append((start, len(paragraph)))
     return out
 
@@ -521,7 +526,7 @@ def parse_directives(path: str, text: str, read) -> Directives:
     loads: list[Load] = []
     misworded: list[Misworded] = []
     for paragraph, starts in _located_paragraphs(_visible_lines(text)):
-        spans = _sentence_spans(paragraph)
+        spans = _sentence_spans(paragraph, bold=True)
         for index, (begin, end) in enumerate(spans):
             raw_sentence = paragraph[begin:end]
             if not raw_sentence.strip():
@@ -529,6 +534,8 @@ def parse_directives(path: str, text: str, read) -> Directives:
             lead = len(raw_sentence) - len(raw_sentence.lstrip())
             marker = _LIST_MARKER.match(raw_sentence)
             body = raw_sentence[marker.end():].strip() if marker else raw_sentence.strip()
+            if body.startswith("**") and body.endswith("**") and body.count("**") == 2:
+                body = body[2:-2].strip()
             line = _line_at(starts, begin + lead)
             end_line = _line_at(starts, max(begin + lead, end - 1))
             named = _named_files(body, path, read)
