@@ -1,21 +1,21 @@
-"""Which files a declared eval case depends on, derived from the loads in its procedure prose.
+"""Which files a declared eval case depends on, derived from the loads in its procedure files.
 
-A load is the word ``Read`` followed by a backticked path ending ``.md``, plus every further backticked ``.md``
-path in the same sentence. A sentence spans the lines of its paragraph and ends at ``.``, ``:`` or ``;``
-followed by whitespace or the end of the paragraph, outside backticks (``e.g.`` and ``i.e.`` do not end one).
-Fenced code blocks are skipped. Each path resolves against the loading file's directory first, then each ancestor
-directory up to the plugin root, taking the first that holds a file (a path found nowhere resolves to its
-loading-directory form, which ``missing_loads`` reports); it must match ``[A-Za-z0-9._/-]`` and must stay inside
-the plugin root. A *branch file* opens (first non-blank line, after optional ``*``/``_``) with "Applies when" or
-"Applies only when". A *split core* loads at least one.
+A load is one sentence in a fixed wording (``parse_directives``, below): ``FULL_LOAD``, ``SECTION_LOAD`` or
+``BRANCH_LOAD``. Its path resolves strictly against the loading file's own directory, with no search of any
+ancestor, and may name a file of any type. A *branch file* opens (first non-blank line, after optional ``*``/``_``)
+with "Applies when" or "Applies only when". A *split core* reaches at least one.
 
-``derive`` fails safe: its closure is the entry, the declared branches and every non-branch file reached from
-them, transitively, by any ``[A-Za-z0-9._/-]+.md`` token in the raw text (a ``#anchor`` ends the token) that
-resolves to an existing file, wherever it sits (a link, a code span of any kind, a fence, loose prose) and
-whether or not its sentence parsed as a load, so a misread load over-selects and never under-selects. A token
-that resolves to nothing or escapes the plugin root is ignored. An undeclared branch is never in the closure.
-The parsed loads serve only the refusals (``LoadError``) and ``missing_loads``. An entry that is itself a
-branch file is refused: its core is the entry and the branch goes under ``branches``.
+``derive``'s closure is the entry, the declared branches and every file reached from them, transitively, by a
+parsed load or by a *mention*: a raw token of the text, ``[A-Za-z0-9._/-]+`` ending in an extension (a ``#anchor``
+ends it), that names an existing plugin file (searched from the mentioning file's directory up through each
+ancestor, wherever it sits: a link, a code span, a fence, loose prose) and that the plugin has not declared a
+plain mention. The declared mentions are ``<plugin-root>/declared-mentions.json`` (``read_declared_mentions``),
+a file mapping a mentioning file to the paths it names only as plain mentions; a declared mention is not
+followed. A mention is followed whether or not its sentence parsed as a load, so a load phrased outside the
+fixed wording over-selects and never under-selects, and a base revision still in an older wording or with
+ancestor-resolved paths derives without a fault. A load that resolves to nothing is ignored by ``derive``;
+``missing_loads`` reports it. An undeclared branch is never in the closure. An entry that is itself a branch
+file is refused: its core is the entry and the branch goes under ``branches``.
 
 The reader contract, which every caller builds against: ``read(path) -> str | None`` takes a plugin-relative
 posix path. ``None`` means the file does not exist. A symlink or any other non-regular file is signalled by
@@ -25,14 +25,12 @@ is never an empty file. ``tree_reader(root)`` is the working-tree reader; a git 
 
 The cache is held per revision by the caller: wrap that revision's reader once with ``cached(read)`` and pass
 the wrapper to every ``derive`` and ``missing_loads`` call for that revision, so a file is read at most once
-across every case. ``None`` and raised exceptions are remembered too. The wrapper also carries ``parses``, the
-parse of each file text (its loads, its backticked ``.md`` mentions and whether it is a branch), so a text is
-parsed once per revision; keyed by text, two revisions never share a parse.
+across every case. ``None`` and raised exceptions are remembered too. The wrapper also carries ``parses`` (the
+parse of each file, keyed by its path and text) and the revision's declared-mentions list, so each revision's
+files are parsed once and each revision reads its own list.
 
-``parse_directives(path, text, read) -> Directives`` is the one definition of a load the convention check
-(``convention.py``) enforces (a fixed sentence wrapped whole in bold, ``**...**``, is that sentence); the gate's own ``derive`` still reads loads with the parser above until it switches.
-``read_declared_mentions(root)`` reads ``<root>/declared-mentions.json``, the per-plugin list of paths a file
-names only as plain mentions.
+``parse_directives(path, text, read) -> Directives`` is the one definition of a load, shared with the
+convention check (``convention.py``); a fixed sentence wrapped whole in bold, ``**...**``, is that sentence.
 
 Every fault is a ``LoadError`` with a one-line message that names values only through ``mapping.echo``.
 A closure holds at most ``MAX_PROCEDURE_FILES`` distinct files, the entry and the branches included. A reader may
@@ -46,13 +44,13 @@ import posixpath
 import re
 import stat
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from .mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES, _q
 
 _SAFE_CHARS = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNORECASE)
-_READ_BEFORE_SPAN = re.compile(r"\bRead\s+$")
+_EXTENSION = re.compile(r"\.[A-Za-z0-9]+\Z")
 _ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e)$", re.IGNORECASE)
 _WORD = re.compile(r"[A-Za-z0-9._/-]+")
 _LIST_OR_HEADING = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
@@ -70,24 +68,6 @@ class NotRegularFile(Exception):
 class Derived:
     files: tuple[str, ...]
     split: bool
-
-
-def _paragraphs(text: str) -> list[str]:
-    paragraphs: list[list[str]] = [[]]
-    fenced = False
-    for line in text.splitlines():
-        if line.lstrip().startswith("```"):
-            fenced = not fenced
-            paragraphs.append([])
-        elif fenced:
-            continue
-        elif not line.strip():
-            paragraphs.append([])
-        else:
-            if _LIST_OR_HEADING.match(line):
-                paragraphs.append([])
-            paragraphs[-1].append(line)
-    return [" ".join(p) for p in paragraphs if p]
 
 
 def _sentence_spans(paragraph: str, bold: bool = False) -> list[tuple[int, int]]:
@@ -111,77 +91,6 @@ def _sentence_spans(paragraph: str, bold: bool = False) -> list[tuple[int, int]]
     return out
 
 
-def _sentences(paragraph: str) -> list[str]:
-    return [paragraph[start:end] for start, end in _sentence_spans(paragraph)]
-
-
-def _spans(sentence: str) -> tuple[list[str], list[str]]:
-    parts = sentence.split("`")
-    return parts[0::2], parts[1::2]
-
-
-def _resolve(file: str, raw: str, read) -> str | None:
-    """The plugin-relative file ``raw`` names from ``file``: the loading directory's form when it exists, else
-    the first ancestor directory (up to the plugin root) holding it, else the loading directory's form.
-    ``None`` when the loading directory's form leaves the plugin root."""
-    if raw.startswith("/"):
-        return None
-    directory = posixpath.dirname(file)
-    first = posixpath.normpath(posixpath.join(directory, raw))
-    if first == ".." or first.startswith("../"):
-        return None
-    while True:
-        candidate = posixpath.normpath(posixpath.join(directory, raw))
-        if not (candidate == ".." or candidate.startswith("../")) and _get(read, candidate) is not None:
-            return candidate
-        if not directory:
-            return first
-        directory = posixpath.dirname(directory)
-
-
-@dataclass(frozen=True)
-class _Parsed:
-    raw_loads: tuple[str, ...]
-    md_tokens: tuple[str, ...]
-    branch: bool
-
-
-def _parse(text: str) -> _Parsed:
-    raw_loads: list[str] = []
-    for paragraph in _paragraphs(text):
-        for sentence in _sentences(paragraph):
-            outside, inside = _spans(sentence)
-            first = next((i for i, seg in enumerate(outside[:len(inside)])
-                          if _READ_BEFORE_SPAN.search(seg) and inside[i].endswith(".md")), None)
-            if first is not None:
-                raw_loads.extend(s for s in inside[first:] if s.endswith(".md"))
-    tokens = (w.rstrip(".") for w in _WORD.findall(text))
-    return _Parsed(tuple(raw_loads), tuple(dict.fromkeys(t for t in tokens if t.endswith(".md"))),
-                   _is_branch(text))
-
-
-def _parsed(read, text: str) -> _Parsed:
-    memo = getattr(read, "parses", None)
-    if memo is None:
-        return _parse(text)
-    if text not in memo:
-        memo[text] = _parse(text)
-    return memo[text]
-
-
-def loads_in(path: str, text: str, read) -> list[str]:
-    """The plugin-relative paths ``path`` loads, in order, each once."""
-    found: dict[str, None] = {}
-    for position, raw in enumerate(_parsed(read, text).raw_loads, 1):
-        if not _SAFE_CHARS.match(raw):
-            raise LoadError(f"{_q(path, 1)} load #{position} has characters outside [A-Za-z0-9._/-]")
-        resolved = _resolve(path, raw, read)
-        if resolved is None:
-            raise LoadError(f"{_q(path, 1)} loads {_q(raw, position)}, which is outside the plugin root")
-        found.setdefault(resolved)
-    return list(found)
-
-
 def _is_branch(text: str) -> bool:
     for line in text.splitlines():
         if line.strip():
@@ -189,29 +98,94 @@ def _is_branch(text: str) -> bool:
     return False
 
 
-def _reached(current: str, text: str, read) -> list[str]:
-    """Every file ``current`` names: its parsed loads, then every ``.md`` token that resolves."""
-    reached = loads_in(current, text, read)
-    for raw in _parsed(read, text).md_tokens:
-        if _SAFE_CHARS.match(raw) and (resolved := _resolve(current, raw, read)) is not None:
-            reached.append(resolved)
-    return reached
+@dataclass(frozen=True)
+class _Analysis:
+    loads: tuple[Load, ...]
+    tokens: tuple[str, ...]
+
+
+def _analysis(path: str, text: str, read) -> _Analysis:
+    """The parsed loads of ``text``, the file ``path``, and every distinct token of it that could name a file
+    (``[A-Za-z0-9._/-]+`` ending in an extension, a trailing ``.`` dropped); remembered per revision."""
+    memo = getattr(read, "parses", None)
+    key = (path, text)
+    if memo is not None and key in memo:
+        return memo[key]
+    tokens = (w.rstrip(".") for w in _WORD.findall(text))
+    found = _Analysis(parse_directives(path, text, read).loads,
+                      tuple(dict.fromkeys(t for t in tokens if _EXTENSION.search(t))))
+    if memo is not None:
+        memo[key] = found
+    return found
+
+
+def _load_targets(path: str, text: str, read) -> list[str]:
+    """The plugin-relative files ``path`` loads, in order, each once; a load whose path has a character outside
+    the allowlist or leaves the plugin root is a fault."""
+    found: dict[str, None] = {}
+    for position, load in enumerate(_analysis(path, text, read).loads, 1):
+        if not _SAFE_CHARS.match(load.raw):
+            raise LoadError(f"{_q(path, 1)} load #{position} has characters outside [A-Za-z0-9._/-]")
+        if load.target is None:
+            raise LoadError(f"{_q(path, 1)} loads {_q(load.raw, position)}, which is outside the plugin root")
+        found.setdefault(load.target)
+    return list(found)
+
+
+def _declared(read) -> dict[str, tuple[str, ...]]:
+    """The declared-mentions list of the revision ``read`` serves; a missing file is an empty list."""
+    memo = getattr(read, "declared", None)
+    if memo is not None and "list" in memo:
+        return memo["list"]
+    text = _get(read, DECLARED_MENTIONS)
+    value = {} if text is None else parse_declared_mentions(text)
+    if memo is not None:
+        memo["list"] = value
+    return value
+
+
+def _find_mentioned(file: str, raw: str, read) -> str | None:
+    """The plugin-relative file ``raw`` names from ``file``, searching the file's directory and then each
+    ancestor up to the plugin root; ``None`` when none holds one. A read failure is a fault."""
+    directory = posixpath.dirname(file)
+    while True:
+        candidate = posixpath.normpath(posixpath.join(directory, raw))
+        if not (candidate == ".." or candidate.startswith("../")) and _get(read, candidate) is not None:
+            return candidate
+        if not directory:
+            return None
+        directory = posixpath.dirname(directory)
+
+
+def _reached(current: str, text: str, read) -> tuple[list[str], list[str]]:
+    """``(loads, reached)``: the files ``current`` loads, and those plus every existing file it names in a
+    token the plugin has not declared a plain mention, each once, loads first."""
+    loaded = _load_targets(current, text, read)
+    declared = set(_declared(read).get(current, ()))
+    reached = dict.fromkeys(loaded)
+    for raw in _analysis(current, text, read).tokens:
+        if posixpath.basename(raw) in ("", ".", "..") or raw.startswith("/"):
+            continue
+        found = _find_mentioned(current, raw, read)
+        if found is not None and found != current and found not in declared:
+            reached.setdefault(found)
+    return loaded, list(reached)
 
 
 def reaches_branch(path: str, read) -> bool:
-    """Whether the file ``path`` loads or names (a ``.md`` token that resolves) a branch file."""
+    """Whether the file ``path`` loads or names (as ``derive`` reads names) a branch file."""
     text = _get(read, path)
-    return text is not None and any(is_branch_file(t, read) for t in _reached(path, text, read))
+    return text is not None and any(is_branch_file(t, read) for t in _reached(path, text, read)[1])
 
 
-def is_branch(text: str, read=None) -> bool:
-    return _is_branch(text) if read is None else _parsed(read, text).branch
+def is_branch(text: str) -> bool:
+    return _is_branch(text)
 
 
 def is_branch_file(path: str, read) -> bool:
     """Whether ``path`` exists and is a branch file."""
     text = _get(read, path)
-    return text is not None and is_branch(text, read)
+    return text is not None and _is_branch(text)
 
 
 def _get(read, path: str) -> str | None:
@@ -241,6 +215,7 @@ def cached(read):
         raise value
 
     wrapper.parses = {}
+    wrapper.declared = {}
     wrapper.derivations = {}
     return wrapper
 
@@ -252,8 +227,11 @@ def tree_reader(root: Path):
     def read(path: str):
         full = root / path
         try:
-            if any(parent.is_symlink() for parent in full.parents if parent != root and root in parent.parents):
-                raise NotRegularFile(path)
+            walked = root
+            for part in PurePosixPath(path).parts[:-1]:
+                walked = walked / part
+                if walked.is_symlink():
+                    raise NotRegularFile(path)
             st = full.lstat()
         except FileNotFoundError:
             return None
@@ -288,17 +266,17 @@ def _derive(entry: str, branches, read) -> Derived:
     entry_text = _get(read, entry)
     if entry_text is None:
         raise LoadError(f"entry {_q(entry, 1)} does not exist")
-    if is_branch(entry_text, read):
+    if is_branch(entry_text):
         raise LoadError(f"entry {_q(entry, 1)} is a branch file; declare its core as entry and the branch "
                         "under branches")
-    entry_loads = loads_in(entry, entry_text, read)
+    entry_reached = _reached(entry, entry_text, read)[1]
     declared = []
     for position, branch in enumerate(branches, 1):
         norm = posixpath.normpath(branch)
         text = _get(read, norm)
         if text is None:
             raise LoadError(f"declared branch {_q(branch, position)} does not exist")
-        if norm not in entry_loads:
+        if norm not in entry_reached:
             raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
@@ -329,16 +307,16 @@ def _derive(entry: str, branches, read) -> Derived:
         text = _get(read, current)
         if text is None:
             raise LoadError(f"{_q(current, 1)} does not exist")
-        parsed = loads_in(current, text, read)
+        loaded, reached = _reached(current, text, read)
         if current in declared:
-            for target in parsed:
+            for target in loaded:
                 if is_branch_file(target, read):
                     raise LoadError(f"branch {_q(current, 1)} loads the branch {_q(target, 1)}")
-        for target in _reached(current, text, read):
+        for target in reached:
             body = _get(read, target)
             if body is None:
                 continue
-            if is_branch(body, read):
+            if is_branch(body):
                 split = True
                 continue
             if target in seen:
@@ -355,7 +333,7 @@ def missing_loads(files, read) -> list[tuple[str, str]]:
         text = _get(read, path)
         if text is None:
             continue
-        for target in loads_in(path, text, read):
+        for target in _load_targets(path, text, read):
             if _get(read, target) is None:
                 missing.append((path, target))
     return missing

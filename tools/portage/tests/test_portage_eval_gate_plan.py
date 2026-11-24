@@ -1394,7 +1394,7 @@ class TestDeclaredCases:
         assert plan["mapping_invalid"]["fault"] == fault
 
     def test_a_load_in_a_mapped_corpus_naming_a_missing_file_is_a_fault_naming_both(self, repo, capsys):
-        _declared_corpus(repo, files={"skills/plain.md": "Read `rules/gone.md`.\n"})
+        _declared_corpus(repo, files={"skills/plain.md": "Read `rules/gone.md` now and follow it in full.\n"})
         _commit(repo)
         _branch(repo)
         _write(repo, "p/skills/other.md", "changed\n")
@@ -2450,3 +2450,80 @@ class TestLiveCorpusMergeOnlyCases:
         assert merge["merge_only_pending"] == 0
         assert sorted(c["case"] for c in merge["cases"] if c["merge_only"]) == merge_only
         assert not any(c["merge_only"] for c in push["cases"])
+
+
+FIXED_ENTRY = ("# Entry\n\nRead `../rules/core.md` now and follow it in full.\n\n"
+               "When the user asks for A, read `b-declared.md` now and follow it in full.\n\n"
+               "When the user asks for B, read `b-undeclared.md` now and follow it in full.\n")
+
+
+def _closure_change(repo, capsys, entry_text, files, changed, declared=None):
+    """Commit a corpus whose case ``decl`` has ``entry_text`` as its entry, change ``changed``, and plan."""
+    extra = dict(files)
+    if declared is not None:
+        extra["declared-mentions.json"] = json.dumps(declared)
+    _declared_corpus(repo, cases={"decl": {"entry": "skills/entry.md"}},
+                     files={"skills/entry.md": entry_text, **extra})
+    _commit(repo)
+    _branch(repo)
+    _write(repo, f"p/{changed}", (repo / "p" / changed).read_text() + "\nchanged\n")
+    _commit(repo)
+    return _plan(repo, capsys, "--base", "base")
+
+
+class TestSelectionFollowsLoadsAndUndeclaredMentions:
+    MENTION = "# Entry\n\nThe sibling procedure `core-two.md` is a separate case.\n"
+    SIBLING = {"skills/core-two.md": "Core two.\n"}
+
+    def test_an_edit_to_a_core_the_entry_only_declares_a_mention_of_selects_no_case(self, repo, capsys):
+        _, plan, _ = _closure_change(repo, capsys, self.MENTION, self.SIBLING, "skills/core-two.md",
+                                     declared={"skills/entry.md": ["skills/core-two.md"]})
+        assert plan["status"] == "no-cases-mapped"
+
+    def test_the_same_mention_undeclared_selects_the_case(self, repo, capsys):
+        _, plan, _ = _closure_change(repo, capsys, self.MENTION, self.SIBLING, "skills/core-two.md")
+        assert _names(plan) == ["decl"]
+
+    def test_a_fixed_wording_load_of_that_core_selects_the_case_even_when_declared(self, repo, capsys):
+        text = "# Entry\n\nRead `core-two.md` now and follow it in full.\n"
+        _, plan, _ = _closure_change(repo, capsys, text, self.SIBLING, "skills/core-two.md",
+                                     declared={"skills/entry.md": ["skills/core-two.md"]})
+        assert _names(plan) == ["decl"]
+
+    def test_an_edit_to_a_non_markdown_file_a_load_names_selects_the_case(self, repo, capsys):
+        text = "# Entry\n\nRead `../scripts/check.py` now and follow it in full.\n"
+        _, plan, _ = _closure_change(repo, capsys, text, {"scripts/check.py": "print(1)\n"}, "scripts/check.py",
+                                     declared={"skills/entry.md": ["scripts/check.py"]})
+        assert _names(plan) == ["decl"]
+        assert "scripts/check.py" in _entry_of(plan, "decl")["derived"]
+
+    def test_an_edit_to_a_file_the_entry_names_outside_every_recognised_form_selects_the_case(
+        self, repo, capsys
+    ):
+        text = "# Entry\n\nApply `../rules/core.md`.\n"
+        _, plan, _ = _closure_change(repo, capsys, text, {}, "rules/core.md")
+        assert _names(plan) == ["decl"]
+
+    def test_a_load_that_exists_only_in_an_ancestor_directory_is_refused_as_missing(self, repo, capsys):
+        _declared_corpus(repo, files={"skills/plain.md": "Read `rules/core.md` now and follow it in full.\n"})
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/other.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == (
+            "'skills/plain.md' loads 'skills/rules/core.md', which does not exist")
+
+    def test_a_base_still_in_the_old_wording_with_ancestor_paths_plans_without_a_base_fault(self, repo, capsys):
+        _declared_corpus(repo)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/entry.md", FIXED_ENTRY)
+        _write(repo, "p/rules/core.md", "core, changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+        assert not plan.get("mapping_invalid")
+        assert _entry_of(plan, "decl")["derived"] == ["skills/entry.md", "skills/b-declared.md",
+                                                      "rules/core.md", "rules/rule-a.md"]

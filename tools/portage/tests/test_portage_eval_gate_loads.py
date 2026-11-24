@@ -15,7 +15,7 @@ import pytest
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from portage.eval_gate import loads
 from portage.eval_gate.loads import (
-    LoadError, NotRegularFile, cached, derive, is_branch, loads_in, missing_loads, tree_reader,
+    LoadError, NotRegularFile, cached, derive, is_branch, missing_loads, tree_reader,
 )
 from portage.eval_gate.mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES
 from portage.eval_gate.loads import parse_declared_mentions, parse_directives, read_declared_mentions
@@ -115,11 +115,10 @@ class TestDerive:
         files = corpus(**{ENTRY: "Read `../_shared/r.md` (e.g. the part on `../_shared/r2.md`) now.\n"})
         assert {R, R2} <= set(derive(ENTRY, [], reader(files)).files)
 
-    def test_a_sentence_after_a_load_naming_a_path_adds_it_to_the_closure_but_is_not_a_load(self):
+    def test_a_sentence_after_a_load_naming_a_path_adds_it_to_the_closure(self):
         text = "Read `../_shared/r.md` now. Also see `../_shared/r2.md`.\n"
-        assert loads_in(ENTRY, text, reader(corpus())) == [R]
         got = derive(ENTRY, [], reader(corpus(**{ENTRY: text})))
-        assert R2 in got.files
+        assert {R, R2} <= set(got.files)
 
     @pytest.mark.parametrize("text", [
         "See [the rules](../_shared/r.md#step) for detail.\n",
@@ -196,26 +195,16 @@ class TestFaults:
         assert str(e.value) == f"declared branch '{B2}' does not exist"
 
     def test_a_branch_that_loads_a_branch_faults_and_terminates(self):
-        files = corpus(**{B1: BRANCH_HEAD + "Read `b2.md` now.\n"})
+        files = corpus(**{B1: BRANCH_HEAD + "Read `b2.md` now and follow it in full.\n"})
         with pytest.raises(LoadError) as e:
             derive(ENTRY, [B1], reader(files))
         assert str(e.value) == f"branch '{B1}' loads the branch '{B2}'"
 
     def test_a_load_resolving_outside_the_plugin_root_faults(self):
-        files = corpus(**{R: "Read `../../../x.md` now.\n"})
+        files = corpus(**{R: "Read `../../../x.md` now and follow it in full.\n"})
         with pytest.raises(LoadError) as e:
             derive(ENTRY, [], reader(files))
         assert str(e.value) == f"'{R}' loads '../../../x.md', which is outside the plugin root"
-
-    def test_loads_in_refuses_an_escaping_load_directly(self):
-        with pytest.raises(LoadError) as e:
-            loads_in("skills/a.md", "Read `../../x.md` now.\n", reader({}))
-        assert "outside the plugin root" in str(e.value)
-
-    def test_a_load_path_with_a_character_outside_the_allowlist_faults_without_echoing_it(self):
-        with pytest.raises(LoadError) as e:
-            loads_in(ENTRY, "Read `a b$.md` now.\n", reader({}))
-        assert str(e.value) == f"'{ENTRY}' load #1 has characters outside [A-Za-z0-9._/-]"
 
     def test_a_reader_that_raises_is_a_fault_not_an_empty_closure(self):
         def read(path):
@@ -325,11 +314,11 @@ class TestDeriveIsMemoisedPerReader:
         assert len(seen) == 2 * before
 
 
-class TestLoadsInKeepsFirstOccurrenceOrder:
+class TestMissingLoadsKeepsFirstOccurrenceOrder:
     def test_many_repeats_collapse_to_each_path_once_in_first_seen_order(self):
-        names = [f"r{i % 3}.md" for i in range(300)]
-        text = "Read " + " ".join(f"`{n}`" for n in names) + ".\n"
-        assert loads_in(ENTRY, text, reader({})) == ["skills/x/r0.md", "skills/x/r1.md", "skills/x/r2.md"]
+        text = "".join(f"Read `r{i % 3}.md` now and follow it in full.\n\n" for i in range(300))
+        assert missing_loads([ENTRY], reader({ENTRY: text})) == [
+            (ENTRY, "skills/x/r0.md"), (ENTRY, "skills/x/r1.md"), (ENTRY, "skills/x/r2.md")]
 
 
 class TestTreeReaderBlobCap:
@@ -372,72 +361,25 @@ class TestClosureCap:
             derive(ENTRY, [B1], reader(files))
 
 
-class TestLoadsIn:
-    @pytest.mark.parametrize("text, expected", [
-        ("Read `../_shared/a.md` now and follow it in full.\n", ["a"]),
-        ("Read `../_shared/a.md` and `../_shared/b.md` now.\n", ["a", "b"]),
-        ("Read `../_shared/a.md` in full, together with `../_shared/b.md`, `../_shared/c.md`\n"
-         "and `../_shared/d.md`.\n", ["a", "b", "c", "d"]),
-        ("**Read `../_shared/a.md` now**\n", ["a"]),
-        ("Read `../_shared/a.md` now. Then see `../_shared/b.md`.\n", ["a"]),
-        ("Read `../_shared/a.md` now; `../_shared/b.md` is for later.\n", ["a"]),
-        ("Read `review_bot_login` and `external_tracker` from the `[release]` block of the group TOML.\n", []),
-        ("Read `manifest.json` at the derived root.\n", []),
-        ("The file `../_shared/a.md` explains it.\n", []),
-        ("Intro.\n\nRead `../_shared/a.md` now.\n\nBoth `../_shared/b.md` matter.\n", ["a"]),
-    ])
-    def test_each_form_yields_exactly_its_loads(self, text, expected):
-        assert loads_in("skills/x/SKILL.md", text, reader({})) == [f"skills/_shared/{n}.md" for n in expected]
-
-    def test_a_load_resolves_against_the_loading_files_directory(self):
-        assert loads_in("agents/m.md", "Read `../skills/_shared/a.md` now.\n", reader({})) == ["skills/_shared/a.md"]
-
-    def test_an_eg_does_not_end_the_sentence_so_the_path_after_it_is_still_a_load(self):
-        text = "Read `../_shared/a.md` (e.g. the part on `../_shared/b.md`) now.\n"
-        assert loads_in("skills/x/SKILL.md", text, reader({})) == ["skills/_shared/a.md", "skills/_shared/b.md"]
-
-    def test_a_read_inside_a_code_fence_is_not_a_load(self):
-        assert loads_in(ENTRY, "```\nRead `a.md` now.\n```\n", reader({})) == []
-
-
-class TestResolution:
+class TestMentionResolution:
     G = "skills/g/SKILL.md"
-    TEXT = "Read `g/a.md` now.\n"
 
-    def test_an_ancestor_directory_holds_it_when_the_loading_directory_does_not(self):
-        read = reader({self.G: self.TEXT, "skills/g/a.md": "a\n"})
-        assert loads_in(self.G, self.TEXT, read) == ["skills/g/a.md"]
-        assert missing_loads([self.G], read) == []
-
-    def test_the_loading_directory_wins_when_both_exist(self):
-        read = reader({self.G: self.TEXT, "skills/g/a.md": "a\n", "skills/g/g/a.md": "b\n"})
-        assert loads_in(self.G, self.TEXT, read) == ["skills/g/g/a.md"]
-
-    def test_a_path_found_nowhere_is_reported_in_its_loading_directory_form(self):
-        read = reader({self.G: self.TEXT})
-        assert missing_loads([self.G], read) == [(self.G, "skills/g/g/a.md")]
-
-    def test_the_walk_reaches_the_plugin_root(self):
-        read = reader({self.G: "Read `top/a.md` now.\n", "top/a.md": "a\n"})
-        assert loads_in(self.G, "Read `top/a.md` now.\n", read) == ["top/a.md"]
-
-    def test_the_walk_never_resolves_outside_the_plugin_root(self):
-        read = reader({self.G: "Read `../../../x.md` now.\n", "x.md": "inside\n"})
-        with pytest.raises(LoadError) as e:
-            loads_in(self.G, "Read `../../../x.md` now.\n", read)
-        assert str(e.value) == f"'{self.G}' loads '../../../x.md', which is outside the plugin root"
-
-    def test_an_ancestor_form_that_leaves_the_root_is_skipped_even_when_the_reader_has_it(self):
-        read = reader({self.G: "Read `../a.md` now.\n", "../a.md": "outside\n"})
-        assert loads_in(self.G, "Read `../a.md` now.\n", read) == ["skills/a.md"]
-
-    def test_the_closure_resolves_a_non_load_mention_by_the_same_rule(self):
+    def test_a_mention_resolves_in_an_ancestor_directory_when_the_mentioning_directory_lacks_it(self):
         files = {ENTRY: "See `x/a.md`.\n", "skills/x/a.md": "a\n"}
         assert "skills/x/a.md" in derive(ENTRY, [], reader(files)).files
 
-    def test_an_ancestor_resolved_load_reaches_the_closure(self):
-        files = {self.G: self.TEXT, "skills/g/a.md": "a\n"}
-        assert set(derive(self.G, [], reader(files)).files) == {self.G, "skills/g/a.md"}
+    def test_the_mentioning_directory_wins_when_both_exist(self):
+        files = {self.G: "See `g/a.md`.\n", "skills/g/a.md": "a\n", "skills/g/g/a.md": "b\n"}
+        got = derive(self.G, [], reader(files)).files
+        assert "skills/g/g/a.md" in got and "skills/g/a.md" not in got
+
+    def test_the_walk_reaches_the_plugin_root(self):
+        files = {self.G: "See `top/a.md`.\n", "top/a.md": "a\n"}
+        assert "top/a.md" in derive(self.G, [], reader(files)).files
+
+    def test_a_mention_that_leaves_the_plugin_root_is_never_resolved_even_when_the_reader_has_it(self):
+        files = {self.G: "See `../../../x.md` and `../../a.md`.\n", "x.md": "inside\n", "../a.md": "outside\n"}
+        assert derive(self.G, [], reader(files)).files == (self.G,)
 
 
 class TestIsBranch:
@@ -458,7 +400,7 @@ class TestIsBranch:
 
 class TestMissingLoads:
     def test_a_file_loading_a_missing_file_returns_the_pair(self):
-        files = {ENTRY: "Read `../_shared/gone.md` now.\n"}
+        files = {ENTRY: "Read `../_shared/gone.md` now and follow it in full.\n"}
         assert missing_loads([ENTRY], reader(files)) == [(ENTRY, "skills/_shared/gone.md")]
 
     def test_files_whose_loads_all_exist_return_nothing(self):
@@ -466,11 +408,11 @@ class TestMissingLoads:
 
     def test_a_load_outside_the_plugin_root_raises(self):
         with pytest.raises(LoadError) as e:
-            missing_loads([ENTRY], reader({ENTRY: "Read `../../../x.md` now.\n"}))
+            missing_loads([ENTRY], reader({ENTRY: "Read `../../../x.md` now and follow it in full.\n"}))
         assert "outside the plugin root" in str(e.value)
 
     def test_only_loads_count_not_other_missing_mentions(self):
-        files = {ENTRY: "See `gone.md`.\n\nRead `r.md` now.\n", "skills/x/r.md": "r\n"}
+        files = {ENTRY: "See `gone.md`.\n\nRead `r.md` now and follow it in full.\n", "skills/x/r.md": "r\n"}
         assert missing_loads([ENTRY], reader(files)) == []
 
 
@@ -502,14 +444,14 @@ class TestCachedReader:
 class TestParseOncePerRevision:
     @staticmethod
     def _parse_counter(monkeypatch):
-        calls: list[str] = []
-        real = getattr(loads, "_parse", lambda text: None)
+        calls: list[tuple[str, str]] = []
+        real = loads.parse_directives
 
-        def counting_parse(text):
-            calls.append(text)
-            return real(text)
+        def counting_parse(path, text, read):
+            calls.append((path, text))
+            return real(path, text, read)
 
-        monkeypatch.setattr(loads, "_parse", counting_parse, raising=False)
+        monkeypatch.setattr(loads, "parse_directives", counting_parse)
         return calls
 
     def test_two_cases_sharing_a_rule_file_parse_it_once_per_revision_cache(self, monkeypatch):
@@ -519,36 +461,34 @@ class TestParseOncePerRevision:
         derive(ENTRY, [B1], shared)
         derive(ENTRY, [B1, B2], shared)
         missing_loads(list(files), shared)
-        assert len(calls) == len(set(calls)) == len(set(files.values()))
+        assert calls and len(calls) == len(set(calls))
 
     def test_without_a_cache_wrapper_each_call_still_parses_and_answers(self):
         assert derive(ENTRY, [B1], reader(corpus())).files == derive(ENTRY, [B1], cached(reader(corpus()))).files
 
     def test_separate_revision_caches_do_not_share_parses_for_the_same_path(self):
-        base = {ENTRY: "Read `old.md` now.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
-        head = {ENTRY: "Read `new.md` now.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
+        base = {ENTRY: "Read `old.md` now and follow it in full.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
+        head = {ENTRY: "Read `new.md` now and follow it in full.\n", "skills/x/old.md": "o\n", "skills/x/new.md": "n\n"}
         base_read, head_read = cached(reader(base)), cached(reader(head))
         assert derive(ENTRY, [], base_read).files == (ENTRY, "skills/x/old.md")
         assert derive(ENTRY, [], head_read).files == (ENTRY, "skills/x/new.md")
-        assert loads_in(ENTRY, base[ENTRY], base_read) == ["skills/x/old.md"]
-        assert loads_in(ENTRY, head[ENTRY], head_read) == ["skills/x/new.md"]
         assert missing_loads([ENTRY], head_read) == []
 
 
 class TestLinearSentences:
     def test_twenty_thousand_abbreviations_in_one_sentence_are_split_in_linear_time(self):
-        text = "Read `r.md` now, " + "go e.g. " * 20000 + "then read `late.md`. Read `last.md` now.\n"
-        files = {ENTRY: text, "skills/x/r.md": "r\n", "skills/x/late.md": "l\n", "skills/x/last.md": "l\n"}
+        text = "go " + "e.g. " * 20000 + "then stop.\n\nRead `r.md` now and follow it in full.\n"
         started = time.perf_counter()
-        got = loads_in(ENTRY, text, reader(files))
+        got = parse_directives(ENTRY, text, reader({}))
         elapsed = time.perf_counter() - started
-        assert got == ["skills/x/r.md", "skills/x/late.md", "skills/x/last.md"]
+        assert [load.raw for load in got.loads] == ["r.md"]
         assert elapsed < 1.0
 
     def test_e_g_and_i_e_do_not_end_a_sentence_but_a_word_ending_in_them_does(self):
-        text = "Read `a.md` e.g. now and (i.e. later) then `b.md`. Read `c.md` once. Mre.g. x. Read `d.md` too.\n"
-        files = {ENTRY: text, **{f"skills/x/{n}.md": "x\n" for n in "abcd"}}
-        assert loads_in(ENTRY, text, reader(files)) == [f"skills/x/{n}.md" for n in "abc"] + ["skills/x/d.md"]
+        text = ("When asked e.g. now and (i.e. later), read `a.md` now and follow it in full. Mre.g. x. "
+                "Read `d.md` now and follow it in full.\n")
+        got = parse_directives(ENTRY, text, reader({}))
+        assert [load.raw for load in got.loads] == ["a.md", "d.md"]
 
 
 PLUGINS = ("craft", "lore", "portage", "outpost")
@@ -800,3 +740,103 @@ class TestDeclaredMentions:
         with pytest.raises(LoadError) as caught:
             declared(tmp_path, '{"a.md": ["b c.md"]}')
         assert "b c.md" not in str(caught.value)
+
+
+class TestClosureFollowsLoadsAndUndeclaredMentions:
+    A = "skills/a/SKILL.md"
+    OTHER = "skills/b/SKILL.md"
+    MENTION = "Run the sibling procedure `../b/SKILL.md` on its own.\n"
+    DECLARATION = json.dumps({A: [OTHER]})
+
+    def files(self, entry_text: str, declared: str | None = None) -> dict[str, str]:
+        files = {self.A: entry_text, self.OTHER: "Other core.\n"}
+        if declared is not None:
+            files["declared-mentions.json"] = declared
+        return files
+
+    def test_a_mention_the_plugin_declares_does_not_pull_the_mentioned_core_into_the_closure(self):
+        got = derive(self.A, [], reader(self.files(self.MENTION, self.DECLARATION)))
+        assert got.files == (self.A,)
+
+    def test_the_same_mention_undeclared_pulls_it_in(self):
+        got = derive(self.A, [], reader(self.files(self.MENTION)))
+        assert got.files == (self.A, self.OTHER)
+
+    def test_a_fixed_wording_load_of_it_pulls_it_in_even_when_the_file_declares_the_path(self):
+        text = "Read `../b/SKILL.md` now and follow it in full.\n"
+        got = derive(self.A, [], reader(self.files(text, self.DECLARATION)))
+        assert got.files == (self.A, self.OTHER)
+
+    def test_a_declaration_for_another_file_does_not_cover_this_files_mention(self):
+        declared = json.dumps({"skills/c/SKILL.md": [self.OTHER]})
+        got = derive(self.A, [], reader(self.files(self.MENTION, declared)))
+        assert self.OTHER in got.files
+
+    def test_each_revisions_reader_serves_its_own_declared_list(self):
+        base = cached(reader(self.files(self.MENTION)))
+        head = cached(reader(self.files(self.MENTION, self.DECLARATION)))
+        assert derive(self.A, [], base).files == (self.A, self.OTHER)
+        assert derive(self.A, [], head).files == (self.A,)
+
+    def test_a_malformed_declared_list_is_a_one_line_fault(self):
+        with pytest.raises(LoadError) as e:
+            derive(self.A, [], reader(self.files(self.MENTION, "[]")))
+        assert str(e.value).startswith("declared-mentions.json ")
+
+    @pytest.mark.parametrize("name", ["helper.py", "table.json"])
+    def test_a_fixed_wording_load_of_a_file_that_is_not_markdown_pulls_it_into_the_closure(self, name):
+        target = f"skills/_shared/{name}"
+        files = self.files(f"Read `../_shared/{name}` now and follow it in full.\n", json.dumps({self.A: [target]}))
+        files[target] = "payload\n"
+        assert target in derive(self.A, [], reader(files)).files
+
+    def test_a_file_reached_only_through_a_non_markdown_load_is_followed_from_there(self):
+        files = self.files("Read `../_shared/helper.py` now and follow it in full.\n",
+                           json.dumps({self.A: ["skills/_shared/helper.py"]}))
+        files["skills/_shared/helper.py"] = "See `tail.md`.\n"
+        files["skills/_shared/tail.md"] = "tail\n"
+        assert "skills/_shared/tail.md" in derive(self.A, [], reader(files)).files
+
+    def test_a_load_phrased_outside_every_recognised_form_still_pulls_its_file_in(self):
+        files = self.files("Apply `../_shared/x.md`.\n")
+        files["skills/_shared/x.md"] = "x\n"
+        assert derive(self.A, [], reader(files)).files == (self.A, "skills/_shared/x.md")
+
+    def test_a_declared_branch_the_entry_names_in_the_old_wording_still_derives(self):
+        text = ("Read `r.md` now.\n\nUse the rest.\n\n"
+                "Read `b1.md` when the run is unattended.\n")
+        files = {ENTRY: text, B1: BRANCH_HEAD + "Branch.\n", "skills/x/r.md": "r\n"}
+        got = derive(ENTRY, [B1], reader(files))
+        assert got.files == (ENTRY, B1, "skills/x/r.md") and got.split is True
+
+    def test_an_old_wording_load_resolved_only_through_an_ancestor_is_still_followed(self):
+        files = {ENTRY: "Read `_shared/r.md` now.\n\nUse the rest.\n", R: "Rule.\n"}
+        assert R in derive(ENTRY, [], reader(files)).files
+
+
+class TestStrictLoadResolution:
+    G = "skills/g/SKILL.md"
+    TEXT = "Read `g/a.md` now and follow it in full.\n"
+
+    def test_a_load_that_exists_only_in_an_ancestor_directory_is_reported_missing(self):
+        read = reader({self.G: self.TEXT, "skills/g/a.md": "a\n"})
+        assert missing_loads([self.G], read) == [(self.G, "skills/g/g/a.md")]
+
+    def test_a_load_that_exists_in_the_loading_directory_is_not_missing(self):
+        read = reader({self.G: self.TEXT, "skills/g/g/a.md": "a\n"})
+        assert missing_loads([self.G], read) == []
+
+    def test_a_load_that_exists_nowhere_is_reported_in_its_loading_directory_form(self):
+        assert missing_loads([self.G], reader({self.G: self.TEXT})) == [(self.G, "skills/g/g/a.md")]
+
+    def test_an_escaping_fixed_wording_load_is_refused(self):
+        text = "Read `../../../x.md` now and follow it in full.\n"
+        with pytest.raises(LoadError) as e:
+            missing_loads([self.G], reader({self.G: text}))
+        assert str(e.value) == f"'{self.G}' loads '../../../x.md', which is outside the plugin root"
+
+    def test_a_fixed_wording_load_path_with_a_character_outside_the_allowlist_is_refused(self):
+        text = "Read `a b$.md` now and follow it in full.\n"
+        with pytest.raises(LoadError) as e:
+            missing_loads([self.G], reader({self.G: text}))
+        assert str(e.value) == f"'{self.G}' load #1 has characters outside [A-Za-z0-9._/-]"
