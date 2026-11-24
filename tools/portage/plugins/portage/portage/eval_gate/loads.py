@@ -449,10 +449,12 @@ def _located_paragraphs(lines: list[str]) -> list[tuple[str, list[tuple[int, int
         if not block:
             continue
         starts, offset = [], 0
+        joined = []
         for number, line in block:
             starts.append((offset, number))
-            offset += len(line) + 1
-        out.append((" ".join(line for _, line in block), starts))
+            joined.append(line.lstrip() if joined else line)
+            offset += len(joined[-1]) + 1
+        out.append((" ".join(joined), starts))
     return out
 
 

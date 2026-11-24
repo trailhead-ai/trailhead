@@ -651,6 +651,11 @@ class TestParseDirectivesFixedForms:
         result = directives(tmp_path, "# T\n\nRead `a.md`\nnow and follow it in full.\n")
         assert [(load.raw, load.line) for load in result.loads] == [("a.md", 3)]
 
+    def test_a_load_wrapped_inside_an_indented_list_item_is_still_one_load(self, tmp_path):
+        result = directives(tmp_path, "# T\n\n- Intro sentence here. Read\n  `a.md`\n  now and follow it in full.\n")
+        assert result.misworded == ()
+        assert [(load.raw, load.line) for load in result.loads] == [("a.md", 3)]
+
     def test_two_loads_in_one_paragraph_are_both_found_in_order(self, tmp_path):
         result = directives(tmp_path, "Read `a.md` now and follow it in full. "
                                       "When x, read `b.md` now and follow it in full.\n")
