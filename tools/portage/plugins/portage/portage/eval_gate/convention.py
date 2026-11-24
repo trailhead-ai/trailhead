@@ -25,7 +25,8 @@ Rules, by the name each fault carries:
 - ``unreadable-file``: a file the walk cannot read as UTF-8 text; the check fails closed.
 - ``declared-mentions-malformed``, ``declared-mention-stale``, ``declared-mention-also-loaded``: the
   ``<root>/declared-mentions.json`` list (see ``loads.read_declared_mentions``): a malformed list, an entry
-  whose file no longer names the path, an entry naming a path the same file loads.
+  whose file no longer names the path, an entry naming a path the same file loads. A path a file declares there
+  is a plain mention, so a sentence naming only declared paths is not a ``misworded-load``.
 """
 
 from __future__ import annotations
@@ -90,7 +91,7 @@ def _unsafe_reason(raw: str, target: str | None) -> str | None:
     return None
 
 
-def _check_file(root: Path, read, file: str, faults: _Faults) -> None:
+def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _Faults) -> None:
     try:
         text = _get(read, file)
     except LoadError as exc:
@@ -100,6 +101,8 @@ def _check_file(root: Path, read, file: str, faults: _Faults) -> None:
         return
     directives = parse_directives(file, text, read)
     for item in directives.misworded:
+        if all(resolve_existing(file, raw, read) in declared for raw in item.paths):
+            continue
         several = len(item.paths) > 1
         shown = ", ".join(_q(p, n) for n, p in enumerate(item.paths, 1))
         faults.add(file, item.line, "load-names-several-files" if several else "misworded-load",
@@ -193,8 +196,12 @@ def check_plugin(root: Path) -> list[str]:
     root = Path(root)
     read = cached(tree_reader(root))
     faults = _Faults()
+    try:
+        declared = read_declared_mentions(root)
+    except LoadError:
+        declared = {}
     for file in _walk(root):
-        _check_file(root, read, file, faults)
+        _check_file(root, read, file, frozenset(declared.get(file, ())), faults)
     _check_declared(root, read, faults)
     return faults.found
 

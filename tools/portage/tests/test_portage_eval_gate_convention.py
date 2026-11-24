@@ -370,6 +370,27 @@ class TestDeclaredMentions:
         files = {**self.FILES, "skills/y/SKILL.md": FULL.format(p="../_shared/r.md")}
         assert self.declare(tmp_path, {"skills/x/SKILL.md": ["skills/_shared/r.md"]}, files) == []
 
+    MENTION = {"skills/x/SKILL.md": "# T\n\nUse the helper, whose mechanism lives in `../_shared/r.md`.\n",
+               "skills/_shared/r.md": "R\n"}
+
+    def test_a_sentence_with_a_directive_verb_naming_a_declared_mention_is_not_misworded(self, tmp_path):
+        assert self.declare(tmp_path, {"skills/x/SKILL.md": ["skills/_shared/r.md"]}, self.MENTION) == []
+
+    def test_the_same_sentence_undeclared_is_misworded(self, tmp_path):
+        faults = faults_of(tmp_path, self.MENTION)
+        assert len(rule_faults(faults, "misworded-load")) == 1
+
+    def test_a_declaration_for_another_file_does_not_clear_the_sentence(self, tmp_path):
+        files = {**self.MENTION, "skills/y/SKILL.md": "# T\n\nSee `../_shared/r.md` for the mechanism.\n"}
+        faults = self.declare(tmp_path, {"skills/y/SKILL.md": ["skills/_shared/r.md"]}, files)
+        assert [f.split(": ")[0] for f in rule_faults(faults, "misworded-load")] == ["skills/x/SKILL.md:3"]
+
+    def test_a_declared_path_does_not_clear_a_sentence_that_also_names_an_undeclared_file(self, tmp_path):
+        files = {**self.MENTION, "skills/_shared/q.md": "Q\n",
+                 "skills/x/SKILL.md": "# T\n\nUse `../_shared/r.md` and `../_shared/q.md`.\n"}
+        faults = self.declare(tmp_path, {"skills/x/SKILL.md": ["skills/_shared/r.md"]}, files)
+        assert len(rule_faults(faults, "load-names-several-files")) == 1
+
     def test_a_malformed_list_is_refused(self, tmp_path):
         files = {**self.FILES, "declared-mentions.json": "{not json"}
         faults = faults_of(tmp_path, files)
