@@ -92,14 +92,14 @@ never restates them.
   edit, not collected for the end, so a session interrupted part-way leaves the calls so far on
   record. A decision names the question, the choice and the reasoning. Bring `**Checkpoint:**` up to
   date with each write.
-- **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, read
-  fresh immediately beforehand, after the credential scrub (`_shared/security.md`) has run over the
-  text to be written. The same scrub runs before step 8's full-body parent write and before every
-  later write to the parent. Each of those bodies and diffs reaches `lore` from a temp file by stdin
-  redirect, never on a command line, and the file is removed after the write when removal is
-  available (`_shared/unattended.md`, Record writes). As `_shared/unattended.md` says, when an
-  update reports that the diff did not apply, read the record fresh and rebuild the diff once; a
-  write that still fails, or fails for any other reason, ends the session with
+- **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, taken
+  from a fresh copy immediately beforehand, after the credential scrub (`_shared/security.md`) has
+  run over the text to be written. The same scrub runs before step 8's full-body parent write and
+  before every later write to the parent. Each of those bodies and diffs reaches `lore` from a temp
+  file by stdin redirect, never on a command line, and the file is removed after the write when
+  removal is available (`_shared/unattended.md`, Record writes). As `_shared/unattended.md` says,
+  when an update reports that the diff did not apply, read the record fresh and rebuild the diff
+  once; a write that still fails, or fails for any other reason, ends the session with
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
@@ -618,9 +618,9 @@ that existing parent, exactly as the topic-rooted path does below.
      `lore record create --kind task --title '<topic>' --status ready < <body-path>`, the body
      written to a `mktemp` file with the file-writing tool and read by redirect. This stores the
      plan as a searchable lore `task` record, linkable from session notes and future planning.
-     Before creating it, check whether the resolved spec already has an open slice parent — validate
-     `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any vault-sourced
-     value entering a command before it is substituted into this query:
+     Before creating it, check whether the resolved spec already has an unfinished slice parent —
+     validate `<spec-name>` against the safe-value shape `_shared/security.md` codifies for any
+     vault-sourced value entering a command before it is substituted into this query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
      rather than about any task linked to the spec — a follow-up or a coordination task carries

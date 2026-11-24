@@ -152,9 +152,9 @@ that fails. Then run
 - **Exit 0, printing `stuck: ACn, ...`.** The build is finished and only a manual check nobody has
   carried out keeps the slice open, so there is nothing to resume or re-plan. Read
   `../_shared/execute.md` now and follow it in full. Phase 6 also needs the documents step 9 reads
-  alongside it, so read those as step 9 lists them. Run its Phase 6 inline against this parent as
-  the caller that says **run Phase 6 as a no-ask close** — asking no one about the check. The branch
-  is recovered before the push by execute's own paragraph ([the
+  alongside it, which step 9 lists. Run its Phase 6 inline against this parent as the caller that
+  says **run Phase 6 as a no-ask close** — asking no one about the check. The branch is recovered
+  before the push by execute's own paragraph ([the
   recovery](../_shared/execute.md#no-ask-close-branch-recovery)); this skill never restates it. A
   close that finishes ends this run at the slice boundary: report the closed slice, say its branch
   is pushed and that a pull request is owed, naming the branch and `/portage:pull_request`, and
@@ -283,13 +283,13 @@ exists, so planning updates it in place and creates no second parent.
 
 **Read it, don't invoke it.** A skill-to-skill chain is unreliable, by `/craft:plan`'s own
 council-dispatch rule (`../plan/SKILL.md`, step 8.5) — the same deferral step 4 above already
-applies to `../slice/SKILL.md`. Read `../plan/SKILL.md` now. Run it inline in this session, running
-its Process steps 1 through 8 against the slice parent — stopping before that skill's own Council
-Review step (`../plan/SKILL.md`, step 8.5), which step 8 below runs instead, because the driver
-hangs its own checkpoint and its `plan-critical` escalation off that gate. Planning's Present for
-Approval step (`../plan/SKILL.md`, step 9) follows that gate rather than this one, exactly where
-planning's own ordering puts it — step 8 below runs it. This skill never restates that procedure: a
-second copy here is exactly how the two would drift apart.
+applies to `../slice/SKILL.md`. Read `../plan/SKILL.md` now and follow it in full. Run it inline in
+this session, running its Process steps 1 through 8 against the slice parent — stopping before that
+skill's own Council Review step (`../plan/SKILL.md`, step 8.5), which step 8 below runs instead,
+because the driver hangs its own checkpoint and its `plan-critical` escalation off that gate.
+Planning's Present for Approval step (`../plan/SKILL.md`, step 9) follows that gate rather than this
+one, exactly where planning's own ordering puts it — step 8 below runs it. This skill never restates
+that procedure: a second copy here is exactly how the two would drift apart.
 
 **Running it inline is what makes the plan phase attended, and that is the point.** A human is
 present in this session, so planning's own Clarify step asks the operator in this session rather

@@ -28,7 +28,6 @@
   ],
   "skills/brainstorm/SKILL.md": [
     "skills/_shared/execute.md",
-    "skills/_shared/note-storage.md",
     "skills/_shared/security.md",
     "skills/_shared/slice.md",
     "skills/distill/SKILL.md",
@@ -62,32 +61,22 @@
     "skills/gauntlet/SKILL.md"
   ],
   "skills/gauntlet/dispositions.md": [
-    "skills/_shared/council.md",
     "skills/gauntlet/SKILL.md"
   ],
   "skills/plan/SKILL.md": [
-    "skills/_shared/note-storage.md",
-    "skills/_shared/security.md",
     "skills/_shared/slice.md"
   ],
   "skills/polish/SKILL.md": [
     "skills/_shared/note-storage.md"
   ],
-  "skills/receiving-code-review/SKILL.md": [
-    "skills/_shared/council.md"
-  ],
   "skills/review/SKILL.md": [
     "skills/_shared/status-ownership.md",
-    "skills/review/code-reviewer.md",
     "skills/tidy-followups/SKILL.md"
   ],
   "skills/tidy-followups/SKILL.md": [
     "skills/_shared/refine.md",
     "templates/plan.md",
     "templates/task.md"
-  ],
-  "agents/code-reviewer.md": [
-    "skills/_shared/council.md"
   ],
   "agents/consistency-auditor.md": [
     "skills/gauntlet/SKILL.md"

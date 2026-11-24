@@ -42,7 +42,8 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 **3. Dispatch code-reviewer subagent:**
 
-Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
+Read `code-reviewer.md` now and follow it in full. Use the Task tool with the code-reviewer type,
+filling in that template.
 
 **4. For security-sensitive diffs, also dispatch `security-auditor`.** If the change touches auth,
 input validation, crypto, secrets, or session handling, run both reviews in parallel — they're
