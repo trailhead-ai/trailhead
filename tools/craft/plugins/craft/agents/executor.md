@@ -156,6 +156,7 @@ any. Always:
   for. Asserting that a file **your test just generated** exists is fine — that is an output, not a
   source inspection — but assert its contents where you can: existence proves the step ran, contents
   prove it did the right thing.
+
   `trailhead core show adr/a-test-executes-its-subject`
   `trailhead core show adr/presence-and-absence-are-not-behaviour`
 
