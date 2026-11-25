@@ -678,12 +678,18 @@ When the change is too large, narrow the slice rather than hand it over as it is
 one principal ships its access check in the slice that first makes it reachable, so that check is
 core even when a cut by usefulness would let it wait. (`../_shared/slice.md` requires the same for a
 visual surface under "State coverage: the floor a visual surface owes"; the principle here is not
-limited to visual surfaces.) The `**Narrowed:**` line never lists it, the reduced list the covers
-gate certifies includes it, and no child task is written to remove or defer it.
+limited to visual surfaces.) Whether a surface is reachable by more than one principal is read from
+the spec first (its criteria, problem and non-goals), then the repo's agent-instruction file and
+contributing guide, then the code the surface already has. A criterion that restricts who sees or
+changes what ("only the operator's reports include customer names") is an access check whether or
+not it uses the word, so it is always kept. The `**Narrowed:**` line never lists it, the reduced
+list the covers gate certifies includes it, and no child task is written to remove or defer it.
 2. **Decompose only the kept criteria,** and settle the sizes again for that set. No child task is
    written, titled or delivering, for a dropped criterion.
 3. **Give back a folded entry whose work went with the dropped criteria** through the reopen below,
-   with the narrowing as its reason.
+   with the narrowing as its reason, except an entry whose work concerns access (authorization, a
+   role or permission check, who can see or change what) or that is marked urgent: that entry is not
+   given back as routine, as the paragraph after the reopen below says.
 4. **Record the narrowing in step 8's single full-body write**, and show it at step 9. Under
    `--unattended`, log the cut as a decision in the run block the moment it is made: a one-line
    summary saying the slice was narrowed because it is too large, a `Question:` line asking where
@@ -770,7 +776,12 @@ way as step 1's:
 The entry goes back to `open` for a later slice, and no child names it. This reopen is a routine
 decision under the rule, so it is not asked, and **under `--unattended` nothing here is asked:**
 decide it by this test and log it as a decision in the run block, naming the entry and the reason
-(the balloon reason or the narrowing). An entry that the rule says to ask about is, under
+(the balloon reason or the narrowing). The narrowing is never a routine reason for an entry whose
+work concerns access (authorization, a role or permission check, who can see or change what) or that
+is marked urgent: plan keeps that entry in the slice. If keeping it would defeat the cut, the
+give-back is a question about that entry: attended, put the blocking prompt
+`../_shared/escalation.md` defines and end the turn; under `--unattended`, park it as "How a stop is
+parked" says and do not reopen the entry. An entry that the rule says to ask about is, under
 `--unattended`, given back the same way with `reopen`, its reason beginning with the trigger in the
 words the rule's "No one to answer" section gives, and the closing message lists it first among what
 needs the operator. A failed call is reported in the closing message with its `reason-code:` token
@@ -1097,10 +1108,10 @@ skipped."
 
 **Re-review:** no automatic re-review after the user resolves Critical findings inline. The user
 attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. The one
-exception is step 9's restore of a rejected cut that added child tasks: the plan that now stands is
-one the council has not seen, so it reviews that plan again. This keeps mandatory-review cost
-bounded; if first-pass calibration is wrong, tune the bars for each lens in `_shared/council.md`
-rather than adding iteration cycles.
+exception is step 9's restore of a rejected cut, or a re-cut, that added child tasks or changed any
+child's content: the plan that now stands is one the council has not seen, so it reviews that plan
+again. This keeps mandatory-review cost bounded; if first-pass calibration is wrong, tune the bars
+for each lens in `_shared/council.md` rather than adding iteration cycles.
 
 **Hard-floor gate:** the "reply `build` to hand off" prompt in Step 9 must NOT be printed until
 every Critical finding has a disposition. Important and Minor findings do not block. (Under
@@ -1151,10 +1162,14 @@ handoff prompt until `lore record show` reads each such child as `dropped`. A fo
 7 gave back because its work went with the dropped criteria and whose criteria are now restored is
 folded back in: write a `fold` transition for it through `found_work.py`, as step 1 writes it, put
 it on the parent's `**Folds:**` line again, and recreate the child that resolves it with the
-`Resolves` line in its **Delivers**. When the restore added children, step 8.5's council runs again
-on the restored plan before presenting; that second pass replaces the `## Council Review` section,
-written as a `--diff` hunk, so the section the hard-floor gate below reads holds the latest pass
-alone. Then present again.
+`Resolves` line in its **Delivers**. A re-cut that asks to drop the access check, or any other
+criterion step 7 always keeps, is refused for that part: plan says why, leaves the criterion
+covered, and points to changing the spec through `/lore:correct`, as step 7's no-cut reshape option
+does. When the restore or the re-cut added children or changed the content of any child, step 8.5's
+council runs again on the restored plan before presenting; that second pass is appended to the
+`## Council Review` section as a second dated pass, written as a `--diff` hunk, and each Critical
+from the earlier pass that has no disposition is carried forward into it, so the hard-floor gate
+below reads every Critical the section holds. Then present again.
 
 **Before printing the handoff prompt, confirm every Critical finding from Step 8.5 has a disposition
 recorded in the plan's `## Council Review` section.** If any Critical is undisposed, do not print
