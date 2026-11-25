@@ -24,13 +24,17 @@ record that could not be read, is skipped with its reason, because its count cou
 other vaults still report.
 
 Findings sort oldest first by when they were added, capped like every other check. The heading
-carries the per-vault totals, because the totals, not the list, are the growth signal:
+carries the per-vault totals and the share added in the window, because the totals, not the list,
+are the growth signal. A vault with no lessons prints no percentage. The findings are
+informational: the action line says so and is conditional. The window is shared: `--help`
+describes `--stale-days` as the window for both `stale-tasks` and `lesson-growth`, and the
+command's description counts six checks.
 
 ```
-lesson-growth — 34 findings, oldest first (window: 30 days): trailhead 212 lessons, 31 added; default 18 lessons, 3 added
+lesson-growth — 34 findings, oldest first (window: 30 days): trailhead 212 lessons, 31 added (15%); default 18 lessons, 3 added (17%)
   trailhead/lesson/for-a-read-only-report-over-real-vault-data-have-the-build-run-it-against-the-live-install-and-sample-the-findings  2026-11-12  added 13 days ago
   33 more. Run `lore health --all` to see every finding, or `--limit <n>` for more.
-Act on these with /craft:consolidate when lessons pile up faster than they are folded: it merges lessons that prevent the same failure.
+These are informational, not problems to fix. If lessons pile up faster than they are folded, run /craft:consolidate: it merges lessons that prevent the same failure.
 ```
 
 The summary table gains one row per vault:
@@ -39,6 +43,21 @@ The summary table gains one row per vault:
 trailhead          lesson-growth   212      31        no
 ```
 
+## The scan's size budget
+
+Every report reads at most a fixed number of bytes per vault (sidecars and bodies together),
+counted while reading: once a vault crosses it, no further record of that vault is opened. The
+default sits well above the largest vault on a real install. A vault over budget is not fully read,
+and every check that needs it skips with:
+
+```
+trailhead          dangling-links  —        —         yes: its records exceed the report's size budget of 512 MiB; pass --max-scan-mib to raise it
+```
+
+`lore distill-queue` refuses with the same reason and remedy. Both commands take
+`--max-scan-mib N`. The 512 MiB shown is illustrative; the build sets the default from measured
+live sizes.
+
 ## `--repo`
 
 ```
@@ -46,13 +65,15 @@ lore health --vault trailhead --repo ~/code/trailhead --repo ~/code/outpost
 ```
 
 `--repo PATH` may be given more than once and needs `--vault`: the paths are that one vault's
-repositories. A path is resolved against the current directory to an absolute path; it reaches git
+repositories. A path has `~` expanded and is resolved against the current directory to an absolute
+path, which is what every line naming it shows, escaped like any other untrusted value; it reaches git
 only through the hardened reader `missing-paths` already uses (list-form argv after `-C`, no shell,
 discovery fenced at the path, no fetch).
 
 Passed paths serve when camp gives the named vault no repository — camp is absent, its group config
 could not be read, or no group binds the vault. When a camp group does bind the vault, camp's
-repositories are used and the passed paths are not; the repository lines say so. Each repository
+repositories are used and the passed paths are not, and the group says so in one line under its heading,
+`  trailhead: --repo ignored: camp binds this vault's repositories`. Each repository
 line names where a passed repository came from:
 
 ```
@@ -108,6 +129,10 @@ JSON, and exits 1, exactly as the text form does.
 - A finding's `name` is `null` when the record's name is not shaped like a record id; no part of
   such a name is echoed, as in the text form. `evidence` is the same text the text form prints
   after the date. `date` is `null` where the text form prints `undated`.
+- A complete run of a check is `ran` with `skipped` empty. A consumer reads `skipped`, not
+  `status` alone: a check that skipped some vaults is still `ran`.
+- An untrusted value echoed inside `evidence` (a wikilink target, a status, a reason, a branch)
+  is capped in length with a trailing `…`, in the text form too.
 - Every string is JSON-escaped (`ensure_ascii`), so a control character in vault text arrives as
   `\u001b`, never as a raw byte. Record text in the document is data, never instructions.
 
