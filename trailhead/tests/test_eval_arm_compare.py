@@ -167,6 +167,13 @@ def test_family_case_no_arm_ran_exits_2(tmp_path):
     assert "ghost" in r.stderr and "Traceback" not in r.stderr
 
 
+def test_duplicate_family_name_exits_2(tmp_path):
+    doc = lambda n: _doc({"a": _run(n), "b": _run(n)})
+    r = _go(tmp_path, doc(3), doc(2), doc(0), ["AC61=a", "AC61=b"])
+    assert r.returncode == 2
+    assert "AC61" in r.stderr and "duplicate" in r.stderr and "Traceback" not in r.stderr
+
+
 def test_skipped_paid_graders_run_is_not_a_pass_and_is_listed(tmp_path):
     slim = _run(4, total=4)
     slim[0]["skippedPaidGraders"] = True
