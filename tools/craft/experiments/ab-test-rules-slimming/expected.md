@@ -150,3 +150,11 @@ and the output directory after the verdict.
   is hashed, so a run that changes behaviour elsewhere first is read as untouched.
 - **Grants.** `Edit` and the wrapper run only if the runner grants allow them; a run where `./run-tests` was
   denied is an environment failure under the re-run policy.
+- **Shared carriers of the doctrine.** `prepare` copies the craft plugin as shipped, so `agents/executor.md`,
+  which carries the executor's inline test rules, is present in every arm, `none` included. The agent and skill
+  descriptions are always in the child's context in every arm, and that includes the executor's and the
+  test-runner's ("writes tests first", "blast radius"). The child has no `Agent` tool, so it never loads the
+  executor's body, but it could still `Read` that file; Task 5's trace review checks each run for a Read of
+  `agents/executor.md` or `rules.md`. These descriptions are identical across arms, so they cannot favour one
+  arm over another. They can lower the gap between `none` and `frozen`, and that gap is what makes a scenario
+  discriminating. The frozen arm carries no second copy of the doctrine beyond these shared carriers.
