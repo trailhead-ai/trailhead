@@ -78,6 +78,23 @@
         "skills/tidy-followups/SKILL.md"
       ]
     },
+    "distill-sweep-builds-its-queue-from-lore": {
+      "measures": [
+        "skills/distill/SKILL.md"
+      ]
+    },
+    "distill-sweep-stops-when-lore-has-no-distill-queue": {
+      "measures": [
+        "skills/distill/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "distill-sweep-relays-a-distill-queue-refusal": {
+      "measures": [
+        "skills/distill/SKILL.md"
+      ],
+      "merge_only": true
+    },
     "slice-spec-complete-hands-off-to-tidy-followups": {
       "measures": [
         "skills/slice/SKILL.md"

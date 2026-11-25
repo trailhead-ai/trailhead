@@ -79,6 +79,7 @@ _HELP_LEVELS = [
     (["session", "show"], "lore session show"),
     (["health"], "lore health"),
     (["validate"], "lore validate"),
+    (["distill-queue"], "lore distill-queue"),
 ]
 
 
@@ -101,7 +102,7 @@ class TestHelpAtEveryLevel:
         # Registration order is load-bearing for the help listing; assert the
         # exact choices string argparse renders.
         assert (
-            "{init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session,signing,health,validate}"
+            "{init,status,sync,publish,flush,resolve,areas,reindex,search,record,task,pipeline,vault,session,signing,health,validate,distill-queue}"
             in result.stdout
         )
 

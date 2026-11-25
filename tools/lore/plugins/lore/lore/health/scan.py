@@ -107,7 +107,7 @@ class _IndexerProbe:
         self._conn.close()
 
 
-def iter_vault_records(result: VaultScan):
+def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
     """Yield each readable record of ``result.root`` one at a time.
 
     Unreadable records, escaping skips and an unreadable vault are accumulated
@@ -118,6 +118,10 @@ def iter_vault_records(result: VaultScan):
     (the indexer skips it) but includes an oversize one (it reads without a cap).
     A vault directory that is missing, or a kind directory that cannot be
     listed, marks the vault unreadable.
+
+    The index probe is about half the scan's run time and feeds only ``indexed``;
+    a caller that never reads that count passes ``probe_index=False``, which
+    leaves ``indexed`` at 0 and every other field of the scan unchanged.
     """
 
     def skipped():
@@ -126,7 +130,7 @@ def iter_vault_records(result: VaultScan):
     def unlistable():
         result.unreadable_reason = REASON_VAULT_UNREADABLE
 
-    probe = _IndexerProbe()
+    probe = _IndexerProbe() if probe_index else None
     try:
         root = Path(result.root)
         if not root.is_dir():
@@ -178,7 +182,7 @@ def iter_vault_records(result: VaultScan):
                     UnreadableRecord(result.vault, kind, name, REASON_BODY_UNREADABLE)
                 )
                 continue
-            if probe.holds(kind, name, sidecar, body):
+            if probe is not None and probe.holds(kind, name, sidecar, body):
                 result.indexed += 1
             updated = sidecar.get("updated-at")
             yield ScannedRecord(
@@ -192,13 +196,14 @@ def iter_vault_records(result: VaultScan):
     except OSError:
         result.unreadable_reason = REASON_VAULT_UNREADABLE
     finally:
-        probe.close()
+        if probe is not None:
+            probe.close()
 
 
-def scan_vault(name: str, root) -> VaultScan:
+def scan_vault(name: str, root, *, probe_index: bool = True) -> VaultScan:
     """Scan one vault eagerly; the records land on ``result.records``."""
     result = new_vault_scan(name, root)
-    result.records.extend(iter_vault_records(result))
+    result.records.extend(iter_vault_records(result, probe_index=probe_index))
     return result
 
 
