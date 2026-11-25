@@ -129,7 +129,9 @@ read nothing the session printed before it.
 **At most three fixes are listed, plus free text.** When more than three are real, the session lists
 the recommended fix and the best others up to three, and the question itself describes each further
 fix with what choosing it costs, saying that the operator can ask for one of them by naming it in
-their own words. A fix is never left out for want of room.
+their own words. Put those in the question as their own short paragraph, one sentence per further
+fix naming the fix and its cost; an example of what the operator could say is not a substitute for
+it. A fix is never left out for want of room.
 
 ## Where the question is shown
 

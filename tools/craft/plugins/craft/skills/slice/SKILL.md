@@ -476,11 +476,13 @@ Query the spec's linked slices:
 `in-progress`, `blocked`), so a slice that closes stops blocking future passes and one still in
 flight keeps blocking them.
 
-**Before refusing, close any open slice that is stuck only on its manual check.** Take each task the
-query returned in turn. Validate `<spec-name>` and the open parent's name against step 1's
-safe-value shape (under `--unattended`, with its `..` and leading `-` rule too) before either enters
-a command, and never substitute one that fails: a parent whose name fails is not stuck and refuses
-below. Then run
+**Before refusing, close any open slice that is stuck only on its manual check.** The close belongs
+to this guard, not to the selection that follows it: a caller's limit on what the pass writes once
+it has chosen (a bounded session, no parent task) does not suspend it. Take each task the query
+returned in turn. Validate `<spec-name>` and the open parent's name against step 1's safe-value
+shape (under `--unattended`, with its `..` and leading `-` rule too) before either enters a command,
+and never substitute one that fails: a parent whose name fails is not stuck and refuses below. Then
+run
 `${CLAUDE_PLUGIN_ROOT}/scripts/pending_check.py stuck --spec <spec-name> --parent <slice-parent-name> --vault <elected-vault>`,
 where `<elected-vault>` is the vault the spec was read from.
 
@@ -872,9 +874,10 @@ decides anything. Then, in this order:
      id and the slice that did not build it (`task/<id>`), and says that entry is open again and
      every later pass stops at it. Its fixes, the recommended one first, are:
      - **Drop it, naming where the work went.** Recommended when `lore search` finds an existing
-       task that credibly holds the work, one fix per such task; the drop's `reason` names that
-       `task/<id>`. Its cost: the spec's loop no longer builds the work, which stays tracked only in
-       that task.
+       task that credibly holds the work, one fix per such task; a search that returns nothing is
+       tried again with fewer, plainer terms before concluding that no task holds it; the drop's
+       `reason` names that `task/<id>`. Its cost: the spec's loop no longer builds the work, which
+       stays tracked only in that task.
      - **Restore it as a new entry.** A drop with a reason beginning `nowhere:` that says it is
        restored, then a `restore` of the same entry, which appends a new open entry under a new id
        that no slice's `**Folds:**` line names, so a later pass can choose it. Its cost: a slice
@@ -1369,10 +1372,12 @@ chosen, a termination or an early stop alike, run
 lists the decisions the session's slice stream holds, whatever parent they sit under, and needs no
 `--parent`: that is every slice pass in the conversation, so a second pass in one conversation
 reports the first pass's decisions as well. Put the sentences it prints in your closing message,
-above any outcome line, as printed — a sentence left in an earlier message does not count — for
-example "Folded spec/x#F2 into this slice: …", "Dropped spec/x#F3: <title>, because …", "Returned
-spec/x#F2 to open: …" and "Marked spec/x#F1 done by this slice: <title>.". Any failure step 4, step
-7 or step 9 reported, with its reason-code and retry command, goes in the same report.
+above any outcome line, as printed — a sentence left in an earlier message does not count. Copy them
+unchanged, as their own block: do not restate them as bullets, shorten them, or change their wording
+or capitalisation. For example "Folded spec/x#F2 into this slice: …", "Dropped spec/x#F3: <title>,
+because …", "Returned spec/x#F2 to open: …" and "Marked spec/x#F1 done by this slice: <title>.". Any
+failure step 4, step 7 or step 9 reported, with its reason-code and retry command, goes in the same
+report.
 
 **When the pass dropped any entry, name the way back.** Say that a dropped entry is put back with
 `found_work.py entry` and its `restore` transition, which appends a new open entry carrying the
@@ -1380,7 +1385,7 @@ dropped one's work and leaves the dropped entry as it is, and never by editing t
 
 **A pass that made no found-work decision says so in one line.** That same report then prints
 `The slice made no decisions about found work.`; put it in your closing message, above any outcome
-line, as printed. A refusal ends on its own outcome line and prints nothing else.
+line, unchanged, as its own line. A refusal ends on its own outcome line and prints nothing else.
 
 **Under `--unattended`, the handoff below does not apply.** Report the chosen slice, its value claim
 and the new parent task's record id in prose, then finish the run block and end:
