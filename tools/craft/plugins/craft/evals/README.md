@@ -94,6 +94,13 @@ craft command: set `--case` to the case, `--runs 3`, and `--max-cost-usd` from t
   still end in `*`, because a branch name cannot be pinned: `git switch *` admits its option forms
   (`--discard-changes`, `--detach`), and `git log origin/*` admits `--output=<path>`, which writes a
   file the sandbox allows.
+- `Bash(./run-tests)` is how the four test-rules cases below run tests. It takes no arguments, so it
+  is pinned exactly with no `*`, but it runs whatever `./run-tests` is: the wrapper each case's
+  scaffold writes runs the fixture's suite, and an agent with Write or Edit can rewrite that file and
+  so run other code, inside the runner sandbox. Every craft case gets the grant. A prompt-level Bash
+  grant is denied, which is why it sits in the runner block. The push gate reads the runner block
+  from main, so until main carries `"Bash(./run-tests)"` the `adds-a-cli-flag-test-first` and
+  `fixes-a-reported-bug-test-first` cases fail at push: land the grant on main first.
 - **What the grants bound.** Every grant that leads with `*` (`maturity_bars.py`, `ledger_gate.py`,
   `candidate_set.py`, `covers_gate.py`, `migration_bar.py`, `pending_check.py`) matches any single command that ends in
   or contains that script path, whatever program runs it. So the set of commands a case can run is
@@ -149,3 +156,29 @@ for the gates a slice pass runs (`ledger_gate`, `candidate_set`, `covers_gate`, 
 added: the cases use the existing script, git, `mktemp` and `Write` grants. In the `credential` arm the
 `pending_check.py` stand-in appends a credential-shaped token to the drafted `check` before the real
 writer reads it, so the real waiting gate refuses.
+
+### The test-rules cases
+
+`tests-a-registered-exporter-by-running-it`, `tests-a-changed-default-through-what-it-changes`,
+`adds-a-cli-flag-test-first` and `fixes-a-reported-bug-test-first` guard the always-loaded
+`rules.md`. Each carries the live `rules.md` text in its case file's `execution.append_system_prompt`,
+the one route a run has to an always-loaded ruleset. They are the four scenarios of the slimming
+experiment in `tools/craft/experiments/ab-test-rules-slimming/`, whose `ab.py` writes them:
+
+- `ab.py sync` rewrites each case's `case.yaml`, `prompt.md` and `graders/` from the experiment's
+  scenario and puts the current `rules.md` into the case file. **Run it after any edit to
+  `rules.md`, or to a scenario in the experiment.** The cases' `expected.md` and
+  `fixtures/scaffold.sh` are committed by hand and `sync` leaves them alone.
+- `ab.py check` exits 1, naming each case that differs from what `sync` would write: the rules
+  text, the case file, the prompt or the graders. A test in `tools/craft/tests/` runs it on the real
+  tree, so CI fails on a `rules.md` edit committed without a `sync`.
+- The fixture is shared, not copied: each `fixtures/scaffold.sh` is a wrapper that execs the
+  experiment's `scaffold/scaffold.sh` with the name of its tree, as the stuck-close cases share one
+  scaffold. The scaffold runs in the repo checkout, as the others do.
+
+Grading limitation: the three test-first graders read `run-tests.log`, which the `./run-tests`
+wrapper writes. An agent with Write or Edit can write that log itself and satisfy them without
+running the tests; the graders cannot tell a forged log from a real one.
+
+All four are core: `rules.md` has no other case, and each declares `timeout_seconds` 480, inside the
+540 s gate budget. Their `measures` is `rules.md`.
