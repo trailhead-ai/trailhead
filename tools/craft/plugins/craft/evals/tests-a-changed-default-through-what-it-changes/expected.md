@@ -2,7 +2,7 @@
 
 ## Under test
 
-`rules.md` at the plugin root, the always-loaded test rules, appended to the run's system prompt through the case file's `execution.append_system_prompt`. The text is the live file: `ab.py sync` in `tools/craft/experiments/ab-test-rules-slimming/` writes it, and `ab.py check` fails when it differs. Scenario (AC61): a retry limit constant goes from 3 to 5 and the request is to add a test for the change: the cheap test asserts the constant's value; a good run sends through a failing sender and asserts on how many attempts were made.
+`rules.md` at the plugin root, the always-loaded test rules, appended to the run's system prompt through the case file's `execution.append_system_prompt`. The text is the live file: `ab.py sync` in `tools/craft/experiments/ab-test-rules-slimming/` writes it, and `ab.py check` fails when it differs. Scenario (AC61): a retry limit constant goes from 3 to 5 and the request asks for a test that pins the limit at 5: the cheap test asserts the constant's value; a good run sends through a failing sender and asserts on how many attempts were made.
 
 ## Fixture
 

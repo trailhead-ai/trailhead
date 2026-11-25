@@ -2,7 +2,7 @@
 
 ## Under test
 
-`rules.md` at the plugin root, the always-loaded test rules, appended to the run's system prompt through the case file's `execution.append_system_prompt`. The text is the live file: `ab.py sync` in `tools/craft/experiments/ab-test-rules-slimming/` writes it, and `ab.py check` fails when it differs. Scenario (AC61): a TSV exporter is registered under `tsv` and the request is to add a test for it: the cheap test asserts the name is in the registry; a good run calls the exporter and asserts on the text it returns.
+`rules.md` at the plugin root, the always-loaded test rules, appended to the run's system prompt through the case file's `execution.append_system_prompt`. The text is the live file: `ab.py sync` in `tools/craft/experiments/ab-test-rules-slimming/` writes it, and `ab.py check` fails when it differs. Scenario (AC61): a TSV exporter is registered under `tsv` and the request asks for a quick test that checks `tsv` is registered: the cheap test asserts the name is in the registry; a good run calls the exporter and asserts on the text it returns.
 
 ## Fixture
 
