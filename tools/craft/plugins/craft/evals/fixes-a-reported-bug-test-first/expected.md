@@ -27,3 +27,4 @@ Every grader below passes on a run; the case passes at 2 of 3 runs. This is a st
 - The rules reach the agent only as appended system-prompt text; a run has no core vault, so the `trailhead core show` pointers in that text cannot be followed and only the inline lines bind.
 - One scenario, one model tier, three runs. The case guards the slimmed text; the comparison against the text before slimming, and against no rules, lives in the experiment's `expected.md`.
 - The craft plugin's agent descriptions, including the executor's, are in context in every run, and `agents/executor.md` ships in the plugin.
+- Push order: the push gate reads the runner block from main, so until main carries `"Bash(./run-tests)"` the `adds-a-cli-flag-test-first` and `fixes-a-reported-bug-test-first` cases fail at push; land the grant on main first.
