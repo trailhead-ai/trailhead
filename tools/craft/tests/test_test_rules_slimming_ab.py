@@ -65,30 +65,12 @@ def _mini(tmp_path, rules=RULES_TEXT, frozen=FROZEN_TEXT):
     return craft, exp
 
 
-def _prompt_in(case_yaml_text):
-    """The appended prompt as a YAML reader would see it: a JSON string on one line, or a block scalar
-    with the `|2` indentation indicator."""
-    lines = case_yaml_text.splitlines()
-    for i, ln in enumerate(lines):
-        if ln.startswith("  append_system_prompt: "):
-            rest = ln[len("  append_system_prompt: "):]
-            if rest.startswith('"'):
-                return json.loads(rest)
-            chomp = rest[2:]
-            assert rest[:2] == "|2" and chomp in ("", "-", "+"), rest
-            body = []
-            for nxt in lines[i + 1:]:
-                if nxt.strip() and not nxt.startswith("    "):
-                    break
-                body.append(nxt[4:] if nxt.strip() else "")
-            while chomp != "+" and body and body[-1] == "":
-                body.pop()
-            return "\n".join(body) + ("" if chomp == "-" else "\n")
-    return None
+def _written_path(dest, exp, case="c1"):
+    return Path(dest) / "evals" / exp.name / case / "case.yaml"
 
 
 def _written(dest, exp, case="c1"):
-    return (Path(dest) / "evals" / exp.name / case / "case.yaml").read_text()
+    return _written_path(dest, exp, case).read_text()
 
 
 # --- prepare: the ruleset each arm carries ---------------------------------------------------
@@ -101,7 +83,7 @@ def test_prepare_sets_each_arms_ruleset_from_its_own_source(rules, frozen, tmp_p
     for arm in ("slimmed", "frozen", "none"):
         dest = tmp_path / f"out-{arm}" / "craft"
         ab.build_arm_plugin(arm, "c1", dest, craft_root=craft, exp_dir=exp)
-        got[arm] = _prompt_in(_written(dest, exp))
+        got[arm] = ab.get_append_system_prompt(_written_path(dest, exp))
     assert got == {"slimmed": rules, "frozen": frozen, "none": None}
 
 
@@ -168,9 +150,9 @@ def test_set_append_system_prompt_adds_replaces_and_removes_the_prompt(tmp_path)
     case = tmp_path / "case.yaml"
     case.write_text('schema_version: "1.1"\nname: c\nruns: 3\n')
     ab.set_append_system_prompt(case, RULES_TEXT)
-    assert _prompt_in(case.read_text()) == RULES_TEXT
+    assert ab.get_append_system_prompt(case) == RULES_TEXT
     ab.set_append_system_prompt(case, "second\n")
-    assert _prompt_in(case.read_text()) == "second\n"
+    assert ab.get_append_system_prompt(case) == "second\n"
     assert case.read_text().count("append_system_prompt") == 1
     ab.set_append_system_prompt(case, None)
     assert case.read_text() == 'schema_version: "1.1"\nname: c\nruns: 3\n'
@@ -181,7 +163,7 @@ def test_set_append_system_prompt_keeps_the_other_execution_keys(tmp_path):
     case.write_text("name: c\nexecution:\n  model: m\n  append_system_prompt: \"old\"\n  max_turns: 9\nruns: 3\n")
     ab.set_append_system_prompt(case, "new\n")
     text = case.read_text()
-    assert _prompt_in(text) == "new\n"
+    assert ab.get_append_system_prompt(case) == "new\n"
     assert "  model: m\n" in text and "  max_turns: 9\n" in text and text.endswith("runs: 3\n")
     ab.set_append_system_prompt(case, None)
     assert "  model: m\n" in case.read_text() and "append_system_prompt" not in case.read_text()
@@ -527,7 +509,7 @@ def test_sync_writes_the_live_rules_text_into_each_committed_case(tmp_path):
     craft, exp, cases = _committed(tmp_path)
     ab.sync(craft, exp, cases)
     for name in cases:
-        assert _prompt_in(_committed_case_yaml(craft, name).read_text()) == RULES_TEXT
+        assert ab.get_append_system_prompt(_committed_case_yaml(craft, name)) == RULES_TEXT
         assert (craft / "evals" / name / "prompt.md").read_text() == "do it\n"
         assert (craft / "evals" / name / "graders" / "g.md").read_text() == f"grader for {name}\n"
 
@@ -538,7 +520,7 @@ def test_sync_carries_a_changed_rules_text_and_leaves_other_cases_alone(tmp_path
     (craft / "rules.md").write_text("A different rule set.\n")
     ab.sync(craft, exp, cases)
     for name in cases:
-        assert _prompt_in(_committed_case_yaml(craft, name).read_text()) == "A different rule set.\n"
+        assert ab.get_append_system_prompt(_committed_case_yaml(craft, name)) == "A different rule set.\n"
     assert (craft / "evals" / "other-case" / "case.yaml").read_text() == "name: other\n"
 
 
@@ -647,6 +629,13 @@ def test_each_committed_case_scaffolds_the_experiments_fixture(case, tmp_path):
 POINTER_TEXT = "Rules.\n\ntrailhead core show adr/some-decision\n\n- next rule\n"
 
 
+def test_the_block_written_for_a_known_text_has_the_two_indent_header_and_four_space_body(tmp_path):
+    case = tmp_path / "case.yaml"
+    case.write_text("name: c\n")
+    ab.set_append_system_prompt(case, "a\n\n- b\n")
+    assert case.read_bytes() == b"name: c\nexecution:\n  append_system_prompt: |2\n    a\n\n    - b\n"
+
+
 def test_a_pointer_in_the_appended_text_is_not_glued_to_what_follows_it(tmp_path):
     case = tmp_path / "case.yaml"
     case.write_text("name: c\nruns: 3\n")
@@ -663,6 +652,12 @@ def test_a_pointer_in_the_appended_text_is_not_glued_to_what_follows_it(tmp_path
     "tab\there\nnaïve — ünïcode\n",
     "crlf\r\nline\n",
     "trailing spaces   \nnext\n",
+    "a\n   \nb\n",
+    "a\n      \nb\n",
+    "a\n   ",
+    "line\u2028separator\n",
+    "next\x85line\n",
+    "a\rb\n",
     "\n",
     "",
 ])
@@ -671,7 +666,6 @@ def test_the_appended_text_reads_back_exactly_and_the_other_keys_survive(text, t
     case.write_text("name: c\nexecution:\n  model: m\n  max_turns: 9\nruns: 3\n")
     ab.set_append_system_prompt(case, text)
     assert ab.get_append_system_prompt(case) == text
-    assert _prompt_in(case.read_text()) == text
     ab.set_append_system_prompt(case, "x\n")
     assert ab.get_append_system_prompt(case) == "x\n"
     ab.set_append_system_prompt(case, None)

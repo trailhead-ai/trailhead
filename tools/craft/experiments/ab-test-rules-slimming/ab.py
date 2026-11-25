@@ -63,7 +63,7 @@ def _prompt_lines(text: str) -> list[str]:
     stripped = text.rstrip("\n")
     plain = stripped and all(c in "\n\t" or c.isprintable() for c in text)
     if not plain:
-        return [f"  {PROMPT_KEY}: {json.dumps(text, ensure_ascii=False)}\n"]
+        return [f"  {PROMPT_KEY}: {json.dumps(text)}\n"]
     kept = len(text) - len(stripped)
     chomp = "-" if kept == 0 else "" if kept == 1 else "+"
     body = [f"    {ln}\n" if ln else "\n" for ln in stripped.split("\n")]
@@ -82,9 +82,12 @@ def get_append_system_prompt(case_yaml) -> str | None:
             return json.loads(rest)
         body = []
         for nxt in lines[i + 1:]:
-            if nxt.strip() and not nxt.startswith("    "):
+            if nxt.startswith("    "):
+                body.append(nxt[4:])
+            elif nxt.strip():
                 break
-            body.append(nxt[4:] if nxt.strip() else "")
+            else:
+                body.append("")
         chomp = rest[2:]
         while chomp != "+" and body and body[-1] == "":
             body.pop()
