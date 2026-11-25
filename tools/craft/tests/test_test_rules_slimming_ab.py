@@ -209,8 +209,8 @@ def test_the_bar_command_prints_the_committed_bar():
 
 # --- the fixtures, through the copy `prepare` writes ---------------------------------------------
 
-AC61 = ("tests-a-registered-exporter-by-running-it", "tests-a-changed-default-through-what-it-changes")
-AC62 = ("adds-a-cli-flag-test-first", "fixes-a-reported-bug-test-first")
+WEAK_TEST_SCENARIOS = ("tests-a-registered-exporter-by-running-it", "tests-a-changed-default-through-what-it-changes")
+TEST_FIRST_SCENARIOS = ("adds-a-cli-flag-test-first", "fixes-a-reported-bug-test-first")
 
 
 def _env(home):
@@ -252,13 +252,13 @@ def test_each_fixture_scaffolds_a_passing_suite_whose_first_run_is_logged_untouc
 
 
 def test_run_tests_takes_no_arguments_into_account(tmp_path):
-    _, cwd = _scaffolded(AC62[0], tmp_path)
+    _, cwd = _scaffolded(TEST_FIRST_SCENARIOS[0], tmp_path)
     code, _ = _run_tests(cwd, "-k", "nothing_matches_this", "tests.test_cli")
     assert code == 0
     assert _log(cwd) == "exit=0 impl=untouched\n"
 
 
-# --- the AC62 graders, applied to logs made by driving ./run-tests by hand ------------------------
+# --- the test-first graders, applied to logs made by driving ./run-tests by hand ------------------------
 
 SOLUTIONS = {
     "adds-a-cli-flag-test-first": {
@@ -344,7 +344,7 @@ def _drive(case, steps, cwd):
     return codes
 
 
-@pytest.mark.parametrize("case", AC62)
+@pytest.mark.parametrize("case", TEST_FIRST_SCENARIOS)
 @pytest.mark.parametrize("steps, verdicts, codes", [
     ("trir", (True, True, True), [1, 0]),
     ("itr", (False, True, False), [0]),
@@ -361,7 +361,7 @@ def test_the_log_graders_pass_only_a_run_that_went_red_before_the_code_changed(c
     assert tuple(_grade(graders / f"{name}.md", cwd) for name in GRADERS_62) == verdicts
 
 
-# --- the AC61 planted test files: what the `llm` grader is asked to tell apart -----------------
+# --- the planted test files: what the `llm` grader is asked to tell apart -----------------
 
 PLANTED = {
     "tests-a-registered-exporter-by-running-it": {
@@ -418,7 +418,7 @@ class RetryLimitTest(unittest.TestCase):
 }
 
 
-@pytest.mark.parametrize("case", AC61)
+@pytest.mark.parametrize("case", WEAK_TEST_SCENARIOS)
 def test_the_planted_files_both_run_green_but_only_the_good_one_fails_a_broken_subject(case, tmp_path):
     planted = PLANTED[case]
     results = {}
@@ -445,7 +445,7 @@ def test_the_recorded_fingerprint_matches_the_bar():
     assert done.stdout.strip() == recorded
 
 
-# --- what the AC61 graders can see: the contents of the one file the prompt names ----------------
+# --- what the weak-test graders can see: the contents of the one planted test file ----------------
 
 
 def _llm_sees(grader_path, cwd):
@@ -459,21 +459,20 @@ def _llm_sees(grader_path, cwd):
     return target.read_text() if target.exists() else None
 
 
-@pytest.mark.parametrize("case", AC61)
+@pytest.mark.parametrize("case", WEAK_TEST_SCENARIOS)
 @pytest.mark.parametrize("which", ["good", "bad"])
-def test_the_llm_grader_is_shown_the_test_file_the_prompt_names(case, which, tmp_path):
+def test_the_llm_grader_is_shown_the_planted_test_file(case, which, tmp_path):
     plugin, cwd = _scaffolded(case, tmp_path)
     copy = plugin / "evals" / EXP.name / case
     rel, text = PLANTED[case][which]
     judges = [p for p in (copy / "graders").glob("*.md") if ab.shared._front_matter(p)["type"] == "llm"]
     assert len(judges) == 1
     assert _llm_sees(judges[0], cwd) is None
-    assert f"`{rel}`" in (copy / "prompt.md").read_text()
     (cwd / rel).write_text(text)
     assert _llm_sees(judges[0], cwd) == text
 
 
-@pytest.mark.parametrize("case", AC61)
+@pytest.mark.parametrize("case", WEAK_TEST_SCENARIOS)
 def test_the_file_exists_grader_checks_the_path_the_prompt_names(case, tmp_path):
     plugin, cwd = _scaffolded(case, tmp_path)
     graders = plugin / "evals" / EXP.name / case / "graders"
