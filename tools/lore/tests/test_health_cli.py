@@ -271,9 +271,7 @@ def test_records_outside_the_vault_root_skip_the_check_and_are_counted_nameless(
             "0 records the index would hold (sessions included).") in r.stdout
     assert "trailhead: 1 record lies outside the vault root and was not read." in r.stdout
     assert "secret-name" not in r.stdout and "elsewhere" not in r.stdout
-    assert all(v[2].startswith("yes:") for v in rows(r.stdout).values())
-    assert rows(r.stdout)["default"][2] == (
-        "yes: vault trailhead could not be fully read, so no target can be confirmed missing")
+    assert rows(r.stdout)["default"][2] == "no"
     assert rows(r.stdout)["trailhead"][2] == "yes: records lie outside its vault root and were not read"
 
 
@@ -2482,6 +2480,26 @@ def test_a_symlinked_decision_directory_skips_only_the_checks_that_judge_decisio
     assert rows(r.stdout, "stale-tasks")["trailhead"][2] == "no"
     assert rows(r.stdout, "distill-queue")["trailhead"][2] == "no"
     assert "hidden" not in r.stdout and "ext" not in r.stdout.replace("extra", "")
+
+
+def test_a_symlinked_decision_directory_skips_only_the_vault_holding_it_for_links_checks(world, tmp_path):
+    ext = tmp_path / "ext"
+    _put(ext, "decision", "hidden")
+    (world.roots["trailhead"] / "decision").symlink_to(ext / "decision", target_is_directory=True)
+    levr = world.roots["levr"]
+    _put(levr, "lesson", "src", related={"lesson": ["gone"]})
+    _put(levr, "lesson", "old", status="dropped")
+    _put(levr, "task", "t", status="open", related={"lesson": ["old"], "decision": ["hidden"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for check in ("dangling-links", "retired-links"):
+        assert rows(r.stdout, check)["trailhead"][2] == "yes: records lie outside its vault root and were not read", check
+        assert rows(r.stdout, check)["levr"][2] == "no", check
+        assert rows(r.stdout, check)["default"][2] == "no", check
+    assert rows(r.stdout, "dangling-links")["levr"][1] == "1"
+    assert rows(r.stdout, "retired-links")["levr"][1] == "1"
+    assert "lesson/gone" in r.stdout and "lesson/old" in r.stdout
+    assert "decision/hidden" not in r.stdout
 
 
 def test_an_escaping_session_record_named_as_a_link_target_is_not_reported_dangling(world, tmp_path):

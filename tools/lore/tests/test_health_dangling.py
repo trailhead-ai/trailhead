@@ -482,11 +482,34 @@ def test_an_escaping_kind_directory_makes_every_name_of_that_kind_an_unknown_tar
 def test_an_escaping_record_of_a_kind_the_check_judges_skips_the_check():
     linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
     res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "decision", "d")])])
-    assert res == dangling.DanglingSkipped(("a",))
+    assert isinstance(res, dangling.DanglingResult)
+    assert res.skipped == ("a",) and res.findings == [] and res.judged == {}
 
 
 def test_an_escaping_session_record_does_not_skip_the_check_unless_sessions_are_judged():
     linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
     scan = vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])
     assert isinstance(run([scan]), dangling.DanglingResult)
-    assert run([scan], include_sessions=True) == dangling.DanglingSkipped(("a",))
+    assert run([scan], include_sessions=True).skipped == ("a",)
+
+
+def test_an_escaping_kind_directory_skips_that_vault_only_and_the_others_still_report():
+    holder = vault("a", rec("a", "lesson", "mine", {}, "[[gone-a]]"),
+                   skipped_escaping=1, escaped=[_escaped("a", "decision", None)])
+    other = vault("b", rec("b", "lesson", "src", {}, "[[lesson/gone-b]] and [[decision/hidden]]"))
+    res = run([holder, other])
+    assert isinstance(res, dangling.DanglingResult)
+    assert res.skipped == ("a",)
+    assert res.judged == {"b": 1}
+    assert [(f.vault, f.target) for f in res.findings] == [("b", "lesson/gone-b")]
+
+
+def test_a_vault_holding_an_escape_is_named_skipped_even_when_not_selected():
+    holder = vault("a", skipped_escaping=1, escaped=[_escaped("a", "decision", None)])
+    res = run([holder, vault("b")], selected={"b"})
+    assert res.skipped == ("a",) and res.judged == {"b": 0}
+
+
+def test_an_unattributed_escape_still_skips_the_whole_check():
+    res = run([vault("a", skipped_escaping=1, escaped=[]), vault("b")])
+    assert res == dangling.DanglingSkipped(("a",))

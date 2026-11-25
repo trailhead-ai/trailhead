@@ -391,7 +391,9 @@ def test_an_escaped_record_with_a_retired_namesake_is_never_called_retired():
 
 def test_an_escaping_kind_directory_of_a_kind_the_check_judges_skips_the_check():
     escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "decision", None)])
-    assert run([escaped, vault("b")]) == retired.RetiredSkipped(("a",))
+    res = run([escaped, vault("b")])
+    assert isinstance(res, retired.RetiredResult)
+    assert res.skipped == ("a",) and res.judged == {"b": 0}
 
 
 def test_an_escaping_session_record_does_not_skip_the_check():
@@ -399,3 +401,22 @@ def test_an_escaping_session_record_does_not_skip_the_check():
                     rec("a", "decision", "old", "dropped"),
                     skipped_escaping=1, escaped=[model.EscapedRecord("a", "session", "s")])
     assert len(single(run([escaped])).retired) == 1
+
+
+def test_an_escaping_kind_directory_skips_that_vault_only_and_the_others_still_report():
+    holder = vault("a", linking("decision", "mine", "active", rel("decision", "old")),
+                   rec("a", "decision", "old", "dropped"),
+                   skipped_escaping=1, escaped=[model.EscapedRecord("a", "decision", None)])
+    other = vault("b", rec("b", "task", "t", "open", {"related": rel("lesson", "old")}),
+                  rec("b", "lesson", "old", "dropped"),
+                  rec("b", "task", "u", "open", {"related": rel("decision", "hidden")}))
+    res = run([holder, other])
+    assert isinstance(res, retired.RetiredResult)
+    assert res.skipped == ("a",)
+    assert res.judged == {"b": 2}
+    assert [(f.vault, f.name, f.target) for f in res.findings] == [("b", "t", "lesson/old")]
+
+
+def test_an_unattributed_escape_still_skips_the_whole_check():
+    res = run([vault("a", skipped_escaping=1), vault("b")])
+    assert res == retired.RetiredSkipped(("a",))

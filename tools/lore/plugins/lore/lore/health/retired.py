@@ -14,6 +14,7 @@ be trusted.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterator, Sequence
+import dataclasses
 from dataclasses import dataclass, field
 
 from ..record import guards
@@ -77,10 +78,12 @@ class Finding:
 
 @dataclass(frozen=True)
 class RetiredResult:
-    """Findings, and per selected vault the number of linking records judged."""
+    """Findings, per judged selected vault the number of linking records judged, and
+    the vaults skipped alone for an escape of a judged kind."""
 
     findings: list[Finding] = field(default_factory=list)
     judged: dict[str, int] = field(default_factory=dict)
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,8 @@ def check_retired(
     scans: Sequence[VaultScan], selected: Collection[str]
 ) -> RetiredResult | RetiredSkipped:
     """Check the live records of every selected vault against the records of all *scans*."""
-    at_fault = tuple(s.vault for s in scans if not s.readable_for(LIVE_STATUSES))
+    at_fault = tuple(s.vault for s in scans
+                     if not s.readable_for(LIVE_STATUSES) and not s.escapes_in(LIVE_STATUSES))
     if at_fault:
         return RetiredSkipped(at_fault)
 
@@ -123,7 +127,11 @@ def check_retired(
     accepted: dict[tuple[str, str, str, str | None], bool] = {}
 
     result = RetiredResult()
+    skipped: list[str] = []
     for s in scans:
+        if not s.readable_for(LIVE_STATUSES):
+            skipped.append(s.vault)
+            continue
         if s.vault not in selected:
             continue
         judged = 0
@@ -151,7 +159,7 @@ def check_retired(
                     )
                 )
         result.judged[s.vault] = judged
-    return result
+    return dataclasses.replace(result, skipped=tuple(skipped))
 
 
 def retired_references(

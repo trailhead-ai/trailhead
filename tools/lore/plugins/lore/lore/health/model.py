@@ -130,6 +130,16 @@ class VaultScan:
         wanted = set(kinds)
         return not any(e.kind in wanted for e in self.escaped)
 
+    def escapes_in(self, kinds: Iterable[str]) -> bool:
+        """Whether the vault was read apart from escapes that all name a kind of *kinds*.
+
+        True when :meth:`readable_for` is false only because an attributed escape is of
+        one of *kinds*: a check that guards each link against an escaped target may skip
+        this vault alone and still judge the others.
+        """
+        return (self.unreadable_reason is None and self.skipped_escaping <= len(self.escaped)
+                and not self.readable_for(kinds))
+
 
 @dataclass(frozen=True)
 class IndexCount:

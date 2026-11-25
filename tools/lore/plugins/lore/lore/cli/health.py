@@ -268,7 +268,7 @@ def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[s
     if scan.unreadable_reason is not None:
         return "its directory could not be read"
     if scan.vault in at_fault and scan.skipped_escaping:
-        return "records lie outside its vault root and were not read"
+        return ESCAPE_SKIP_REASON
     holders = tuple(n for n in at_fault if scans[n].readable_for(queue_mod.JUDGED_KINDS)
                     and queue_mod.holds_unreadable_judged_record(scans[n]))
     incomplete = tuple(n for n in at_fault if n not in holders)
@@ -318,6 +318,9 @@ def _index_line(selected_scans: list[VaultScan], env=None) -> IndexLine:
     return IndexLine(status, held, indexed, mismatches)
 
 
+ESCAPE_SKIP_REASON = "records lie outside its vault root and were not read"
+
+
 def _check_run(result, skipped: type, completed: type) -> CheckRun:
     if isinstance(result, skipped):
         return CheckRun(None, {}, result.vaults)
@@ -325,16 +328,25 @@ def _check_run(result, skipped: type, completed: type) -> CheckRun:
     return CheckRun(list(result.findings), dict(result.judged))
 
 
+def _escape_aware_run(result, skipped: type, completed: type) -> CheckRun:
+    """Like :func:`_check_run` for a check that skips a vault holding an escape alone."""
+    run = _check_run(result, skipped, completed)
+    if run.findings is None or not result.skipped:
+        return run
+    return CheckRun(None if not run.judged else run.findings, run.judged,
+                    skipped={v: ESCAPE_SKIP_REASON for v in result.skipped})
+
+
 # Each runner classifies through the module that produced the result, looked up
 # at call time: an in-place reload of that module replaces its classes, and a
 # name bound at import would then name a stale class.
 def _run_dangling(scans, selected, ctx) -> CheckRun:
-    return _check_run(dangling_mod.check_dangling(scans, selected),
+    return _escape_aware_run(dangling_mod.check_dangling(scans, selected),
                       dangling_mod.DanglingSkipped, dangling_mod.DanglingResult)
 
 
 def _run_retired(scans, selected, ctx) -> CheckRun:
-    return _check_run(retired_mod.check_retired(scans, selected),
+    return _escape_aware_run(retired_mod.check_retired(scans, selected),
                       retired_mod.RetiredSkipped, retired_mod.RetiredResult)
 
 
