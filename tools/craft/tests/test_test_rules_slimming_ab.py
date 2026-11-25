@@ -239,18 +239,25 @@ def _scaffolded(case, tmp_path):
 
 
 def _standin_python(bin_dir, base_prefix, real_home):
-    """A python3 on PATH that reports BASE_PREFIX and REAL_HOME for the scaffold's one probe and otherwise runs the real one."""
+    """A python3 on PATH that reports BASE_PREFIX and REAL_HOME for the scaffold's one probe.
+
+    Otherwise it runs the real one.
+    """
     bin_dir.mkdir(parents=True)
     stand = bin_dir / "python3"
     lines = [str(base_prefix)] + ([str(real_home)] if real_home is not None else [])
     stand.write_text(
         f'#!/bin/sh\nif [ "$1" = "-c" ] && case "$2" in *base_prefix*) true;; *) false;; esac; then\n'
-        f'  printf "%s\\n" {" ".join(shlex.quote(x) for x in lines)}; exit 0\nfi\nexec {shlex.quote(sys.executable)} "$@"\n')
+        f'  printf "%s\\n" {" ".join(shlex.quote(x) for x in lines)}; exit 0\nfi\n'
+        f'exec {shlex.quote(sys.executable)} "$@"\n')
     stand.chmod(0o755)
 
 
 def _scaffold_with_base(tmp_path, base_of, report_home=True):
-    """HOME is an unrelated directory, as in a run; the operator's real home is `tmp_path/home`, which only the probe reports."""
+    """HOME is an unrelated directory, as in a run.
+
+    The operator's real home is `tmp_path/home`, which only the probe reports.
+    """
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
     (home / "secret.txt").write_text("hunter2\n")
@@ -714,7 +721,8 @@ def test_each_committed_case_scaffolds_the_experiments_fixture(case, tmp_path):
     cwd = tmp_path / "run"
     cwd.mkdir()
     wrapper = CRAFT / "evals" / case / "fixtures" / "scaffold.sh"
-    done = subprocess.run(["bash", str(wrapper)], cwd=cwd, env=_env(tmp_path), capture_output=True, text=True, timeout=120)
+    done = subprocess.run(
+        ["bash", str(wrapper)], cwd=cwd, env=_env(tmp_path), capture_output=True, text=True, timeout=120)
     assert done.returncode == 0, done.stderr
     code, output = _run_tests(cwd)
     assert code == 0, output

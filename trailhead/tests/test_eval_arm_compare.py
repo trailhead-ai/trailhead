@@ -108,7 +108,8 @@ def test_failing_scenario_named_and_passing_one_not_in_failure_message(tmp_path)
 def test_errored_run_with_passed_true_is_not_counted_and_is_listed(tmp_path):
     slim = _run(4, total=4)
     slim[0]["error"] = "timeout"
-    r = _go(tmp_path, _doc({"exporter-case": slim}), _doc({"exporter-case": _run(2)}), _doc({"exporter-case": _run(0)}), ["AC61=exporter-case"])
+    r = _go(tmp_path, _doc({"exporter-case": slim}), _doc({"exporter-case": _run(2)}),
+            _doc({"exporter-case": _run(0)}), ["AC61=exporter-case"])
     assert r.returncode == 0, r.stdout + r.stderr
     assert "slimmed=3/3" in r.stdout
     assert "timeout" in r.stdout
@@ -118,7 +119,8 @@ def test_errored_run_counts_as_error_not_pass_changes_verdict(tmp_path):
     slim = _run(3)
     slim[0]["error"] = "timeout"
     slim.append(_run(0, total=1)[0])
-    r = _go(tmp_path, _doc({"exporter-case": slim}), _doc({"exporter-case": _run(3)}), _doc({"exporter-case": _run(0)}), ["AC61=exporter-case"])
+    r = _go(tmp_path, _doc({"exporter-case": slim}), _doc({"exporter-case": _run(3)}),
+            _doc({"exporter-case": _run(0)}), ["AC61=exporter-case"])
     assert r.returncode == 1
     assert "fail" in r.stdout
     assert "timeout" in r.stdout
@@ -144,7 +146,8 @@ def test_under_sampled_arm_fails(tmp_path):
 
 
 def test_malformed_json_exits_2_without_traceback(tmp_path):
-    r = _go(tmp_path, _doc({"exporter-case": _run(3)}), _doc({"exporter-case": _run(2)}), _doc({"exporter-case": _run(0)}),
+    r = _go(tmp_path, _doc({"exporter-case": _run(3)}), _doc({"exporter-case": _run(2)}),
+            _doc({"exporter-case": _run(0)}),
             ["AC61=exporter-case"], raw={"frozen": "{not json"})
     assert r.returncode == 2
     assert "frozen" in r.stderr and "Traceback" not in r.stderr
@@ -161,14 +164,16 @@ def test_missing_file_exits_2_without_traceback(tmp_path):
 
 
 def test_family_case_no_arm_ran_exits_2(tmp_path):
-    r = _go(tmp_path, _doc({"exporter-case": _run(3)}), _doc({"exporter-case": _run(2)}), _doc({"exporter-case": _run(0)}),
-            ["AC61=exporter-case,ghost"])
+    r = _go(tmp_path, _doc({"exporter-case": _run(3)}), _doc({"exporter-case": _run(2)}),
+            _doc({"exporter-case": _run(0)}), ["AC61=exporter-case,ghost"])
     assert r.returncode == 2
     assert "ghost" in r.stderr and "Traceback" not in r.stderr
 
 
 def test_duplicate_family_name_exits_2(tmp_path):
-    doc = lambda n: _doc({"a": _run(n), "b": _run(n)})
+    def doc(n):
+        return _doc({"a": _run(n), "b": _run(n)})
+
     r = _go(tmp_path, doc(3), doc(2), doc(0), ["AC61=a", "AC61=b"])
     assert r.returncode == 2
     assert "AC61" in r.stderr and "duplicate" in r.stderr and "Traceback" not in r.stderr
