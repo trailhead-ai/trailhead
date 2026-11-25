@@ -15,7 +15,7 @@ TOOLS = Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("plugin", ["craft", "lore", "portage", "outpost"])
-def test_the_shipped_plugin_tree_has_no_load_convention_faults(plugin):  # inert-gate: allow seam smoke over the shipped trees, one per plugin root
+def test_the_shipped_plugin_tree_has_no_load_convention_faults(plugin):  # inert-gate: allow seam smoke, one per root
     root = TOOLS / plugin / "plugins" / plugin
     assert root.is_dir()
     assert check_plugin(root) == []

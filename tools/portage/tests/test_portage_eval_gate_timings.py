@@ -567,7 +567,8 @@ class TestHostileInputs:
 
 
 class TestDeclaredCases:
-    FILES = {"skills/entry.md": "Read `../rules/core.md` now and follow it in full.\n\nRead `b.md` now and follow it in full.\n",
+    FILES = {"skills/entry.md": ("Read `../rules/core.md` now and follow it in full.\n\n"
+                                 "Read `b.md` now and follow it in full.\n"),
              "skills/b.md": "Applies when B.\n\nRead `rules/rule-b.md`.\n",
              "skills/b-undeclared.md": "Applies when C.\n",
              "rules/core.md": "core\n", "rules/rule-b.md": "rule b\n"}

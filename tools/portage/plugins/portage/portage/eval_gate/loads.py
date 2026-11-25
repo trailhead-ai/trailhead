@@ -20,8 +20,8 @@ ignored by ``derive``; ``missing_loads`` reports it. An undeclared branch is nev
 
 A declared branch must be a parsed load of the entry, so the head revision refuses a case whose entry only
 mentions it. The merge-base revision is derived with ``base_tolerant=True``, which accepts a mention too: a base
-still in an older wording, or with ancestor-resolved paths, predates the strict declaration and must not fault. An entry that is itself a branch
-file is refused: its core is the entry and the branch goes under ``branches``.
+still in an older wording, or with ancestor-resolved paths, predates the strict declaration and must not fault.
+An entry that is itself a branch file is refused: its core is the entry and the branch goes under ``branches``.
 
 The reader contract, which every caller builds against: ``read(path) -> str | None`` takes a plugin-relative
 posix path. ``None`` means the file does not exist. A symlink or any other non-regular file is signalled by
@@ -490,8 +490,8 @@ def _present(read, path: str) -> bool:
 
 def resolve_existing(file: str, raw: str, read) -> str | None:
     """The plugin-relative regular file ``raw`` names from ``file``, looking in the loading directory and then each
-    ancestor up to the plugin root; ``None`` when none holds one (a directory or a symlink is not one). This is how a mention is told from a
-    path to nothing, not how a load resolves (a load resolves strictly: see ``Load.target``)."""
+    ancestor up to the plugin root; ``None`` when none holds one (a directory or a symlink is not one). This is how a
+    mention is told from a path to nothing, not how a load resolves (a load resolves strictly: see ``Load.target``)."""
     if raw.startswith("/") or posixpath.basename(raw) in ("", ".", ".."):
         return None
     directory = posixpath.dirname(file)
