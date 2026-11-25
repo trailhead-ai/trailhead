@@ -10,7 +10,8 @@ condensed into ADRs, decided by :func:`..health.distill_queue.build_distill_queu
 one definition ``lore distill-queue`` shares; deferred specs, which no task links to, are
 counted in the heading rather than listed) and ``lesson-growth`` (the executor-dispatch
 lessons per vault and the ones added within the same ``--stale-days`` window, informational; skips
-per vault when a vault's lessons cannot all be counted). The command builds a plain-data :class:`HealthReport` from the scan of every
+per vault when a vault's lessons cannot all be counted). The command builds a plain-data
+:class:`HealthReport` from the scan of every
 configured vault and the registry of checks (:data:`CHECKS`), then renders it:
 one summary row per vault per check, then one findings group per check, each
 with its own ``--limit`` cap and action line. Nothing is written: no record, no
@@ -46,7 +47,8 @@ lines of a bad wikilink, or the entry positions of a bad sidecar entry
 hold, sessions included, on every form it prints.
 
 ``--json`` prints the same :class:`HealthReport` as one JSON document on stdout instead of the
-text (:func:`json_document`; the shape is fixed by ``docs/design/lore-health-reports-lesson-growth-passed-repositories-and-json.md``),
+text (:func:`json_document`; the shape is fixed by
+``docs/design/lore-health-reports-lesson-growth-passed-repositories-and-json.md``),
 with the same ``--vault``, ``--limit``, ``--all``, ``--stale-days`` and ``--repo``. A finding is
 its identity, its date and its *evidence*: each :class:`Check` supplies the evidence once
 (:attr:`Check.evidence`), and the text line (:func:`_line`) and the JSON ``evidence`` both print
@@ -1021,7 +1023,8 @@ def _finding_json(f, evidence: str) -> dict:
 
 
 def _repository_json(item, now: datetime, passed: bool) -> dict:
-    """One repository as read: its root, whether ``--repo`` named it, and its default branch or why it could not be read."""
+    """One repository as read: its root, whether ``--repo`` named it, and its default branch or why it could not
+    be read."""
     out = {"root": _safe(item.root), "passed": passed, "branch": None, "local": None,
            "fetched_at": None, "age_days": None, "unreadable_reason": None}
     if isinstance(item, repos_mod.Unreadable):
@@ -1033,7 +1036,8 @@ def _repository_json(item, now: datetime, passed: bool) -> dict:
 
 
 def _repositories_json(sec: Section, ctx: RunContext) -> list[dict]:
-    """Per selected vault the group's repository lines are made of: its repositories, the ``--repo`` paths set aside, or why it has none."""
+    """Per selected vault the group's repository lines are made of: its repositories, the ``--repo`` paths set
+    aside, or why it has none."""
     if sec.check.repository_lines is None:
         return []
     out = []

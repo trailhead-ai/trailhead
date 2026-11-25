@@ -152,7 +152,10 @@ def check_retired(
                 linker_duplicated = len(holders[(record.kind, record.name)]) > 1
                 shared = len({(c.kind, c.name) for c in found}) < len(found)
                 retired = tuple(
-                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted, related_to, escapes)
+                    _candidate(
+                        c, superseders_of(c)[0], record, holdings, shared or linker_duplicated,
+                        accepted, related_to, escapes,
+                    )
                     for c in sorted(found, key=key)
                 )
                 result.findings.append(

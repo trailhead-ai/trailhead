@@ -239,8 +239,8 @@ def test_a_vault_not_fully_read_and_another_holding_an_unreadable_spec_are_both_
     assert r.returncode == 1
     assert r.stderr.splitlines() == [
         "lore: vault trailhead could not be read and vault default holds a spec or task record that could "
-        "not be read (default/spec/x), so the distill queue is refused rather than built partial; repair or remove what "
-        "could not be read to sweep again, or distill one spec by name with /craft:distill spec/<name>"]
+        "not be read (default/spec/x), so the distill queue is refused rather than built partial; repair or remove "
+        "what could not be read to sweep again, or distill one spec by name with /craft:distill spec/<name>"]
 
 
 def test_a_refusal_for_an_unreadable_record_escapes_the_vault_name(tmp_path):

@@ -2501,7 +2501,8 @@ def test_a_symlinked_decision_directory_skips_only_the_vault_holding_it_for_link
     r = world.run()
     assert r.returncode == 0, r.stderr
     for check in ("dangling-links", "retired-links"):
-        assert rows(r.stdout, check)["trailhead"][2] == "yes: records lie outside its vault root and were not read", check
+        expected = "yes: records lie outside its vault root and were not read"
+        assert rows(r.stdout, check)["trailhead"][2] == expected, check
         assert rows(r.stdout, check)["levr"][2] == "no", check
         assert rows(r.stdout, check)["default"][2] == "no", check
     assert rows(r.stdout, "dangling-links")["levr"][1] == "1"
@@ -2577,7 +2578,9 @@ def test_a_stale_task_shared_with_another_vault_prints_a_drop_command_that_drops
     assert "default" in line and "--vault trailhead" in line
     r = _run_drop(w, _printed_drop_command(line))
     assert r.returncode == 0, r.stderr
-    status = lambda n: json.loads((w.roots[n] / "task" / "x.json").read_text())["status"]
+    def status(n):
+        return json.loads((w.roots[n] / "task" / "x.json").read_text())["status"]
+
     assert (status("trailhead"), status("default")) == ("dropped", "open")
 
 
@@ -2987,7 +2990,9 @@ CHAR_NOW = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
 def _characterization_world(world, mp):
     """One vault set holding every line shape each check and ``lore distill-queue`` prints."""
     d, t, lv = world.roots["default"], world.roots["trailhead"], world.roots["levr"]
-    stamp = lambda days: (CHAR_NOW - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    def stamp(days):
+        return (CHAR_NOW - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
     # dangling-links: unresolved related edge, a bad wikilink and a bad related entry
     _put(d, "decision", "uses-gone", updated="2026-03-02T00:00:00Z", related={"decision": ["gone-one"]})
@@ -3037,7 +3042,9 @@ def _characterized(world, mp, monkeypatch, tmp_path):
     text = "\n".join(health.render(health.build_report(now=CHAR_NOW), None, None))
     queue = _queue_cli(world)
     assert queue.returncode == 0, queue.stderr
-    scrub = lambda s: s.replace(str(tmp_path.resolve()), "<tmp>")
+    def scrub(s):
+        return s.replace(str(tmp_path.resolve()), "<tmp>")
+
     return scrub(text).splitlines(), scrub(queue.stdout).splitlines()
 
 
@@ -3107,7 +3114,7 @@ lesson-growth — 2 findings, oldest first (window: 30 days): default 2 lessons,
   default/lesson/d-new  2026-11-20  added 5 days ago
   trailhead/lesson/t-new  2026-11-20  added 5 days ago
 These are informational, not problems to fix. If lessons pile up faster than they are folded, run /craft:consolidate: it merges lessons that prevent the same failure.
-"""
+"""  # noqa: E501 -- golden report text, wrapping would change the pinned output
 
 CHAR_QUEUE = """\
 lore distill-queue — 2 waiting, 1 deferred
@@ -3291,7 +3298,6 @@ def test_an_unbound_vault_served_by_repo_lists_the_passed_repository_as_passed_w
 def test_a_repository_fetched_some_days_ago_carries_its_fetch_time_and_age(world, mp, monkeypatch):
     repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
     mp.bind("g", ["trailhead"], [repo])
-    health = importlib.import_module("lore.cli.health")
     fetched = datetime.now(timezone.utc) - timedelta(days=5, hours=2)
     (repo / ".git" / "FETCH_HEAD").write_text("")
     os.utime(repo / ".git" / "FETCH_HEAD", (fetched.timestamp(), fetched.timestamp()))
@@ -3352,7 +3358,8 @@ def test_a_long_wikilink_target_is_capped_with_an_ellipsis_in_both_forms_and_a_s
     _put(world.roots["default"], "task", "short", related={"decision": ["b" * 40]})
     doc, _ = _json(world)
     ev = {f["name"]: f["evidence"] for f in _check(doc, "dangling-links")["findings"]}
-    capped = f"related decision → decision/{'a' * (health.MAX_EVIDENCE_FIELD - 1 - len('decision/'))}…: not found in any vault"
+    room = health.MAX_EVIDENCE_FIELD - 1 - len("decision/")
+    capped = f"related decision → decision/{'a' * room}…: not found in any vault"
     assert ev["long"] == capped
     assert ev["short"] == f"related decision → decision/{'b' * 40}: not found in any vault"
     text = world.run().stdout
@@ -3440,7 +3447,9 @@ def test_a_skipped_row_names_the_real_cause_when_the_only_escape_is_of_a_kind_th
     ("stale-tasks", "task", {"status": "open"}),
     ("distill-queue", "spec", {"status": "planned"}),
 ])
-def test_a_skipped_row_names_the_escape_when_the_escaping_record_is_of_a_kind_the_check_judges(world, tmp_path, check, kind, extra):
+def test_a_skipped_row_names_the_escape_when_the_escaping_record_is_of_a_kind_the_check_judges(
+    world, tmp_path, check, kind, extra
+):
     outside = tmp_path / "elsewhere-j"
     outside.mkdir()
     _put(outside, kind, "hidden", **extra)
