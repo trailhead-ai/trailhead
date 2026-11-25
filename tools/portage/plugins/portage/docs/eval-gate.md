@@ -365,6 +365,8 @@ the one looked up before it, so inputs that changed while the case ran are never
 The key is content alone, so a pass carries over between branches and worktrees. It has known limits, and a
 change to any of them does not change it: a script a scaffold calls from outside `evals/`, other plugin
 prose the case does not list in `measures`, the `claude` CLI version, a model alias the runner
-re-targets, and a shared file whose name a scaffold builds at run time and never writes out in full. Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
+re-targets, a shared file whose name a scaffold builds at run time and never writes out in full, and a
+shared file named only by another case's files that this case's scaffold runs (a scaffold that calls
+`../../<other case>/fixtures/scaffold.sh`). Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
 that is a symlink, owned by another user or group- or world-writable is not used, and an unreadable or
 corrupt entry is a miss, so the case just runs.

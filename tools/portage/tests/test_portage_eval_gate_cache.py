@@ -323,9 +323,11 @@ class TestSharedFilesInTheKey:
         self._write(env, "evals/helper-n.sh", "echo n\n")
         assert self._changes(env, "evals/helper-n.sh")
 
-    def test_a_shared_file_a_missing_name_never_joins(self, env):
-        (env.plugin / "evals/scaffold.sh").unlink()
-        assert not self._changes(env, "evals/README.md")
+    def test_the_mapping_file_stays_out_of_the_key_even_when_a_case_names_it(self, env):
+        self._write(env, "evals/helper-m.sh", "echo m\n")
+        self._write(env, "evals/c1/expected.md", "Reads eval-gate.json and helper-m.sh.\n")
+        assert self._changes(env, "evals/helper-m.sh")
+        assert not self._changes(env, "evals/eval-gate.json")
 
     def test_a_symlink_directly_under_evals_makes_every_case_uncacheable(self, env):
         outside = env.tmp / "outside.txt"
