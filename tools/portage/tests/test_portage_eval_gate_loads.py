@@ -401,6 +401,51 @@ class TestMentionResolution:
         assert derive(self.G, [], reader(files)).files == (self.G,)
 
 
+class TestDeclaredBranchLoadedBelowTheEntry:
+    CORE = "skills/_shared/core.md"
+    B = "skills/_shared/b.md"
+    ENTRY_FULL = "Read `../_shared/core.md` now and follow it in full.\n"
+
+    def _files(self, core_text: str) -> dict[str, str]:
+        return {ENTRY: self.ENTRY_FULL, self.CORE: core_text, self.B: BRANCH_HEAD + "Branch.\n"}
+
+    def test_a_declared_branch_a_core_in_the_closure_loads_is_accepted_on_head(self):
+        files = self._files("Core.\n\nWhen the run is unattended, read `b.md` now and follow it in full.\n")
+        got = derive(ENTRY, [self.B], reader(files))
+        assert set(got.files) == {ENTRY, self.CORE, self.B}
+        assert got.split is True
+
+    def test_a_branch_the_core_loads_stays_out_of_the_closure_when_it_is_not_declared(self):
+        files = self._files("Core.\n\nWhen the run is unattended, read `b.md` now and follow it in full.\n")
+        assert set(derive(ENTRY, [], reader(files)).files) == {ENTRY, self.CORE}
+
+    def test_a_declared_branch_a_core_in_the_closure_only_mentions_is_refused_on_head(self):
+        files = self._files("Core.\n\nThe branch `b.md` exists.\n")
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [self.B], reader(files))
+        assert str(e.value) == f"entry '{ENTRY}' does not load the declared branch '{self.B}'"
+
+    def test_a_declared_branch_no_file_of_the_closure_loads_is_refused_on_head(self):
+        files = {**self._files("Core.\n"), "skills/_shared/other.md": "Other.\n"}
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [self.B], reader(files))
+        assert str(e.value) == f"entry '{ENTRY}' does not load the declared branch '{self.B}'"
+
+    def test_a_declared_branch_only_another_branch_file_loads_is_refused_on_head(self):
+        other = "skills/_shared/other.md"
+        files = {**self._files("Core.\n\nWhen the run is unattended, read `other.md` now and follow it in full.\n"),
+                 other: BRANCH_HEAD + "When the run is attended, read `b.md` now and follow it in full.\n"}
+        with pytest.raises(LoadError) as e:
+            derive(ENTRY, [self.B], reader(files))
+        assert str(e.value) == f"entry '{ENTRY}' does not load the declared branch '{self.B}'"
+
+    def test_a_branch_loaded_by_a_file_outside_the_closure_is_refused_on_head(self):
+        files = {**self._files("Core.\n"), "skills/y/SKILL.md": self.ENTRY_FULL,
+                 "skills/_shared/elsewhere.md": "When the run is unattended, read `b.md` now and follow it in full.\n"}
+        with pytest.raises(LoadError):
+            derive(ENTRY, [self.B], reader(files))
+
+
 class TestPluginRootVariableMentions:
     VAR = "${CLAUDE_PLUGIN_ROOT}"
 

@@ -18,9 +18,10 @@ extensionless file is reachable only through a fixed-wording load. A reached fil
 further names; a symlink or a file that cannot be read is still a fault. A load that resolves to nothing is
 ignored by ``derive``; ``missing_loads`` reports it. An undeclared branch is never in the closure.
 
-A declared branch must be a parsed load of the entry, so the head revision refuses a case whose entry only
-mentions it. The merge-base revision is derived with ``base_tolerant=True``, which accepts a mention too: a base
-still in an older wording, or with ancestor-resolved paths, predates the strict declaration and must not fault.
+A declared branch must be a parsed load of the entry or of a non-branch file in its closure, so the head
+revision refuses a case whose closure only mentions it. The merge-base revision is derived with
+``base_tolerant=True``, which accepts a mention too: a base still in an older wording, or with
+ancestor-resolved paths, predates the strict declaration and must not fault.
 An entry that is itself a branch file is refused: its core is the entry and the branch goes under ``branches``.
 
 The reader contract, which every caller builds against: ``read(path) -> str | None`` takes a plugin-relative
@@ -301,8 +302,9 @@ def tree_reader(root: Path):
 
 def derive(entry: str, branches, read, *, base_tolerant: bool = False) -> Derived:
     """The closure of ``entry`` with the declared ``branches``; remembered per reader (see ``cached``), so a
-    declaration shared by many cases is walked once. A declared branch must be a parsed load of the entry;
-    ``base_tolerant`` (the merge-base revision only) accepts one the entry merely mentions."""
+    declaration shared by many cases is walked once. A declared branch must be a parsed load of the entry or of a
+    non-branch file in its closure; ``base_tolerant`` (the merge-base revision only) also accepts one the entry
+    merely mentions."""
     memo = getattr(read, "derivations", None)
     if memo is None:
         return _derive(entry, branches, read, base_tolerant)
@@ -316,6 +318,26 @@ def derive(entry: str, branches, read, *, base_tolerant: bool = False) -> Derive
     if ok:
         return value
     raise value
+
+
+def _loads_in_closure(entry: str, read) -> set[str]:
+    """The files loaded by ``entry`` or by any non-branch file reached from it, transitively."""
+    loaded: set[str] = set()
+    queue = [entry]
+    for current in queue:
+        text = _get(read, current)
+        if text is None:
+            continue
+        found, reached = _reached(current, text, read)
+        loaded.update(found)
+        for target in reached:
+            try:
+                body = _get(read, target)
+            except BinaryFile:
+                continue
+            if body is not None and target not in queue and not is_branch(body):
+                queue.append(target)
+    return loaded
 
 
 def _derive(entry: str, branches, read, base_tolerant: bool) -> Derived:
@@ -333,7 +355,7 @@ def _derive(entry: str, branches, read, base_tolerant: bool) -> Derived:
         text = _get(read, norm)
         if text is None:
             raise LoadError(f"declared branch {_q(branch, position)} does not exist")
-        if norm not in accepted:
+        if norm not in accepted and norm not in _loads_in_closure(entry, read):
             raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
