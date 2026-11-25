@@ -196,13 +196,9 @@ def test_the_grants_command_prints_what_shlex_parses_back_to_the_live_grants():
     live = json.loads((CRAFT / "evals" / "eval-gate.json").read_text())["runner"]["allow_tools"]
     assert done.returncode == 0
     assert shlex.split(done.stdout) == live
-
-
-# inert-gate: allow the push gate reads this block from main; the grant has no other consumer to run here
-def test_the_gate_grants_run_tests_in_its_exact_form_and_no_wider():
-    grants = ab.shared.runner_args(CRAFT)[1:]
-    assert grants.count(WRAPPER_GRANT) == 1
-    assert [g for g in grants if "run-tests" in g] == [WRAPPER_GRANT]
+    printed = shlex.split(done.stdout)
+    assert printed.count(WRAPPER_GRANT) == 1
+    assert [g for g in printed if "run-tests" in g] == [WRAPPER_GRANT]
 
 
 def test_bar_text_is_the_text_between_the_delimiters(tmp_path):
