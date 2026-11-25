@@ -272,7 +272,8 @@
         "skills/_shared/escalation.md",
         "skills/slice/SKILL.md",
         "scripts/found_work.py"
-      ]
+      ],
+      "needs_merge_model": "composes a long escalation question graded part by part; the push model drops a different required part each run, unchanged across three wording fixes and four batches"
     },
     "slice-asks-before-dropping-an-urgent-entry-with-a-planted-credential": {
       "measures": [
