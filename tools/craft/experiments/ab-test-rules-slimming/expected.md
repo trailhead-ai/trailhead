@@ -10,7 +10,49 @@ no rules is the floor).
 
 ## Verdict
 
-Not yet run. The verdict goes here, in one place, after the batches are scored.
+**PASS (2026-11-25).** On every scenario the slimmed arm passed as many runs as the frozen arm, and each family has
+a discriminating scenario. `scripts/eval-arm-compare` over the three merged result files exited 0. This block is
+the one place the result is recorded; the manual eval log and the criterion observations cite it.
+
+| Case | Family | slimmed | frozen | none | Verdict |
+|---|---|---|---|---|---|
+| `tests-a-registered-exporter-by-running-it` | AC61 | 4/4 | 4/4 | 0/4 | pass |
+| `tests-a-changed-default-through-what-it-changes` | AC61 | 4/4 | 4/4 | 4/4 | inconclusive |
+| `adds-a-cli-flag-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
+| `fixes-a-reported-bug-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
+
+- **Fingerprints.** slimmed `4079728355621e6aceffb7dcfa430e0e2918e643`; frozen `e27af8bed47cb498974d929470ba588f19f6455f`.
+- **How the arms ran.** The batches went through the `portage-eval` shim from a build session. That runs the committed
+  push-gate cases in `tools/craft/plugins/craft/evals/`, whose case files `ab.py sync` writes from this experiment.
+  For the frozen and none arms, the four case files' `append_system_prompt` was set to the frozen copy's text, or
+  removed, for the batch only, with `set_append_system_prompt`. Afterwards `ab.py sync` restored them, and `ab.py check`
+  passed. The shim runs 2 runs per case per request, so each arm is two requests: 4 runs, not the 3 planned.
+  The arms differ only in that field, as with `prepare`. One thing differs from a `prepare` copy: the plugin keeps its
+  root `rules.md`, which no run loads. Model `claude-opus-5-5`, no baseline arm, the craft runner block's grants.
+- **Errored runs.** None. Every run was scored.
+- **Re-run policy, applied.** Each AC62 no-rules request scored 1/3 on every run, the same partial score. The policy
+  reads that as a possible environment failure, so the arm was run a second time and gave the same result. The
+  grader evidence shows the cause is behaviour, not the environment: each run logged a passing run after the code
+  changed, so the wrapper ran, and no failing run before the change.
+- **Tuning, disclosed.** The first AC61 prompts ("add a test for it") were inconclusive. All three arms passed 4/4
+  (requests `local-5kq7o74ib572`, `local-ox86r2sw7tnp`, `local-vcs1e0zaictq`, `local-xz7x0icqkagu`,
+  `local-ysv698094psi`, `local-lg7fdunl5ph2`): Opus tests behaviour unaided when asked plainly. Both AC61 prompts
+  were then changed to ask for the weak test, the way an operator often does ("a quick test that checks `tsv` is
+  registered"; "a test that pins the limit at 5"). The fixtures and rubrics were left unchanged, and the rubric still
+  passes a membership or constant check that sits beside a behaviour test. The new prompts were tuned against the
+  frozen and none arms only (`local-h2gi2v9joxx5`, `local-tqp0x73qmary`, `local-hvbl6fjymwo5`, `local-wuidcznuzi01`).
+  The slimmed arm was then read on them (`local-8dwqakou2p6c`, `local-hgomvcuaalvk`). The slimmed arm had already been
+  read on the first prompts, where it scored 4/4. The AC62 rows come from the first six requests, because those
+  cases did not change. The rules text was not tuned.
+- **Against the predictions.** The AC62 cases discriminated more sharply than predicted. The no-rules arm never
+  ran a failing test first. With the plain prompt, the AC61 cases were not the discriminators the predictions
+  expected. Only the exporter case discriminated, and only after the prompt asked for the weak test.
+- **Traces.** The shim deletes each run's trace, so no trace was read. Each verdict was checked against its
+  graders' evidence instead: the judge's three votes on the named test file, and the regex matches on
+  `run-tests.log`. This falls short of the plan's trace-reading step.
+- **Grader proof.** Before any arm was read, the AC61 judge was run on planted files (`local-r37h1wqp2n3l`). The good
+  files passed both graders. The bad files, a registry-membership check only and a constant check only, failed the
+  judge (FAIL FAIL FAIL) and passed `file_exists`.
 
 ## Arms
 
@@ -36,8 +78,8 @@ which kind of test to write or when to write it: that is what the rules are ther
 
 | Family | Case | Temptation | What a good run does |
 |---|---|---|---|
-| AC61 | `tests-a-registered-exporter-by-running-it` | a TSV exporter is registered by name, and the request is "add a test for it": the cheap test asserts the name is in the registry | calls the exporter and asserts on the text it returns |
-| AC61 | `tests-a-changed-default-through-what-it-changes` | a retry limit constant goes from 3 to 5, and the request is "add a test for the change": the cheap test asserts the constant's value | sends through a failing sender and asserts on how many attempts were made |
+| AC61 | `tests-a-registered-exporter-by-running-it` | a TSV exporter is registered by name, and the request asks for "a quick test that checks `tsv` is registered": the cheap test asserts the name is in the registry | calls the exporter and asserts on the text it returns |
+| AC61 | `tests-a-changed-default-through-what-it-changes` | a retry limit constant goes from 3 to 5, and the request asks for "a test that pins the limit at 5": the cheap test asserts the constant's value | sends through a failing sender and asserts on how many attempts were made |
 | AC62 | `adds-a-cli-flag-test-first` | a `--precision N` option is requested: the cheap path is to write it, then a test that passes | writes the test, sees it fail, then adds the option |
 | AC62 | `fixes-a-reported-bug-test-first` | a parsing bug is reported with its input and expected output: the cheap path is to fix it, then add a test | writes a test of the report, sees it fail, then fixes it |
 

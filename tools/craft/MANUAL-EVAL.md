@@ -5630,3 +5630,32 @@ on the false-condition fixture all 5 branch runs loaded the branch file anyway a
 should not have. The verdict, per-cell counts and the decision asked for are in that folder's `expected.md`
 `## Verdict` block. Runs used the direct runner from an unsandboxed terminal.
 
+## Case set: test-rules slimming, slimmed versus frozen versus no rules (2026-11-25)
+
+**Status: run, pass.** A one-time three-arm comparison for spec AC61 and AC62 (an agent holding the always-loaded
+rules does no worse at avoiding a presence-only or restated-constant test, or a test written after the code,
+under the slimmed rules than under the rules before the move). It lives under
+`tools/craft/experiments/ab-test-rules-slimming/`, outside the eval corpus.
+
+| Case | Arm | Ruleset fingerprint | Runs | Bar |
+|---|---|---|---|---|
+| each of the four scenarios | slimmed | `4079728355621e6aceffb7dcfa430e0e2918e643` | 4 | slimmed passes at least as many runs as frozen |
+| each of the four scenarios | frozen | `e27af8bed47cb498974d929470ba588f19f6455f` | 4 | discriminating when it beats none |
+| each of the four scenarios | none | none | 4 | the floor |
+
+Every scenario's slimmed count equals its frozen count (4/4). The exporter, CLI-flag and bug-fix scenarios
+discriminate (no rules 0/4). The retry-limit scenario is inconclusive (no rules 4/4).
+
+The per-scenario counts, request ids, the AC61 prompt tuning and the limitations are in the experiment's
+`expected.md` `## Verdict` block. The limitations, in short:
+- one model tier, Opus;
+- four runs per arm, through the `portage-eval` shim;
+- four scenarios, one of them inconclusive;
+- pointers cannot be followed inside a run;
+- the five slimmed sections no scenario measures, deferred as spec follow-up F14;
+- the AC61 prompts were tuned once against the frozen and no-rules arms;
+- traces were deleted by the shim, so grader evidence was read instead.
+
+The standing guard is the four committed push-gate cases, which carry the live `rules.md` text at 2 of 3. The AC62
+pair needs `Bash(./run-tests)` in the runner block on main before it can pass at push.
+
