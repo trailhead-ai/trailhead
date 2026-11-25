@@ -109,6 +109,18 @@ def test_prepare_refuses_an_unknown_arm_or_case_and_writes_nothing(args, tmp_pat
     assert "arm" in done.stderr or "case" in done.stderr
 
 
+def test_prepare_refuses_a_case_that_reaches_a_real_case_by_a_dotdot_path(tmp_path):
+    dest = tmp_path / "out" / "craft"
+    path_case = f"../{EXP.name}/{ab.CASES[0]}"
+    done = subprocess.run(
+        [sys.executable, str(EXP / "ab.py"), "prepare", "none", path_case, str(dest)],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert done.returncode != 0
+    assert "ab.py: unknown case" in done.stderr
+    assert not (tmp_path / "out").exists()
+
+
 def test_prepare_leaves_the_source_plugin_and_experiment_byte_identical(tmp_path):
     craft, exp = _mini(tmp_path)
     before = (_hashes(craft), _hashes(exp))

@@ -244,6 +244,9 @@ def _dispatch(argv) -> int:
             print("ab.py check: run `ab.py sync` and commit the result", file=sys.stderr)
         return 1 if problems else 0
     if cmd == "prepare" and len(args) == 3:
+        if args[1] not in CASES:
+            print(f"ab.py: unknown case {args[1]!r}", file=sys.stderr)
+            return 2
         try:
             print(build_arm_plugin(*args))
         except ValueError as err:
