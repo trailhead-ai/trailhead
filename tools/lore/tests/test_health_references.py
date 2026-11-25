@@ -178,14 +178,18 @@ def test_a_malformed_supersedes_entry_claims_nothing_and_a_repeat_counts_once():
     assert cands.superseded_by("decision", "Bad Entry!") == ()
 
 
-def test_line_numbers_are_taken_from_one_newline_scan_however_many_links(monkeypatch):
+def test_line_numbers_come_from_the_one_newline_scan_and_no_per_link_scan(monkeypatch):
     scans = []
-    real = references._newline_offsets
-    monkeypatch.setattr(references, "_newline_offsets",
-                        lambda text: scans.append(len(text)) or real(text))
+
+    def no_newlines_found(text):
+        scans.append(len(text))
+        return []
+
+    monkeypatch.setattr(references, "_newline_offsets", no_newlines_found)
     body = "".join(f"[[a{i}]]\n" for i in range(500))
     found = references.extract_wikilink_lines(body)
-    assert [line for _, line in found] == list(range(1, 501))
+    assert len(found) == 500
+    assert [line for _, line in found] == [1] * 500
     assert len(scans) == 1
 
 
