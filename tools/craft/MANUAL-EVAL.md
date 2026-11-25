@@ -5941,3 +5941,28 @@ Limitations: the grader that reads a `reopen` or `fold` transition reads the fil
 | answers moved under the attended bullet; the unattended bullet says the run carries out none of them | plan SKILL `533cfae…` | attended no-stopping-point **green** 1 / 1; unattended **1 of 3**, runs 0.89 / 1 / 0.89, failing only `no-question-is-asked` (judge votes split FAIL PASS FAIL) | every record grader passed: the run parked correctly but listed the options in its final message, which the judge reads as a choice left open. Request `local-kuz3nmbcvd5g` |
 | the parked report names `Q<n>` and does not lay the options out again | plan SKILL `ff6b8d4…` | unattended no-stopping-point **green** 1 / 1; `unattended-plan-parks-a-spec-change` **green** 1 / 1 | request `local-22lewp28omem`. Every green arm ran 2 of 2, not 3 of 3, as the shim decides at 2 |
 
+
+## Second review fix pass and security folds, after rebasing on main (2026-11-25)
+
+**Status: run, green with two unexplained runs.** The re-review's folds (plan writes no status and
+hands a drop to the slice ritual's drop procedure, the drop cost, a re-cut through step 7's cut
+rules, the second council pass, the give-back reason, the always-kept rule) and the security audit's
+four folds (an access-concerned or urgent folded entry is kept or asked about, where "more than one
+principal" is read from, the second council pass appended with undispositioned Criticals carried
+forward, a re-cut that names the access check refused) are prose-only. No case was added for them:
+the security folds have no eval coverage. The six cases that read the changed sentences were re-run
+on the rebased branch, plan SKILL `4ec61e9…`; `skills/_shared/slice.md` is unchanged by both passes.
+
+### Runs
+
+| Case | Result | Notes |
+|---|---|---|
+| `plan-asks-when-an-oversized-slice-has-no-stopping-point` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `unattended-plan-parks-an-oversized-slice-with-no-stopping-point` | **green**, runs 0.89 / 1 / 1 | run 1 failed only `no-question-is-asked` (judge votes PASS FAIL FAIL); request `local-kxtm32hecbkh` |
+| `plan-narrowing-keeps-the-access-check-the-surface-needs` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `unattended-plan-narrows-an-oversized-slice` | first request split (0.79 / 1, deciding run cut by the shim's budget); resubmitted **green** 1 / 1 | the failing run parked a question and omitted the narrowed outcome line; no transcript kept. Requests `local-kxtm32hecbkh`, `local-yl8u1cssqct3` |
+| `plan-restores-the-whole-slice-when-the-cut-is-rejected` | through the shim: 2 passed, 2 failed (0.87 each), 5 killed at the shim's 540-second case budget; direct runner: **green 3 / 3** | both failing shim runs failed only the two `covers_gate` graders (no gate call matched, at the cut or after the restore), with no transcript kept. The direct runs (`claude plugin eval`, 3 runs at once, `--keep-temp`) each called the gate with the reduced list and again with the restored list; each run took 433–500 s, so a parallel pair sits at the shim's 540-second budget. Untested hypothesis for the failures: the runs are in don't-ask mode, so a gate call shaped outside the granted commands (the spec piped from `cat`, say) is denied and the run may go on uncertified. Requests `local-kxtm32hecbkh`, `local-yl8u1cssqct3`, `local-184tifg0nuj7` |
+
+A probe of the restore case on the prose before both passes (plan SKILL `ff6b8d4…`, request
+`local-8gr4p84pdowq`) had both runs killed at the shim's budget and decided nothing.
