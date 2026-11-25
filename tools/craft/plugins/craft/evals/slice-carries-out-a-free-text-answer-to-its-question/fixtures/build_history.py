@@ -12,11 +12,16 @@ session loaded the slice skill, read the spec, and put the blocking prompt about
 The one tool_result is the captured output of the real `./lore record show`
 command the tool_use names, run in a throwaway vault built by the urgent-entry
 case's own scaffold (so the spec revision embedded in it is the one a run sees).
-Only the operator's and the agent's prose is written here. The skill load is the
-Skill call and its launch line alone: the history carries no text of the slice
-skill or of `skills/_shared/escalation.md`, so none of the sentences those files
-are measured on, and the resumed session reads them itself. Run it again whenever the scaffold's spec
-changes; it writes the same history.jsonl into all three fixtures directories.
+Only the operator's and the agent's prose is written here. The skill load is what a
+real launch leaves in a conversation: the Skill call, its launch line, and the
+skill's text as the harness shows it (a "Base directory for this skill" line, the
+body without its front matter, the plugin root filled in, and the arguments).
+The plugin root is `./craft`, the copy of the plugin each case's scaffold installs
+in the run directory, because a seeded conversation is resumed literally and an
+absolute path would hold only on the machine that built it. The history carries
+no text of `skills/_shared/escalation.md`: the resumed session reads it itself.
+Run it again whenever the slice skill or the scaffold's spec changes; it writes the
+same history.jsonl into all three fixtures directories.
 """
 from __future__ import annotations
 
@@ -29,6 +34,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EVALS = HERE.parents[1]
+PLUGIN = EVALS.parent
+SLICE_SKILL = PLUGIN / "skills" / "slice" / "SKILL.md"
+PLUGIN_IN_RUN = "./craft"
+SKILL_ARGS = "spec/invoice-summary"
 URGENT = EVALS / "slice-asks-before-dropping-an-urgent-entry"
 CASES = [
     EVALS / "slice-carries-out-a-free-text-answer-to-its-question",
@@ -57,6 +66,16 @@ task is broader, so the finding may wait behind other audit work.
 until someone builds or drops F1.
 
 Reply with a number, or tell me in your own words what to do."""
+
+
+def launch_text(skill_md: Path, args: str) -> str:
+    """The text a real skill launch adds to the conversation, for the plugin copy in the run."""
+    text = skill_md.read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        text = text.split("\n---\n", 1)[1]
+    body = text.replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN_IN_RUN)
+    base = f"{PLUGIN_IN_RUN}/skills/{skill_md.parent.name}"
+    return f"Base directory for this skill: {base}\n\n{body}\n\nARGUMENTS: {args}"
 
 
 def clean_env(home: Path) -> dict[str, str]:
@@ -111,6 +130,10 @@ class Writer:
     def user(self, text: str) -> None:
         self._base("user", {"role": "user", "content": text})
 
+    def meta(self, text: str, source_tool_id: str) -> None:
+        self._base("user", {"role": "user", "content": [{"type": "text", "text": text}]},
+                   {"isMeta": True, "sourceToolUseID": source_tool_id})
+
     def assistant(self, text: str, command: str | None = None, description: str = "",
                   tool: tuple[str, dict] | None = None) -> str | None:
         content: list[dict] = [{"type": "text", "text": text}] if text else []
@@ -146,8 +169,9 @@ class Writer:
 def build() -> str:
     w = Writer()
     w.user(operator_prompt())
-    skill_id = w.assistant("", tool=("Skill", {"skill": "craft:slice", "args": "spec/invoice-summary"}))
+    skill_id = w.assistant("", tool=("Skill", {"skill": "craft:slice", "args": SKILL_ARGS}))
     w.result(skill_id, "Launching skill: craft:slice", {"success": True, "commandName": "craft:slice"})
+    w.meta(launch_text(SLICE_SKILL, SKILL_ARGS), skill_id)
     tool_id = w.assistant("I'll read the spec first.", SHOW, "Read the spec")
     w.result(tool_id, captured_show())
     w.assistant(QUESTION)
