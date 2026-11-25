@@ -1030,7 +1030,7 @@ def test_a_render_that_raises_errors_only_its_check(world, monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(health, "CHECKS", tuple(
-        replace(c, render=boom) if c.name == "retired-links" else c for c in health.CHECKS))
+        replace(c, evidence=boom) if c.name == "retired-links" else c for c in health.CHECKS))
     r = world.run()
     assert r.returncode == 0, r.stderr
     assert group(r.stdout, "retired-links") == ["retired-links — errored: RuntimeError."]
@@ -3125,3 +3125,236 @@ def test_characterization_pins_every_check_line_and_the_distill_queue_lines(worl
     health_lines, queue_lines = _characterized(world, mp, monkeypatch, tmp_path)
     assert health_lines == CHAR_HEALTH.splitlines()
     assert queue_lines == CHAR_QUEUE.splitlines()
+
+
+# --- --json ------------------------------------------------------------------------
+
+
+def _json(world, *args):
+    r = world.run("--json", *args)
+    assert r.returncode == 0, r.stderr
+    assert r.stderr == ""
+    return json.loads(r.stdout), r
+
+
+def _check(doc, name):
+    (found,) = [c for c in doc["checks"] if c["name"] == name]
+    return found
+
+
+def test_a_clean_run_has_every_check_ran_with_no_findings(world, mp):
+    mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
+    _put(world.roots["default"], "decision", "fine")
+    doc, _ = _json(world)
+    assert doc["format"] == 1
+    assert doc["vaults"] == ["default", "trailhead", "levr"]
+    assert (doc["configured"], doc["window_days"]) == (3, 30)
+    assert [c["name"] for c in doc["checks"]] == list(CHECKS)
+    for c in doc["checks"]:
+        assert (c["status"], c["total"], c["shown"], c["findings"], c["skipped"], c["error"]) == (
+            "ran", 0, 0, [], {}, None), c["name"]
+        assert c["action"] is None
+    assert {(r["vault"], r["check"]): (r["findings"], r["skipped"], r["error"]) for r in doc["summary"]} == {
+        (v, c): (0, None, None) for v in doc["vaults"] for c in CHECKS}
+    assert doc["unreadable"] == {} and doc["outside_root"] == {}
+    assert doc["index"]["status"] == "unconfirmed"
+
+
+def test_over_the_cap_total_is_true_and_shown_is_the_limit_oldest_first_and_all_shows_every_one(world):
+    for i in range(5):
+        _put(world.roots["default"], "task", f"t{i}", updated=f"2026-02-0{i + 1}T00:00:00Z",
+             related={"lesson": [f"gone-{i}"]})
+    doc, _ = _json(world, "--limit", "2")
+    c = _check(doc, "dangling-links")
+    assert (c["total"], c["shown"]) == (5, 2)
+    assert [f["name"] for f in c["findings"]] == ["t0", "t1"]
+    assert c["action"].startswith("Act on these with /lore:correct")
+    assert [r["findings"] for r in doc["summary"] if r["check"] == "dangling-links"
+            and r["vault"] == "default"] == [5]
+    doc, _ = _json(world, "--all")
+    c = _check(doc, "dangling-links")
+    assert (c["total"], c["shown"]) == (5, 5)
+    assert [f["name"] for f in c["findings"]] == [f"t{i}" for i in range(5)]
+
+
+def test_a_finding_carries_vault_kind_name_date_and_evidence_and_an_undated_one_has_a_null_date(world):
+    _put(world.roots["trailhead"], "task", "t", updated=None, related={"lesson": ["gone"]})
+    doc, _ = _json(world)
+    (f,) = _check(doc, "dangling-links")["findings"]
+    assert f == {"vault": "trailhead", "kind": "task", "name": "t", "date": None,
+                 "evidence": "related lesson → lesson/gone: not found in any vault"}
+
+
+def test_a_check_skipped_for_every_vault_has_null_counts_and_each_vaults_reason(world):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["nowhere"]})
+    os.chmod(world.roots["levr"], 0)
+    try:
+        doc, r = _json(world)
+        table = rows(world.run().stdout)
+    finally:
+        os.chmod(world.roots["levr"], 0o755)
+    c = _check(doc, "dangling-links")
+    assert (c["status"], c["total"], c["shown"], c["findings"]) == ("skipped", None, None, [])
+    assert set(c["skipped"]) == {"default", "trailhead", "levr"}
+    for vault, reason in c["skipped"].items():
+        assert "yes: " + reason == table[vault][2], vault
+    assert {r["skipped"] for r in doc["summary"] if r["check"] == "dangling-links"} == set(c["skipped"].values())
+
+
+def test_a_check_skipped_for_some_vaults_is_ran_with_those_vaults_in_skipped_and_null_counts_on_their_rows(
+        world, mp):
+    mp.bind("g", ["trailhead"], [mp.repo("alpha", {"tools/lore/x.py": "x\n"})])
+    _decision_naming(world.roots["trailhead"], "d", "tools/lore/gone.py")
+    doc, _ = _json(world)
+    c = _check(doc, "missing-paths")
+    assert c["status"] == "ran"
+    assert set(c["skipped"]) == {"default", "levr"}
+    assert (c["total"], c["shown"]) == (1, 1)
+    summary = {r["vault"]: r for r in doc["summary"] if r["check"] == "missing-paths"}
+    assert (summary["default"]["records"], summary["default"]["findings"]) == (None, None)
+    assert summary["default"]["skipped"] == c["skipped"]["default"]
+    assert summary["trailhead"]["findings"] == 1 and summary["trailhead"]["skipped"] is None
+    assert any("repository" in line for line in c["repositories"])
+
+
+def test_an_errored_check_has_its_error_type_and_the_others_are_intact(world, monkeypatch):
+    _put(world.roots["default"], "task", "d", related={"lesson": ["nowhere"]})
+
+    def boom(scans, selected, ctx):
+        raise RuntimeError("boom\nsecond line")
+
+    _with_checks(monkeypatch, "retired-links", boom)
+    doc, r = _json(world)
+    c = _check(doc, "retired-links")
+    assert (c["status"], c["error"], c["total"], c["shown"], c["findings"]) == (
+        "errored", "RuntimeError", None, None, [])
+    assert "boom" not in r.stdout
+    assert _check(doc, "dangling-links")["total"] == 1
+    assert {r["error"] for r in doc["summary"] if r["check"] == "retired-links"} == {"RuntimeError"}
+
+
+def test_an_unknown_vault_with_json_refuses_on_stderr_alone(world):
+    r = world.run("--json", "--vault", "nope")
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert len(r.stderr.splitlines()) == 1 and r.stderr.startswith("lore: ")
+
+
+def test_json_with_repo_and_no_vault_refuses_on_stderr_alone(world, tmp_path):
+    r = world.run("--json", "--repo", str(tmp_path))
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert r.stderr.startswith("lore: cannot run the health report: --repo needs --vault")
+
+
+def test_a_passed_repo_path_with_a_control_character_arrives_escaped(world, tmp_path):
+    r = world.run("--json", "--vault", "trailhead", "--repo", str(tmp_path / "re\x1bpo\ndir"))
+    assert r.returncode == 0, r.stderr
+    assert not [b for b in r.stdout.encode() if b < 0x20 and b not in b"\n "]
+    (line,) = [ln for ln in _check(json.loads(r.stdout), "missing-paths")["repositories"] if "re" in ln]
+    assert line.isprintable()
+    assert "re\\x1bpo\\ndir" in line and "(passed with --repo)" in line
+
+
+def _hostile_stale(**kw):
+    stale_mod = importlib.import_module("lore.health.stale")
+    health = importlib.import_module("lore.cli.health")
+    f = stale_mod.Finding("default", "task", kw.get("name", "SECRETNAME\x1b[2J\nx"), "2026-09-01T00:00:00+00:00",
+                          kw.get("status", "open\x1b[31m\nINJECT é"), 60, False)
+    return health.CheckRun([f], {"default": 1})
+
+
+def _with_stale_run(monkeypatch, run):
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, run=lambda scans, selected, ctx: run) if c.name == "stale-tasks" else c
+        for c in health.CHECKS))
+
+
+def test_untrusted_text_in_json_has_no_control_bytes_no_raw_non_ascii_and_a_bad_name_is_null(world, monkeypatch):
+    _with_stale_run(monkeypatch, _hostile_stale())
+    r = world.run("--json")
+    assert r.returncode == 0, r.stderr
+    raw = r.stdout.encode()
+    assert not [b for b in raw if b < 0x20 and b not in b"\n "]
+    assert all(b < 0x80 for b in raw)
+    assert "SECRETNAME" not in r.stdout
+    (f,) = _check(json.loads(r.stdout), "stale-tasks")["findings"]
+    assert f["name"] is None
+    assert f["evidence"].isprintable() and "INJECT" in f["evidence"] and "é" in f["evidence"]
+
+
+def test_a_non_ascii_character_arrives_as_a_json_escape_and_not_as_raw_bytes(world, monkeypatch):
+    _with_stale_run(monkeypatch, _hostile_stale(name="plain", status="open é"))
+    r = world.run("--json")
+    assert "\\u00e9" in r.stdout
+    assert all(b < 0x80 for b in r.stdout.encode())
+    (f,) = _check(json.loads(r.stdout), "stale-tasks")["findings"]
+    assert f["name"] == "plain" and "é" in f["evidence"]
+
+
+def test_a_long_wikilink_target_is_capped_with_an_ellipsis_in_both_forms_and_a_short_one_is_whole(world):
+    health = importlib.import_module("lore.cli.health")
+    long_name = "a" * 250
+    _put(world.roots["default"], "task", "long", related={"decision": [long_name]})
+    _put(world.roots["default"], "task", "short", related={"decision": ["b" * 40]})
+    doc, _ = _json(world)
+    ev = {f["name"]: f["evidence"] for f in _check(doc, "dangling-links")["findings"]}
+    capped = f"related decision → decision/{'a' * (health.MAX_EVIDENCE_FIELD - 1 - len('decision/'))}…: not found in any vault"
+    assert ev["long"] == capped
+    assert ev["short"] == f"related decision → decision/{'b' * 40}: not found in any vault"
+    text = world.run().stdout
+    assert f"  default/task/long  2026-03-01  {capped}" in text.splitlines()
+    assert long_name not in text
+
+
+def _json_world_evidence(world, mp, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    _characterization_world(world, mp)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    report = health.build_report(now=CHAR_NOW)
+    return health, report, health.json_document(report, None), health.render(report, None, None)
+
+
+def _text_line_for(f):
+    ident = f"{f['vault']}/{f['kind']}/" + (f["name"] if f["name"] is not None
+                                            else " (a record whose name is not a valid record id)")
+    return f"  {ident}  {f['date'] or 'undated'}  {f['evidence']}"
+
+
+@pytest.mark.parametrize("name", CHECKS)
+def test_every_findings_text_line_is_its_identity_date_and_json_evidence(world, mp, monkeypatch, tmp_path, name):
+    health, report, doc, lines = _json_world_evidence(world, mp, monkeypatch, tmp_path)
+    c = _check(doc, name)
+    assert c["findings"] and c["total"] == len(c["findings"])
+    for f in c["findings"]:
+        assert _text_line_for(f) in lines, f
+    assert c["total"] == sum(r["findings"] for r in doc["summary"] if r["check"] == name)
+    group_lines = group("\n".join(lines), name)
+    assert len([ln for ln in group_lines if ln in {_text_line_for(f) for f in c["findings"]}]) == c["total"]
+
+
+@pytest.mark.parametrize("name", CHECKS)
+def test_changing_a_checks_evidence_function_changes_both_forms(world, mp, monkeypatch, tmp_path, name):
+    health = importlib.import_module("lore.cli.health")
+    monkeypatch.setattr(health, "CHECKS", tuple(
+        replace(c, evidence=lambda f: "SENTINEL-EVIDENCE") if c.name == name else c for c in health.CHECKS))
+    _, report, doc, lines = _json_world_evidence(world, mp, monkeypatch, tmp_path)
+    c = _check(doc, name)
+    assert c["findings"]
+    assert {f["evidence"] for f in c["findings"]} == {"SENTINEL-EVIDENCE"}
+    finding_lines = [ln for ln in group("\n".join(lines), name) if ln.startswith("  ") and ": repository" not in ln]
+    assert finding_lines and all(ln.endswith("  SENTINEL-EVIDENCE") for ln in finding_lines)
+
+
+@pytest.mark.parametrize("extra,capped", [(0, False), (1, True)])
+def test_a_target_of_exactly_the_cap_prints_whole_and_one_more_character_is_cut(world, extra, capped):
+    health = importlib.import_module("lore.cli.health")
+    name = "a" * (health.MAX_EVIDENCE_FIELD - len("decision/") + extra)
+    _put(world.roots["default"], "task", "t", related={"decision": [name]})
+    doc, _ = _json(world)
+    (f,) = _check(doc, "dangling-links")["findings"]
+    target = f["evidence"].split(" → ")[1].split(": ")[0]
+    assert target.endswith("…") is capped
+    assert len(target) == health.MAX_EVIDENCE_FIELD

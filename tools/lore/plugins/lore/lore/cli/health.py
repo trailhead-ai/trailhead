@@ -45,6 +45,19 @@ lines of a bad wikilink, or the entry positions of a bad sidecar entry
 (:func:`_malformed_evidence`). The index line counts the records the index would
 hold, sessions included, on every form it prints.
 
+``--json`` prints the same :class:`HealthReport` as one JSON document on stdout instead of the
+text (:func:`json_document`; the shape is fixed by ``docs/design/lore-health-reports-lesson-growth-passed-repositories-and-json.md``),
+with the same ``--vault``, ``--limit``, ``--all``, ``--stale-days`` and ``--repo``. A finding is
+its identity, its date and its *evidence*: each :class:`Check` supplies the evidence once
+(:attr:`Check.evidence`), and the text line (:func:`_line`) and the JSON ``evidence`` both print
+that string, so they cannot disagree. A check that skipped only some vaults is ``ran`` with those
+vaults in ``skipped``; ``status`` is ``skipped`` only when every selected vault was skipped. The
+document is ``json.dumps(..., ensure_ascii=True)`` of values already escaped by :func:`_safe`, and
+a run that cannot happen prints no JSON, only its one stderr line.
+
+Untrusted values echoed into evidence (a reference target, a status, a reason, a branch, a path)
+are cut by :func:`_cap` to :data:`MAX_EVIDENCE_FIELD` characters ending in ``…``, in both forms.
+
 Record identity: a finding opens with ``<vault>/<kind>/<name>`` and the date. The
 name is printed only when it is shaped like a record id (the shape
 ``health.references.resolve`` accepts, no slash); a name from disk that is not
@@ -68,6 +81,7 @@ config, unknown ``--vault``) or fails unexpectedly, always as one ``lore:`` line
 from __future__ import annotations
 
 import argparse
+import json
 import shlex
 import sys
 from collections import Counter
@@ -92,6 +106,11 @@ DEFAULT_LIMIT = 20
 DEFAULT_STALE_DAYS = 30
 MAX_STALE_DAYS = 36_500
 BAD_NAME = "a record whose name is not a valid record id"
+# The longest an untrusted value echoed into a finding's evidence may be, ellipsis included. It is
+# longer than any record id in the live vaults, so a real target prints whole, and short enough
+# that one finding stays a line a reader and an agent consumer can take in.
+MAX_EVIDENCE_FIELD = 200
+ELLIPSIS = "…"
 
 INDEX_MATCH = "match"
 INDEX_MISMATCH = "mismatch"
@@ -181,7 +200,8 @@ class Section:
     ``findings`` is ``None`` when the check was skipped or errored; ``lines`` is
     each finding rendered, in order. ``run`` is what the check returned, ``None`` when it raised and ``error`` holds the
     error type name. ``repository_lines`` are the lines printed under the heading
-    before the findings.
+    before the findings. ``evidence`` is each finding's evidence text, in order, and
+    ``lines`` each finding's text line built from it: both forms print one string.
     """
 
     check: Check
@@ -189,6 +209,7 @@ class Section:
     findings: list | None = None
     error: str | None = None
     lines: list[str] = field(default_factory=list)
+    evidence: list[str] = field(default_factory=list)
     note: str | None = None
     repository_lines: list[str] = field(default_factory=list)
 
@@ -230,7 +251,9 @@ class Check:
     """One registry entry.
 
     ``run(scans, selected, ctx)`` runs the check and classifies its result through
-    the check's own module at call time. ``render(finding)`` is one finding's line.
+    the check's own module at call time. ``evidence(finding)`` is what one finding says
+    after its identity and date; the text line (:func:`_line`) and the JSON document print
+    that one string.
     ``skip_reason`` ends the sentence saying why a skipped check could not judge
     a target. ``action`` is the line that names what acts on the findings.
     ``heading_note(section, ctx)``, when set, returns text appended verbatim to the
@@ -244,7 +267,7 @@ class Check:
 
     name: str
     run: Callable[[Sequence[VaultScan], Collection[str], RunContext], CheckRun]
-    render: Callable[[object], str]
+    evidence: Callable[[object], str]
     skip_reason: str
     action: str
     heading_note: Callable[[Section, RunContext], str | None] | None = None
@@ -253,6 +276,12 @@ class Check:
 
 def _safe(value: object) -> str:
     return _printable(str(value))
+
+
+def _cap(value: object) -> str:
+    """*value* escaped as :func:`_safe` does, cut to :data:`MAX_EVIDENCE_FIELD` characters ending in an ellipsis."""
+    text = _safe(value)
+    return text if len(text) <= MAX_EVIDENCE_FIELD else text[:MAX_EVIDENCE_FIELD - 1] + ELLIPSIS
 
 
 def _num(n: int) -> str:
@@ -431,10 +460,14 @@ def _run_distill(scans, selected, ctx) -> CheckRun:
                     deferred=sum(1 for i in result.deferred if i.vault in chosen))
 
 
+def _distill_evidence(item: queue_mod.QueueItem) -> str:
+    text = f"{_cap(item.status)}  {_cap(item.reason)}"
+    return f"{text}; {_cap(item.adr_note)}" if item.adr_note else text
+
+
 def _distill_line(item: queue_mod.QueueItem) -> str:
     """One queued spec's line; ``lore distill-queue`` prints its items through this too."""
-    text = f"  {_ident(item)}  {_when(item)}  {_safe(item.status)}  {_safe(item.reason)}"
-    return f"{text}; {_safe(item.adr_note)}" if item.adr_note else text
+    return _line(item, _distill_evidence(item))
 
 
 def _distill_note(sec: Section, ctx: RunContext) -> str | None:
@@ -463,8 +496,8 @@ def _run_lessons(scans, selected, ctx) -> CheckRun:
                     dict(result.judged), skipped=skipped)
 
 
-def _lesson_line(f: lessons_mod.Finding) -> str:
-    return f"  {_ident(f)}  {_when(f)}  added {_plural(f.age_days, 'day', 'days')} ago"
+def _lesson_evidence(f: lessons_mod.Finding) -> str:
+    return f"added {_plural(f.age_days, 'day', 'days')} ago"
 
 
 def _percent(added: int, records: int) -> int:
@@ -515,8 +548,9 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
         try:
             run = check.run(scans, selected, ctx)
             findings = None if run.findings is None else sorted(run.findings, key=_sort_key)
-            lines = [] if findings is None else [check.render(f) for f in findings]
-            section = Section(check, run, findings, lines=lines)
+            evidence = [] if findings is None else [check.evidence(f) for f in findings]
+            lines = [_line(f, e) for f, e in zip(findings or (), evidence)]
+            section = Section(check, run, findings, lines=lines, evidence=evidence)
             if check.heading_note is not None:
                 section.note = check.heading_note(section, ctx)
             if check.repository_lines is not None:
@@ -605,9 +639,13 @@ def _malformed_evidence(field: str, locations: tuple[int, ...]) -> str:
     return f"malformed reference at {noun} {spots}"
 
 
-def _when(f) -> str:
+def _date(f) -> str | None:
     when = parse_timestamp(f.updated_at)
-    return when.date().isoformat() if when is not None else "undated"
+    return when.date().isoformat() if when is not None else None
+
+
+def _when(f) -> str:
+    return _date(f) or "undated"
 
 
 def _well_shaped(name: str) -> bool:
@@ -625,12 +663,15 @@ def _ident(f) -> str:
     return _record_id(f.vault, f.kind, f.name)
 
 
-def _dangling_line(f: dangling_mod.Finding) -> str:
+def _line(f, evidence: str) -> str:
+    """One finding's text line: its identity, its date, then its *evidence*."""
+    return f"  {_ident(f)}  {_when(f)}  {evidence}"
+
+
+def _dangling_evidence(f: dangling_mod.Finding) -> str:
     if f.malformed:
-        what = f"{_safe(f.field)} → {_malformed_evidence(f.field, f.locations)}: not shaped like a record id"
-    else:
-        what = f"{_safe(f.field)} → {_safe(f.target)}: not found in any vault"
-    return f"  {_ident(f)}  {_when(f)}  {what}"
+        return f"{_cap(f.field)} → {_malformed_evidence(f.field, f.locations)}: not shaped like a record id"
+    return f"{_cap(f.field)} → {_cap(f.target)}: not found in any vault"
 
 
 MAX_NAMED_SUCCESSORS = 3
@@ -704,14 +745,18 @@ def _candidate_status(f: retired_mod.Finding, c: retired_mod.RetiredCandidate, s
     return f"{phrase}; {LINKS_BACK}" + (f": `{_safe(cmd)}`" if cmd else "")
 
 
-def _retired_line(f: retired_mod.Finding) -> str:
+def _retired_evidence(f: retired_mod.Finding) -> str:
     shared = len({(c.kind, c.name) for c in f.retired}) < len(f.retired)
     if len(f.retired) == 1:
         what = _candidate_status(f, f.retired[0], shared)
     else:
         ids = _qualified(f.retired, kind_name=lambda c: (c.kind, c.name))
         what = "; ".join(f"{i} {_candidate_status(f, c, shared)}" for i, c in zip(ids, f.retired))
-    return f"  {_ident(f)}  {_when(f)}  {_safe(f.field)} → {_safe(f.target)}: {what}"
+    return f"{_cap(f.field)} → {_cap(f.target)}: {what}"
+
+
+def _retired_line(f: retired_mod.Finding) -> str:
+    return _line(f, _retired_evidence(f))
 
 
 MAX_NAMED_SPECS = 3
@@ -759,7 +804,7 @@ def _shared_name_remedy(f: stale_mod.Finding) -> str:
     return f"a task of this name is also in vault {where}; to drop this one, run `{_safe(cmd)}`"
 
 
-def _stale_line(f: stale_mod.Finding) -> str:
+def _stale_evidence(f: stale_mod.Finding) -> str:
     reasons = []
     if f.undated:
         reasons.append("no readable last-updated time")
@@ -769,7 +814,11 @@ def _stale_line(f: stale_mod.Finding) -> str:
         reasons.append(f"linked to {_spec_phrase(f.retired_specs)}")
     if f.duplicated_in:
         reasons.append(_shared_name_remedy(f))
-    return f"  {_ident(f)}  {_when(f)}  {_safe(f.status)}  {'; '.join(reasons)}"
+    return f"{_cap(f.status)}  {'; '.join(reasons)}"
+
+
+def _stale_line(f: stale_mod.Finding) -> str:
+    return _line(f, _stale_evidence(f))
 
 
 def _stale_note(sec: Section, ctx: RunContext) -> str:
@@ -783,16 +832,15 @@ def _stale_note(sec: Section, ctx: RunContext) -> str:
     return window + (": " + ", ".join(parts) if parts else "")
 
 
-def _missing_line(f: paths_mod.MissingPath) -> str:
-    return (f"  {_ident(f)}  {_when(f)}  {_safe(f.location)} {f.number}: "
-            f"`{_safe(f.path)}` is on no repository's default branch")
+def _missing_evidence(f: paths_mod.MissingPath) -> str:
+    return f"{_safe(f.location)} {f.number}: `{_cap(f.path)}` is on no repository's default branch"
 
 
 def _repository_line(vault: str, item, now: datetime, passed: bool = False) -> str:
     head = f"  {_safe(vault)}: repository {_safe(item.root)}{' (passed with --repo)' if passed else ''}: "
     if isinstance(item, repos_mod.Unreadable):
         return f"{head}could not be read ({_UNREADABLE_WHY[item.reason]})"
-    branch = _safe(item.branch)
+    branch = _cap(item.branch)
     where = f"local {branch} (no remote-tracking default branch)" if item.local else f"origin/{branch}"
     if item.fetched_at is None:
         return f"{head}{where}, no fetch recorded"
@@ -818,7 +866,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="dangling-links",
         run=_run_dangling,
-        render=_dangling_line,
+        evidence=_dangling_evidence,
         skip_reason="so no target can be confirmed missing",
         action="Act on these with /lore:correct: point the reference at the record "
                "that replaced its target, or remove it.",
@@ -826,7 +874,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="retired-links",
         run=_run_retired,
-        render=_retired_line,
+        evidence=_retired_evidence,
         skip_reason="so no target's status can be confirmed",
         action="Act on these with /lore:correct: point a superseded link at a named live "
                "successor; for a superseded record that links back, run the lore record supersede "
@@ -836,7 +884,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="stale-tasks",
         run=_run_stale,
-        render=_stale_line,
+        evidence=_stale_evidence,
         skip_reason="so no spec's status can be confirmed",
         action=STALE_ACTION,
         heading_note=_stale_note,
@@ -844,7 +892,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="missing-paths",
         run=_run_paths,
-        render=_missing_line,
+        evidence=_missing_evidence,
         skip_reason=PATHS_SKIP_TAIL,
         action="Act on these with /lore:correct: point the record at where the code now lives, "
                "or, if the feature it describes was removed, drop or supersede the record. "
@@ -855,7 +903,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="distill-queue",
         run=_run_distill,
-        render=_distill_line,
+        evidence=_distill_evidence,
         skip_reason=DISTILL_SKIP_TAIL,
         action="Act on these with /craft:distill: a sweep takes every waiting spec, including any "
                "not shown; /craft:distill spec/<name> takes one. "
@@ -865,7 +913,7 @@ CHECKS: tuple[Check, ...] = (
     Check(
         name="lesson-growth",
         run=_run_lessons,
-        render=_lesson_line,
+        evidence=_lesson_evidence,
         skip_reason=LESSONS_SKIP_TAIL,
         action="These are informational, not problems to fix. If lessons pile up faster than they "
                "are folded, run /craft:consolidate: it merges lessons that prevent the same failure.",
@@ -947,6 +995,69 @@ def _group(sec: Section, limit: int | None, vault_arg: str | None, ctx: RunConte
     return out
 
 
+def _finding_json(f, evidence: str) -> dict:
+    """One finding as data: the record's identity, its date, and the *evidence* its text line ends with.
+
+    ``name`` is ``None`` for a name that is not record-id shaped, which is then never echoed.
+    """
+    return {
+        "vault": _safe(f.vault),
+        "kind": _safe(f.kind),
+        "name": _safe(f.name) if _well_shaped(f.name) else None,
+        "date": _date(f),
+        "evidence": evidence,
+    }
+
+
+def _check_json(sec: Section, report: HealthReport, limit: int | None) -> dict:
+    name = sec.check.name
+    skipped = {_safe(r.vault): _safe(r.skipped_reason)
+               for r in report.rows if r.check == name and r.skipped_reason}
+    out = {"name": name, "status": "ran", "skipped": skipped, "error": None, "note": None,
+           "repositories": [], "total": None, "shown": None, "findings": [], "action": None}
+    if sec.error is not None:
+        return {**out, "status": "errored", "error": _safe(sec.error)}
+    out["repositories"] = [ln.strip() for ln in sec.repository_lines]
+    if sec.findings is None:
+        return {**out, "status": "skipped"}
+    shown = len(sec.findings) if limit is None else min(limit, len(sec.findings))
+    return {**out,
+            "note": _safe(sec.note).strip() or None if sec.note else None,
+            "total": len(sec.findings), "shown": shown,
+            "findings": [_finding_json(f, e) for f, e in zip(sec.findings[:shown], sec.evidence)],
+            "action": sec.check.action if sec.findings else None}
+
+
+def json_document(report: HealthReport, limit: int | None) -> dict:
+    """*report* as the ``--json`` document; *limit* ``None`` shows every finding.
+
+    Built from the same :class:`HealthReport` the text form renders, and each finding's
+    ``evidence`` is the string its text line carries, so the two forms cannot disagree.
+    Every untrusted string goes through :func:`_safe` first, as in the text form.
+    """
+    ix = report.index
+    return {
+        "format": 1,
+        "vaults": [_safe(v) for v in report.selected],
+        "configured": report.configured,
+        "window_days": report.ctx.stale_days,
+        "summary": [{"vault": _safe(r.vault), "check": r.check, "records": r.records, "findings": r.findings,
+                     "skipped": None if r.skipped_reason is None else _safe(r.skipped_reason),
+                     "error": None if r.error is None else _safe(r.error)} for r in report.rows],
+        "unreadable": {_safe(v): n for v, n in report.unreadable.items()},
+        "outside_root": {_safe(v): n for v, n in report.outside_root.items()},
+        "index": {"status": ix.status, "read": ix.read, "indexed": ix.indexed,
+                  "mismatches": [{"vault": _safe(v), "read": r, "indexed": i} for v, r, i in ix.mismatches],
+                  "reason": None if ix.reason is None else _safe(ix.reason)},
+        "checks": [_check_json(sec, report, limit) for sec in report.sections],
+    }
+
+
+def render_json(report: HealthReport, limit: int | None) -> list[str]:
+    """The ``--json`` document as lines: ASCII only, every control character escaped."""
+    return json.dumps(json_document(report, limit), ensure_ascii=True, indent=2).splitlines()
+
+
 def _emit(lines: list[str], stream) -> None:
     """The one place the command writes output: each line is escaped on the way out."""
     for line in lines:
@@ -973,7 +1084,7 @@ def cmd_health(args) -> int:
     try:
         report = build_report(only, stale_days=args.stale_days, max_scan_mib=args.max_scan_mib,
                               repo_paths=args.repo or ())
-        _emit(render(report, limit, only), sys.stdout)
+        _emit(render_json(report, limit) if args.json else render(report, limit, only), sys.stdout)
         return 0
     except scan_mod.HealthResolutionError as exc:
         _emit([_refusal(exc, only)], sys.stderr)
@@ -1036,7 +1147,9 @@ def add_health_subparser(sub) -> None:
             "executor-dispatch lessons (kind lesson, label craft/dispatch-lesson=executor, not dropped "
             "or superseded) per vault and lists those added within the staleness window, as "
             "information rather than problems; it is skipped for one vault, not all, when that vault's "
-            "lessons cannot all be read. Read-only: nothing is "
+            "lessons cannot all be read. --json prints the whole report as one JSON document instead "
+            "of text; a check that skipped some vaults is 'ran' with those vaults in its 'skipped' "
+            "map. Read-only: nothing is "
             "fetched. "
             "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
@@ -1056,5 +1169,8 @@ def add_health_subparser(sub) -> None:
                    help="A repository of the vault named with --vault, for missing-paths when camp "
                         "binds that vault none (repeatable; needs --vault; ~ is expanded, a relative "
                         "path is taken from the current directory)")
+    p.add_argument("--json", action="store_true", default=False,
+                   help="Print the whole report as one JSON document on stdout instead of text "
+                        "(same --vault, --limit, --all, --stale-days and --repo)")
     add_max_scan_mib(p)
     p.set_defaults(func=cmd_health)
