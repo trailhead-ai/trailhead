@@ -739,6 +739,26 @@
         "skills/slice/SKILL.md"
       ],
       "merge_only": true
+    },
+    "tests-a-registered-exporter-by-running-it": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "tests-a-changed-default-through-what-it-changes": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "adds-a-cli-flag-test-first": {
+      "measures": [
+        "rules.md"
+      ]
+    },
+    "fixes-a-reported-bug-test-first": {
+      "measures": [
+        "rules.md"
+      ]
     }
   }
 }

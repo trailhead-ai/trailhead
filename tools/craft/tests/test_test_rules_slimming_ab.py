@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import shlex
 import subprocess
 import sys
@@ -65,8 +66,25 @@ def _mini(tmp_path, rules=RULES_TEXT, frozen=FROZEN_TEXT):
 
 
 def _prompt_in(case_yaml_text):
-    found = re.search(r"^  append_system_prompt: (.*)$", case_yaml_text, re.M)
-    return json.loads(found.group(1)) if found else None
+    """The appended prompt as a YAML reader would see it: a JSON string on one line, or a block scalar
+    with the `|2` indentation indicator."""
+    lines = case_yaml_text.splitlines()
+    for i, ln in enumerate(lines):
+        if ln.startswith("  append_system_prompt: "):
+            rest = ln[len("  append_system_prompt: "):]
+            if rest.startswith('"'):
+                return json.loads(rest)
+            chomp = rest[2:]
+            assert rest[:2] == "|2" and chomp in ("", "-", "+"), rest
+            body = []
+            for nxt in lines[i + 1:]:
+                if nxt.strip() and not nxt.startswith("    "):
+                    break
+                body.append(nxt[4:] if nxt.strip() else "")
+            while chomp != "+" and body and body[-1] == "":
+                body.pop()
+            return "\n".join(body) + ("" if chomp == "-" else "\n")
+    return None
 
 
 def _written(dest, exp, case="c1"):
@@ -183,7 +201,20 @@ def test_the_grants_command_prints_what_shlex_parses_back_to_the_live_grants():
     done = subprocess.run([sys.executable, str(EXP / "ab.py"), "grants"], capture_output=True, text=True, timeout=60)
     live = json.loads((CRAFT / "evals" / "eval-gate.json").read_text())["runner"]["allow_tools"]
     assert done.returncode == 0
-    assert shlex.split(done.stdout) == [*live, WRAPPER_GRANT]
+    assert shlex.split(done.stdout) == live
+
+
+def test_the_wrapper_grant_is_not_added_twice_when_the_gate_already_carries_it(tmp_path):
+    craft, _ = _mini(tmp_path)
+    (craft / "evals" / "eval-gate.json").write_text(json.dumps({"runner": {"allow_tools": ["Read", WRAPPER_GRANT]}}))
+    assert ab.runner_grants(craft) == ["Read", WRAPPER_GRANT]
+
+
+# inert-gate: allow the push gate reads this block from main; the grant has no other consumer to run here
+def test_the_gate_grants_run_tests_in_its_exact_form_and_no_wider():
+    grants = ab.shared.runner_args(CRAFT)[1:]
+    assert grants.count(WRAPPER_GRANT) == 1
+    assert [g for g in grants if "run-tests" in g] == [WRAPPER_GRANT]
 
 
 def test_bar_text_is_the_text_between_the_delimiters(tmp_path):
@@ -487,3 +518,178 @@ def test_the_file_exists_grader_checks_the_path_the_prompt_names(case, tmp_path)
     assert not list(cwd.glob(exists[0]["path"]))
     (cwd / rel).write_text(text)
     assert [p.relative_to(cwd).as_posix() for p in cwd.glob(exists[0]["path"])] == [rel]
+
+
+# --- sync and check: the committed push-gate cases carry the live rules ---------------------------
+
+
+def _committed(tmp_path, cases=("c1", "c2")):
+    """A mini craft plugin whose evals/ is to hold the committed cases, and a mini experiment with `cases`."""
+    craft, exp = _mini(tmp_path)
+    for name in cases:
+        if name != "c1":
+            shutil.copytree(exp / "c1", exp / name)
+        (exp / name / "graders").mkdir(exist_ok=True)
+        (exp / name / "graders" / "g.md").write_text(f"grader for {name}\n")
+        (exp / name / "case.yaml").write_text(f'schema_version: "1.1"\nname: {name}\nruns: 3\n')
+    return craft, exp, tuple(cases)
+
+
+def _committed_case_yaml(craft, name):
+    return craft / "evals" / name / "case.yaml"
+
+
+def test_sync_writes_the_live_rules_text_into_each_committed_case(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    for name in cases:
+        assert _prompt_in(_committed_case_yaml(craft, name).read_text()) == RULES_TEXT
+        assert (craft / "evals" / name / "prompt.md").read_text() == "do it\n"
+        assert (craft / "evals" / name / "graders" / "g.md").read_text() == f"grader for {name}\n"
+
+
+def test_sync_carries_a_changed_rules_text_and_leaves_other_cases_alone(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    (craft / "rules.md").write_text("A different rule set.\n")
+    ab.sync(craft, exp, cases)
+    for name in cases:
+        assert _prompt_in(_committed_case_yaml(craft, name).read_text()) == "A different rule set.\n"
+    assert (craft / "evals" / "other-case" / "case.yaml").read_text() == "name: other\n"
+
+
+def test_sync_replaces_a_grader_the_experiment_no_longer_has(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    (exp / "c1" / "graders" / "g.md").unlink()
+    (exp / "c1" / "graders" / "h.md").write_text("new grader\n")
+    ab.sync(craft, exp, cases)
+    assert sorted(p.name for p in (craft / "evals" / "c1" / "graders").iterdir()) == ["h.md"]
+
+
+def test_sync_keeps_the_committed_expected_md_and_scaffold_wrapper(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    (craft / "evals" / "c1" / "expected.md").write_text("kept\n")
+    (craft / "evals" / "c1" / "fixtures").mkdir()
+    (craft / "evals" / "c1" / "fixtures" / "scaffold.sh").write_text("wrapper\n")
+    ab.sync(craft, exp, cases)
+    assert (craft / "evals" / "c1" / "expected.md").read_text() == "kept\n"
+    assert (craft / "evals" / "c1" / "fixtures" / "scaffold.sh").read_text() == "wrapper\n"
+
+
+def test_check_passes_on_synced_cases(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    assert ab.check(craft, exp, cases) == []
+
+
+def test_check_names_the_one_case_whose_text_was_edited_by_a_byte(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    path = _committed_case_yaml(craft, "c2")
+    ab.set_append_system_prompt(path, RULES_TEXT + " ")
+    problems = ab.check(craft, exp, cases)
+    assert [p for p in problems if "c1" in p] == []
+    assert len(problems) == 1 and "c2" in problems[0] and "rules.md" in problems[0]
+
+
+def test_check_fails_for_every_case_after_rules_md_changes_without_a_sync(tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    (craft / "rules.md").write_text(RULES_TEXT + "one more rule\n")
+    problems = ab.check(craft, exp, cases)
+    assert [c for c in cases if any(c in p for p in problems)] == list(cases)
+
+
+@pytest.mark.parametrize("what", ["prompt", "grader-edited", "grader-missing", "grader-extra", "case-key", "no-case"])
+def test_check_names_a_case_whose_prompt_graders_or_case_file_diverge_from_the_experiment(what, tmp_path):
+    craft, exp, cases = _committed(tmp_path)
+    ab.sync(craft, exp, cases)
+    case = craft / "evals" / "c1"
+    if what == "prompt":
+        (case / "prompt.md").write_text("do it differently\n")
+    elif what == "grader-edited":
+        (case / "graders" / "g.md").write_text("weaker grader\n")
+    elif what == "grader-missing":
+        (case / "graders" / "g.md").unlink()
+    elif what == "grader-extra":
+        (case / "graders" / "extra.md").write_text("extra\n")
+    elif what == "case-key":
+        (case / "case.yaml").write_text((case / "case.yaml").read_text().replace("runs: 3", "runs: 1"))
+    else:
+        shutil.rmtree(case)
+    problems = ab.check(craft, exp, cases)
+    assert len(problems) == 1 and "c1" in problems[0]
+
+
+def test_the_cli_syncs_then_checks_and_check_exits_nonzero_naming_a_drifted_case(tmp_path, monkeypatch, capsys):
+    base = tmp_path / "tools" / "craft"
+    craft, exp, cases = _committed(tmp_path)
+    (base / "plugins").mkdir(parents=True)
+    (base / "experiments").mkdir()
+    shutil.copytree(craft, base / "plugins" / "craft")
+    shutil.copytree(exp, base / "experiments" / exp.name)
+    monkeypatch.setattr(ab, "EXP", base / "experiments" / exp.name)
+    monkeypatch.setattr(ab, "CASES", cases)
+    assert ab.main(["ab.py", "check"]) == 1
+    assert "c1" in capsys.readouterr().err
+    assert ab.main(["ab.py", "sync"]) == 0
+    assert ab.main(["ab.py", "check"]) == 0
+    (base / "plugins" / "craft" / "rules.md").write_text("edited\n")
+    assert ab.main(["ab.py", "check"]) == 1
+    err = capsys.readouterr().err
+    assert "c1" in err and "c2" in err and "sync" in err
+
+
+def test_the_real_committed_cases_carry_the_live_rules_text_and_the_experiments_files():
+    assert ab.check() == []
+
+
+@pytest.mark.parametrize("case", ab.CASES)
+def test_each_committed_case_scaffolds_the_experiments_fixture(case, tmp_path):
+    cwd = tmp_path / "run"
+    cwd.mkdir()
+    wrapper = CRAFT / "evals" / case / "fixtures" / "scaffold.sh"
+    done = subprocess.run(["bash", str(wrapper)], cwd=cwd, env=_env(tmp_path), capture_output=True, text=True, timeout=120)
+    assert done.returncode == 0, done.stderr
+    code, output = _run_tests(cwd)
+    assert code == 0, output
+    assert _log(cwd) == "exit=0 impl=untouched\n"
+
+
+# --- the case file stays scannable: a pointer in the text is followed by a real line break -------
+
+POINTER_TEXT = "Rules.\n\ntrailhead core show adr/some-decision\n\n- next rule\n"
+
+
+def test_a_pointer_in_the_appended_text_is_not_glued_to_what_follows_it(tmp_path):
+    case = tmp_path / "case.yaml"
+    case.write_text("name: c\nruns: 3\n")
+    ab.set_append_system_prompt(case, POINTER_TEXT)
+    assert re.search(r"trailhead\s+core\s+show\s+(\S+)", case.read_text()).group(1) == "adr/some-decision"
+
+
+@pytest.mark.parametrize("text", [
+    POINTER_TEXT,
+    "no trailing newline",
+    "two trailing\n\n",
+    "  leading spaces\n\n\nblank lines above\n",
+    'quotes " and \' # not a comment: no | > & * !\n- dash\n',
+    "tab\there\nnaïve — ünïcode\n",
+    "crlf\r\nline\n",
+    "trailing spaces   \nnext\n",
+    "\n",
+    "",
+])
+def test_the_appended_text_reads_back_exactly_and_the_other_keys_survive(text, tmp_path):
+    case = tmp_path / "case.yaml"
+    case.write_text("name: c\nexecution:\n  model: m\n  max_turns: 9\nruns: 3\n")
+    ab.set_append_system_prompt(case, text)
+    assert ab.get_append_system_prompt(case) == text
+    assert _prompt_in(case.read_text()) == text
+    ab.set_append_system_prompt(case, "x\n")
+    assert ab.get_append_system_prompt(case) == "x\n"
+    ab.set_append_system_prompt(case, None)
+    assert case.read_text() == "name: c\nexecution:\n  model: m\n  max_turns: 9\nruns: 3\n"
+    assert ab.get_append_system_prompt(case) is None
