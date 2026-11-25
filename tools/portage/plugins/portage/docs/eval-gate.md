@@ -350,18 +350,21 @@ again. The fingerprint is a SHA-256 over:
 
 - every file in the case directory, with its executable bit;
 - every file of the case's `measures`, with its executable bit;
-- every file directly under the corpus `evals/` directory except `eval-gate.json` (the shared scaffolds),
-  with its executable bit;
+- every shared file the case uses, with its executable bit: a file directly under the corpus `evals/`
+  directory (a shared scaffold, the corpus README) except `eval-gate.json`, whose file name appears as a plain
+  byte substring in any file of the case directory, or in a shared file already in the key, followed until
+  nothing new joins. Any mention counts, prose included, and a name inside a longer one matches, so a wrong
+  match only re-runs a case; editing a shared file no case file names leaves the case's saved pass in use;
 - the case's runner block, `runs`, `pass_at`, plugin root and name.
 
-A symlink anywhere among those inputs makes the case uncacheable: it is never looked up and never stored.
+A symlink anywhere among those inputs, or directly under `evals/`, makes the case uncacheable: it is never looked up and never stored.
 With `PORTAGE_EVAL_RUNNER` set the cache is neither read nor written, because the key does not cover which
 runner produced a pass. A fresh pass is stored only when the fingerprint, recomputed after the run, equals
 the one looked up before it, so inputs that changed while the case ran are never stored.
 
 The key is content alone, so a pass carries over between branches and worktrees. It has known limits, and a
 change to any of them does not change it: a script a scaffold calls from outside `evals/`, other plugin
-prose the case does not list in `measures`, the `claude` CLI version, and a model alias the runner
-re-targets. Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
+prose the case does not list in `measures`, the `claude` CLI version, a model alias the runner
+re-targets, and a shared file whose name a scaffold builds at run time and never writes out in full. Delete `<cache dir>/portage/eval-gate/` to force a re-run; there is no flag. A cache directory
 that is a symlink, owned by another user or group- or world-writable is not used, and an unreadable or
 corrupt entry is a miss, so the case just runs.
