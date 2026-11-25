@@ -242,6 +242,53 @@ def _scaffolded(case, tmp_path):
     return plugin, cwd
 
 
+def _standin_python(bin_dir, base_prefix):
+    """A python3 on PATH that reports BASE_PREFIX as its sys.base_prefix and otherwise runs the real one."""
+    bin_dir.mkdir(parents=True)
+    stand = bin_dir / "python3"
+    stand.write_text(
+        f'#!/bin/sh\nif [ "$1" = "-c" ] && case "$2" in *base_prefix*) true;; *) false;; esac; then\n'
+        f'  echo {shlex.quote(str(base_prefix))}; exit 0\nfi\nexec {shlex.quote(sys.executable)} "$@"\n')
+    stand.chmod(0o755)
+
+
+def _scaffold_with_base(tmp_path, base_of):
+    home = tmp_path / "home"
+    (home / "work").mkdir(parents=True)
+    (home / "secret.txt").write_text("hunter2\n")
+    (tmp_path / "hom" / "bin").mkdir(parents=True)
+    (tmp_path / "hom" / "bin" / "python3").symlink_to(sys.executable)
+    base = base_of(home, tmp_path)
+    _standin_python(tmp_path / "bin", base)
+    plugin = ab.build_arm_plugin("none", ab.CASES[0], tmp_path / "plugin" / "craft")
+    cwd = tmp_path / "run"
+    cwd.mkdir()
+    env = {"PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "HOME": str(home)}
+    done = subprocess.run(
+        ["bash", str(plugin / "evals" / EXP.name / ab.CASES[0] / "fixtures" / "scaffold.sh")],
+        cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+    return done, cwd
+
+
+@pytest.mark.parametrize("base_of", [
+    lambda home, tmp: home,
+    lambda home, tmp: home.parent,
+    lambda home, tmp: home / "work" / "..",
+], ids=["home", "ancestor-of-home", "home-by-dotdot"])
+def test_scaffold_refuses_to_copy_a_python_prefix_that_holds_home(base_of, tmp_path):
+    done, cwd = _scaffold_with_base(tmp_path, base_of)
+    assert done.returncode != 0
+    assert "home directory" in done.stderr
+    assert "hunter2" not in done.stderr
+    assert not (cwd / "py-home").exists()
+
+
+def test_scaffold_still_scaffolds_when_the_prefix_is_only_a_string_prefix_of_homes_name(tmp_path):
+    done, cwd = _scaffold_with_base(tmp_path, lambda home, tmp: tmp / "hom")
+    assert done.returncode == 0, done.stderr
+    assert (cwd / "py-home").exists()
+
+
 def _run_tests(cwd, *args):
     done = subprocess.run(
         ["./run-tests", *args], cwd=cwd, env=_env(cwd.parent), capture_output=True, text=True, timeout=120)

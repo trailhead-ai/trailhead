@@ -20,6 +20,12 @@ cp -R "$here/trees/$tree/." .
 
 py=$(command -v python3)
 base=$("$py" -c 'import sys; print(sys.base_prefix)')
+# A prefix that is the operator's home directory, or holds it, would put the whole home in the run directory.
+if [ -n "${HOME:-}" ] && home_real=$(cd -P "$HOME" 2>/dev/null && pwd) && base_real=$(cd -P "$base" 2>/dev/null && pwd); then
+  case "$home_real/" in
+    "${base_real%/}/"*) echo "scaffold.sh: refusing to expose the home directory: python's prefix is the home directory or one of its ancestors" >&2; exit 3 ;;
+  esac
+fi
 # The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of it;
 # a system interpreter stays visible and is linked, not copied.
 case "$base" in
