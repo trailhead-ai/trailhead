@@ -26,6 +26,14 @@ through one seam (:data:`_repository_views`, which forwards ``env``) and reach e
 check on :class:`RunContext`; the group prints one line per repository read
 (:attr:`Section.repository_lines`), kept when every vault was skipped.
 
+``--repo PATH`` (repeatable, needs ``--vault``) names that vault's repositories for
+``missing-paths``. The paths are operator-named directories, so they are untrusted: each is
+resolved to an absolute path (``~`` expanded, a relative path taken from the cwd) and read only
+through the hardened reader of :mod:`..health.repos`. They serve only when camp binds the vault
+no repository; when it does, camp's are read and the group says the passed paths were not used.
+The vault's view is then a :class:`~..health.repos.RepositoryView`, which keeps the paths passed
+(``passed``) and whether they were used (``used``) as plain data.
+
 Each check runs inside its own exception boundary: one that raises is reported
 as ``errored: <error type>`` on its rows and in its group, every other check
 still renders, and the exit status stays 0. A later check is one more entry in
@@ -66,6 +74,7 @@ from collections import Counter
 from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ..health import dangling as dangling_mod
 from ..health import distill_queue as queue_mod
@@ -93,15 +102,27 @@ _scan_vault = scan_mod.scan_vault
 
 
 # Seam: the report build reads repositories only through this.
-def _repository_views(selected: Sequence[str], *, env=None) -> dict[str, str | tuple]:
+def _repository_views(selected: Sequence[str], *, env=None,
+                      passed: Mapping[str, Sequence[Path]] | None = None) -> dict[str, str | tuple]:
     """Per selected vault: the reason it has no repositories, or its repositories as read.
 
     Only the repositories of *selected* vaults are read, each distinct root once.
+    *passed* maps a vault to the resolved paths the operator passed for it with ``--repo``:
+    they are the vault's repositories only when camp gives it none, and that vault's view is
+    then a :class:`~..health.repos.RepositoryView` saying which paths were passed and whether
+    they were used.
     """
+    passed = passed or {}
     bound = repos_mod.vault_repositories(selected, env=env)
-    read = repos_mod.read_repositories((r for b in bound.values() for r in b.roots), env=env)
-    return {v: b.reason if b.reason is not None else tuple(read[r] for r in b.roots)
-            for v, b in bound.items()}
+    roots = {v: tuple(passed[v]) if v in passed and not b.roots else b.roots for v, b in bound.items()}
+    read = repos_mod.read_repositories((r for rs in roots.values() for r in rs), env=env)
+    views: dict[str, str | tuple] = {}
+    for v, b in bound.items():
+        if v in passed:
+            views[v] = repos_mod.RepositoryView((read[r] for r in roots[v]), passed[v], not b.roots)
+        else:
+            views[v] = b.reason if b.reason is not None else tuple(read[r] for r in b.roots)
+    return views
 
 
 @dataclass
@@ -374,12 +395,14 @@ _UNREADABLE_WHY = {
 }
 
 
-def _paths_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], skip) -> str:
+def _paths_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], skip, view) -> str:
     if skip.reason == paths_mod.NOT_FULLY_READ:
         return _skip_reason(scan, scans, (scan.vault,), PATHS_SKIP_TAIL)
     if skip.root is not None:
-        return (f"repository {_safe(skip.root)} could not be read, {PATHS_SKIP_TAIL}; "
-                "clone or repair it, or remove it from the camp group")
+        remedy = ("pass a repository's working directory with --repo"
+                  if isinstance(view, repos_mod.RepositoryView) and view.used
+                  else "clone or repair it, or remove it from the camp group")
+        return f"repository {_safe(skip.root)} could not be read, {PATHS_SKIP_TAIL}; {remedy}"
     return _NO_REPOSITORIES[skip.reason]
 
 
@@ -388,7 +411,8 @@ def _run_paths(scans, selected, ctx) -> CheckRun:
         raise ctx.repos_error
     result = paths_mod.check_missing_paths(scans, selected, ctx.repos)
     by_name = {s.vault: s for s in scans}
-    skipped = {v: _paths_skip_reason(by_name[v], by_name, skip) for v, skip in result.skipped.items()}
+    skipped = {v: _paths_skip_reason(by_name[v], by_name, skip, ctx.repos.get(v))
+               for v, skip in result.skipped.items()}
     return CheckRun(None if skipped and not result.judged else list(result.findings),
                     dict(result.judged), skipped=skipped)
 
@@ -458,7 +482,8 @@ def _lesson_note(sec: Section, ctx: RunContext) -> str:
 
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
                  stale_days: int = DEFAULT_STALE_DAYS,
-                 max_scan_mib: int | None = None) -> HealthReport:
+                 max_scan_mib: int | None = None,
+                 repo_paths: Sequence[str] = ()) -> HealthReport:
     """Scan every configured vault, run every check, and gather the result as data.
 
     Every vault is scanned even when *only* narrows the report, so a target in
@@ -467,7 +492,9 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
     *now* (the current UTC time when ``None``), *stale_days* and the repository
     views of the selected vaults, read once through :data:`_repository_views` with *env*.
     Each vault is read up to *max_scan_mib* MiB (:data:`scan_mod.DEFAULT_MAX_SCAN_BYTES`
-    when ``None``); a vault past it is not fully read.
+    when ``None``); a vault past it is not fully read. *repo_paths* are the ``--repo`` paths
+    of the vault *only* names: resolved against the cwd (``~`` against ``HOME`` of *env*),
+    they are that vault's repositories when camp binds it none.
     """
     now = now if now is not None else datetime.now(timezone.utc)
     every = scan_mod.resolve_vaults()
@@ -476,8 +503,10 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
     scans = [_scan_vault(name, root, max_bytes=scan_budget(max_scan_mib)) for name, root in every]
     by_name = {s.vault: s for s in scans}
     selected = [s.vault for s in scans if only is None or s.vault == only]
+    passed = {only: tuple(dict.fromkeys(repos_mod.resolve_passed_root(p, env) for p in repo_paths))} \
+        if repo_paths else {}
     try:
-        ctx = RunContext(now, stale_days, _repository_views(selected, env=env))
+        ctx = RunContext(now, stale_days, _repository_views(selected, env=env, passed=passed))
     except Exception as exc:  # noqa: BLE001 - only missing-paths needs the views; it errors alone
         ctx = RunContext(now, stale_days, repos_error=exc)
 
@@ -759,8 +788,8 @@ def _missing_line(f: paths_mod.MissingPath) -> str:
             f"`{_safe(f.path)}` is on no repository's default branch")
 
 
-def _repository_line(vault: str, item, now: datetime) -> str:
-    head = f"  {_safe(vault)}: repository {_safe(item.root)}: "
+def _repository_line(vault: str, item, now: datetime, passed: bool = False) -> str:
+    head = f"  {_safe(vault)}: repository {_safe(item.root)}{' (passed with --repo)' if passed else ''}: "
     if isinstance(item, repos_mod.Unreadable):
         return f"{head}could not be read ({_UNREADABLE_WHY[item.reason]})"
     branch = _safe(item.branch)
@@ -773,9 +802,15 @@ def _repository_line(vault: str, item, now: datetime) -> str:
 
 
 def _repository_lines(sec: Section, ctx: RunContext) -> list[str]:
-    return [_repository_line(vault, item, ctx.now)
-            for vault, view in ctx.repos.items() if not isinstance(view, str)
-            for item in view]
+    lines: list[str] = []
+    for vault, view in ctx.repos.items():
+        if isinstance(view, str):
+            continue
+        passed = isinstance(view, repos_mod.RepositoryView)
+        if passed and not view.used:
+            lines.append(f"  {_safe(vault)}: --repo ignored: camp binds this vault's repositories")
+        lines += [_repository_line(vault, item, ctx.now, passed and view.used) for item in view]
+    return lines
 
 
 # The checks, in the order they print. A new check is one more entry.
@@ -931,8 +966,13 @@ def cmd_health(args) -> int:
     """Print the vault health report; see the module docstring for the exit contract."""
     only = args.vault
     limit = None if args.all else args.limit
+    if args.repo and only is None:
+        _emit(["lore: cannot run the health report: "
+               "--repo needs --vault to name the vault the repositories belong to"], sys.stderr)
+        return 1
     try:
-        report = build_report(only, stale_days=args.stale_days, max_scan_mib=args.max_scan_mib)
+        report = build_report(only, stale_days=args.stale_days, max_scan_mib=args.max_scan_mib,
+                              repo_paths=args.repo or ())
         _emit(render(report, limit, only), sys.stdout)
         return 0
     except scan_mod.HealthResolutionError as exc:
@@ -988,7 +1028,8 @@ def add_health_subparser(sub) -> None:
             "dropped or superseded spec. missing-paths reports paths a live decision, ADR or area "
             "names that are on no default branch of the repositories its vault is bound to (by "
             "[[lore_scopes]] in a camp group); it is skipped for one vault, not all, when that vault "
-            "has no repository, an unreadable one, or was not fully read. distill-queue reports the "
+            "has no repository, an unreadable one, or was not fully read; --repo PATH (repeatable, "
+            "needs --vault) names that vault's repositories when camp binds it none. distill-queue reports the "
             "specs waiting to be distilled into ADRs, oldest first, to act on with /craft:distill; "
             "specs no task links to are counted in its heading and listed by lore distill-queue; "
             "it is skipped for every vault when any vault was not fully read. lesson-growth counts the "
@@ -1011,5 +1052,9 @@ def add_health_subparser(sub) -> None:
                         f"(default {DEFAULT_STALE_DAYS})")
     p.add_argument("--all", action="store_true", default=False,
                    help="Show every finding (wins over --limit)")
+    p.add_argument("--repo", action="append", default=None, metavar="PATH",
+                   help="A repository of the vault named with --vault, for missing-paths when camp "
+                        "binds that vault none (repeatable; needs --vault; ~ is expanded, a relative "
+                        "path is taken from the current directory)")
     add_max_scan_mib(p)
     p.set_defaults(func=cmd_health)

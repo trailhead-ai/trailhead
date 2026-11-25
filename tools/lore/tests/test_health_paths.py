@@ -299,3 +299,75 @@ def test_a_tail_must_start_at_a_directory_boundary():
 def test_a_tail_in_another_repository_of_the_vault_resolves():
     r2 = repo("services/auth/src/step-up.ts", root="/r/two")
     assert run([rec("`src/step-up.ts`")], repo("src/index.ts"), r2).findings == []
+
+
+# --- the trailing-part index ---------------------------------------------------
+
+def _old_verdict(paths_on_branch, bare):
+    """The tail-set definition the index replaces: *bare* is a path or a boundary tail of one."""
+    tails = set()
+    for p in paths_on_branch:
+        tails.add(p)
+        start = p.find("/") + 1
+        while start:
+            tails.add(p[start:])
+            start = p.find("/", start) + 1
+    return bare in tails
+
+
+PARITY = [
+    # (paths on the branch, written candidate, is the candidate a path or a directory tail?)
+    (("services/auth/src/step-up.ts", "src/index.ts"), "src/step-up.ts", True),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "auth/src/step-up.ts", True),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "services/auth/src/step-up.ts", True),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "step-up.ts", True),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "src/tep-up.ts", False),
+    (("services/auth/mysrc/lib.ts", "src/index.ts"), "src/lib.ts", False),
+    (("services/xauth/src/step-up.ts", "src/index.ts"), "auth/src/step-up.ts", False),
+    (("services/xauth/src/step-up.ts", "src/index.ts"), "uth/src/step-up.ts", False),
+    (("deep/er/than/src/step-up.ts", "src/index.ts"), "than/src/step-up.ts", True),
+    (("deep/er/than/src/step-up.ts", "src/index.ts"), "er/than/src/step-up.ts", True),
+    (("deep/er/than/src/step-up.ts", "src/index.ts"), "xdeep/er/than/src/step-up.ts", False),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "x/services/auth/src/step-up.ts", False),
+    (("services/auth/src/step-up.ts", "src/index.ts"), "src/step-up.ts/", True),
+    (("src/index.ts",), "src/index.ts", True),
+    (("services/auth/src", "src/index.ts"), "auth/src", True),
+]
+
+
+@pytest.mark.parametrize("on_branch,written,found", PARITY)
+def test_the_trailing_part_verdict_is_the_one_the_tail_set_gave(on_branch, written, found):
+    bare = written.rstrip("/")
+    assert _old_verdict(on_branch, bare) is found
+    first = bare.split("/", 1)[0]
+    top_level_marker = f"{first}/_marker"
+    reported = missing(run([rec(f"`{written}`")], repo(*on_branch, top_level_marker)))
+    assert (reported == []) is found
+
+
+def test_the_index_finds_a_candidate_that_is_a_boundary_tail_and_not_one_that_is_a_suffix_of_a_segment():
+    index = paths.SuffixIndex(["services/auth/src/step-up.ts", "mysrc/lib.ts", "xdeep/er/than/a.ts"])
+    assert index.has_tail("auth/src/step-up.ts")
+    assert not index.has_tail("uth/src/step-up.ts")
+    assert not index.has_tail("deep/er/than/a.ts")
+    assert index.has_tail("lib.ts") and index.has_tail("mysrc/lib.ts")
+    assert not index.has_tail("src/lib.ts")
+
+
+def test_a_candidate_whose_parent_segment_differs_does_not_scan_the_bucket_of_a_shared_basename():
+    index = paths.SuffixIndex(f"pkg{i}/index.ts" for i in range(100_000))
+    assert index.entries == 100_000
+    assert not index.has_tail("other/index.ts")
+    assert not index.has_tail("a/other/index.ts")
+    assert index.comparisons == 0
+    assert index.has_tail("x/pkg7/index.ts") is False
+    assert index.has_tail("pkg7/index.ts")
+    assert index.comparisons <= 1
+
+
+def test_the_index_holds_one_entry_per_path_whatever_the_depth():
+    shallow = paths.SuffixIndex(f"d{i}/f.ts" for i in range(1_000))
+    deep = paths.SuffixIndex("/".join(f"s{j}" for j in range(30)) + f"/d{i}/f.ts" for i in range(1_000))
+    assert shallow.entries == deep.entries == 1_000
+    twice = paths.SuffixIndex([*(f"d{i}/f.ts" for i in range(1_000)), *(f"d{i}/f.ts" for i in range(1_000))])
+    assert twice.entries == 1_000

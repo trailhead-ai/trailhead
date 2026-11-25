@@ -9,6 +9,9 @@ Two questions, no record text ever reaching git:
   reason: ``camp-absent`` (trailhead or camp cannot be imported),
   ``config-unreadable`` (a group TOML is malformed or unreadable) or ``unbound``
   (no group names it). It never raises for a missing or broken camp.
+* :func:`resolve_passed_root` -- an operator-passed ``--repo`` path as an absolute
+  path, the form every other function here takes a root in; :class:`RepositoryView`
+  carries the passed paths with the repositories read from them.
 * :func:`read_repository` -- one repository's default branch as a
   :class:`Repository` (the ref read, whether it is remote-tracking or local, every
   file AND directory path on it, its top-level entries, its submodule gitlinks and
@@ -146,9 +149,40 @@ class Unreadable:
     reason: str
 
 
+class RepositoryView(tuple):
+    """The repositories judged for a vault that was given ``--repo`` paths.
+
+    The tuple holds the repositories as read (a :class:`Repository` or an
+    :class:`Unreadable` each). ``passed`` is every path the operator passed for the
+    vault, resolved and absolute; ``used`` is true when those paths are the
+    repositories read (camp bound the vault to none), false when camp's own
+    repositories were read and the passed paths were set aside.
+    """
+
+    passed: tuple[Path, ...]
+    used: bool
+
+    def __new__(cls, items: Iterable[Repository | Unreadable], passed: Iterable[Path], used: bool):
+        view = super().__new__(cls, items)
+        view.passed = tuple(passed)
+        view.used = used
+        return view
+
+
 # ---------------------------------------------------------------------------
 # A vault's repositories
 # ---------------------------------------------------------------------------
+
+
+def resolve_passed_root(raw: str, env: Mapping[str, str] | None = None) -> Path:
+    """An operator-passed repository path as an absolute path: ``~`` expanded, resolved against the cwd.
+
+    The result is absolute, so it can never be read by git as an option.
+    """
+    try:
+        return _member_root(raw, "", env)
+    except (OSError, RuntimeError):
+        return Path(os.path.abspath(os.path.expanduser(raw)))
 
 
 def _member_root(raw: str, toml_path: str, env: Mapping[str, str] | None) -> Path:

@@ -712,3 +712,61 @@ def test_a_treeless_clone_with_a_hostile_ssh_remote_is_unreadable_and_runs_and_f
     assert result.reason == repos.GIT_FAILED
     assert not marker.exists()
     assert _object_files(clone) == before
+
+
+# ---------------------------------------------------------------------------
+# Operator-passed repositories (--repo)
+# ---------------------------------------------------------------------------
+
+
+def _plant_canary(repo: Path, tmp_path: Path) -> Path:
+    sentinel = tmp_path / "canary-ran"
+    script = tmp_path / "canary.sh"
+    script.write_text(f"#!/bin/sh\necho ran >> {sentinel}\nexit 0\n")
+    script.chmod(0o755)
+    with (repo / ".git" / "config").open("a") as cfg:
+        cfg.write(f"[core]\n\tfsmonitor = {script}\n\tpager = {script}\n\talternateRefsCommand = {script}\n")
+    return sentinel
+
+
+def test_a_planted_fsmonitor_pager_and_alternate_refs_command_is_read_and_never_run(tmp_path):
+    r = make_repo(tmp_path / "r", {"main": {"real.txt": "r"}}, remote_tracking=("main",))
+    sentinel = _plant_canary(r, tmp_path)
+    subprocess.run(["git", "-C", str(r), "status", "--porcelain"], capture_output=True)
+    assert sentinel.exists(), "the canary must fire for a command that honours it"
+    sentinel.unlink()
+
+    view = view_of(r)
+
+    assert "real.txt" in view.paths
+    assert not sentinel.exists()
+
+
+def test_a_passed_root_expands_a_tilde_against_the_given_home_and_is_absolute(tmp_path):
+    home = tmp_path / "home"
+    (home / "x").mkdir(parents=True)
+    assert repos.resolve_passed_root("~/x", env={"HOME": str(home)}) == (home / "x").resolve()
+    assert repos.resolve_passed_root("~", env={"HOME": str(home)}) == home.resolve()
+
+
+def test_a_relative_passed_root_resolves_against_the_current_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert repos.resolve_passed_root("a/../b") == (tmp_path / "b").resolve()
+
+
+def test_a_passed_root_starting_with_a_dash_is_an_absolute_path_not_an_option(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    root = repos.resolve_passed_root("-r")
+    assert root == (tmp_path / "-r").resolve() and root.is_absolute()
+
+
+def test_a_symlink_loop_in_a_passed_root_is_still_an_absolute_path(tmp_path, monkeypatch):
+    (tmp_path / "loop").symlink_to(tmp_path / "loop")
+    monkeypatch.chdir(tmp_path)
+    assert repos.resolve_passed_root("loop/x").is_absolute()
+
+
+def test_a_repository_named_with_a_leading_dash_is_read_as_a_path(tmp_path, monkeypatch):
+    make_repo(tmp_path / "-r", {"main": {"real.txt": "r"}})
+    monkeypatch.chdir(tmp_path)
+    assert "real.txt" in view_of(repos.resolve_passed_root("-r")).paths
