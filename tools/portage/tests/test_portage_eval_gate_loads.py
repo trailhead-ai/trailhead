@@ -401,6 +401,53 @@ class TestMentionResolution:
         assert derive(self.G, [], reader(files)).files == (self.G,)
 
 
+class TestPluginRootVariableMentions:
+    VAR = "${CLAUDE_PLUGIN_ROOT}"
+
+    def _entry(self, rest: str) -> str:
+        return f"Read `../_shared/r.md` now and follow it in full.\n\nThe template is {self.VAR}{rest}.\n"
+
+    def test_a_path_written_under_the_plugin_root_variable_is_followed_to_the_plugin_relative_file(self):
+        files = corpus(**{ENTRY: self._entry("/templates/t.md"), "templates/t.md": "T\n"})
+        assert "templates/t.md" in derive(ENTRY, [], reader(files)).files
+
+    def test_the_variable_path_names_a_file_the_plugin_lacks_so_nothing_is_added(self):
+        files = corpus(**{ENTRY: self._entry("/templates/gone.md"), "templates/t.md": "T\n"})
+        assert set(derive(ENTRY, [], reader(files)).files) == {ENTRY, R}
+
+    def test_the_variable_path_resolves_from_the_plugin_root_and_never_from_an_ancestor_of_the_mentioner(self):
+        files = corpus(**{ENTRY: self._entry("/t.md"), "skills/x/t.md": "near\n"})
+        assert "skills/x/t.md" not in derive(ENTRY, [], reader(files)).files
+
+    def test_the_variable_path_resolves_to_the_plugin_root_file_when_a_nearer_one_exists(self):
+        files = corpus(**{ENTRY: self._entry("/t.md"), "skills/x/t.md": "near\n", "t.md": "root\n"})
+        assert "t.md" in derive(ENTRY, [], reader(files)).files
+
+    def test_the_variable_path_cannot_climb_out_of_the_plugin_root(self):
+        files = corpus(**{ENTRY: self._entry("/../x.md"), "x.md": "inside\n", "../x.md": "outside\n"})
+        assert set(derive(ENTRY, [], reader(files)).files) == {ENTRY, R}
+
+
+class TestAbsoluteMentions:
+    def test_an_absolute_path_to_a_real_file_outside_the_plugin_is_not_in_the_closure(self, tmp_path):
+        outside = tmp_path / "outside.md"
+        outside.write_text("outside\n")
+        plugin = tmp_path / "plugin"
+        write_tree(plugin, corpus(**{ENTRY: f"Read `../_shared/r.md` now and follow it in full.\n\nSee {outside}.\n"}))
+        got = derive(ENTRY, [], loads.tree_reader(plugin))
+        assert set(got.files) == {ENTRY, R}
+
+    def test_a_resolution_from_an_absolute_file_name_terminates(self):
+        calls = []
+
+        def read(path: str):
+            calls.append(path)
+            if len(calls) >= 50:
+                pytest.fail("the upward search did not terminate")
+            return None
+        assert loads.resolve_existing("/x/y.md", "gone.md", read) is None
+
+
 class TestIsBranch:
     @pytest.mark.parametrize("text, expected", [
         ("Applies when the run is unattended.\n", True),
@@ -545,7 +592,7 @@ class TestLiveCorpus:
                 derived += 1
         for name in PLUGINS:
             root = REPO_TOOLS / name / "plugins" / name
-            assert missing_loads(_procedures(root), cached(tree_reader(root))) == [], name
+            assert missing_loads(_procedures(root), read if root == craft else cached(tree_reader(root))) == [], name
         elapsed = time.perf_counter() - started
         assert derived > 20
         assert elapsed < 1.0, f"{elapsed:.2f}s"

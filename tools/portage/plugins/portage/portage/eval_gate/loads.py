@@ -64,6 +64,8 @@ _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNOR
 _EXTENSION = re.compile(r"\.[A-Za-z0-9]+\Z")
 _ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e)$", re.IGNORECASE)
 _WORD = re.compile(r"[A-Za-z0-9._/-]+")
+_PLUGIN_ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}"
+_TOKEN = re.compile(rf"(?:{re.escape(_PLUGIN_ROOT_VAR)})?[A-Za-z0-9._/-]+")
 _LIST_OR_HEADING = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 _FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
 _LINE_END = re.compile(r"\r\n|\r|\n")
@@ -135,7 +137,7 @@ def _analysis(path: str, text: str, read) -> _Analysis:
     key = (path, text)
     if memo is not None and key in memo:
         return memo[key]
-    tokens = (w.rstrip(".") for w in _WORD.findall(text))
+    tokens = (w.rstrip(".") for w in _TOKEN.findall(text))
     found = _Analysis(parse_directives(path, text, read).loads,
                       tuple(dict.fromkeys(t for t in tokens if _EXTENSION.search(t))))
     if memo is not None:
@@ -176,7 +178,14 @@ def _leaves_root(path: str) -> bool:
 def _search_up(file: str, raw: str, exists) -> str | None:
     """The first plugin-relative path ``raw`` names from ``file`` for which ``exists(path)`` holds, trying the
     file's directory and then each ancestor up to the plugin root; ``None`` for an absolute ``raw``, one whose
-    last part is empty, ``.`` or ``..``, or when no directory holds one."""
+    last part is empty, ``.`` or ``..``, or when no directory holds one. A ``raw`` written under
+    ``${CLAUDE_PLUGIN_ROOT}`` names that path from the plugin root alone."""
+    if raw.startswith(_PLUGIN_ROOT_VAR):
+        rest = raw[len(_PLUGIN_ROOT_VAR):]
+        if not rest.startswith("/") or posixpath.basename(rest) in ("", ".", ".."):
+            return None
+        candidate = posixpath.normpath(rest.lstrip("/"))
+        return candidate if not _leaves_root(candidate) and exists(candidate) else None
     if raw.startswith("/") or posixpath.basename(raw) in ("", ".", ".."):
         return None
     directory = posixpath.dirname(file)
@@ -184,9 +193,10 @@ def _search_up(file: str, raw: str, exists) -> str | None:
         candidate = posixpath.normpath(posixpath.join(directory, raw))
         if not _leaves_root(candidate) and exists(candidate):
             return candidate
-        if not directory:
+        parent = posixpath.dirname(directory)
+        if not directory or parent == directory:
             return None
-        directory = posixpath.dirname(directory)
+        directory = parent
 
 
 def _find_mentioned(file: str, raw: str, read) -> str | None:

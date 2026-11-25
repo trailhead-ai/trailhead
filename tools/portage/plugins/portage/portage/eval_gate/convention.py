@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 from .loads import (
-    _SAFE_CHARS, _WORD, BRANCH_LOAD, FULL_LOAD, SECTION_LOAD, LoadError, NotRegularFile, _get, _visible_lines,
+    _SAFE_CHARS, _TOKEN, BRANCH_LOAD, FULL_LOAD, SECTION_LOAD, LoadError, NotRegularFile, _get, _visible_lines,
     cached, is_branch, parse_directives, read_declared_mentions, resolve_existing, tree_reader,
 )
 from .mapping import _q, echo
@@ -179,7 +179,7 @@ def _check_declared(root: Path, read, faults: _Faults) -> None:
             faults.add(name, 1, "declared-mention-stale", str(exc))
             continue
         loaded = {load.target for load in parse_directives(file, text, read).loads} if text is not None else set()
-        named = ({resolve_existing(file, w.rstrip("."), read) for w in _WORD.findall(text) if _SAFE_CHARS.match(w)}
+        named = ({resolve_existing(file, w.rstrip("."), read) for w in _TOKEN.findall(text)}
                  if text is not None else set())
         for number, path in enumerate(paths, 1):
             if path not in named:

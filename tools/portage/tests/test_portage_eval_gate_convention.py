@@ -357,6 +357,17 @@ class TestDeclaredMentions:
         faults = self.declare(tmp_path, {"skills/x/SKILL.md": ["skills/_shared/r.md"]}, files)
         assert len(rule_faults(faults, "declared-mention-stale")) == 1
 
+    def test_an_entry_for_a_path_the_file_names_under_the_plugin_root_variable_is_not_stale(self, tmp_path):
+        files = {"skills/x/SKILL.md": "# T\n\nThe template is ${CLAUDE_PLUGIN_ROOT}/templates/t.md.\n",
+                 "templates/t.md": "T\n"}
+        assert self.declare(tmp_path, {"skills/x/SKILL.md": ["templates/t.md"]}, files) == []
+
+    def test_an_entry_for_a_variable_path_the_file_no_longer_names_is_refused_as_stale(self, tmp_path):
+        files = {"skills/x/SKILL.md": "# T\n\nThe template is ${CLAUDE_PLUGIN_ROOT}/templates/other.md.\n",
+                 "templates/t.md": "T\n", "templates/other.md": "O\n"}
+        faults = self.declare(tmp_path, {"skills/x/SKILL.md": ["templates/t.md"]}, files)
+        assert len(rule_faults(faults, "declared-mention-stale")) == 1
+
     def test_an_entry_for_a_file_that_does_not_exist_is_refused_as_stale(self, tmp_path):
         faults = self.declare(tmp_path, {"skills/x/gone.md": ["skills/_shared/r.md"]})
         assert len(rule_faults(faults, "declared-mention-stale")) == 1
