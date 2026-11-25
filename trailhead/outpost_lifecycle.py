@@ -117,11 +117,11 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 import tomllib
 import urllib.error
 import urllib.request
-import webbrowser
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -988,26 +988,95 @@ def status(
     return EXIT_RUNNING
 
 
+OPERATOR_DIR = "operator"
+CREDENTIAL_NAME = "credential"
+OPEN_FILE_PREFIX = "open-"
+# How long a minted code lives; an open file older than this is spent.
+OPEN_CODE_TTL = 60.0
+
+_OPEN_PAGE = """<!doctype html>
+<meta charset="utf-8">
+<title>Opening Outpost</title>
+<form method="post" action="{action}">
+<input type="hidden" name="code" value="{code}">
+<noscript><button type="submit">Open Outpost</button></noscript>
+</form>
+<script>document.forms[0].submit()</script>
+"""
+
+
+def _open_file(path: str) -> bool:
+    """Hand *path* to the platform's opener; True when it launched.
+
+    The file path is the only argument, so the one-time code inside the file is
+    never in any process's argv.
+    """
+    program = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        return subprocess.run([program, path], check=False).returncode == 0
+    except OSError:
+        return False
+
+
+def _mint_open_code(env: dict[str, str] | None, port: int, timeout: float) -> str:
+    """Read the operator credential and ask the daemon for a one-time code."""
+    credential_file = state_dir(APP, env=env) / OPERATOR_DIR / CREDENTIAL_NAME
+    try:
+        credential = credential_file.read_text().strip()
+    except OSError as exc:
+        raise OutpostLifecycleError(
+            f"cannot read the operator credential ({exc.strerror or exc}); "
+            "run 'trailhead outpost open' from your own terminal, not from a sandbox."
+        ) from exc
+    request = urllib.request.Request(
+        f"http://{DAEMON_HOST}:{port}/operator/ui-code",
+        data=b"",
+        method="POST",
+        headers={"Authorization": f"Bearer {credential}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            return json.loads(resp.read())["code"]
+    except urllib.error.HTTPError as exc:
+        if exc.code == 401:
+            raise OutpostLifecycleError(
+                "outpost refused the operator credential (it is from an older boot); "
+                "run 'trailhead outpost restart' and try again."
+            ) from exc
+        raise OutpostLifecycleError(f"outpost refused the open request (HTTP {exc.code}).") from exc
+    except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+        raise OutpostLifecycleError(f"could not get a one-time code from outpost: {exc}") from exc
+
+
+def _sweep_open_files(folder: Path) -> None:
+    """Remove open files whose code has expired (a failed open leaves one)."""
+    cutoff = time.time() - OPEN_CODE_TTL
+    for stale in folder.glob(f"{OPEN_FILE_PREFIX}*.html"):
+        try:
+            if stale.stat().st_mtime < cutoff:
+                stale.unlink()
+        except OSError:
+            pass
+
+
 def open_ui(
     *,
     env: dict[str, str] | None = None,
     port: int = DAEMON_PORT,
     health_timeout: float = 2.0,
-    opener=webbrowser.open,
+    opener=_open_file,
+    settle: float = 10.0,
 ) -> int:
-    """Open the outpost web UI in the platform's default browser.
+    """Open the outpost web UI, signed in as the operator.
 
-    Read-only: it spawns nothing and touches no pidfile. The daemon must already
-    be answering ``/health`` — the same identity probe the other verbs use, so a
-    stale pidfile or an unrelated process on the port can't pass for a running
-    UI. When it isn't, this raises OutpostLifecycleError naming the start verb
-    rather than handing the browser a URL that will fail to connect.
-
-    ``opener`` is the injectable browser seam (default :func:`webbrowser.open`,
-    stdlib and cross-platform — matching this module's no-macOS-assumptions
-    invariant). It returns False when no browser could be launched at all, which
-    is likewise a named error: silently printing success there would leave the
-    operator waiting on a window that is never going to appear.
+    The daemon must be answering ``/health`` (the identity probe the other verbs
+    use). The operator credential is read from the operator folder, which only
+    the operator's own terminal can read, and swapped for a single-use code. The
+    code goes into a 0600 HTML file in that folder that POSTs it to the daemon;
+    ``opener`` is handed the file's path, never the code. After ``settle``
+    seconds for the browser to read it, the file is deleted. When no browser
+    could be launched the file is kept and its path printed, to be opened
+    within a minute.
     """
     if _probe_health(port, health_timeout) is None:
         raise OutpostLifecycleError(
@@ -1015,12 +1084,21 @@ def open_ui(
             "start it with 'trailhead outpost start'."
         )
 
-    url = f"http://{DAEMON_HOST}:{port}/"
-    if not opener(url):
-        raise OutpostLifecycleError(
-            f"could not launch a browser for {url}; open it manually."
-        )
-    print(f"opened {url}")
+    code = _mint_open_code(env, port, health_timeout)
+    folder = state_dir(APP, env=env) / OPERATOR_DIR
+    _sweep_open_files(folder)
+    path = folder / f"{OPEN_FILE_PREFIX}{os.urandom(8).hex()}.html"
+    page = _OPEN_PAGE.format(action=f"http://{DAEMON_HOST}:{port}/auth/open", code=code)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(page)
+
+    if not opener(str(path)):
+        print(f"could not launch a browser; open this file within a minute: {path}")
+        return 0
+    print("opening outpost in your browser")
+    time.sleep(settle)
+    path.unlink(missing_ok=True)
     return 0
 
 

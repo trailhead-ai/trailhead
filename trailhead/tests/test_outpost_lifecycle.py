@@ -14,11 +14,13 @@ real ``~/.config``/``~/.local/state`` (Axiom 6).
 import json
 import os
 import signal
+import http.server
 import socket
 import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -808,27 +810,215 @@ def test_restart_hands_an_explicit_window_to_the_liveness_check(monkeypatch, tmp
 
 
 class _RecordingOpener:
-    """Stands in for webbrowser.open: records the URLs it was handed and
-    reports whether a browser was successfully launched."""
+    """Stands in for the platform opener: records every argument it was handed,
+    and what the file it was pointed at looked like at that moment."""
 
     def __init__(self, result: bool = True):
         self.result = result
-        self.urls: list[str] = []
+        self.args: list[tuple] = []
+        self.snapshots: list[dict] = []
 
-    def __call__(self, url: str) -> bool:
-        self.urls.append(url)
+    def __call__(self, *args) -> bool:
+        self.args.append(args)
+        path = Path(args[0])
+        if path.exists():
+            self.snapshots.append(
+                {"mode": path.stat().st_mode & 0o777, "text": path.read_text()}
+            )
         return self.result
 
 
-def test_open_hands_the_running_daemons_url_to_the_browser(outpost):
-    assert _start(outpost) == 0
-    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
+class _TestOutpost:
+    """A TCP stand-in for Outpost's /health, POST /operator/ui-code and
+    POST /auth/open: a code swaps for a cookie once, and only the bearer mints."""
+
+    CREDENTIAL = "operator-credential-for-open-tests"
+
+    def __init__(self):
+        self.codes: set[str] = set()
+        self.minted = 0
+        outer = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _send(self, status, body=b"", headers=()):
+                self.send_response(status)
+                for k, v in headers:
+                    self.send_header(k, v)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_GET(self):
+                if self.path == "/health":
+                    self._send(200, b'{"ok": true, "contract_version": 8}')
+                else:
+                    self._send(404)
+
+            def do_POST(self):
+                n = int(self.headers.get("Content-Length") or 0)
+                body = self.rfile.read(n).decode()
+                if self.path == "/operator/ui-code":
+                    if self.headers.get("Authorization") != f"Bearer {outer.CREDENTIAL}":
+                        return self._send(401)
+                    outer.minted += 1
+                    code = f"code-{outer.minted}-{os.urandom(8).hex()}"
+                    outer.codes.add(code)
+                    return self._send(200, json.dumps({"code": code}).encode())
+                if self.path == "/auth/open":
+                    code = urllib.parse.parse_qs(body).get("code", [""])[0]
+                    if code in outer.codes:
+                        outer.codes.discard(code)
+                        return self._send(200, b"ok", [("Set-Cookie", "outpost_session=abc; HttpOnly")])
+                    return self._send(400)
+                self._send(404)
+
+            def log_message(self, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        self.port = self.server.server_address[1]
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def swap(self, code: str) -> str | None:
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/auth/open",
+            data=urllib.parse.urlencode({"code": code}).encode(),
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=2) as resp:
+                return resp.headers.get("Set-Cookie")
+        except urllib.error.HTTPError:
+            return None
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+@pytest.fixture()
+def test_outpost(outpost):
+    t = _TestOutpost()
+    cred = outpost.state_dir / "operator" / "credential"
+    cred.parent.mkdir(parents=True)
+    cred.write_text(t.CREDENTIAL)
+    cred.chmod(0o600)
+    t.credential_path = cred
+    yield t
+    t.close()
+
+
+def _form_code(html: str) -> str:
+    import re
+
+    m = re.search(r'name="code" value="([^"]+)"', html)
+    assert m, html
+    return m.group(1)
+
+
+def test_open_hands_the_browser_a_file_never_the_code(outpost, test_outpost):
     opener = _RecordingOpener()
 
-    rc = outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
+    rc = outpost_lifecycle.open_ui(
+        env=outpost.env, port=test_outpost.port, opener=opener, settle=0
+    )
 
     assert rc == 0
-    assert opener.urls == [f"http://127.0.0.1:{outpost.port}/"]
+    (args,) = opener.args
+    html_file = Path(args[0])
+    assert html_file.parent == outpost.state_dir / "operator"
+    snap = opener.snapshots[0]
+    code = _form_code(snap["text"])
+    assert all(code not in str(a) for a in args)
+    assert snap["mode"] == 0o600
+    assert f"http://127.0.0.1:{test_outpost.port}/auth/open" in snap["text"]
+    assert "outpost_session=" in (test_outpost.swap(code) or "")
+    assert test_outpost.swap(code) is None
+
+
+def test_open_deletes_the_file_after_use(outpost, test_outpost):
+    opener = _RecordingOpener()
+
+    outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    assert not Path(opener.args[0][0]).exists()
+
+
+def test_open_prints_the_path_and_keeps_the_file_when_no_browser_opens(outpost, test_outpost, capsys):
+    opener = _RecordingOpener(result=False)
+
+    rc = outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    path = Path(opener.args[0][0])
+    assert rc == 0
+    assert str(path) in capsys.readouterr().out
+    assert path.exists()
+    assert "outpost_session=" in (test_outpost.swap(_form_code(path.read_text())) or "")
+
+
+def test_open_from_the_sandbox_exits_nonzero_and_opens_nothing(outpost, test_outpost, monkeypatch, capsys):
+    test_outpost.credential_path.chmod(0)
+    opener = _RecordingOpener()
+
+    with pytest.raises(OutpostLifecycleError) as exc:
+        outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    assert "your own terminal" in str(exc.value)
+    assert opener.args == []
+    assert test_outpost.minted == 0
+
+
+def test_cli_open_exits_nonzero_naming_your_own_terminal_when_the_credential_is_unreadable(
+    outpost, test_outpost, monkeypatch, capsys
+):
+    test_outpost.credential_path.chmod(0)
+    opener = _RecordingOpener()
+    monkeypatch.setattr(
+        cli,
+        "open_ui",
+        lambda: outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0),
+    )
+    monkeypatch.setattr(sys, "argv", ["trailhead", "outpost", "open"])
+
+    assert cli.main() != 0
+    assert "your own terminal" in capsys.readouterr().err
+    assert opener.args == []
+
+
+def test_open_reports_a_credential_outpost_refuses(outpost, test_outpost):
+    test_outpost.credential_path.write_text("a-credential-from-an-older-boot")
+    opener = _RecordingOpener()
+
+    with pytest.raises(OutpostLifecycleError) as exc:
+        outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    assert "trailhead outpost restart" in str(exc.value)
+    assert opener.args == []
+
+
+def test_open_sweeps_a_stale_file_a_failed_open_left_behind(outpost, test_outpost):
+    first = _RecordingOpener(result=False)
+    outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=first, settle=0)
+    stale = Path(first.args[0][0])
+    old = time.time() - 120
+    os.utime(stale, (old, old))
+
+    outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=_RecordingOpener(), settle=0)
+
+    assert not stale.exists()
+
+
+def test_the_default_opener_passes_only_the_file_path(monkeypatch):
+    calls: list[list[str]] = []
+    monkeypatch.setattr(
+        outpost_lifecycle.subprocess,
+        "run",
+        lambda argv, **kw: calls.append(argv) or SimpleNamespace(returncode=0),
+    )
+    for platform, program in (("darwin", "open"), ("linux", "xdg-open")):
+        monkeypatch.setattr(outpost_lifecycle.sys, "platform", platform)
+        assert outpost_lifecycle._open_file("/state/operator/open-x.html") is True
+    assert calls == [["open", "/state/operator/open-x.html"], ["xdg-open", "/state/operator/open-x.html"]]
 
 
 def test_open_refuses_and_opens_nothing_when_the_daemon_is_not_answering(outpost):
@@ -838,18 +1028,7 @@ def test_open_refuses_and_opens_nothing_when_the_daemon_is_not_answering(outpost
         outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
 
     assert "trailhead outpost start" in str(exc.value)
-    assert opener.urls == []
-
-
-def test_open_raises_when_no_browser_could_be_launched(outpost):
-    assert _start(outpost) == 0
-    assert _wait_until(lambda: _health_reachable(outpost.port), timeout=5.0)
-    opener = _RecordingOpener(result=False)
-
-    with pytest.raises(OutpostLifecycleError) as exc:
-        outpost_lifecycle.open_ui(env=outpost.env, port=outpost.port, opener=opener)
-
-    assert f"http://127.0.0.1:{outpost.port}/" in str(exc.value)
+    assert opener.args == []
 
 
 def test_cli_open_verb_dispatches_to_open_ui(monkeypatch):
