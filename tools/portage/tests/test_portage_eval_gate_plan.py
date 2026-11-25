@@ -22,6 +22,7 @@ from _portage_cli import contained_tempdir  # noqa: F401  (autouse fixture)
 
 from portage.cli import dispatch
 from portage.eval_gate import merge_check, select, unmapped_runner_cases
+from portage.eval_gate.loads import LoadError
 
 RUNNER = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
 
@@ -2038,6 +2039,44 @@ class TestReaderFailureNamesItsRevision:
             "at the base revision")
 
 
+class TestGitReaderRefusals:
+    def _reader(self, repo: Path, tree: dict[str, str], git: select.Git | None = None):
+        return select._GitReader(repo, "HEAD", tree, "", git or _CountingGit())
+
+    @pytest.mark.parametrize("char", ["\n", "\r", "\t", "\x00", "\x1b", "\x7f"])
+    def test_a_path_holding_a_control_character_is_refused_before_git_is_asked(self, repo, char):
+        _write(repo, "a.md", "A\n")
+        _commit(repo)
+        git = _CountingGit()
+        reader = self._reader(repo, {f"a{char}b.md": "100644", "a.md": "100644"}, git)
+        with pytest.raises(select.GitError):
+            reader._fetch(f"a{char}b.md")
+        assert git.cat_files == 0
+
+    def test_a_path_without_control_characters_is_read(self, repo):
+        _write(repo, "a b.md", "A\n")
+        _commit(repo)
+        reader = self._reader(repo, {"a b.md": "100644"})
+        try:
+            assert reader("a b.md") == "A\n"
+        finally:
+            reader.close()
+
+    def test_an_object_that_is_not_a_blob_is_a_fault_and_leaves_the_reader_usable(self, repo):
+        _write(repo, "d/x.md", "X\n")
+        _write(repo, "ok.md", "OK\n")
+        _commit(repo)
+        git = _CountingGit()
+        reader = self._reader(repo, {"d": "100644", "ok.md": "100644"}, git)
+        try:
+            with pytest.raises(LoadError):
+                reader("d")
+            assert reader("ok.md") == "OK\n"
+            assert git.cat_files == 2
+        finally:
+            reader.close()
+
+
 class TestPlanOutputIsAllowlisted:
     def test_a_corpus_path_outside_the_allowlist_never_reaches_stdout_raw(self, repo, capsys):
         hostile = "a@evil"
@@ -2493,6 +2532,14 @@ class TestSelectionFollowsLoadsAndUndeclaredMentions:
         _, plan, _ = _closure_change(repo, capsys, self.MENTION, self.SIBLING, "skills/core-two.md",
                                      declared={"skills/entry.md": ["skills/core-two.md"]})
         assert plan["status"] == "no-cases-mapped"
+
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    def test_a_deeply_nested_declared_list_is_a_mapping_fault_not_a_traceback(self, repo, capsys, nested):
+        _, plan, out = _closure_change(repo, capsys, self.MENTION, {**self.SIBLING,
+                                       "declared-mentions.json": nested}, "skills/core-two.md")
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"].endswith("case 'decl': declared-mentions.json is not valid JSON")
+        assert "Traceback" not in out
 
     def test_the_same_mention_undeclared_selects_the_case(self, repo, capsys):
         _, plan, _ = _closure_change(repo, capsys, self.MENTION, self.SIBLING, "skills/core-two.md")

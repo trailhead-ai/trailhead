@@ -280,8 +280,8 @@ class _GitReader:
             raise LoadError(f"{_q(path, 1)} could not be read at {label}") from None
 
     def _fetch(self, full: str) -> str:
-        if "\n" in full:
-            raise GitError("a path with a newline cannot be read through cat-file --batch")
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in full):
+            raise GitError("a path with a control character cannot be read through cat-file --batch")
         if self._proc is None:
             self._proc = self._git.open_cat_file(self._repo)
         proc = self._proc
@@ -289,6 +289,7 @@ class _GitReader:
         proc.stdin.flush()
         head = proc.stdout.readline().split()
         if len(head) != 3 or head[1] != b"blob" or not head[2].isdigit():
+            self.close(kill=True)
             raise GitError("git cat-file --batch did not return a blob")
         size = int(head[2])
         if size > MAX_BLOB_BYTES:

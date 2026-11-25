@@ -75,6 +75,9 @@ def _walk(root: Path) -> list[tuple[str, str]]:
         found.append((rel(Path(error.filename)), "unreadable"))
 
     for top in ("skills", "agents"):
+        if (root / top).is_symlink():
+            found.append((top, "symlink"))
+            continue
         for directory, dirs, names in os.walk(root / top, onerror=unreadable):
             dirs.sort()
             found.extend((rel(Path(directory) / d), "symlink") for d in dirs if (Path(directory) / d).is_symlink())

@@ -46,10 +46,12 @@ raise a ``LoadError`` of its own (a cap, a failed read naming its revision): ``r
 
 from __future__ import annotations
 
+import errno
 import json
 import posixpath
 import re
 import stat
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -75,7 +77,7 @@ _LOAD_SECTION = re.compile(r"Read `([^`]+)` now\.")
 _LOAD_BRANCH = re.compile(r"When (.+), read `([^`]+)` now and follow it in full\.")
 _LIST_MARKER = re.compile(r"^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)+")
 _DIRECTIVE_VERB = re.compile(r"\b(?:read|load|follow|consult|open|see|apply|use|per)\b", re.IGNORECASE)
-_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
+_LINK_END = re.compile(r"[)\s]")
 
 
 class LoadError(Exception):
@@ -289,8 +291,12 @@ def tree_reader(root: Path):
                 if walked.is_symlink():
                     raise NotRegularFile(path)
             st = full.lstat()
-        except FileNotFoundError:
+        except (FileNotFoundError, NotADirectoryError):
             return None
+        except OSError as exc:
+            if exc.errno == errno.ENAMETOOLONG:
+                return None
+            raise
         if not stat.S_ISREG(st.st_mode):
             raise NotRegularFile(path)
         if st.st_size > MAX_BLOB_BYTES:
@@ -324,6 +330,7 @@ def _loads_in_closure(entry: str, read) -> set[str]:
     """The files loaded by ``entry`` or by any non-branch file reached from it, transitively."""
     loaded: set[str] = set()
     queue = [entry]
+    queued = {entry}
     for current in queue:
         text = _get(read, current)
         if text is None:
@@ -335,7 +342,8 @@ def _loads_in_closure(entry: str, read) -> set[str]:
                 body = _get(read, target)
             except BinaryFile:
                 continue
-            if body is not None and target not in queue and not is_branch(body):
+            if body is not None and target not in queued and not is_branch(body):
+                queued.add(target)
                 queue.append(target)
     return loaded
 
@@ -350,13 +358,17 @@ def _derive(entry: str, branches, read, base_tolerant: bool) -> Derived:
     entry_loaded, entry_reached = _reached(entry, entry_text, read)
     accepted = entry_reached if base_tolerant else entry_loaded
     declared = []
+    below: set[str] | None = None
     for position, branch in enumerate(branches, 1):
         norm = posixpath.normpath(branch)
         text = _get(read, norm)
         if text is None:
             raise LoadError(f"declared branch {_q(branch, position)} does not exist")
-        if norm not in accepted and norm not in _loads_in_closure(entry, read):
-            raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
+        if norm not in accepted:
+            if below is None:
+                below = _loads_in_closure(entry, read)
+            if norm not in below:
+                raise LoadError(f"entry {_q(entry, 1)} does not load the declared branch {_q(branch, position)}")
         if not is_branch(text):
             raise LoadError(f"declared branch {_q(branch, position)} does not open with 'Applies when'")
         declared.append(norm)
@@ -506,13 +518,23 @@ def _located_paragraphs(lines: list[str]) -> list[tuple[str, list[tuple[int, int
     return out
 
 
-def _line_at(starts: list[tuple[int, int]], offset: int) -> int:
-    line = starts[0][1]
-    for start, number in starts:
-        if start > offset:
-            break
-        line = number
-    return line
+def _line_at(offsets: list[int], numbers: list[int], offset: int) -> int:
+    return numbers[max(bisect_right(offsets, offset) - 1, 0)]
+
+
+def _link_targets(text: str):
+    """``(offset, target)`` for each ``](target)`` in ``text``, a target being one or more characters that are
+    neither ``)`` nor whitespace. One pass: a failed opener cannot be rescued by a later one before the character
+    that stopped it."""
+    at = text.find("](")
+    while at != -1:
+        stop = _LINK_END.search(text, at + 2)
+        end = stop.start() if stop else len(text)
+        if stop and stop.group() == ")" and end > at + 2:
+            yield at + 2, text[at + 2:end]
+            at = text.find("](", end + 1)
+        else:
+            at = text.find("](", max(end, at + 1))
 
 
 def _present(read, path: str) -> bool:
@@ -549,7 +571,7 @@ def _named_files(sentence: str, file: str, read) -> list[tuple[int, str]]:
         if index % 2 == 1 and _SAFE_CHARS.match(part):
             found.append((offset, part))
         elif index % 2 == 0:
-            found.extend((offset + m.start(1), m.group(1).split("#")[0]) for m in _LINK_TARGET.finditer(part))
+            found.extend((offset + at, target.split("#")[0]) for at, target in _link_targets(part))
         offset += len(part) + 1
     return [(at, raw) for at, raw in found if _SAFE_CHARS.match(raw) and resolve_existing(file, raw, read)]
 
@@ -567,6 +589,8 @@ def parse_directives(path: str, text: str, read) -> Directives:
     loads: list[Load] = []
     misworded: list[Misworded] = []
     for paragraph, starts in _located_paragraphs(_visible_lines(text)):
+        offsets = [start for start, _ in starts]
+        numbers = [number for _, number in starts]
         spans = _sentence_spans(paragraph, bold=True)
         for index, (begin, end) in enumerate(spans):
             raw_sentence = paragraph[begin:end]
@@ -577,8 +601,8 @@ def parse_directives(path: str, text: str, read) -> Directives:
             body = raw_sentence[marker.end():].strip() if marker else raw_sentence.strip()
             if body.startswith("**") and body.endswith("**") and body.count("**") == 2:
                 body = body[2:-2].strip()
-            line = _line_at(starts, begin + lead)
-            end_line = _line_at(starts, max(begin + lead, end - 1))
+            line = _line_at(offsets, numbers, begin + lead)
+            end_line = _line_at(offsets, numbers, max(begin + lead, end - 1))
             named = _named_files(body, path, read)
             distinct = tuple(dict.fromkeys(raw for _, raw in named))
             full = _LOAD_FULL.fullmatch(body)
@@ -618,7 +642,7 @@ def parse_declared_mentions(text: str) -> dict[str, tuple[str, ...]]:
     list, a path that is not a string or is not a safe plugin-relative path raise a one-line ``LoadError``."""
     try:
         data = json.loads(text)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise _declared_fault("is not valid JSON") from None
     if not isinstance(data, dict):
         raise _declared_fault("must be a JSON object mapping a file to the paths it only mentions")

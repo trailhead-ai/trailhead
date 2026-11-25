@@ -298,6 +298,18 @@ class TestWalkFailsClosed:
         faults = rule_faults(check_plugin(root), "unreadable-file")
         assert [f.split(": ")[0] for f in faults] == ["agents/a.md:1"]
 
+    @pytest.mark.parametrize("top", ["skills", "agents"])
+    def test_a_symlinked_top_directory_is_a_fault_and_is_never_walked(self, tmp_path, top):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "external-secret-name.md").write_text("Read `a.md` from the top.\n")
+        root = plugin(tmp_path, {"README.md": "x\n"})
+        (root / top).symlink_to(outside, target_is_directory=True)
+        faults = check_plugin(root)
+        assert [f.split(": ")[0] for f in faults] == [f"{top}:1"]
+        assert "unreadable-file" in faults[0]
+        assert "external-secret-name" not in "\n".join(faults)
+
     def test_a_tree_with_no_symlinks_has_no_such_fault(self, tmp_path):
         assert faults_of(tmp_path, {"skills/x/real.md": "A\n", "agents/b.md": "B\n"}) == []
 
@@ -484,6 +496,18 @@ class TestDeclaredMentions:
         faults = faults_of(tmp_path, files)
         assert len(rule_faults(faults, "declared-mentions-malformed")) == 1
         assert faults[0].startswith("declared-mentions.json:1: ")
+
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    def test_a_deeply_nested_list_is_refused_like_any_malformed_one(self, tmp_path, nested):
+        faults = faults_of(tmp_path, {**self.FILES, "declared-mentions.json": nested})
+        assert len(rule_faults(faults, "declared-mentions-malformed")) == 1
+
+    def test_the_command_line_reports_a_deeply_nested_list_as_a_fault_and_no_traceback(self, tmp_path):
+        root = plugin(tmp_path, {**self.FILES, "declared-mentions.json": "[" * 100000})
+        done = TestCommandLine().run(root)
+        assert done.returncode == 1
+        assert "Traceback" not in done.stderr
+        assert done.stdout.startswith("declared-mentions.json:1: declared-mentions-malformed: ")
 
     def test_a_missing_list_is_an_empty_list(self, tmp_path):
         assert faults_of(tmp_path, self.FILES) == []

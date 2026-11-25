@@ -7,6 +7,7 @@ on what came back, including the exact fault text for each refusal.
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 
@@ -415,6 +416,18 @@ class TestDeclaredBranchLoadedBelowTheEntry:
         assert set(got.files) == {ENTRY, self.CORE, self.B}
         assert got.split is True
 
+    def test_the_closure_below_the_entry_is_not_re_walked_for_each_declared_branch(self):
+        def core_reads(count: int) -> int:
+            names = [f"skills/_shared/b{n}.md" for n in range(count)]
+            core = "Core.\n\n" + "".join(
+                f"When the run is unattended, read `b{n}.md` now and follow it in full.\n\n" for n in range(count))
+            files = {ENTRY: self.ENTRY_FULL, self.CORE: core, **{name: BRANCH_HEAD + "Branch.\n" for name in names}}
+            read, seen = counting(files)
+            assert set(derive(ENTRY, names, read).files) == {ENTRY, self.CORE, *names}
+            return seen.count(self.CORE)
+
+        assert core_reads(8) == core_reads(2)
+
     def test_a_branch_the_core_loads_stays_out_of_the_closure_when_it_is_not_declared(self):
         files = self._files("Core.\n\nWhen the run is unattended, read `b.md` now and follow it in full.\n")
         assert set(derive(ENTRY, [], reader(files)).files) == {ENTRY, self.CORE}
@@ -595,6 +608,34 @@ class TestLinearSentences:
         assert [load.raw for load in got.loads] == ["r.md"]
         assert elapsed < 1.0
 
+    @staticmethod
+    def _best_of(text: str, runs: int = 3) -> float:
+        best = float("inf")
+        for _ in range(runs):
+            started = time.perf_counter()
+            parse_directives(ENTRY, text, reader({}))
+            best = min(best, time.perf_counter() - started)
+        return best
+
+    @pytest.mark.benchmark
+    def test_a_paragraph_of_many_short_lines_costs_time_proportional_to_its_length(self):
+        small, large = 2000, 8000
+        t_small = self._best_of("a.\n" * small)
+        t_large = self._best_of("a.\n" * large)
+        assert t_large < 8 * max(t_small, 0.005), f"{small} lines {t_small:.3f}s, {large} lines {t_large:.3f}s"
+
+    @pytest.mark.benchmark
+    def test_a_long_run_of_unclosed_link_openers_costs_time_proportional_to_its_length(self):
+        small, large = 2000, 8000
+        t_small = self._best_of("x" + "](" * small + "\n")
+        t_large = self._best_of("x" + "](" * large + "\n")
+        assert t_large < 8 * max(t_small, 0.005), f"{small} openers {t_small:.3f}s, {large} openers {t_large:.3f}s"
+
+    def test_a_link_target_is_still_found_after_a_run_of_unclosed_openers(self):
+        text = "Read " + "](" * 50 + " [a](a.md) now and follow it in full.\n"
+        got = parse_directives(ENTRY, text, reader({"skills/x/a.md": "A\n"}))
+        assert [m.reason for m in got.misworded] == ["is not in the fixed wording"]
+
     def test_e_g_and_i_e_do_not_end_a_sentence_but_a_word_ending_in_them_does(self):
         text = ("When asked e.g. now and (i.e. later), read `a.md` now and follow it in full. Mre.g. x. "
                 "Read `d.md` now and follow it in full.\n")
@@ -667,6 +708,50 @@ class TestTreeReaderContainment:
         (real / "a.md").write_text("fine\n")
         (tmp_path / "via").symlink_to(real, target_is_directory=True)
         assert tree_reader(tmp_path / "via")("a.md") == "fine\n"
+
+
+class TestTreeReaderReadsAnImpossiblePathAsAbsent:
+    LONG = "a" * 300 + ".md"
+
+    @pytest.mark.parametrize("path", ["skills/x/SKILL.md/x.md", f"skills/x/{LONG}", f"skills/{LONG}/b.md"])
+    def test_a_path_the_filesystem_cannot_hold_is_absent_not_a_fault(self, tmp_path, path):
+        write_tree(tmp_path / "plugin", {"skills/x/SKILL.md": "S\n"})
+        assert tree_reader(tmp_path / "plugin")(path) is None
+
+    @pytest.mark.parametrize("token", ["SKILL.md/x.md", LONG])
+    def test_a_mention_of_such_a_path_adds_nothing_to_the_closure(self, tmp_path, token):
+        root = tmp_path / "plugin"
+        write_tree(root, {ENTRY: f"See `{token}` for the layout.\n"})
+        assert derive(ENTRY, [], cached(tree_reader(root))).files == (ENTRY,)
+
+    def test_a_mention_of_a_directory_adds_nothing_but_a_load_of_one_is_still_a_fault(self, tmp_path):
+        root = tmp_path / "plugin"
+        write_tree(root, {ENTRY: "See `sub` for the layout.\n", "skills/x/sub/a.md": "A\n"})
+        assert derive(ENTRY, [], cached(tree_reader(root))).files == (ENTRY,)
+        write_tree(root, {ENTRY: "Read `sub` now and follow it in full.\n"})
+        with pytest.raises(LoadError, match="not a regular file"):
+            derive(ENTRY, [], cached(tree_reader(root)))
+
+    def test_a_path_under_a_directory_that_cannot_be_searched_is_still_a_fault(self, tmp_path):
+        if os.geteuid() == 0:
+            pytest.skip("permission bits are not enforced for root")
+        root = tmp_path / "plugin"
+        write_tree(root, {"skills/x/d/a.md": "A\n", ENTRY: "See `d/a.md` for the layout.\n"})
+        (root / "skills/x/d").chmod(0o000)
+        try:
+            with pytest.raises(PermissionError):
+                tree_reader(root)("skills/x/d/a.md")
+            with pytest.raises(LoadError, match="could not be read"):
+                derive(ENTRY, [], cached(tree_reader(root)))
+        finally:
+            (root / "skills/x/d").chmod(0o755)
+
+    def test_a_symlinked_file_is_still_refused_by_the_reader(self, tmp_path):
+        root = tmp_path / "plugin"
+        write_tree(root, {"skills/x/real.md": "A\n"})
+        (root / "skills/x/link.md").symlink_to(root / "skills/x/real.md")
+        with pytest.raises(NotRegularFile):
+            tree_reader(root)("skills/x/link.md")
 
 
 def write_tree(root: Path, files: dict[str, str]) -> None:
@@ -850,6 +935,13 @@ class TestDeclaredMentions:
         assert fragment in message
         assert "\n" not in message
         assert "declared-mentions.json" in message
+
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    def test_a_deeply_nested_list_is_refused_in_one_line_like_any_malformed_one(self, nested):
+        with pytest.raises(LoadError) as caught:
+            parse_declared_mentions(nested)
+        assert str(caught.value).startswith("declared-mentions.json ")
+        assert "\n" not in str(caught.value)
 
     def test_an_unsafe_value_is_echoed_by_position_only(self, tmp_path):
         with pytest.raises(LoadError) as caught:
