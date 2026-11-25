@@ -363,6 +363,7 @@ def write_credential(
     path = state_dir / "sessions" / key / "gateway-client.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps({"client_id": client_id, "client_secret": client_secret}))
+    path.chmod(0o600)
     return path
 
 

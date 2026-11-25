@@ -12,7 +12,7 @@ from pathlib import Path
 
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
-from trailhead.install import build_cli_shims, resolve_cli_tools
+from trailhead.install import resolve_cli_tools
 from trailhead.tests._gateway_support import (
     await_harness,
     REGISTRATION_AUTHORITY,
@@ -24,6 +24,7 @@ from trailhead.tests._gateway_support import (
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
+from trailhead.tests._trusted_checkout import build_gateway_shims, make_trusted_checkout
 from trailhead.uninstall import run_uninstall
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -205,7 +206,7 @@ class TestScript:
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
         tools = resolve_cli_tools({"camp": True, "lore": True, "portage": True})
-        build_cli_shims(tools, env=env, outpost_enabled=True)
+        build_gateway_shims(tools, env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
         launcher = make_fake_harness(tmp_path / "fake")
         proc = run_under_harness(
             launcher,
@@ -259,6 +260,7 @@ class TestRealInstallReachesOutpost:
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
         outpost_state = tmp_path / "outpost-state"
+        env = {**env, "OUTPOST_STATE_DIR": str(outpost_state)}
         write_authority(outpost_state)
         launcher = make_fake_harness(tmp_path / "fake")
         dest = tmp_path / "plugins" / "outpost"
@@ -268,7 +270,7 @@ class TestRealInstallReachesOutpost:
             monkeypatch.setattr(
                 "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
             )
-            build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
+            build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
             proc = run_under_harness(
                 launcher,
                 str(dest / "hooks" / "gateway-register"),
@@ -294,12 +296,13 @@ class TestNoCredentialThroughTheInstalledHook:
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
         outpost_state = tmp_path / "outpost-state"
+        env = {**env, "OUTPOST_STATE_DIR": str(outpost_state)}
         if authority:
             write_authority(outpost_state)
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
         monkeypatch.setattr("trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port)))
-        build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
+        build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
         started = time.monotonic()
         proc = run_under_harness(
             make_fake_harness(tmp_path / "fake"),
@@ -344,3 +347,30 @@ class TestNoCredentialThroughTheInstalledHook:
             proc, _, _ = self._run(tmp_path, monkeypatch, stub.port)
         assert proc.returncode == 0, proc.stderr
         assert "not in a camp workspace" in _one_message(proc)
+
+
+class TestHookWithAShimThatRefusesAtExec:
+    def test_a_registration_script_swapped_after_install_leaves_stdout_empty_and_the_hook_exits_0_within_2s(
+        self, tmp_path
+    ):
+        state = tmp_path / "state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
+        checkout = make_trusted_checkout(tmp_path / "checkout")
+        build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=checkout)
+        script = checkout / "bin" / "_gateway_register.py"
+        marker = tmp_path / "ran-swapped-script"
+        script.write_text(f'print("{{}}")\nopen("{marker}", "w").write("ran")\n')
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        started = time.monotonic()
+        proc = subprocess.run(
+            ["/bin/sh", str(dest / "hooks" / "gateway-register")],
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)},
+            timeout=60,
+        )
+        assert time.monotonic() - started < 2
+        assert (proc.returncode, proc.stdout) == (0, "")
+        assert str(script) in proc.stderr and "changed" in proc.stderr
+        assert not marker.exists()

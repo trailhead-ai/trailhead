@@ -115,6 +115,7 @@ from trailhead.harness.base import (
     SessionTranscript,
 )
 from trailhead.launch_profile import BROKER_SERVER, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
+from trailhead.launch_profile import scratch_dirs as _scratch_dirs
 
 if TYPE_CHECKING:
     from trailhead.launch_profile import BrokerLaunch, ResolvedProfile
@@ -1237,11 +1238,6 @@ def _managed_settings(home: Path, launch_dir: Path, platform: str | None = None)
         ) from exc
     paths += [base / _MANAGED_DROP_IN_DIR / n for n in names if n.endswith(".json") and not n.startswith(".")]
     return [_UserSettings(p, home, launch_dir, kind="managed", platform=plat) for p in paths]
-
-
-def _scratch_dirs() -> set[Path]:
-    """System temp, symlink-free: ``/tmp``, ``/private/tmp`` and the platform temp dir."""
-    return {Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())}
 
 
 def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:

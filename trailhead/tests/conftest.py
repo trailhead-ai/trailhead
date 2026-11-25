@@ -112,3 +112,11 @@ def _no_real_lore(monkeypatch: pytest.MonkeyPatch) -> None:
         raise FileNotFoundError("lore")
 
     monkeypatch.setattr(doctor, "_default_lore_runner", refuse)
+
+
+@pytest.fixture()
+def trusted_checkout(tmp_path: Path) -> Path:
+    """A copy of the code the pinned gateway shims run that install accepts to pin them to."""
+    from ._trusted_checkout import make_trusted_checkout
+
+    return make_trusted_checkout(tmp_path / "trusted-checkout")

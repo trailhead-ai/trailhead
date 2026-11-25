@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from unittest import mock
 
-from trailhead.install import build_cli_shims, resolve_cli_tools
+from trailhead.install import resolve_cli_tools
 
 from ._git_support import make_hermetic_git_env
 from ._gateway_support import (
@@ -47,6 +47,7 @@ from ._gateway_support import (
     runner_env,
 )
 from ._harness_process_support import make_fake_harness
+from ._trusted_checkout import build_gateway_shims, make_trusted_checkout
 
 GROUP = "e2e"
 W1, W2 = "ws-one", "ws-two"
@@ -316,7 +317,11 @@ def install_shims(root: Path, outpost: RealOutpost) -> Path:
     """
     env = {"TRAILHEAD_STATE_DIR": str(root / "trailhead-state"), "HOME": str(root / "outpost-home")}
     with mock.patch("trailhead.pathint.sys.executable", str(register_port_interpreter(root / "interp", outpost.port))):
-        build_cli_shims(resolve_cli_tools({"camp": True, "lore": True, "portage": True}), env=env, outpost_enabled=True)
+        build_gateway_shims(
+            resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
+            env=env,
+            checkout=make_trusted_checkout(root / "trusted-checkout"),
+        )
     bin_dir = root / "shims"
     bin_dir.mkdir()
     gateway = bin_dir / "outpost-gateway"

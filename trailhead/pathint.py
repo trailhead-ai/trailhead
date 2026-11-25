@@ -41,14 +41,17 @@ match raises ``PathIntegrationError`` instead of emitting unsafe output.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import shutil
 import stat
 import sys
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from trailhead.launch_profile import session_write_roots
 from trailhead.paths import ensure_dir, state_dir
 
 # ---------------------------------------------------------------------------
@@ -98,10 +101,17 @@ class PinnedShimOptions:
 
     ``extra_env``: variable names passed through when the caller has them set.
     ``fixed_env``: variables the shim sets to a value fixed when it is built.
+    ``pass_state_env``: whether ``HOME`` and the state-folder variables are passed through from the
+    caller; when false, ``fixed_env`` carries whatever of them the shim needs.
+    ``pin_code``: the shim runs outside the sandbox, so building it refuses a repository root, script
+    or interpreter a session could write (``check_pinned_code``), and it re-checks, each time it
+    runs, that they are the ones it was built from.
     """
 
     extra_env: tuple[str, ...] = ()
     fixed_env: dict[str, str] = field(default_factory=dict)
+    pass_state_env: bool = True
+    pin_code: bool = False
 
 
 @dataclass
@@ -187,6 +197,8 @@ def create_shims(
     env: dict[str, str] | None = None,
     pinned_scripts: dict[str, Path] | None = None,
     pinned_options: dict[str, PinnedShimOptions] | None = None,
+    sandbox_write_roots: Iterable[Path] | None = None,
+    euid: int | None = None,
 ) -> ShimDirResult:
     """Create the trailhead-managed shim directory, one wrapper per tool.
 
@@ -206,6 +218,11 @@ def create_shims(
         pinned_options: Mapping of a pinned CLI name → the extra environment that
                         shim carries (``PinnedShimOptions``); a name with no entry
                         gets only the shared pinned environment.
+        sandbox_write_roots: Folders a session's sandbox may write; a shim whose options
+                        ``pin_code`` is refused code under one. Defaults to
+                        ``session_write_roots`` for *env*.
+        euid:           The user whose ownership is trusted besides root (the process's
+                        effective user by default).
 
     Raises:
         ShimDenylistError:    If any name matches the system-binary denylist.
@@ -218,6 +235,14 @@ def create_shims(
             raise ShimDenylistError(
                 f"refused to create shim named {name!r}: matches system-binary "
                 f"denylist ({', '.join(sorted(_SHIM_DENYLIST))})"
+            )
+
+    for name, script in pinned_scripts.items():
+        if pinned_options.get(name, PinnedShimOptions()).pin_code:
+            roots = session_write_roots(env=env) if sandbox_write_roots is None else sandbox_write_roots
+            check_pinned_code(
+                name, Path(trailhead_root), script, Path(os.path.realpath(sys.executable)),
+                write_roots=roots, euid=euid,
             )
 
     shim_dir = resolve_shim_dir(env=env)
@@ -253,10 +278,10 @@ def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
     )
 
 
-# What the pinned gateway command reads from its environment: HOME and the state-dir
-# variables ``trailhead.paths.state_dir`` consults. Everything else is dropped, including
+# What a pinned shim without fixed state folders passes through from the caller: HOME and the
+# state-dir variables ``trailhead.paths.state_dir`` consults. Everything else is dropped, including
 # the dynamic-loader variables (LD_*, DYLD_*), and PATH is fixed so the ``ps`` it runs on
-# macOS is the system one.
+# macOS is the system one. A shim whose options set ``pass_state_env`` false passes none of them.
 _PINNED_SHIM_ENV = ("HOME", "TRAILHEAD_STATE_DIR", "OUTPOST_STATE_DIR", "XDG_STATE_HOME")
 _PINNED_SHIM_PATH = "/usr/bin:/bin"
 
@@ -272,6 +297,16 @@ EVAL_SHIM_EXTRA_ENV = (
     "LC_MEASUREMENT", "LC_IDENTIFICATION",
 )
 EVAL_RUNNER_COMMAND = "claude"
+
+
+def _other_owner(info: os.stat_result, euid: int) -> bool:
+    """True when *info* belongs to neither the system (root, and whoever owns ``/``, which is not
+    root inside a user namespace) nor the user whose ownership is trusted."""
+    return info.st_uid not in (0, os.stat("/").st_uid, euid)
+
+
+def _group_or_world_writable(info: os.stat_result) -> bool:
+    return bool(info.st_mode & (stat.S_IWGRP | stat.S_IWOTH))
 
 
 def resolve_eval_runner(env: dict[str, str], *, euid: int | None = None) -> Path:
@@ -300,7 +335,7 @@ def resolve_eval_runner(env: dict[str, str], *, euid: int | None = None) -> Path
                 f"refused to build the portage-eval shim: the eval runner path {pinned!r} contains an "
                 f"unsafe character ({ch!r}) that would break out of the shim's quoted context"
             )
-    if pinned.is_symlink() and pinned.lstat().st_uid not in (0, euid):
+    if pinned.is_symlink() and _other_owner(pinned.lstat(), euid):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner link {pinned} is owned by another user"
         )
@@ -310,15 +345,88 @@ def resolve_eval_runner(env: dict[str, str], *, euid: int | None = None) -> Path
             f"refused to build the portage-eval shim: the eval runner {real} is not an executable file"
         )
     info = real.stat()
-    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+    if _group_or_world_writable(info):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is writable by group or others"
         )
-    if info.st_uid not in (0, euid):
+    if _other_owner(info, euid):
         raise PathIntegrationError(
             f"refused to build the portage-eval shim: the eval runner {real} is owned by another user"
         )
     return pinned
+
+
+def _untrusted_because(path: Path, write_roots: tuple[Path, ...], euid: int) -> str | None:
+    """Why *path* cannot be trusted as code that runs outside the sandbox, or ``None``.
+
+    The rules ``resolve_eval_runner`` holds a runner to, plus the sandbox's: not under a folder
+    the sandbox may write, owned by root or the operator (a link by its own owner, and its target
+    by its), and not writable by group or others. A sticky folder others can write (system temp)
+    is let through here only, since its entries cannot be replaced by anyone else; the write roots
+    still refuse it where a session can write it.
+    """
+    resolved = Path(os.path.realpath(path))
+    for root in write_roots:
+        if root == resolved or root in resolved.parents or root == path or root in path.parents:
+            return f"is under {root}, which a sandboxed session may write"
+    try:
+        if path.is_symlink() and _other_owner(path.lstat(), euid):
+            return "is a link owned by another user"
+        info = path.stat()
+    except OSError as exc:
+        return f"cannot be inspected ({exc.strerror or exc})"
+    if _other_owner(info, euid):
+        return "is owned by another user"
+    sticky_folder = stat.S_ISDIR(info.st_mode) and bool(info.st_mode & stat.S_ISVTX)
+    if _group_or_world_writable(info) and not sticky_folder:
+        return "is writable by group or others"
+    return None
+
+
+def check_pinned_code(
+    name: str,
+    root: Path,
+    script: Path,
+    interpreter: Path,
+    *,
+    write_roots: Iterable[Path],
+    euid: int | None = None,
+) -> None:
+    """Refuse (``PathIntegrationError`` naming the path) to pin shim *name* to code a session could change.
+
+    Checked: the repository *root*, every folder on the way to it and to *script* (as written and
+    where they resolve), every file and folder of the ``trailhead`` package under *root* (what the
+    script imports), *script*, and *interpreter* with every folder on the way to it. Each must pass
+    ``_untrusted_because`` against *write_roots*, the folders the sandbox may write.
+    """
+    euid = os.geteuid() if euid is None else euid
+    roots = tuple(Path(os.path.realpath(r)) for r in write_roots)
+    seen: set[Path] = set()
+
+    def check(path: Path) -> None:
+        if path in seen:
+            return
+        seen.add(path)
+        why = _untrusted_because(path, roots, euid)
+        if why is not None:
+            raise PathIntegrationError(f"refused to build the {name} shim: {path} {why}")
+
+    def check_chain(path: Path, *, as_written: bool) -> None:
+        forms = [Path(os.path.abspath(path)), Path(os.path.realpath(path))] if as_written else [
+            Path(os.path.realpath(path))
+        ]
+        for form in forms:
+            for step in (form, *form.parents):
+                check(step)
+
+    check_chain(root, as_written=True)
+    check_chain(script, as_written=True)
+    package = root / "trailhead"
+    if package.is_dir():
+        for folder, folders, files in os.walk(package):
+            for entry in (*folders, *files):
+                check(Path(folder) / entry)
+    check_chain(interpreter, as_written=False)
 
 
 def _pinned_shim_content(
@@ -331,8 +439,8 @@ def _pinned_shim_content(
     ``SHELLOPTS``, ``BASHOPTS`` and exported functions, so no variable the session
     sets on the command runs code in the shell before its one line; ``/bin/sh`` would
     not do on macOS, where it is bash honouring ``SHELLOPTS``. The interpreter starts
-    from an empty environment carrying only ``_PINNED_SHIM_ENV`` (when set) and a fixed
-    PATH, so a loader variable the session exported cannot reach it.
+    from an empty environment carrying only ``_PINNED_SHIM_ENV`` (when set, and unless the
+    options fix the state folders instead) and a fixed PATH, so a loader variable the session exported cannot reach it.
     *options* adds names passed through when set and values fixed at build time, for the one
     shim that needs them.
     """
@@ -351,12 +459,46 @@ def _pinned_shim_content(
             raise PathIntegrationError(f"refused to build the shim: {var!r} is not a variable name")
         _reject_unsafe_for_eval(value, label=f"the shim's {var}")
         fixed.append(f'{var}="{value}"')
-    passed = [f'${{{var}:+{var}="${var}"}}' for var in (*_PINNED_SHIM_ENV, *options.extra_env)]
+    state_vars = _PINNED_SHIM_ENV if options.pass_state_env else ()
+    passed = [f'${{{var}:+{var}="${var}"}}' for var in (*state_vars, *options.extra_env)]
     assignments = " ".join([f'PATH="{_PINNED_SHIM_PATH}"', f'TRAILHEAD_ROOT="{trailhead_root}"', *fixed, *passed])
+    recheck = _recheck_lines(name, trailhead_root, script, interpreter) if options.pin_code else ""
     return (
         "#!/bin/bash -p\n"
         f"# trailhead-managed shim for {name}\n"
+        f"{recheck}"
         f'exec /usr/bin/env -i {assignments} "{interpreter}" -I -S "{script}" "$@"\n'
+    )
+
+
+_DIGEST_COMMANDS = (("/usr/bin/sha256sum",), ("/usr/bin/shasum", "-a", "256"))
+
+
+def _recheck_lines(name: str, trailhead_root: str, script: Path, interpreter: str) -> str:
+    """Shell lines that refuse (exit 2, message on stderr only) when the checkout root, *script* or
+    *interpreter* is not what this shim was built from.
+
+    The root is compared by where it resolves; the script and the interpreter by the SHA-256 of their
+    contents, taken now and compared with a stock tool at each run (``sha256sum``, or ``shasum`` on macOS).
+    """
+    command = next((c for c in _DIGEST_COMMANDS if os.access(c[0], os.X_OK)), None)
+    if command is None:
+        raise PathIntegrationError(f"refused to build the {name} shim: no sha256sum or shasum to re-check it with")
+    real_root = os.path.realpath(trailhead_root)
+    _reject_unsafe_for_eval(real_root, label="the checkout root's resolved path")
+    digests = {}
+    for label, path in (("script", str(script)), ("interpreter", interpreter)):
+        try:
+            digests[label] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+        except OSError as exc:
+            raise PathIntegrationError(f"refused to build the {name} shim: cannot read {path} ({exc.strerror})") from exc
+    return (
+        "unset CDPATH\n"
+        f"_digest() {{ local out; out=$({' '.join(command)} < \"$1\" 2>/dev/null) && printf '%s' \"${{out%% *}}\"; }}\n"
+        f"_changed() {{ printf '%s\\n' \"{name}: $1 changed since trailhead install pinned it; run trailhead update\" >&2; exit 2; }}\n"
+        f'[ "$(cd -P -- "{real_root}" 2>/dev/null && pwd -P)" = "{real_root}" ] || _changed "{trailhead_root}"\n'
+        f'[ "$(_digest "{script}")" = "{digests["script"]}" ] || _changed "{script}"\n'
+        f'[ "$(_digest "{interpreter}")" = "{digests["interpreter"]}" ] || _changed "{interpreter}"\n'
     )
 
 

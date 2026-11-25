@@ -24,8 +24,10 @@ subprocess; an unexpected failure reports its exception type and nothing else.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
+import stat
 import re
 import sys
 from pathlib import Path
@@ -74,14 +76,41 @@ class _NoCredential(Exception):
     """The session has no usable credential file."""
 
 
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
 def _read_credential(key: str) -> tuple[str, str]:
+    """The client id and secret in this session's credential file, which must be a regular file the
+    operator owns with mode 0600, opened without following a link: anything else is refused before
+    the contents are read."""
     path = state_dir(OUTPOST_APP) / "sessions" / key / "gateway-client.json"
     try:
-        raw = path.read_text()
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     except FileNotFoundError:
         raise _NoCredential from None
+    except OSError as err:
+        if err.errno == errno.ELOOP:
+            raise _fail(f"the gateway credential {path} is a symbolic link; refusing to read it") from None
+        raise CommandError(SANDBOXED) from None
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise _fail(f"the gateway credential {path} is not a regular file; refusing to read it")
+        if info.st_uid != _operator_uid():
+            raise _fail(f"the gateway credential {path} is not owned by you; refusing to read it")
+        if stat.S_IMODE(info.st_mode) != 0o600:
+            raise _fail(
+                f"the gateway credential {path} has mode {stat.S_IMODE(info.st_mode):04o}; it must be 0600, refusing to read it"
+            )
+        with os.fdopen(fd, "r") as handle:
+            fd = -1
+            raw = handle.read()
     except OSError:
         raise CommandError(SANDBOXED) from None
+    finally:
+        if fd != -1:
+            os.close(fd)
     try:
         parsed = json.loads(raw)
         client_id, client_secret = parsed["client_id"], parsed["client_secret"]

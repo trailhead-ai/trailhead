@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from trailhead.install import build_cli_shims, resolve_cli_tools
+from trailhead.tests._trusted_checkout import build_gateway_shims, make_trusted_checkout
 from trailhead.pathint import PathIntegrationError, resolve_eval_runner, resolve_shim_dir
 
 
@@ -42,7 +43,7 @@ def _seen_by_interpreter(tmp_path, monkeypatch, shim_name, session_env, args=("s
     fake.chmod(0o755)
     monkeypatch.setattr("trailhead.pathint.sys.executable", str(fake))
     env = _env(tmp_path)
-    build_cli_shims(_tools(), env=env, outpost_enabled=True)
+    build_gateway_shims(_tools(), env=env, checkout=make_trusted_checkout(tmp_path / f"checkout-{shim_name}"))
     proc = subprocess.run(
         [str(resolve_shim_dir(env=env) / shim_name), *args],
         capture_output=True, text=True, env=session_env, timeout=60,
@@ -127,11 +128,12 @@ class TestEnvironment:
         env = _env(tmp_path)
         assert seen["PORTAGE_EVAL_SHIM"] == str(resolve_shim_dir(env=env) / "portage-eval")
 
-    def test_the_extras_reach_only_the_eval_shim_and_the_gateway_shim_gets_what_it_always_did(
+    def test_the_extras_reach_only_the_eval_shim_and_the_gateway_shim_gets_only_what_install_fixed(
             self, tmp_path, monkeypatch):
         gateway = _seen_by_interpreter(tmp_path, monkeypatch, "outpost-gateway", SESSION, args=("run", "list"))
         eval_seen = _seen_by_interpreter(tmp_path, monkeypatch, "portage-eval", SESSION)
-        assert set(gateway) - {"PWD"} == {"HOME", "PATH", "TRAILHEAD_ROOT"}
+        assert set(gateway) - {"PWD"} == {"HOME", "PATH", "TRAILHEAD_ROOT", "XDG_STATE_HOME"}
+        assert gateway["HOME"] == _env(tmp_path)["HOME"] != SESSION["HOME"]
         assert {"SANDBOX_RUNTIME", "USER", "LANG", "TERM", "LC_ALL", "LC_TIME"} <= set(eval_seen)
         assert not {"SANDBOX_RUNTIME", "USER", "LANG", "TERM", "LC_ALL", "PORTAGE_EVAL_RUNNER",
                     "PORTAGE_EVAL_SHIM"} & set(gateway)
@@ -227,7 +229,7 @@ class TestUnsafeRunnerPath:
     def test_a_build_with_such_a_runner_warns_and_skips_the_eval_shim_and_still_builds_the_others(
             self, tmp_path, capsys, dirname):
         env = self._env_with_runner_in(tmp_path, dirname)
-        shim_dir = build_cli_shims(_tools(), env=env, outpost_enabled=True)
+        shim_dir = build_gateway_shims(_tools(), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
         assert (shim_dir / "camp").exists() and (shim_dir / "outpost-gateway").exists()
         assert not (shim_dir / "portage-eval").exists()
         err = capsys.readouterr().err

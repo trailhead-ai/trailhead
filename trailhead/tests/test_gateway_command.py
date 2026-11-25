@@ -154,6 +154,71 @@ class TestFailurePaths:
             assert stub.requests == []
         self._fails_with(r, SANDBOX_LINE)
 
+    def test_a_credential_file_that_is_a_symlink_is_refused_naming_it_and_no_request_is_sent(
+        self, launcher, tmp_path, state
+    ):
+        decoy = tmp_path / "another-sessions-credential.json"
+        decoy.write_text(json.dumps({"client_id": "other-id", "client_secret": "other-secret"}))
+        decoy.chmod(0o600)
+        links = []
+
+        def seed(key):
+            path = state / "sessions" / key / "gateway-client.json"
+            path.parent.mkdir(parents=True)
+            path.symlink_to(decoy)
+            links.append(path)
+
+        with StubOutpost(client_id="other-id", client_secret="other-secret", runs=RUNS) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        (line,) = r.proc.stderr.splitlines()
+        assert str(links[0]) in line and "symbolic link" in line
+
+    @pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o400, 0o700])
+    def test_a_credential_file_whose_mode_is_not_0600_is_refused_naming_it_and_no_request_is_sent(
+        self, launcher, tmp_path, state, mode
+    ):
+        paths = []
+
+        def seed(key):
+            paths.append(write_credential(state, key))
+            paths[0].chmod(mode)
+
+        with StubOutpost(runs=RUNS) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        (line,) = r.proc.stderr.splitlines()
+        assert str(paths[0]) in line and f"mode {mode:04o}" in line and "0600" in line
+
+    def test_a_credential_file_that_is_not_a_regular_file_is_refused_and_no_request_is_sent(
+        self, launcher, tmp_path, state
+    ):
+        def seed(key):
+            (state / "sessions" / key / "gateway-client.json").mkdir(parents=True)
+
+        with StubOutpost(runs=RUNS) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        assert "not a regular file" in r.proc.stderr
+
+    def test_a_credential_file_the_operator_does_not_own_is_refused_and_no_request_is_sent(
+        self, tmp_path, state, monkeypatch
+    ):
+        # Running as the operator, no file can be made another user's, so the owner the command compares against is injected.
+        write_credential(state, "k1")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+        monkeypatch.setattr(command, "_operator_uid", lambda: os.geteuid() + 1)
+        with pytest.raises(command.CommandError, match=r"gateway-client\.json.*not owned by you"):
+            command._read_credential("k1")
+
+    def test_a_credential_file_the_operator_owns_with_mode_0600_is_read(self, tmp_path, state, monkeypatch):
+        write_credential(state, "k1", client_id="the-id", client_secret="the-secret")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+        assert command._read_credential("k1") == ("the-id", "the-secret")
+
     def test_credential_missing_refusal_is_named_by_its_reason_code(self, launcher, tmp_path, state):
         body = {"reason": "credential_missing", "message": "No credential was presented."}
         with StubOutpost(runs_reply=(401, body)) as stub:
