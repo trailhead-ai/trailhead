@@ -21,7 +21,8 @@ returns ``None``, and the caller neither looks the case up nor stores it. Other 
 are skipped. A plan entry with no ``measures`` key has none. The key leaves out the ``claude`` CLI
 version, scripts outside ``evals/`` that a scaffold calls, a model alias the runner re-targets, and a
 shared file whose name a scaffold builds at run time and never writes out in full, and a shared
-file named only by another case's files that this case's scaffold runs: none of them change it. Delete the cache directory to force a re-run.
+file named only by another case's files that this case's scaffold runs: none of them change it.
+Delete the cache directory to force a re-run.
 
 The cache is also skipped, neither read nor written, whenever ``PORTAGE_EVAL_RUNNER`` is set (the
 key does not cover which runner produced a pass), and ``run`` stores a fresh pass only when the
