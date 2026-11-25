@@ -331,7 +331,9 @@ class StubOutpost:
                         if self._authorised():
                             if stub.view_sequence is not None:
                                 stub.views_served += 1
-                                return self._send(200, stub.view_sequence[min(stub.views_served - 1, len(stub.view_sequence) - 1)])
+                                return self._send(
+                                    200, stub.view_sequence[min(stub.views_served - 1, len(stub.view_sequence) - 1)]
+                                )
                             self._send(200, stub.view)
                         return
                 if stub.runs_redirect is not None and self.path == "/gateway/runs":
@@ -368,7 +370,8 @@ def write_credential(
 
 
 def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY, *, mode: int = 0o600) -> Path:
-    """Outpost's registration authority file, written at the mode Outpost writes it (0600) unless *mode* says otherwise."""
+    """Outpost's registration authority file, written at the mode Outpost writes it (0600) unless *mode* says
+    otherwise."""
     path = state_dir / "registration" / "credential"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(authority + "\n")

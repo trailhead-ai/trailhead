@@ -221,7 +221,9 @@ class TestFailurePaths:
 class TestNoCredentialMessage:
     """When no credential results, the hook says so in one line: on stdout for the session, and in the log."""
 
-    def test_unreachable_outpost_says_it_will_register_on_the_first_gateway_call(self, run, outpost_state, trailhead_state):
+    def test_unreachable_outpost_says_it_will_register_on_the_first_gateway_call(
+        self, run, outpost_state, trailhead_state
+    ):
         write_authority(outpost_state)
         proc, _ = run(free_port())
         assert proc.returncode == 0
@@ -232,7 +234,8 @@ class TestNoCredentialMessage:
 
     def test_a_refusal_carries_outposts_reason_and_its_next_step(self, run, outpost_state):
         write_authority(outpost_state)
-        with StubOutpost(register_reply=(403, {"reason": "host_not_allowed", "message": "Open Outpost from the host."})) as stub:
+        reply = (403, {"reason": "host_not_allowed", "message": "Open Outpost from the host."})
+        with StubOutpost(register_reply=reply) as stub:
             proc, _ = run(stub.port)
         message = _hook_output(proc)
         assert "host_not_allowed" in message
@@ -283,7 +286,8 @@ class TestNoCredentialMessage:
 
 
 class TestAuthorityIsReadSafely:
-    """The registration authority is read as the gateway credential is: no link followed, a regular file, the operator's, mode 0600."""
+    """The registration authority is read as the gateway credential is: no link followed, a regular file, the
+    operator's, mode 0600."""
 
     def test_an_authority_that_is_a_link_is_refused_with_a_message_and_nothing_is_sent(self, run, outpost_state):
         real = write_authority(outpost_state)
@@ -384,7 +388,8 @@ class TestAuthorityProblems:
 
 
 class TestRefusalCarriesOutpostsNextStep:
-    """What the on-demand registration of the gateway command reads from a refusal; the hook prints only the reason code."""
+    """What the on-demand registration of the gateway command reads from a refusal; the hook prints only the reason
+    code."""
 
     def _register(self, monkeypatch, outpost_state, port, **kwargs):
         from trailhead.gateway import register

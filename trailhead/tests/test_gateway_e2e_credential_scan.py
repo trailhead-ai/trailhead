@@ -133,7 +133,7 @@ def _flow(root, camp, outpost, shim_bin, steps):
 
 
 @pytest.mark.seam_real
-def test_a_registered_session_listing_runs_through_the_real_shim_leaves_no_secret_or_token_in_arguments_or_request_records(
+def test_a_session_listing_runs_through_the_real_shim_leaves_no_secret_or_token_in_arguments_or_request_records(
     tmp_path_factory,
 ):  # AC81, AC86
     root = tmp_path_factory.mktemp("scan-flow")
@@ -142,7 +142,9 @@ def test_a_registered_session_listing_runs_through_the_real_shim_leaves_no_secre
         shim_bin = install_shims(root, outpost, port=recorder.port)
         gateway = shim_bin / "outpost-gateway"
         with ArgumentSampler() as sampler:
-            sections = _flow(root, camp, outpost, shim_bin, [("first", f"{gateway} run list"), ("second", f"{gateway} run list")])
+            sections = _flow(
+                root, camp, outpost, shim_bin, [("first", f"{gateway} run list"), ("second", f"{gateway} run list")]
+            )
         secrets = known_secrets(outpost, recorder.tokens)
         records = outpost_request_records(outpost)
     expected = f"No runs in workspace {GROUP}/{W1}\nrc=0"

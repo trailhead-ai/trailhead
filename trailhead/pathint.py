@@ -249,7 +249,10 @@ def create_shims(
             except PathIntegrationError as exc:
                 removed = _remove_refused_pinned_shims(shim_dir, pinned_scripts, pinned_options)
                 if removed:
-                    exc.args = (f"{exc}; removed the existing {', '.join(removed)} shim so it does not keep running earlier code",)
+                    exc.args = (
+                        f"{exc}; removed the existing {', '.join(removed)} shim "
+                        "so it does not keep running earlier code",
+                    )
                 raise
 
     try:
@@ -513,11 +516,14 @@ def _recheck_lines(name: str, trailhead_root: str, script: Path, interpreter: st
         try:
             digests[label] = hashlib.sha256(Path(path).read_bytes()).hexdigest()
         except OSError as exc:
-            raise PathIntegrationError(f"refused to build the {name} shim: cannot read {path} ({exc.strerror})") from exc
+            raise PathIntegrationError(
+                f"refused to build the {name} shim: cannot read {path} ({exc.strerror})"
+            ) from exc
     return (
         "unset CDPATH\n"
         f"_digest() {{ local out; out=$({' '.join(command)} < \"$1\" 2>/dev/null) && printf '%s' \"${{out%% *}}\"; }}\n"
-        f"_changed() {{ printf '%s\\n' \"{name}: $1 changed since trailhead install pinned it; run trailhead update\" >&2; exit 2; }}\n"
+        f"_changed() {{ printf '%s\\n' \"{name}: $1 changed since trailhead install pinned it; "
+        "run trailhead update\" >&2; exit 2; }\n"
         f'[ "$(cd -P -- "{real_root}" 2>/dev/null && pwd -P)" = "{real_root}" ] || _changed "{trailhead_root}"\n'
         f'[ "$(_digest "{script}")" = "{digests["script"]}" ] || _changed "{script}"\n'
         f'[ "$(_digest "{interpreter}")" = "{digests["interpreter"]}" ] || _changed "{interpreter}"\n'

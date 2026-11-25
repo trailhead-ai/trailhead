@@ -3064,7 +3064,9 @@ def _launched_deny_sets(env, ws):
         "db/late.db-wal",
     ],
 )
-def test_an_outpost_launched_sessions_settings_deny_the_credentials_and_the_database_to_the_sandbox(tmp_path, rel):  # AC83
+def test_an_outpost_launched_sessions_settings_deny_the_credentials_and_the_database_to_the_sandbox(
+    tmp_path, rel
+):  # AC83
     env, ws = _ritual_ready(tmp_path)
     denied, _ = _launched_deny_sets(env, ws)
     assert _covered_by(denied, Path(env["OUTPOST_STATE_DIR"]).resolve() / rel)

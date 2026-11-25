@@ -75,7 +75,12 @@ def test_a_registration_outpost_refuses_prints_outposts_reason_and_next_step(wor
     wrong = tmp_path / "wrong-authority-state"
     write_authority(wrong, "not-the-registration-authority")
     rc, out = gateway(
-        root, "wrong-authority", camp.w1, outpost, ["run", "list"], env={**step_env(root, outpost), "OUTPOST_STATE_DIR": str(wrong)}
+        root,
+        "wrong-authority",
+        camp.w1,
+        outpost,
+        ["run", "list"],
+        env={**step_env(root, outpost), "OUTPOST_STATE_DIR": str(wrong)},
     )
     assert rc == 2
     assert out == (
@@ -84,7 +89,9 @@ def test_a_registration_outpost_refuses_prints_outposts_reason_and_next_step(wor
     )
 
 
-def test_a_credential_outpost_does_not_know_is_refused_with_the_fixtures_credential_unrecognised_message(world, tmp_path):
+def test_a_credential_outpost_does_not_know_is_refused_with_the_fixtures_credential_unrecognised_message(
+    world, tmp_path
+):
     root, camp, outpost = world
     state = tmp_path / "unknown-credential-state"
     state.mkdir()
@@ -121,11 +128,16 @@ def test_a_credential_whose_session_ended_is_refused_with_the_fixtures_credentia
     )
     list_cmd = gateway_runner_cmd(outpost.port, root / "revoked-env.json", ["run", "list"])
     sections = run_fake_harness(
-        root, "revoked", camp.w1, [("first", list_cmd), ("revoke", revoke), ("second", list_cmd)], step_env(root, outpost)
+        root,
+        "revoked",
+        camp.w1,
+        [("first", list_cmd), ("revoke", revoke), ("second", list_cmd)],
+        step_env(root, outpost),
     )
     assert sections["first"].splitlines()[-1] == "rc=0"
     assert sections["revoke"].splitlines()[-1] == "rc=0"
     assert sections["second"].splitlines() == [
-        f"outpost-gateway: Outpost refused the credential: credential_revoked: {refusal_messages()['credential_revoked']}",
+        "outpost-gateway: Outpost refused the credential: "
+        f"credential_revoked: {refusal_messages()['credential_revoked']}",
         "rc=2",
     ]

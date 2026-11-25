@@ -987,7 +987,9 @@ def test_cancel_scenario_another_workspaces_session_cannot_cancel_it_and_the_run
     assert w.hold_after_foreign == ("in_progress", None), w.hold_after_foreign
 
 
-def test_cancel_scenario_no_secret_or_token_reaches_any_arguments_run_log_or_request_record(cancel_world):  # AC81, AC85, AC86
+def test_cancel_scenario_no_secret_or_token_reaches_any_arguments_run_log_or_request_record(
+    cancel_world,
+):  # AC81, AC85, AC86
     assert cancel_world.leaks == [], cancel_world.leaks
 
 

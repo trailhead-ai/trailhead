@@ -130,8 +130,13 @@ class TestScript:
         assert "refused to run" in json.loads(proc.stdout)["systemMessage"]
 
     def test_a_shim_that_exits_non_zero_with_its_own_json_has_that_json_passed_through_unchanged(self, tmp_path):
-        own = '{"systemMessage": "its own line", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "its own line"}}'
-        self._fake_cli(tmp_path / "state" / "bin" / "trailhead-gateway-register", tmp_path / "args.txt", prints=own, status=1)
+        own = (
+            '{"systemMessage": "its own line", "hookSpecificOutput": '
+            '{"hookEventName": "SessionStart", "additionalContext": "its own line"}}'
+        )
+        self._fake_cli(
+            tmp_path / "state" / "bin" / "trailhead-gateway-register", tmp_path / "args.txt", prints=own, status=1
+        )
         proc = self._run_hook(tmp_path)
         assert (proc.returncode, proc.stdout) == (0, own + "\n")
 
@@ -295,7 +300,9 @@ class TestRealInstallReachesOutpost:
             monkeypatch.setattr(
                 "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
             )
-            build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
+            build_gateway_shims(
+                resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
+            )
             proc = run_under_harness(
                 launcher,
                 str(dest / "hooks" / "gateway-register"),
@@ -315,7 +322,8 @@ class TestRealInstallReachesOutpost:
 
 
 class TestNoCredentialThroughTheInstalledHook:
-    """The hook as `trailhead install` wires it: the plugin's script, the shim install wrote, a stub or absent Outpost."""
+    """The hook as `trailhead install` wires it: the plugin's script, the shim install wrote, a stub or absent
+    Outpost."""
 
     def _run(self, tmp_path, monkeypatch, port, *, authority=True):
         state = tmp_path / "state"
@@ -326,8 +334,12 @@ class TestNoCredentialThroughTheInstalledHook:
             write_authority(outpost_state)
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
-        monkeypatch.setattr("trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port)))
-        build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
+        monkeypatch.setattr(
+            "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port))
+        )
+        build_gateway_shims(
+            resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
+        )
         started = time.monotonic()
         proc = run_under_harness(
             make_fake_harness(tmp_path / "fake"),
@@ -360,7 +372,8 @@ class TestNoCredentialThroughTheInstalledHook:
         assert elapsed < 2.0, elapsed
 
     def test_a_refusal_prints_outposts_reason_and_next_step(self, tmp_path, monkeypatch):
-        with StubOutpost(register_reply=(403, {"reason": "host_not_allowed", "message": "Open it on the host."})) as stub:
+        reply = (403, {"reason": "host_not_allowed", "message": "Open it on the host."})
+        with StubOutpost(register_reply=reply) as stub:
             proc, _, log = self._run(tmp_path, monkeypatch, stub.port)
         assert proc.returncode == 0, proc.stderr
         message = _one_message(proc)
@@ -419,7 +432,8 @@ def _header_helper_command(plugin: Path) -> str:
 
 
 class TestToolServerEntry:
-    def test_the_entry_addresses_the_tool_server_on_the_daemon_port(self, tmp_path):  # inert-gate: allow seam smoke: the composed plugin is wired to the daemon's tool-server URL
+    # inert-gate: allow seam smoke: the composed plugin is wired to the daemon's tool-server URL
+    def test_the_entry_addresses_the_tool_server_on_the_daemon_port(self, tmp_path):
         from urllib.parse import urlsplit
 
         from trailhead.launch_profile import BROKER_MCP_PATH
@@ -443,7 +457,9 @@ class TestToolServerEntry:
         assert proc.returncode == 0
         assert json.loads(proc.stdout) == {}
 
-    def test_after_a_real_install_the_header_helper_prints_the_session_s_token_and_nothing_else(self, tmp_path, monkeypatch):
+    def test_after_a_real_install_the_header_helper_prints_the_session_s_token_and_nothing_else(
+        self, tmp_path, monkeypatch
+    ):
         state = tmp_path / "state"
         outpost_state = tmp_path / "outpost-state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path), "OUTPOST_STATE_DIR": str(outpost_state)}
@@ -454,7 +470,9 @@ class TestToolServerEntry:
             monkeypatch.setattr(
                 "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
             )
-            build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
+            build_gateway_shims(
+                resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout")
+            )
             proc = run_under_harness(
                 make_fake_harness(tmp_path / "fake"),
                 _header_helper_command(dest),
@@ -469,13 +487,17 @@ class TestToolServerEntry:
         assert json.loads(proc.stdout) == {"Authorization": f"Bearer {TOKEN}"}
         assert [q.path for q in stub.requests] == ["/broker/token"]
 
-    def test_a_shim_that_refuses_at_exec_prints_an_empty_header_and_exits_0_without_running_the_swapped_script(self, tmp_path):
+    def test_a_shim_that_refuses_at_exec_prints_an_empty_header_and_exits_0_without_running_the_swapped_script(
+        self, tmp_path
+    ):
         state = tmp_path / "state"
         env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
         checkout = make_trusted_checkout(tmp_path / "checkout")
         build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=checkout)
         marker = tmp_path / "ran-swapped-script"
-        (checkout / "bin" / "_outpost_gateway.py").write_text(f'print("Bearer stolen")\nopen("{marker}", "w").write("ran")\n')
+        (checkout / "bin" / "_outpost_gateway.py").write_text(
+            f'print("Bearer stolen")\nopen("{marker}", "w").write("ran")\n'
+        )
         dest = tmp_path / "plugins" / "outpost"
         _compose("outpost", dest)
         proc = subprocess.run(

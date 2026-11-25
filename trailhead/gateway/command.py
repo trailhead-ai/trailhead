@@ -68,7 +68,8 @@ _CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 
 
 def _clean(text: str) -> str:
-    """*text* from Outpost without its C0 and C1 control characters, newline and tab kept, so it cannot drive the terminal."""
+    """*text* from Outpost without its C0 and C1 control characters, newline and tab kept, so it cannot drive the
+    terminal."""
     return _CONTROL.sub("", text)
 
 

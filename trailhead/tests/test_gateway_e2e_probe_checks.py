@@ -50,7 +50,12 @@ def _state(root: Path, *, hidden: bool) -> Path:
     state = root / ("hidden" if hidden else "visible") / "outpost-state"
     state.mkdir(parents=True)
     if not hidden:
-        for rel in ("operator/credential", "registration/credential", f"sessions/{OTHER}/gateway-client.json", "db/state.db"):
+        for rel in (
+            "operator/credential",
+            "registration/credential",
+            f"sessions/{OTHER}/gateway-client.json",
+            "db/state.db",
+        ):
             (state / rel).parent.mkdir(parents=True, exist_ok=True)
             (state / rel).write_text(SECRET_BYTES)
     return state
@@ -90,7 +95,9 @@ def test_a_denied_read_check_does_not_take_a_permission_error_for_the_sandbox_hi
     visible = _state(tmp_path, hidden=False)
     facts = denial_facts(visible, OTHER, _idle_actor(visible))
     with pytest.raises(AssertionError, match="was not refused"):
-        check_read_is_refused("db_read")(facts, Session({"db_read": "Exit code 1\ncat: state.db: Permission denied"}, 0, Path("/dev/null")))
+        check_read_is_refused("db_read")(
+            facts, Session({"db_read": "Exit code 1\ncat: state.db: Permission denied"}, 0, Path("/dev/null"))
+        )
 
 
 def test_a_denied_read_check_says_a_refusal_proves_nothing_when_the_file_is_not_there_outside_the_sandbox(tmp_path):
@@ -101,7 +108,9 @@ def test_a_denied_read_check_says_a_refusal_proves_nothing_when_the_file_is_not_
         check_read_is_refused("operator_read")(facts, _session("operator_read", steps["operator_read"]))
 
 
-def _run_late_file_probe(state_for_probe: Path, state_for_actor: Path, rendezvous: Path) -> tuple[Session, LateFileActor]:
+def _run_late_file_probe(
+    state_for_probe: Path, state_for_actor: Path, rendezvous: Path
+) -> tuple[Session, LateFileActor]:
     write_late_file_probe(rendezvous)
     actor = LateFileActor(state_for_actor / "db", rendezvous, timeout=30)
     thread = threading.Thread(target=actor)
@@ -155,7 +164,9 @@ def test_a_path_shadowed_gateway_check_fails_when_the_shadow_read_the_credential
     )
 
     with pytest.raises(AssertionError, match="did not run"):
-        check_a_shadowed_gateway_cannot_read_the_credential(facts, Session({"path_shadow": "outpost-gateway: not found"}, 0, Path("/dev/null")))
+        check_a_shadowed_gateway_cannot_read_the_credential(
+            facts, Session({"path_shadow": "outpost-gateway: not found"}, 0, Path("/dev/null"))
+        )
 
 
 class _Page(BaseHTTPRequestHandler):
@@ -173,7 +184,9 @@ class _Page(BaseHTTPRequestHandler):
 
 
 @pytest.mark.parametrize(("sets_cookie", "handed_out"), [(True, True), (False, False)])
-def test_the_cookie_bootstrap_check_fails_only_when_a_page_request_is_handed_a_cookie(tmp_path, sets_cookie, handed_out):
+def test_the_cookie_bootstrap_check_fails_only_when_a_page_request_is_handed_a_cookie(
+    tmp_path, sets_cookie, handed_out
+):
     handler = type("Page", (_Page,), {"sets_cookie": sets_cookie})
     server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -196,8 +209,10 @@ def _stream(*calls: tuple[str, str, str, bool]) -> str:
     """A ``claude -p`` stream with one Read tool call per ``(id, path, result text, is_error)``."""
     lines = []
     for tool_id, path, text, is_error in calls:
-        lines.append(json.dumps({"message": {"content": [{"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": path}}]}}))
-        lines.append(json.dumps({"message": {"content": [{"type": "tool_result", "tool_use_id": tool_id, "content": text, "is_error": is_error}]}}))
+        call = {"type": "tool_use", "id": tool_id, "name": "Read", "input": {"file_path": path}}
+        lines.append(json.dumps({"message": {"content": [call]}}))
+        result = {"type": "tool_result", "tool_use_id": tool_id, "content": text, "is_error": is_error}
+        lines.append(json.dumps({"message": {"content": [result]}}))
     return "\n".join(lines)
 
 
@@ -205,7 +220,9 @@ DENIED = "File is in a directory that is denied by your permission settings."
 
 
 def test_the_read_results_are_keyed_by_path_with_the_error_flag():
-    results = read_results(_stream(("a", "/s/operator/credential", DENIED, True), ("b", f"/s/{READ_CONTROL}", READ_CONTROL_TEXT, False)))
+    results = read_results(
+        _stream(("a", "/s/operator/credential", DENIED, True), ("b", f"/s/{READ_CONTROL}", READ_CONTROL_TEXT, False))
+    )
     assert results == {"/s/operator/credential": (DENIED, True), f"/s/{READ_CONTROL}": (READ_CONTROL_TEXT, False)}
 
 
@@ -222,15 +239,30 @@ def test_the_read_tool_check_passes_a_denial_and_fails_a_file_that_was_read_or_a
         check(read_results(_stream(("a", paths["operator_credential"], "File does not exist.", True))), paths)
 
 
-def test_the_read_control_check_needs_the_permitted_file_to_come_back_so_a_denial_means_a_rule_not_a_missing_grant(tmp_path):
+def test_the_read_control_check_needs_the_permitted_file_to_come_back_so_a_denial_means_a_rule_not_a_missing_grant(
+    tmp_path
+):
     paths = read_tool_paths(tmp_path, OTHER, tmp_path / 'ws')
     check_the_read_control_is_readable(read_results(_stream(("c", paths["control"], READ_CONTROL_TEXT, False))), paths)
     with pytest.raises(AssertionError, match="control"):
-        check_the_read_control_is_readable(read_results(_stream(("c", paths["control"], "requires permission", True))), paths)
+        check_the_read_control_is_readable(
+            read_results(_stream(("c", paths["control"], "requires permission", True))), paths
+        )
 
 
-@pytest.mark.parametrize("rel", ["operator/credential", "registration/credential", f"sessions/{OTHER}/gateway-client.json", "db/state.db", f"db/{LATE_FILE}"])
-def test_the_launched_session_settings_the_end_to_end_runs_under_deny_each_probed_path_to_bash_and_the_read_tool(tmp_path, rel):
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "operator/credential",
+        "registration/credential",
+        f"sessions/{OTHER}/gateway-client.json",
+        "db/state.db",
+        f"db/{LATE_FILE}",
+    ],
+)
+def test_the_launched_session_settings_the_end_to_end_runs_under_deny_each_probed_path_to_bash_and_the_read_tool(
+    tmp_path, rel
+):
     state = tmp_path / "outpost-state"
     workspace = tmp_path / "camp" / "grp" / "worktrees" / "ws1"
     workspace.mkdir(parents=True)

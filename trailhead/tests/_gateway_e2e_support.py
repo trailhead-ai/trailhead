@@ -23,7 +23,6 @@ import socket
 import stat
 import sqlite3
 import subprocess
-import sys
 import threading
 import time
 import tomllib
@@ -112,7 +111,8 @@ class RealOutpost:
 
     @property
     def db_path(self) -> Path:
-        """Where this Outpost keeps its database: its ``db`` folder, or beside the credential folders for an older one."""
+        """Where this Outpost keeps its database: its ``db`` folder, or beside the credential folders for an older
+        one."""
         folder = self.state / "db" / "state.db"
         return folder if folder.exists() else self.state / "state.db"
 
@@ -472,7 +472,10 @@ def run_claude_session(
     text = stream.read_text()
     results = tool_results(text)
     return Session(
-        {name: results[cmd] for name, cmd in steps.items() if cmd in results}, done.returncode, stream, read_results(text)
+        {name: results[cmd] for name, cmd in steps.items() if cmd in results},
+        done.returncode,
+        stream,
+        read_results(text),
     )
 
 
@@ -1360,7 +1363,8 @@ class TokenRecorder:
 
 
 def known_secrets(outpost: RealOutpost, tokens: set[str]) -> dict[str, str]:
-    """Every secret this Outpost has handed out, labelled: client secrets, the registration authority, the operator credential, tokens."""
+    """Every secret this Outpost has handed out, labelled: client secrets, the registration authority, the operator
+    credential, tokens."""
     found: dict[str, str] = {}
     for n, path in enumerate(outpost.credential_files(), 1):
         found[f"client secret ({n})"] = json.loads(path.read_text())["client_secret"]
@@ -1380,7 +1384,10 @@ def outpost_request_records(outpost: RealOutpost) -> dict[str, str]:
         rows = db.execute("SELECT * FROM timeline_events ORDER BY id").fetchall()
     finally:
         db.close()
-    return {"timeline events": "\n".join(" | ".join(map(str, row)) for row in rows), "Outpost's log": outpost.log.read_text()}
+    return {
+        "timeline events": "\n".join(" | ".join(map(str, row)) for row in rows),
+        "Outpost's log": outpost.log.read_text(),
+    }
 
 
 def stored_run_logs(runs_folder: Path) -> dict[str, str]:
@@ -1502,12 +1509,17 @@ def denial_facts(state: Path, other_key: str, actor: LateFileActor) -> DenialFac
 
 
 def check_read_is_refused(step: str):
-    """A check that the sandboxed read named *step* failed as the sandbox's mask makes a read fail: the file is absent."""
+    """A check that the sandboxed read named *step* failed as the sandbox's mask makes a read fail: the file is
+    absent."""
 
     def check(facts: DenialFacts, session: Session) -> None:
-        assert facts.exists.get(step), f"{step}: the file does not exist outside the sandbox, so a refusal proves nothing"
+        assert facts.exists.get(step), (
+            f"{step}: the file does not exist outside the sandbox, so a refusal proves nothing"
+        )
         out = _out(session, step)
-        assert out.startswith("Exit code") and "No such file or directory" in out, f"{step}: the read was not refused: {out!r}"
+        assert out.startswith("Exit code") and "No such file or directory" in out, (
+            f"{step}: the read was not refused: {out!r}"
+        )
 
     check.__name__ = f"check_{step}_is_refused"
     return check
@@ -1534,7 +1546,8 @@ def check_no_cookie_is_handed_to_a_page_request(facts: DenialFacts, session: Ses
 
 
 def read_results(stream_jsonl: str) -> dict[str, tuple[str, bool]]:
-    """Map each Read tool call's file path to ``(result text, is_error)``, from ``claude -p --output-format stream-json``."""
+    """Map each Read tool call's file path to ``(result text, is_error)``, from ``claude -p --output-format
+    stream-json``."""
     paths: dict[str, str] = {}
     results: dict[str, tuple[str, bool]] = {}
     for line in stream_jsonl.splitlines():
@@ -1563,7 +1576,9 @@ def check_the_read_tool_is_denied(name: str):
         assert path in results, f"{name}: the Read tool was not asked for {path}"
         text, is_error = results[path]
         assert is_error or "denied" in text.lower(), f"{name}: the file was read: {text[:80]!r}"
-        assert "denied by your permission settings" in text, f"{name}: refused, but not by a permission denial: {text!r}"
+        assert "denied by your permission settings" in text, (
+            f"{name}: refused, but not by a permission denial: {text!r}"
+        )
 
     check.__name__ = f"check_the_read_tool_is_denied_{name}"
     return check

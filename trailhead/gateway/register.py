@@ -69,7 +69,9 @@ def register_log() -> Path:
 NEXT_STEPS = {
     NO_HARNESS: "Run this inside a session started by a supported harness.",
     AUTHORITY_MISSING: "Start Outpost so it writes its registration authority, then try again.",
-    AUTHORITY_UNREADABLE: "This process cannot read Outpost's registration authority; run it where that file is readable.",
+    AUTHORITY_UNREADABLE: (
+        "This process cannot read Outpost's registration authority; run it where that file is readable."
+    ),
     OUTPOST_UNREACHABLE: "Start Outpost, then try again.",
     UNEXPECTED_REPLY: "Outpost answered the registration with a reply this command cannot read.",
     UNEXPECTED_FAILURE: "Registration failed unexpectedly; try again.",
@@ -86,7 +88,8 @@ def _one_line(text: str) -> str:
 
 
 class Refused(Exception):
-    """A registration that did not succeed: *reason* is a code from this module, *message* Outpost's next step if it gave one."""
+    """A registration that did not succeed: *reason* is a code from this module, *message* Outpost's next step if it
+    gave one."""
 
     def __init__(self, reason: str, key: str | None = None, message: str | None = None) -> None:
         super().__init__(reason)
@@ -119,7 +122,8 @@ def _read_authority() -> str:
 def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS) -> str:
     """Register this process's harness; return the session key or raise :class:`Refused`.
 
-    *port* defaults to ``PORT``; a *timeout* of ``None`` leaves the call to the reach budget of the command that runs it."""
+    *port* defaults to ``PORT``; a *timeout* of ``None`` leaves the call to the reach budget of the command that runs
+    it."""
     found = harness_process()
     if found is None:
         raise Refused(NO_HARNESS)
@@ -150,7 +154,8 @@ NO_CREDENTIAL = "This session has no gateway credential"
 
 
 def no_credential_line(reason: str, message: str | None = None) -> str:
-    """The one line saying this session has no gateway credential and why, for a failure with *reason* and Outpost's *message*."""
+    """The one line saying this session has no gateway credential and why, for a failure with *reason* and Outpost's
+    *message*."""
     if reason == OUTPOST_UNREACHABLE:
         why = "Outpost is unreachable; it will register on the first gateway call once Outpost is back"
     elif reason == "not_in_workspace":

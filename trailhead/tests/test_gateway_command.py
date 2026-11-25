@@ -207,7 +207,8 @@ class TestFailurePaths:
     def test_a_credential_file_the_operator_does_not_own_is_refused_and_no_request_is_sent(
         self, tmp_path, state, monkeypatch
     ):
-        # Running as the operator, no file can be made another user's, so the owner the command compares against is injected.
+        # Running as the operator, no file can be made another user's, so the owner the command compares against is
+        # injected.
         write_credential(state, "k1")
         monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
         monkeypatch.setattr(command, "_operator_uid", lambda: os.geteuid() + 1)
@@ -244,11 +245,16 @@ class TestFailurePaths:
         self._fails_with(r, "outpost-gateway: Outpost refused the credential: invalid_client")
 
     def test_token_exchange_refusal_prints_the_reason_code_and_its_next_step(self, launcher, tmp_path, state):
-        refusal = {"error": "invalid_client", "error_description": "credential_revoked: This session has ended: start a new one."}
+        refusal = {
+            "error": "invalid_client",
+            "error_description": "credential_revoked: This session has ended: start a new one.",
+        }
         with StubOutpost(token_reply=(401, refusal)) as stub:
             r = _run(launcher, tmp_path, state, stub.port)
         self._fails_with(
-            r, "outpost-gateway: Outpost refused the credential: credential_revoked: This session has ended: start a new one."
+            r,
+            "outpost-gateway: Outpost refused the credential: "
+            "credential_revoked: This session has ended: start a new one.",
         )
 
     def test_closed_port_says_outpost_is_unreachable(self, launcher, tmp_path, state):
@@ -874,7 +880,11 @@ class TestRunWatchCancelled:
         v = view(result="cancelled", exit_code=None, cancel_reason="session_ended")
         with StubOutpost(view=v, log_steps=["one\n"]) as stub:
             rc, out, err = self._watch(cli, stub, "--exit-status")
-        assert (rc, out, err) == (1, "one\n", "outpost-gateway: run 7 was cancelled: the session that started it ended\n")
+        assert (rc, out, err) == (
+            1,
+            "one\n",
+            "outpost-gateway: run 7 was cancelled: the session that started it ended\n",
+        )
 
     def test_a_session_ended_reason_on_a_run_that_was_not_cancelled_is_not_shown(self, cli):
         with StubOutpost(view=view(result="success", cancel_reason="session_ended"), log_steps=[]) as stub:
@@ -1413,7 +1423,11 @@ class TestAuthHeader:
         "stub_kwargs, authority, says",
         [
             (dict(), False, "not registered"),
-            (dict(token_reply=(401, {"error": "invalid_client", "error_description": "credential_revoked: ended"})), True, "credential_revoked"),
+            (
+                dict(token_reply=(401, {"error": "invalid_client", "error_description": "credential_revoked: ended"})),
+                True,
+                "credential_revoked",
+            ),
             (dict(token_reply=(200, "<<not json>>")), True, "cannot read"),
         ],
     )

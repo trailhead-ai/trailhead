@@ -69,7 +69,9 @@ class TestShimBuild:
         ("name", "expected"),
         [("outpost-gateway", "run list"), ("trailhead-gateway-register", "Register this session")],
     )
-    def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(self, trusted_checkout, tmp_path, name, expected):
+    def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(
+        self, trusted_checkout, tmp_path, name, expected
+    ):
         env = _env(tmp_path)
         build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
         shim = resolve_shim_dir(env=env) / name
@@ -120,7 +122,9 @@ class TestShimBuild:
         assert "run list" in proc.stdout
         assert not marker.exists(), marker.read_text()
 
-    def test_git_and_python_variables_the_session_sets_do_not_reach_run_start(self, trusted_checkout, tmp_path, hermetic_git_env):
+    def test_git_and_python_variables_the_session_sets_do_not_reach_run_start(
+        self, trusted_checkout, tmp_path, hermetic_git_env
+    ):
         env = _env(tmp_path)
         build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
         repo = tmp_path / "elsewhere-repo"
@@ -151,7 +155,9 @@ class TestShimBuild:
         assert proc.stderr == "outpost-gateway: this folder is not inside a git work tree\n"
         assert not marker.exists(), marker.read_text()
 
-    def test_an_installing_venv_that_is_a_copy_does_not_put_its_site_packages_in_front(self, trusted_checkout, tmp_path, monkeypatch):
+    def test_an_installing_venv_that_is_a_copy_does_not_put_its_site_packages_in_front(
+        self, trusted_checkout, tmp_path, monkeypatch
+    ):
         venv = tmp_path / "venv"
         subprocess.run([sys.executable, "-m", "venv", "--copies", "--without-pip", str(venv)], check=True)
         marker = tmp_path / "ran-pth"
@@ -191,7 +197,9 @@ class TestShimBuild:
         assert proc.returncode == 0, proc.stderr
         return dict(line.split("=", 1) for line in dump.read_text().splitlines() if "=" in line)
 
-    def test_the_interpreter_is_started_without_the_dynamic_loader_variables(self, trusted_checkout, tmp_path, monkeypatch):
+    def test_the_interpreter_is_started_without_the_dynamic_loader_variables(
+        self, trusted_checkout, tmp_path, monkeypatch
+    ):
         seen = self._env_seen_by_interpreter(
             trusted_checkout, tmp_path,
             monkeypatch,
@@ -430,7 +438,9 @@ class TestShimRechecksAtExec:
     @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-register"])
     def test_a_script_swapped_after_install_is_refused_at_exec_and_not_run(self, trusted_checkout, tmp_path, name):
         shim = self._installed(trusted_checkout, tmp_path, name)
-        script = trusted_checkout / "bin" / ("_outpost_gateway.py" if name == "outpost-gateway" else "_gateway_register.py")
+        script = trusted_checkout / "bin" / (
+            "_outpost_gateway.py" if name == "outpost-gateway" else "_gateway_register.py"
+        )
         marker = tmp_path / "ran-swapped-script"
         script.write_text(f'open("{marker}", "w").write("ran")\n')
         proc = self._run(shim, "--help")
@@ -474,7 +484,8 @@ class TestShimRechecksAtExec:
 
 
 class TestInstalledShimOnItsOwnState:
-    """The installed shims against a stub Outpost, run as a child of a fake harness with nothing but what the session sets."""
+    """The installed shims against a stub Outpost, run as a child of a fake harness with nothing but what the session
+    sets."""
 
     def _install(self, trusted_checkout, tmp_path, monkeypatch, port):
         from trailhead.tests._gateway_support import register_port_interpreter
@@ -485,7 +496,9 @@ class TestInstalledShimOnItsOwnState:
             "TRAILHEAD_STATE_DIR": str(tmp_path / "baked-trailhead-state"),
             "OUTPOST_STATE_DIR": str(outpost_state),
         }
-        monkeypatch.setattr("trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port)))
+        monkeypatch.setattr(
+            "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port))
+        )
         build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
         return env, outpost_state
 
@@ -514,7 +527,9 @@ class TestInstalledShimOnItsOwnState:
             def seed(pid):
                 key = format_session_key(*await_harness(pid))
                 write_credential(outpost_state, key)
-                other = write_credential(tmp_path / "other-session-state", "ws-other", client_id="other-id", client_secret="other-secret")
+                other = write_credential(
+                    tmp_path / "other-session-state", "ws-other", client_id="other-id", client_secret="other-secret"
+                )
                 link = planted / "sessions" / key / "gateway-client.json"
                 link.parent.mkdir(parents=True)
                 link.symlink_to(other)
@@ -536,7 +551,12 @@ class TestInstalledShimOnItsOwnState:
         self, trusted_checkout, tmp_path, monkeypatch
     ):
         # AC28: on-demand registration, proven through the real installed shim.
-        from trailhead.tests._gateway_support import StubOutpost, REGISTRATION_AUTHORITY, write_authority, write_credential
+        from trailhead.tests._gateway_support import (
+            StubOutpost,
+            REGISTRATION_AUTHORITY,
+            write_authority,
+            write_credential,
+        )
 
         holder = []
         with StubOutpost(runs=[], on_register=lambda key: write_credential(holder[0], key)) as stub:

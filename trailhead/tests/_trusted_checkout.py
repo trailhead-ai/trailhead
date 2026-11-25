@@ -8,7 +8,6 @@ itself one.
 
 from __future__ import annotations
 
-import os
 import shutil
 import stat
 from pathlib import Path
@@ -19,7 +18,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def make_trusted_checkout(dest: Path, source: Path = REPO_ROOT) -> Path:
-    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, ``pyproject.toml``) of *source* to *dest*, closed to group and others."""
+    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, ``pyproject.toml``) of *source* to
+    *dest*, closed to group and others."""
     dest.mkdir(parents=True)
     shutil.copytree(
         source / "bin", dest / "bin", ignore=shutil.ignore_patterns("__pycache__")
