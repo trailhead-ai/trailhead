@@ -31,13 +31,32 @@ base_real=$(cd -P "$base" 2>/dev/null && pwd) || { echo "scaffold.sh: cannot res
 case "$home_real/" in
   "${base_real%/}/"*) echo "scaffold.sh: refusing to expose the home directory: python's prefix is the home directory or one of its ancestors" >&2; exit 3 ;;
 esac
-# The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of its
-# bin/ and lib/ only (a prefix such as ~/.local also holds state/ and share/); a system interpreter stays visible
-# and is linked, not copied.
+# The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of the
+# interpreter alone: bin/python3*, lib/libpython*, and the standard library under lib/python3*/ without its
+# site-packages or dist-packages. A prefix such as ~/.local also holds personal scripts in bin/, other tools' data
+# in lib/ and the pip --user set, none of which belongs in a run. A system interpreter stays visible and is
+# linked, not copied.
 case "$base_real/" in
   /Users/*|/home/*|"$home_real"/*)
     mkdir py-home
-    for d in bin lib; do [ -d "$base/$d" ] && cp -R "$base/$d" "py-home/$d"; done
+    "$py" - "$base" py-home <<'COPY'
+import fnmatch, shutil, sys
+from pathlib import Path
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+skip = shutil.ignore_patterns("site-packages", "dist-packages", "__pycache__")
+for sub, pattern in (("bin", "python3*"), ("lib", "libpython*"), ("lib", "python3*")):
+    if not (src / sub).is_dir():
+        continue
+    for entry in sorted((src / sub).iterdir()):
+        if not fnmatch.fnmatch(entry.name, pattern):
+            continue
+        target = dst / sub / entry.name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if entry.is_dir() and not entry.is_symlink():
+            shutil.copytree(entry, target, symlinks=True, ignore=skip)
+        else:
+            shutil.copy2(entry, target, follow_symlinks=False)
+COPY
     ;;
   *) ln -s "$base" py-home ;;
 esac

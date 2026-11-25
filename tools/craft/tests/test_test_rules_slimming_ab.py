@@ -303,16 +303,28 @@ def test_scaffold_copies_only_the_interpreter_directories_of_a_prefix_under_home
         (prefix / "bin" / "python3").symlink_to(sys.executable)
         (prefix / "lib" / "python3.x").mkdir(parents=True)
         (prefix / "lib" / "python3.x" / "os.py").write_text("")
+        (prefix / "lib" / "libpython3.x.so").write_text("")
         (prefix / "state").mkdir()
         (prefix / "state" / "secret").write_text("hunter2\n")
+        # What else lives in ~/.local's bin/ and lib/: personal scripts, other tools' data, the pip --user set.
+        (prefix / "bin" / "mytool").write_text("TOKEN=hunter2\n")
+        (prefix / "lib" / "node_modules" / "x").mkdir(parents=True)
+        (prefix / "lib" / "node_modules" / "x" / ".npmrc").write_text("hunter2\n")
+        (prefix / "lib" / "python3.x" / "site-packages" / "private").mkdir(parents=True)
+        (prefix / "lib" / "python3.x" / "site-packages" / "private" / "__init__.py").write_text("hunter2\n")
         return prefix
 
     done, cwd = _scaffold_with_base(tmp_path, prefix_under_home)
     assert done.returncode == 0, done.stderr
-    assert (cwd / "py-home" / "bin" / "python3").exists()
-    assert (cwd / "py-home" / "lib" / "python3.x" / "os.py").exists()
-    assert not (cwd / "py-home" / "state").exists()
-    assert not list(cwd.rglob("secret"))
+    copied = cwd / "py-home"
+    assert (copied / "bin" / "python3").exists()
+    assert (copied / "lib" / "python3.x" / "os.py").exists()
+    assert (copied / "lib" / "libpython3.x.so").exists()
+    assert not (copied / "state").exists()
+    assert not (copied / "bin" / "mytool").exists()
+    assert not (copied / "lib" / "node_modules").exists()
+    assert not (copied / "lib" / "python3.x" / "site-packages" / "private").exists()
+    assert not [p for p in copied.rglob("*") if p.is_file() and "hunter2" in p.read_text(errors="ignore")]
     assert (cwd / "run-tests").exists()
 
 
