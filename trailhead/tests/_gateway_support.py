@@ -152,7 +152,7 @@ class StubOutpost:
     ``on_register`` is called with the session key a successful registration answers for (a real Outpost
     writes the session's credential file there); ``register_delay`` and ``token_delay`` hold those two
     answers back that many seconds. With ``token_uses`` set, each exchange issues a fresh token that is
-    accepted for that many authorised calls and then refused as ``credential_expired``.
+    accepted for that many authorised calls and then refused as ``expiry_reason`` (``credential_expired`` unless set).
     ``release`` is set
     on exit so no waiting step outlives the stub.
     """
@@ -177,6 +177,7 @@ class StubOutpost:
     register_delay: float = 0.0
     token_delay: float = 0.0
     token_uses: int | None = None
+    expiry_reason: str = "credential_expired"
     log_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
     log_connections: list[list] | None = None
@@ -223,7 +224,7 @@ class StubOutpost:
                     stub.uses[bearer] = stub.uses.get(bearer, 0) + 1
                     if stub.uses[bearer] <= stub.token_uses:
                         return True
-                    self._send(401, {"reason": "credential_expired", "message": "This access token has expired."})
+                    self._send(401, {"reason": stub.expiry_reason, "message": "This access token has expired."})
                     return False
                 self._send(401, {"reason": "credential_unrecognised", "message": "The bearer token is not recognised."})
                 return False

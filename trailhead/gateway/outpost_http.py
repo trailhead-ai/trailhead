@@ -78,15 +78,20 @@ def _opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
-@contextmanager
-def reach_budget() -> Iterator[None]:
-    """Give the calls made inside, until :func:`reached`, ``REACH_BUDGET_SECONDS`` between them."""
+def start_reach_budget() -> None:
+    """Give the calls made from now until :func:`reached` ``REACH_BUDGET_SECONDS`` between them."""
     global _deadline
     _deadline = time.monotonic() + REACH_BUDGET_SECONDS
+
+
+@contextmanager
+def reach_budget() -> Iterator[None]:
+    """:func:`start_reach_budget` for the calls made inside, and no budget after."""
+    start_reach_budget()
     try:
         yield
     finally:
-        _deadline = None
+        reached()
 
 
 def reached() -> None:

@@ -640,6 +640,55 @@ def test_each_user_unsandboxed_command_exemption_is_denied_in_the_session(tmp_pa
     assert _bash_denies(start) == [f"Bash({e})" for e in exclusions]
 
 
+def _gateway_shim(env, name="outpost-gateway") -> str:
+    return str(Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / name)
+
+
+def _launched_with_exclusions(env, exclusions):
+    settings = _user_allowing_hub(env)
+    settings["sandbox"]["excludedCommands"] = exclusions
+    _write_user_settings(env, settings)
+    return _settings_of(_start(env))
+
+
+def test_a_launched_profile_does_not_deny_the_pinned_gateway_shim_and_denies_the_other_exclusions(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _launched_with_exclusions(env, ["claude plugin eval *", shim, f"{shim} *", "portage eval-gate *"])
+    denied = [r for r in start["permissions"]["deny"] if r.startswith("Bash(")]
+    assert f"Bash({shim})" not in denied and f"Bash({shim} *)" not in denied
+    assert {"Bash(claude plugin eval *)", "Bash(portage eval-gate *)"} <= set(denied)
+
+
+def test_a_launched_profile_allows_the_pinned_gateway_shim_the_user_excludes(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert f"Bash({shim}:*)" in start["permissions"]["allow"]
+
+
+def test_a_launched_profile_does_not_allow_a_gateway_shim_the_user_does_not_exclude(tmp_path):
+    env = _fence(tmp_path)
+    start = _launched_with_exclusions(env, ["claude plugin eval *"])
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+
+
+def test_a_gateway_command_at_another_path_is_still_denied_in_a_launched_profile(tmp_path):
+    env = _fence(tmp_path)
+    start = _launched_with_exclusions(env, ["/elsewhere/bin/outpost-gateway", "/elsewhere/bin/outpost-gateway *"])
+    denied = [r for r in start["permissions"]["deny"] if r.startswith("Bash(")]
+    assert denied[:2] == ["Bash(/elsewhere/bin/outpost-gateway)", "Bash(/elsewhere/bin/outpost-gateway *)"]
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+
+
+def test_a_launched_profile_that_runs_the_gateway_denies_the_header_shim(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    header = _gateway_shim(env, "trailhead-gateway-auth-header")
+    start = _launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert {f"Bash({header})", f"Bash({header} *)"} <= set(start["permissions"]["deny"])
+
+
 @pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
 def test_malformed_user_excluded_commands_refuse_the_launch(tmp_path, bad):
     env = _fence(tmp_path)

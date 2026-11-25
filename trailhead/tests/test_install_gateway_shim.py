@@ -67,7 +67,11 @@ class TestShimBuild:
 
     @pytest.mark.parametrize(
         ("name", "expected"),
-        [("outpost-gateway", "run list"), ("trailhead-gateway-register", "Register this session")],
+        [
+            ("outpost-gateway", "run list"),
+            ("trailhead-gateway-register", "Register this session"),
+            ("trailhead-gateway-auth-header", "{}"),
+        ],
     )
     def test_the_shim_runs_its_pinned_interpreter_not_what_the_session_puts_on_path(
         self, trusted_checkout, tmp_path, name, expected
@@ -99,6 +103,17 @@ class TestShimBuild:
         assert proc.returncode == 0, proc.stderr
         assert expected in proc.stdout
         assert not marker.exists(), marker.read_text()
+
+    def test_the_header_shim_prints_an_empty_header_and_exits_0_when_the_session_has_no_credential(
+        self, trusted_checkout, tmp_path
+    ):
+        env = _env(tmp_path)
+        build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
+        proc = subprocess.run(
+            [str(resolve_shim_dir(env=env) / "trailhead-gateway-auth-header")],
+            capture_output=True, text=True, env={"HOME": env["HOME"], "PATH": "/usr/bin:/bin"}, timeout=60,
+        )
+        assert (proc.returncode, proc.stdout) == (0, "{}\n")
 
     def test_the_shim_runs_no_shell_startup_code_the_session_puts_in_its_environment(self, trusted_checkout, tmp_path):
         env = _env(tmp_path)
@@ -300,7 +315,7 @@ class TestInstallPipeline:
 
 
 def _shim_names():
-    return ("outpost-gateway", "trailhead-gateway-register")
+    return ("outpost-gateway", "trailhead-gateway-register", "trailhead-gateway-auth-header")
 
 
 def _no_gateway_shims(env) -> bool:
@@ -397,7 +412,7 @@ class TestInstallRefusesAnUntrustedPin:
 
 
 class TestRefusedInstallRemovesTheStaleShim:
-    @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-register"])
+    @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-register", "trailhead-gateway-auth-header"])
     def test_a_refused_rebuild_removes_the_earlier_pinned_shim_and_says_so(self, trusted_checkout, tmp_path, name):
         env = _env(tmp_path)
         build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
@@ -435,12 +450,19 @@ class TestShimRechecksAtExec:
             [str(shim), *args], capture_output=True, text=True, env={"PATH": "/usr/bin:/bin"}, timeout=60
         )
 
-    @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-register"])
-    def test_a_script_swapped_after_install_is_refused_at_exec_and_not_run(self, trusted_checkout, tmp_path, name):
+    @pytest.mark.parametrize(
+        ("name", "script_name"),
+        [
+            ("outpost-gateway", "_outpost_gateway.py"),
+            ("trailhead-gateway-register", "_gateway_register.py"),
+            ("trailhead-gateway-auth-header", "_gateway_auth_header.py"),
+        ],
+    )
+    def test_a_script_swapped_after_install_is_refused_at_exec_and_not_run(
+        self, trusted_checkout, tmp_path, name, script_name
+    ):
         shim = self._installed(trusted_checkout, tmp_path, name)
-        script = trusted_checkout / "bin" / (
-            "_outpost_gateway.py" if name == "outpost-gateway" else "_gateway_register.py"
-        )
+        script = trusted_checkout / "bin" / script_name
         marker = tmp_path / "ran-swapped-script"
         script.write_text(f'open("{marker}", "w").write("ran")\n')
         proc = self._run(shim, "--help")
@@ -449,15 +471,16 @@ class TestShimRechecksAtExec:
         assert str(script) in proc.stderr and "changed" in proc.stderr
         assert not marker.exists()
 
+    @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-auth-header"])
     def test_an_interpreter_swapped_after_install_is_refused_at_exec_and_not_run(
-        self, trusted_checkout, tmp_path, monkeypatch
+        self, trusted_checkout, tmp_path, monkeypatch, name
     ):
         marker = tmp_path / "ran-swapped-interpreter"
         interpreter = tmp_path / "python"
         interpreter.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
         interpreter.chmod(0o755)
         monkeypatch.setattr("trailhead.pathint.sys.executable", str(interpreter))
-        shim = self._installed(trusted_checkout, tmp_path)
+        shim = self._installed(trusted_checkout, tmp_path, name)
         interpreter.write_text(f'#!/bin/sh\necho ran > "{marker}"\n')
         proc = self._run(shim, "--help")
         assert proc.returncode == 2

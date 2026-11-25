@@ -114,6 +114,7 @@ from trailhead.harness.base import (
     SessionStart,
     SessionTranscript,
 )
+from trailhead.paths import state_dir as _state_dir
 from trailhead.launch_profile import BROKER_SERVER, ROLE_OTHER_ACCOUNT_CONFIGS, ROLE_WORKSPACE
 from trailhead.launch_profile import scratch_dirs as _scratch_dirs
 
@@ -870,7 +871,9 @@ def claude_config_file(env: Mapping[str, str] | None) -> Path:
 # * A user-level ``sandbox.excludedCommands`` entry runs OUTSIDE the sandbox and cannot be
 #   removed by a session (lists union), so each one is also denied as a ``Bash()``
 #   permission rule: a denial beats any allowance at every scope, so the command is
-#   refused rather than run unconfined.
+#   refused rather than run unconfined. The one exception is the pinned ``outpost-gateway`` shim
+#   (see ``_gateway_shim_rules``): it acts only as the session that runs it, and a ritual session
+#   holds a gateway credential for it, so it is allowed instead.
 # * The directory the session starts in is writable and trusted, so a session could
 #   rewrite the project settings, hooks, agents and MCP config a later launch honours.
 #   ``<directory>/.claude`` and ``<directory>/.mcp.json`` are therefore always denied.
@@ -1238,6 +1241,23 @@ def _managed_settings(home: Path, launch_dir: Path, platform: str | None = None)
         ) from exc
     paths += [base / _MANAGED_DROP_IN_DIR / n for n in names if n.endswith(".json") and not n.startswith(".")]
     return [_UserSettings(p, home, launch_dir, kind="managed", platform=plat) for p in paths]
+
+
+def _gateway_shim_rules(user: _UserSettings, env: dict[str, str]) -> tuple[set[str], list[str], list[str]]:
+    """What a launched profile does about the pinned ``outpost-gateway`` shim the user excludes from the sandbox.
+
+    The shim is the session's way to its own workspace's runs and acts only as the session that runs it, so
+    its excluded-command entries (the path, and the path with arguments) are returned to be left out of the
+    ``Bash()`` denials, with an allow rule for it. The shim that prints the tool server's header is denied,
+    since only the harness has any business running it. All three are empty when the user does not exclude the shim.
+    """
+    bin_dir = _state_dir("trailhead", env=env) / "bin"
+    shim = str(bin_dir / "outpost-gateway")
+    entries = {shim, f"{shim} *"}
+    if not entries & set(user.excluded_commands):
+        return set(), [], []
+    header = str(bin_dir / "trailhead-gateway-auth-header")
+    return entries, [f"Bash({shim}:*)"], [f"Bash({header})", f"Bash({header} *)"]
 
 
 def _tmux_socket_dir(env: dict[str, str], uid: int) -> Path:
@@ -2650,6 +2670,7 @@ class ClaudeCodeHarness(Harness):
         write_denied = [Path(os.path.realpath(p)) for p in profile.write_denied]
         deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
+        gateway_commands, gateway_allowed, gateway_denied = _gateway_shim_rules(user, source)
         denied_reads = _profile_denied_reads(profile, config_dir, home)
         # A ritual never prompts, so under dontAsk its file tools write only where an allow rule
         # names: the roots its sandbox already lets Bash write.
@@ -2679,13 +2700,16 @@ class ClaudeCodeHarness(Harness):
                     if wants_broker
                     else []
                 )
-                + [f"Bash({command})" for command in user.excluded_commands]
+                + [f"Bash({command})" for command in user.excluded_commands if command not in gateway_commands]
+                + gateway_denied
                 + [f"Skill({skill})" for skill in profile.profile.denied_skills]
             },
             "enabledMcpjsonServers": [n for n in profile.profile.mcp_servers if n != BROKER_SERVER],
         }
+        if gateway_allowed:
+            settings["permissions"].setdefault("allow", []).extend(gateway_allowed)
         if file_tool_roots:
-            settings["permissions"]["allow"] = [f"Edit(/{r}/**)" for r in file_tool_roots]
+            settings["permissions"].setdefault("allow", []).extend(f"Edit(/{r}/**)" for r in file_tool_roots)
             # the file tools run outside the Bash sandbox: every path it refuses, they refuse too
             deny = settings["permissions"]["deny"]
             for p in deny_write:
@@ -2737,7 +2761,7 @@ class ClaudeCodeHarness(Harness):
                     mode="0600",
                 ),
             )
-            settings["permissions"]["allow"] = [f"mcp__{broker.server}__{t}" for t in broker.tools]
+            settings["permissions"].setdefault("allow", []).extend(f"mcp__{broker.server}__{t}" for t in broker.tools)
         if profile.profile.model is not None:
             settings["model"] = profile.profile.model
 

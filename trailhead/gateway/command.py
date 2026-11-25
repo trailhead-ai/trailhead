@@ -4,10 +4,11 @@ Every verb finds the harness this process runs under, reads that session's
 gateway credential, and exchanges it for a broker bearer token (kept in memory only).
 A session with no credential file yet registers itself first, through the same step the
 SessionStart hook runs. A token Outpost refuses as expired is exchanged again once and the
-call retried. The session key comes only from the parent process chain: there is no
-argument or environment variable that names one. Reaching Outpost has one overall budget
-(``outpost_http.reach_budget``); text from Outpost is stripped of control characters before
-it reaches the terminal.
+call retried, and so is one Outpost replaced with a newer token. The session key comes only from the
+parent process chain: there is no argument or environment variable that names one. Reaching Outpost
+has one overall budget (``outpost_http.start_reach_budget``), which starts when the command first
+turns to Outpost, not before it has built what it will send; text from Outpost is stripped of control
+characters before it reaches the terminal.
 
 ``run start`` uploads the working tree and prints the new run's id; ``run watch`` follows
 a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
@@ -17,13 +18,15 @@ cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
 unreachable or silent Outpost, a dropped stream and a usage error.
 
-``auth-header`` is the harness's ``headersHelper`` for Outpost's tool server: it prints one JSON
-object, ``{"Authorization": "Bearer <token>"}``, or ``{}`` when the session has no usable
-credential, and always exits 0, so a session with no credential still connects (the tool server
-answers a tool call it cannot authenticate with a 401 that makes the harness run the helper again).
-The reason it printed ``{}`` goes to stderr.
+This command never prints a credential or an access token: it runs outside the sandbox, so
+anything it printed would reach the session's transcript. The harness's ``headersHelper`` for
+Outpost's tool server is a separate entry, ``auth_header_main``, run through its own shim that is
+not an excluded command: it prints one JSON object, ``{"Authorization": "Bearer <token>"}``, or
+``{}`` when the session has no usable credential, and always exits 0, so a session with no
+credential still connects (the tool server answers a tool call it cannot authenticate with a 401
+that makes the harness run the helper again). The reason it printed ``{}`` goes to stderr.
 
-The secret and token are never printed, logged, written, exported or passed to a
+The secret and token are never printed by this command, logged, written, exported or passed to a
 subprocess; an unexpected failure reports its exception type and nothing else.
 """
 
@@ -46,6 +49,7 @@ from trailhead.paths import state_dir
 
 STATES = ("queued", "in_progress", "completed")
 RESULTS = ("success", "failure", "cancelled")
+STALE_TOKEN_REASONS = ("credential_expired", "token_replaced")
 CANNOT_READ = "Outpost answered with a reply this command cannot read"
 # Outpost answers a cancel once the run's stop is signalled; removing its containers goes on in
 # the background. A cancel that gets no answer in this long is reported as requested, not as lost.
@@ -168,15 +172,17 @@ def _exchange(client_id: str, client_secret: str, port: int) -> str:
 
 
 class _Gateway:
-    """The gateway as one session sees it: a bearer token, replaced once when Outpost refuses it as expired."""
+    """The gateway as one session sees it: a bearer token, replaced once when Outpost refuses it as expired or as
+    replaced by a newer one (it keeps only a few live tokens per client)."""
 
     def __init__(self, port: int) -> None:
         self.port = port
+        outpost_http.start_reach_budget()
         self.token = gateway_token(port)
 
     @staticmethod
     def _expired(reply: outpost_http.Reply | None) -> bool:
-        return reply is not None and reply.status == 401 and reply.body.get("reason") == "credential_expired"
+        return reply is not None and reply.status == 401 and reply.body.get("reason") in STALE_TOKEN_REASONS
 
     def request(self, method: str, path: str, **kwargs) -> outpost_http.Reply:
         reply = outpost_http.request(method, path, headers=_bearer(self.token), port=self.port, **kwargs)
@@ -447,11 +453,6 @@ def _run_id(text: str) -> int:
     return int(text)
 
 
-def _auth_header(port: int) -> int:
-    print(json.dumps({"Authorization": f"Bearer {gateway_token(port)}"}))
-    return 0
-
-
 def _parser() -> argparse.ArgumentParser:
     shim = state_dir("trailhead") / "bin" / "outpost-gateway"
     parser = argparse.ArgumentParser(
@@ -462,13 +463,11 @@ def _parser() -> argparse.ArgumentParser:
         "  run watch <id> [--exit-status]        follow a run's log (exit: 0 ok, 1 failed or cancelled, 3 not run)\n"
         "  run view <id> [--log]                 show a run, or print its whole log once\n"
         "  run cancel <id>                       cancel a queued or running run\n"
-        "  run list [--json]                     list the workspace's runs\n"
-        "  auth-header                           print the tool server's Authorization header as JSON\n\n"
+        "  run list [--json]                     list the workspace's runs\n\n"
         f"run it as: {shim} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="group", required=True)
-    sub.add_parser("auth-header", help="print the tool server's Authorization header as JSON")
     run = sub.add_parser("run", help="the workspace's CI runs").add_subparsers(dest="action", required=True)
     start = run.add_parser("start", help="upload the working tree and start a run")
     start.add_argument("job")
@@ -493,8 +492,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) -> int:
-    if args.group == "auth-header":
-        return _auth_header(port)
     if args.action == "start":
         return _run_start(args.job, args.workflow, port, scratch_home)
     if args.action == "watch":
@@ -506,23 +503,37 @@ def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) ->
     return _run_list(args.json, port)
 
 
+def _report(err: Exception) -> None:
+    if isinstance(err, CommandError):
+        print(err, file=sys.stderr)
+    elif isinstance(err, outpost_http.OutpostUnreachable):
+        print(
+            _fail(f"Outpost is unreachable at {outpost_http.DAEMON_HOST}:{err.port}; is it running?"), file=sys.stderr
+        )
+    else:
+        print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home: Path | None = None) -> int:
     """*scratch_home* is where ``run start`` makes its private upload folder; the default
     is the operator's home from the password database."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
-    helper = args.group == "auth-header"
+    try:
+        return _dispatch(args, port, scratch_home)
+    except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
+        _report(err)
+        return 2
+    finally:
+        outpost_http.reached()
+
+
+def auth_header_main(argv: list[str] | None = None, *, port: int = DAEMON_PORT) -> int:
+    """The headersHelper entry: print the session's ``Authorization`` header as JSON, or ``{}`` and the reason on
+    stderr, and exit 0 whatever happens. Takes no arguments (any given are ignored)."""
     try:
         with outpost_http.reach_budget():
-            return _dispatch(args, port, scratch_home)
-    except CommandError as err:
-        print(err, file=sys.stderr)
-    except outpost_http.OutpostUnreachable as err:
-        print(
-            _fail(f"Outpost is unreachable at {outpost_http.DAEMON_HOST}:{err.port}; is it running?"), file=sys.stderr
-        )
+            print(json.dumps({"Authorization": f"Bearer {gateway_token(port)}"}))
     except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
-        print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
-    if helper:
+        _report(err)
         print("{}")
-        return 0
-    return 2
+    return 0

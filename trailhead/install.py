@@ -88,6 +88,7 @@ _RANGER_BIN = _REPO_ROOT / "bin" / "ranger"
 _GATEWAY_BIN = _REPO_ROOT / "bin" / "outpost-gateway"
 _GATEWAY_SCRIPT = _REPO_ROOT / "bin" / "_outpost_gateway.py"
 _REGISTER_SCRIPT = _REPO_ROOT / "bin" / "_gateway_register.py"
+_AUTH_HEADER_SCRIPT = _REPO_ROOT / "bin" / "_gateway_auth_header.py"
 _EVAL_SCRIPT = _REPO_ROOT / "bin" / "_portage_eval.py"
 
 
@@ -149,10 +150,12 @@ def build_cli_shims(
     euid: int | None = None,
 ) -> Path | None:
     """Build the CLI shim dir for *cli_tools* plus ``bin/trailhead`` and ``bin/ranger``
-    (plus, when *outpost_enabled*, the ``outpost-gateway`` and ``trailhead-gateway-register``
-    shims pinned to this interpreter, because the harness runs both outside its sandbox:
-    the first as an excluded command, the second from the Outpost plugin's SessionStart
-    hook), and, when portage's CLI is among *cli_tools*, the ``portage-eval`` shim pinned the same
+    (plus, when *outpost_enabled*, the ``outpost-gateway``, ``trailhead-gateway-register`` and
+    ``trailhead-gateway-auth-header`` shims pinned to this interpreter, because the harness runs
+    all three outside its sandbox: the first as an excluded command, the others from the Outpost
+    plugin's SessionStart hook and its tool server's headersHelper; the header shim is deliberately
+    not an excluded command, so a sandboxed call of it cannot read the credential), and, when portage's CLI
+    is among *cli_tools*, the ``portage-eval`` shim pinned the same
     way with the eval runner resolved now; the one shim build shared by ``trailhead install`` and ``trailhead update``.
 
     Returns the shim dir, or ``None`` when *cli_tools* is empty — an install that
@@ -160,7 +163,7 @@ def build_cli_shims(
     Shims already in the dir are rewritten, so a build from a different *root* repoints them. Raises whatever
     ``create_shims`` raises; the caller decides how loudly to fail.
 
-    The two gateway shims run outside the sandbox, so building them is refused (``PathIntegrationError``
+    The gateway shims run outside the sandbox, so building them is refused (``PathIntegrationError``
     naming the path) when the repository root, a folder on the way to it, a file of the ``trailhead`` package,
     the script or the interpreter is under a folder the sandbox may write (*sandbox_write_roots*, by default
     ``launch_profile.session_write_roots``), owned by someone else (*euid* is the trusted user), or writable by
@@ -173,7 +176,11 @@ def build_cli_shims(
     pinned = {}
     options: dict[str, PinnedShimOptions] = {}
     if outpost_enabled:
-        for name, default in (("outpost-gateway", _GATEWAY_SCRIPT), ("trailhead-gateway-register", _REGISTER_SCRIPT)):
+        for name, default in (
+            ("outpost-gateway", _GATEWAY_SCRIPT),
+            ("trailhead-gateway-register", _REGISTER_SCRIPT),
+            ("trailhead-gateway-auth-header", _AUTH_HEADER_SCRIPT),
+        ):
             script = default if root is None else root / "bin" / default.name
             if script.exists():
                 pinned[name] = script

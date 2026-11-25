@@ -490,6 +490,40 @@ def unregistered(tmp_path, state, monkeypatch, capsys):
     return call
 
 
+@pytest.fixture
+def header(state, monkeypatch, capsys):
+    """The headersHelper entry run in-process by a registered session."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
+    write_credential(state, "ws-test-1")
+
+    def call(port):
+        capsys.readouterr()
+        rc = command.auth_header_main([], port=port)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+@pytest.fixture
+def header_unregistered(state, monkeypatch, capsys):
+    """The headersHelper entry run in-process by a session that has no credential file yet."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: HARNESS_KEY)
+    monkeypatch.setattr(register, "harness_process", lambda: HARNESS)
+
+    def call(port, *, authority=True):
+        if authority:
+            write_authority(state)
+        capsys.readouterr()
+        rc = command.auth_header_main([], port=port)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
 def start_request(stub):
     return next(q for q in stub.requests if q.method == "POST" and q.path.startswith("/gateway/runs"))
 
@@ -1296,6 +1330,36 @@ class TestReplyTimeout:
         assert not isinstance(raised.value, outpost_http.ReplyTimedOut)
 
 
+class TestReachBudgetAndTheTar:
+    def test_a_slow_tar_build_does_not_spend_the_budget_for_reaching_outpost(self, cli, repo, monkeypatch):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        real = command.tree_upload.write_tar
+
+        def slow(tree, spool):
+            time.sleep(0.8)
+            return real(tree, spool)
+
+        monkeypatch.setattr(command.tree_upload, "write_tar", slow)
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert (rc, out) == (0, "7\n"), err
+
+    def test_an_outpost_that_never_answers_a_run_start_is_still_unreachable_within_the_budget(
+        self, cli, repo, monkeypatch
+    ):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, _, err = cli(silent.port, "run", "start", "build", cwd=repo)
+            elapsed = time.monotonic() - started
+        assert rc == 2 and "Outpost is unreachable" in err
+        assert elapsed < 3.0
+
+
 class TestExpiredToken:
     def test_a_token_refused_as_expired_is_exchanged_again_once_and_the_call_made_again(self, cli):
         with StubOutpost(runs=RUNS, token_uses=0) as stub:
@@ -1335,6 +1399,35 @@ class TestExpiredToken:
         assert rc == 2
         assert "credential_expired" in err
         assert exchanges == 2
+
+
+class TestReplacedToken:
+    """Outpost keeps a few live tokens per client, so a parallel call can evict this one."""
+
+    def test_a_token_refused_as_replaced_is_exchanged_again_once_and_the_call_made_again(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0, expiry_reason="token_replaced") as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+            paths = [q.path for q in stub.requests]
+        assert (rc, err) == (2, "outpost-gateway: token_replaced: This access token has expired.\n")
+        assert paths == ["/broker/token", "/gateway/runs", "/broker/token", "/gateway/runs"]
+
+    def test_a_watch_whose_token_was_replaced_reconnects_with_a_new_token(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(
+            token_uses=1,
+            expiry_reason="token_replaced",
+            log_connections=[["one\n", threading.Event()], ["one\n", "two\n"]],
+            view_sequence=[view(state="in_progress", result=None, exit_code=None), view(result="failure", exit_code=1)],
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+        assert (rc, out) == (1, "one\ntwo\n"), err
+
+    def test_another_refusal_reason_is_not_retried(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0, expiry_reason="credential_revoked") as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+        assert rc == 2 and "credential_revoked" in err
+        assert exchanges == 1
 
 
 class TestServerTextIsCleaned:
@@ -1390,32 +1483,48 @@ class TestCancelTimeout:
         assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
 
 
-class TestAuthHeader:
-    """``auth-header``: the headersHelper the Outpost plugin's tool-server entry runs. It never fails the connection."""
+class TestTheSessionCommandHasNoTokenVerb:
+    """``outpost-gateway`` runs outside the sandbox, so what it prints reaches the session's transcript."""
 
-    ARGV = ("auth-header",)
-
-    def test_prints_only_the_authorization_header_for_the_session_s_token(self, cli):
+    def test_auth_header_is_refused_before_any_token_is_asked_for(self, cli, capsys):
         with StubOutpost() as stub:
-            rc, out, err = cli(stub.port, *self.ARGV)
+            with pytest.raises(SystemExit) as refused:
+                cli(stub.port, "auth-header")
+            requests = list(stub.requests)
+        out, err = capsys.readouterr()
+        assert refused.value.code == 2
+        assert requests == []
+        assert TOKEN not in out + err and CLIENT_SECRET not in out + err
+
+
+class TestAuthHeader:
+    """The auth-header entry: the Outpost plugin's tool-server headersHelper. It never fails the connection."""
+
+    ARGV = ()
+
+    def test_prints_only_the_authorization_header_for_the_session_s_token(self, header):
+        with StubOutpost() as stub:
+            rc, out, err = header(stub.port)
         assert rc == 0, err
         assert json.loads(out) == {"Authorization": f"Bearer {TOKEN}"}
         assert out.count("\n") == 1
         assert CLIENT_SECRET not in out + err and CLIENT_ID not in out
 
-    def test_a_session_with_no_credential_registers_itself_and_prints_the_header_it_got(self, unregistered, state):
+    def test_a_session_with_no_credential_registers_itself_and_prints_the_header_it_got(
+        self, header_unregistered, state
+    ):
         with StubOutpost(on_register=lambda key: write_credential(state, key)) as stub:
-            rc, out, err = unregistered(stub.port, *self.ARGV)
+            rc, out, err = header_unregistered(stub.port)
             paths = [q.path for q in stub.requests]
         assert rc == 0, err
         assert json.loads(out) == {"Authorization": f"Bearer {TOKEN}"}
         assert paths == ["/gateway/sessions", "/broker/token"]
 
-    def test_a_credential_written_after_a_run_with_none_is_used_by_the_next_run(self, unregistered, state):
+    def test_a_credential_written_after_a_run_with_none_is_used_by_the_next_run(self, header_unregistered, state):
         with StubOutpost() as stub:
-            first = unregistered(stub.port, *self.ARGV, authority=False)
+            first = header_unregistered(stub.port, authority=False)
             write_credential(state, HARNESS_KEY)
-            second = unregistered(stub.port, *self.ARGV, authority=False)
+            second = header_unregistered(stub.port, authority=False)
         assert (first[0], json.loads(first[1])) == (0, {})
         assert (second[0], json.loads(second[1])) == (0, {"Authorization": f"Bearer {TOKEN}"})
 
@@ -1432,38 +1541,49 @@ class TestAuthHeader:
         ],
     )
     def test_a_session_that_cannot_get_a_token_exits_0_with_an_empty_header_and_says_why_on_stderr(
-        self, stub_kwargs, authority, says, unregistered, state
+        self, stub_kwargs, authority, says, header_unregistered, state
     ):
         if authority:
             write_credential(state, HARNESS_KEY)
         with StubOutpost(**stub_kwargs) as stub:
-            rc, out, err = unregistered(stub.port, *self.ARGV, authority=False)
+            rc, out, err = header_unregistered(stub.port, authority=False)
         assert (rc, json.loads(out)) == (0, {})
         assert says in err
         assert CLIENT_SECRET not in out + err and TOKEN not in out + err
 
-    def test_unreachable_outpost_exits_0_with_an_empty_header(self, cli):
+    def test_unreachable_outpost_exits_0_with_an_empty_header(self, header):
         port = free_port()
-        rc, out, err = cli(port, *self.ARGV)
+        rc, out, err = header(port)
         assert (rc, json.loads(out)) == (0, {})
         assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
 
-    def test_an_outpost_that_accepts_and_never_answers_gives_up_within_the_reach_budget(self, cli):
+    def test_an_outpost_that_accepts_and_never_answers_gives_up_within_the_reach_budget(self, header):
         import time
 
         with SilentOutpost() as silent:
             started = time.monotonic()
-            rc, out, err = cli(silent.port, *self.ARGV)
+            rc, out, err = header(silent.port)
             elapsed = time.monotonic() - started
         assert (rc, json.loads(out)) == (0, {})
         assert "Outpost is unreachable" in err
         assert elapsed < 5.0
 
+    def test_the_reach_budget_ends_with_the_helper_so_a_later_call_is_not_cut_off_by_it(self, header, monkeypatch):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.05)
+        with StubOutpost() as stub:
+            rc, _, err = header(stub.port)
+            time.sleep(0.1)
+            later = outpost_http.request("GET", "/nothing-here", port=stub.port)
+        assert rc == 0, err
+        assert later.status == 404
+
     def test_the_header_reaches_a_real_process_through_the_entry_point_with_nothing_in_its_arguments(
         self, launcher, tmp_path, state
     ):
         with StubOutpost() as stub:
-            r = _run(launcher, tmp_path, state, stub.port, self.ARGV)
+            r = _run(launcher, tmp_path, state, stub.port, self.ARGV, extra_env={"GATEWAY_RUNNER_ENTRY": "auth_header"})
         assert r.proc.returncode == 0, r.proc.stderr
         assert json.loads(r.proc.stdout) == {"Authorization": f"Bearer {TOKEN}"}
         assert r.env_after is not None and all(TOKEN not in v for v in r.env_after.values())

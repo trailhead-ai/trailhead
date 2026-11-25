@@ -837,6 +837,7 @@ class _TestOutpost:
     def __init__(self):
         self.codes: set[str] = set()
         self.minted = 0
+        self.ui_code_status: int | None = None
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -858,6 +859,8 @@ class _TestOutpost:
                 n = int(self.headers.get("Content-Length") or 0)
                 body = self.rfile.read(n).decode()
                 if self.path == "/operator/ui-code":
+                    if outer.ui_code_status is not None:
+                        return self._send(outer.ui_code_status)
                     if self.headers.get("Authorization") != f"Bearer {outer.CREDENTIAL}":
                         return self._send(401)
                     outer.minted += 1
@@ -993,6 +996,32 @@ def test_open_reports_a_credential_outpost_refuses(outpost, test_outpost):
         outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
 
     assert "trailhead outpost restart" in str(exc.value)
+    assert opener.args == []
+
+
+def test_open_against_an_outpost_without_the_code_route_opens_the_bare_ui_url_and_says_so(
+    outpost, test_outpost, capsys
+):
+    test_outpost.ui_code_status = 404
+    opener = _RecordingOpener()
+
+    rc = outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    out = capsys.readouterr().out.strip().splitlines()
+    assert rc == 0
+    assert opener.args == [(f"http://127.0.0.1:{test_outpost.port}/",)]
+    assert len(out) == 1 and "older" in out[0]
+    assert not list((outpost.state_dir / "operator").glob("open-*.html"))
+
+
+@pytest.mark.parametrize("status", [403, 500])
+def test_open_still_fails_on_any_other_refusal_of_the_code_route(outpost, test_outpost, status):
+    test_outpost.ui_code_status = status
+    opener = _RecordingOpener()
+
+    with pytest.raises(OutpostLifecycleError, match=f"HTTP {status}"):
+        outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
     assert opener.args == []
 
 
