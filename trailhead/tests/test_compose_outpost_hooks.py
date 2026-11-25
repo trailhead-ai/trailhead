@@ -12,8 +12,8 @@ from pathlib import Path
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 from trailhead.install import build_cli_shims, resolve_cli_tools
-from trailhead.harness import harness_process
 from trailhead.tests._gateway_support import (
+    await_harness,
     REGISTRATION_AUTHORITY,
     StubOutpost,
     register_port_interpreter,
@@ -252,7 +252,7 @@ class TestRealInstallReachesOutpost:
                     "OUTPOST_STATE_DIR": str(outpost_state),
                     "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
                 },
-                on_start=lambda pid: found.append(harness_process(start_pid=pid)),
+                on_start=lambda pid: found.append(await_harness(pid)),
                 stdin="{}",
             )
         assert (proc.returncode, proc.stdout) == (0, "")

@@ -18,13 +18,14 @@ import socket
 import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from trailhead.harness import session_key
+from trailhead.harness.process import format_session_key, harness_process
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GATEWAY_RUNNER = Path(__file__).with_name("_gateway_runner.py")
@@ -135,7 +136,10 @@ class StubOutpost:
     is set, then closes the connection (an early close is a dropped stream). ``log_connections``,
     when set, gives each successive log request its own steps (the last repeats); ``view_sequence``
     likewise gives each successive view request its own body; ``log_chunked`` sends the log chunked,
-    and a ``Cut`` step ends it mid-chunk. ``release`` is set
+    and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
+    ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``),
+    after ``cancel_delay`` seconds.
+    ``release`` is set
     on exit so no waiting step outlives the stub.
     """
 
@@ -153,6 +157,9 @@ class StubOutpost:
     start_reply: tuple[int, object] | None = None
     view: dict | None = None
     view_reply: tuple[int, object] | None = None
+    cancel_reply: tuple[int, object] | None = None
+    cancel_delay: float = 0.0
+    log_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
     log_connections: list[list] | None = None
     view_sequence: list[dict] | None = None
@@ -238,6 +245,15 @@ class StubOutpost:
                     if self._authorised():
                         self._send(202, {"id": 7, "state": "queued", "matrix": None, "not_run": 0})
                     return
+                parts = urlsplit(self.path).path.split("/")
+                if (parts[:3] == ["", "gateway", "runs"] and len(parts) == 5
+                        and parts[3].isdigit() and parts[4] == "cancel"):
+                    stub.release.wait(stub.cancel_delay)
+                    if stub.cancel_reply is not None:
+                        return self._send(*stub.cancel_reply)
+                    if self._authorised():
+                        self._send(202, {"id": int(parts[3]), "state": "completed", "result": "cancelled"})
+                    return
                 if self.path == "/gateway/sessions":
                     if stub.register_reply is not None:
                         return self._send(*stub.register_reply)
@@ -267,6 +283,8 @@ class StubOutpost:
                 parts = urlsplit(self.path).path.split("/")
                 if len(parts) in (4, 5) and parts[:3] == ["", "gateway", "runs"] and parts[3].isdigit():
                     if len(parts) == 5 and parts[4] == "log":
+                        if stub.log_reply is not None:
+                            return self._send(*stub.log_reply)
                         if stub.view_reply is not None and stub.view_reply[0] == 404:
                             return self._send(*stub.view_reply)
                         if self._authorised():
@@ -323,6 +341,29 @@ def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) ->
     return path
 
 
+def await_harness(
+    pid: int,
+    *,
+    resolve: Callable[..., tuple[int, int] | None] = harness_process,
+    timeout: float = 5.0,
+    interval: float = 0.02,
+) -> tuple[int, int]:
+    """``(pid, start_time)`` of the fake harness *pid*, once the process table shows it.
+
+    A just-spawned process is not always readable as a harness the instant ``Popen``
+    returns, and until it is, the walk can land on an outer session instead; this waits
+    for the answer to be *pid* itself rather than reading once.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        found = resolve(start_pid=pid)
+        if found is not None and found[0] == pid:
+            return found
+        if time.monotonic() >= deadline:
+            raise AssertionError("fake harness did not resolve to a session key")
+        time.sleep(interval)
+
+
 @dataclass
 class RunResult:
     proc: subprocess.CompletedProcess[str]
@@ -348,8 +389,7 @@ def run_gateway_runner(
     env_dump.unlink(missing_ok=True)
 
     def started(pid: int) -> None:
-        key = session_key(start_pid=pid)
-        assert key is not None, "fake harness did not resolve to a session key"
+        key = format_session_key(*await_harness(pid))
         if seed is not None:
             seed(key)
 
