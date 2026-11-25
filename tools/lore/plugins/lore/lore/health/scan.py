@@ -82,11 +82,22 @@ def _read_capped(path: Path) -> tuple[str, int]:
         data = fh.read(MAX_RECORD_BYTES + 1)
     if len(data) > MAX_RECORD_BYTES:
         raise _Oversize(REASON_OVERSIZE)
-    return data.decode("utf-8"), len(data)
+    try:
+        return data.decode("utf-8"), len(data)
+    except UnicodeDecodeError:
+        raise _Undecodable(len(data)) from None
 
 
 class _Oversize(ValueError):
     """The file is past the cap; it was charged at the capped read size."""
+
+
+class _Undecodable(ValueError):
+    """The file is not UTF-8; ``size`` is the bytes that were read, to be charged."""
+
+    def __init__(self, size: int):
+        super().__init__(size)
+        self.size = size
 
 
 class _IndexerProbe:
@@ -234,6 +245,10 @@ def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedR
             result.indexed += 1
         unreadable(REASON_OVERSIZE)
         return None
+    except _Undecodable as exc:
+        result.bytes_read += exc.size
+        unreadable(REASON_SIDECAR_MALFORMED)
+        return None
     except ValueError:
         unreadable(REASON_SIDECAR_MALFORMED)
         return None
@@ -256,6 +271,10 @@ def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedR
             result.indexed += 1
         result.sidecar_only.append(SidecarOnlyRecord(result.vault, kind, name, sidecar))
         unreadable(REASON_OVERSIZE)
+        return None
+    except _Undecodable as exc:
+        result.bytes_read += exc.size
+        unreadable(REASON_BODY_UNREADABLE)
         return None
     except (ValueError, OSError):
         unreadable(REASON_BODY_UNREADABLE)

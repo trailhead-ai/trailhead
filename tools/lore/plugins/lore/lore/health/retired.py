@@ -43,7 +43,9 @@ class RetiredCandidate:
     superseded candidate with no successor at all whose own ``related`` entries
     name the linking record. ``supersede_allowed`` is set when it is a links-back
     candidate and ``lore record supersede`` would accept the linker as its
-    successor, judged by the verb's own pairing guard.
+    successor, judged by the verb's own pairing guard. ``successor_unconfirmed`` is set
+    on a superseded candidate with no successor read while a scanned vault holds an
+    escaping record, which could be the successor; it is never a links-back candidate.
     """
 
     vault: str
@@ -54,6 +56,7 @@ class RetiredCandidate:
     nonconforming_successors: int = 0
     links_back: bool = False
     supersede_allowed: bool = False
+    successor_unconfirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,7 @@ def check_retired(
     accepted: dict[tuple[str, str, str, str | None], bool] = {}
     related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]] = {}
 
+    escapes = any(s.escaped for s in scans)
     result = RetiredResult()
     skipped: list[str] = []
     for s in scans:
@@ -148,7 +152,7 @@ def check_retired(
                 linker_duplicated = len(holders[(record.kind, record.name)]) > 1
                 shared = len({(c.kind, c.name) for c in found}) < len(found)
                 retired = tuple(
-                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted, related_to)
+                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted, related_to, escapes)
                     for c in sorted(found, key=key)
                 )
                 result.findings.append(
@@ -188,6 +192,7 @@ def _candidate(
     vault_flagged: bool,
     accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
     related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]],
+    escapes: bool,
 ) -> RetiredCandidate:
     state = status(record)
     assert state is not None
@@ -204,8 +209,9 @@ def _candidate(
             else:
                 successors.append(Successor(s.vault, s.kind, s.name, status(s)))
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
+    unconfirmed = state == "superseded" and not successors and not nonconforming and escapes
     links_back = (
-        state == "superseded" and not successors and not nonconforming
+        state == "superseded" and not successors and not nonconforming and not unconfirmed
         and (linker.kind, linker.name) in _related_records(record, related_to)
     )
     return RetiredCandidate(
@@ -214,6 +220,7 @@ def _candidate(
         links_back and _accepted_once(
             accepted, record, linker, holdings, record.vault if vault_flagged else None
         ),
+        unconfirmed,
     )
 
 

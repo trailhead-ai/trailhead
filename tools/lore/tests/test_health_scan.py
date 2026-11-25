@@ -562,3 +562,33 @@ def test_an_oversize_body_whose_sidecar_the_indexer_rejects_does_not_count_as_he
     counts = scan.count_index_rows([str(root)], env=inst.env)
     s = scan.scan_vault("default", root)
     assert counts[str(root)].count == s.indexed == 1
+
+
+def _fill_undecodable(root, n, body_bytes=1000):
+    for i in range(n):
+        _put(root, "lesson", f"u{i}", _sidecar(f"U{i}"), None)
+        (root / "lesson" / f"u{i}.md").write_bytes(b"\xff" * body_bytes)
+
+
+def test_undecodable_bodies_are_charged_to_the_budget_and_trip_it(scan, inst):
+    _fill_undecodable(inst.roots["default"], 5)
+    s = scan.scan_vault("default", inst.roots["default"], max_bytes=2500)
+    assert s.unreadable_reason == scan.REASON_OVER_BUDGET
+    assert s.bytes_read > 2500
+
+
+def test_undecodable_bodies_under_the_budget_leave_the_vault_fully_read_and_are_charged(scan, inst):
+    _fill_undecodable(inst.roots["default"], 2)
+    s = scan.scan_vault("default", inst.roots["default"], max_bytes=10_000)
+    assert s.unreadable_reason is None
+    assert [u.reason for u in s.unreadable] == [scan.REASON_BODY_UNREADABLE] * 2
+    assert s.bytes_read >= 2 * 1000
+
+
+def test_an_undecodable_sidecar_is_charged_to_the_budget(scan, inst):
+    root = inst.roots["default"]
+    for i in range(5):
+        _put(root, "lesson", f"s{i}", _sidecar(f"S{i}"), "ok\n")
+        (root / "lesson" / f"s{i}.json").write_bytes(b"\xff" * 1000)
+    s = scan.scan_vault("default", root, max_bytes=2500)
+    assert s.unreadable_reason == scan.REASON_OVER_BUDGET

@@ -3410,3 +3410,77 @@ def test_a_target_of_exactly_the_cap_prints_whole_and_one_more_character_is_cut(
     target = f["evidence"].split(" → ")[1].split(": ")[0]
     assert target.endswith("…") is capped
     assert len(target) == health.MAX_EVIDENCE_FIELD
+
+
+def _escape_session(world, tmp_path, vault):
+    outside = tmp_path / "elsewhere-s"
+    outside.mkdir(exist_ok=True)
+    (outside / "s.md").write_text("x")
+    (outside / "s.json").write_text("{}")
+    sess = world.roots[vault] / "session"
+    sess.mkdir(exist_ok=True)
+    (sess / "s1.md").symlink_to(outside / "s.md")
+    (sess / "s1.json").symlink_to(outside / "s.json")
+
+
+def test_a_skipped_row_names_the_real_cause_when_the_only_escape_is_of_a_kind_the_check_does_not_judge(world, tmp_path):
+    root = world.roots["trailhead"]
+    _put(root, "spec", "broken", status="planned")
+    (root / "spec" / "broken.json").write_text("not json")
+    _escape_session(world, tmp_path, "trailhead")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    reason = rows(r.stdout, "distill-queue")["trailhead"][2]
+    assert reason.startswith("yes:")
+    assert "outside its vault root" not in reason
+    assert "holds a spec or task record that could not be read" in reason
+
+
+@pytest.mark.parametrize("check,kind,extra", [
+    ("stale-tasks", "task", {"status": "open"}),
+    ("distill-queue", "spec", {"status": "planned"}),
+])
+def test_a_skipped_row_names_the_escape_when_the_escaping_record_is_of_a_kind_the_check_judges(world, tmp_path, check, kind, extra):
+    outside = tmp_path / "elsewhere-j"
+    outside.mkdir()
+    _put(outside, kind, "hidden", **extra)
+    (world.roots["trailhead"] / kind).symlink_to(outside / kind, target_is_directory=True)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, check)["trailhead"][2] == "yes: records lie outside its vault root and were not read"
+
+
+def test_a_stale_task_whose_namesake_is_unreadable_in_another_vault_prints_the_vault_qualified_drop_command(world):
+    _put(world.roots["trailhead"], "task", "x", status="open", updated="2026-01-01T00:00:00Z")
+    _put(world.roots["default"], "task", "x", status="open", body="y" * (2 * 1024 * 1024))
+    r = world.run("--vault", "trailhead")
+    assert r.returncode == 0, r.stderr
+    (line,) = [ln for ln in group(r.stdout, "stale-tasks") if "task/x" in ln]
+    assert "a task of this name is also in vault default" in line
+    assert line.endswith("`lore record update task/x --status dropped --diff --vault trailhead`")
+
+
+UNCONFIRMED = "superseded, and no readable record supersedes it"
+
+
+def test_a_superseded_target_is_unconfirmed_and_gets_no_supersede_command_when_a_vault_holds_an_escape(world, tmp_path):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    _escape_session(world, tmp_path, "levr")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert retired_lines(r.stdout) == [
+        f"  default/adr/src  2026-03-01  related decision → decision/old: {UNCONFIRMED}"]
+    doc, _ = _json(world)
+    (finding,) = _check(doc, "retired-links")["findings"]
+    assert finding["evidence"] == f"related decision → decision/old: {UNCONFIRMED}"
+    assert "lore record supersede" not in finding["evidence"]
+
+
+def test_a_superseded_target_with_no_escape_anywhere_keeps_its_wording_and_command_in_text_and_json(world):
+    _links_back_world(world.roots["default"], target_related={"adr": ["src"]})
+    (line,) = retired_lines(world.run().stdout)
+    assert line.endswith(f"{NO_SUCCESSOR}; {LINKS_BACK}: `lore record supersede decision/old --by adr/src`")
+    doc, _ = _json(world)
+    (finding,) = _check(doc, "retired-links")["findings"]
+    assert finding["evidence"].endswith(
+        f"{NO_SUCCESSOR}; {LINKS_BACK}: `lore record supersede decision/old --by adr/src`")

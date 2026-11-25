@@ -93,7 +93,7 @@ def check_stale(
     start = now - timedelta(days=window_days)
     holders: dict[str, set[str]] = {}
     for s in scans:
-        for record in s.records:
+        for record in (*s.records, *s.unreadable, *s.sidecar_only):
             if record.kind == "task":
                 holders.setdefault(record.name, set()).add(s.vault)
 

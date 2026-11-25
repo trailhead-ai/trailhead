@@ -242,6 +242,25 @@ def test_a_stale_task_names_the_other_vaults_that_hold_a_task_of_the_same_name()
     assert [(f.vault, f.duplicated_in) for f in res.findings] == [("b", ("a", "c"))]
 
 
+def test_a_stale_task_names_a_vault_whose_same_named_task_is_unreadable():
+    a = vault("a", unreadable=[model.UnreadableRecord("a", "task", "x", "sidecar-malformed")])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ("a",))]
+
+
+def test_a_stale_task_names_a_vault_whose_same_named_task_is_kept_as_sidecar_only():
+    a = vault("a", sidecar_only=[model.SidecarOnlyRecord("a", "task", "x", {"status": "open"})])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ("a",))]
+
+
+def test_an_unreadable_record_of_another_kind_or_name_is_not_a_namesake():
+    a = vault("a", unreadable=[model.UnreadableRecord("a", "decision", "x", "oversize"),
+                               model.UnreadableRecord("a", "task", "other", "oversize")])
+    b = vault("b", task("x", days=60, vault="b"))
+    assert [(f.vault, f.duplicated_in) for f in run([a, b]).findings] == [("b", ())]
+
+
 def test_a_unique_task_name_has_no_duplicate_vaults():
     a = vault("a", rec("a", "decision", "y"))
     b = vault("b", task("y", days=60, vault="b"))

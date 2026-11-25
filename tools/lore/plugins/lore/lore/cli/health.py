@@ -255,7 +255,10 @@ class Check:
     after its identity and date; the text line (:func:`_line`) and the JSON document print
     that one string.
     ``skip_reason`` ends the sentence saying why a skipped check could not judge
-    a target. ``action`` is the line that names what acts on the findings.
+    a target. ``kinds`` are the record kinds a check judges when it skips whole on an
+    escape in one of them (empty for a check that skips an escaping vault alone): an
+    escape of any other kind is not why it skipped.
+    ``action`` is the line that names what acts on the findings.
     ``heading_note(section, ctx)``, when set, returns text appended verbatim to the
     group heading (after ``oldest first``, or after ``no findings``), or ``None``
     for none. It is called for any check that ran, with or without findings, inside
@@ -272,6 +275,7 @@ class Check:
     action: str
     heading_note: Callable[[Section, RunContext], str | None] | None = None
     repository_lines: Callable[[Section, RunContext], list[str]] | None = None
+    kinds: Collection[str] = ()
 
 
 def _safe(value: object) -> str:
@@ -313,14 +317,15 @@ def budget_phrase(scan: VaultScan) -> str:
     return f"its {budget_exceeded(scan)}; pass --max-scan-mib to raise it"
 
 
-def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...], tail: str) -> str:
+def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...], tail: str,
+                 kinds: Collection[str]) -> str:
     if scan.unreadable_reason == scan_mod.REASON_VAULT_MISSING:
         return "its directory does not exist"
     if scan.unreadable_reason == scan_mod.REASON_OVER_BUDGET:
         return budget_phrase(scan)
     if scan.unreadable_reason is not None:
         return "its directory could not be read"
-    if scan.vault in at_fault and scan.skipped_escaping:
+    if scan.vault in at_fault and scan.skipped_escaping and not scan.readable_for(kinds):
         return ESCAPE_SKIP_REASON
     holders = tuple(n for n in at_fault if scans[n].readable_for(queue_mod.JUDGED_KINDS)
                     and queue_mod.holds_unreadable_judged_record(scans[n]))
@@ -433,7 +438,7 @@ _UNREADABLE_WHY = {
 
 def _paths_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], skip, view) -> str:
     if skip.reason == paths_mod.NOT_FULLY_READ:
-        return _skip_reason(scan, scans, (scan.vault,), PATHS_SKIP_TAIL)
+        return _skip_reason(scan, scans, (scan.vault,), PATHS_SKIP_TAIL, paths_mod.JUDGED_KINDS)
     if skip.root is not None:
         remedy = ("pass a repository's working directory with --repo"
                   if isinstance(view, repos_mod.RepositoryView) and view.used
@@ -490,7 +495,7 @@ LESSONS_SKIP_TAIL = "so its lessons cannot all be counted"
 def _lessons_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], code: str) -> str:
     if code == lessons_mod.UNREADABLE_LESSON:
         return f"vault {_safe(scan.vault)} holds a lesson record that could not be read, {LESSONS_SKIP_TAIL}"
-    reason = _skip_reason(scan, scans, (scan.vault,), LESSONS_SKIP_TAIL)
+    reason = _skip_reason(scan, scans, (scan.vault,), LESSONS_SKIP_TAIL, (lessons_mod.KIND,))
     return reason if reason.endswith(LESSONS_SKIP_TAIL) else f"{reason}, {LESSONS_SKIP_TAIL}"
 
 
@@ -574,7 +579,7 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
             elif v in sec.run.skipped:
                 rows.append(VaultRow(v, name, None, None, sec.run.skipped[v]))
             elif sec.findings is None:
-                reason = _skip_reason(by_name[v], by_name, sec.run.at_fault, sec.check.skip_reason)
+                reason = _skip_reason(by_name[v], by_name, sec.run.at_fault, sec.check.skip_reason, sec.check.kinds)
                 rows.append(VaultRow(v, name, None, None, reason))
             else:
                 n = sum(1 for f in sec.findings if f.vault == v)
@@ -698,7 +703,8 @@ def _qualified(items, *, kind_name) -> list[str]:
 def _successor_phrase(c: retired_mod.RetiredCandidate) -> str:
     """What became of a superseded record; never carries a non-conforming name."""
     if not c.successors and not c.nonconforming_successors:
-        return "superseded, and no record supersedes it"
+        return ("superseded, and no readable record supersedes it" if c.successor_unconfirmed
+                else "superseded, and no record supersedes it")
     named = []
     ids = _qualified(c.successors, kind_name=lambda s: (s.kind, s.name))
     for s, ident in list(zip(c.successors, ids))[:MAX_NAMED_SUCCESSORS]:
@@ -887,6 +893,7 @@ CHECKS: tuple[Check, ...] = (
         run=_run_stale,
         evidence=_stale_evidence,
         skip_reason="so no spec's status can be confirmed",
+        kinds=("task",),
         action=STALE_ACTION,
         heading_note=_stale_note,
     ),
@@ -895,6 +902,7 @@ CHECKS: tuple[Check, ...] = (
         run=_run_paths,
         evidence=_missing_evidence,
         skip_reason=PATHS_SKIP_TAIL,
+        kinds=paths_mod.JUDGED_KINDS,
         action="Act on these with /lore:correct: point the record at where the code now lives, "
                "or, if the feature it describes was removed, drop or supersede the record. "
                "If a repository line above is old, fetch it first; a path added on a branch "
@@ -906,6 +914,7 @@ CHECKS: tuple[Check, ...] = (
         run=_run_distill,
         evidence=_distill_evidence,
         skip_reason=DISTILL_SKIP_TAIL,
+        kinds=queue_mod.JUDGED_KINDS,
         action="Act on these with /craft:distill: a sweep takes every waiting spec, including any "
                "not shown; /craft:distill spec/<name> takes one. "
                "The id is spec/<name>, without the vault prefix.",
@@ -916,6 +925,7 @@ CHECKS: tuple[Check, ...] = (
         run=_run_lessons,
         evidence=_lesson_evidence,
         skip_reason=LESSONS_SKIP_TAIL,
+        kinds=(lessons_mod.KIND,),
         action="These are informational, not problems to fix. If lessons pile up faster than they "
                "are folded, run /craft:consolidate: it merges lessons that prevent the same failure.",
         heading_note=_lesson_note,
