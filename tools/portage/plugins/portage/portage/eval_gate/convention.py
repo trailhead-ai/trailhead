@@ -38,10 +38,9 @@ import sys
 from pathlib import Path
 
 from .loads import (
-    BRANCH_LOAD, FULL_LOAD, SECTION_LOAD, LoadError, NotRegularFile, _get, _is_branch, _visible_lines,
-    cached, parse_directives, read_declared_mentions, resolve_existing, tree_reader,
+    _SAFE_CHARS, _WORD, BRANCH_LOAD, FULL_LOAD, SECTION_LOAD, LoadError, NotRegularFile, _get, _visible_lines,
+    cached, is_branch, parse_directives, read_declared_mentions, resolve_existing, tree_reader,
 )
-from .loads import _SAFE_CHARS, _WORD
 from .mapping import _q, echo
 
 MAX_CORE_LINES = 500
@@ -107,15 +106,15 @@ def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _
         shown = ", ".join(_q(p, n) for n, p in enumerate(item.paths, 1))
         faults.add(file, item.line, "load-names-several-files" if several else "misworded-load",
                    f"the directive naming {shown} {item.reason}", _USE_ANY)
-    is_branch = _is_branch(text)
+    branch_file = is_branch(text)
     is_entry = Path(file).name == "SKILL.md" or file.startswith("agents/")
     branch_loads = [load for load in directives.loads if load.kind == "branch"]
-    if is_branch:
+    if branch_file:
         for load in branch_loads:
             faults.add(file, load.line, "branch-loads-branch",
                        f"a branch file loads {_q(load.raw, 1)}; move the load to the procedure that tests the "
                        "condition", BRANCH_LOAD)
-    if not (is_entry or is_branch):
+    if not (is_entry or branch_file):
         for load in directives.loads:
             if load.kind != "branch":
                 faults.add(file, load.line, "rule-file-loads",
@@ -145,11 +144,11 @@ def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _
             faults.add(file, load.line, "load-target-missing",
                        f"load path {_q(load.raw, number)} names no file when resolved from this file's own "
                        "directory", use)
-        elif load.kind == "branch" and not _is_branch(body):
+        elif load.kind == "branch" and not is_branch(body):
             faults.add(file, load.line, "branch-opening",
                        f"branch-loaded {_q(load.raw, number)} does not open 'Applies when'; open it with the "
                        "condition under which it applies", BRANCH_LOAD)
-        elif load.kind != "branch" and _is_branch(body):
+        elif load.kind != "branch" and is_branch(body):
             faults.add(file, load.line, "branch-loaded-unconditionally",
                        f"{_q(load.raw, number)} opens 'Applies when' but is loaded unconditionally", BRANCH_LOAD)
     if str(Path(file).parent) == "skills/_shared":

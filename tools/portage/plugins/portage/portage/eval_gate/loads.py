@@ -54,12 +54,25 @@ from pathlib import Path, PurePosixPath
 
 from .mapping import MAX_BLOB_BYTES, MAX_PROCEDURE_FILES, _q
 
+DECLARED_MENTIONS = "declared-mentions.json"
+FULL_LOAD = "Read `<path>` now and follow it in full."
+SECTION_LOAD = "Read `<path>` now." + " Then a sentence naming the section to use."
+BRANCH_LOAD = "When <condition>, read `<path>` now and follow it in full."
+
 _SAFE_CHARS = re.compile(r"^[A-Za-z0-9._/-]+\Z")
 _BRANCH_OPENING = re.compile(r"^applies (?:only )?when(?![A-Za-z0-9])", re.IGNORECASE)
 _EXTENSION = re.compile(r"\.[A-Za-z0-9]+\Z")
 _ABBREVIATION = re.compile(r"(?:^|[\s(])(?:e\.g|i\.e)$", re.IGNORECASE)
 _WORD = re.compile(r"[A-Za-z0-9._/-]+")
 _LIST_OR_HEADING = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
+_FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
+_LINE_END = re.compile(r"\r\n|\r|\n")
+_LOAD_FULL = re.compile(r"Read `([^`]+)` now and follow it in full\.")
+_LOAD_SECTION = re.compile(r"Read `([^`]+)` now\.")
+_LOAD_BRANCH = re.compile(r"When (.+), read `([^`]+)` now and follow it in full\.")
+_LIST_MARKER = re.compile(r"^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)+")
+_DIRECTIVE_VERB = re.compile(r"\b(?:read|load|follow|consult|open|see|apply|use|per)\b", re.IGNORECASE)
+_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
 
 
 class LoadError(Exception):
@@ -101,7 +114,8 @@ def _sentence_spans(paragraph: str, bold: bool = False) -> list[tuple[int, int]]
     return out
 
 
-def _is_branch(text: str) -> bool:
+def is_branch(text: str) -> bool:
+    """Whether ``text`` opens a branch file."""
     for line in text.splitlines():
         if line.strip():
             return bool(_BRANCH_OPENING.match(line.lstrip(" \t*_")))
@@ -154,17 +168,31 @@ def _declared(read) -> dict[str, tuple[str, ...]]:
     return value
 
 
-def _find_mentioned(file: str, raw: str, read) -> str | None:
-    """The plugin-relative file ``raw`` names from ``file``, searching the file's directory and then each
-    ancestor up to the plugin root; ``None`` when none holds one. A read failure is a fault."""
+def _leaves_root(path: str) -> bool:
+    """Whether the normalised plugin-relative ``path`` climbs above the plugin root."""
+    return path == ".." or path.startswith("../")
+
+
+def _search_up(file: str, raw: str, exists) -> str | None:
+    """The first plugin-relative path ``raw`` names from ``file`` for which ``exists(path)`` holds, trying the
+    file's directory and then each ancestor up to the plugin root; ``None`` for an absolute ``raw``, one whose
+    last part is empty, ``.`` or ``..``, or when no directory holds one."""
+    if raw.startswith("/") or posixpath.basename(raw) in ("", ".", ".."):
+        return None
     directory = posixpath.dirname(file)
     while True:
         candidate = posixpath.normpath(posixpath.join(directory, raw))
-        if not (candidate == ".." or candidate.startswith("../")) and _exists(read, candidate):
+        if not _leaves_root(candidate) and exists(candidate):
             return candidate
         if not directory:
             return None
         directory = posixpath.dirname(directory)
+
+
+def _find_mentioned(file: str, raw: str, read) -> str | None:
+    """The plugin-relative file, binary included, ``raw`` names from ``file`` (see ``_search_up``). A read
+    failure is a fault."""
+    return _search_up(file, raw, lambda path: _exists(read, path))
 
 
 def _reached(current: str, text: str, read) -> tuple[list[str], list[str]]:
@@ -174,8 +202,6 @@ def _reached(current: str, text: str, read) -> tuple[list[str], list[str]]:
     declared = set(_declared(read).get(current, ()))
     reached = dict.fromkeys(loaded)
     for raw in _analysis(current, text, read).tokens:
-        if posixpath.basename(raw) in ("", ".", "..") or raw.startswith("/"):
-            continue
         found = _find_mentioned(current, raw, read)
         if found is not None and found != current and found not in declared:
             reached.setdefault(found)
@@ -188,17 +214,13 @@ def reaches_branch(path: str, read) -> bool:
     return text is not None and any(is_branch_file(t, read) for t in _reached(path, text, read)[1])
 
 
-def is_branch(text: str) -> bool:
-    return _is_branch(text)
-
-
 def is_branch_file(path: str, read) -> bool:
     """Whether ``path`` exists and is a branch file."""
     try:
         text = _get(read, path)
     except BinaryFile:
         return False
-    return text is not None and _is_branch(text)
+    return text is not None and is_branch(text)
 
 
 def _exists(read, path: str) -> bool:
@@ -371,22 +393,6 @@ def missing_loads(files, read) -> list[tuple[str, str]]:
     return missing
 
 
-DECLARED_MENTIONS = "declared-mentions.json"
-FULL_LOAD = "Read `<path>` now and follow it in full."
-SECTION_LOAD = "Read `<path>` now." + " Then a sentence naming the section to use."
-BRANCH_LOAD = "When <condition>, read `<path>` now and follow it in full."
-
-_FENCE_OPEN = re.compile(r"^(`{3,}|~{3,})")
-_LINE_END = re.compile(r"\r\n|\r|\n")
-_LOAD_FULL = re.compile(r"Read `([^`]+)` now and follow it in full\.")
-_LOAD_SECTION = re.compile(r"Read `([^`]+)` now\.")
-_LOAD_BRANCH = re.compile(r"When (.+), read `([^`]+)` now and follow it in full\.")
-_LIST_MARKER = re.compile(r"^(?:\s*(?:[-*+]|\d+[.)]|>)\s+)+")
-_DIRECTIVE_VERB = re.compile(r"\b(?:read|load|follow|consult|open|see|apply|use|per)\b", re.IGNORECASE)
-_LINK_TARGET = re.compile(r"\]\(([^)\s]+)\)")
-_PATHISH = re.compile(r"^[A-Za-z0-9._/-]+\Z")
-
-
 @dataclass(frozen=True)
 class Load:
     """A load in the fixed wording. ``kind`` is ``full``, ``section`` or ``branch``; ``raw`` is the path as
@@ -492,23 +498,14 @@ def resolve_existing(file: str, raw: str, read) -> str | None:
     """The plugin-relative regular file ``raw`` names from ``file``, looking in the loading directory and then each
     ancestor up to the plugin root; ``None`` when none holds one (a directory or a symlink is not one). This is how a
     mention is told from a path to nothing, not how a load resolves (a load resolves strictly: see ``Load.target``)."""
-    if raw.startswith("/") or posixpath.basename(raw) in ("", ".", ".."):
-        return None
-    directory = posixpath.dirname(file)
-    while True:
-        candidate = posixpath.normpath(posixpath.join(directory, raw))
-        if not (candidate == ".." or candidate.startswith("../")) and _present(read, candidate):
-            return candidate
-        if not directory:
-            return None
-        directory = posixpath.dirname(directory)
+    return _search_up(file, raw, lambda path: _present(read, path))
 
 
 def _strict_target(file: str, raw: str) -> str | None:
     if raw.startswith("/"):
         return None
     candidate = posixpath.normpath(posixpath.join(posixpath.dirname(file), raw))
-    return None if candidate == ".." or candidate.startswith("../") else candidate
+    return None if _leaves_root(candidate) else candidate
 
 
 def _named_files(sentence: str, file: str, read) -> list[tuple[int, str]]:
@@ -517,12 +514,12 @@ def _named_files(sentence: str, file: str, read) -> list[tuple[int, str]]:
     found: list[tuple[int, str]] = []
     offset = 0
     for index, part in enumerate(sentence.split("`")):
-        if index % 2 == 1 and _PATHISH.match(part):
+        if index % 2 == 1 and _SAFE_CHARS.match(part):
             found.append((offset, part))
         elif index % 2 == 0:
             found.extend((offset + m.start(1), m.group(1).split("#")[0]) for m in _LINK_TARGET.finditer(part))
         offset += len(part) + 1
-    return [(at, raw) for at, raw in found if _PATHISH.match(raw) and resolve_existing(file, raw, read)]
+    return [(at, raw) for at, raw in found if _SAFE_CHARS.match(raw) and resolve_existing(file, raw, read)]
 
 
 def parse_directives(path: str, text: str, read) -> Directives:
@@ -580,7 +577,7 @@ def _declared_fault(detail: str) -> LoadError:
 
 def _is_plugin_path(value: object) -> bool:
     return (isinstance(value, str) and bool(_SAFE_CHARS.match(value)) and posixpath.normpath(value) == value
-            and not value.startswith("/") and value != ".." and not value.startswith("../"))
+            and not value.startswith("/") and not _leaves_root(value))
 
 
 def parse_declared_mentions(text: str) -> dict[str, tuple[str, ...]]:
@@ -609,5 +606,4 @@ def parse_declared_mentions(text: str) -> dict[str, tuple[str, ...]]:
 
 def read_declared_mentions(root: Path) -> dict[str, tuple[str, ...]]:
     """``parse_declared_mentions`` of ``<root>/declared-mentions.json``; a missing file is an empty list."""
-    text = _get(tree_reader(root), DECLARED_MENTIONS)
-    return {} if text is None else parse_declared_mentions(text)
+    return _declared(tree_reader(root))
