@@ -31,10 +31,14 @@ base_real=$(cd -P "$base" 2>/dev/null && pwd) || { echo "scaffold.sh: cannot res
 case "$home_real/" in
   "${base_real%/}/"*) echo "scaffold.sh: refusing to expose the home directory: python's prefix is the home directory or one of its ancestors" >&2; exit 3 ;;
 esac
-# The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of it;
-# a system interpreter stays visible and is linked, not copied.
-case "$base" in
-  /Users/*|/home/*) cp -R "$base" py-home ;;
+# The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of its
+# bin/ and lib/ only (a prefix such as ~/.local also holds state/ and share/); a system interpreter stays visible
+# and is linked, not copied.
+case "$base_real/" in
+  /Users/*|/home/*|"$home_real"/*)
+    mkdir py-home
+    for d in bin lib; do [ -d "$base/$d" ] && cp -R "$base/$d" "py-home/$d"; done
+    ;;
   *) ln -s "$base" py-home ;;
 esac
 seed=$(py-home/bin/python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$impl")

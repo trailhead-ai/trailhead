@@ -300,6 +300,26 @@ def test_scaffold_refuses_when_the_real_home_cannot_be_resolved(tmp_path):
     assert not (cwd / "py-home").exists()
 
 
+def test_scaffold_copies_only_the_interpreter_directories_of_a_prefix_under_home(tmp_path):
+    def prefix_under_home(home, tmp):
+        prefix = home / ".local"
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "bin" / "python3").symlink_to(sys.executable)
+        (prefix / "lib" / "python3.x").mkdir(parents=True)
+        (prefix / "lib" / "python3.x" / "os.py").write_text("")
+        (prefix / "state").mkdir()
+        (prefix / "state" / "secret").write_text("hunter2\n")
+        return prefix
+
+    done, cwd = _scaffold_with_base(tmp_path, prefix_under_home)
+    assert done.returncode == 0, done.stderr
+    assert (cwd / "py-home" / "bin" / "python3").exists()
+    assert (cwd / "py-home" / "lib" / "python3.x" / "os.py").exists()
+    assert not (cwd / "py-home" / "state").exists()
+    assert not list(cwd.rglob("secret"))
+    assert (cwd / "run-tests").exists()
+
+
 def _run_tests(cwd, *args):
     done = subprocess.run(
         ["./run-tests", *args], cwd=cwd, env=_env(cwd.parent), capture_output=True, text=True, timeout=120)
