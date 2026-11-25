@@ -232,3 +232,18 @@ def test_an_escaping_spec_a_task_links_to_is_never_called_retired():
     linker = vault("c", task("t", 1, sidecar=spec_link("s"), vault="c"))
     assert run([escaped, namesake, linker]).findings == []
     assert [f.name for f in run([namesake, linker]).findings] == ["t"]
+
+
+def test_a_stale_task_names_the_other_vaults_that_hold_a_task_of_the_same_name():
+    a = vault("a", task("x", days=1, vault="a"))
+    b = vault("b", task("x", days=60, vault="b"))
+    c = vault("c", task("x", days=1, status="done", vault="c"))
+    res = run([a, b, c])
+    assert [(f.vault, f.duplicated_in) for f in res.findings] == [("b", ("a", "c"))]
+
+
+def test_a_unique_task_name_has_no_duplicate_vaults():
+    a = vault("a", rec("a", "decision", "y"))
+    b = vault("b", task("y", days=60, vault="b"))
+    res = run([a, b])
+    assert [(f.name, f.duplicated_in) for f in res.findings] == [("y", ())]

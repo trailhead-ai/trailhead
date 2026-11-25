@@ -663,6 +663,35 @@ def _spec_phrase(specs: Sequence[stale_mod.RetiredSpec]) -> str:
     return "; ".join(named) + (f" and {_num(rest)} more" if rest else "")
 
 
+def _vault_arg_ok(vault: str) -> bool:
+    """Whether *vault* is a name ``--vault`` resolves as written: the one a configured vault carries."""
+    from ..vault import config as vault_config_mod
+    from ..vault import layers as layers_mod
+
+    try:
+        layers_mod.validate_layer_name(vault)
+    except layers_mod.LayerConfinementError:
+        return False
+    return vault.isprintable() and vault_config_mod.normalize_vault_name(vault) == vault
+
+
+def _drop_command(f: stale_mod.Finding) -> str | None:
+    """``lore record update`` dropping *f* in its own vault, or ``None`` when no safe command exists."""
+    if not (_well_shaped(f.name) and _vault_arg_ok(f.vault)):
+        return None
+    return (f"lore record update {shlex.quote(f'task/{f.name}')} --status dropped --diff "
+            f"--vault {shlex.quote(f.vault)}")
+
+
+def _shared_name_remedy(f: stale_mod.Finding) -> str:
+    where = ", ".join(_safe(v) for v in f.duplicated_in)
+    cmd = _drop_command(f)
+    if cmd is None:
+        return (f"a task of this name is also in vault {where}; to drop this one, "
+                "pass --vault with this task's vault to lore record update")
+    return f"a task of this name is also in vault {where}; to drop this one, run `{_safe(cmd)}`"
+
+
 def _stale_line(f: stale_mod.Finding) -> str:
     reasons = []
     if f.undated:
@@ -671,6 +700,8 @@ def _stale_line(f: stale_mod.Finding) -> str:
         reasons.append(f"last updated {_num(f.age_days)} days ago")
     if f.retired_specs:
         reasons.append(f"linked to {_spec_phrase(f.retired_specs)}")
+    if f.duplicated_in:
+        reasons.append(_shared_name_remedy(f))
     return f"  {_ident(f)}  {_when(f)}  {_safe(f.status)}  {'; '.join(reasons)}"
 
 

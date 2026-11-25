@@ -2518,3 +2518,89 @@ def test_an_escaping_session_record_named_as_a_link_target_is_not_reported_dangl
     assert any("session/never-was" in ln for ln in lines)
     assert not any("session/s1" in ln for ln in lines)
     assert rows(r.stdout, "dangling-links")["default"] == ("1", "1", "no")
+
+
+# --- the stale-tasks drop remedy when a task name is shared across vaults --------
+
+import shlex  # noqa: E402
+
+from conftest import make_git_vault  # noqa: E402
+
+
+def _two_vault_world(tmp_path, other="trailhead"):
+    """Two git vaults, ``default`` and *other*, each holding ``task/x``; only *other*'s is stale."""
+    from types import SimpleNamespace
+    roots = {n: make_git_vault(tmp_path / f"v{i}") for i, n in enumerate(("default", other))}
+    cfg, state = tmp_path / "config", tmp_path / "state"
+    (state / "lore" / "vaults").mkdir(parents=True)
+    write_vault_config(cfg, [("default", "default", roots["default"]), (other, "team", roots[other])])
+    for n, days in (("default", 1), (other, 60)):
+        _stale_put(roots[n], "x", days)
+        side = roots[n] / "task" / "x.json"
+        side.write_text(json.dumps({**json.loads(side.read_text()), "kind": "task",
+                                    "created-at": "2026-01-01T00:00:00Z"}))
+    return SimpleNamespace(roots=roots, cfg=cfg, state=state, other=other)
+
+
+def _shared_stale_lines(w, monkeypatch):
+    out = _stale_run(w, monkeypatch)
+    return [ln for ln in _stale_group(out)[1:-1]]
+
+
+def _run_drop(w, command):
+    argv = shlex.split(command)
+    assert argv[:2] == ["lore", "record"]
+    body = (w.roots[w.other] / "task" / "x.md").read_text()
+    import difflib
+    diff = "".join(difflib.unified_diff(body.splitlines(True), (body + "why\n").splitlines(True),
+                                        "a/x.md", "b/x.md"))
+    return run_cli(argv[1:], vault=w.roots["default"], state_dir=w.state,
+                   stdin_text=diff, env_extra={"XDG_CONFIG_HOME": str(w.cfg)})
+
+
+def _printed_drop_command(line):
+    return re.search(r"`(lore record update [^`]*)`", line).group(1)
+
+
+def test_a_stale_task_shared_with_another_vault_prints_a_drop_command_that_drops_its_own_copy(
+        tmp_path, monkeypatch):
+    w = _two_vault_world(tmp_path)
+    (line,) = _shared_stale_lines(w, monkeypatch)
+    assert "default" in line and "--vault trailhead" in line
+    r = _run_drop(w, _printed_drop_command(line))
+    assert r.returncode == 0, r.stderr
+    status = lambda n: json.loads((w.roots[n] / "task" / "x.json").read_text())["status"]
+    assert (status("trailhead"), status("default")) == ("dropped", "open")
+
+
+def test_a_unique_stale_task_keeps_the_plain_line_and_names_no_vault(world, monkeypatch):
+    _stale_put(world.roots["default"], "y", 60)
+    out = _stale_run(world, monkeypatch)
+    assert _stale_group(out)[1:-1] == ["  default/task/y  2026-09-02  open  last updated 60 days ago"]
+    assert "--vault" not in out
+
+
+@pytest.mark.parametrize("other", ["my vault", "it's"])
+def test_a_vault_name_with_a_space_or_quote_is_printed_quoted_and_the_command_still_works(
+        tmp_path, monkeypatch, other):
+    w = _two_vault_world(tmp_path, other)
+    (line,) = _shared_stale_lines(w, monkeypatch)
+    command = _printed_drop_command(line)
+    assert f"--vault {shlex.quote(other)}" in command
+    assert shlex.split(command)[-1] == other
+    r = _run_drop(w, command)
+    assert r.returncode == 0, r.stderr
+    assert json.loads((w.roots[other] / "task" / "x.json").read_text())["status"] == "dropped"
+
+
+@pytest.mark.parametrize("vault_name,task_name", [("bad\x1bvault", "x"), ("trailhead", "Bad Name")])
+def test_a_name_that_fails_the_shape_check_prints_no_command_only_the_vault_instruction(
+        vault_name, task_name):
+    health = importlib.import_module("lore.cli.health")
+    stale_mod = importlib.import_module("lore.health.stale")
+    f = stale_mod.Finding(vault_name, "task", task_name, "2026-09-01T00:00:00+00:00", "open", 60, False,
+                          duplicated_in=("default",))
+    line = health._stale_line(f)
+    assert "`" not in line and "--status dropped" not in line
+    assert "--vault" in line
+    assert "\x1b" not in line
