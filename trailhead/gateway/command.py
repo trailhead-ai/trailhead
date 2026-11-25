@@ -17,6 +17,12 @@ cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
 unreachable or silent Outpost, a dropped stream and a usage error.
 
+``auth-header`` is the harness's ``headersHelper`` for Outpost's tool server: it prints one JSON
+object, ``{"Authorization": "Bearer <token>"}``, or ``{}`` when the session has no usable
+credential, and always exits 0, so a session with no credential still connects (the tool server
+answers a tool call it cannot authenticate with a 401 that makes the harness run the helper again).
+The reason it printed ``{}`` goes to stderr.
+
 The secret and token are never printed, logged, written, exported or passed to a
 subprocess; an unexpected failure reports its exception type and nothing else.
 """
@@ -443,6 +449,11 @@ def _run_id(text: str) -> int:
     return int(text)
 
 
+def _auth_header(port: int) -> int:
+    print(json.dumps({"Authorization": f"Bearer {gateway_token(port)}"}))
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     shim = state_dir("trailhead") / "bin" / "outpost-gateway"
     parser = argparse.ArgumentParser(
@@ -453,11 +464,13 @@ def _parser() -> argparse.ArgumentParser:
         "  run watch <id> [--exit-status]        follow a run's log (exit: 0 ok, 1 failed or cancelled, 3 not run)\n"
         "  run view <id> [--log]                 show a run, or print its whole log once\n"
         "  run cancel <id>                       cancel a queued or running run\n"
-        "  run list [--json]                     list the workspace's runs\n\n"
+        "  run list [--json]                     list the workspace's runs\n"
+        "  auth-header                           print the tool server's Authorization header as JSON\n\n"
         f"run it as: {shim} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = parser.add_subparsers(dest="group", required=True)
+    sub.add_parser("auth-header", help="print the tool server's Authorization header as JSON")
     run = sub.add_parser("run", help="the workspace's CI runs").add_subparsers(dest="action", required=True)
     start = run.add_parser("start", help="upload the working tree and start a run")
     start.add_argument("job")
@@ -482,6 +495,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) -> int:
+    if args.group == "auth-header":
+        return _auth_header(port)
     if args.action == "start":
         return _run_start(args.job, args.workflow, port, scratch_home)
     if args.action == "watch":
@@ -497,6 +512,7 @@ def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home
     """*scratch_home* is where ``run start`` makes its private upload folder; the default
     is the operator's home from the password database."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
+    helper = args.group == "auth-header"
     try:
         with outpost_http.reach_budget():
             return _dispatch(args, port, scratch_home)
@@ -508,4 +524,7 @@ def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home
         )
     except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
         print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
+    if helper:
+        print("{}")
+        return 0
     return 2

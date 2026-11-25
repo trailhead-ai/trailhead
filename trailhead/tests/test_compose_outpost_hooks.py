@@ -13,7 +13,10 @@ from pathlib import Path
 from trailhead.capabilities import load_manifest
 from trailhead.compose import apply_plan, compose_plan
 from trailhead.install import resolve_cli_tools
+from trailhead.harness.process import format_session_key
 from trailhead.tests._gateway_support import (
+    TOKEN,
+    write_credential,
     await_harness,
     REGISTRATION_AUTHORITY,
     StubOutpost,
@@ -403,4 +406,83 @@ class TestHookWithAShimThatRefusesAtExec:
         }
         log = (state / "gateway" / "register.log").read_text()
         assert log.rstrip("\n").endswith(f" refused_at_exec {line}")
+        assert not marker.exists()
+
+
+def _tool_server_entry(plugin: Path) -> dict:
+    manifest = json.loads((plugin / ".claude-plugin" / "plugin.json").read_text())
+    return manifest["mcpServers"]["outpost"]
+
+
+def _header_helper_command(plugin: Path) -> str:
+    return _tool_server_entry(plugin)["headersHelper"].replace("${CLAUDE_PLUGIN_ROOT}", str(plugin))
+
+
+class TestToolServerEntry:
+    def test_the_entry_addresses_the_tool_server_on_the_daemon_port(self, tmp_path):  # inert-gate: allow seam smoke: the composed plugin is wired to the daemon's tool-server URL
+        from urllib.parse import urlsplit
+
+        from trailhead.launch_profile import BROKER_MCP_PATH
+        from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
+
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        entry = _tool_server_entry(dest)
+        url = urlsplit(entry["url"])
+        assert entry["type"] == "http"
+        assert (url.hostname, url.port, url.path) == (DAEMON_HOST, DAEMON_PORT, BROKER_MCP_PATH)
+
+    def test_a_missing_gateway_shim_prints_an_empty_header_and_exits_0(self, tmp_path):
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        proc = subprocess.run(
+            ["/bin/sh", "-c", _header_helper_command(dest)],
+            capture_output=True, text=True, timeout=30,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "no-state"), "HOME": str(tmp_path)},
+        )
+        assert proc.returncode == 0
+        assert json.loads(proc.stdout) == {}
+
+    def test_after_a_real_install_the_header_helper_prints_the_session_s_token_and_nothing_else(self, tmp_path, monkeypatch):
+        state = tmp_path / "state"
+        outpost_state = tmp_path / "outpost-state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path), "OUTPOST_STATE_DIR": str(outpost_state)}
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        found = []
+        with StubOutpost() as stub:
+            monkeypatch.setattr(
+                "trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", stub.port))
+            )
+            build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=make_trusted_checkout(tmp_path / "checkout"))
+            proc = run_under_harness(
+                make_fake_harness(tmp_path / "fake"),
+                _header_helper_command(dest),
+                env={**env, "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"])},
+                on_start=lambda pid: (
+                    found.append(await_harness(pid)),
+                    write_credential(outpost_state, format_session_key(*found[0])),
+                ),
+                stdin="{}",
+            )
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout) == {"Authorization": f"Bearer {TOKEN}"}
+        assert [q.path for q in stub.requests] == ["/broker/token"]
+
+    def test_a_shim_that_refuses_at_exec_prints_an_empty_header_and_exits_0_without_running_the_swapped_script(self, tmp_path):
+        state = tmp_path / "state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
+        checkout = make_trusted_checkout(tmp_path / "checkout")
+        build_gateway_shims(resolve_cli_tools({"camp": True}), env=env, checkout=checkout)
+        marker = tmp_path / "ran-swapped-script"
+        (checkout / "bin" / "_outpost_gateway.py").write_text(f'print("Bearer stolen")\nopen("{marker}", "w").write("ran")\n')
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        proc = subprocess.run(
+            ["/bin/sh", "-c", _header_helper_command(dest)],
+            capture_output=True, text=True, timeout=60,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)},
+        )
+        assert proc.returncode == 0
+        assert json.loads(proc.stdout) == {}
         assert not marker.exists()

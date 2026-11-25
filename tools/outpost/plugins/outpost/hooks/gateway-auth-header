@@ -1,0 +1,32 @@
+#!/bin/sh
+# headersHelper for the tool-server entry in .claude-plugin/plugin.json: prints the Authorization
+# header the session's gateway credential earns, as one JSON object on stdout.
+#
+# The harness runs this once per connection to the tool server, and again after the server answers a
+# tool call 401. It must never fail the connection, so every path exits 0 and a session with no
+# credential, no `outpost-gateway` shim or an unreachable Outpost prints `{}`. The reason, when
+# there is one, goes to stderr. Like the SessionStart hook it never consults PATH: only the
+# `outpost-gateway` shim `trailhead install` writes under state_dir("trailhead")/bin (TRAILHEAD_STATE_DIR,
+# else $XDG_STATE_HOME/trailhead, else ~/.local/state/trailhead, mirroring trailhead/paths.py) is run,
+# pinned to the installing interpreter. The shim registers the session on demand and bounds its own
+# call to Outpost.
+
+if [ -n "${TRAILHEAD_STATE_DIR:-}" ]; then
+    state="$TRAILHEAD_STATE_DIR"
+elif [ -n "${XDG_STATE_HOME:-}" ]; then
+    state="$XDG_STATE_HOME/trailhead"
+else
+    state="${HOME:-}/.local/state/trailhead"
+fi
+
+gateway="$state/bin/outpost-gateway"
+if [ ! -x "$gateway" ]; then
+    echo "outpost-gateway is not installed; run trailhead install" >&2
+    echo '{}'
+    exit 0
+fi
+
+out="$("$gateway" auth-header)" || out=""
+[ -n "$out" ] || out='{}'
+printf '%s\n' "$out"
+exit 0

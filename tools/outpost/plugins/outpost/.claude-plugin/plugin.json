@@ -1,5 +1,12 @@
 {
   "name": "outpost",
   "version": "0.1.0",
-  "description": "Publish multi-file static sites into a shared lore vault's sites/ tree, so every teammate can view them from their own local Outpost."
+  "description": "Publish multi-file static sites into a shared lore vault's sites/ tree, so every teammate can view them from their own local Outpost.",
+  "mcpServers": {
+    "outpost": {
+      "type": "http",
+      "url": "http://127.0.0.1:7313/broker/mcp",
+      "headersHelper": "\"${CLAUDE_PLUGIN_ROOT}/hooks/gateway-auth-header\""
+    }
+  }
 }
