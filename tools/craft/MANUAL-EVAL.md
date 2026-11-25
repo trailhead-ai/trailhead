@@ -5639,7 +5639,7 @@ under the slimmed rules than under the rules before the move). It lives under
 
 | Case | Arm | Ruleset fingerprint | Runs | Bar |
 |---|---|---|---|---|
-| each of the four scenarios | slimmed | `18f0ea3cf854b52fedff1a21612a98e545093be7` | 4 | slimmed passes at least as many runs as frozen |
+| each of the four scenarios | slimmed | `8dc93a0c3a75dfb510a153f4b3ab4ba9fa4e0234` | 4 | slimmed passes at least as many runs as frozen |
 | each of the four scenarios | frozen | `e27af8bed47cb498974d929470ba588f19f6455f` | 4 | discriminating when it beats none |
 | each of the four scenarios | none | none | 4 | the floor |
 

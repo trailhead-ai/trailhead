@@ -21,7 +21,7 @@ the one place the result is recorded; the manual eval log and the criterion obse
 | `adds-a-cli-flag-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
 | `fixes-a-reported-bug-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
 
-- **Fingerprints.** slimmed `18f0ea3cf854b52fedff1a21612a98e545093be7` (the final text; see Slimmed re-run below); frozen `e27af8bed47cb498974d929470ba588f19f6455f`.
+- **Fingerprints.** slimmed `8dc93a0c3a75dfb510a153f4b3ab4ba9fa4e0234` (the final text; see Slimmed re-run below); frozen `e27af8bed47cb498974d929470ba588f19f6455f`.
 - **How the arms ran.** The batches went through the `portage-eval` shim from a build session. That runs the committed
   push-gate cases in `tools/craft/plugins/craft/evals/`, whose case files `ab.py sync` writes from this experiment.
   For the frozen and none arms, the four case files' `append_system_prompt` was set to the frozen copy's text, or
@@ -59,9 +59,10 @@ the one place the result is recorded; the manual eval log and the criterion obse
   out.
 - **Slimmed re-run.** The whole-change review restored a condition the slimmed fast-suite line had dropped (when
   to inject a collaborator and when a module-path patch is fine), which changed `rules.md` from `40797283…` to
-  `18f0ea3c…`. The slimmed arm was run again on the final text and code (`local-aao0kgjkvarg`,
-  `local-mxbojt4lg0it`): 4/4 on all four scenarios, the same as on the earlier text. The table above is from
-  those runs.
+  `18f0ea3c…` (slimmed re-run `local-aao0kgjkvarg`, `local-mxbojt4lg0it`: 4/4 on all four). The final review round
+  then added the stdlib-import patch caveat to the same line (`8dc93a0c…`) and narrowed the scaffold's interpreter
+  copy. The slimmed arm was run again on that final text and code (`local-w5m7k7kykaw7`, `local-5bnmf4qyd0x0`):
+  4/4 on all four scenarios, the same as on every earlier text. The table above is from those runs.
 - **Evidence.** The three merged result files `eval-arm-compare` read are committed in `results/`
   (`slimmed.json`, `frozen.json`, `none.json`, trimmed to scores, errors and grader verdicts, each run tagged with
   its request id). Re-running the comparison on them reproduces the exit 0.
@@ -73,7 +74,7 @@ the one place the result is recorded; the manual eval log and the criterion obse
 
 | Arm | The ruleset appended to the run's system prompt | Fingerprint (`git hash-object`) |
 |---|---|---|
-| `slimmed` | the live `tools/craft/plugins/craft/rules.md` at run time | `18f0ea3cf854b52fedff1a21612a98e545093be7`, the file the final slimmed batches ran (recorded in the verdict) |
+| `slimmed` | the live `tools/craft/plugins/craft/rules.md` at run time | `8dc93a0c3a75dfb510a153f4b3ab4ba9fa4e0234`, the file the final slimmed batches ran (recorded in the verdict) |
 | `frozen` | `arms/frozen/rules.md`, a byte copy of `rules.md` as it was before the slimming | `e27af8bed47cb498974d929470ba588f19f6455f` |
 | `none` | nothing: the case file sets no prompt | none |
 
