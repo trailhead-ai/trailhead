@@ -5639,7 +5639,7 @@ under the slimmed rules than under the rules before the move). It lives under
 
 | Case | Arm | Ruleset fingerprint | Runs | Bar |
 |---|---|---|---|---|
-| each of the four scenarios | slimmed | `4079728355621e6aceffb7dcfa430e0e2918e643` | 4 | slimmed passes at least as many runs as frozen |
+| each of the four scenarios | slimmed | `18f0ea3cf854b52fedff1a21612a98e545093be7` | 4 | slimmed passes at least as many runs as frozen |
 | each of the four scenarios | frozen | `e27af8bed47cb498974d929470ba588f19f6455f` | 4 | discriminating when it beats none |
 | each of the four scenarios | none | none | 4 | the floor |
 
@@ -5654,7 +5654,10 @@ The per-scenario counts, request ids, the AC61 prompt tuning and the limitations
 - pointers cannot be followed inside a run;
 - the five slimmed sections no scenario measures, deferred as spec follow-up F14;
 - the AC61 prompts were tuned once against the frozen and no-rules arms;
-- traces were deleted by the shim, so grader evidence was read instead.
+- traces were deleted by the shim, so no run was checked for reading the executor's long-form rules or the
+  plugin's root `rules.md`; grader evidence was read instead.
+
+The three merged result files are committed under the experiment's `results/`.
 
 The standing guard is the four committed push-gate cases, which carry the live `rules.md` text at 2 of 3. The AC62
 pair needs `Bash(./run-tests)` in the runner block on main before it can pass at push.

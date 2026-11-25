@@ -21,7 +21,7 @@ the one place the result is recorded; the manual eval log and the criterion obse
 | `adds-a-cli-flag-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
 | `fixes-a-reported-bug-test-first` | AC62 | 4/4 | 4/4 | 0/4 | pass |
 
-- **Fingerprints.** slimmed `4079728355621e6aceffb7dcfa430e0e2918e643`; frozen `e27af8bed47cb498974d929470ba588f19f6455f`.
+- **Fingerprints.** slimmed `18f0ea3cf854b52fedff1a21612a98e545093be7` (the final text; see Slimmed re-run below); frozen `e27af8bed47cb498974d929470ba588f19f6455f`.
 - **How the arms ran.** The batches went through the `portage-eval` shim from a build session. That runs the committed
   push-gate cases in `tools/craft/plugins/craft/evals/`, whose case files `ab.py sync` writes from this experiment.
   For the frozen and none arms, the four case files' `append_system_prompt` was set to the frozen copy's text, or
@@ -42,14 +42,29 @@ the one place the result is recorded; the manual eval log and the criterion obse
   passes a membership or constant check that sits beside a behaviour test. The new prompts were tuned against the
   frozen and none arms only (`local-h2gi2v9joxx5`, `local-tqp0x73qmary`, `local-hvbl6fjymwo5`, `local-wuidcznuzi01`).
   The slimmed arm was then read on them (`local-8dwqakou2p6c`, `local-hgomvcuaalvk`). The slimmed arm had already been
-  read on the first prompts, where it scored 4/4. The AC62 rows come from the first six requests, because those
-  cases did not change. The rules text was not tuned.
+  read on the first prompts, where it scored 4/4. The tuned-prompt requests ran the two AC61 cases only. The frozen
+  and none AC62 rows come from `local-vcs1e0zaictq` and `local-xz7x0icqkagu` (frozen) and `local-ysv698094psi` and
+  `local-lg7fdunl5ph2` (none, the second being the re-run the policy calls for). Those cases did not change. The
+  rules text was not tuned against these scenarios.
 - **Against the predictions.** The AC62 cases discriminated more sharply than predicted. The no-rules arm never
   ran a failing test first. With the plain prompt, the AC61 cases were not the discriminators the predictions
   expected. Only the exporter case discriminated, and only after the prompt asked for the weak test.
-- **Traces.** The shim deletes each run's trace, so no trace was read. Each verdict was checked against its
-  graders' evidence instead: the judge's three votes on the named test file, and the regex matches on
-  `run-tests.log`. This falls short of the plan's trace-reading step.
+- **Traces: not read, and what that leaves open.** The shim deletes each run's trace, so no trace was read, and
+  no run was checked for a Read of `agents/executor.md` or of the plugin's root `rules.md`. Each verdict was
+  checked only against its graders' evidence: the judge's three votes on the named test file, and the regex
+  matches on `run-tests.log`. What that leaves open: a slimmed run, whose `trailhead core show` pointers fail
+  inside a run, could have read the executor's long-form rules from the plugin. Because the arms were run by
+  swapping the committed cases' prompt in place, the plugin's root `rules.md` (the slimmed text) was also
+  readable in the frozen and none arms. Nothing here shows that any run read either file, and nothing rules it
+  out.
+- **Slimmed re-run.** The whole-change review restored a condition the slimmed fast-suite line had dropped (when
+  to inject a collaborator and when a module-path patch is fine), which changed `rules.md` from `40797283…` to
+  `18f0ea3c…`. The slimmed arm was run again on the final text and code (`local-aao0kgjkvarg`,
+  `local-mxbojt4lg0it`): 4/4 on all four scenarios, the same as on the earlier text. The table above is from
+  those runs.
+- **Evidence.** The three merged result files `eval-arm-compare` read are committed in `results/`
+  (`slimmed.json`, `frozen.json`, `none.json`, trimmed to scores, errors and grader verdicts, each run tagged with
+  its request id). Re-running the comparison on them reproduces the exit 0.
 - **Grader proof.** Before any arm was read, the AC61 judge was run on planted files (`local-r37h1wqp2n3l`). The good
   files passed both graders. The bad files, a registry-membership check only and a constant check only, failed the
   judge (FAIL FAIL FAIL) and passed `file_exists`.
@@ -58,7 +73,7 @@ the one place the result is recorded; the manual eval log and the criterion obse
 
 | Arm | The ruleset appended to the run's system prompt | Fingerprint (`git hash-object`) |
 |---|---|---|
-| `slimmed` | the live `tools/craft/plugins/craft/rules.md` at run time | recorded in the verdict, from the file the batch ran. It is not known yet: this file is committed before the rules are slimmed, and the live file still equals the frozen copy until then |
+| `slimmed` | the live `tools/craft/plugins/craft/rules.md` at run time | `18f0ea3cf854b52fedff1a21612a98e545093be7`, the file the final slimmed batches ran (recorded in the verdict) |
 | `frozen` | `arms/frozen/rules.md`, a byte copy of `rules.md` as it was before the slimming | `e27af8bed47cb498974d929470ba588f19f6455f` |
 | `none` | nothing: the case file sets no prompt | none |
 
@@ -196,7 +211,7 @@ and the output directory after the verdict.
   which carries the executor's inline test rules, is present in every arm, `none` included. The agent and skill
   descriptions are always in the child's context in every arm, and that includes the executor's and the
   test-runner's ("writes tests first", "blast radius"). The child has no `Agent` tool, so it never loads the
-  executor's body, but it could still `Read` that file; Task 5's trace review checks each run for a Read of
-  `agents/executor.md` or `rules.md`. These descriptions are identical across arms, so they cannot favour one
+  executor's body, but it could still `Read` that file, or the plugin's root `rules.md`; no run was checked for
+  either (see the verdict's Traces note). These descriptions are identical across arms, so they cannot favour one
   arm over another. They can lower the gap between `none` and `frozen`, and that gap is what makes a scenario
   discriminating. The frozen arm carries no second copy of the doctrine beyond these shared carriers.

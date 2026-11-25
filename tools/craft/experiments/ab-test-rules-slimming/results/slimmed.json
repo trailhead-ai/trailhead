@@ -1,0 +1,427 @@
+{
+ "schemaVersion": 1,
+ "partial": false,
+ "arm": "slimmed",
+ "cases": [
+  {
+   "name": "adds-a-cli-flag-test-first",
+   "arms": {
+    "with": [
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 19,
+      "durationSeconds": 44,
+      "startedAt": "2026-11-25T08:38:45.396Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 14,
+      "durationSeconds": 33,
+      "startedAt": "2026-11-25T08:38:45.398Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 22,
+      "durationSeconds": 49,
+      "startedAt": "2026-11-25T08:44:28.265Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 12,
+      "durationSeconds": 31,
+      "startedAt": "2026-11-25T08:44:28.265Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "fixes-a-reported-bug-test-first",
+   "arms": {
+    "with": [
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 16,
+      "startedAt": "2026-11-25T08:39:30.538Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 15,
+      "startedAt": "2026-11-25T08:39:30.538Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 15,
+      "startedAt": "2026-11-25T08:45:18.424Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 14,
+      "startedAt": "2026-11-25T08:45:18.424Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-failing-run-was-logged-before-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched"
+       },
+       {
+        "name": "a-passing-run-was-logged-after-the-code-changed",
+        "passed": true,
+        "explanation": "matched exit=0 impl=changed"
+       },
+       {
+        "name": "the-failing-run-came-before-the-passing-one",
+        "passed": true,
+        "explanation": "matched exit=[1-9][0-9]* impl=untouched\\n(?:.*\\n)*exit=0 impl=changed"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "tests-a-changed-default-through-what-it-changes",
+   "arms": {
+    "with": [
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 26,
+      "startedAt": "2026-11-25T08:38:14.782Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_retry_limit.py exists as expected"
+       },
+       {
+        "name": "test-runs-a-failing-send-and-asserts-on-what-happened",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 10,
+      "durationSeconds": 29,
+      "startedAt": "2026-11-25T08:38:14.782Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_retry_limit.py exists as expected"
+       },
+       {
+        "name": "test-runs-a-failing-send-and-asserts-on-what-happened",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 9,
+      "durationSeconds": 27,
+      "startedAt": "2026-11-25T08:43:56.902Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_retry_limit.py exists as expected"
+       },
+       {
+        "name": "test-runs-a-failing-send-and-asserts-on-what-happened",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 11,
+      "durationSeconds": 30,
+      "startedAt": "2026-11-25T08:43:56.902Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_retry_limit.py exists as expected"
+       },
+       {
+        "name": "test-runs-a-failing-send-and-asserts-on-what-happened",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "tests-a-registered-exporter-by-running-it",
+   "arms": {
+    "with": [
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 16,
+      "durationSeconds": 34,
+      "startedAt": "2026-11-25T08:37:39.246Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_tsv_export.py exists as expected"
+       },
+       {
+        "name": "test-runs-the-exporter-and-asserts-on-its-output",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 15,
+      "durationSeconds": 30,
+      "startedAt": "2026-11-25T08:37:39.246Z",
+      "request": "local-aao0kgjkvarg",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_tsv_export.py exists as expected"
+       },
+       {
+        "name": "test-runs-the-exporter-and-asserts-on-its-output",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 13,
+      "durationSeconds": 36,
+      "startedAt": "2026-11-25T08:43:20.531Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_tsv_export.py exists as expected"
+       },
+       {
+        "name": "test-runs-the-exporter-and-asserts-on-its-output",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     },
+     {
+      "score": 1,
+      "passed": true,
+      "error": null,
+      "skippedPaidGraders": false,
+      "turns": 7,
+      "durationSeconds": 24,
+      "startedAt": "2026-11-25T08:43:20.531Z",
+      "request": "local-mxbojt4lg0it",
+      "graders": [
+       {
+        "name": "a-new-test-file-was-created",
+        "passed": true,
+        "explanation": "tests/test_tsv_export.py exists as expected"
+       },
+       {
+        "name": "test-runs-the-exporter-and-asserts-on-its-output",
+        "passed": true,
+        "explanation": "judge votes: PASS PASS PASS"
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
