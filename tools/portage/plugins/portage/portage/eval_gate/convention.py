@@ -13,8 +13,10 @@ Rules, by the name each fault carries:
 - ``branch-loads-branch``: a branch file (first line opens "Applies when" or "Applies only when") that branch-loads.
 - ``rule-file-loads``: a file that is neither ``SKILL.md``, an agent nor a branch file, with a load that is not a
   branch load.
-- ``shared-sibling-named``: a file in ``skills/_shared`` naming a sibling ``.md`` file of that directory, by bare
-  filename or any path form, outside a load; fenced code and HTML comments are not read.
+- ``shared-sibling-named``: a file in ``skills/_shared``, at any depth, naming a sibling ``.md`` file of its own
+  directory, by bare filename or any path form, outside a load written with a path; a load that names its
+  sibling by bare filename is the breach (write ``../_shared/<name>``). Fenced code and HTML comments are not
+  read.
 - ``branch-opening``: a branch load whose target does not open "Applies when"; ``branch-loaded-unconditionally``:
   a file that does, read by a non-branch load.
 - ``load-path-unsafe``: an absolute path, a path with a character outside ``[A-Za-z0-9._/-]``, a ``plugins/``
@@ -22,7 +24,8 @@ Rules, by the name each fault carries:
   file's own directory and no other, names no file. ``load-target-not-regular``: it names a symlink, a directory,
   or is reached through a symlinked directory. ``load-target-unreadable``: the file cannot be read.
 - ``core-too-long``: a file holding a branch load that has 500 or more lines.
-- ``unreadable-file``: a file the walk cannot read as UTF-8 text; the check fails closed.
+- ``unreadable-file``: a file the walk cannot read as UTF-8 text, a symlinked ``.md`` file or directory under
+  ``skills`` or ``agents``, or a directory it cannot list; the check fails closed.
 - ``declared-mentions-malformed``, ``declared-mention-stale``, ``declared-mention-also-loaded``: the
   ``<root>/declared-mentions.json`` list (see ``loads.read_declared_mentions``): a malformed list, an entry
   whose file no longer names the path, an entry naming a path the same file loads. A path a file declares there
@@ -58,15 +61,27 @@ class _Faults:
         self.found.append(f"{echo(file, position)}:{line}: {rule}: {detail}{tail}")
 
 
-def _walk(root: Path) -> list[str]:
-    found: list[str] = []
+def _walk(root: Path) -> list[tuple[str, str]]:
+    """``(plugin-relative path, kind)`` for each ``.md`` file under ``skills`` and ``agents`` and for each
+    entry the walk cannot treat as one; ``kind`` is ``file``, ``symlink`` or ``unreadable``."""
+    found: list[tuple[str, str]] = []
+
+    def rel(path: Path) -> str:
+        return path.relative_to(root).as_posix()
+
+    def unreadable(error: OSError) -> None:
+        if isinstance(error, FileNotFoundError):
+            return
+        found.append((rel(Path(error.filename)), "unreadable"))
+
     for top in ("skills", "agents"):
-        for directory, dirs, names in os.walk(root / top):
+        for directory, dirs, names in os.walk(root / top, onerror=unreadable):
             dirs.sort()
+            found.extend((rel(Path(directory) / d), "symlink") for d in dirs if (Path(directory) / d).is_symlink())
             for name in sorted(names):
                 full = Path(directory) / name
-                if name.endswith(".md") and full.is_file() and not full.is_symlink():
-                    found.append(full.relative_to(root).as_posix())
+                if name.endswith(".md"):
+                    found.append((rel(full), "symlink" if full.is_symlink() else "file"))
     return found
 
 
@@ -151,10 +166,10 @@ def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _
         elif load.kind != "branch" and is_branch(body):
             faults.add(file, load.line, "branch-loaded-unconditionally",
                        f"{_q(load.raw, number)} opens 'Applies when' but is loaded unconditionally", BRANCH_LOAD)
-    if str(Path(file).parent) == "skills/_shared":
+    if file.startswith("skills/_shared/"):
         pattern = _sibling_pattern(root, file)
         if pattern is not None:
-            in_load = {n for load in directives.loads if load.kind == "branch"
+            in_load = {n for load in directives.loads if "/" in load.raw
                        for n in range(load.line, load.end_line + 1)}
             for number, line in enumerate(_visible_lines(text), 1):
                 if number in in_load:
@@ -200,8 +215,12 @@ def check_plugin(root: Path) -> list[str]:
         declared = read_declared_mentions(root)
     except LoadError:
         declared = {}
-    for file in _walk(root):
-        _check_file(root, read, file, frozenset(declared.get(file, ())), faults)
+    for file, kind in _walk(root):
+        if kind == "file":
+            _check_file(root, read, file, frozenset(declared.get(file, ())), faults)
+        else:
+            what = "is a symlink or not a regular file" if kind == "symlink" else "could not be read"
+            faults.add(file, 1, "unreadable-file", f"{_q(file, 1)} {what}")
     _check_declared(root, read, faults)
     return faults.found
 

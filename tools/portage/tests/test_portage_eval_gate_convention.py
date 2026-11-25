@@ -192,10 +192,32 @@ class TestSharedFilesStayOneHop:
     def test_a_longer_name_that_embeds_a_sibling_stem_is_not_a_fault(self, tmp_path):
         assert self.shared(tmp_path, "# T\n\nThe `my-slice.md` and `slice.mdx` names.\n") == []
 
-    def test_a_core_naming_its_sibling_through_its_own_branch_load_passes(self, tmp_path):
-        files = {"skills/_shared/core.md": "# C\n\n" + BRANCH.format(p="b.md"),
+    def test_a_core_naming_its_sibling_through_its_own_branch_load_written_from_the_shared_directory_passes(
+        self, tmp_path
+    ):
+        files = {"skills/_shared/core.md": "# C\n\n" + BRANCH.format(p="../_shared/b.md"),
                  "skills/_shared/b.md": OPENING}
         assert faults_of(tmp_path, files) == []
+
+    @pytest.mark.parametrize("load", [
+        "When the run is unattended, read `b.md` now and follow it in full.\n",
+        "Read `b.md` now and follow it in full.\n",
+        "Read `b.md` now.\n\nThen the section on retries.\n",
+    ])
+    def test_a_shared_file_loading_its_sibling_by_bare_name_is_refused_at_the_load_line(self, tmp_path, load):
+        files = {"skills/_shared/core.md": "# C\n\n" + load, "skills/_shared/b.md": OPENING}
+        faults = rule_faults(faults_of(tmp_path, files), "shared-sibling-named")
+        assert [f.split(": ")[0] for f in faults] == ["skills/_shared/core.md:3"]
+
+    def test_a_shared_file_nested_below_the_shared_directory_naming_its_sibling_is_refused(self, tmp_path):
+        files = {"skills/_shared/deep/doc.md": "# T\n\nThe shapes `slice.md` fixes.\n",
+                 "skills/_shared/deep/slice.md": "# S\n\nText.\n"}
+        faults = rule_faults(faults_of(tmp_path, files), "shared-sibling-named")
+        assert [f.split(": ")[0] for f in faults] == ["skills/_shared/deep/doc.md:3"]
+
+    def test_a_file_outside_the_shared_directory_naming_its_sibling_is_not_a_fault(self, tmp_path):
+        files = {"skills/x/doc.md": "# T\n\nThe shapes `slice.md` fixes.\n", "skills/x/slice.md": "# S\n\nText.\n"}
+        assert rule_faults(faults_of(tmp_path, files), "shared-sibling-named") == []
 
     SIBLING_LOAD = {"skills/x/SKILL.md": "# S\n\n" + BRANCH.format(p="../_shared/b.md"),
                     "skills/_shared/b.md": "Applies when the run is unattended.\n\n" + FULL.format(p="r.md"),
@@ -210,7 +232,8 @@ class TestSharedFilesStayOneHop:
         assert faults_of(tmp_path, files) == []
 
     def test_a_core_that_also_names_the_sibling_outside_the_branch_load_is_refused(self, tmp_path):
-        files = {"skills/_shared/core.md": "# C\n\n" + BRANCH.format(p="b.md") + "\nThe shape `b.md` fixes.\n",
+        core = "# C\n\n" + BRANCH.format(p="../_shared/b.md") + "\nThe shape `b.md` fixes.\n"
+        files = {"skills/_shared/core.md": core,
                  "skills/_shared/b.md": OPENING}
         faults = faults_of(tmp_path, files)
         assert [f.split(": ")[0] for f in rule_faults(faults, "shared-sibling-named")] == [
@@ -234,6 +257,40 @@ class TestSharedFilesStayOneHop:
     def test_a_shared_file_that_is_not_utf8_fails_closed(self, tmp_path):
         faults = faults_of(tmp_path, {"skills/_shared/doc.md": b"\xff\xfe\x00 not utf-8"})
         assert [f.split(": ")[0] for f in rule_faults(faults, "unreadable-file")] == ["skills/_shared/doc.md:1"]
+
+
+class TestWalkFailsClosed:
+    def test_a_symlinked_markdown_file_is_a_fault_at_its_own_path(self, tmp_path):
+        root = plugin(tmp_path, {"skills/x/real.md": "A\n"})
+        (root / "skills/x/a.md").symlink_to(root / "skills/x/real.md")
+        faults = rule_faults(check_plugin(root), "unreadable-file")
+        assert [f.split(": ")[0] for f in faults] == ["skills/x/a.md:1"]
+
+    def test_a_symlinked_directory_is_a_fault_at_its_own_path(self, tmp_path):
+        root = plugin(tmp_path, {"elsewhere/a.md": "A\n", "skills/x/real.md": "A\n"})
+        (root / "skills/x/d").symlink_to(root / "elsewhere", target_is_directory=True)
+        faults = rule_faults(check_plugin(root), "unreadable-file")
+        assert [f.split(": ")[0] for f in faults] == ["skills/x/d:1"]
+
+    def test_a_symlinked_markdown_file_under_agents_is_a_fault(self, tmp_path):
+        root = plugin(tmp_path, {"elsewhere/a.md": "A\n", "agents/real.md": "A\n"})
+        (root / "agents/a.md").symlink_to(root / "elsewhere/a.md")
+        faults = rule_faults(check_plugin(root), "unreadable-file")
+        assert [f.split(": ")[0] for f in faults] == ["agents/a.md:1"]
+
+    def test_a_tree_with_no_symlinks_has_no_such_fault(self, tmp_path):
+        assert faults_of(tmp_path, {"skills/x/real.md": "A\n", "agents/b.md": "B\n"}) == []
+
+    def test_an_unreadable_directory_is_a_fault_at_its_own_path(self, tmp_path):
+        if os.name != "posix" or os.geteuid() == 0:
+            pytest.skip("permission bits are not enforced for root or on non-POSIX")
+        root = plugin(tmp_path, {"skills/x/d/a.md": "A\n", "skills/x/real.md": "A\n"})
+        (root / "skills/x/d").chmod(0o000)
+        try:
+            faults = rule_faults(check_plugin(root), "unreadable-file")
+        finally:
+            (root / "skills/x/d").chmod(0o755)
+        assert [f.split(": ")[0] for f in faults] == ["skills/x/d:1"]
 
 
 class TestRuleFilesLoadNothingUnconditionally:
