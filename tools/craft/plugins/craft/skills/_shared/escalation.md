@@ -102,8 +102,10 @@ written until the operator's answer arrives.
 The fixes this trigger offers, in the order the session judges them, are whichever of these apply:
 
 - **Move it to an existing task.** The entry is dropped with a reason that names that task, and the
-  work stays tracked there. Offered once per existing task that credibly holds the work, found with
-  `lore search`.
+  work stays tracked there. Offered once per existing task that credibly holds the work. Find them
+  with two searches: one for the file name in each of the entry's `where` paths, and one for two or
+  three plain words from its title. Read every task either search returns, because a task that holds
+  the work often describes it in other words than the entry does.
 - **Keep it open and stop the loop.** The entry stays open and the ritual takes its early stop; its
   cost is that the spec cannot be reported complete until someone builds or drops the entry.
 - **Drop it with no task to hold it.** The entry is dropped with a reason beginning `nowhere:`; its

@@ -244,7 +244,8 @@ gate below: an unverifiable ledger must refuse this pass before a candidate set 
 it. Build its `--parent-coverage` map from the same done-parent read this reconcile already
 performed: for each linked slice parent read above, key an object on its bare task id (never the
 `task/`-prefixed form) carrying that parent's own `**Covers:**` and `**Partially covers:**` fields
-verbatim, write that JSON object to a temporary file, and pass its path as `--parent-coverage`:
+verbatim, write that JSON object to a temporary file, and pass its path as `--parent-coverage`. A
+spec with no linked slice parent gets the empty object `{}`: the flag is passed on every run:
 
 ```sh
 lore record show spec/<spec-name> | ${CLAUDE_PLUGIN_ROOT}/scripts/ledger_gate.py --parent-coverage <path-to-temp-parent-coverage.json>
@@ -873,11 +874,10 @@ decides anything. Then, in this order:
      anything is written, and end the turn waiting for the answer. The question names the entry by
      id and the slice that did not build it (`task/<id>`), and says that entry is open again and
      every later pass stops at it. Its fixes, the recommended one first, are:
-     - **Drop it, naming where the work went.** Recommended when `lore search` finds an existing
-       task that credibly holds the work, one fix per such task; a search that returns nothing is
-       tried again with fewer, plainer terms before concluding that no task holds it; the drop's
-       `reason` names that `task/<id>`. Its cost: the spec's loop no longer builds the work, which
-       stays tracked only in that task.
+     - **Drop it, naming where the work went.** Recommended when an existing task credibly holds the
+       work, one fix per such task, found with the two searches `escalation.md` gives under "Move it
+       to an existing task"; the drop's `reason` names that `task/<id>`. Its cost: the spec's loop
+       no longer builds the work, which stays tracked only in that task.
      - **Restore it as a new entry.** A drop with a reason beginning `nowhere:` that says it is
        restored, then a `restore` of the same entry, which appends a new open entry under a new id
        that no slice's `**Folds:**` line names, so a later pass can choose it. Its cost: a slice
@@ -919,8 +919,9 @@ decides anything. Then, in this order:
 `parent` is the most recently closed slice parent of this spec on the ledger, the task whose build
 left these entries behind; this pass has no parent of its own yet. `reason` is one line, run through
 the credential-pattern scrub first, that either begins `nowhere:` and says why no task holds the
-work, or names the existing `task/<id>` the work belongs to (find it with `lore search`); the script
-refuses any other reason as `drop-target-missing`. Run it with the document read by redirect:
+work, or names the existing `task/<id>` the work belongs to (find it with the two searches
+`../_shared/escalation.md` gives under "Move it to an existing task"); the script refuses any other
+reason as `drop-target-missing`. Run it with the document read by redirect:
 
    ```sh
    ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py entry --session slice --vault <vault> < <transition-path>
