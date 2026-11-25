@@ -124,7 +124,22 @@ def _known(run: object) -> dict:
         raise _fail(CANNOT_READ)
     if (state == "completed") != (result is not None) or not (reason is None or isinstance(reason, str)):
         raise _fail(CANNOT_READ)
+    cancel_reason = run.get("cancel_reason")
+    if not (cancel_reason is None or isinstance(cancel_reason, str)):
+        raise _fail(CANNOT_READ)
     return run
+
+
+CANCEL_REASONS = {"session_ended": "the session that started it ended"}
+"""What Outpost cancels a run for without its session asking, in words."""
+
+
+def _result_text(run: dict) -> object:
+    """The run's result, with why it was cancelled when Outpost cancelled it for a reason this command knows."""
+    explanation = CANCEL_REASONS.get(run.get("cancel_reason"))
+    if run["result"] == "cancelled" and explanation is not None:
+        return f"cancelled: {explanation}"
+    return run["result"]
 
 
 def _get_view(token: str, run_id: int, port: int) -> dict:
@@ -187,7 +202,7 @@ def _run_view(run_id: int, port: int) -> int:
     _print_fields((
         ("id", run_id),
         ("state", run["state"]),
-        ("result", run["result"]),
+        ("result", _result_text(run)),
         ("reason", run["reason"]),
         ("job", run.get("job")),
         ("workflow", run.get("workflow")),
@@ -270,7 +285,7 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
     if run["state"] != "completed":
         raise _fail(f"the log stream ended before run {run_id} completed")
     if run["result"] == "cancelled":
-        print(f"outpost-gateway: run {run_id} was cancelled", file=sys.stderr)
+        print(f"outpost-gateway: run {run_id} was {_result_text(run)}", file=sys.stderr)
         return 1 if exit_status else 0
     if not exit_status or run["result"] == "success":
         return 0

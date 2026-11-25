@@ -346,7 +346,7 @@ NOT_FOUND = (404, {"reason": "run_not_found", "message": "No run with that id."}
 def view(**over):
     base = {
         "id": 7, "workspace": "trailhead/ws", "workflow": WORKFLOW, "job": "build", "matrix": None,
-        "state": "completed", "result": "success", "reason": None,
+        "state": "completed", "result": "success", "reason": None, "cancel_reason": None,
         "created_at": "2026-11-10T09:00:00Z", "started_at": "2026-11-10T09:00:01Z",
         "finished_at": "2026-11-10T09:00:09Z", "exit_code": 0,
     }
@@ -720,6 +720,25 @@ class TestRunView:
         assert rc == 0
         assert "result:   cancelled" in out.splitlines()
 
+    def test_a_run_cancelled_because_its_session_ended_says_so(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="session_ended")
+        with StubOutpost(view=v) as stub:
+            rc, out, _ = cli(stub.port, "run", "view", "7")
+        assert rc == 0
+        assert "result:   cancelled: the session that started it ended" in out.splitlines()
+
+    def test_a_cancel_reason_it_does_not_know_leaves_the_result_as_plain_cancelled(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="something_new")
+        with StubOutpost(view=v) as stub:
+            _, out, _ = cli(stub.port, "run", "view", "7")
+        assert "result:   cancelled" in out.splitlines()
+
+    def test_a_cancel_reason_that_is_not_text_is_refused(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None, cancel_reason=5)) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "7")
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
     def test_prints_state_result_reason_job_workflow_and_matrix(self, cli):
         v = view(result="failure", reason="no runner", matrix={"os": "linux", "node": "20"}, job="test")
         with StubOutpost(view=v) as stub:
@@ -774,6 +793,17 @@ class TestRunWatchCancelled:
         with StubOutpost(view=view(result="cancelled", exit_code=None), log_steps=["one\n"]) as stub:
             rc, out, err = self._watch(cli, stub)
         assert (rc, out, err) == (0, "one\n", self.CANCELLED)
+
+    def test_a_run_cancelled_because_its_session_ended_says_so_and_still_exits_1(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="session_ended")
+        with StubOutpost(view=v, log_steps=["one\n"]) as stub:
+            rc, out, err = self._watch(cli, stub, "--exit-status")
+        assert (rc, out, err) == (1, "one\n", "outpost-gateway: run 7 was cancelled: the session that started it ended\n")
+
+    def test_a_session_ended_reason_on_a_run_that_was_not_cancelled_is_not_shown(self, cli):
+        with StubOutpost(view=view(result="success", cancel_reason="session_ended"), log_steps=[]) as stub:
+            _, _, err = self._watch(cli, stub)
+        assert "session that started it ended" not in err
 
     @pytest.mark.parametrize("result", ["success", "failure"])
     def test_no_cancelled_line_for_a_run_that_was_not_cancelled(self, result, cli):
