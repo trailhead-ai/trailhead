@@ -387,6 +387,18 @@ class TestTheGitDirIsFoundInTheTree:
         alias.symlink_to(repo)
         assert set(tar_of(alias, home).getnames()) == EXPECTED
 
+    def test_the_opened_top_level_reports_its_real_path_from_a_subfolder(self, repo, home):
+        (repo / "sub").mkdir()
+        with opened(repo / "sub", home) as tree:
+            assert tree.path() == repo.resolve()
+
+    def test_the_opened_top_level_reports_the_real_path_behind_a_symlink(self, repo, tmp_path, home):
+        alias = tmp_path / "alias"
+        alias.symlink_to(repo)
+        with opened(alias, home) as tree:
+            assert tree.path() == repo.resolve()
+            assert tree.path() != alias
+
     def test_a_folder_in_no_repository_is_refused(self, tmp_path, hermetic_git_env, home):
         plain = tmp_path / "plain"
         plain.mkdir()

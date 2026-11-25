@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 
 from ._gateway_e2e_support import (
+    GROUP,
     LATE_FILE,
+    W1,
     READ_CONTROL,
     READ_CONTROL_TEXT,
     DenialFacts,
@@ -27,6 +29,8 @@ from ._gateway_e2e_support import (
     RealOutpost,
     Session,
     check_a_shadowed_gateway_cannot_read_the_credential,
+    check_the_auth_header_helper_prints_no_token,
+    check_the_launched_session_reaches_its_own_workspace_runs,
     check_no_cookie_is_handed_to_a_page_request,
     check_read_is_refused,
     check_the_late_side_file_is_refused,
@@ -284,3 +288,81 @@ def test_a_real_outposts_database_is_found_where_that_outpost_keeps_it(tmp_path)
     (legacy_state / "state.db").write_text("")
     assert RealOutpost(1, folder_state, tmp_path / "log").db_path == folder_state / "db" / "state.db"
     assert RealOutpost(1, legacy_state, tmp_path / "log").db_path == legacy_state / "state.db"
+
+
+def _fake_header_shim(directory: Path, body: str) -> dict[str, str]:
+    directory.mkdir(parents=True, exist_ok=True)
+    shim = directory / "trailhead-gateway-auth-header"
+    shim.write_text(f"#!/bin/sh\n{body}\n")
+    shim.chmod(0o755)
+    return {**os.environ, "PATH": f"{directory}:{os.environ['PATH']}"}
+
+
+@pytest.mark.parametrize(
+    ("shim_body", "passes"),
+    [
+        ("echo '{}'", True),
+        ("echo 'outpost-gateway: no credential' >&2; echo '{}'", True),
+        ("echo '{\"Authorization\": \"Bearer abc.def\"}'", False),
+        ("echo '{}'; echo 'Bearer abc.def'", False),
+        ("exit 0", False),
+    ],
+)
+def test_the_auth_header_probe_runs_the_helper_by_name_and_its_check_passes_only_when_it_prints_an_empty_object(
+    tmp_path, shim_body, passes
+):
+    env = _fake_header_shim(tmp_path / "bin", shim_body)
+    session = _session("auth_header", denial_steps(tmp_path, OTHER, tmp_path, 1)["auth_header"], env=env)
+    if passes:
+        check_the_auth_header_helper_prints_no_token(DenialFacts({}, False), session)
+    else:
+        with pytest.raises(AssertionError):
+            check_the_auth_header_helper_prints_no_token(DenialFacts({}, False), session)
+
+
+def test_the_auth_header_check_proves_nothing_when_the_helper_did_not_run(tmp_path):
+    not_found = "Exit code 127\nsh: trailhead-gateway-auth-header: not found"
+    session = Session({"auth_header": not_found}, 0, Path("/dev/null"))
+    with pytest.raises(AssertionError, match="did not run"):
+        check_the_auth_header_helper_prints_no_token(DenialFacts({}, False), session)
+    with pytest.raises(AssertionError, match="was not run"):
+        check_the_auth_header_helper_prints_no_token(DenialFacts({}, False), Session({}, 0, Path("/dev/null")))
+
+
+@pytest.mark.parametrize(
+    ("out", "passes"),
+    [
+        (f"No runs in workspace {GROUP}/{W1}\n", True),
+        (f"No runs in workspace {GROUP}/{W1}", True),
+        (f"No runs in workspace {GROUP}/ws-two\n", False),
+        (f"No runs in workspace {GROUP}/{W1}-other\n", False),
+        ("Exit code 2\noutpost-gateway: outpost-gateway is running inside the sandbox; run it on its own", False),
+        ("Exit code 1\nBash command permission check failed", False),
+        ("", False),
+    ],
+)
+def test_the_launched_session_gateway_check_passes_only_when_the_shim_answers_for_its_own_workspace(out, passes):
+    session = Session({"gateway_run_list": out}, 0, Path("/dev/null"))
+    if passes:
+        check_the_launched_session_reaches_its_own_workspace_runs(DenialFacts({}, False), session)
+    else:
+        with pytest.raises(AssertionError):
+            check_the_launched_session_reaches_its_own_workspace_runs(DenialFacts({}, False), session)
+
+
+def _launched(tmp_path):
+    state = tmp_path / "outpost-state"
+    workspace = tmp_path / "camp" / "grp" / "worktrees" / "ws1"
+    workspace.mkdir(parents=True)
+    (workspace / "manifest.json").write_text("{}")
+    return launched_session_settings(tmp_path, state, workspace)
+
+
+def test_the_launched_session_settings_let_the_ritual_run_the_pinned_gateway_shim_the_user_excludes(tmp_path):
+    settings = _launched(tmp_path)
+    shim = str(tmp_path / "trailhead-state" / "bin" / "outpost-gateway")
+    header = str(tmp_path / "trailhead-state" / "bin" / "trailhead-gateway-auth-header")
+    assert f"Bash({shim}:*)" in settings["permissions"]["allow"]
+    denied = settings["permissions"]["deny"]
+    assert f"Bash({shim})" not in denied and f"Bash({shim} *)" not in denied
+    assert {f"Bash({header})", f"Bash({header} *)"} <= set(denied)

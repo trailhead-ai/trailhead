@@ -286,6 +286,25 @@ def validate_workspace(
     return real
 
 
+def workspace_containing(
+    directory: str | os.PathLike[str],
+    *,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+) -> Path:
+    """The real path of the camp workspace *directory* is in, or :class:`WorkspaceError`.
+
+    Symlinks in *directory* are resolved first; the workspace is its first three components under camp's
+    state folder, checked as :func:`validate_workspace` checks one. This is the derivation Outpost makes
+    from a session's working folder when it registers the session.
+    """
+    root = Path(os.path.realpath(state_dir("camp", env=env, platform=platform)))
+    real = Path(os.path.realpath(directory))
+    if root not in real.parents:
+        raise WorkspaceError(f"{directory} resolves to {real}, which is outside camp's worktrees root {root}")
+    return validate_workspace(root.joinpath(*real.relative_to(root).parts[:3]), env=env, platform=platform)
+
+
 def _expand_home(value: str, env: dict[str, str] | None) -> str:
     home = (env if env is not None else os.environ).get("HOME", "")
     return home + value[1:] if value == "~" or value.startswith("~/") else value

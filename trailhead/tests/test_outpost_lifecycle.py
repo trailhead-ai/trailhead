@@ -838,6 +838,7 @@ class _TestOutpost:
         self.codes: set[str] = set()
         self.minted = 0
         self.ui_code_status: int | None = None
+        self.ui_code_body: bytes = b""
         outer = self
 
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -860,7 +861,7 @@ class _TestOutpost:
                 body = self.rfile.read(n).decode()
                 if self.path == "/operator/ui-code":
                     if outer.ui_code_status is not None:
-                        return self._send(outer.ui_code_status)
+                        return self._send(outer.ui_code_status, outer.ui_code_body)
                     if self.headers.get("Authorization") != f"Bearer {outer.CREDENTIAL}":
                         return self._send(401)
                     outer.minted += 1
@@ -1014,9 +1015,35 @@ def test_open_against_an_outpost_without_the_code_route_opens_the_bare_ui_url_an
     assert not list((outpost.state_dir / "operator").glob("open-*.html"))
 
 
-@pytest.mark.parametrize("status", [403, 500])
-def test_open_still_fails_on_any_other_refusal_of_the_code_route(outpost, test_outpost, status):
+def test_open_against_an_outpost_that_wants_the_cookie_for_the_code_route_opens_the_bare_ui_url_and_says_so(
+    outpost, test_outpost, capsys
+):
+    test_outpost.ui_code_status = 403
+    test_outpost.ui_code_body = b'{"error":"human_action_requires_cookie"}'
+    opener = _RecordingOpener()
+
+    rc = outpost_lifecycle.open_ui(env=outpost.env, port=test_outpost.port, opener=opener, settle=0)
+
+    out = capsys.readouterr().out.strip().splitlines()
+    assert rc == 0
+    assert opener.args == [(f"http://127.0.0.1:{test_outpost.port}/",)]
+    assert len(out) == 1 and "older" in out[0]
+
+
+@pytest.mark.parametrize(
+    ("status", "body"),
+    [
+        (403, b'{"error":"forbidden"}'),
+        (403, b""),
+        (403, b"not json"),
+        (403, b'{"error":["human_action_requires_cookie"]}'),
+        (500, b'{"error":"human_action_requires_cookie"}'),
+        (500, b""),
+    ],
+)
+def test_open_still_fails_on_any_other_refusal_of_the_code_route(outpost, test_outpost, status, body):
     test_outpost.ui_code_status = status
+    test_outpost.ui_code_body = body
     opener = _RecordingOpener()
 
     with pytest.raises(OutpostLifecycleError, match=f"HTTP {status}"):

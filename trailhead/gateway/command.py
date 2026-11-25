@@ -10,7 +10,8 @@ has one overall budget (``outpost_http.start_reach_budget``), which starts when 
 turns to Outpost, not before it has built what it will send; text from Outpost is stripped of control
 characters before it reaches the terminal.
 
-``run start`` uploads the working tree and prints the new run's id; ``run watch`` follows
+``run start`` uploads the working tree and prints the new run's id, and refuses a tree whose real top level is not
+inside the camp workspace the harness process works in; ``run watch`` follows
 a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
 log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run.
 Exit codes: 0 done, 1 (``watch --exit-status`` only) the job ran and failed or the run was
@@ -42,7 +43,8 @@ from urllib.parse import urlencode
 
 from trailhead.gateway import outpost_http, register, tree_upload
 from trailhead.gateway.private_file import Unsafe, read_private_file
-from trailhead.harness import session_key
+from trailhead.harness import harness_cwd, session_key
+from trailhead.launch_profile import WorkspaceError, workspace_containing
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
@@ -407,9 +409,25 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
     return 3
 
 
+def _session_workspace() -> Path:
+    """The camp workspace the harness this command runs under belongs to, derived from the harness's own working
+    folder as Outpost derives it; no argument, environment variable or working folder of this process names it."""
+    folder = harness_cwd()
+    if folder is None:
+        raise CommandError(SANDBOXED)
+    try:
+        return workspace_containing(folder)
+    except WorkspaceError:
+        raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
+
+
 def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | None) -> int:
     try:
         with tree_upload.top_level(Path(os.curdir), home=scratch_home) as tree:
+            workspace = _session_workspace()
+            top = tree.path()
+            if top != workspace and workspace not in top.parents:
+                raise _fail("the working tree is not inside this session's workspace; nothing was uploaded")
             workflow = workflow or tree_upload.workflow_defining(tree, job)
             spool = tree.spool()
             try:

@@ -417,9 +417,37 @@ def git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+def make_workspace(camp, slug, group="g"):
+    ws = camp / group / "worktrees" / slug
+    ws.mkdir(parents=True)
+    (ws / "manifest.json").write_text("{}")
+    return ws
+
+
+class HarnessFolder:
+    """Where the harness process the command runs under is working: the folder Outpost derives the workspace from."""
+
+    def __init__(self, path):
+        self.path = path
+
+
 @pytest.fixture
-def repo(tmp_path, hermetic_git_env):
-    root = tmp_path / "repo"
+def workspace(tmp_path, monkeypatch):
+    camp = tmp_path / "camp"
+    monkeypatch.setenv("CAMP_STATE_DIR", str(camp))
+    return make_workspace(camp, "ws-a")
+
+
+@pytest.fixture
+def harness_folder(workspace, monkeypatch):
+    folder = HarnessFolder(workspace)
+    monkeypatch.setattr(command, "harness_cwd", lambda: folder.path)
+    return folder
+
+
+@pytest.fixture
+def repo(workspace, hermetic_git_env):
+    root = workspace / "repo"
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / "sub").mkdir()
     (root / WORKFLOW).write_text(CI_YML)
@@ -456,7 +484,7 @@ HARNESS_KEY = "ws-4242-987654"
 
 
 @pytest.fixture
-def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
+def cli(tmp_path, state, scratch_home, harness_folder, monkeypatch, capsys):
     monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
     monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
     write_credential(state, "ws-test-1")
@@ -568,6 +596,80 @@ class TestRunStart:
             names = set(uploaded(stub).getnames())
         assert rc == 0, err
         assert {"tracked.txt", "sub/inner.txt", WORKFLOW} <= names
+
+    def test_a_top_level_that_is_a_symlink_out_of_the_workspace_is_refused_before_anything_is_sent(
+        self, cli, workspace, tmp_path, hermetic_git_env
+    ):
+        denied = tmp_path / "denied-repo"
+        denied.mkdir()
+        (denied / "secret.txt").write_text("secret\n")
+        git(denied, "init", "-q")
+        git(denied, "add", ".")
+        git(denied, "commit", "-q", "-m", "init")
+        (workspace / "link").symlink_to(denied)
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", "--workflow", WORKFLOW, cwd=workspace / "link")
+            assert stub.requests == []
+        assert rc == 2
+        assert out == ""
+        assert err == "outpost-gateway: the working tree is not inside this session's workspace; nothing was uploaded\n"
+
+    def test_a_workspace_whose_name_is_a_prefix_of_the_trees_workspace_does_not_contain_it(
+        self, cli, workspace, tmp_path, hermetic_git_env
+    ):
+        sibling = make_workspace(tmp_path / "camp", "ws-ab")
+        other = sibling / "repo"
+        other.mkdir()
+        git(other, "init", "-q")
+        (other / "f.txt").write_text("f\n")
+        git(other, "add", ".")
+        git(other, "commit", "-q", "-m", "init")
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", "--workflow", WORKFLOW, cwd=other)
+            assert stub.requests == []
+        assert rc == 2
+        assert "not inside this session's workspace" in err
+
+    def test_a_tree_in_the_workspace_reached_through_a_symlink_from_elsewhere_is_uploaded(
+        self, cli, repo, tmp_path
+    ):
+        alias = tmp_path / "alias-into-workspace"
+        alias.symlink_to(repo)
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=alias)
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert "tracked.txt" in names
+
+    def test_a_workspace_that_is_itself_the_repository_is_uploaded(self, cli, workspace, hermetic_git_env):
+        (workspace / ".github" / "workflows").mkdir(parents=True)
+        (workspace / WORKFLOW).write_text(CI_YML)
+        git(workspace, "init", "-q")
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=workspace)
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert WORKFLOW in names
+
+    def test_a_harness_that_is_in_no_camp_workspace_is_told_so_and_nothing_is_sent(
+        self, cli, repo, harness_folder, tmp_path
+    ):
+        harness_folder.path = tmp_path
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert err == f"outpost-gateway: {register.NO_GATEWAY_OUTSIDE_WORKSPACE}\n"
+
+    def test_a_process_with_no_harness_is_told_it_is_in_the_sandbox_and_nothing_is_sent(
+        self, cli, repo, harness_folder
+    ):
+        harness_folder.path = None
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert err == f"{command.SANDBOXED}\n"
 
     def test_outside_a_git_work_tree_it_is_refused_before_anything_is_sent(self, cli, tmp_path):
         bare = tmp_path / "plain"

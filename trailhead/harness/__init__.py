@@ -14,7 +14,7 @@ import os
 
 from trailhead.harness.base import Harness, HarnessError, SessionStart, SessionTranscript
 from trailhead.harness.claude_code import ClaudeCodeHarness, claude_config_file
-from trailhead.harness.process import format_session_key, harness_process, session_key
+from trailhead.harness.process import format_session_key, harness_cwd, harness_process, session_key
 
 __all__ = [
     "Harness",
@@ -24,6 +24,7 @@ __all__ = [
     "ClaudeCodeHarness",
     "claude_config_file",
     "format_session_key",
+    "harness_cwd",
     "harness_process",
     "session_key",
     "canonical_name",

@@ -1249,7 +1249,8 @@ def _gateway_shim_rules(user: _UserSettings, env: dict[str, str]) -> tuple[set[s
     The shim is the session's way to its own workspace's runs and acts only as the session that runs it, so
     its excluded-command entries (the path, and the path with arguments) are returned to be left out of the
     ``Bash()`` denials, with an allow rule for it. The shim that prints the tool server's header is denied,
-    since only the harness has any business running it. All three are empty when the user does not exclude the shim.
+    since only the harness has any business running it. All three are empty when the user does not exclude the shim;
+    a profile with no workspace has no gateway to reach, so the caller does not apply them to it.
     """
     bin_dir = _state_dir("trailhead", env=env) / "bin"
     shim = str(bin_dir / "outpost-gateway")
@@ -2670,7 +2671,9 @@ class ClaudeCodeHarness(Harness):
         write_denied = [Path(os.path.realpath(p)) for p in profile.write_denied]
         deny_write += [str(p) for p in write_denied if str(p) not in deny_write]
 
-        gateway_commands, gateway_allowed, gateway_denied = _gateway_shim_rules(user, source)
+        gateway_commands, gateway_allowed, gateway_denied = (
+            _gateway_shim_rules(user, source) if ROLE_WORKSPACE in profile.paths else (set(), [], [])
+        )
         denied_reads = _profile_denied_reads(profile, config_dir, home)
         # A ritual never prompts, so under dontAsk its file tools write only where an allow rule
         # names: the roots its sandbox already lets Bash write.

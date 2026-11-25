@@ -33,6 +33,7 @@ from trailhead.launch_profile import (
     broker_launch,
     hub_home,
     resolve_profile,
+    workspace_containing,
 )
 from trailhead.ranger import outpost_client
 from trailhead.ranger.config import HubConfig, write_hub_config
@@ -644,11 +645,23 @@ def _gateway_shim(env, name="outpost-gateway") -> str:
     return str(Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / name)
 
 
-def _launched_with_exclusions(env, exclusions):
+def _hub_launched_with_exclusions(env, exclusions):
     settings = _user_allowing_hub(env)
     settings["sandbox"]["excludedCommands"] = exclusions
     _write_user_settings(env, settings)
     return _settings_of(_start(env))
+
+
+def _launched_with_exclusions(env, exclusions):
+    """A ritual (workspace-role) launch under a user who excludes *exclusions* from the sandbox."""
+    _configure_hub(env, "default")
+    ws = _make_workspace(env)
+    Path(env["HOME"], ".claude").mkdir(parents=True, exist_ok=True)
+    _ritual_user(env, ws)
+    user = json.loads((Path(env["HOME"]) / ".claude" / "settings.json").read_text())
+    user["sandbox"]["excludedCommands"] = exclusions
+    _write_user_settings(env, user)
+    return _settings_of(_ritual_start(env, ws))
 
 
 def test_a_launched_profile_does_not_deny_the_pinned_gateway_shim_and_denies_the_other_exclusions(tmp_path):
@@ -687,6 +700,14 @@ def test_a_launched_profile_that_runs_the_gateway_denies_the_header_shim(tmp_pat
     header = _gateway_shim(env, "trailhead-gateway-auth-header")
     start = _launched_with_exclusions(env, [shim, f"{shim} *"])
     assert {f"Bash({header})", f"Bash({header} *)"} <= set(start["permissions"]["deny"])
+
+
+def test_a_hub_launch_keeps_the_pinned_gateway_shim_denied_and_does_not_allow_it(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _hub_launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert {f"Bash({shim})", f"Bash({shim} *)"} <= set(start["permissions"]["deny"])
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
 
 
 @pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
@@ -2671,6 +2692,35 @@ def test_a_symlink_inside_the_root_resolves_to_the_workspace_it_points_at(tmp_pa
     link = _camp_root(env) / "grp" / "worktrees" / "alias"
     link.symlink_to(ws)
     assert _ritual_resolved(env, link).paths["workspace"] == ws
+
+
+def test_the_workspace_containing_a_member_folder_is_the_workspace_not_the_member(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    member = ws / "trailhead" / "sub"
+    member.mkdir(parents=True)
+    assert workspace_containing(member, env=env, platform="linux") == ws
+
+
+def test_the_workspace_containing_a_folder_reached_through_a_symlink_is_where_the_link_leads(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    other = _make_workspace(env, slug="ws2")
+    link = ws / "link"
+    link.symlink_to(other)
+    assert workspace_containing(link, env=env, platform="linux") == other
+
+
+@pytest.mark.parametrize("where", ["outside-root", "root", "group", "no-manifest"])
+def test_a_folder_that_is_in_no_workspace_has_none(tmp_path, where):
+    env, ws = _ritual_ready(tmp_path)
+    folder = {
+        "outside-root": tmp_path / "elsewhere",
+        "root": _camp_root(env),
+        "group": _camp_root(env) / "grp",
+        "no-manifest": _make_workspace(env, slug="bare", manifest=False),
+    }[where]
+    folder.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(WorkspaceError):
+        workspace_containing(folder, env=env, platform="linux")
 
 
 def test_a_workspace_with_no_manifest_is_refused(tmp_path):

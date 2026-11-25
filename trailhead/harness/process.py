@@ -155,3 +155,34 @@ def session_key(**kwargs: object) -> str | None:
     if found is None:
         return None
     return format_session_key(*found)
+
+
+def _read_cwd(pid: int, *, proc_root: Path, system: str | None, runner: Runner | None) -> Path | None:
+    if (system or platform.system()) == "Linux":
+        try:
+            return Path(os.readlink(proc_root / str(pid) / "cwd"))
+        except OSError:
+            return None
+    try:
+        out = (runner or _default_runner)(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
+    except (OSError, subprocess.SubprocessError):
+        return None
+    line = next((ln for ln in out.splitlines() if ln.startswith("n")), None)
+    return Path(line[1:]) if line else None
+
+
+def harness_cwd(
+    *,
+    start_pid: int | None = None,
+    proc_root: Path = Path("/proc"),
+    system: str | None = None,
+    runner: Runner | None = None,
+) -> Path | None:
+    """The working folder of the harness process that owns this one, or ``None``.
+
+    It is the harness's folder, not the caller's: the one Outpost derives the session's workspace from.
+    """
+    found = harness_process(start_pid=start_pid, proc_root=proc_root, system=system, runner=runner)
+    if found is None:
+        return None
+    return _read_cwd(found[0], proc_root=proc_root, system=system, runner=runner)

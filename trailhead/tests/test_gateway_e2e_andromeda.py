@@ -66,6 +66,8 @@ from ._gateway_e2e_support import (
     LateFileActor,
     check_a_shadowed_gateway_cannot_read_the_credential,
     check_no_cookie_is_handed_to_a_page_request,
+    check_the_auth_header_helper_prints_no_token,
+    check_the_launched_session_reaches_its_own_workspace_runs,
     check_read_is_refused,
     check_the_late_side_file_is_refused,
     check_the_read_control_is_readable,
@@ -320,6 +322,8 @@ def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
                 f"127.0.0.1:{outpost.port}"
             )
         steps = denial_steps(outpost.state, other_key, rendezvous, outpost.port)
+        if kind == "launched":
+            steps["gateway_run_list"] = f"{gateway} run list"
         paths = read_tool_paths(outpost.state, other_key, camp.w1)
         session = run_claude_session(
             root,
@@ -347,6 +351,7 @@ BASH_DENIAL_CHECKS = [
     check_the_late_side_file_is_refused,
     check_a_shadowed_gateway_cannot_read_the_credential,
     check_no_cookie_is_handed_to_a_page_request,
+    check_the_auth_header_helper_prints_no_token,
 ]
 READ_TOOL_DENIAL_CHECKS = [
     check_the_read_tool_is_denied(name)
@@ -385,6 +390,11 @@ def test_the_read_tool_reads_a_file_the_hand_started_settings_leave_alone(hand_s
 def test_an_outpost_launched_session_cannot_read_or_run_what_it_must_not_by_shell(check, launched_session):  # AC83
     facts, session, _ = launched_session
     check(facts, session)
+
+
+def test_an_outpost_launched_session_runs_the_gateway_shim_as_itself(launched_session):
+    facts, session, _ = launched_session
+    check_the_launched_session_reaches_its_own_workspace_runs(facts, session)
 
 
 @pytest.mark.parametrize("check", READ_TOOL_DENIAL_CHECKS, ids=lambda c: c.__name__)

@@ -1470,6 +1470,7 @@ def denial_steps(state: Path, other_key: str, rendezvous: Path, port: int) -> di
         "db_read": f'cat "{state}/db/state.db" > /dev/null',
         "late_file": f'python3 "{rendezvous / "late_file_probe.py"}" "{state}/db" "{rendezvous}"',
         "path_shadow": "outpost-gateway run list",
+        "auth_header": "trailhead-gateway-auth-header",
         "cookie_bootstrap": (
             'curl -sS --max-time 10 --noproxy "" --proxy "$HTTP_PROXY" -D - -o /dev/null '
             f"-H 'Accept: text/html' -w 'http=%{{http_code}}\\n' http://127.0.0.1:{port}/"
@@ -1545,6 +1546,24 @@ def check_no_cookie_is_handed_to_a_page_request(facts: DenialFacts, session: Ses
     assert "set-cookie" not in out.lower(), "a page request was handed a cookie"
 
 
+def check_the_auth_header_helper_prints_no_token(facts: DenialFacts, session: Session) -> None:
+    """The tool server's header helper, run by name from the sandboxed shell, cannot read the credential, so it prints
+    the empty object and no ``Bearer`` token."""
+    out = _out(session, "auth_header")
+    assert "Bearer" not in out, f"the header helper printed a token: {out!r}"
+    assert any(line.strip() == "{}" for line in out.splitlines()), (
+        f"the header helper did not run, or did not print an empty object: {out!r}"
+    )
+
+
+def check_the_launched_session_reaches_its_own_workspace_runs(facts: DenialFacts, session: Session) -> None:
+    """The ritual-profile session ran the pinned gateway shim it may run, and Outpost answered for its workspace."""
+    out = _out(session, "gateway_run_list")
+    assert f"No runs in workspace {GROUP}/{W1}" in out.splitlines(), (
+        f"the launched session's gateway shim did not answer for its own workspace: {out!r}"
+    )
+
+
 def read_results(stream_jsonl: str) -> dict[str, tuple[str, bool]]:
     """Map each Read tool call's file path to ``(result text, is_error)``, from ``claude -p --output-format
     stream-json``."""
@@ -1598,7 +1617,9 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
 
     ``ClaudeCodeHarness.session_start`` renders ``RITUAL_PROFILE`` exactly as ``trailhead session-start --role
     ritual`` does for a launch. The fence names a throwaway home, lore, cache and camp state, and Outpost's
-    state is *outpost_state*, so the whole-state-folder deny lands on the temp Outpost under test.
+    state is *outpost_state*, so the whole-state-folder deny lands on the temp Outpost under test. The user
+    excludes the pinned ``outpost-gateway`` shim ``install_shims`` writes under *root* (as the dotfiles do), so the
+    profile's rules for it are the ones the session runs under.
     """
     from trailhead.harness.claude_code import ClaudeCodeHarness
     from trailhead.launch_profile import RITUAL_PROFILE, resolve_profile
@@ -1613,9 +1634,10 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
         "LORE_STATE_DIR": str(fence / "lore-state"),
         "OUTPOST_STATE_DIR": str(outpost_state),
         "CAMP_STATE_DIR": str(workspace.resolve().parents[2]),
-        "TRAILHEAD_STATE_DIR": str(fence / "trailhead-state"),
+        "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
         "PATH": os.environ.get("PATH", ""),
     }
+    shim = str(Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / "outpost-gateway")
     user_settings = Path(env["HOME"]) / ".claude"
     user_settings.mkdir(parents=True, exist_ok=True)
     write_hub_config(HubConfig(name="Hub A", account="a", launch_account="default"), env=env, platform="linux")
@@ -1625,6 +1647,7 @@ def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) 
             {
                 "sandbox": {
                     "enabled": True,
+                    "excludedCommands": ["claude plugin eval *", "portage eval-gate *", shim, f"{shim} *"],
                     "filesystem": {"allowWrite": [".", *(str(p) for p in resolved.writable[1:])]},
                     "network": {"allowedDomains": ["api.anthropic.com"]},
                 }
