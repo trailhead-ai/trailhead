@@ -242,28 +242,32 @@ def _scaffolded(case, tmp_path):
     return plugin, cwd
 
 
-def _standin_python(bin_dir, base_prefix):
-    """A python3 on PATH that reports BASE_PREFIX as its sys.base_prefix and otherwise runs the real one."""
+def _standin_python(bin_dir, base_prefix, real_home):
+    """A python3 on PATH that reports BASE_PREFIX and REAL_HOME for the scaffold's one probe and otherwise runs the real one."""
     bin_dir.mkdir(parents=True)
     stand = bin_dir / "python3"
+    lines = [str(base_prefix)] + ([str(real_home)] if real_home is not None else [])
     stand.write_text(
         f'#!/bin/sh\nif [ "$1" = "-c" ] && case "$2" in *base_prefix*) true;; *) false;; esac; then\n'
-        f'  echo {shlex.quote(str(base_prefix))}; exit 0\nfi\nexec {shlex.quote(sys.executable)} "$@"\n')
+        f'  printf "%s\\n" {" ".join(shlex.quote(x) for x in lines)}; exit 0\nfi\nexec {shlex.quote(sys.executable)} "$@"\n')
     stand.chmod(0o755)
 
 
-def _scaffold_with_base(tmp_path, base_of):
+def _scaffold_with_base(tmp_path, base_of, report_home=True):
+    """HOME is an unrelated directory, as in a run; the operator's real home is `tmp_path/home`, which only the probe reports."""
     home = tmp_path / "home"
     (home / "work").mkdir(parents=True)
     (home / "secret.txt").write_text("hunter2\n")
+    run_home = tmp_path / "runhome"
+    run_home.mkdir()
     (tmp_path / "hom" / "bin").mkdir(parents=True)
     (tmp_path / "hom" / "bin" / "python3").symlink_to(sys.executable)
     base = base_of(home, tmp_path)
-    _standin_python(tmp_path / "bin", base)
+    _standin_python(tmp_path / "bin", base, home if report_home else None)
     plugin = ab.build_arm_plugin("none", ab.CASES[0], tmp_path / "plugin" / "craft")
     cwd = tmp_path / "run"
     cwd.mkdir()
-    env = {"PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "HOME": str(home)}
+    env = {"PATH": f"{tmp_path / 'bin'}:{os.environ['PATH']}", "HOME": str(run_home)}
     done = subprocess.run(
         ["bash", str(plugin / "evals" / EXP.name / ab.CASES[0] / "fixtures" / "scaffold.sh")],
         cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
@@ -287,6 +291,13 @@ def test_scaffold_still_scaffolds_when_the_prefix_is_only_a_string_prefix_of_hom
     done, cwd = _scaffold_with_base(tmp_path, lambda home, tmp: tmp / "hom")
     assert done.returncode == 0, done.stderr
     assert (cwd / "py-home").exists()
+
+
+def test_scaffold_refuses_when_the_real_home_cannot_be_resolved(tmp_path):
+    done, cwd = _scaffold_with_base(tmp_path, lambda home, tmp: home, report_home=False)
+    assert done.returncode != 0
+    assert "home" in done.stderr
+    assert not (cwd / "py-home").exists()
 
 
 def _run_tests(cwd, *args):

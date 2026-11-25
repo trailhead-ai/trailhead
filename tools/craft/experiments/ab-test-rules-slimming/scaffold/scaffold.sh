@@ -19,13 +19,18 @@ esac
 cp -R "$here/trees/$tree/." .
 
 py=$(command -v python3)
-base=$("$py" -c 'import sys; print(sys.base_prefix)')
+# The operator's real home comes from the account database, never from $HOME: a run gives the scaffold a temporary HOME.
+probe=$("$py" -c 'import os, pwd, sys; print(sys.base_prefix); print(pwd.getpwuid(os.getuid()).pw_dir)') || probe=""
+base=$(printf '%s\n' "$probe" | sed -n 1p)
+real_home=$(printf '%s\n' "$probe" | sed -n 2p)
+home_real=""
+[ -n "$real_home" ] && home_real=$(cd -P "$real_home" 2>/dev/null && pwd) || home_real=""
+[ -n "$home_real" ] || { echo "scaffold.sh: refusing to continue: cannot resolve the operator's real home directory" >&2; exit 3; }
+base_real=$(cd -P "$base" 2>/dev/null && pwd) || { echo "scaffold.sh: cannot resolve python's prefix: $base" >&2; exit 3; }
 # A prefix that is the operator's home directory, or holds it, would put the whole home in the run directory.
-if [ -n "${HOME:-}" ] && home_real=$(cd -P "$HOME" 2>/dev/null && pwd) && base_real=$(cd -P "$base" 2>/dev/null && pwd); then
-  case "$home_real/" in
-    "${base_real%/}/"*) echo "scaffold.sh: refusing to expose the home directory: python's prefix is the home directory or one of its ancestors" >&2; exit 3 ;;
-  esac
-fi
+case "$home_real/" in
+  "${base_real%/}/"*) echo "scaffold.sh: refusing to expose the home directory: python's prefix is the home directory or one of its ancestors" >&2; exit 3 ;;
+esac
 # The runner's sandbox hides an interpreter installed under a home directory, so the run carries a copy of it;
 # a system interpreter stays visible and is linked, not copied.
 case "$base" in
