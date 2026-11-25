@@ -32,3 +32,7 @@ Targeted mutation: delete only the stuck-check clause of step 5's guard; `detect
 ## Limitations
 
 One fixture, three runs, one model tier. The bound stops before the new slice's parent task is written, so step 9 is not exercised here (the `--unattended` arm exercises it).
+
+## Deviation from pre-registration (2026-11-25): the bounded-session limit names the new slice
+
+The prompt's limit read "write no parent task for it", meant to stop the run before the next slice's parent is written. On `claude-sonnet-5-5` two runs in three read it as forbidding the close of the stuck slice, which writes that existing parent to `done`, and asked before closing: the prompt, not the procedure under test, decided those runs. The limit now names the new slice and says that what the procedure does before choosing it goes ahead as written. The close is still the procedure's to order; the prompt names no step of it. No grader, fixture or bar changed.
