@@ -124,7 +124,8 @@ of all test time, spread over 499 cheap tests (median 0.1 s, the slowest 5 s), s
 launch real processes and dominate its run time: `chromium` (drives a real headless
 Chromium) and `seam_real` (its subject is a real lore or git process end to end). A default
 run ends with `deselected tiers: ... — run them with <command>`; that line means the green
-result does not cover them, so run the all-tiers command before calling work done. The three
+result does not cover them (it also names `gateway-e2e` until `TRAILHEAD_GATEWAY_E2E=1` is set; that
+host-terminal tier is a collect-time gate, not a marker), so run the all-tiers command before calling work done. The three
 tool configs (`tools/craft`, `tools/lore`, `tools/camp`) carry the same exclusion and register
 the same markers, so a path-scoped run behaves the same way, and `strict_markers` makes a
 misspelled marker a collection error. Mark a new test with `pytestmark = pytest.mark.<tier>`
