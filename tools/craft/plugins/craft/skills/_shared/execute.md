@@ -1800,7 +1800,8 @@ Manual checks confirmed at close: 1 (AC3). Nothing added to your check list.
 
 When some were answered "Not yet", the close writes went through and the report adds this block
 after the line above (if any were confirmed), with the plural count and two lines per criterion, in
-the order the close asked about them:
+the order the close asked about them. Print it as shown, filling in only the angle-bracket parts; do
+not reword it or fold it into the phase lines:
 
 ```
 1 check is waiting on you:
@@ -1822,7 +1823,10 @@ nobody has corrected the drafted lines: it shows each criterion's `check` and `h
 characters stripped from the drafted lines before they are printed, and says the closing session
 drafted them and no one reviewed them. When the caller is the driver the parenthesis reads "not
 asked at close — the driver never stops for a check"; for another caller it ends after "not asked at
-close". Criterion words come from `describe` and are shown as data.
+close". Criterion words come from `describe` and are shown as data. Print the block as shown, every
+line of it, filling in only the angle-bracket parts; do not reword it, shorten it or fold it into
+the phase lines. It is part of the session's final message even when the caller asks only for how
+the phase ended: a summary that names the waiting criteria does not stand in for it.
 
 ```
 Closed task/<parent-name>.
@@ -1851,8 +1855,10 @@ Answering a check from that list arrives with a later command; until then it sta
 A check the operator would have confirmed at close is not confirmed here; it waits on the list like
 the rest. No line of a no-ask report says a check was confirmed, passed or answered, and that
 includes the phase lines: `verify` is reported as the entries being recorded, never as a check
-confirmed. The "left on the task branch" line appears in every no-ask report that got as far as the
-branch, whether the close finished or refused after it.
+confirmed, and the words "confirmed", "passed" and "verified" are not used of a check or of what
+`verify` did (write "the entries for AC2 and AC3 were recorded", not "`verify` confirmed them"). The
+"left on the task branch" line appears in every no-ask report that got as far as the branch, whether
+the close finished or refused after it.
 
 **Measurement tally.** For each correctness Critical/Important finding, record it **cited against
 the specific plan section it was classified under** — not a bare count. Each finding is classified
@@ -2079,10 +2085,12 @@ with the reason it was not built. If the retry is not run, the parent is then `d
 slice pass's `reopen-abandoned` settles the entry: it marks it done when a done child names it and
 returns it to open otherwise. Do not report the entry as settled, and do not retry in a loop.
 
-**The completion report** begins with what needs the operator, and nothing, no summary or preamble,
-comes before it: first the findings a no-one-to-answer build deferred under a trigger, one line each
-with its entry id, then the finding text from every exit `2`, carried as printed, and the
-needs-the-operator block of
+**The completion report** is the session's final message, and it begins with what needs the
+operator: its first line is the first needs-the-operator line, with no status sentence, summary,
+heading or preamble before it, even when the caller asked how far the run got (when nothing needs
+the operator, it begins with what comes next). It holds: first the findings a no-one-to-answer build
+deferred under a trigger, one line each with its entry id, then the finding text from every exit
+`2`, carried as printed, and the needs-the-operator block of
 
 ```
 ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<parent-name>
@@ -2092,7 +2100,10 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/found_work.py report --parent task/<parent-name>
 task/<id>` command for each brainstorm task). The phase lines follow that block, and the report
 closes with the decision sentences the same command prints, which include the entries the final
 sweep marked done or returned to open, or its line saying the build made no decisions about found
-work. Carry the script's output as printed.
+work. Carry the script's output as printed. Those decision sentences are the report's last lines:
+next steps, environment notes and anything else the report says go between the needs-the-operator
+block and them, never after them, and a finding's decision is said there and not also in a phase
+line or a table above.
 
 ## Blocked-Path Write
 
