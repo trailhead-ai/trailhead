@@ -24,14 +24,15 @@ import stat
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest import mock
 
@@ -109,9 +110,15 @@ class RealOutpost:
     state: Path
     log: Path
 
+    @property
+    def db_path(self) -> Path:
+        """Where this Outpost keeps its database: its ``db`` folder, or beside the credential folders for an older one."""
+        folder = self.state / "db" / "state.db"
+        return folder if folder.exists() else self.state / "state.db"
+
     def registry_workspaces(self) -> list[tuple[str, str | None]]:
         """``(session_id, workspace)`` for every live workspace-session client."""
-        db = sqlite3.connect(f"file:{self.state / 'state.db'}?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         try:
             return db.execute(
                 "SELECT session_id, workspace FROM broker_clients "
@@ -125,7 +132,7 @@ class RealOutpost:
 
         The reason is None for a table from before runs could report one.
         """
-        db = sqlite3.connect(f"file:{self.state / 'state.db'}?mode=ro", uri=True)
+        db = sqlite3.connect(f"file:{self.db_path}?mode=ro", uri=True)
         try:
             columns = {row[1] for row in db.execute("PRAGMA table_info(gateway_runs)")}
             reason = "reason" if "reason" in columns else "NULL"
@@ -306,33 +313,31 @@ def render_sandbox_settings(
     return {"sandbox": sandbox, "permissions": {"allow": allow, "deny": deny}}
 
 
-def install_shims(root: Path, outpost: RealOutpost) -> Path:
-    """The bin dir holding an ``outpost-gateway`` aimed at *outpost*.
+def install_shims(root: Path, outpost: RealOutpost, *, port: int | None = None) -> Path:
+    """The bin dir the real ``trailhead install`` writes the gateway shims into, aimed at *outpost*.
 
-    The trailhead state dir is what the real install writes (``build_cli_shims`` with the Outpost
-    tool enabled): the real ``hooks/gateway-register`` finds the ``trailhead-gateway-register`` shim
-    there. Both it and the production gateway command fix Outpost's port, so the registration shim
-    is pinned to ``register_port_interpreter`` and the gateway command is this test's own wrapper
-    around ``main(port=...)``.
+    ``build_cli_shims`` with the Outpost tool enabled writes the pinned ``outpost-gateway`` and
+    ``trailhead-gateway-register`` shims into a temp trailhead state folder, from a trusted copy of the
+    trailhead checkout, with the state folders baked in (so Outpost's state is ``outpost.state``, as the real
+    install bakes the operator's). The shims run the real gateway command and the real hook's registration
+    step. Both fix Outpost's port, so the shims are pinned to ``register_port_interpreter``, a stand-in that
+    aims them at *port* (Outpost's, unless a ``TokenRecorder`` stands in front of it); nothing else about them
+    is replaced.
     """
-    env = {"TRAILHEAD_STATE_DIR": str(root / "trailhead-state"), "HOME": str(root / "outpost-home")}
-    with mock.patch("trailhead.pathint.sys.executable", str(register_port_interpreter(root / "interp", outpost.port))):
-        build_gateway_shims(
+    env = {
+        "TRAILHEAD_STATE_DIR": str(root / "trailhead-state"),
+        "OUTPOST_STATE_DIR": str(outpost.state),
+        "HOME": str(root / "outpost-home"),
+    }
+    checkout = trailhead_checkout()
+    interpreter = register_port_interpreter(root / "interp", port or outpost.port, checkout)
+    with mock.patch("trailhead.pathint.sys.executable", str(interpreter)):
+        shim_dir = build_gateway_shims(
             resolve_cli_tools({"camp": True, "lore": True, "portage": True}),
             env=env,
-            checkout=make_trusted_checkout(root / "trusted-checkout"),
+            checkout=make_trusted_checkout(root / "trusted-checkout", checkout),
         )
-    bin_dir = root / "shims"
-    bin_dir.mkdir()
-    gateway = bin_dir / "outpost-gateway"
-    gateway.write_text(
-        "#!/bin/sh\n"
-        f'PYTHONPATH="{trailhead_checkout()}" exec "{sys.executable}" -c '
-        "'import sys; from trailhead.gateway.command import main; "
-        f'sys.exit(main(sys.argv[1:], port={outpost.port}))\' "$@"\n'
-    )
-    gateway.chmod(0o755)
-    return bin_dir
+    return shim_dir
 
 
 def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dict[str, str]:
@@ -353,13 +358,20 @@ def sandbox_steps(state: Path, port: int, other_port: int, gateway: Path) -> dic
     }
 
 
-def session_prompt(steps: dict[str, str]) -> str:
+def session_prompt(steps: dict[str, str], read_paths: dict[str, str] | None = None) -> str:
     numbered = "\n".join(f"{i}. {cmd}" for i, cmd in enumerate(steps.values(), 1))
+    reads = ""
+    if read_paths:
+        listed = "\n".join(f"- {path}" for path in read_paths.values())
+        reads = (
+            "\nThen use the Read tool (never Bash) on each of these file paths, one Read call each, in order, "
+            f"and do not retry or work around a refusal:\n{listed}\n"
+        )
     return (
         "You are running a scripted sandbox probe. Run each numbered Bash command below EXACTLY as written, "
         "one Bash tool call per item, in order. Do not modify, combine, retry or work around any command, "
-        "never ask to run anything outside the sandbox, and do not investigate failures. When done, reply "
-        f"with the single word done.\n\n{numbered}\n"
+        "never ask to run anything outside the sandbox, and do not investigate failures. "
+        f"When done, reply with the single word done.\n\n{numbered}\n{reads}"
     )
 
 
@@ -398,6 +410,7 @@ class Session:
     outputs: dict[str, str]
     exit_code: int
     stream: Path
+    reads: dict[str, tuple[str, bool]] = field(default_factory=dict)  # Read tool: path -> (result, is_error)
 
 
 def run_claude_session(
@@ -411,8 +424,15 @@ def run_claude_session(
     shim_bin: Path,
     with_hook: bool,
     timeout: int = SESSION_TIMEOUT_SECONDS,
+    read_paths: dict[str, str] | None = None,
+    extra_path: Path | None = None,
+    during: Callable[[], None] | None = None,
 ) -> Session:
-    """One real ``claude -p`` session in *cwd*, its Bash sandboxed by *settings*; waits for the process to exit."""
+    """One real ``claude -p`` session in *cwd*, its Bash sandboxed by *settings*; waits for the process to exit.
+
+    *read_paths* adds Read-tool calls after the Bash steps. *extra_path* goes first on the session's PATH
+    (a directory a session could have put a script in). *during* runs on a thread beside the session.
+    """
     if shutil.which("claude") is None:
         raise AssertionError("claude is not on PATH")
     settings_file = root / f"settings-{label}.json"
@@ -432,9 +452,13 @@ def run_claude_session(
     ]
     if with_hook:
         cmd += ["--plugin-dir", str(PLUGIN_DIR)]
-    cmd.append(session_prompt(steps))
+    cmd.append(session_prompt(steps, read_paths))
     stream = root / f"session-{label}.jsonl"
-    session_env = {**env, "PATH": f"{shim_bin}{os.pathsep}{env['PATH']}"}
+    front = os.pathsep.join(str(p) for p in (extra_path, shim_bin) if p is not None)
+    session_env = {**env, "PATH": f"{front}{os.pathsep}{env['PATH']}"}
+    helper = threading.Thread(target=during, daemon=True) if during is not None else None
+    if helper is not None:
+        helper.start()
     with stream.open("w") as out:
         done = subprocess.run(
             cmd,
@@ -445,8 +469,11 @@ def run_claude_session(
             text=True,
             timeout=timeout,
         )
-    results = tool_results(stream.read_text())
-    return Session({name: results[cmd] for name, cmd in steps.items() if cmd in results}, done.returncode, stream)
+    text = stream.read_text()
+    results = tool_results(text)
+    return Session(
+        {name: results[cmd] for name, cmd in steps.items() if cmd in results}, done.returncode, stream, read_results(text)
+    )
 
 
 @dataclass(frozen=True)
@@ -1194,3 +1221,403 @@ def check_container_inspect(inspect: dict, secrets: list[str]) -> list[str]:
         elif any(x and x in value for x in secrets):
             problems.append(f"{name} holds a secret Outpost minted")
     return problems
+
+
+# --- the credential scan ----------------------------------------------------------------------------
+#
+# A problem names the secret by its label and where it was seen, never by its value, so a failing
+# run does not print the credential it is reporting.
+
+
+def process_arguments(proc: Path = Path("/proc")) -> list[tuple[int, list[str]]]:
+    """``(pid, argv)`` of every process whose command line can be read now."""
+    found = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if raw:
+            found.append((int(entry.name), raw.decode(errors="replace").split("\0")[:-1]))
+    return found
+
+
+def arguments_with_secrets(secrets: dict[str, str], snapshots: list[tuple[int, list[str]]]) -> list[str]:
+    """One problem per ``(label, program, pid)`` whose arguments carry a secret's bytes."""
+    problems: dict[tuple[str, str, int], str] = {}
+    for pid, argv in snapshots:
+        for label, secret in secrets.items():
+            if secret and any(secret in arg for arg in argv):
+                program = os.path.basename(argv[0]) if argv else "?"
+                problems[(label, program, pid)] = f"{label} is in the arguments of {program} (pid {pid})"
+    return list(problems.values())
+
+
+def secrets_in_text(secrets: dict[str, str], sources: dict[str, str]) -> list[str]:
+    return [
+        f"{label} is in the {source}"
+        for source, text in sources.items()
+        for label, secret in secrets.items()
+        if secret and secret in text
+    ]
+
+
+class ArgumentSampler:
+    """Reads every process's arguments every *interval* seconds while it is open, and keeps what it saw."""
+
+    def __init__(self, interval: float = 0.02, proc: Path = Path("/proc")) -> None:
+        self.interval = interval
+        self.proc = proc
+        self.snapshots: list[tuple[int, list[str]]] = []
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            self.snapshots.extend(process_arguments(self.proc))
+            self._stop.wait(self.interval)
+
+    def __enter__(self) -> ArgumentSampler:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._stop.set()
+        self._thread.join(timeout=10)
+        self.snapshots.extend(process_arguments(self.proc))
+
+    def problems(self, secrets: dict[str, str]) -> list[str]:
+        return arguments_with_secrets(secrets, self.snapshots)
+
+
+_BEARER = re.compile(rb"[Aa]uthorization:\s*Bearer\s+([A-Za-z0-9._~+/=-]+)")
+_ACCESS_TOKEN = re.compile(rb'"access_token"\s*:\s*"([^"]+)"')
+
+
+class TokenRecorder:
+    """A loopback relay to Outpost that learns every access token the gateway command sends or is given.
+
+    The tokens live only in the command's memory and Outpost stores their hash, so the one place they can be
+    read to be looked for elsewhere is the wire. Aim the command at ``port`` (the test's stand-in interpreter
+    does) and ``tokens`` holds each ``Authorization: Bearer`` value and each ``access_token`` answer.
+    """
+
+    def __init__(self, target_port: int) -> None:
+        self.target_port = target_port
+        self.tokens: set[str] = set()
+        self._server = socket.socket()
+        self._server.bind(("127.0.0.1", 0))
+        self._server.listen(32)
+        self.port = self._server.getsockname()[1]
+        self._open: list[socket.socket] = []
+        self._thread = threading.Thread(target=self._accept, daemon=True)
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                client, _ = self._server.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._relay, args=(client,), daemon=True).start()
+
+    def _relay(self, client: socket.socket) -> None:
+        try:
+            upstream = socket.create_connection(("127.0.0.1", self.target_port), timeout=30)
+        except OSError:
+            client.close()
+            return
+        self._open += [client, upstream]
+        threading.Thread(target=self._pump, args=(client, upstream, _BEARER), daemon=True).start()
+        self._pump(upstream, client, _ACCESS_TOKEN)
+
+    def _pump(self, source: socket.socket, sink: socket.socket, pattern: re.Pattern[bytes]) -> None:
+        tail = b""
+        try:
+            while chunk := source.recv(65536):
+                window = tail + chunk
+                self.tokens.update(m.decode() for m in pattern.findall(window))
+                tail = window[-512:]
+                sink.sendall(chunk)
+        except OSError:
+            pass
+        finally:
+            for sock in (source, sink):
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def __enter__(self) -> TokenRecorder:
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self._server.close()
+        for sock in self._open:
+            sock.close()
+
+
+def known_secrets(outpost: RealOutpost, tokens: set[str]) -> dict[str, str]:
+    """Every secret this Outpost has handed out, labelled: client secrets, the registration authority, the operator credential, tokens."""
+    found: dict[str, str] = {}
+    for n, path in enumerate(outpost.credential_files(), 1):
+        found[f"client secret ({n})"] = json.loads(path.read_text())["client_secret"]
+    for label, name in (("registration authority", "registration"), ("operator credential", "operator")):
+        path = outpost.state / name / "credential"
+        if path.exists():
+            found[label] = path.read_text().strip()
+    for n, token in enumerate(sorted(tokens), 1):
+        found[f"access token ({n})"] = token
+    return found
+
+
+def outpost_request_records(outpost: RealOutpost) -> dict[str, str]:
+    """What Outpost keeps of the requests it served: every timeline event row, and its log."""
+    db = sqlite3.connect(f"file:{outpost.db_path}?mode=ro", uri=True)
+    try:
+        rows = db.execute("SELECT * FROM timeline_events ORDER BY id").fetchall()
+    finally:
+        db.close()
+    return {"timeline events": "\n".join(" | ".join(map(str, row)) for row in rows), "Outpost's log": outpost.log.read_text()}
+
+
+def stored_run_logs(runs_folder: Path) -> dict[str, str]:
+    """A run's stored log is ``<copy>.log`` in the runs folder; each, by its copy name."""
+    return {f"run log {path.stem}": path.read_text(errors="replace") for path in sorted(runs_folder.glob("*.log"))}
+
+
+# --- the denial probes: what a sandboxed session must not read, run, or be handed ----------------------
+
+LATE_FILE = "late.db-wal"
+READ_CONTROL = "read-control.txt"
+READ_CONTROL_TEXT = "READ-CONTROL-OK"
+
+# Run by one sandboxed Bash call. It reports it is up, waits for the test to create LATE_FILE in the database
+# folder after that (the way SQLite makes a -wal after a command has started), and then tries to read it.
+_LATE_FILE_PROBE = """\
+import os, sys, time
+folder, rendezvous = sys.argv[1], sys.argv[2]
+open(os.path.join(rendezvous, "ready"), "w").close()
+deadline = time.time() + 120
+while not os.path.exists(os.path.join(rendezvous, "go")) and time.time() < deadline:
+    time.sleep(0.05)
+try:
+    with open(os.path.join(folder, "%s"), "rb") as f:
+        f.read(1)
+    print("late_file=readable")
+except OSError as err:
+    print("late_file=refused:" + (err.strerror or "?"))
+try:
+    print("listing=" + ",".join(sorted(os.listdir(folder))))
+except OSError as err:
+    print("listing=refused:" + (err.strerror or "?"))
+""" % LATE_FILE
+
+
+def write_late_file_probe(rendezvous: Path) -> Path:
+    rendezvous.mkdir(parents=True, exist_ok=True)
+    script = rendezvous / "late_file_probe.py"
+    script.write_text(_LATE_FILE_PROBE)
+    return script
+
+
+class LateFileActor:
+    """Run beside a sandboxed session: when the probe says it is up, create ``LATE_FILE`` in *db_dir*, then say go."""
+
+    def __init__(self, db_dir: Path, rendezvous: Path, timeout: float = 300) -> None:
+        self.db_dir, self.rendezvous, self.timeout = db_dir, rendezvous, timeout
+        self.created = False
+
+    def __call__(self) -> None:
+        deadline = time.monotonic() + self.timeout
+        while not (self.rendezvous / "ready").exists():
+            if time.monotonic() > deadline:
+                return
+            time.sleep(0.05)
+        (self.db_dir / LATE_FILE).write_bytes(b"LATE-WAL-BYTES")
+        self.created = True
+        (self.rendezvous / "go").write_text("")
+
+
+def write_path_shadow(directory: Path, state: Path) -> Path:
+    """A script named ``outpost-gateway`` that, if it ever runs outside the sandbox, can read the credential."""
+    directory.mkdir(parents=True, exist_ok=True)
+    shadow = directory / "outpost-gateway"
+    shadow.write_text(
+        "#!/bin/sh\necho shadow-ran\n"
+        f'if cat "{state}"/sessions/*/gateway-client.json > /dev/null 2>&1; then echo credential=readable; '
+        "else echo credential=refused; fi\n"
+    )
+    shadow.chmod(0o755)
+    return shadow
+
+
+def denial_steps(state: Path, other_key: str, rendezvous: Path, port: int) -> dict[str, str]:
+    """The Bash commands that probe what a session must not reach, one tool call each, none printing a credential."""
+    return {
+        "operator_read": f'cat "{state}/operator/credential" > /dev/null',
+        "registration_read": f'cat "{state}/registration/credential" > /dev/null',
+        "other_session_read": f'cat "{state}/sessions/{other_key}/gateway-client.json" > /dev/null',
+        "db_read": f'cat "{state}/db/state.db" > /dev/null',
+        "late_file": f'python3 "{rendezvous / "late_file_probe.py"}" "{state}/db" "{rendezvous}"',
+        "path_shadow": "outpost-gateway run list",
+        "cookie_bootstrap": (
+            'curl -sS --max-time 10 --noproxy "" --proxy "$HTTP_PROXY" -D - -o /dev/null '
+            f"-H 'Accept: text/html' -w 'http=%{{http_code}}\\n' http://127.0.0.1:{port}/"
+        ),
+    }
+
+
+def read_tool_paths(state: Path, other_key: str, control_dir: Path) -> dict[str, str]:
+    """What the Read tool is asked for: the denied files, and a control in the session's own directory."""
+    return {
+        "operator_credential": f"{state}/operator/credential",
+        "registration_authority": f"{state}/registration/credential",
+        "other_session_credential": f"{state}/sessions/{other_key}/gateway-client.json",
+        "database": f"{state}/db/state.db",
+        "control": f"{control_dir}/{READ_CONTROL}",
+    }
+
+
+@dataclass(frozen=True)
+class DenialFacts:
+    """What exists outside the sandbox, so a refusal inside it proves something; and whether the late file was made."""
+
+    exists: dict[str, bool]
+    late_file_created: bool
+
+
+def denial_facts(state: Path, other_key: str, actor: LateFileActor) -> DenialFacts:
+    return DenialFacts(
+        {
+            "operator_read": (state / "operator" / "credential").is_file(),
+            "registration_read": (state / "registration" / "credential").is_file(),
+            "other_session_read": (state / "sessions" / other_key / "gateway-client.json").is_file(),
+            "db_read": (state / "db" / "state.db").is_file(),
+        },
+        actor.created,
+    )
+
+
+def check_read_is_refused(step: str):
+    """A check that the sandboxed read named *step* failed as the sandbox's mask makes a read fail: the file is absent."""
+
+    def check(facts: DenialFacts, session: Session) -> None:
+        assert facts.exists.get(step), f"{step}: the file does not exist outside the sandbox, so a refusal proves nothing"
+        out = _out(session, step)
+        assert out.startswith("Exit code") and "No such file or directory" in out, f"{step}: the read was not refused: {out!r}"
+
+    check.__name__ = f"check_{step}_is_refused"
+    return check
+
+
+def check_the_late_side_file_is_refused(facts: DenialFacts, session: Session) -> None:
+    assert facts.late_file_created, "the late side file was never created, so a refusal proves nothing"
+    out = _out(session, "late_file")
+    assert "late_file=refused" in out and "late_file=readable" not in out, f"the late file was not refused: {out!r}"
+    assert "listing=refused" in out, f"the database folder could be listed: {out!r}"
+
+
+def check_a_shadowed_gateway_cannot_read_the_credential(facts: DenialFacts, session: Session) -> None:
+    out = _out(session, "path_shadow")
+    assert "shadow-ran" in out, f"the shadowing script did not run, so nothing was proven: {out!r}"
+    assert "credential=readable" not in out, f"the shadowing script read the credential: {out!r}"
+    assert "credential=refused" in out, f"the shadowing script did not report its read: {out!r}"
+
+
+def check_no_cookie_is_handed_to_a_page_request(facts: DenialFacts, session: Session) -> None:
+    out = _out(session, "cookie_bootstrap")
+    assert "http=" in out, f"the page request did not complete: {out!r}"
+    assert "set-cookie" not in out.lower(), "a page request was handed a cookie"
+
+
+def read_results(stream_jsonl: str) -> dict[str, tuple[str, bool]]:
+    """Map each Read tool call's file path to ``(result text, is_error)``, from ``claude -p --output-format stream-json``."""
+    paths: dict[str, str] = {}
+    results: dict[str, tuple[str, bool]] = {}
+    for line in stream_jsonl.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if block.get("type") == "tool_use" and block.get("name") == "Read":
+                paths[block["id"]] = block["input"].get("file_path", "")
+            elif block.get("type") == "tool_result":
+                body = block.get("content")
+                if isinstance(body, list):
+                    body = "".join(part.get("text", "") for part in body if isinstance(part, dict))
+                results[block["tool_use_id"]] = (body if isinstance(body, str) else "", bool(block.get("is_error")))
+    return {paths[i]: result for i, result in results.items() if i in paths}
+
+
+def check_the_read_tool_is_denied(name: str):
+    def check(results: dict[str, tuple[str, bool]], paths: dict[str, str]) -> None:
+        path = paths[name]
+        assert path in results, f"{name}: the Read tool was not asked for {path}"
+        text, is_error = results[path]
+        assert is_error or "denied" in text.lower(), f"{name}: the file was read: {text[:80]!r}"
+        assert "denied by your permission settings" in text, f"{name}: refused, but not by a permission denial: {text!r}"
+
+    check.__name__ = f"check_the_read_tool_is_denied_{name}"
+    return check
+
+
+def check_the_read_control_is_readable(results: dict[str, tuple[str, bool]], paths: dict[str, str]) -> None:
+    path = paths["control"]
+    assert path in results, f"the Read tool was not asked for the control {path}"
+    text, is_error = results[path]
+    assert not is_error and READ_CONTROL_TEXT in text, (
+        f"the control file could not be read ({text[:80]!r}), so a denial of the others may be a missing grant"
+    )
+
+
+def launched_session_settings(root: Path, outpost_state: Path, workspace: Path) -> dict:
+    """The settings Outpost's drive launches a ritual session under, for *workspace*, from the real launch profile.
+
+    ``ClaudeCodeHarness.session_start`` renders ``RITUAL_PROFILE`` exactly as ``trailhead session-start --role
+    ritual`` does for a launch. The fence names a throwaway home, lore, cache and camp state, and Outpost's
+    state is *outpost_state*, so the whole-state-folder deny lands on the temp Outpost under test.
+    """
+    from trailhead.harness.claude_code import ClaudeCodeHarness
+    from trailhead.launch_profile import RITUAL_PROFILE, resolve_profile
+    from trailhead.ranger.config import HubConfig, write_hub_config
+
+    fence = root.resolve() / "launch-fence"
+    env = {
+        "HOME": str(fence / "home"),
+        "XDG_CONFIG_HOME": str(fence / "config"),
+        "XDG_STATE_HOME": str(fence / "state"),
+        "XDG_CACHE_HOME": str(fence / "cache"),
+        "LORE_STATE_DIR": str(fence / "lore-state"),
+        "OUTPOST_STATE_DIR": str(outpost_state),
+        "CAMP_STATE_DIR": str(workspace.resolve().parents[2]),
+        "TRAILHEAD_STATE_DIR": str(fence / "trailhead-state"),
+        "PATH": os.environ.get("PATH", ""),
+    }
+    user_settings = Path(env["HOME"]) / ".claude"
+    user_settings.mkdir(parents=True, exist_ok=True)
+    write_hub_config(HubConfig(name="Hub A", account="a", launch_account="default"), env=env, platform="linux")
+    resolved = resolve_profile(RITUAL_PROFILE, "a", env=env, platform="linux", workspace=str(workspace.resolve()))
+    (user_settings / "settings.json").write_text(
+        json.dumps(
+            {
+                "sandbox": {
+                    "enabled": True,
+                    "filesystem": {"allowWrite": [".", *(str(p) for p in resolved.writable[1:])]},
+                    "network": {"allowedDomains": ["api.anthropic.com"]},
+                }
+            }
+        )
+    )
+    start = ClaudeCodeHarness().session_start(
+        resolved, workspace.resolve(), None, interactive=False, account=None, env=env, platform="linux",
+        session_dir=outpost_state.resolve() / "sessions" / "launch-probe",
+    )
+    return json.loads(start.argv[start.argv.index("--settings") + 1])

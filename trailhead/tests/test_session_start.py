@@ -1641,7 +1641,8 @@ def test_the_denied_reads_cover_the_database_and_session_credentials_and_follow_
         settings = _settings_of(_start(env))
         denied = settings["sandbox"]["filesystem"]["denyRead"]
         base = Path(env["OUTPOST_STATE_DIR"])
-        assert _covered_by(denied, base / "state.db")
+        assert _covered_by(denied, base / "db" / "state.db")
+        assert _covered_by(denied, base / "db" / "late.db-wal")
         assert _covered_by(denied, base / "sessions" / "s1" / "broker-client.json")
         assert _covered_by(denied, base / "operator" / "credential")
         assert all(Path(d) == base for d in denied)
@@ -3046,3 +3047,36 @@ def test_setup_sandbox_only_still_equals_the_full_ritual_sections_with_the_crede
     assert only == full
     assert str(Path(env["HOME"]).resolve() / ".ssh") in only["denied_reads"]
 
+
+
+def _launched_deny_sets(env, ws):
+    settings = _settings_of(_ritual_start(env, ws))
+    return settings["sandbox"]["filesystem"]["denyRead"], settings["permissions"].get("deny", [])
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "operator/credential",
+        "registration/credential",
+        "sessions/ws-4242-99/gateway-client.json",
+        "db/state.db",
+        "db/late.db-wal",
+    ],
+)
+def test_an_outpost_launched_sessions_settings_deny_the_credentials_and_the_database_to_the_sandbox(tmp_path, rel):  # AC83
+    env, ws = _ritual_ready(tmp_path)
+    denied, _ = _launched_deny_sets(env, ws)
+    assert _covered_by(denied, Path(env["OUTPOST_STATE_DIR"]).resolve() / rel)
+
+
+def test_an_outpost_launched_sessions_settings_do_not_deny_what_it_still_has_to_read(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    denied, _ = _launched_deny_sets(env, ws)
+    assert not _covered_by(denied, ws / "read-control.txt")
+
+
+def test_an_outpost_launched_sessions_settings_deny_the_whole_state_folder_to_the_read_tool_too(tmp_path):  # AC83
+    env, ws = _ritual_ready(tmp_path)
+    _, rules = _launched_deny_sets(env, ws)
+    assert f"Read(/{Path(env['OUTPOST_STATE_DIR']).resolve()}/**)" in rules

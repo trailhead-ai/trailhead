@@ -18,18 +18,18 @@ from trailhead.install import build_cli_shims
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
-def make_trusted_checkout(dest: Path) -> Path:
-    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, ``pyproject.toml``) to *dest*, closed to group and others."""
+def make_trusted_checkout(dest: Path, source: Path = REPO_ROOT) -> Path:
+    """Copy what the pinned scripts run (``bin/``, the ``trailhead`` package, ``pyproject.toml``) of *source* to *dest*, closed to group and others."""
     dest.mkdir(parents=True)
     shutil.copytree(
-        REPO_ROOT / "bin", dest / "bin", ignore=shutil.ignore_patterns("__pycache__")
+        source / "bin", dest / "bin", ignore=shutil.ignore_patterns("__pycache__")
     )
     shutil.copytree(
-        REPO_ROOT / "trailhead",
+        source / "trailhead",
         dest / "trailhead",
         ignore=shutil.ignore_patterns("tests", "__pycache__"),
     )
-    shutil.copy2(REPO_ROOT / "pyproject.toml", dest / "pyproject.toml")
+    shutil.copy2(source / "pyproject.toml", dest / "pyproject.toml")
     for path in [dest, *dest.rglob("*")]:
         if not path.is_symlink():
             path.chmod(stat.S_IMODE(path.stat().st_mode) & ~(stat.S_IWGRP | stat.S_IWOTH))

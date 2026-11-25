@@ -65,7 +65,7 @@ def runner_env(
     return env
 
 
-def register_port_interpreter(directory: Path, port: int) -> Path:
+def register_port_interpreter(directory: Path, port: int, repo_root: Path = REPO_ROOT) -> Path:
     """An interpreter for install to pin that aims the registration step at *port*.
 
     The pinned shims start their interpreter isolated, from an empty environment, so no
@@ -81,7 +81,7 @@ def register_port_interpreter(directory: Path, port: int) -> Path:
         '[ "$1" = -I ] && [ "$2" = -S ] || { echo "not started isolated: $*" >&2; exit 97; }\n'
         "shift 2\n"
         f'PYTHONPATH="{Path(__file__).with_name("_register_port")}" '
-        f'TRAILHEAD_TEST_REGISTER_PORT="{port}" TRAILHEAD_TEST_REPO_ROOT="{REPO_ROOT}" '
+        f'TRAILHEAD_TEST_REGISTER_PORT="{port}" TRAILHEAD_TEST_REPO_ROOT="{repo_root}" '
         f'exec "{sys.executable}" "$@"\n'
     )
     interpreter.chmod(0o755)

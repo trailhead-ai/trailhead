@@ -115,7 +115,7 @@ def test_a_token_refused_as_expired_is_exchanged_again_once_then_refused_with_th
 def test_a_credential_whose_session_ended_is_refused_with_the_fixtures_credential_revoked_message(world):
     root, camp, outpost = world
     revoke = (
-        f"{sys.executable} -c \"import sqlite3; d = sqlite3.connect('{outpost.state / 'state.db'}'); "
+        f"{sys.executable} -c \"import sqlite3; d = sqlite3.connect('{outpost.db_path}'); "
         "d.execute(\\\"UPDATE broker_clients SET revoked_at = 1 WHERE principal_kind = 'workspace-session'\\\"); "
         "d.commit()\""
     )

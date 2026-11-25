@@ -165,7 +165,7 @@ def operator_token_store(
 
 
 def outpost_state(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
-    """Outpost's whole state directory: the database, the operator ``credential`` and
+    """Outpost's whole state directory: the database folder, the operator ``credential`` and
     every session's broker credentials."""
     return state_dir("outpost", env=env, platform=platform)
 
