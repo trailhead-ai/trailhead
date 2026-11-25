@@ -50,9 +50,6 @@ CANNOT_READ = "Outpost answered with a reply this command cannot read"
 # Outpost answers a cancel once the run's stop is signalled; removing its containers goes on in
 # the background. A cancel that gets no answer in this long is reported as requested, not as lost.
 CANCEL_TIMEOUT_SECONDS = 10.0
-NO_GATEWAY_OUTSIDE_WORKSPACE = (
-    "this session is not in a camp workspace; sessions outside any camp workspace have no gateway"
-)
 SANDBOXED = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
 
 
@@ -117,7 +114,7 @@ def _register(port: int) -> str:
         if refusal.reason == register.OUTPOST_UNREACHABLE:
             raise outpost_http.OutpostUnreachable(port) from None
         if refusal.reason == "not_in_workspace":
-            raise _fail(NO_GATEWAY_OUTSIDE_WORKSPACE) from None
+            raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
         next_step = refusal.message or register.NEXT_STEPS.get(refusal.reason)
         suffix = f": {_clean(next_step)}" if next_step else ""
         raise _fail(f"this session is not registered: {_clean(refusal.reason)}{suffix}") from None

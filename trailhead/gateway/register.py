@@ -151,6 +151,9 @@ def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS
 
 
 NO_CREDENTIAL = "This session has no gateway credential"
+NO_GATEWAY_OUTSIDE_WORKSPACE = (
+    "this session is not in a camp workspace; sessions outside any camp workspace have no gateway"
+)
 
 
 def no_credential_line(reason: str, message: str | None = None) -> str:
@@ -159,8 +162,6 @@ def no_credential_line(reason: str, message: str | None = None) -> str:
     if reason == OUTPOST_UNREACHABLE:
         why = "Outpost is unreachable; it will register on the first gateway call once Outpost is back"
     elif reason == "not_in_workspace":
-        from trailhead.gateway.command import NO_GATEWAY_OUTSIDE_WORKSPACE
-
         why = NO_GATEWAY_OUTSIDE_WORKSPACE
     else:
         step = message or NEXT_STEPS.get(reason)

@@ -249,7 +249,7 @@ class TestNoCredentialMessage:
         assert "internal" in message
 
     def test_outside_a_camp_workspace_says_so_in_the_gateway_commands_words(self, run, outpost_state):
-        from trailhead.gateway.command import NO_GATEWAY_OUTSIDE_WORKSPACE
+        from trailhead.gateway.register import NO_GATEWAY_OUTSIDE_WORKSPACE
 
         write_authority(outpost_state)
         with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": ECHOED_SECRET})) as stub:
