@@ -670,3 +670,32 @@ def test_the_appended_text_reads_back_exactly_and_the_other_keys_survive(text, t
     ab.set_append_system_prompt(case, None)
     assert case.read_text() == "name: c\nexecution:\n  model: m\n  max_turns: 9\nruns: 3\n"
     assert ab.get_append_system_prompt(case) is None
+
+
+# --- the command line reports a filesystem failure as one line, not a traceback ------------------
+
+
+def _cli(script, *args):
+    return subprocess.run([sys.executable, str(script), *args], capture_output=True, text=True, timeout=60)
+
+
+def test_prepare_to_an_existing_dest_exits_nonzero_with_a_one_line_message(tmp_path):
+    dest = tmp_path / "out"
+    dest.mkdir()
+    done = _cli(EXP / "ab.py", "prepare", "slimmed", "adds-a-cli-flag-test-first", str(dest))
+    assert done.returncode != 0
+    assert done.stderr.startswith("ab.py: ") and "Traceback" not in done.stderr
+    assert len(done.stderr.strip().splitlines()) == 1
+
+
+@pytest.mark.parametrize("cmd", ["sync", "check"])
+def test_sync_and_check_without_a_rules_file_exit_nonzero_with_a_one_line_message(cmd, tmp_path):
+    exp = tmp_path / "tools" / "craft" / "experiments"
+    for name in ("ab-test-rules-slimming", "ab-found-work-branch-load"):
+        (exp / name).mkdir(parents=True)
+        shutil.copy2(REPO / "tools" / "craft" / "experiments" / name / "ab.py", exp / name / "ab.py")
+    (tmp_path / "tools" / "craft" / "plugins" / "craft").mkdir(parents=True)
+    done = _cli(exp / "ab-test-rules-slimming" / "ab.py", cmd)
+    assert done.returncode != 0
+    assert done.stderr.startswith("ab.py: ") and "rules.md" in done.stderr and "Traceback" not in done.stderr
+    assert len(done.stderr.strip().splitlines()) == 1

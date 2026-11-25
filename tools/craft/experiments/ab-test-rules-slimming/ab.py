@@ -225,7 +225,7 @@ def bar_text(expected_md=None) -> str:
     return shared.bar_text(Path(expected_md or EXP / "expected.md"))
 
 
-def main(argv) -> int:
+def _dispatch(argv) -> int:
     cmd, args = (argv[1], argv[2:]) if len(argv) > 1 else ("", [])
     if cmd == "grants" and not args:
         print(" ".join(shlex.quote(g) for g in runner_grants()))
@@ -252,6 +252,14 @@ def main(argv) -> int:
         return 0
     print(__doc__, file=sys.stderr)
     return 2
+
+
+def main(argv) -> int:
+    try:
+        return _dispatch(argv)
+    except OSError as err:
+        print(f"ab.py: {err}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
