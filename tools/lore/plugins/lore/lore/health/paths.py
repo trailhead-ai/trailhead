@@ -123,7 +123,7 @@ def check_missing_paths(
 
 
 def _skip(scan: VaultScan, view: str | Sequence[Repository | Unreadable] | None) -> VaultSkip | None:
-    if not scan.fully_read:
+    if not scan.readable_for(JUDGED_KINDS):
         return VaultSkip(NOT_FULLY_READ)
     if isinstance(view, str):
         return VaultSkip(view)

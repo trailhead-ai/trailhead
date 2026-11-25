@@ -3,8 +3,9 @@
 Pure: takes the scan of every configured vault and returns data. A reference
 dangles when no record with that kind and name exists in any configured vault;
 a bare name dangles only when no record of any kind has it. When any vault was
-not fully read the check is skipped, because nothing can then be confirmed
-missing.
+not fully read, or holds an escaping record of a kind the check judges, the check
+is skipped, because nothing can then be confirmed missing. An escaping record of
+another kind skips nothing, and as a target it is known to exist.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
+from ..record.model import KINDS
 from . import references
 from .model import ScannedRecord, VaultScan
 
@@ -64,7 +66,8 @@ def check_dangling(
     """Check every selected vault's records against the records of all *scans*.
 
     Session records are skipped unless *include_sessions*."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    judged_kinds = KINDS if include_sessions else KINDS - {SESSION_KIND}
+    at_fault = tuple(s.vault for s in scans if not s.readable_for(judged_kinds))
     if at_fault:
         return DanglingSkipped(at_fault)
 

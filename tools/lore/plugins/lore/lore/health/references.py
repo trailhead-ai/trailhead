@@ -212,6 +212,7 @@ class CandidateIndex:
         self._readable_by_name: dict[str, list[ScannedRecord]] = {}
         self._unreadable: set[tuple[str, str]] = set()
         self._unreadable_names: set[str] = set()
+        self._blind_kinds: set[str] = set()
         self._claims: dict[tuple[str | None, str], list[ScannedRecord]] = {}
         for scan in scans:
             for record in scan.records:
@@ -228,13 +229,22 @@ class CandidateIndex:
             for gone in scan.unreadable:
                 self._unreadable.add((gone.kind, gone.name))
                 self._unreadable_names.add(gone.name)
+            for hidden in scan.escaped:
+                if hidden.name is None:
+                    self._blind_kinds.add(hidden.kind)
+                else:
+                    self._unreadable.add((hidden.kind, hidden.name))
+                    self._unreadable_names.add(hidden.name)
 
     def lookup(self, kind: str | None, name: str) -> tuple[tuple[ScannedRecord, ...], bool]:
         """Return the readable records *kind*/*name* can resolve to, and whether
-        an unreadable record could also be it. A ``None`` kind matches by name alone."""
+        an unreadable or escaping record could also be it. A ``None`` kind matches by name
+        alone. A kind whose whole directory escapes could hold any name."""
         if kind is None:
-            return tuple(self._readable_by_name.get(name, ())), name in self._unreadable_names
-        return tuple(self._readable.get((kind, name), ())), (kind, name) in self._unreadable
+            return (tuple(self._readable_by_name.get(name, ())),
+                    name in self._unreadable_names or bool(self._blind_kinds))
+        return (tuple(self._readable.get((kind, name), ())),
+                (kind, name) in self._unreadable or kind in self._blind_kinds)
 
     def superseded_by(self, kind: str, name: str) -> tuple[ScannedRecord, ...]:
         """Return every record, in any vault, whose ``supersedes`` names *kind*/*name*

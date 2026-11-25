@@ -50,13 +50,15 @@ conditions, a reserved label key and a value it cannot bind, are not mirrored: s
 links here, so its spec is waiting, but a ``kind:task related-spec:`` search does not find it. The task-to-spec map is
 built once per run.
 
-**Skipped.** When any vault was not fully read no spec can be judged, because a task
-edge or an ADR's status could sit in the unread part. The same holds when any vault
-holds an unreadable ``spec`` or ``task`` record (its kind is its directory): an unread
-spec is missing from the queue, and an unread task may be the one linking a spec. The
-result is :class:`DistillSkipped` naming both sets of vaults. An unreadable ADR does not
-skip: it is judged per edge, with the "could not be read" note. An unreadable record of
-any other kind is never consulted.
+**Skipped.** When any vault was not read, or holds an escaping ``spec`` or ``task``
+record or directory, no spec can be judged, because a task edge or an ADR's status could
+sit in the unread part. The same holds when any vault holds an unreadable ``spec`` or
+``task`` record (its kind is its directory): an unread spec is missing from the queue, and
+an unread task may be the one linking a spec. The result is :class:`DistillSkipped` naming
+both sets of vaults and, in ``records``, each unreadable or escaping spec or task as
+``(vault, kind, name)`` (``name`` is ``None`` for a whole escaping kind directory). An
+unreadable or escaping ADR does not skip: it is judged per edge, with the "could not be
+read" note. An unreadable or escaping record of any other kind is never consulted.
 
 Each waiting or deferred spec is a :class:`QueueItem` carrying its reason (the text a
 report prints) and, when a ``related adr`` edge was ignored for want of a decision, an
@@ -66,7 +68,7 @@ report prints) and, when a ``related adr`` edge was ignored for want of a decisi
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import ClassVar
 
@@ -124,11 +126,14 @@ class DistillSkipped:
     """The queue could not be built.
 
     ``vaults`` names the vaults not fully read; ``unreadable_records`` names the other
-    vaults that hold an unreadable spec or task record.
+    vaults that hold an unreadable spec or task record. ``records`` lists every
+    unreadable or escaping spec or task, by vault, kind and name (the name is ``None``
+    for a kind directory that escapes); it is not part of equality.
     """
 
     vaults: tuple[str, ...]
     unreadable_records: tuple[str, ...] = ()
+    records: tuple[tuple[str, str, str | None], ...] = field(default=(), compare=False)
 
     @property
     def at_fault(self) -> tuple[str, ...]:
@@ -138,6 +143,13 @@ class DistillSkipped:
 def holds_unreadable_judged_record(scan: VaultScan) -> bool:
     """Whether *scan* holds an unreadable record of a kind the queue is judged from."""
     return any(u.kind in JUDGED_KINDS for u in scan.unreadable)
+
+
+def unjudgeable_records(scan: VaultScan) -> tuple[tuple[str, str, str | None], ...]:
+    """Each unreadable or escaping spec or task of *scan*, as ``(vault, kind, name)``."""
+    gone = [(u.vault, u.kind, u.name) for u in scan.unreadable if u.kind in JUDGED_KINDS]
+    hidden = [(e.vault, e.kind, e.name) for e in scan.escaped if e.kind in JUDGED_KINDS]
+    return tuple(sorted(gone + hidden, key=lambda r: (r[1], r[2] or "")))
 
 
 def _mapping(sidecar: dict, field: str) -> dict:
@@ -186,6 +198,7 @@ class _Adrs:
     def __init__(self, scans: Sequence[VaultScan]) -> None:
         self._readable: dict[tuple[str, str], list[str | None]] = {}
         self._unreadable: set[tuple[str, str]] = set()
+        self._blind: set[str] = set()
         for scan in scans:
             for record in scan.records:
                 if record.kind == "adr":
@@ -193,6 +206,12 @@ class _Adrs:
             for gone in scan.unreadable:
                 if gone.kind == "adr":
                     self._unreadable.add((scan.vault, gone.name))
+            for hidden in scan.escaped:
+                if hidden.kind == "adr":
+                    if hidden.name is None:
+                        self._blind.add(scan.vault)
+                    else:
+                        self._unreadable.add((scan.vault, hidden.name))
         self._vaults = [s.vault for s in scans]
 
     def _copies(self, vaults: Sequence[str], name: str) -> tuple[list[str | None], bool]:
@@ -200,7 +219,7 @@ class _Adrs:
         unreadable = False
         for v in vaults:
             found.extend(self._readable.get((v, name), ()))
-            unreadable = unreadable or (v, name) in self._unreadable
+            unreadable = unreadable or (v, name) in self._unreadable or v in self._blind
         return found, unreadable
 
     def judge(self, own_vault: str, name: str) -> tuple[bool, str]:
@@ -254,10 +273,12 @@ def _sort_key(item: QueueItem):
 
 def build_distill_queue(scans: Sequence[VaultScan]) -> DistillQueue | DistillSkipped:
     """Judge every spec of every scanned vault; see the module docstring for the rule."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
-    holders = tuple(s.vault for s in scans if s.fully_read and holds_unreadable_judged_record(s))
+    at_fault = tuple(s.vault for s in scans if not s.readable_for(JUDGED_KINDS))
+    holders = tuple(s.vault for s in scans
+                    if s.readable_for(JUDGED_KINDS) and holds_unreadable_judged_record(s))
     if at_fault or holders:
-        return DistillSkipped(at_fault, holders)
+        return DistillSkipped(at_fault, holders,
+                              tuple(r for s in scans for r in unjudgeable_records(s)))
 
     adrs = _Adrs(scans)
     linked = _linked_spec_names(scans)

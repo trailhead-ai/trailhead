@@ -239,16 +239,45 @@ def _plural(n: int, singular: str, plural: str) -> str:
     return f"{_num(n)} {singular if n == 1 else plural}"
 
 
+MIB = 1024 * 1024
+
+
+def scan_budget(max_scan_mib: int | None) -> int:
+    """The per-vault scan budget in bytes for a ``--max-scan-mib`` value (default when ``None``)."""
+    return scan_mod.DEFAULT_MAX_SCAN_BYTES if max_scan_mib is None else max_scan_mib * MIB
+
+
+def _mib(size: int) -> str:
+    return f"{size / MIB:g} MiB"
+
+
+def budget_exceeded(scan: VaultScan) -> str:
+    """Why *scan* was not read; shared with ``lore distill-queue``."""
+    return f"records exceed the report's size budget of {_mib(scan.budget_bytes)}"
+
+
+def budget_phrase(scan: VaultScan) -> str:
+    return f"its {budget_exceeded(scan)}; pass --max-scan-mib to raise it"
+
+
 def _skip_reason(scan: VaultScan, scans: dict[str, VaultScan], at_fault: tuple[str, ...], tail: str) -> str:
     if scan.unreadable_reason == scan_mod.REASON_VAULT_MISSING:
         return "its directory does not exist"
+    if scan.unreadable_reason == scan_mod.REASON_OVER_BUDGET:
+        return budget_phrase(scan)
     if scan.unreadable_reason is not None:
         return "its directory could not be read"
-    if scan.skipped_escaping:
+    if scan.vault in at_fault and scan.skipped_escaping:
         return "records lie outside its vault root and were not read"
-    holders = tuple(n for n in at_fault if scans[n].fully_read)
+    holders = tuple(n for n in at_fault if scans[n].readable_for(queue_mod.JUDGED_KINDS)
+                    and queue_mod.holds_unreadable_judged_record(scans[n]))
     incomplete = tuple(n for n in at_fault if n not in holders)
     causes = []
+    over = tuple(n for n in incomplete if scans[n].unreadable_reason == scan_mod.REASON_OVER_BUDGET)
+    incomplete = tuple(n for n in incomplete if n not in over)
+    if over:
+        noun = "vault" if len(over) == 1 else "vaults"
+        causes.append(f"{noun} {', '.join(over)} exceeded the report's size budget (pass --max-scan-mib to raise it)")
     if incomplete:
         noun = "vault" if len(incomplete) == 1 else "vaults"
         unreadable = all(scans[name].unreadable_reason is not None for name in incomplete)
@@ -378,7 +407,8 @@ def _distill_note(sec: Section, ctx: RunContext) -> str | None:
 
 
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
-                 stale_days: int = DEFAULT_STALE_DAYS) -> HealthReport:
+                 stale_days: int = DEFAULT_STALE_DAYS,
+                 max_scan_mib: int | None = None) -> HealthReport:
     """Scan every configured vault, run every check, and gather the result as data.
 
     Every vault is scanned even when *only* narrows the report, so a target in
@@ -386,12 +416,14 @@ def build_report(only: str | None = None, *, env=None, now: datetime | None = No
     does not stop the others. Every runner gets one :class:`RunContext`, built from
     *now* (the current UTC time when ``None``), *stale_days* and the repository
     views of the selected vaults, read once through :data:`_repository_views` with *env*.
+    Each vault is read up to *max_scan_mib* MiB (:data:`scan_mod.DEFAULT_MAX_SCAN_BYTES`
+    when ``None``); a vault past it is not fully read.
     """
     now = now if now is not None else datetime.now(timezone.utc)
     every = scan_mod.resolve_vaults()
     if only is not None:
         scan_mod.resolve_vaults(only)
-    scans = [_scan_vault(name, root) for name, root in every]
+    scans = [_scan_vault(name, root, max_bytes=scan_budget(max_scan_mib)) for name, root in every]
     by_name = {s.vault: s for s in scans}
     selected = [s.vault for s in scans if only is None or s.vault == only]
     try:
@@ -810,7 +842,7 @@ def cmd_health(args) -> int:
     only = args.vault
     limit = None if args.all else args.limit
     try:
-        report = build_report(only, stale_days=args.stale_days)
+        report = build_report(only, stale_days=args.stale_days, max_scan_mib=args.max_scan_mib)
         _emit(render(report, limit, only), sys.stdout)
         return 0
     except scan_mod.HealthResolutionError as exc:
@@ -839,6 +871,14 @@ def _stale_days(text: str) -> int:
     if not 1 <= value <= MAX_STALE_DAYS:
         raise argparse.ArgumentTypeError(f"must be from 1 to {MAX_STALE_DAYS:,} days, got {value}")
     return value
+
+
+def add_max_scan_mib(parser) -> None:
+    """Add ``--max-scan-mib`` to *parser*; ``lore distill-queue`` takes the same flag."""
+    parser.add_argument(
+        "--max-scan-mib", type=_positive_int, default=None, metavar="N",
+        help=f"Read at most N MiB of records per vault before skipping it "
+             f"(default {scan_mod.DEFAULT_MAX_SCAN_BYTES // MIB})")
 
 
 def add_health_subparser(sub) -> None:
@@ -877,4 +917,5 @@ def add_health_subparser(sub) -> None:
                         f"(default {DEFAULT_STALE_DAYS})")
     p.add_argument("--all", action="store_true", default=False,
                    help="Show every finding (wins over --limit)")
+    add_max_scan_mib(p)
     p.set_defaults(func=cmd_health)

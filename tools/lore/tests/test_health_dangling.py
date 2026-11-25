@@ -453,3 +453,40 @@ def test_including_sessions_counts_them_as_judged():
     a = vault("a", rec("a", "session", "s1"), rec("a", "lesson", "l1"))
     assert run([a]).judged == {"a": 1}
     assert run([a], include_sessions=True).judged == {"a": 2}
+
+
+def _escaped(vault_name, kind, name):
+    return model.EscapedRecord(vault_name, kind, name)
+
+
+def test_an_escaping_record_named_as_a_link_target_is_not_reported_dangling():
+    linker = rec("a", "task", "t", {"related": {"session": ["s"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])])
+    assert isinstance(res, dangling.DanglingResult)
+    assert found(res) == []
+
+
+def test_a_target_that_is_not_the_escaping_record_is_still_reported_dangling():
+    linker = rec("a", "task", "t", {"related": {"session": ["other"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])])
+    assert found(res) == [("t", "related session", "session/other")]
+
+
+def test_an_escaping_kind_directory_makes_every_name_of_that_kind_an_unknown_target():
+    kinds = model.VaultScan("a", "/nowhere/a", skipped_escaping=1,
+                            escaped=[_escaped("a", "session", None)])
+    kinds.records.append(rec("a", "task", "t", {"related": {"session": ["whatever"]}}))
+    assert found(run([kinds])) == []
+
+
+def test_an_escaping_record_of_a_kind_the_check_judges_skips_the_check():
+    linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
+    res = run([vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "decision", "d")])])
+    assert res == dangling.DanglingSkipped(("a",))
+
+
+def test_an_escaping_session_record_does_not_skip_the_check_unless_sessions_are_judged():
+    linker = rec("a", "task", "t", {"related": {"lesson": ["gone"]}})
+    scan = vault("a", linker, skipped_escaping=1, escaped=[_escaped("a", "session", "s")])
+    assert isinstance(run([scan]), dangling.DanglingResult)
+    assert run([scan], include_sessions=True) == dangling.DanglingSkipped(("a",))

@@ -381,3 +381,163 @@ def test_count_creates_nothing_in_an_unwritable_index_dir(scan, inst):
         os.chmod(idx_dir, 0o755)
     assert res[str(inst.roots["default"])].count == 1
     assert sorted(p.name for p in idx_dir.iterdir()) == before
+
+
+# --- the aggregate budget ---------------------------------------------------
+
+
+def _fill(root, n, body_bytes=1000):
+    for i in range(n):
+        _put(root, "lesson", f"r{i}", _sidecar(f"R{i}"), "x" * body_bytes)
+
+
+def test_records_over_the_budget_leave_the_vault_not_fully_read_with_its_own_reason(scan, inst):
+    _fill(inst.roots["default"], 3)
+    s = scan.scan_vault("default", inst.roots["default"], max_bytes=2500)
+    assert s.unreadable_reason == scan.REASON_OVER_BUDGET
+    assert not s.fully_read
+    assert s.budget_bytes == 2500
+
+
+def test_the_same_records_under_a_larger_budget_read_fully(scan, inst):
+    _fill(inst.roots["default"], 3)
+    s = scan.scan_vault("default", inst.roots["default"], max_bytes=10_000)
+    assert s.fully_read and s.unreadable_reason is None
+    assert [r.name for r in s.records] == ["r0", "r1", "r2"]
+
+
+def test_a_vault_exactly_at_the_budget_still_reads_fully(scan, inst):
+    _fill(inst.roots["default"], 2)
+    total = scan.scan_vault("default", inst.roots["default"], max_bytes=10_000).bytes_read
+    assert scan.scan_vault("default", inst.roots["default"], max_bytes=total).fully_read
+    assert not scan.scan_vault("default", inst.roots["default"], max_bytes=total - 1).fully_read
+
+
+def test_reading_stops_at_the_trip_point_and_later_records_are_never_opened(scan, inst, monkeypatch):
+    _fill(inst.roots["default"], 6)
+    opened = []
+    real = scan._read_capped
+
+    def counted(path):
+        opened.append(path.name)
+        return real(path)
+
+    monkeypatch.setattr(scan, "_read_capped", counted)
+    s = scan.scan_vault("default", inst.roots["default"], max_bytes=2500)
+    assert s.unreadable_reason == scan.REASON_OVER_BUDGET
+    assert opened and not any(n.startswith(("r3", "r4", "r5")) for n in opened)
+    assert s.bytes_read <= 2500 + 2 * scan.MAX_RECORD_BYTES
+
+
+def test_an_oversize_record_is_charged_at_its_capped_size_and_is_not_a_budget_breach(scan, inst):
+    root = inst.roots["default"]
+    _put(root, "lesson", "huge", _sidecar("Huge"), "x" * (scan.MAX_RECORD_BYTES + 1))
+    s = scan.scan_vault("default", root, max_bytes=2 * scan.MAX_RECORD_BYTES)
+    assert s.fully_read
+    assert [u.reason for u in s.unreadable] == [scan.REASON_OVERSIZE]
+    assert scan.MAX_RECORD_BYTES <= s.bytes_read <= scan.MAX_RECORD_BYTES + 200
+
+
+# --- escaping records are known by kind and name, never by path --------------
+
+
+def _escape(root, tmp_path, kind, name):
+    outside = tmp_path / "outside"
+    outside.mkdir(exist_ok=True)
+    (outside / f"{name}.md").write_text("SECRET")
+    (outside / f"{name}.json").write_text(json.dumps(_sidecar("Secret")))
+    (root / kind).mkdir(exist_ok=True)
+    (root / kind / f"{name}.md").symlink_to(outside / f"{name}.md")
+    (root / kind / f"{name}.json").symlink_to(outside / f"{name}.json")
+
+
+def test_an_escaping_record_is_tracked_by_kind_and_name_and_judges_only_its_kind(scan, inst, tmp_path):
+    root = inst.roots["default"]
+    _put(root, "spec", "ok", _sidecar("Ok"))
+    _escape(root, tmp_path, "session", "s")
+    s = scan.scan_vault("default", root)
+    assert [(e.kind, e.name) for e in s.escaped] == [("session", "s")]
+    assert s.skipped_escaping == 1
+    assert s.readable_for(("spec", "task"))
+    assert not s.readable_for(("session",))
+    assert not s.fully_read
+    assert str(tmp_path / "outside") not in repr(s) and "SECRET" not in repr(s)
+
+
+def test_an_escaping_kind_directory_counts_against_every_record_of_its_kind(scan, inst, tmp_path):
+    root = inst.roots["default"]
+    ext = tmp_path / "extdecision"
+    _put(tmp_path, "extdecision", "x", _sidecar("X"))
+    (root / "decision").symlink_to(ext, target_is_directory=True)
+    _put(root, "task", "t", _sidecar("T"))
+    s = scan.scan_vault("default", root)
+    assert [(e.kind, e.name) for e in s.escaped] == [("decision", None)]
+    assert not s.readable_for(("decision", "adr"))
+    assert s.readable_for(("task",))
+    assert [r.name for r in s.records] == ["t"]
+
+
+def test_an_escape_the_scan_could_not_attribute_blocks_every_kind(scan):
+    model = load_script("lore.health.model")
+    s = model.VaultScan("v", "/nowhere", skipped_escaping=1)
+    assert not s.readable_for(("session",))
+
+
+# --- the index probe counts exactly what the indexer keeps -----------------------
+
+
+def test_a_record_the_indexer_keeps_despite_a_failing_projection_counts_as_held(scan, inst):
+    root = inst.roots["default"]
+    _put(root, "lesson", "plain", _sidecar("Plain"))
+    _put(root, "lesson", "unbindable", _sidecar("U", labels={"k": {"nested": "dict"}}))
+    inst.index()
+    counts = scan.count_index_rows([str(root)], env=inst.env)
+    s = scan.scan_vault("default", root)
+    assert counts[str(root)].count == s.indexed == 2
+
+
+def test_a_reserved_label_key_the_indexer_drops_does_not_count(scan, inst):
+    root = inst.roots["default"]
+    _put(root, "lesson", "plain", _sidecar("Plain"))
+    _put(root, "lesson", "reserved", _sidecar("R", labels={"related": "z"}))
+    inst.index()
+    counts = scan.count_index_rows([str(root)], env=inst.env)
+    assert counts[str(root)].count == scan.scan_vault("default", root).indexed == 1
+
+
+@pytest.mark.parametrize("sidecar", [
+    _sidecar("Ok"),
+    {k: v for k, v in _sidecar("NoCreated").items() if k != "created-at"},
+    {k: v for k, v in _sidecar("NoUpdated").items() if k != "updated-at"},
+    _sidecar("Reserved", labels={"related": "z"}),
+    _sidecar("Unbindable", labels={"k": {"a": 1}}),
+])
+def test_the_probes_verdict_is_the_same_for_a_real_body_an_empty_one_and_a_dummy(scan, sidecar):
+    probe = scan._IndexerProbe()
+    verdicts = {probe.holds("lesson", "x", sidecar, b) for b in ("real body\n" * 50, "", "dummy")}
+    assert len(verdicts) == 1
+
+
+def test_the_scan_gives_the_probe_an_empty_body(scan, inst, monkeypatch):
+    _put(inst.roots["default"], "lesson", "a", _sidecar("A"), "a real body that is not empty\n")
+    bodies = []
+    real = scan._IndexerProbe.holds
+
+    def spy(self, kind, name, sidecar, body):
+        bodies.append(body)
+        return real(self, kind, name, sidecar, body)
+
+    monkeypatch.setattr(scan._IndexerProbe, "holds", spy)
+    assert scan.scan_vault("default", inst.roots["default"]).indexed == 1
+    assert bodies == [""]
+
+
+def test_an_oversize_body_whose_sidecar_the_indexer_rejects_does_not_count_as_held(scan, inst):
+    root = inst.roots["default"]
+    big = "x" * (scan.MAX_RECORD_BYTES + 1)
+    _put(root, "lesson", "keeps", _sidecar("Keeps"), big)
+    _put(root, "lesson", "drops", {k: v for k, v in _sidecar("Drops").items() if k != "created-at"}, big)
+    inst.index()
+    counts = scan.count_index_rows([str(root)], env=inst.env)
+    s = scan.scan_vault("default", root)
+    assert counts[str(root)].count == s.indexed == 1

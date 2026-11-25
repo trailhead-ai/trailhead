@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 
 from ..record import guards
 from . import references
-from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
+from .model import LIVE_STATUSES, RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,7 @@ def check_retired(
     scans: Sequence[VaultScan], selected: Collection[str]
 ) -> RetiredResult | RetiredSkipped:
     """Check the live records of every selected vault against the records of all *scans*."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    at_fault = tuple(s.vault for s in scans if not s.readable_for(LIVE_STATUSES))
     if at_fault:
         return RetiredSkipped(at_fault)
 

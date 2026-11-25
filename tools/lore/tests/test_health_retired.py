@@ -377,3 +377,25 @@ def test_the_pairing_guard_runs_once_per_pair_however_many_findings_repeat_it(mo
     assert len(res.findings) == 2
     assert [c.supersede_allowed for f in res.findings for c in f.retired] == [True, True]
     assert calls == ["decision/old"]
+
+
+def test_an_escaped_record_with_a_retired_namesake_is_never_called_retired():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "lesson", "old")])
+    namesake = vault("b", rec("b", "lesson", "old", "dropped"))
+    linker = vault("c", linking("decision", "src", "active", rel("lesson", "old")))
+    quiet = run([escaped, namesake, linker])
+    assert isinstance(quiet, retired.RetiredResult) and quiet.findings == []
+    control = run([namesake, linker])
+    assert [f.target for f in control.findings] == ["lesson/old"]
+
+
+def test_an_escaping_kind_directory_of_a_kind_the_check_judges_skips_the_check():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "decision", None)])
+    assert run([escaped, vault("b")]) == retired.RetiredSkipped(("a",))
+
+
+def test_an_escaping_session_record_does_not_skip_the_check():
+    escaped = vault("a", linking("decision", "src", "active", rel("decision", "old")),
+                    rec("a", "decision", "old", "dropped"),
+                    skipped_escaping=1, escaped=[model.EscapedRecord("a", "session", "s")])
+    assert len(single(run([escaped])).retired) == 1

@@ -1988,9 +1988,9 @@ def test_a_vault_with_records_outside_its_root_is_skipped_with_the_shared_wordin
     outside.mkdir()
     (outside / "x.json").write_text(json.dumps({"title": "x", "status": "active"}))
     (outside / "x.md").write_text("x\n")
-    (world.roots["levr"] / "lesson").mkdir()
-    os.symlink(outside / "x.json", world.roots["levr"] / "lesson" / "x.json")
-    os.symlink(outside / "x.md", world.roots["levr"] / "lesson" / "x.md")
+    (world.roots["levr"] / "decision").mkdir()
+    os.symlink(outside / "x.json", world.roots["levr"] / "decision" / "x.json")
+    os.symlink(outside / "x.md", world.roots["levr"] / "decision" / "x.md")
     r = world.run()
     assert rows(r.stdout, "missing-paths")["levr"] == (
         "—", "—", "yes: records lie outside its vault root and were not read")
@@ -2442,3 +2442,61 @@ def test_a_vault_name_with_control_characters_is_escaped_in_the_distill_group(tm
     r = w.run()
     assert "\x1b" not in r.stdout
     assert "ev\\nil\\x1b[31mv/spec/waits" in group(r.stdout, DQ)[1]
+
+
+# --- the scan budget and kind-aware escapes ---------------------------------------
+
+
+def _big(root, n=3, size=900 * 1024):
+    for i in range(n):
+        _put(root, "lesson", f"big{i}")
+        (root / "lesson" / f"big{i}.md").write_text("x" * size)
+
+
+BUDGET_REASON = "yes: its records exceed the report's size budget of 1 MiB; pass --max-scan-mib to raise it"
+
+
+def test_a_vault_past_the_budget_skips_every_check_with_the_size_reason_then_reports_when_raised(world):
+    _big(world.roots["levr"])
+    _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
+    r = world.run("--max-scan-mib", "1")
+    assert r.returncode == 0, r.stderr
+    for check in CHECKS:
+        assert rows(r.stdout, check)["levr"][2] == BUDGET_REASON, check
+    assert finding_lines(r.stdout) == []
+    r = world.run("--max-scan-mib", "64")
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout)["levr"] == ("3", "0", "no")
+    assert rows(r.stdout)["default"] == ("1", "1", "no")
+
+
+def test_a_symlinked_decision_directory_skips_only_the_checks_that_judge_decisions(world, tmp_path):
+    ext = tmp_path / "ext"
+    _put(ext, "decision", "hidden")
+    (world.roots["trailhead"] / "decision").symlink_to(ext / "decision", target_is_directory=True)
+    _put(world.roots["trailhead"], "task", "t", status="open")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for check in ("dangling-links", "retired-links", "missing-paths"):
+        assert rows(r.stdout, check)["trailhead"][2].startswith("yes:"), check
+    assert rows(r.stdout, "stale-tasks")["trailhead"][2] == "no"
+    assert rows(r.stdout, "distill-queue")["trailhead"][2] == "no"
+    assert "hidden" not in r.stdout and "ext" not in r.stdout.replace("extra", "")
+
+
+def test_an_escaping_session_record_named_as_a_link_target_is_not_reported_dangling(world, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "s.md").write_text("x")
+    (outside / "s.json").write_text("{}")
+    sess = world.roots["trailhead"] / "session"
+    sess.mkdir()
+    (sess / "s1.md").symlink_to(outside / "s.md")
+    (sess / "s1.json").symlink_to(outside / "s.json")
+    _put(world.roots["default"], "task", "t", status="open", related={"session": ["s1", "never-was"]})
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    lines = finding_lines(r.stdout)
+    assert any("session/never-was" in ln for ln in lines)
+    assert not any("session/s1" in ln for ln in lines)
+    assert rows(r.stdout, "dangling-links")["default"] == ("1", "1", "no")

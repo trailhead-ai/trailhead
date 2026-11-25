@@ -81,7 +81,7 @@ def check_stale(
     window_days: int,
 ) -> StaleResult | StaleSkipped:
     """Judge the unfinished tasks of every selected vault against *now* and the window."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    at_fault = tuple(s.vault for s in scans if not s.readable_for(("task",)))
     if at_fault:
         return StaleSkipped(at_fault)
 

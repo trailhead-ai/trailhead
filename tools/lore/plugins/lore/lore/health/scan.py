@@ -15,12 +15,17 @@ from pathlib import Path
 from urllib.parse import quote
 
 from ..cli import common
+from ..record import model as record_model
 from ..record import rename
 from ..search import index as index_mod
-from .model import IndexCount, ScannedRecord, UnreadableRecord, VaultScan
+from .model import EscapedRecord, IndexCount, ScannedRecord, UnreadableRecord, VaultScan
 
 #: Largest sidecar or body, in bytes, the scan will read.
 MAX_RECORD_BYTES = 1024 * 1024
+
+#: Default per-vault byte budget for one scan. The largest live vault measured is
+#: about 33 MiB raw; this is roughly 7.8 times that.
+DEFAULT_MAX_SCAN_BYTES = 256 * 1024 * 1024
 
 REASON_SIDECAR_MALFORMED = "sidecar-malformed"
 REASON_SIDECAR_UNREADABLE = "sidecar-unreadable"
@@ -28,6 +33,7 @@ REASON_BODY_UNREADABLE = "body-unreadable"
 REASON_OVERSIZE = "oversize"
 REASON_VAULT_UNREADABLE = "vault-unreadable"
 REASON_VAULT_MISSING = "vault-missing"
+REASON_OVER_BUDGET = "over-budget"
 
 INDEX_OK = "ok"
 INDEX_ABSENT = "absent"
@@ -66,16 +72,21 @@ def new_vault_scan(name: str, root) -> VaultScan:
     return VaultScan(vault=name, root=str(root))
 
 
-def _read_capped(path: Path) -> str:
-    """Decode *path* as UTF-8; ``ValueError`` past the cap, ``OSError`` if unreadable.
+def _read_capped(path: Path) -> tuple[str, int]:
+    """Decode *path* as UTF-8, with the bytes read; ``OSError`` if unreadable.
 
-    Reads at most one byte past the cap, so an oversize file is never loaded whole.
+    ``ValueError`` past the cap or on undecodable bytes. Reads at most one byte
+    past the cap, so an oversize file is never loaded whole.
     """
     with open(path, "rb") as fh:
         data = fh.read(MAX_RECORD_BYTES + 1)
     if len(data) > MAX_RECORD_BYTES:
-        raise ValueError(REASON_OVERSIZE)
-    return data.decode("utf-8")
+        raise _Oversize(REASON_OVERSIZE)
+    return data.decode("utf-8"), len(data)
+
+
+class _Oversize(ValueError):
+    """The file is past the cap; it was charged at the capped read size."""
 
 
 class _IndexerProbe:
@@ -93,21 +104,56 @@ class _IndexerProbe:
         for statement in index_mod._DDL_STATEMENTS:
             self._conn.execute(statement)
 
-    def holds(self, kind: str, name: str, sidecar: dict, body: str) -> bool:
+    def holds(self, kind: str, name: str, sidecar: dict, body: str = "") -> bool:
+        """Whether the indexer would keep the record.
+
+        The indexer's skip guard leaves whatever row the projection had inserted
+        before it raised, and a rejection the projection undoes itself leaves none,
+        so the verdict is whether the record's row is present afterwards.
+        """
         record_id = index_mod._record_id("probe", kind, name)
         try:
             index_mod._project_record(self._conn, "probe", kind, name, sidecar, body, 0, 0.0, 0)
         except Exception:  # noqa: BLE001 - mirrors the indexer's per-record skip guard
-            index_mod._delete_projection(self._conn, record_id)
-            return False
+            pass
+        held = self._conn.execute("SELECT 1 FROM records WHERE id=?", (record_id,)).fetchone() is not None
         index_mod._delete_projection(self._conn, record_id)
-        return True
+        return held
 
     def close(self) -> None:
         self._conn.close()
 
 
-def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
+def _attribute_escapes(result: VaultScan, root: Path) -> None:
+    """Name each escaping record or kind directory on *result* by kind and name.
+
+    Learns identity from directory entry names alone, so nothing outside the
+    vault is opened, and applies the confinement rule the confined iterator
+    does: a kind directory whose realpath leaves the root is never listed, and a
+    record escapes when either its ``.md`` or its ``.json`` does. Only
+    flat ``<kind>/<name>.md`` entries count, as in the scan.
+    """
+    root_real = os.path.realpath(root)
+    inside = rename.store._realpath_is_descendant
+    with os.scandir(root) as it:
+        kind_entries = sorted((e for e in it if e.name in record_model.KINDS), key=lambda e: e.name)
+    for entry in kind_entries:
+        if not os.path.isdir(entry.path):
+            continue
+        if not inside(Path(entry.path), root_real):
+            result.escaped.append(EscapedRecord(result.vault, entry.name, None))
+            continue
+        with os.scandir(entry.path) as it:
+            names = sorted(e.name[:-3] for e in it if e.name.endswith(".md"))
+        for name in names:
+            body = Path(entry.path) / f"{name}.md"
+            if not inside(body, root_real) or not inside(body.with_suffix(".json"), root_real):
+                result.escaped.append(EscapedRecord(result.vault, entry.name, name))
+
+
+def iter_vault_records(
+    result: VaultScan, *, probe_index: bool = True, max_bytes: int = DEFAULT_MAX_SCAN_BYTES
+):
     """Yield each readable record of ``result.root`` one at a time.
 
     Unreadable records, escaping skips and an unreadable vault are accumulated
@@ -115,9 +161,16 @@ def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
     A record is considered exactly when the indexer would consider it: a flat
     ``<kind>/<name>`` with both ``.md`` and ``.json`` present. ``result.indexed``
     counts those the indexer would hold, which excludes an unreadable record
-    (the indexer skips it) but includes an oversize one (it reads without a cap).
+    (the indexer skips it) but includes an oversize one whose sidecar the
+    indexer accepts (it reads without a cap).
     A vault directory that is missing, or a kind directory that cannot be
     listed, marks the vault unreadable.
+
+    *max_bytes* bounds what is read from the vault: ``result.bytes_read`` is
+    charged as each record is read (an oversize file at its capped read size), and
+    once it passes the budget no further record is opened and the vault is marked
+    :data:`REASON_OVER_BUDGET`. Records already yielded are at most the budget plus
+    one record.
 
     The index probe is about half the scan's run time and feeds only ``indexed``;
     a caller that never reads that count passes ``probe_index=False``, which
@@ -130,6 +183,7 @@ def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
     def unlistable():
         result.unreadable_reason = REASON_VAULT_UNREADABLE
 
+    result.budget_bytes = max_bytes
     probe = _IndexerProbe() if probe_index else None
     try:
         root = Path(result.root)
@@ -143,56 +197,14 @@ def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
         ):
             name = record_id.split("/", 1)[1]
             sidecar_path = body_path.with_suffix(".json")
-            try:
-                if not sidecar_path.exists():
-                    continue
-                sidecar_text = _read_capped(sidecar_path)
-            except ValueError as exc:
-                reason = (
-                    REASON_OVERSIZE if str(exc) == REASON_OVERSIZE else REASON_SIDECAR_MALFORMED
-                )
-                if reason == REASON_OVERSIZE:
-                    result.indexed += 1
-                result.unreadable.append(UnreadableRecord(result.vault, kind, name, reason))
-                continue
-            except OSError:
-                result.unreadable.append(
-                    UnreadableRecord(result.vault, kind, name, REASON_SIDECAR_UNREADABLE)
-                )
-                continue
-            try:
-                sidecar = json.loads(sidecar_text)
-            except (ValueError, RecursionError):
-                sidecar = None
-            if not isinstance(sidecar, dict):
-                result.unreadable.append(
-                    UnreadableRecord(result.vault, kind, name, REASON_SIDECAR_MALFORMED)
-                )
-                continue
-            try:
-                body = _read_capped(body_path)
-            except ValueError as exc:
-                reason = REASON_OVERSIZE if str(exc) == REASON_OVERSIZE else REASON_BODY_UNREADABLE
-                if reason == REASON_OVERSIZE:
-                    result.indexed += 1
-                result.unreadable.append(UnreadableRecord(result.vault, kind, name, reason))
-                continue
-            except OSError:
-                result.unreadable.append(
-                    UnreadableRecord(result.vault, kind, name, REASON_BODY_UNREADABLE)
-                )
-                continue
-            if probe is not None and probe.holds(kind, name, sidecar, body):
-                result.indexed += 1
-            updated = sidecar.get("updated-at")
-            yield ScannedRecord(
-                result.vault,
-                kind,
-                name,
-                updated if isinstance(updated, str) else None,
-                sidecar,
-                body,
-            )
+            record = _read_record(result, probe, kind, name, sidecar_path, body_path)
+            if result.bytes_read > max_bytes:
+                result.unreadable_reason = REASON_OVER_BUDGET
+                return
+            if record is not None:
+                yield record
+        if result.skipped_escaping:
+            _attribute_escapes(result, root)
     except OSError:
         result.unreadable_reason = REASON_VAULT_UNREADABLE
     finally:
@@ -200,10 +212,75 @@ def iter_vault_records(result: VaultScan, *, probe_index: bool = True):
             probe.close()
 
 
-def scan_vault(name: str, root, *, probe_index: bool = True) -> VaultScan:
-    """Scan one vault eagerly; the records land on ``result.records``."""
+def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedRecord | None:
+    """Read one record, charging ``result.bytes_read``; ``None`` when it is not a readable record.
+
+    An unreadable record lands on ``result.unreadable``; ``result.indexed`` counts it
+    when the indexer would hold it.
+    """
+
+    def unreadable(reason: str) -> None:
+        result.unreadable.append(UnreadableRecord(result.vault, kind, name, reason))
+
+    try:
+        if not sidecar_path.exists():
+            return None
+        sidecar_text, size = _read_capped(sidecar_path)
+        result.bytes_read += size
+    except _Oversize:
+        result.bytes_read += MAX_RECORD_BYTES
+        if probe is not None:
+            result.indexed += 1
+        unreadable(REASON_OVERSIZE)
+        return None
+    except ValueError:
+        unreadable(REASON_SIDECAR_MALFORMED)
+        return None
+    except OSError:
+        unreadable(REASON_SIDECAR_UNREADABLE)
+        return None
+    try:
+        sidecar = json.loads(sidecar_text)
+    except (ValueError, RecursionError):
+        sidecar = None
+    if not isinstance(sidecar, dict):
+        unreadable(REASON_SIDECAR_MALFORMED)
+        return None
+    try:
+        body, size = _read_capped(body_path)
+        result.bytes_read += size
+    except _Oversize:
+        result.bytes_read += MAX_RECORD_BYTES
+        if probe is not None and probe.holds(kind, name, sidecar, ""):
+            result.indexed += 1
+        unreadable(REASON_OVERSIZE)
+        return None
+    except ValueError:
+        unreadable(REASON_BODY_UNREADABLE)
+        return None
+    except OSError:
+        unreadable(REASON_BODY_UNREADABLE)
+        return None
+    if probe is not None and probe.holds(kind, name, sidecar, ""):
+        result.indexed += 1
+    updated = sidecar.get("updated-at")
+    return ScannedRecord(
+        result.vault, kind, name, updated if isinstance(updated, str) else None, sidecar, body
+    )
+
+
+def scan_vault(
+    name: str, root, *, probe_index: bool = True, max_bytes: int = DEFAULT_MAX_SCAN_BYTES
+) -> VaultScan:
+    """Scan one vault eagerly; the records land on ``result.records``.
+
+    A vault that passes *max_bytes* keeps none of the records it read: it is not
+    fully read, and every check skips it.
+    """
     result = new_vault_scan(name, root)
-    result.records.extend(iter_vault_records(result, probe_index=probe_index))
+    result.records.extend(iter_vault_records(result, probe_index=probe_index, max_bytes=max_bytes))
+    if result.unreadable_reason == REASON_OVER_BUDGET:
+        result.records.clear()
     return result
 
 

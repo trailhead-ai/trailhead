@@ -215,3 +215,20 @@ def test_the_check_survives_an_in_place_reload():
     again = load_script("lore.health.stale").check_stale(scans, {"a"}, now=NOW, window_days=30)
     assert len(again.findings) == 1 and again.judged == first.judged
     assert again.findings[0].age_days == first.findings[0].age_days == 99
+
+
+def test_an_escaping_task_skips_the_check_and_an_escaping_session_or_spec_does_not():
+    hidden = lambda kind: model.EscapedRecord("a", kind, "x")  # noqa: E731
+    judged = vault("a", task("t", 99), skipped_escaping=1, escaped=[hidden("task")])
+    assert run([judged]) == stale.StaleSkipped(("a",))
+    for kind in ("session", "spec"):
+        res = run([vault("a", task("t", 99), skipped_escaping=1, escaped=[hidden(kind)])])
+        assert names(res) == ["t"], kind
+
+
+def test_an_escaping_spec_a_task_links_to_is_never_called_retired():
+    escaped = vault("a", skipped_escaping=1, escaped=[model.EscapedRecord("a", "spec", "s")])
+    namesake = vault("b", rec("b", "spec", "s", "dropped"))
+    linker = vault("c", task("t", 1, sidecar=spec_link("s"), vault="c"))
+    assert run([escaped, namesake, linker]).findings == []
+    assert [f.name for f in run([namesake, linker]).findings] == ["t"]
