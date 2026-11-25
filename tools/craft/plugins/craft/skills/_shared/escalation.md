@@ -99,7 +99,9 @@ urgent entry, or moving it out of the spec's loop (a drop whose reason names a `
 session asks.** The question is put before any further drop of that pass is written, and no drop is
 written until the operator's answer arrives.
 
-The fixes this trigger offers, in the order the session judges them, are whichever of these apply:
+The fixes this trigger offers, in the order the session judges them, are these. A move applies once
+per task the searches find; the other three always apply, so every one of them is in the question,
+listed or described as a further fix with its cost:
 
 - **Move it to an existing task.** The entry is dropped with a reason that names that task, and the
   work stays tracked there. Offered once per existing task that credibly holds the work. Find them
