@@ -190,11 +190,11 @@ def test_set_append_system_prompt_keeps_the_other_execution_keys(tmp_path):
 # --- grants and the bar ---------------------------------------------------------------------------
 
 
-def test_runner_grants_are_the_gate_mappings_grants_plus_the_wrapper(tmp_path):
+def test_runner_grants_are_the_gate_mappings_grants(tmp_path):
     craft, _ = _mini(tmp_path)
-    assert ab.runner_grants(craft) == ["Write", "Bash(./x *)", WRAPPER_GRANT]
+    assert ab.runner_grants(craft) == ["Write", "Bash(./x *)"]
     (craft / "evals" / "eval-gate.json").write_text(json.dumps({"runner": {"allow_tools": ["Read"]}}))
-    assert ab.runner_grants(craft) == ["Read", WRAPPER_GRANT]
+    assert ab.runner_grants(craft) == ["Read"]
 
 
 def test_the_grants_command_prints_what_shlex_parses_back_to_the_live_grants():
@@ -202,12 +202,6 @@ def test_the_grants_command_prints_what_shlex_parses_back_to_the_live_grants():
     live = json.loads((CRAFT / "evals" / "eval-gate.json").read_text())["runner"]["allow_tools"]
     assert done.returncode == 0
     assert shlex.split(done.stdout) == live
-
-
-def test_the_wrapper_grant_is_not_added_twice_when_the_gate_already_carries_it(tmp_path):
-    craft, _ = _mini(tmp_path)
-    (craft / "evals" / "eval-gate.json").write_text(json.dumps({"runner": {"allow_tools": ["Read", WRAPPER_GRANT]}}))
-    assert ab.runner_grants(craft) == ["Read", WRAPPER_GRANT]
 
 
 # inert-gate: allow the push gate reads this block from main; the grant has no other consumer to run here
@@ -237,17 +231,13 @@ AC61 = ("tests-a-registered-exporter-by-running-it", "tests-a-changed-default-th
 AC62 = ("adds-a-cli-flag-test-first", "fixes-a-reported-bug-test-first")
 
 
-def _prepared(case, tmp_path, arm="none"):
-    return ab.build_arm_plugin(arm, case, tmp_path / "plugin" / "craft")
-
-
 def _env(home):
     return {"PATH": os.environ["PATH"], "HOME": str(home)}
 
 
 def _scaffolded(case, tmp_path):
     """Run the prepared copy's own scaffold script in an empty directory, as the runner does."""
-    plugin = _prepared(case, tmp_path)
+    plugin = ab.build_arm_plugin("none", case, tmp_path / "plugin" / "craft")
     cwd = tmp_path / "run"
     cwd.mkdir()
     done = subprocess.run(
@@ -451,14 +441,8 @@ def test_the_planted_files_both_run_green_but_only_the_good_one_fails_a_broken_s
     planted = PLANTED[case]
     results = {}
     for which in ("good", "bad"):
-        run = tmp_path / which
-        run.mkdir()
-        plugin = ab.build_arm_plugin("none", case, run / "plugin" / "craft")
-        scaffold = plugin / "evals" / EXP.name / case / "fixtures" / "scaffold.sh"
-        cwd = run / "cwd"
-        cwd.mkdir()
-        done = subprocess.run(["bash", str(scaffold)], cwd=cwd, env=_env(run), capture_output=True, text=True, timeout=120)
-        assert done.returncode == 0, done.stderr
+        (tmp_path / which).mkdir()
+        _, cwd = _scaffolded(case, tmp_path / which)
         rel, text = planted[which]
         (cwd / rel).write_text(text)
         green = _run_tests(cwd)

@@ -4,7 +4,7 @@ one of three rulesets.
 
   ab.py prepare ARM CASE DEST   a temp craft plugin copy holding CASE, its case file carrying ARM's ruleset
                                 (ARM is slimmed, frozen or none)
-  ab.py grants                  craft's runner grants plus the wrapper's, shell-quoted, for --allow-tools
+  ab.py grants                  craft's runner grants, shell-quoted, for --allow-tools
   ab.py bar                     the bar text; `ab.py bar | git hash-object --stdin` is its fingerprint
   ab.py sync                    write the four push-gate cases under the craft plugin's evals/: each scenario's
                                 case file, prompt and graders from this folder, the case file carrying the live
@@ -37,7 +37,6 @@ CASES = (
     "adds-a-cli-flag-test-first",
     "fixes-a-reported-bug-test-first",
 )
-WRAPPER_GRANT = "Bash(./run-tests)"
 PROMPT_KEY = "append_system_prompt"
 
 
@@ -216,8 +215,7 @@ def check(craft_root=None, exp_dir=None, cases=None) -> list[str]:
 
 
 def runner_grants(craft_root=None) -> list[str]:
-    live = shared.runner_args(Path(craft_root or craft_dir()))[1:]
-    return live if WRAPPER_GRANT in live else [*live, WRAPPER_GRANT]
+    return shared.runner_args(Path(craft_root or craft_dir()))[1:]
 
 
 def bar_text(expected_md=None) -> str:
