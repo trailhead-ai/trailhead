@@ -143,6 +143,7 @@ any. Always:
 
 - **No production code without a failing test first.** Write the test, run it, watch it fail with
   the *expected* failure, THEN write implementation.
+  `trailhead core show adr/tests-are-written-red-first`
 - **If you wrote code before its test:** delete the code. Start over. Don't keep it "as reference."
 - **One behaviour per test.** Each test should fail for exactly one reason.
 - **Verify both RED and GREEN.** Run before AND after implementing. A test that passes on its first
@@ -155,6 +156,8 @@ any. Always:
   for. Asserting that a file **your test just generated** exists is fine — that is an output, not a
   source inspection — but assert its contents where you can: existence proves the step ran, contents
   prove it did the right thing.
+  `trailhead core show adr/a-test-executes-its-subject`
+  `trailhead core show adr/presence-and-absence-are-not-behaviour`
 
 Use the repo's existing test framework, directory layout, and helpers. Place tests where the
 existing suite expects them, and prefer testing business logic over pure rendering.
@@ -287,6 +290,8 @@ what you could not cover, so the controller's full-suite gate knows what to look
 
 For each item in the intent document's `**Test contract:**` (or `## Test contract`), prove the test
 *binds* the behaviour — not merely that it exists.
+
+`trailhead core show adr/after-the-fact-tests-are-repair-only`
 
 **The kind of mutation is named by the contract item.** Apply the kind it names. When an item names
 none, the default is **reverting the fix under test** — restoring the pre-change behaviour and

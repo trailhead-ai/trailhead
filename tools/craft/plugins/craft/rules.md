@@ -1,221 +1,49 @@
 ## A test must execute the thing it tests
 
-A test's subject is a **behaviour**, and the only way to observe a behaviour is to
-run the code that produces it. An assertion about the *source* — that a function is
-defined, that a config key is set, that a sentence appears in a skill's markdown —
-has observed the artifact, not the behaviour. It passes on a codebase where the
-thing is present and broken; it fails on a correct rename that changed nothing. It
-is a `grep` wearing a green checkmark.
+Every test runs its subject — calls the function, invokes the CLI, loads the file through its real loader, dispatches the agent — and asserts on what came back; an assertion about source (a symbol is defined, a config key is set, a sentence appears in a markdown file) observes the artifact, not the behaviour, so if nothing was executed before the assertion it is not a test, does not ship, and does not count as coverage.
 
-**The rule:** every test runs its subject — calls the function, invokes the CLI,
-loads the file through its real loader, dispatches the agent — and asserts on what
-came back. **If nothing was executed before the assertion, it is not a test.** It
-does not ship, and it does not count as coverage.
+trailhead core show adr/a-test-executes-its-subject
 
 ### A test needs an input it can vary
 
-Running the subject is the floor, not the bar. A test earns its place by showing
-that the subject's answer *depends on what it was given* — feed it one thing, get
-one answer; feed it another, get a different one. That dependency is the property
-a unit test exists to protect, because it is the property a later edit can break
-without noticing.
-
-**The rule:** the subject must have an input that can change its answer, and the
-test must be one of the points that changes it. Where a unit has only one possible
-output, there is no behaviour to pin — only a decision to restate.
-
-Restating a decision looks like this:
-
-```
-assert DEFAULT_SORT == "created_at desc"            # the default sort order
-assert set(manifest.skills) == {"pull_request"}     # the shipped inventory
-assert render() == GOLDEN                           # a byte-for-byte snapshot
-assert SEVERITIES == ("Critical", "Important", "Minor")   # a closed vocabulary
-assert "never do X" in skill_md                     # a sentence someone typed
-```
-
-Each is true by construction. None can fail for any reason except that a person
-changed their mind — at which point the test is not catching a regression, it is
-asking them to make the same edit twice. The decision is already recorded in the
-code. A test that copies it out adds a second copy to keep in sync, not a check.
-
-The same subjects, tested for behaviour instead, vary the input across the branch
-that decides:
-
-- the sort key the caller **asked** for, against the order that comes back
-- an inventory built from a manifest with two entries, and one with none
-- the renderer at each level it maps, and at a level it must refuse
-- a value on either side of the threshold that flips the answer
-- the document that satisfies the gate, and the one edit that makes it fail
-
-**How to tell them apart.** Ask what would have to break for this test to go red.
-If the honest answer is "someone edits this same constant, or rewords this
-sentence", it is guarding a decision. If it is "the logic mapping inputs to
-outputs stops working", it is guarding a behaviour. Only the second is coverage.
-
-**The one exception is the seam smoke.** Wiring — the installer really writes the
-tree, the documented command really parses, the plugin really loads — has no input
-to vary and is still worth exactly one test, because nothing else shows the pieces
-are connected. One per seam, never one per constant the seam happens to touch.
+The subject must have an input that can change its answer, and the test must be one of the points that changes it; a test that restates a constant, snapshot, golden file, inventory, closed vocabulary or sentence, where the unit has only one possible output, guards a decision rather than a behaviour — ask what would have to break for it to go red, and if the answer is that someone edits the same constant or rewords the same sentence, it guards a decision. The one exception is the seam smoke: wiring has no input to vary and is worth exactly one test per seam, never one per constant the seam touches.
 
 `scripts/inert-test-gate` holds both rules mechanically: it flags a test that runs
 nothing, and a test whose whole subject is a document it reads and never varies. A
 deliberate seam smoke carries `# inert-gate: allow <reason>` on its `def` line, so
 the exemptions stay countable and reviewable rather than accumulating unseen.
 
+trailhead core show adr/a-test-needs-an-input-it-can-vary
+
 ### The tests worth writing, in the order you should reach for them
 
-1. **The contract, exercised end to end.** Call the public entry point with real
-   inputs; assert the returned value, the written file, the exit code, the emitted
-   record. This is the default and most tests should be this.
-2. **The boundaries that decide something.** Empty, one, many; the edge that flips
-   a branch; the value on either side of a threshold. Each one is a separate test
-   that fails for exactly one reason.
-3. **The failure paths.** Bad input, a missing dependency, an unwritable target, a
-   permission denial. Assert the *observable* consequence — the raised type, the
-   message a human reads, the state left behind — not that a log line was emitted.
-4. **The regression.** A bug you just fixed, pinned by a test that fails against
-   the pre-fix code. Nothing else proves the fix was the fix.
-5. **The integration seam.** Two components you wired together, run together, with
-   the real adapter where it is cheap enough to do so.
+Reach for these five first, and they are the floor: the contract exercised end to end through the public entry point; the boundaries that decide something (empty, one, many, either side of a threshold), each its own test; the failure paths, asserting the observable consequence rather than a log line; the regression, pinned by a test that fails against the pre-fix code; and the integration seam, run together with the real adapter where it is cheap.
 
-Everything else is a nice-to-have. These five are the floor.
+trailhead core show area/testing
 
-### Presence is not behaviour — unless your test produced it
+### Presence and absence are not behaviour
 
-The line is not what the assertion *looks* like. It is whether **the test ran the
-code that produced the thing being asserted about.** Existence is a perfectly good
-observation when it is the observable output of a step you just executed.
+Existence is a valid observation only when the test ran the step that produced it (run the installer, then assert the file it wrote, and its contents where you can); never assert that a committed file exists, a symbol is defined or something is callable, and never assert a removal (a file gone, a symbol undefined, a key absent, an endpoint 404) — test the behaviour the removal was for.
 
-Legitimate — the subject ran, and the file on disk is its result:
-
-```
-run_install(env=env)                                   # ← the subject ran
-assert (claude_dir / "rules" / "trailhead-craft.md").exists()
-```
-
-Banned — nothing ran, and the assertion describes the repo as checked out:
-
-```
-assert hasattr(module, "resolve")            # the symbol exists
-assert "never do X" in skill_md              # the instruction is written down
-assert (repo_root / "config.toml").exists()  # the file was committed
-assert isinstance(handler, Callable)         # something callable was defined
-```
-
-Each banned form makes the same mistake: it inspects the shape of the source
-instead of running it. A function that exists and returns the wrong answer passes
-all four, on every commit, forever.
-
-The fix is never to delete the intent — it is to find the consumer and run it. The
-symbol exists *so that* a caller can use it: call it and assert the result. The
-committed file exists *so that* a loader can read it: load it and assert what the
-loader produced. If you cannot name a consumer that would break without the thing,
-you have found something with no behaviour to test, and the question is whether it
-should exist at all.
-
-**Contents beat existence.** Where a generator, installer, or build step writes
-files, existence pins only that the step *ran*; contents pin that it did the *right
-thing*. A generator that creates every expected path and fills each with garbage
-passes an existence check clean. Assert on what is in the file — or better, on what
-the real loader makes of it — whenever the format lets you. Treat a bare existence
-assertion as the weakest acceptable form, reached for when the artifact is opaque
-or its contents are genuinely not the point, not as the target.
-
-### Absence is not behaviour either
-
-Never write a test whose subject is that something is *gone* — a file does not
-exist, a symbol is undefined, a config key is absent, an endpoint 404s because it
-was deleted. This is the same error as presence, in the mirror. Removal is not
-behaviour, and a test that asserts it is worthless in both directions: it passes
-vacuously on a fresh checkout where the thing never existed, and it pins a one-time
-migration as a permanent invariant that some future change has to argue its way
-past.
-
-Test the behaviour the removal was *for*. If a file was deleted because its loader
-now reads from a different source, pin that the loader reads the new source. If an
-endpoint was removed because callers moved, pin that the callers work. The absence
-is an implementation detail of that outcome, not the outcome.
+trailhead core show adr/presence-and-absence-are-not-behaviour
 
 ### Testing a prose artifact — skills, agents, prompts, rulesets
 
-A skill or an agent definition is source, not behaviour, and the temptation to
-assert on its text is exactly the trap above. There are only two honest ways to
-test one:
+A skill, agent or rule is source, not behaviour: test it only by running it through its consumer (the composer, installer, manifest loader or front-matter parser) and asserting what the consumer produced, or by running the agent against a scenario in a behavioural eval and judging the outcome; asserting that a sentence is present tests only that someone typed it.
 
-- **Run it through its consumer.** The composer, the installer, the manifest
-  loader, the front-matter parser. Assert on what the consumer produced — the
-  installed path and its contents, the discovered skill list, the parsed
-  capability set. This is a real test: something executed.
-- **Run the agent against a scenario and judge the outcome.** A behavioral eval
-  with a fixture and an expected verdict. Expensive, so reserve it for the
-  instructions that actually decide something.
-
-Asserting that a sentence is present in a markdown file tests that someone typed
-it. It cannot tell you the agent read it, understood it, or obeyed it — which was
-the entire question.
+trailhead core show area/testing
 
 ## Test-driven development — required, not preferred
 
-Write the failing test **before** the implementation. Every behaviour change, every
-time. This is not a style preference and there is no "too small to test" carve-out
-for behaviour.
+Write the failing test before the implementation, for every behaviour change, with no "too small to test" carve-out: run it, confirm it fails for its stated reason (not an import error or a typo), write the minimum implementation that passes, then run the tests covering the change's blast radius (the new test, the file's or module's tests, the suites of its callers) and not the whole suite; run the full suite once, at the end, before handing work back, opening a PR or calling the change done, and report the red state. A dispatch to an executor or subagent says explicitly to make the test fail first and to report that failure; a test contract in the task body is not sufficient on its own.
 
-**Why it is load-bearing.** A test written after the code encodes what the code
-*does* rather than what it *should do*, locking in the implementation along with its
-bugs. It also passes on its first run, so it has never demonstrated that it *can*
-fail — and a test that has never failed is an assertion with no evidence behind it.
-A green suite proves nothing about tests that were never red.
-
-### The loop
-
-1. Write the test. Run it. **Confirm it fails, and fails for the stated reason** —
-   not on an import error or a typo.
-2. Write the minimum implementation that makes it pass.
-3. Run the tests covering the change's blast radius — the new test plus the
-   file's or module's existing tests, and any suite that exercises a caller of what
-   you touched. **Not the whole suite.**
-
-Scoping the run is required, not an optimization. A full-suite run per edit is
-minutes of waiting for signal that a targeted run gives in seconds, and it buries
-the failure you care about in output about code you did not touch. Name the blast
-radius out loud when it is not obvious ("this changes the parser, so parser +
-the two importers that call it").
-
-Run the full suite **once**, at the end — before handing work back, opening a PR,
-or calling a change done. Not after every red/green cycle. If a targeted run leaves
-you unsure what the blast radius actually is, that uncertainty is the reason to go
-find out (grep the callers), not the excuse to run everything.
-
-Report the red state before implementing. "I wrote the test and it failed as
-expected" is part of the work product, not a formality to skip in the retelling.
-
-### Dispatching implementation work
-
-An executor or subagent given a slice to build is told explicitly to make the test
-fail first and to report that failure. A task body carrying a test contract is not
-sufficient on its own — say it in the dispatch.
+trailhead core show adr/tests-are-written-red-first
 
 ### When the code already exists (repair only)
 
-Writing tests after the fact is legitimate **only** as repair of an already-made
-mistake — someone else's untested change, or your own already shipped. It is never
-the plan. When repairing:
+Writing tests after the fact is legitimate only as repair of an already-made mistake, never the plan: derive them from the contract, spec or intended behaviour and never by reading the implementation, mutation-check every test (break the behaviour, confirm the test fails, restore the code exactly, confirm it passes, verify the restore with an empty diff), treat a mutation no test catches as unpinned behaviour and strengthen the test, and name the work as repair when reporting. A mutation check is also the cheapest detector of a test that never executes its subject, since breaking the subject cannot turn it red.
 
-- Derive the tests from the contract, spec, or intended behaviour. **Never by
-  reading the implementation** — that reproduces its bugs as expectations.
-- **Mutation-check every test.** Deliberately break the corresponding behaviour,
-  confirm the test fails, restore the code exactly, confirm it passes. Verify the
-  restore with a diff that must come back empty.
-- A mutation that no test catches means the behaviour is unpinned. Strengthen the
-  test and re-check; do not move on.
-- Name it as repair when reporting. Post-hoc coverage that has passed a mutation
-  check is worth having; presenting it as though it were test-first is not.
-
-A mutation check is also the cheapest detector for the failure this ruleset opens
-with: a test that never executes its subject cannot be made to fail by breaking
-that subject. If the mutation does not turn the test red, the test was not testing
-it.
+trailhead core show adr/after-the-fact-tests-are-repair-only
 
 ### Never
 
@@ -232,43 +60,9 @@ it.
 
 ## Keeping a test suite fast without weakening it
 
-A slow suite gets run less, and a suite that is run less catches less. Most of the cost
-comes from a few habits, and each has a cheaper form that proves the same thing.
+A slow suite gets run less, and a suite that is run less catches less, so: run the real code in-process where the process boundary is not the subject (one real-process test per seam); build shared setup once and copy it per test, with per-test state passed explicitly; use the real disk under the test's temp dir; wait on an observable, never on a duration; inject a collaborator rather than patch by module path; re-home a slow test to an opt-in tier and never delete it for being slow, saying in the closing line that tiers were left out; add cases to the file that already tests the subject (parametrised, with a mutation check of its subject); and budget the run.
 
-- **Run the real thing in-process where the process boundary is not the subject.** A test
-  that spawns a CLI to check logic the CLI's code path holds pays for an interpreter start
-  per call. Call the real code inside the test process, with its environment fenced, and
-  keep one test per seam that spawns the real process end to end. Prefer that real code to a
-  hand-rolled fake: a fake answers things the real one never does, and nothing keeps it
-  honest.
-- **Build shared setup once, copy it per test, and keep per-test state explicit.** A repository
-  or data directory that every test needs identically is built once per worker and copied.
-  Whatever a test depends on that differs from the template (dirty tree, no commits, an
-  identity) is a parameter the test passes, never something left behind in the template.
-  Copies must carry no absolute paths, hooks or config the test did not ask for. Time one case
-  against many before cutting case count: the cost is often per-file setup, and the copy may
-  save less than it seems.
-- **Use the real disk under the test's temp dir.** Make the failure real: a read-only
-  directory, a file where a directory is expected, a missing parent. Patch a filesystem call
-  only when no real trigger exists, such as a full disk.
-- **Wait on an observable, never on a duration.** A sleep is either too short, and the test
-  flakes, or long enough to cost real time on every run. Wait for the file, the sentinel line
-  or the process exit the test cares about. Where elapsed time is the subject, inject the
-  clock or the timeout so the test supplies it.
-- **Inject a collaborator when the test varies its answer or the code already takes one;
-  patch by module path only to stub an orchestrator's collaborator the test does not care
-  about.** A path patch names an import layout: it breaks when the code moves, and a patch of
-  `module.stdlib_module.function` also depends on how the module imports it. A patch of a
-  process-wide function such as `subprocess.run` catches every caller, including incidental ones.
-  Add an injectable seam instead.
-- **Re-home a slow test, never delete it for being slow.** Real-process tests move to an opt-in
-  tier that CI runs as its own required job. Say in the run's closing line that tiers were left
-  out, so a green default run is not read as covering them.
-- **Add a case to the file that already tests the subject.** Cases with the same shape and
-  different values are one parametrized test. A collapsed group still needs a mutation check
-  of its subject, or it can pass for the wrong reason.
-- **Budget the run.** A guard that fails the pull request that pushes run time past a budget
-  derived from measured history keeps the cost from creeping back unnoticed.
+trailhead core show area/testing
 
 ## Output wording
 
