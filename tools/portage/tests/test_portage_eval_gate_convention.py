@@ -17,6 +17,7 @@ import pytest
 
 import _portage_cli  # noqa: F401  (prepends the plugin root onto sys.path)
 from portage.eval_gate.convention import check_plugin
+from portage.eval_gate.mapping import MAX_BLOB_BYTES
 
 FULL = "Read `{p}` now and follow it in full.\n"
 BRANCH = "When the run is unattended, read `{p}` now and follow it in full.\n"
@@ -226,6 +227,25 @@ class TestSharedFilesStayOneHop:
     def test_a_shared_branch_file_loading_a_sibling_unconditionally_is_refused_at_its_line(self, tmp_path):
         faults = rule_faults(faults_of(tmp_path, self.SIBLING_LOAD), "shared-sibling-named")
         assert [f.split(": ")[0] for f in faults] == ["skills/_shared/b.md:3"]
+
+    @pytest.mark.parametrize("load", [
+        "Read `../_shared/r.md` now and follow it in full.\n",
+        "When the run is unattended, read `./r.md` now and follow it in full.\n",
+        "When the run is unattended, read `r.md` now and follow it in full.\n",
+    ])
+    def test_a_shared_branch_file_loading_a_sibling_in_any_form_but_the_shared_branch_load_is_refused(
+        self, tmp_path, load
+    ):
+        files = {**self.SIBLING_LOAD, "skills/_shared/b.md": "Applies when the run is unattended.\n\n" + load}
+        faults = rule_faults(faults_of(tmp_path, files), "shared-sibling-named")
+        assert [f.split(": ")[0] for f in faults] == ["skills/_shared/b.md:3"]
+
+    def test_a_sibling_named_in_the_sentence_after_its_branch_load_is_refused(self, tmp_path):
+        body = ("# C\n\nWhen the run is unattended, read `../_shared/b.md` now and follow it in full. "
+                "Then slice.md applies.\n")
+        files = {"skills/_shared/core.md": body, "skills/_shared/b.md": OPENING, "skills/_shared/slice.md": "S\n"}
+        faults = rule_faults(faults_of(tmp_path, files), "shared-sibling-named")
+        assert len(faults) == 1 and faults[0].startswith("skills/_shared/core.md:3:") and "slice.md" in faults[0]
 
     def test_the_same_shared_branch_file_without_that_load_passes(self, tmp_path):
         files = {**self.SIBLING_LOAD, "skills/_shared/b.md": OPENING}
@@ -467,6 +487,25 @@ class TestDeclaredMentions:
 
     def test_a_missing_list_is_an_empty_list(self, tmp_path):
         assert faults_of(tmp_path, self.FILES) == []
+
+
+class TestUnreadableMention:
+    FILES = {"skills/x/SKILL.md": "# T\n\nSee `big.bin` for the layout.\n",
+             "skills/x/big.bin": b"x" * (MAX_BLOB_BYTES + 1)}
+
+    def test_a_mentioned_file_over_the_size_cap_is_a_fault_not_a_crash(self, tmp_path):
+        faults = faults_of(tmp_path, self.FILES)
+        assert len(faults) == 1 and faults[0].startswith("skills/x/SKILL.md:")
+        assert str(MAX_BLOB_BYTES) in faults[0]
+
+    def test_a_declared_mention_of_a_file_over_the_size_cap_is_a_fault_not_a_crash(self, tmp_path):
+        files = {**self.FILES, "declared-mentions.json": json.dumps({"skills/x/SKILL.md": ["skills/x/big.bin"]})}
+        assert any(str(MAX_BLOB_BYTES) in f for f in faults_of(tmp_path, files))
+
+    def test_the_command_line_exits_one_with_the_fault_and_no_traceback(self, tmp_path):
+        done = TestCommandLine().run(plugin(tmp_path, self.FILES))
+        assert done.returncode == 1
+        assert "Traceback" not in done.stderr and str(MAX_BLOB_BYTES) in done.stdout
 
 
 class TestCommandLine:

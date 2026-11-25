@@ -105,6 +105,23 @@ def _unsafe_reason(raw: str, target: str | None) -> str | None:
     return None
 
 
+_SHARED_BRANCH_FORM = re.compile(r"\.\./_shared/[^/]+\Z")
+
+
+def _mask_branch_load(lines: list[str], load) -> None:
+    """Blank the characters of ``load``'s own sentence in ``lines``, leaving the text around it."""
+    first, last = load.line - 1, load.end_line
+    joined = "\n".join(lines[first:last])
+    condition = r"\s+".join(re.escape(word) for word in load.condition.split())
+    sentence = re.compile(rf"When\s+{condition}\s*,\s+read\s+`{re.escape(load.raw)}`\s+now\s+and\s+follow\s+it\s+in"
+                          r"\s+full\.")
+    found = sentence.search(joined)
+    if found is None:
+        return
+    masked = joined[:found.start()] + re.sub(r"[^\n]", " ", found.group(0)) + joined[found.end():]
+    lines[first:last] = masked.split("\n")
+
+
 def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _Faults) -> None:
     try:
         text = _get(read, file)
@@ -169,11 +186,11 @@ def _check_file(root: Path, read, file: str, declared: frozenset[str], faults: _
     if file.startswith("skills/_shared/"):
         pattern = _sibling_pattern(root, file)
         if pattern is not None:
-            in_load = {n for load in directives.loads if "/" in load.raw
-                       for n in range(load.line, load.end_line + 1)}
-            for number, line in enumerate(_visible_lines(text), 1):
-                if number in in_load:
-                    continue
+            lines = _visible_lines(text)
+            for load in directives.loads:
+                if load.kind == "branch" and _SHARED_BRANCH_FORM.match(load.raw):
+                    _mask_branch_load(lines, load)
+            for number, line in enumerate(lines, 1):
                 for match in pattern.finditer(line):
                     faults.add(file, number, "shared-sibling-named",
                                f"a shared file names its sibling {_q(match.group(0), 1)}; state the point "
@@ -193,9 +210,13 @@ def _check_declared(root: Path, read, faults: _Faults) -> None:
         except LoadError as exc:
             faults.add(name, 1, "declared-mention-stale", str(exc))
             continue
-        loaded = {load.target for load in parse_directives(file, text, read).loads} if text is not None else set()
-        named = ({resolve_existing(file, w.rstrip("."), read) for w in _TOKEN.findall(text)}
-                 if text is not None else set())
+        try:
+            loaded = {load.target for load in parse_directives(file, text, read).loads} if text is not None else set()
+            named = ({resolve_existing(file, w.rstrip("."), read) for w in _TOKEN.findall(text)}
+                     if text is not None else set())
+        except LoadError as exc:
+            faults.add(file, 1, "unreadable-file", str(exc))
+            continue
         for number, path in enumerate(paths, 1):
             if path not in named:
                 faults.add(name, 1, "declared-mention-stale",
@@ -217,7 +238,10 @@ def check_plugin(root: Path) -> list[str]:
         declared = {}
     for file, kind in _walk(root):
         if kind == "file":
-            _check_file(root, read, file, frozenset(declared.get(file, ())), faults)
+            try:
+                _check_file(root, read, file, frozenset(declared.get(file, ())), faults)
+            except LoadError as exc:
+                faults.add(file, 1, "unreadable-file", str(exc))
         else:
             what = "is a symlink or not a regular file" if kind == "symlink" else "could not be read"
             faults.add(file, 1, "unreadable-file", f"{_q(file, 1)} {what}")
