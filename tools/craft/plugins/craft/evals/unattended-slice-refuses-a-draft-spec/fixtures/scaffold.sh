@@ -7,7 +7,14 @@ mkdir -p lore-plugin
 cp -r "$repo/tools/lore/plugins/lore/cli" "$repo/tools/lore/plugins/lore/lore" lore-plugin/
 [ -f "$repo/tools/lore/plugins/lore/_bootstrap.py" ] && cp "$repo/tools/lore/plugins/lore/_bootstrap.py" lore-plugin/ || true
 py=$(sed -n 's/.*exec \([^ ]*\) .*/\1/p' lore | head -1)
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec %s "$here/lore-plugin/cli/lore" "$@"\n' "$py" > lore
+base=$("$py" -c 'import sys; print(sys.base_prefix)')
+# The runner's sandbox hides an interpreter installed under a home directory (uv's, on macOS), so the run
+# carries a copy of it; a system interpreter stays visible and is linked, not copied.
+case "$base" in
+  /Users/*|/home/*) cp -R "$base" py-home ;;
+  *) ln -s "$base" py-home ;;
+esac
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 chmod +x lore
 printf "# CLAUDE.md\n\n## Project Maturity\n\nearly\n" > CLAUDE.md
 SPEC='# Word count tool
