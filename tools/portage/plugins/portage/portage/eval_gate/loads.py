@@ -586,7 +586,7 @@ def parse_directives(path: str, text: str, read) -> Directives:
             section = _LOAD_SECTION.fullmatch(body)
             match = full or branch or section
             if match is None:
-                if named and _DIRECTIVE_VERB.search(body[:body.index(named[0][1])]):
+                if named and _DIRECTIVE_VERB.search(body[:named[0][0]]):
                     reason = "names several files" if len(distinct) > 1 else "is not in the fixed wording"
                     misworded.append(Misworded(line, distinct, reason))
                 continue

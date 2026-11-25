@@ -770,6 +770,8 @@ class TestParseDirectivesMisworded:
         "Per `a.md`, check the result.\n",
         "When x, read `a.md` now.\n",
         "Read `a.md` now and follow it in full, and read `b.md` now and follow it in full.\n",
+        "Unlike a.md, consult `a.md`.\n",
+        "Unlike a.md, consult [a](a.md).\n",
     ])
     def test_a_directive_naming_an_existing_file_outside_the_fixed_wording_is_reported(self, tmp_path, text):
         result = directives(tmp_path, "# T\n\n" + text)
@@ -786,6 +788,7 @@ class TestParseDirectivesMisworded:
         "Read `a.md` now and follow it in full.\n\n```\nsee `b.md`\n```\n",
         "<!-- see `b.md` -->\n",
         "Use the `git status` command.\n",
+        "Unlike a.md, the file `a.md` is a plain mention.\n",
     ])
     def test_text_that_names_no_existing_file_after_a_directive_is_not_reported(self, tmp_path, text):
         assert directives(tmp_path, text).misworded == ()
