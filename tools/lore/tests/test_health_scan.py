@@ -429,6 +429,27 @@ def test_reading_stops_at_the_trip_point_and_later_records_are_never_opened(scan
     assert s.bytes_read <= 2500 + 2 * scan.MAX_RECORD_BYTES
 
 
+def test_an_oversize_body_keeps_its_parsed_sidecar_on_the_sidecar_only_list_and_stays_unreadable(scan, inst):
+    root = inst.roots["default"]
+    sc = _sidecar("Huge", labels={"k/v": "x"})
+    _put(root, "lesson", "huge", sc, "x" * (scan.MAX_RECORD_BYTES + 1))
+    _put(root, "lesson", "good", _sidecar("Good"))
+    s = scan.scan_vault("default", root)
+    assert [(r.vault, r.kind, r.name, r.sidecar) for r in s.sidecar_only] == [("default", "lesson", "huge", sc)]
+    assert [(u.name, u.reason) for u in s.unreadable] == [("huge", scan.REASON_OVERSIZE)]
+    assert [r.name for r in s.records] == ["good"]
+    assert s.fully_read
+
+
+def test_an_oversize_sidecar_and_a_malformed_one_are_not_kept_on_the_sidecar_only_list(scan, inst):
+    root = inst.roots["default"]
+    _put(root, "lesson", "bigsc", _sidecar("Big", pad="y" * (scan.MAX_RECORD_BYTES + 1)))
+    _put(root, "lesson", "broken", "{not json")
+    s = scan.scan_vault("default", root)
+    assert s.sidecar_only == []
+    assert sorted(u.name for u in s.unreadable) == ["bigsc", "broken"]
+
+
 def test_an_oversize_record_is_charged_at_its_capped_size_and_is_not_a_budget_breach(scan, inst):
     root = inst.roots["default"]
     _put(root, "lesson", "huge", _sidecar("Huge"), "x" * (scan.MAX_RECORD_BYTES + 1))

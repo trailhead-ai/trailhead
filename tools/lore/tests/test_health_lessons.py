@@ -170,3 +170,41 @@ def test_only_selected_vaults_are_judged_and_each_vault_counts_its_own():
               selected=["b"])
     assert res.judged == {"b": 2}
     assert [f.vault for f in res.findings] == ["b"]
+
+
+def _sidecar_only(name, created=None, *, vault="a", kind="lesson", status="active", labels=LABEL):
+    sc = {"status": status, "created-at": created if created is not None else ago(100)}
+    if labels is not None:
+        sc["labels"] = dict(labels)
+    return model.SidecarOnlyRecord(vault, kind, name, sc)
+
+
+def _with_oversize_body(scan, *only):
+    for o in only:
+        scan.sidecar_only.append(o)
+        scan.unreadable.append(model.UnreadableRecord(o.vault, o.kind, o.name, "oversize"))
+    return scan
+
+
+def test_an_oversize_body_lesson_is_counted_and_listed_from_its_sidecar():
+    s = _with_oversize_body(vault("a", lesson("x", ago(5))), _sidecar_only("big", ago(2)))
+    res = run([s])
+    assert res.skipped == {}
+    assert counts(res) == (2, 2)
+    assert [f.name for f in res.findings] == ["x", "big"]
+
+
+def test_an_oversize_body_lesson_outside_the_window_or_retired_or_unlabelled_is_not_listed_or_counted():
+    s = _with_oversize_body(vault("a"), _sidecar_only("old", ago(90)),
+                            _sidecar_only("gone", ago(2), status="dropped"),
+                            _sidecar_only("plain", ago(2), labels=None))
+    res = run([s])
+    assert counts(res) == (1, 0)
+
+
+def test_an_unreadable_lesson_with_no_sidecar_still_skips_the_vault():
+    s = _with_oversize_body(vault("a", lesson("x", ago(5))), _sidecar_only("big", ago(2)))
+    s.unreadable.append(model.UnreadableRecord("a", "lesson", "bigsc", "oversize"))
+    res = run([s])
+    assert res.skipped == {"a": lessons.UNREADABLE_LESSON}
+    assert "a" not in res.judged

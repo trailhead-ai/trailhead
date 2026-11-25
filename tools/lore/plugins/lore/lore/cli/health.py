@@ -427,7 +427,8 @@ LESSONS_SKIP_TAIL = "so its lessons cannot all be counted"
 def _lessons_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], code: str) -> str:
     if code == lessons_mod.UNREADABLE_LESSON:
         return f"vault {_safe(scan.vault)} holds a lesson record that could not be read, {LESSONS_SKIP_TAIL}"
-    return _skip_reason(scan, scans, (scan.vault,), LESSONS_SKIP_TAIL)
+    reason = _skip_reason(scan, scans, (scan.vault,), LESSONS_SKIP_TAIL)
+    return reason if reason.endswith(LESSONS_SKIP_TAIL) else f"{reason}, {LESSONS_SKIP_TAIL}"
 
 
 def _run_lessons(scans, selected, ctx) -> CheckRun:

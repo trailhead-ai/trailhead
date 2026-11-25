@@ -432,6 +432,17 @@ def test_target_existing_only_as_unreadable_record_in_another_vault_is_not_repor
     assert run([a, b]).findings == []
 
 
+def test_an_oversize_body_record_kept_for_its_sidecar_still_counts_as_unreadable_to_this_check():
+    def scan(with_sidecar):
+        a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
+        a.unreadable.append(model.UnreadableRecord("a", "adr", "x", "oversize"))
+        if with_sidecar:
+            a.sidecar_only.append(model.SidecarOnlyRecord("a", "adr", "x", {"status": "active"}))
+        return a
+
+    assert run([scan(True)]).findings == run([scan(False)]).findings == []
+
+
 def test_other_kind_that_is_unreadable_is_not_named():
     a = vault("a", rec("a", "lesson", "src", {}, "[[adr/x]]"))
     a.unreadable.append(model.UnreadableRecord("a", "decision", "x", "oversize"))

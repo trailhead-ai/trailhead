@@ -11,7 +11,9 @@ and never listed. Informational: the findings are growth, not defects.
 Skips are per vault, because a vault whose lessons were not all read would report a
 count that could be low: the vault was not fully read (``NOT_FULLY_READ``), holds a
 lesson that could not be read (``UNREADABLE_LESSON``) or holds an escaped lesson
-(``ESCAPED_LESSON``). An unreadable or escaped record of another kind does not skip.
+(``ESCAPED_LESSON``). An unreadable or escaped record of another kind does not skip. A lesson unreadable only
+because its body is oversize is counted from its sidecar (``VaultScan.sidecar_only``): the
+labels, status and ``created-at`` all live there; one whose sidecar is oversize cannot be.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, parse_timestamp, status
+from .model import RETIRED_STATUSES, ScannedRecord, SidecarOnlyRecord, VaultScan, parse_timestamp, status
 
 KIND = "lesson"
 LABEL_KEY = "craft/dispatch-lesson"
@@ -59,7 +61,7 @@ class LessonsResult:
     skipped: dict[str, str] = field(default_factory=dict)
 
 
-def _is_dispatch_lesson(record: ScannedRecord) -> bool:
+def _is_dispatch_lesson(record: ScannedRecord | SidecarOnlyRecord) -> bool:
     if record.kind != KIND or status(record) in RETIRED_STATUSES:
         return False
     labels = record.sidecar.get("labels") if isinstance(record.sidecar, dict) else None
@@ -69,7 +71,8 @@ def _is_dispatch_lesson(record: ScannedRecord) -> bool:
 def _skip_reason(scan: VaultScan) -> str | None:
     if not scan.readable_for((KIND,)):
         return ESCAPED_LESSON if scan.escapes_in((KIND,)) else NOT_FULLY_READ
-    if any(u.kind == KIND for u in scan.unreadable):
+    counted = {s.name for s in scan.sidecar_only if s.kind == KIND}
+    if any(u.kind == KIND and u.name not in counted for u in scan.unreadable):
         return UNREADABLE_LESSON
     return None
 
@@ -93,7 +96,7 @@ def check_lessons(
             result.skipped[scan.vault] = reason
             continue
         judged = 0
-        for record in scan.records:
+        for record in (*scan.records, *scan.sidecar_only):
             if not _is_dispatch_lesson(record):
                 continue
             judged += 1

@@ -940,7 +940,8 @@ def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     for check in CHECKS[:-1]:
         assert rows(r.stdout, check)["levr"] == ("—", "—", "yes: its directory could not be read")
         assert group(r.stdout, check) == [f"{check} — skipped."]
-    assert rows(r.stdout, "lesson-growth")["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert rows(r.stdout, "lesson-growth")["levr"] == (
+        "—", "—", "yes: its directory could not be read, so its lessons cannot all be counted")
     assert rows(r.stdout, "lesson-growth")["default"] == ("0", "0", "no")
     assert group(r.stdout, "lesson-growth") == [
         "lesson-growth — no findings (window: 30 days): default 0 lessons, 0 added; trailhead 0 lessons, 0 added."]
@@ -2465,8 +2466,9 @@ def test_a_vault_past_the_budget_skips_every_check_with_the_size_reason_then_rep
     _put(world.roots["default"], "lesson", "a", related={"decision": ["gone"]})
     r = world.run("--max-scan-mib", "1")
     assert r.returncode == 0, r.stderr
-    for check in CHECKS:
+    for check in CHECKS[:-1]:
         assert rows(r.stdout, check)["levr"][2] == BUDGET_REASON, check
+    assert rows(r.stdout, "lesson-growth")["levr"][2] == f"{BUDGET_REASON}, so its lessons cannot all be counted"
     assert finding_lines(r.stdout) == []
     r = world.run("--max-scan-mib", "64")
     assert r.returncode == 0, r.stderr
@@ -2692,6 +2694,28 @@ def test_lesson_growth_skips_a_vault_with_an_unreadable_lesson_and_reports_the_r
     assert _growth(r.stdout)[0].endswith("default 1 lesson, 1 added (100%); levr 0 lessons, 0 added")
 
 
+def test_lesson_growth_counts_an_oversize_body_lesson_from_its_sidecar(world):
+    root = world.roots["trailhead"]
+    _lesson(root, "plain", 1)
+    _lesson(root, "big", 2, body="x" * (1024 * 1024 + 1))
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert rows(r.stdout, "lesson-growth")["trailhead"] == ("2", "2", "no")
+    assert _growth(r.stdout)[0].startswith("lesson-growth — 2 findings, oldest first")
+    assert any("trailhead/lesson/big" in ln for ln in _growth(r.stdout))
+
+
+def test_lesson_growth_skips_a_vault_whose_lesson_has_an_oversize_sidecar(world):
+    root = world.roots["trailhead"]
+    _lesson(root, "plain", 1)
+    _lesson(root, "bigsc", 2, pad="y" * (1024 * 1024 + 1))
+    _lesson(world.roots["default"], "ok", 1)
+    got = rows(world.run().stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—", "yes: vault trailhead holds a lesson record that could not be read, "
+                                          "so its lessons cannot all be counted")
+
+
 def test_lesson_growth_skips_a_vault_whose_lesson_escapes_and_reports_the_rest(world, tmp_path):
     outside = tmp_path / "elsewhere"
     outside.mkdir()
@@ -2703,14 +2727,16 @@ def test_lesson_growth_skips_a_vault_whose_lesson_escapes_and_reports_the_rest(w
     _lesson(world.roots["default"], "ok", 1)
     got = rows(world.run().stdout, "lesson-growth")
     assert got["default"] == ("1", "1", "no")
-    assert got["trailhead"] == ("—", "—", "yes: records lie outside its vault root and were not read")
+    assert got["trailhead"] == ("—", "—", "yes: records lie outside its vault root and were not read"
+                                ", so its lessons cannot all be counted")
 
 
 def test_lesson_growth_is_skipped_when_every_vault_is_skipped(world):
     shutil.rmtree(world.roots["default"])
     r = world.run("--vault", "default")
     assert _growth(r.stdout) == ["lesson-growth — skipped."]
-    assert rows(r.stdout, "lesson-growth")["default"][2] == "yes: its directory does not exist"
+    assert rows(r.stdout, "lesson-growth")["default"][2] == (
+        "yes: its directory does not exist, so its lessons cannot all be counted")
 
 
 def test_lesson_growth_skips_a_vault_that_is_not_fully_read(world):
@@ -2724,7 +2750,7 @@ def test_lesson_growth_skips_a_vault_that_is_not_fully_read(world):
         os.chmod(kind_dir, 0o755)
     got = rows(r.stdout, "lesson-growth")
     assert got["default"] == ("1", "1", "no")
-    assert got["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert got["levr"] == ("—", "—", "yes: its directory could not be read, so its lessons cannot all be counted")
 
 
 def test_lesson_growth_neutralizes_vault_names_in_its_heading(evil):

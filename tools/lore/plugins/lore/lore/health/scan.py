@@ -18,7 +18,7 @@ from ..cli import common
 from ..record import model as record_model
 from ..record import rename
 from ..search import index as index_mod
-from .model import EscapedRecord, IndexCount, ScannedRecord, UnreadableRecord, VaultScan
+from .model import EscapedRecord, IndexCount, ScannedRecord, SidecarOnlyRecord, UnreadableRecord, VaultScan
 
 #: Largest sidecar or body, in bytes, the scan will read.
 MAX_RECORD_BYTES = 1024 * 1024
@@ -216,7 +216,8 @@ def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedR
     """Read one record, charging ``result.bytes_read``; ``None`` when it is not a readable record.
 
     An unreadable record lands on ``result.unreadable``; ``result.indexed`` counts it
-    when the indexer would hold it.
+    when the indexer would hold it. A record unreadable only for an oversize body also
+    keeps its parsed sidecar on ``result.sidecar_only``.
     """
 
     def unreadable(reason: str) -> None:
@@ -253,6 +254,7 @@ def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedR
         result.bytes_read += MAX_RECORD_BYTES
         if probe is not None and probe.holds(kind, name, sidecar, ""):
             result.indexed += 1
+        result.sidecar_only.append(SidecarOnlyRecord(result.vault, kind, name, sidecar))
         unreadable(REASON_OVERSIZE)
         return None
     except ValueError:

@@ -76,6 +76,20 @@ class UnreadableRecord:
 
 
 @dataclass(frozen=True)
+class SidecarOnlyRecord:
+    """A record whose body was past the size cap but whose sidecar was read and parsed.
+
+    It is also on ``VaultScan.unreadable``, so every check that needs a body still
+    treats it as unreadable; only a check that judges from the sidecar alone uses this.
+    """
+
+    vault: str
+    kind: str
+    name: str
+    sidecar: dict
+
+
+@dataclass(frozen=True)
 class EscapedRecord:
     """A record whose files resolve outside the vault root, known by kind and name only.
 
@@ -96,7 +110,8 @@ class VaultScan:
     read, or when its records exceed the scan's byte budget (``budget_bytes``,
     ``bytes_read`` counting the bytes read so far). ``skipped_escaping`` counts
     records (or kind directories) whose files resolve outside the vault root;
-    ``escaped`` names each by kind and name, never by path.
+    ``escaped`` names each by kind and name, never by path. ``sidecar_only`` holds the
+    parsed sidecar of each record on ``unreadable`` only because its body was oversize.
     ``indexed`` counts the records the search index would hold: every readable
     record whose projection the indexer accepts, plus every oversize record
     (the indexer reads without a cap).
@@ -106,6 +121,7 @@ class VaultScan:
     root: str
     records: list[ScannedRecord] = field(default_factory=list)
     unreadable: list[UnreadableRecord] = field(default_factory=list)
+    sidecar_only: list[SidecarOnlyRecord] = field(default_factory=list)
     unreadable_reason: str | None = None
     skipped_escaping: int = 0
     indexed: int = 0
