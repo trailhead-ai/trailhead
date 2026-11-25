@@ -624,6 +624,7 @@ class TestLiveCorpus:
             assert [f for f in files if is_branch(read(f))] == [], name
         assert total > 20
 
+    @pytest.mark.benchmark
     def test_craft_skill_cases_and_every_procedure_derive_and_check_in_under_a_second(self):
         started = time.perf_counter()
         craft = REPO_TOOLS / "craft" / "plugins" / "craft"
