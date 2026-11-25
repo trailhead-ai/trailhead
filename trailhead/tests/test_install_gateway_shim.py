@@ -4,6 +4,7 @@ when the Outpost tool is enabled."""
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -57,7 +58,8 @@ class TestShimBuild:
             env={"HOME": env["HOME"], "PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(state)},
             timeout=60,
         )
-        assert (proc.returncode, proc.stdout) == (0, ""), proc.stderr
+        assert proc.returncode == 0, proc.stderr
+        assert json.loads(proc.stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
         (line,) = (state / "gateway" / "register.log").read_text().splitlines()
         assert line.split()[2] == "no_harness"
 

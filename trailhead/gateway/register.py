@@ -9,14 +9,20 @@ from Outpost's state directory, and posts ``{pid, start_time}`` to Outpost, whic
 derives the workspace itself. Nothing is taken from the caller: no argument,
 environment variable or hook input names a process, workspace or session key.
 
-As a hook it never blocks the session: it always exits 0 and prints nothing on
-success. A failure writes one reason code to stderr and appends one line to
-``<trailhead state>/gateway/register.log``. The authority is never printed or logged.
+As a hook it never blocks the session: it always exits 0, within ``HOOK_TIMEOUT_SECONDS``
+of reaching Outpost (the hook's declared timeout discards the output of a hook that
+overruns it), and prints nothing on success. A failure writes one reason code to stderr and
+appends ``<timestamp> <key> <reason> <line>`` to ``<trailhead state>/gateway/register.log``,
+where ``<line>`` is the one-line statement that the session has no gateway credential and why;
+the hook also prints that line to the session as one JSON object on stdout. The authority is
+never printed or logged.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +35,9 @@ from trailhead.paths import state_dir
 
 PORT = DAEMON_PORT
 TIMEOUT_SECONDS = 1.5
+HOOK_TIMEOUT_SECONDS = 1.0
+"""What the SessionStart hook allows Outpost to answer in, under the hook's declared 2 s timeout with
+the interpreter's start inside it."""
 
 # Reason codes Outpost's registration route answers with; anything else is
 # reported as UNEXPECTED_REPLY so a server-supplied string is never echoed.
@@ -64,6 +73,14 @@ NEXT_STEPS = {
     UNEXPECTED_FAILURE: "Registration failed unexpectedly; try again.",
 }
 """What to do next for a registration that failed before Outpost gave a reason of its own."""
+
+
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def _one_line(text: str) -> str:
+    """*text* as one line without control characters, so it cannot drive the terminal that shows it."""
+    return " ".join(_CONTROL.sub("", text).split())
 
 
 class Refused(Exception):
@@ -121,13 +138,30 @@ def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS
     raise Refused(UNEXPECTED_REPLY, local_key)
 
 
-def _log(reason: str, key: str | None) -> None:
+NO_CREDENTIAL = "This session has no gateway credential"
+
+
+def no_credential_line(reason: str, message: str | None = None) -> str:
+    """The one line saying this session has no gateway credential and why, for a failure with *reason* and Outpost's *message*."""
+    if reason == OUTPOST_UNREACHABLE:
+        why = "Outpost is unreachable; it will register on the first gateway call once Outpost is back"
+    elif reason == "not_in_workspace":
+        from trailhead.gateway.command import NO_GATEWAY_OUTSIDE_WORKSPACE
+
+        why = NO_GATEWAY_OUTSIDE_WORKSPACE
+    else:
+        step = message or NEXT_STEPS.get(reason)
+        why = f"it is not registered ({reason})" + (f": {step}" if step else "")
+    return _one_line(f"{NO_CREDENTIAL}: {why}")
+
+
+def _log(reason: str, key: str | None, line: str) -> None:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
         path = register_log()
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a") as fh:
-            fh.write(f"{stamp} {key or '-'} {reason}\n")
+            fh.write(f"{stamp} {key or '-'} {reason} {line}\n")
     except Exception:  # noqa: BLE001 — a log that cannot be written must not block the session
         pass
 
@@ -148,15 +182,25 @@ def _parser() -> argparse.ArgumentParser:
 def run(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        key = register()
+        key = register(timeout=HOOK_TIMEOUT_SECONDS if args.hook else TIMEOUT_SECONDS)
     except Refused as refusal:
-        reason, key = refusal.reason, refusal.key
+        reason, key, message = refusal.reason, refusal.key, refusal.message
     except Exception:  # noqa: BLE001 — a traceback must never carry the authority
-        reason, key = UNEXPECTED_FAILURE, None
+        reason, key, message = UNEXPECTED_FAILURE, None, None
     else:
         if not args.hook:
             print(f"registered {key}")
         return 0
-    _log(reason, key)
+    line = no_credential_line(reason, message)
+    _log(reason, key, line)
     print(reason, file=sys.stderr)
+    if args.hook:
+        print(
+            json.dumps(
+                {
+                    "systemMessage": line,
+                    "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": line},
+                }
+            )
+        )
     return 0 if args.hook else 1

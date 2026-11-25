@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from trailhead.capabilities import load_manifest
@@ -18,12 +19,25 @@ from trailhead.tests._gateway_support import (
     StubOutpost,
     register_port_interpreter,
     run_under_harness,
+    silent_listener,
+    free_port,
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
 from trailhead.uninstall import run_uninstall
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CLI_MISSING = "no gateway credential"
+
+
+def _one_message(proc) -> str:
+    """The one-line message the hook printed as its single JSON object on stdout."""
+    out = json.loads(proc.stdout)
+    line = out["systemMessage"]
+    assert "\n" not in line
+    assert out["hookSpecificOutput"] == {"hookEventName": "SessionStart", "additionalContext": line}
+    assert set(out) == {"systemMessage", "hookSpecificOutput"}
+    return line
 
 
 def _compose(tool: str, dest: Path) -> None:
@@ -58,7 +72,7 @@ class TestCompose:
         _compose("outpost", dest)
         hooks = json.loads((dest / "hooks" / "hooks.json").read_text())
         (hook,) = [h for e in hooks["hooks"]["SessionStart"] for h in e["hooks"]]
-        assert hook["timeout"] <= 3
+        assert hook["timeout"] <= 2
 
     def test_no_other_tool_composes_the_gateway_hook(self, tmp_path):
         others = [
@@ -84,7 +98,7 @@ class TestScript:
 
     def _fake_cli(self, path: Path, record: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f'#!/bin/sh\necho "$@" >> "{record}"\necho noise\nexit 3\n')
+        path.write_text(f'#!/bin/sh\necho "$@" >> "{record}"\necho noise >&2\nexit 3\n')
         path.chmod(0o755)
 
     def test_runs_the_register_shim_under_the_trailhead_state_dir_with_the_hook_flag(self, tmp_path):
@@ -111,9 +125,11 @@ class TestScript:
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
         )
         assert not record.exists()
-        assert (proc.returncode, proc.stdout) == (0, "")
+        assert proc.returncode == 0
+        message = _one_message(proc)
         (line,) = (tmp_path / "state" / "gateway" / "register.log").read_text().splitlines()
-        assert line.endswith(" - cli_not_found")
+        assert line.split()[1:3] == ["-", "cli_not_found"]
+        assert line.endswith(f" {message}")
 
     def test_never_runs_a_register_command_found_on_path_when_the_shim_is_missing(self, tmp_path):
         record = tmp_path / "args.txt"
@@ -130,9 +146,11 @@ class TestScript:
             },
         )
         assert not record.exists()
-        assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+        assert (proc.returncode, proc.stderr) == (0, "")
+        message = _one_message(proc)
         (line,) = (tmp_path / "empty" / "gateway" / "register.log").read_text().splitlines()
-        assert line.endswith(" - cli_not_found")
+        assert line.split()[1:3] == ["-", "cli_not_found"]
+        assert line.endswith(f" {message}")
 
     def test_a_shim_that_is_not_executable_is_not_run(self, tmp_path):
         record = tmp_path / "args.txt"
@@ -147,10 +165,11 @@ class TestScript:
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
         )
         assert not record.exists()
-        assert (proc.returncode, proc.stdout) == (0, "")
-        assert (tmp_path / "state" / "gateway" / "register.log").read_text().endswith(" - cli_not_found\n")
+        assert proc.returncode == 0
+        message = _one_message(proc)
+        assert (tmp_path / "state" / "gateway" / "register.log").read_text().endswith(f" - cli_not_found {message}\n")
 
-    def test_without_a_trailhead_cli_it_exits_zero_silently_and_leaves_a_trace(self, tmp_path):
+    def test_without_a_trailhead_cli_it_exits_zero_says_why_and_leaves_a_trace(self, tmp_path):
         proc = subprocess.run(
             [str(self._script(tmp_path))],
             input="{}",
@@ -158,9 +177,12 @@ class TestScript:
             text=True,
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "empty"), "HOME": str(tmp_path)},
         )
-        assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+        assert (proc.returncode, proc.stderr) == (0, "")
+        message = _one_message(proc)
+        assert CLI_MISSING in message.lower() and "trailhead install" in message
         (line,) = (tmp_path / "empty" / "gateway" / "register.log").read_text().splitlines()
-        assert line.endswith(" - cli_not_found")
+        assert line.split()[1:3] == ["-", "cli_not_found"]
+        assert line.endswith(f" {message}")
 
     def test_a_trace_that_cannot_be_written_leaves_the_exit_and_output_untouched(self, tmp_path):
         state = tmp_path / "ro"
@@ -176,7 +198,8 @@ class TestScript:
             )
         finally:
             state.chmod(0o700)
-        assert (proc.returncode, proc.stdout, proc.stderr) == (0, "", "")
+        assert (proc.returncode, proc.stderr) == (0, "")
+        _one_message(proc)
 
     def test_after_a_real_install_the_hook_runs_the_cli_install_wrote(self, tmp_path):
         state = tmp_path / "state"
@@ -195,9 +218,11 @@ class TestScript:
             on_start=lambda pid: None,
             stdin="{}",
         )
-        assert (proc.returncode, proc.stdout) == (0, "")
+        assert proc.returncode == 0
+        message = _one_message(proc)
         (line,) = (state / "gateway" / "register.log").read_text().splitlines()
         assert line.split()[2] == "authority_missing"
+        assert line.endswith(f" {message}")
 
 
 class TestUninstall:
@@ -260,3 +285,62 @@ class TestRealInstallReachesOutpost:
         assert (seen.method, seen.path) == ("POST", "/gateway/sessions")
         assert seen.headers["authorization"] == f"Bearer {REGISTRATION_AUTHORITY}"
         assert json.loads(seen.body) == {"pid": found[0][0], "start_time": found[0][1]}
+
+
+class TestNoCredentialThroughTheInstalledHook:
+    """The hook as `trailhead install` wires it: the plugin's script, the shim install wrote, a stub or absent Outpost."""
+
+    def _run(self, tmp_path, monkeypatch, port, *, authority=True):
+        state = tmp_path / "state"
+        env = {"TRAILHEAD_STATE_DIR": str(state), "HOME": str(tmp_path)}
+        outpost_state = tmp_path / "outpost-state"
+        if authority:
+            write_authority(outpost_state)
+        dest = tmp_path / "plugins" / "outpost"
+        _compose("outpost", dest)
+        monkeypatch.setattr("trailhead.pathint.sys.executable", str(register_port_interpreter(tmp_path / "interp", port)))
+        build_cli_shims(resolve_cli_tools({"camp": True}), env=env, outpost_enabled=True)
+        started = time.monotonic()
+        proc = run_under_harness(
+            make_fake_harness(tmp_path / "fake"),
+            str(dest / "hooks" / "gateway-register"),
+            env={
+                **env,
+                "OUTPOST_STATE_DIR": str(outpost_state),
+                "PATH": os.pathsep.join([str(Path(sys.executable).parent), "/usr/bin", "/bin"]),
+            },
+            on_start=lambda pid: None,
+            stdin="{}",
+        )
+        return proc, time.monotonic() - started, state / "gateway" / "register.log"
+
+    def test_a_closed_port_exits_zero_within_two_seconds_with_the_line(self, tmp_path, monkeypatch):
+        proc, elapsed, log = self._run(tmp_path, monkeypatch, free_port())
+        assert proc.returncode == 0, proc.stderr
+        message = _one_message(proc)
+        assert "it will register on the first gateway call once Outpost is back" in message
+        assert log.read_text().rstrip("\n").endswith(f" {message}")
+        assert elapsed < 2.0, elapsed
+
+    def test_a_port_that_accepts_and_never_answers_exits_zero_within_two_seconds_with_the_line(
+        self, tmp_path, monkeypatch
+    ):
+        with silent_listener() as port:
+            proc, elapsed, log = self._run(tmp_path, monkeypatch, port)
+        assert proc.returncode == 0, proc.stderr
+        assert "once Outpost is back" in _one_message(proc)
+        assert elapsed < 2.0, elapsed
+
+    def test_a_refusal_prints_outposts_reason_and_next_step(self, tmp_path, monkeypatch):
+        with StubOutpost(register_reply=(403, {"reason": "host_not_allowed", "message": "Open it on the host."})) as stub:
+            proc, _, log = self._run(tmp_path, monkeypatch, stub.port)
+        assert proc.returncode == 0, proc.stderr
+        message = _one_message(proc)
+        assert "host_not_allowed" in message and "Open it on the host." in message
+        assert log.read_text().rstrip("\n").endswith(f" {message}")
+
+    def test_outside_a_camp_workspace_says_so(self, tmp_path, monkeypatch):
+        with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": "x"})) as stub:
+            proc, _, _ = self._run(tmp_path, monkeypatch, stub.port)
+        assert proc.returncode == 0, proc.stderr
+        assert "not in a camp workspace" in _one_message(proc)

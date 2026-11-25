@@ -19,7 +19,8 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -42,6 +43,15 @@ def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@contextmanager
+def silent_listener() -> Iterator[int]:
+    """A loopback port that accepts connections (the kernel completes them) and never answers one."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen(16)
+        yield s.getsockname()[1]
 
 
 def runner_env(

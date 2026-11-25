@@ -9,10 +9,16 @@
 # unsandboxed, so it never consults PATH and never runs the interactive `trailhead`
 # shim, which picks its interpreter from PATH: only the registration shim, pinned to
 # the installing interpreter and started isolated, is run. The hook input on stdin is
-# not read: the step takes nothing from its caller. Every path exits 0 and prints
-# nothing to stdout; when the shim is missing or not executable the hook appends
-# `<timestamp> - cli_not_found` to <state>/gateway/register.log, the log the
-# registration step itself writes.
+# not read: the step takes nothing from its caller. Every path exits 0, and the hook's
+# declared timeout (2 s) is the bound on the whole run: the registration step bounds its own
+# call to Outpost well inside it, because a hook that overruns has its output discarded.
+# A successful registration prints nothing. When no credential results, exactly one JSON
+# object goes to stdout (`systemMessage` and `hookSpecificOutput.additionalContext`, the
+# same one line), printed by the registration step; when the shim is missing or not
+# executable the hook prints that object itself and appends
+# `<timestamp> - cli_not_found <line>` to <state>/gateway/register.log, the log the
+# registration step itself writes. The hook runs outside the Bash sandbox, so it reads
+# Outpost's registration authority folder directly.
 
 if [ -n "${TRAILHEAD_STATE_DIR:-}" ]; then
     state="$TRAILHEAD_STATE_DIR"
@@ -24,11 +30,13 @@ fi
 
 register="$state/bin/trailhead-gateway-register"
 if [ ! -x "$register" ]; then
+    line="This session has no gateway credential: the trailhead registration command is not installed; run trailhead install"
     # Leave the one-line trace `outpost-gateway` points an operator at.
     { mkdir -p "$state/gateway" &&
-        printf '%s - cli_not_found\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >>"$state/gateway/register.log"; } 2>/dev/null
+        printf '%s - cli_not_found %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >>"$state/gateway/register.log"; } 2>/dev/null
+    printf '{"systemMessage": "%s", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "%s"}}\n' "$line" "$line"
     exit 0
 fi
 
-"$register" --hook >/dev/null
+"$register" --hook
 exit 0
