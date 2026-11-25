@@ -149,12 +149,14 @@ def _health_ok(port: int) -> bool:
 
 
 @contextmanager
-def real_outpost(root: Path, camp: Camp, *, runs: RunsHost | None = None) -> Iterator[RealOutpost]:
+def real_outpost(
+    root: Path, camp: Camp, *, runs: RunsHost | None = None, extra_env: dict[str, str] | None = None
+) -> Iterator[RealOutpost]:
     """A real Outpost: ``node --import tsx server/index.ts`` on a free port, temp state, temp camp layout.
 
     Waits for ``/health`` and the registration authority file, failing early if the process exits.
     With *runs*, its config is the operator's (so its ``[runs]`` is theirs) and it also waits for the engine
-    filter's socket, which that table makes it bind.
+    filter's socket, which that table makes it bind. *extra_env* is added to the Outpost process's environment.
     """
     checkout = outpost_checkout()
     port, sites_port = free_port(), free_port()
@@ -171,6 +173,7 @@ def real_outpost(root: Path, camp: Camp, *, runs: RunsHost | None = None) -> Ite
         "HTTP_PORT": str(port),
         "SITES_PORT": str(sites_port),
         "NODE_OPTIONS": "--no-experimental-webstorage",
+        **(extra_env or {}),
     }
     if runs is not None:
         copy_operator_config(operator_config_path(), root / "outpost-config")

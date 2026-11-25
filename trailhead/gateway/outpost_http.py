@@ -5,6 +5,11 @@ sandbox exports them) are ignored, redirects are refused, and every call has a
 short timeout. Replies are JSON in and out; a non-2xx status is a result, not an
 exception, so the caller can name the refusal. Only an unreachable Outpost raises.
 
+Reaching Outpost has one overall budget (``reach_budget``): every call made without an
+explicit timeout draws on what is left of it until the caller says ``reached``, so a command
+that registers, exchanges a token and makes its first call is bounded as a whole. After that each
+further call has ``CONNECT_TIMEOUT_SECONDS`` to itself.
+
 A request body can be streamed from a file, and a reply can be read as it arrives
 (``open_stream``). Neither has a whole-request timeout: ``IDLE_TIMEOUT_SECONDS`` bounds
 each read and write on the socket, so a long run is followed for as long as it keeps
@@ -16,18 +21,25 @@ from __future__ import annotations
 import base64
 import json
 import socket
+import time
 import http.client
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import BinaryIO
 
 from trailhead.outpost_lifecycle import DAEMON_HOST, DAEMON_PORT
 
-CONNECT_TIMEOUT_SECONDS = 3.0
+CONNECT_TIMEOUT_SECONDS = 5.0
+REACH_BUDGET_SECONDS = 4.5
+"""Time allowed to reach Outpost: a little under five seconds, so a command that cannot reach it
+has also started its interpreter and printed its message within five."""
 IDLE_TIMEOUT_SECONDS = 120.0
+
+_deadline: float | None = None
 
 
 class OutpostUnreachable(Exception):
@@ -36,6 +48,10 @@ class OutpostUnreachable(Exception):
     def __init__(self, port: int) -> None:
         super().__init__(f"{DAEMON_HOST}:{port}")
         self.port = port
+
+
+class ReplyTimedOut(OutpostUnreachable):
+    """The request was sent and Outpost did not answer in time: it may or may not have acted on it."""
 
 
 class StreamBroken(Exception):
@@ -62,6 +78,34 @@ def _opener() -> urllib.request.OpenerDirector:
     return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
 
 
+@contextmanager
+def reach_budget() -> Iterator[None]:
+    """Give the calls made inside, until :func:`reached`, ``REACH_BUDGET_SECONDS`` between them."""
+    global _deadline
+    _deadline = time.monotonic() + REACH_BUDGET_SECONDS
+    try:
+        yield
+    finally:
+        _deadline = None
+
+
+def reached() -> None:
+    """End the reach budget: the caller has what it needed from Outpost, and later calls have their own timeouts."""
+    global _deadline
+    _deadline = None
+
+
+def _timeout_for(timeout: float | None, port: int) -> float:
+    if timeout is not None:
+        return timeout
+    if _deadline is None:
+        return CONNECT_TIMEOUT_SECONDS
+    remaining = _deadline - time.monotonic()
+    if remaining <= 0:
+        raise OutpostUnreachable(port)
+    return remaining
+
+
 def basic_auth(client_id: str, client_secret: str) -> str:
     return "Basic " + base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
 
@@ -75,12 +119,14 @@ def request(
     json_body: object | None = None,
     body_file: tuple[BinaryIO, int, str] | None = None,
     port: int = DAEMON_PORT,
-    timeout: float = CONNECT_TIMEOUT_SECONDS,
+    timeout: float | None = None,
 ) -> Reply:
     """One loopback call. *form* is sent urlencoded, *json_body* as JSON; the reply body is parsed as a JSON object.
 
     *body_file* is ``(file, length, content_type)``: the file is read and sent as it is written to the socket, never
     held whole in memory, and the idle timeout replaces *timeout* so a large upload is not cut off by a short one.
+    Without a *timeout* the call draws on the reach budget while one is running, else ``CONNECT_TIMEOUT_SECONDS``.
+    A call whose request was sent and got no answer in time raises :class:`ReplyTimedOut`.
     """
     data: object = urllib.parse.urlencode(form).encode() if form is not None else None
     if json_body is not None:
@@ -88,6 +134,7 @@ def request(
     if body_file is not None:
         data = body_file[0]
         timeout = IDLE_TIMEOUT_SECONDS
+    timeout = _timeout_for(timeout, port)
     req = urllib.request.Request(f"http://{DAEMON_HOST}:{port}{path}", data=data, method=method)
     for name, value in (headers or {}).items():
         req.add_header(name, value)
@@ -103,7 +150,11 @@ def request(
             status, raw = resp.status, resp.read()
     except urllib.error.HTTPError as err:
         status, raw = err.code, err.read()
-    except (urllib.error.URLError, OSError) as err:
+    except urllib.error.URLError as err:
+        raise OutpostUnreachable(port) from err
+    except TimeoutError as err:
+        raise ReplyTimedOut(port) from err
+    except OSError as err:
         raise OutpostUnreachable(port) from err
     return _reply(status, raw)
 

@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from trailhead.gateway import command, outpost_http
+from trailhead.gateway import command, outpost_http, register
 
 from trailhead.tests._gateway_support import (
     CLIENT_ID,
@@ -24,6 +24,7 @@ from trailhead.tests._gateway_support import (
     free_port,
     run_gateway_runner,
     runner_env,
+    write_authority,
     write_credential,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -153,14 +154,6 @@ class TestFailurePaths:
             assert stub.requests == []
         self._fails_with(r, SANDBOX_LINE)
 
-    def test_missing_credential_file_points_at_the_register_log(self, launcher, tmp_path, state):
-        with StubOutpost(runs=RUNS) as stub:
-            r = _run(
-                launcher, tmp_path, state, stub.port, seed=None, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
-            )
-        expected_log = tmp_path / "xdg" / "trailhead" / "gateway" / "register.log"
-        self._fails_with(r, f"outpost-gateway: this session has no gateway credential; see {expected_log} for why")
-
     def test_credential_missing_refusal_is_named_by_its_reason_code(self, launcher, tmp_path, state):
         body = {"reason": "credential_missing", "message": "No credential was presented."}
         with StubOutpost(runs_reply=(401, body)) as stub:
@@ -185,22 +178,18 @@ class TestFailurePaths:
             assert [q.path for q in stub.requests] == ["/broker/token"]
         self._fails_with(r, "outpost-gateway: Outpost refused the credential: invalid_client")
 
+    def test_token_exchange_refusal_prints_the_reason_code_and_its_next_step(self, launcher, tmp_path, state):
+        refusal = {"error": "invalid_client", "error_description": "credential_revoked: This session has ended: start a new one."}
+        with StubOutpost(token_reply=(401, refusal)) as stub:
+            r = _run(launcher, tmp_path, state, stub.port)
+        self._fails_with(
+            r, "outpost-gateway: Outpost refused the credential: credential_revoked: This session has ended: start a new one."
+        )
+
     def test_closed_port_says_outpost_is_unreachable(self, launcher, tmp_path, state):
         port = free_port()
         r = _run(launcher, tmp_path, state, port)
-        self._fails_with(r, f"outpost-gateway: Outpost is not reachable at 127.0.0.1:{port}; is it running?")
-
-    def test_malformed_credential_file_is_reported_as_no_usable_credential(self, launcher, tmp_path, state):
-        def seed(key):
-            (write_credential(state, key)).write_text("{not json")
-
-        with StubOutpost() as stub:
-            r = _run(
-                launcher, tmp_path, state, stub.port, seed=seed, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
-            )
-            assert stub.requests == []
-        assert r.proc.returncode != 0
-        assert "this session has no gateway credential" in r.proc.stderr
+        self._fails_with(r, f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{port}; is it running?")
 
 
 class TestHygiene:
@@ -391,6 +380,10 @@ def scratch_home(tmp_path):
     return home
 
 
+HARNESS = (4242, 987654)
+HARNESS_KEY = "ws-4242-987654"
+
+
 @pytest.fixture
 def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
     monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
@@ -402,6 +395,24 @@ def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
             monkeypatch.chdir(cwd)
         capsys.readouterr()
         rc = command.main(list(argv), port=port, scratch_home=scratch_home)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+@pytest.fixture
+def unregistered(tmp_path, state, monkeypatch, capsys):
+    """The command run in-process by a session that has no credential file yet; the harness is a fixed one."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: HARNESS_KEY)
+    monkeypatch.setattr(register, "harness_process", lambda: HARNESS)
+
+    def call(port, *argv, authority=True):
+        if authority:
+            write_authority(state)
+        capsys.readouterr()
+        rc = command.main(list(argv), port=port)
         out, err = capsys.readouterr()
         return rc, out, err
 
@@ -560,7 +571,7 @@ class TestRunStart:
         port = free_port()
         rc, _, err = cli(port, "run", "start", "build", cwd=repo)
         assert rc == 2
-        assert f"Outpost is not reachable at 127.0.0.1:{port}" in err
+        assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
 
     def test_a_scratch_folder_reached_through_a_symlink_is_refused_before_anything_is_sent(
         self, cli, repo, scratch_home, tmp_path
@@ -639,7 +650,7 @@ class TestRunWatch:
     def test_exit_status_is_2_when_outpost_is_unreachable(self, cli):
         rc, _, err = cli(free_port(), "run", "watch", "7", "--exit-status")
         assert rc == 2
-        assert "not reachable" in err
+        assert "Outpost is unreachable" in err
 
     def test_without_the_flag_a_failed_run_still_exits_0_once_complete(self, cli):
         with StubOutpost(view=view(result="failure", exit_code=1), log_steps=self.LOG) as stub:
@@ -826,7 +837,7 @@ class TestRunViewLog:
         return cli(stub.port, "run", "view", "7", "--log")
 
     def test_prints_exactly_the_bytes_the_log_route_returned_without_following(self, cli):
-        log = "caf\u00e9 one\r\n\ttwo, no trailing newline"
+        log = "caf\u00e9 one\n\ttwo, no trailing newline"
         with StubOutpost(view=view(), log_steps=[log]) as stub:
             rc, out, err = self._log(cli, stub)
             asked = [q for q in stub.requests if "/log" in q.path]
@@ -974,7 +985,7 @@ class TestRunCancel:
     def test_an_unreachable_outpost_exits_2(self, cli):
         rc, _, err = cli(free_port(), "run", "cancel", "7")
         assert rc == 2
-        assert "not reachable" in err
+        assert "Outpost is unreachable" in err
 
     def test_a_non_numeric_id_is_a_usage_error(self, cli):
         with StubOutpost() as stub, pytest.raises(SystemExit) as stop:
@@ -1047,3 +1058,258 @@ class TestHygieneAcrossVerbs:
             r = _run(launcher, tmp_path, state, stub.port, ("run", "watch", "7", "--exit-status"))
         assert r.proc.returncode == 1
         assert r.proc.stdout == "boom\n"
+
+
+class TestRegistersOnDemand:
+    LIST = ("run", "list")
+
+    def test_a_session_with_no_credential_registers_itself_then_makes_the_call(self, unregistered, state):
+        with StubOutpost(runs=RUNS, on_register=lambda key: write_credential(state, key)) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+            sent = [q for q in stub.requests if q.path == "/gateway/sessions"]
+            paths = [q.path for q in stub.requests]
+        assert rc == 0, err
+        assert out.splitlines()[0].split() == ["ID", "JOB", "STATE", "RESULT", "REASON", "CREATED"]
+        assert paths == ["/gateway/sessions", "/broker/token", "/gateway/runs"]
+        (registered,) = sent
+        assert json.loads(registered.body) == {"pid": HARNESS[0], "start_time": HARNESS[1]}
+        assert registered.headers["authorization"] == "Bearer registration-authority-SEEDED-7d4e"
+
+    def test_a_malformed_credential_file_is_registered_over(self, unregistered, state):
+        def rewrite(key):
+            write_credential(state, key)
+
+        write_credential(state, HARNESS_KEY).write_text("{not json")
+        with StubOutpost(runs=RUNS, on_register=rewrite) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+        assert rc == 0, err
+
+    def test_a_session_that_already_has_a_credential_does_not_register_again(self, unregistered, state):
+        write_credential(state, HARNESS_KEY)
+        with StubOutpost(runs=RUNS) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+            paths = [q.path for q in stub.requests]
+        assert rc == 0, err
+        assert paths == ["/broker/token", "/gateway/runs"]
+
+    @pytest.mark.parametrize(
+        "status, reason",
+        [
+            (401, "registration_authority_required"),
+            (400, "invalid_request"),
+            (409, "process_mismatch"),
+            (403, "host_not_allowed"),
+            (500, "internal"),
+        ],
+    )
+    def test_a_refused_registration_says_the_session_is_not_registered_with_outposts_reason_and_next_step(
+        self, status, reason, unregistered
+    ):
+        message = f"Outpost's next step for {reason}."
+        with StubOutpost(register_reply=(status, {"reason": reason, "message": message})) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+            paths = [q.path for q in stub.requests]
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: this session is not registered: {reason}: {message}\n"
+        assert paths == ["/gateway/sessions"]
+
+    def test_a_reason_and_next_step_carrying_control_characters_are_printed_cleaned(self, unregistered):
+        body = {"reason": "process_mismatch", "message": "Try\x1b[2J again\x07\x9b."}
+        with StubOutpost(register_reply=(409, body)) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err == "outpost-gateway: this session is not registered: process_mismatch: Try[2J again.\n"
+
+    def test_a_reason_the_command_does_not_know_is_not_echoed(self, unregistered):
+        with StubOutpost(register_reply=(409, {"reason": "who\x1b[31mknows", "message": "m"})) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err.startswith("outpost-gateway: this session is not registered: unexpected_reply")
+        assert "who" not in err
+
+    def test_a_missing_registration_authority_says_the_session_is_not_registered_and_sends_nothing(self, unregistered):
+        with StubOutpost() as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST, authority=False)
+            assert stub.requests == []
+        assert rc == 2
+        assert err.startswith("outpost-gateway: this session is not registered: authority_missing: ")
+        assert len(err.splitlines()) == 1
+
+    def test_a_session_outside_any_camp_workspace_is_told_such_sessions_have_no_gateway(self, unregistered):
+        refusal = {"reason": "not_in_workspace", "message": "The process was not started in a camp workspace."}
+        with StubOutpost(register_reply=(422, refusal)) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+        assert (rc, out) == (2, "")
+        assert err == (
+            "outpost-gateway: this session is not in a camp workspace; "
+            "sessions outside any camp workspace have no gateway\n"
+        )
+
+    def test_no_credential_and_nothing_listening_says_outpost_is_unreachable(self, unregistered):
+        port = free_port()
+        rc, out, err = unregistered(port, *self.LIST)
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{port}; is it running?\n"
+
+    def test_registering_but_getting_no_credential_file_is_reported(self, unregistered):
+        with StubOutpost() as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err == "outpost-gateway: this session registered but Outpost left it no gateway credential\n"
+
+
+class SilentOutpost:
+    """A loopback port that accepts connections and never answers."""
+
+    def __enter__(self):
+        import socket
+
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        return self
+
+    def __exit__(self, *exc):
+        self.sock.close()
+
+
+class TestReachingOutpost:
+    def test_an_outpost_that_accepts_and_never_answers_is_unreachable_in_under_five_seconds(self, cli):
+        import time
+
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, out, err = cli(silent.port, "run", "list")
+            elapsed = time.monotonic() - started
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{silent.port}; is it running?\n"
+        assert elapsed < 5.0
+
+    def test_the_budget_is_one_for_registering_and_exchanging_together_not_one_per_call(
+        self, unregistered, state, monkeypatch
+    ):
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 1.2)
+        with StubOutpost(
+            runs=RUNS, register_delay=0.7, token_delay=0.7, on_register=lambda key: write_credential(state, key)
+        ) as stub:
+            rc, out, err = unregistered(stub.port, "run", "list")
+        assert (rc, out) == (2, "")
+        assert "Outpost is unreachable" in err
+
+    def test_calls_after_outpost_has_answered_are_not_cut_off_by_what_is_left_of_the_budget(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.8)
+        with StubOutpost(
+            view=view(result="failure", exit_code=1), log_connections=[["one\n", threading.Event()]]
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+        assert (rc, out) == (1, "one\n"), err
+
+
+class TestReplyTimeout:
+    """What an unanswered call is called depends on whether the request got out."""
+
+    def test_a_request_sent_to_an_outpost_that_never_answers_raises_reply_timed_out(self):
+        with SilentOutpost() as silent:
+            with pytest.raises(outpost_http.ReplyTimedOut):
+                outpost_http.request("POST", "/x", port=silent.port, timeout=0.3)
+
+    def test_a_request_to_a_closed_port_is_unreachable_not_a_reply_timeout(self):
+        with pytest.raises(outpost_http.OutpostUnreachable) as raised:
+            outpost_http.request("POST", "/x", port=free_port(), timeout=0.3)
+        assert not isinstance(raised.value, outpost_http.ReplyTimedOut)
+
+
+class TestExpiredToken:
+    def test_a_token_refused_as_expired_is_exchanged_again_once_and_the_call_made_again(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0) as stub:
+            rc, out, err = cli(stub.port, "run", "list")
+            paths = [q.path for q in stub.requests]
+        assert (rc, err) == (2, "outpost-gateway: credential_expired: This access token has expired.\n")
+        assert paths == ["/broker/token", "/gateway/runs", "/broker/token", "/gateway/runs"]
+
+    def test_an_expired_token_is_replaced_even_when_the_first_call_is_a_view(self, cli):
+        with StubOutpost(token_uses=0, view=view()) as stub:
+            rc, _, err = cli(stub.port, "run", "view", "7")
+            views = [q for q in stub.requests if q.path == "/gateway/runs/7"]
+        assert rc == 2
+        assert "credential_expired" in err
+        assert len(views) == 2
+
+    def test_a_watch_whose_token_expires_between_calls_keeps_following_until_the_run_completes(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        running = view(state="in_progress", result=None, exit_code=None)
+        with StubOutpost(
+            token_uses=1,
+            log_connections=[["one\n", "tw", threading.Event()], ["one\n", "two\n", "three\n"]],
+            view_sequence=[running, view(result="failure", exit_code=1)],
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+            follows = [q for q in stub.requests if q.path.endswith("/log?follow=1")]
+        assert out == "one\ntwo\nthree\n"
+        assert rc == 1, err
+        assert exchanges >= 2
+        assert follows[-1].headers["authorization"] != follows[0].headers["authorization"]
+
+    def test_a_cancel_refused_as_expired_is_made_again_with_a_new_token(self, cli):
+        with StubOutpost(token_uses=0) as stub:
+            rc, _, err = cli(stub.port, "run", "cancel", "7")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+        assert rc == 2
+        assert "credential_expired" in err
+        assert exchanges == 2
+
+
+class TestServerTextIsCleaned:
+    def test_a_log_viewed_whole_reaches_stdout_with_no_control_sequence_and_keeps_newlines_and_tabs(self, cli):
+        log = "ok \x1b[31mred\x1b[0m\x1b]0;title\x07\tafter tab\r\nsecond \u009b31m line\x00\x7f\n"
+        with StubOutpost(view=view(), log_steps=[log]) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "7", "--log")
+        assert rc == 0, err
+        assert out == "ok [31mred[0m]0;title\tafter tab\nsecond 31m line\n"
+
+    def test_a_watched_log_reaches_stdout_with_no_control_sequence_and_keeps_newlines_and_tabs(self, cli):
+        log = "ok \x1b[31mred\x1b]0;title\x07\tafter tab\r\nsecond \u009b31m line\x00\x7f\n"
+        with StubOutpost(view=view(), log_steps=[log]) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7")
+        assert rc == 0, err
+        assert out == "ok [31mred]0;title\tafter tab\nsecond 31m line\n"
+
+    def test_a_log_line_split_across_reads_is_cleaned_whole(self, cli):
+        with StubOutpost(view=view(), log_steps=["a\x1b", "[2Jb\n"]) as stub:
+            rc, out, _ = cli(stub.port, "run", "watch", "7")
+        assert (rc, out) == (0, "a[2Jb\n")
+
+    def test_a_refusal_code_and_reason_with_control_characters_are_printed_cleaned(self, cli):
+        body = {"reason": "cred\x1b[2Jential_missing", "message": "No\x07 credential\x9b."}
+        with StubOutpost(runs_reply=(401, body)) as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+        assert (rc, err) == (2, "outpost-gateway: cred[2Jential_missing: No credential.\n")
+
+    def test_a_token_refusal_with_control_characters_is_printed_cleaned(self, cli):
+        refusal = {"error": "invalid_client", "error_description": "credential_revoked: Gone\x1b[31m!"}
+        with StubOutpost(token_reply=(401, refusal)) as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+        assert (rc, err) == (2, "outpost-gateway: Outpost refused the credential: credential_revoked: Gone[31m!\n")
+
+
+class TestCancelTimeout:
+    def test_a_cancel_that_sent_its_request_and_got_no_answer_says_it_was_requested_not_that_outpost_is_unreachable(
+        self, cli, monkeypatch
+    ):
+        monkeypatch.setattr(command, "CANCEL_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(cancel_delay=1.5) as stub:
+            rc, out, err = cli(stub.port, "run", "cancel", "7")
+            sent = [q for q in stub.requests if q.path.endswith("/cancel")]
+        assert len(sent) == 1
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: cancel requested; check run view 7\n"
+        assert "unreachable" not in err
+
+    def test_a_cancel_to_a_closed_port_is_still_unreachable(self, cli):
+        port = free_port()
+        rc, _, err = cli(port, "run", "cancel", "7")
+        assert rc == 2
+        assert f"Outpost is unreachable at 127.0.0.1:{port}" in err

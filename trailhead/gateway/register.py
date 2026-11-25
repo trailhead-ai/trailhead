@@ -55,11 +55,25 @@ def register_log() -> Path:
     return state_dir("trailhead") / "gateway" / "register.log"
 
 
+NEXT_STEPS = {
+    NO_HARNESS: "Run this inside a session started by a supported harness.",
+    AUTHORITY_MISSING: "Start Outpost so it writes its registration authority, then try again.",
+    AUTHORITY_UNREADABLE: "This process cannot read Outpost's registration authority; run it where that file is readable.",
+    OUTPOST_UNREACHABLE: "Start Outpost, then try again.",
+    UNEXPECTED_REPLY: "Outpost answered the registration with a reply this command cannot read.",
+    UNEXPECTED_FAILURE: "Registration failed unexpectedly; try again.",
+}
+"""What to do next for a registration that failed before Outpost gave a reason of its own."""
+
+
 class Refused(Exception):
-    def __init__(self, reason: str, key: str | None = None) -> None:
+    """A registration that did not succeed: *reason* is a code from this module, *message* Outpost's next step if it gave one."""
+
+    def __init__(self, reason: str, key: str | None = None, message: str | None = None) -> None:
         super().__init__(reason)
         self.reason = reason
         self.key = key
+        self.message = message
 
 
 def _read_authority() -> str:
@@ -77,8 +91,10 @@ def _read_authority() -> str:
     return authority
 
 
-def register() -> str:
-    """Register this process's harness; return the session key or raise :class:`Refused`."""
+def register(*, port: int | None = None, timeout: float | None = TIMEOUT_SECONDS) -> str:
+    """Register this process's harness; return the session key or raise :class:`Refused`.
+
+    *port* defaults to ``PORT``; a *timeout* of ``None`` leaves the call to the reach budget of the command that runs it."""
     found = harness_process()
     if found is None:
         raise Refused(NO_HARNESS)
@@ -91,8 +107,8 @@ def register() -> str:
             "/gateway/sessions",
             headers={"Authorization": f"Bearer {authority}"},
             json_body={"pid": pid, "start_time": start_time},
-            port=PORT,
-            timeout=TIMEOUT_SECONDS,
+            port=PORT if port is None else port,
+            timeout=timeout,
         )
     except outpost_http.OutpostUnreachable:
         raise Refused(OUTPOST_UNREACHABLE, local_key) from None
@@ -100,7 +116,8 @@ def register() -> str:
         return local_key
     reason = reply.body.get("reason")
     if reply.status != 200 and reason in OUTPOST_REASONS:
-        raise Refused(reason, local_key)
+        message = reply.body.get("message")
+        raise Refused(reason, local_key, message if isinstance(message, str) and message else None)
     raise Refused(UNEXPECTED_REPLY, local_key)
 
 

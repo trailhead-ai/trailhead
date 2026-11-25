@@ -139,6 +139,10 @@ class StubOutpost:
     and a ``Cut`` step ends it mid-chunk. ``log_reply`` answers the log route wholesale (a refusal).
     ``POST /gateway/runs/<id>/cancel`` answers 202 ``completed``/``cancelled`` (or ``cancel_reply``),
     after ``cancel_delay`` seconds.
+    ``on_register`` is called with the session key a successful registration answers for (a real Outpost
+    writes the session's credential file there); ``register_delay`` and ``token_delay`` hold those two
+    answers back that many seconds. With ``token_uses`` set, each exchange issues a fresh token that is
+    accepted for that many authorised calls and then refused as ``credential_expired``.
     ``release`` is set
     on exit so no waiting step outlives the stub.
     """
@@ -159,12 +163,19 @@ class StubOutpost:
     view_reply: tuple[int, object] | None = None
     cancel_reply: tuple[int, object] | None = None
     cancel_delay: float = 0.0
+    on_register: Callable[[str], None] | None = None
+    register_delay: float = 0.0
+    token_delay: float = 0.0
+    token_uses: int | None = None
     log_reply: tuple[int, object] | None = None
     log_steps: list = field(default_factory=list)
     log_connections: list[list] | None = None
     view_sequence: list[dict] | None = None
     log_chunked: bool = False
     requests: list[Seen] = field(default_factory=list)
+    issued: list[str] = field(default_factory=list)
+    uses: dict[str, int] = field(default_factory=dict)
+    views_served: int = 0
     release: threading.Event = field(default_factory=threading.Event)
 
     def __post_init__(self) -> None:
@@ -195,8 +206,15 @@ class StubOutpost:
                 )
 
             def _authorised(self) -> bool:
-                if self.headers.get("Authorization") == f"Bearer {stub.token}":
+                bearer = (self.headers.get("Authorization") or "").removeprefix("Bearer ")
+                if stub.token_uses is None and bearer == stub.token:
                     return True
+                if stub.token_uses is not None and bearer in stub.issued:
+                    stub.uses[bearer] = stub.uses.get(bearer, 0) + 1
+                    if stub.uses[bearer] <= stub.token_uses:
+                        return True
+                    self._send(401, {"reason": "credential_expired", "message": "This access token has expired."})
+                    return False
                 self._send(401, {"reason": "credential_unrecognised", "message": "The bearer token is not recognised."})
                 return False
 
@@ -261,10 +279,12 @@ class StubOutpost:
                         return self._send(
                             401, {"reason": "registration_authority_required", "message": "No authority."}
                         )
+                    stub.release.wait(stub.register_delay)
                     sent = json.loads(body)
-                    return self._send(
-                        200, {"session_key": f"ws-{sent['pid']}-{sent['start_time']}", "workspace": stub.workspace}
-                    )
+                    key = f"ws-{sent['pid']}-{sent['start_time']}"
+                    if stub.on_register is not None:
+                        stub.on_register(key)
+                    return self._send(200, {"session_key": key, "workspace": stub.workspace})
                 if stub.token_redirect is not None and self.path == "/broker/token":
                     return self._redirect(stub.token_redirect)
                 if self.path != "/broker/token":
@@ -276,7 +296,12 @@ class StubOutpost:
                 expected = base64.b64encode(f"{stub.client_id}:{stub.client_secret}".encode()).decode()
                 if self.headers.get("Authorization") != f"Basic {expected}":
                     return self._send(401, {"error": "invalid_client"})
-                self._send(200, {"access_token": stub.token, "token_type": "Bearer", "scope": "gateway"})
+                stub.release.wait(stub.token_delay)
+                token = stub.token
+                if stub.token_uses is not None:
+                    token = f"{stub.token}-{len(stub.issued) + 1}"
+                    stub.issued.append(token)
+                self._send(200, {"access_token": token, "token_type": "Bearer", "scope": "gateway"})
 
             def do_GET(self):
                 self._record(b"")
@@ -295,8 +320,8 @@ class StubOutpost:
                             return self._send(*stub.view_reply)
                         if self._authorised():
                             if stub.view_sequence is not None:
-                                views = sum(1 for q in stub.requests if urlsplit(q.path).path.count("/") == 3)
-                                return self._send(200, stub.view_sequence[min(views - 1, len(stub.view_sequence) - 1)])
+                                stub.views_served += 1
+                                return self._send(200, stub.view_sequence[min(stub.views_served - 1, len(stub.view_sequence) - 1)])
                             self._send(200, stub.view)
                         return
                 if stub.runs_redirect is not None and self.path == "/gateway/runs":
@@ -305,11 +330,8 @@ class StubOutpost:
                     return self._send(404, {"error": "not_found"})
                 if stub.runs_reply is not None:
                     return self._send(*stub.runs_reply)
-                if self.headers.get("Authorization") != f"Bearer {stub.token}":
-                    return self._send(
-                        401, {"reason": "credential_unrecognised", "message": "The bearer token is not recognised."}
-                    )
-                self._send(200, {"workspace": stub.workspace, "runs": stub.runs})
+                if self._authorised():
+                    self._send(200, {"workspace": stub.workspace, "runs": stub.runs})
 
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self._server.server_address[1]

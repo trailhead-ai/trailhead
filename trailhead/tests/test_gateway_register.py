@@ -251,3 +251,38 @@ class TestAuthorityProblems:
         assert proc.stderr.strip() == "unexpected_failure"
         assert _log_lines(trailhead_state)[0].split()[-2:] == ["-", "unexpected_failure"]
         assert "日本語" not in proc.stderr + "".join(_log_lines(trailhead_state))
+
+
+class TestRefusalCarriesOutpostsNextStep:
+    """What the on-demand registration of the gateway command reads from a refusal; the hook prints only the reason code."""
+
+    def _register(self, monkeypatch, outpost_state, port, **kwargs):
+        from trailhead.gateway import register
+
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        monkeypatch.setattr(register, "harness_process", lambda: (4242, 987654))
+        write_authority(outpost_state)
+        return register.register(port=port, **kwargs)
+
+    @pytest.mark.parametrize("message", ["Move to a camp workspace.", "Try again later."])
+    def test_a_refusal_holds_the_message_outpost_sent_with_its_reason(self, message, monkeypatch, outpost_state):
+        from trailhead.gateway import register
+
+        with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": message})) as stub:
+            with pytest.raises(register.Refused) as refused:
+                self._register(monkeypatch, outpost_state, stub.port)
+        assert (refused.value.reason, refused.value.message) == ("not_in_workspace", message)
+
+    def test_a_refusal_without_a_message_holds_none(self, monkeypatch, outpost_state):
+        from trailhead.gateway import register
+
+        with StubOutpost(register_reply=(500, {"reason": "internal"})) as stub:
+            with pytest.raises(register.Refused) as refused:
+                self._register(monkeypatch, outpost_state, stub.port)
+        assert (refused.value.reason, refused.value.message) == ("internal", None)
+
+    def test_the_port_asked_for_is_the_port_called(self, monkeypatch, outpost_state):
+        with StubOutpost() as stub:
+            key = self._register(monkeypatch, outpost_state, stub.port, timeout=None)
+            assert [q.path for q in stub.requests] == ["/gateway/sessions"]
+        assert key == "ws-4242-987654"
