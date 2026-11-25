@@ -97,10 +97,20 @@ class TestScript:
         _compose("outpost", dest)
         return dest / "hooks" / "gateway-register"
 
-    def _fake_cli(self, path: Path, record: Path) -> None:
+    def _fake_cli(self, path: Path, record: Path, *, prints: str = "", status: int = 3) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(f'#!/bin/sh\necho "$@" >> "{record}"\necho noise >&2\nexit 3\n')
+        echo = f"echo '{prints}'\n" if prints else ""
+        path.write_text(f'#!/bin/sh\necho "$@" >> "{record}"\necho noise >&2\n{echo}exit {status}\n')
         path.chmod(0o755)
+
+    def _run_hook(self, tmp_path):
+        return subprocess.run(
+            [str(self._script(tmp_path))],
+            input="{}",
+            capture_output=True,
+            text=True,
+            env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
+        )
 
     def test_runs_the_register_shim_under_the_trailhead_state_dir_with_the_hook_flag(self, tmp_path):
         record = tmp_path / "args.txt"
@@ -113,6 +123,18 @@ class TestScript:
             env={"PATH": "/usr/bin:/bin", "TRAILHEAD_STATE_DIR": str(tmp_path / "state"), "HOME": str(tmp_path)},
         )
         assert record.read_text().split() == ["--hook"]
+        assert proc.returncode == 0
+        assert "refused to run" in json.loads(proc.stdout)["systemMessage"]
+
+    def test_a_shim_that_exits_non_zero_with_its_own_json_has_that_json_passed_through_unchanged(self, tmp_path):
+        own = '{"systemMessage": "its own line", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "its own line"}}'
+        self._fake_cli(tmp_path / "state" / "bin" / "trailhead-gateway-register", tmp_path / "args.txt", prints=own, status=1)
+        proc = self._run_hook(tmp_path)
+        assert (proc.returncode, proc.stdout) == (0, own + "\n")
+
+    def test_a_shim_that_succeeds_silently_leaves_stdout_empty(self, tmp_path):
+        self._fake_cli(tmp_path / "state" / "bin" / "trailhead-gateway-register", tmp_path / "args.txt", status=0)
+        proc = self._run_hook(tmp_path)
         assert (proc.returncode, proc.stdout) == (0, "")
 
     def test_never_runs_the_interactive_trailhead_shim(self, tmp_path):
@@ -350,7 +372,7 @@ class TestNoCredentialThroughTheInstalledHook:
 
 
 class TestHookWithAShimThatRefusesAtExec:
-    def test_a_registration_script_swapped_after_install_leaves_stdout_empty_and_the_hook_exits_0_within_2s(
+    def test_a_registration_script_swapped_after_install_prints_the_one_line_json_and_the_hook_exits_0_within_2s(
         self, tmp_path
     ):
         state = tmp_path / "state"
@@ -371,6 +393,14 @@ class TestHookWithAShimThatRefusesAtExec:
             timeout=60,
         )
         assert time.monotonic() - started < 2
-        assert (proc.returncode, proc.stdout) == (0, "")
-        assert str(script) in proc.stderr and "changed" in proc.stderr
+        assert proc.returncode == 0
+        out = json.loads(proc.stdout)
+        line = out["systemMessage"]
+        assert "no gateway credential" in line and "refused to run" in line and "trailhead install" in line
+        assert out == {
+            "systemMessage": line,
+            "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": line},
+        }
+        log = (state / "gateway" / "register.log").read_text()
+        assert log.rstrip("\n").endswith(f" refused_at_exec {line}")
         assert not marker.exists()

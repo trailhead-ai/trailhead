@@ -282,6 +282,59 @@ class TestNoCredentialMessage:
         assert elapsed < 2.0, elapsed
 
 
+class TestAuthorityIsReadSafely:
+    """The registration authority is read as the gateway credential is: no link followed, a regular file, the operator's, mode 0600."""
+
+    def test_an_authority_that_is_a_link_is_refused_with_a_message_and_nothing_is_sent(self, run, outpost_state):
+        real = write_authority(outpost_state)
+        planted = real.with_name("elsewhere")
+        real.rename(planted)
+        real.symlink_to(planted)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        assert proc.returncode == 0
+        message = _hook_output(proc)
+        assert "symbolic link" in message and "refusing to read" in message
+        assert REGISTRATION_AUTHORITY not in proc.stdout + proc.stderr
+
+    @pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o700, 0o400])
+    def test_an_authority_whose_mode_is_not_0600_is_refused_and_nothing_is_sent(self, run, outpost_state, mode):
+        write_authority(outpost_state, mode=mode)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        message = _hook_output(proc)
+        assert f"mode {mode:04o}" in message and "0600" in message
+
+    def test_an_authority_that_is_not_a_regular_file_is_refused_and_nothing_is_sent(self, run, outpost_state):
+        path = outpost_state / "registration" / "credential"
+        path.mkdir(parents=True)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        assert "not a regular file" in _hook_output(proc)
+
+    def test_an_authority_the_operator_does_not_own_is_refused_and_nothing_is_sent(self, outpost_state, monkeypatch):
+        import os
+
+        from trailhead.gateway import register
+
+        write_authority(outpost_state)
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        monkeypatch.setattr(register, "_operator_uid", lambda: os.geteuid() + 1)
+        with pytest.raises(register.Refused) as refused:
+            register._read_authority()
+        assert "not owned by you" in refused.value.message
+
+    def test_an_authority_the_operator_owns_with_mode_0600_is_read(self, outpost_state, monkeypatch):
+        from trailhead.gateway import register
+
+        write_authority(outpost_state, "an-authority-SEEDED-5")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        assert register._read_authority() == "an-authority-SEEDED-5"
+
+
 class TestWithoutHookFlag:
     def test_reports_success_and_exit_zero(self, run, outpost_state):
         write_authority(outpost_state)

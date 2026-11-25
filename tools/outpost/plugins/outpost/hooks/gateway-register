@@ -15,8 +15,9 @@
 # A successful registration prints nothing. When no credential results, exactly one JSON
 # object goes to stdout (`systemMessage` and `hookSpecificOutput.additionalContext`, the
 # same one line), printed by the registration step; when the shim is missing or not
-# executable the hook prints that object itself and appends
-# `<timestamp> - cli_not_found <line>` to <state>/gateway/register.log, the log the
+# executable (`cli_not_found`), or exits non-zero printing nothing, as it does when it
+# refuses its exec-time re-check (`refused_at_exec`), the hook prints that object itself
+# and appends `<timestamp> - <reason> <line>` to <state>/gateway/register.log, the log the
 # registration step itself writes. The hook runs outside the Bash sandbox, so it reads
 # Outpost's registration authority folder directly.
 
@@ -28,15 +29,29 @@ else
     state="${HOME:-}/.local/state/trailhead"
 fi
 
+# Print the one-line JSON object for a session with no credential, and leave the one-line
+# trace `outpost-gateway` points an operator at.
+no_credential() {
+    line="This session has no gateway credential: $2"
+    { mkdir -p "$state/gateway" &&
+        printf '%s - %s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$1" "$line" >>"$state/gateway/register.log"; } 2>/dev/null
+    printf '{"systemMessage": "%s", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "%s"}}\n' "$line" "$line"
+}
+
 register="$state/bin/trailhead-gateway-register"
 if [ ! -x "$register" ]; then
-    line="This session has no gateway credential: the trailhead registration command is not installed; run trailhead install"
-    # Leave the one-line trace `outpost-gateway` points an operator at.
-    { mkdir -p "$state/gateway" &&
-        printf '%s - cli_not_found %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$line" >>"$state/gateway/register.log"; } 2>/dev/null
-    printf '{"systemMessage": "%s", "hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "%s"}}\n' "$line" "$line"
+    no_credential cli_not_found "the trailhead registration command is not installed; run trailhead install"
     exit 0
 fi
 
-"$register" --hook
+# The shim refuses its own exec-time re-check with exit 2 and a message on stderr only; a
+# non-zero exit with nothing printed is that refusal (or any other failure before the
+# registration step could speak), so the hook says so itself. Whatever the step printed is
+# passed through unchanged.
+out="$("$register" --hook)" || status=$?
+if [ -n "$out" ]; then
+    printf '%s\n' "$out"
+elif [ "${status:-0}" -ne 0 ]; then
+    no_credential refused_at_exec "the gateway launcher refused to run; re-run trailhead install or trailhead update"
+fi
 exit 0

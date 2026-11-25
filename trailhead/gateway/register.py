@@ -22,12 +22,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 from trailhead.gateway import outpost_http
+from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.harness import format_session_key, harness_process
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
@@ -93,12 +95,18 @@ class Refused(Exception):
         self.message = message
 
 
+def _operator_uid() -> int:
+    return os.geteuid()
+
+
 def _read_authority() -> str:
     path = state_dir(OUTPOST_APP) / "registration" / "credential"
     try:
-        authority = path.read_text().strip()
+        authority = read_private_file(path, "registration authority", _operator_uid()).strip()
     except FileNotFoundError:
         raise Refused(AUTHORITY_MISSING) from None
+    except Unsafe as unsafe:
+        raise Refused(AUTHORITY_UNREADABLE, message=str(unsafe)) from None
     except (OSError, UnicodeDecodeError):
         raise Refused(AUTHORITY_UNREADABLE) from None
     if not authority:

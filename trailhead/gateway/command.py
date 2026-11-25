@@ -24,16 +24,15 @@ subprocess; an unexpected failure reports its exception type and nothing else.
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import os
-import stat
 import re
 import sys
 from pathlib import Path
 from urllib.parse import urlencode
 
 from trailhead.gateway import outpost_http, register, tree_upload
+from trailhead.gateway.private_file import Unsafe, read_private_file
 from trailhead.harness import session_key
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
@@ -86,31 +85,13 @@ def _read_credential(key: str) -> tuple[str, str]:
     the contents are read."""
     path = state_dir(OUTPOST_APP) / "sessions" / key / "gateway-client.json"
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        raw = read_private_file(path, "gateway credential", _operator_uid())
     except FileNotFoundError:
         raise _NoCredential from None
-    except OSError as err:
-        if err.errno == errno.ELOOP:
-            raise _fail(f"the gateway credential {path} is a symbolic link; refusing to read it") from None
-        raise CommandError(SANDBOXED) from None
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise _fail(f"the gateway credential {path} is not a regular file; refusing to read it")
-        if info.st_uid != _operator_uid():
-            raise _fail(f"the gateway credential {path} is not owned by you; refusing to read it")
-        if stat.S_IMODE(info.st_mode) != 0o600:
-            raise _fail(
-                f"the gateway credential {path} has mode {stat.S_IMODE(info.st_mode):04o}; it must be 0600, refusing to read it"
-            )
-        with os.fdopen(fd, "r") as handle:
-            fd = -1
-            raw = handle.read()
+    except Unsafe as unsafe:
+        raise _fail(str(unsafe)) from None
     except OSError:
         raise CommandError(SANDBOXED) from None
-    finally:
-        if fd != -1:
-            os.close(fd)
     try:
         parsed = json.loads(raw)
         client_id, client_secret = parsed["client_id"], parsed["client_secret"]

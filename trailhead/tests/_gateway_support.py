@@ -367,10 +367,12 @@ def write_credential(
     return path
 
 
-def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY) -> Path:
+def write_authority(state_dir: Path, authority: str = REGISTRATION_AUTHORITY, *, mode: int = 0o600) -> Path:
+    """Outpost's registration authority file, written at the mode Outpost writes it (0600) unless *mode* says otherwise."""
     path = state_dir / "registration" / "credential"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(authority + "\n")
+    path.chmod(mode)
     return path
 
 

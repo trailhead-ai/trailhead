@@ -388,6 +388,34 @@ class TestInstallRefusesAnUntrustedPin:
         assert all((resolve_shim_dir(env=env) / name).exists() for name in _shim_names())
 
 
+class TestRefusedInstallRemovesTheStaleShim:
+    @pytest.mark.parametrize("name", ["outpost-gateway", "trailhead-gateway-register"])
+    def test_a_refused_rebuild_removes_the_earlier_pinned_shim_and_says_so(self, trusted_checkout, tmp_path, name):
+        env = _env(tmp_path)
+        build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
+        shim = resolve_shim_dir(env=env) / name
+        assert shim.exists()
+        with pytest.raises(PathIntegrationError, match=r"removed the existing .*shim") as refused:
+            build_gateway_shims(_tools(), env=env, checkout=trusted_checkout, sandbox_write_roots=[tmp_path])
+        assert str(trusted_checkout) in str(refused.value)
+        assert _no_gateway_shims(env)
+
+    def test_a_refusal_with_no_earlier_shim_does_not_claim_to_remove_one(self, trusted_checkout, tmp_path):
+        env = _env(tmp_path)
+        with pytest.raises(PathIntegrationError) as refused:
+            build_gateway_shims(_tools(), env=env, checkout=trusted_checkout, sandbox_write_roots=[tmp_path])
+        assert "removed" not in str(refused.value)
+
+    def test_a_refused_rebuild_leaves_other_shims_in_place(self, trusted_checkout, tmp_path):
+        env = _env(tmp_path)
+        build_gateway_shims(_tools(), env=env, checkout=trusted_checkout)
+        other = resolve_shim_dir(env=env) / "trailhead"
+        assert other.exists()
+        with pytest.raises(PathIntegrationError):
+            build_gateway_shims(_tools(), env=env, checkout=trusted_checkout, sandbox_write_roots=[tmp_path])
+        assert other.exists()
+
+
 class TestShimRechecksAtExec:
     def _installed(self, trusted_checkout, tmp_path, name="outpost-gateway"):
         env = _env(tmp_path)

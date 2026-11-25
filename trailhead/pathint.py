@@ -237,15 +237,21 @@ def create_shims(
                 f"denylist ({', '.join(sorted(_SHIM_DENYLIST))})"
             )
 
+    shim_dir = resolve_shim_dir(env=env)
     for name, script in pinned_scripts.items():
         if pinned_options.get(name, PinnedShimOptions()).pin_code:
             roots = session_write_roots(env=env) if sandbox_write_roots is None else sandbox_write_roots
-            check_pinned_code(
-                name, Path(trailhead_root), script, Path(os.path.realpath(sys.executable)),
-                write_roots=roots, euid=euid,
-            )
+            try:
+                check_pinned_code(
+                    name, Path(trailhead_root), script, Path(os.path.realpath(sys.executable)),
+                    write_roots=roots, euid=euid,
+                )
+            except PathIntegrationError as exc:
+                removed = _remove_refused_pinned_shims(shim_dir, pinned_scripts, pinned_options)
+                if removed:
+                    exc.args = (f"{exc}; removed the existing {', '.join(removed)} shim so it does not keep running earlier code",)
+                raise
 
-    shim_dir = resolve_shim_dir(env=env)
     try:
         ensure_dir(shim_dir, mode=0o700)
         shims: dict[str, Path] = {}
@@ -263,6 +269,22 @@ def create_shims(
         raise PathIntegrationError(f"could not create shim dir at {shim_dir}: {exc}") from exc
 
     return ShimDirResult(shim_dir=shim_dir, shims=shims)
+
+
+def _remove_refused_pinned_shims(
+    shim_dir: Path, pinned_scripts: dict[str, Path], pinned_options: dict[str, PinnedShimOptions]
+) -> list[str]:
+    """Delete the code-pinned shims already in *shim_dir* that a refused build would have rewritten; their names."""
+    removed = []
+    for name in pinned_scripts:
+        if not pinned_options.get(name, PinnedShimOptions()).pin_code:
+            continue
+        try:
+            (shim_dir / name).unlink()
+        except OSError:
+            continue
+        removed.append(name)
+    return removed
 
 
 def _shim_content(name: str, bin_path: Path, trailhead_root: str) -> str:
