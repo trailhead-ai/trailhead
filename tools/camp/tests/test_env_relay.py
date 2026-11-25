@@ -124,6 +124,28 @@ def start(procs, pairs, env_extra=None, **kw) -> subprocess.Popen:
     return proc
 
 
+def launch_one_port(procs, port):
+    return launch(procs, argv_for([(port, 1025)]))
+
+
+def await_ready(procs, proc, port, attempts=5):
+    """Wait for ``proc`` (a one-port relay on ``port``) to say ready; return the relay that did.
+
+    A port from ``free_ports`` is only free until it is closed, so with many relays and test
+    workers starting together another process can take it first. The relay then exits 1 with
+    ``port <n>: ...`` on stderr: a collision, so it is replaced by a relay on a fresh port.
+    Any other early exit still fails the caller.
+    """
+    for _ in range(attempts):
+        if proc.stdout.readline() == b"ready\n":
+            return proc
+        err = proc.stderr.read().decode()
+        assert proc.wait() == 1 and err.startswith(f"port {port}:") and "in use" in err, err
+        port = free_ports(1)[0]
+        proc = launch_one_port(procs, port)
+    raise AssertionError(f"{attempts} ports in a row were taken before the relay could bind them")
+
+
 def request(port: int, payload: bytes, timeout: float = 10) -> bytes:
     with socket.create_connection(("127.0.0.1", port), timeout=timeout) as sock:
         sock.sendall(payload)
@@ -338,6 +360,39 @@ def test_a_signal_exits_0_within_2s_and_frees_every_port(procs, upstreams, which
     assert can_bind(pa) and can_bind(pb)
 
 
+def test_await_ready_replaces_a_relay_whose_port_another_process_took(procs):
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    try:
+        taken_port = taken.getsockname()[1]
+        proc = await_ready(procs, launch_one_port(procs, taken_port), taken_port)
+        assert proc.poll() is None
+        new_port = int(proc.args[-1].split(":")[1])
+        assert new_port != taken_port
+        assert not can_bind(new_port)
+    finally:
+        taken.close()
+
+
+def test_await_ready_gives_up_after_its_attempts_when_every_port_is_taken(procs):
+    taken = socket.socket()
+    taken.bind(("127.0.0.1", 0))
+    taken.listen()
+    try:
+        port = taken.getsockname()[1]
+        with pytest.raises(AssertionError, match="taken"):
+            await_ready(procs, launch_one_port(procs, port), port, attempts=1)
+    finally:
+        taken.close()
+
+
+def test_await_ready_does_not_hide_a_relay_that_failed_for_another_reason(procs):
+    bad = launch(procs, [sys.executable, "-m", "camp.env.relay", "-N", "-L", "127.0.0.1:1023:127.0.0.1:2000"])
+    with pytest.raises(AssertionError, match="usage"):
+        await_ready(procs, bad, 1023)
+
+
 def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
     """The relay's wait must not be able to miss a signal that lands just before it starts.
 
@@ -349,11 +404,11 @@ def test_a_sigterm_sent_the_moment_ready_is_read_never_goes_unheard(procs):
     deaf: list[int] = []
     sent = 0
     for _ in range(batches):
-        ports = iter(free_ports(batch))
-        group = [launch(procs, argv_for([(next(ports), 1025)])) for _ in range(batch)]
+        ports = free_ports(batch)
+        group = [(launch_one_port(procs, port), port) for port in ports]
         signalled = []
-        for proc in group:
-            assert proc.stdout.readline() == b"ready\n"
+        for proc, port in group:
+            proc = await_ready(procs, proc, port)
             proc.send_signal(signal.SIGTERM)
             signalled.append((proc, time.monotonic()))
         for proc, at in signalled:

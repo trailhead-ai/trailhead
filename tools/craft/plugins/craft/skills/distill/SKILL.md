@@ -82,98 +82,80 @@ record whose id could not be trusted.
 scanning the configured vaults in **config order**, so an unscoped update in a multi-vault install
 lands wherever the scan happens to hit first — which is not necessarily where the record lives.
 `--vault` disambiguates the record's CURRENT location; it is not the same flag as
-`--product`/`--team` on a `create`, which instead selects the DESTINATION vault (see step 1). Read
-each record's vault from the sidecar that `lore record show <record-id> --json` already returned
-during the queue pass, and pass it back as `--vault` on every update against that record.
+`--product`/`--team` on a `create`, which instead selects the DESTINATION vault (see step 1). A
+record's sidecar carries no vault field. For a spec the sweep queued, the vault is the part of its
+queue line before `/spec/`; carry it from there and pass it as `--vault` on every read and update
+against that spec.
 
 ## Sweep mode — building the queue
 
-### 1. Enumerate the candidates
+### 1. Ask lore for the queue
 
 ```
-lore search "kind:spec status:planned"
+lore distill-queue
 ```
 
-Plus, **one-time migration**: specs that reached `complete` before this ritual existed and were
-therefore never distilled. Enumerate them the same way —
+Lore holds the rule for which specs are waiting to be distilled — the candidate statuses, the
+`distilled=` annotation and `related: adr` exclusions, the resumed-after-stop exception, the `draft`
+ADR carve-out and the zero-task-edge deferral. **Do not re-apply that rule by hand:** no
+`lore search "kind:spec ..."` candidate queries, no per-candidate exclusion check. A hand-built
+queue and lore's drift apart, and the sweep would then queue what `lore health` does not report, or
+skip what it does.
+
+**Any failure is a hard stop, never an empty queue.** A run succeeded only when it exited 0 **and**
+its first line starts `lore distill-queue — `. Anything else — a non-zero exit, a first line that
+starts differently, no output (an older lore without the command, a crash) — stops the sweep before
+anything is queued, clustered or drafted:
+
+- a `lore:` refusal line (exit 1, a vault or a spec or task record that could not be read): relay it
+  exactly as printed. It already names the way on, `/craft:distill spec/<name>` for one spec by
+  name.
+- the command is missing (an unknown-command error, an unrecognised-command usage message): say that
+  this lore predates `lore distill-queue` and to update it (`trailhead update`), then stop.
+- anything else: relay what was printed and stop.
+
+Never read a failure as "nothing waiting", and never fall back to deriving the queue from
+`lore search`.
+
+On success the first line is `lore distill-queue — nothing waiting` (report that and stop) or
+`lore distill-queue — N waiting, M deferred`; `0 waiting, M deferred` is a valid header, and the
+`waiting:` list is then absent. Otherwise a `waiting:` list follows, then
+`deferred, no linked task (distill each by target):`. Each line reads
+`<vault>/spec/<name>  <date>  <status>  <reason>`, the reason sometimes carrying an ADR note after a
+`;`.
+
+- **The `waiting:` specs are the queue.**
+- **The `deferred:` specs are deferred, not queued.** Report each as:
+
+  > no task edges — link tasks or distill by target
+
+  Both remedies are named on purpose: the spec may be genuinely unlinked (link the tasks and
+  re-sweep) or simply distillable from its own text (use targeted mode). Guessing at the tree from
+  prose alone is how a cluster comes out wrong.
+- A line `<vault>/spec/ (a record whose name is not a valid record id)` names nothing the sweep can
+  act on: report it as unusable and go on. This fixed-phrase line is exempt from the stop below: it
+  is reported and skipped, and nothing from it is substituted anywhere.
+
+**Shape-check every printed name before it enters a command.** The vault and spec name on each line
+come from a git-synced vault a teammate can write. Check the id against the safe-value shape
+`^[A-Za-z0-9._/-]+$` (the rule under "Rules that bind every step") before substituting it anywhere;
+one that fails is never substituted, quoted or escaped in — refuse it loudly and stop.
+
+### 2. Read each queued spec's sidecar
+
+Split each queue line's `<vault>/spec/<name>` (after the shape check above) into the vault and
+`spec/<name>`, then read the spec with the vault passed explicitly:
 
 ```
-lore search "kind:spec status:complete"
+lore record show spec/<name> --json --vault <vault>
 ```
 
-— and let the exclusion check below drop the ones that were genuinely distilled. Once the migration
-cohort is worked through, this second query returns only already-excluded records.
+The printed `<vault>/spec/<name>` is not a record id and `lore record show` refuses it as not found;
+only `spec/<name>` is. Lore decided the queue; it does not return the scope fields the
+explicit-scope rule needs later, so read them here for each waiting spec and keep the output. Carry
+the `<vault>` from the queue line as `--vault` on every later read and update of that spec.
 
-Plus, **specs the slice loop closed out**. A spec under the slice loop holds `ready` from the
-gauntlet until distill completes it — it never reaches `planned`, so the first query cannot see it
-and the pipeline would have no terminus. Enumerate them by the marker `/craft:slice` writes at its
-terminating condition:
-
-```
-lore search "kind:spec status:ready has:label.craft.slice-loop"
-```
-
-`has:label.` is the **presence** form, and it is presence that is wanted here: the marker takes two
-values, `craft/slice-loop=complete` and `craft/slice-loop=stopped`, and both are closed-out outcomes
-distill has something to say about. Narrowing this to `label.craft.slice-loop:complete` would strand
-every early-stopped spec. The key takes the dot-for-slash spelling because an unquoted `/` is a
-lexer error — the same convention `label.craft.branch` and `label.craft.subsystems` already use
-(`_shared/status-ownership.md`).
-
-A spec **mid-loop** never matches: `/craft:slice` unsets the label whenever it selects again, so the
-marker is present only while the loop is actually stopped. What the two values mean for the
-completion write — they are not the same outcome — is step 6 below.
-
-### 2. Apply the exclusion per candidate, never in the query
-
-A spec is out of the queue if it already carries **a `distilled=` annotation** — `distilled=adr`
-(ADRs written), `distilled=zero-adr`, or `distilled=rejected` — **or a `related: adr` edge whose
-anchoring ADR has itself reached `active` or a terminal status**.
-
-**One narrow exception, and it is the resumed-after-stop case.** A spec that stopped early was
-distilled and annotated but deliberately left `ready` (step 6), and the loop can be re-entered
-against it afterwards — `/craft:slice` clears the marker on reselection and writes it again when the
-loop next terminates. So a spec that is `ready`, carries `craft/slice-loop=complete`, and carries a
-`distilled=` annotation is **back in the queue**: the annotation records an earlier, partial
-distillation, and the slices shipped since it was written have never been distilled at all.
-Excluding it on the annotation alone would leave a finished spec permanently unable to reach
-`complete` — the one shape this ritual must never produce. Every other annotated spec stays
-excluded. Two keys, not one, because they arise from opposite directions: distill's own writes never
-land spec-side — step 1 writes the ADR's provenance edge as `--related spec=<member>` **on the
-ADR**, never on the spec, so a `related: adr` edge on a spec never came from a prior distillation. A
-spec carries `--related adr=<adr-id>` when it descends from that decision, so a spec holding one
-already belongs to a decision already on record, and sweeping it would re-distill that decision into
-a second ADR restating its parent's. `distilled=` cannot ride the KQL query either, because
-annotations are never indexed, so this cannot be a KQL filter, and the same per-candidate check
-covers the edge too. Check per candidate:
-
-```
-lore record show <spec-id> --json
-```
-
-Read the sidecar's annotations and `related` edges, and drop the candidate on an annotation hit, or
-on a `related: adr` edge whose anchoring ADR has itself reached `active` or a terminal status —
-never on a bare edge whose anchor is still `draft`. This is an extra call per candidate; at spec
-volume that is fine, and it is the only correct way to apply an exclusion key the index does not
-carry.
-
-**The edge half of that exclusion is narrow on purpose.** Its stated job is to stop distill
-re-recording a decision that is already on record — and that job is done only once the anchoring ADR
-has actually reached `active` or a terminal status. While the anchoring ADR is still `draft` it is
-*not yet* a decision on record, so excluding the candidate now would drop it before its own upstream
-decision is settled — and excluding it blanket would strand it there forever with no way back into
-the queue, whether it is sitting at `planned` or, under the slice loop, at `ready`. So a candidate
-whose anchoring ADR is still `draft` **stays in the queue**: it clusters normally and takes the
-ordinary drafting path, exactly like a candidate with no anchor at all. Read the anchor's status
-with one more per-candidate call:
-
-```
-lore record show <adr-id> --json
-```
-
-Keep the `--json` output — its scope fields are what the explicit-scope rule above needs later.
-
-### 3. Resolve each surviving spec's task tree
+### 3. Resolve each queued spec's task tree
 
 ```
 lore search "kind:task related-spec:<name>"
@@ -185,13 +167,16 @@ freshly-linked task shows up with no reindex in between. The second expands each
 its tree, because the facet returns the task that carries the edge, not its parent plan or its
 sibling tasks.
 
-**A spec with zero task edges is deferred, not queued.** Report it as:
+**In a sweep, a spec lore listed as waiting for which this search finds no task is a disagreement,
+not a deferral.** Lore only lists a spec as waiting when a task links it, so one of the two reads is
+wrong (a vault the search did not cover, a stale index, or a task the index does not hold but lore
+counts). Report the spec and the disagreement, and leave it out of the clustering rather than
+dropping it silently.
 
-> no task edges — link tasks or distill by target
-
-Both remedies are named on purpose: the spec may be genuinely unlinked (link the tasks and re-sweep)
-or simply distillable from its own text (use targeted mode). Guessing at the tree from prose alone
-is how a cluster comes out wrong.
+**In targeted mode, finding no task is not a disagreement.** Lore listed nothing, and a spec with no
+linked task is exactly what the deferred list sends an operator here for. Say the tree is empty,
+cluster the spec from its own text, its `related` edges and shared areas, and let the disposition
+gate stand as the backstop.
 
 **Stated thin spot:** nothing in the record model marks *which* task of a tree is the plan task.
 Task trees resolve through `related: spec=` edges plus judgment, and the human disposition gate is
@@ -426,8 +411,8 @@ Re-open it later with `/craft:distill spec/<id>`; the sweep will not.
 A run that stops mid-write order leaves a cluster whose ADR exists and whose specs have not reached
 their terminal state — still `planned` for pre-loop records, still `ready` with the
 `craft/slice-loop` marker and no `distilled=` annotation for a loop-closed spec. Either shape is
-exactly what the next sweep re-surfaces, since both remain in step 1's queues and neither has picked
-up the annotation that would exclude it.
+exactly what the next sweep re-surfaces, since both stay in the queue `lore distill-queue` builds
+and neither has picked up the annotation that would exclude it.
 
 Before drafting anything for a re-surfaced cluster, **detect the existing cluster ADR via the
 forward `related-spec` facet** — `lore search "kind:adr related-spec:<spec-name>"`. `related:` edges

@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -713,6 +714,12 @@ class TestRunWatch:
 
 
 class TestRunView:
+    def test_a_cancelled_run_is_shown(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None)) as stub:
+            rc, out, _ = cli(stub.port, "run", "view", "7")
+        assert rc == 0
+        assert "result:   cancelled" in out.splitlines()
+
     def test_prints_state_result_reason_job_workflow_and_matrix(self, cli):
         v = view(result="failure", reason="no runner", matrix={"os": "linux", "node": "20"}, job="test")
         with StubOutpost(view=v) as stub:
@@ -752,9 +759,218 @@ class TestRunView:
         assert "cannot read" in err
 
 
+class TestRunWatchCancelled:
+    CANCELLED = "outpost-gateway: run 7 was cancelled\n"
+
+    def _watch(self, cli, stub, *flags):
+        return cli(stub.port, "run", "watch", "7", *flags)
+
+    def test_exit_status_exits_1_and_says_the_run_was_cancelled(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None), log_steps=["one\n"]) as stub:
+            rc, out, err = self._watch(cli, stub, "--exit-status")
+        assert (rc, out, err) == (1, "one\n", self.CANCELLED)
+
+    def test_without_the_flag_it_says_so_and_exits_0(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None), log_steps=["one\n"]) as stub:
+            rc, out, err = self._watch(cli, stub)
+        assert (rc, out, err) == (0, "one\n", self.CANCELLED)
+
+    @pytest.mark.parametrize("result", ["success", "failure"])
+    def test_no_cancelled_line_for_a_run_that_was_not_cancelled(self, result, cli):
+        with StubOutpost(view=view(result=result), log_steps=[]) as stub:
+            _, _, err = self._watch(cli, stub)
+        assert "cancelled" not in err
+
+    def test_help_names_the_exit_code_a_cancelled_run_gets(self, cli, capsys):
+        with StubOutpost(view=view(result="cancelled"), log_steps=[]) as stub:
+            rc, _, _ = self._watch(cli, stub, "--exit-status")
+        with pytest.raises(SystemExit):
+            command.main(["--help"])
+        watch_line = next(ln for ln in capsys.readouterr().out.splitlines() if "run watch" in ln)
+        named = re.search(r"(\d) failed or cancelled", watch_line)
+        assert named and int(named.group(1)) == rc
+
+
+class TestRunViewLog:
+    def _log(self, cli, stub):
+        return cli(stub.port, "run", "view", "7", "--log")
+
+    def test_prints_exactly_the_bytes_the_log_route_returned_without_following(self, cli):
+        log = "caf\u00e9 one\r\n\ttwo, no trailing newline"
+        with StubOutpost(view=view(), log_steps=[log]) as stub:
+            rc, out, err = self._log(cli, stub)
+            asked = [q for q in stub.requests if "/log" in q.path]
+        assert (rc, out, err) == (0, log, "")
+        assert [q.path for q in asked] == ["/gateway/runs/7/log"]
+        assert asked[0].headers["authorization"] == f"Bearer {TOKEN}"
+
+    def test_a_running_run_s_log_so_far_is_printed_and_it_exits(self, cli):
+        running = view(state="in_progress", result=None, exit_code=None)
+        with StubOutpost(view=running, log_steps=["so far\n"]) as stub:
+            rc, out, _ = self._log(cli, stub)
+        assert (rc, out) == (0, "so far\n")
+
+    def test_a_queued_run_has_no_log_yet_and_no_log_is_requested(self, cli):
+        with StubOutpost(view=view(state="queued", result=None, exit_code=None), log_steps=["x\n"]) as stub:
+            rc, out, err = self._log(cli, stub)
+            asked = [q for q in stub.requests if "/log" in q.path]
+        assert (rc, out) == (0, "")
+        assert err == "outpost-gateway: run 7 has not started, so it has no log yet\n"
+        assert asked == []
+
+    def test_a_log_that_is_not_a_regular_file_is_a_refusal(self, cli):
+        reply = (500, {"reason": "log_not_a_regular_file",
+                       "message": "The run's log is not a regular file, so Outpost will not read it."})
+        with StubOutpost(view=view(), log_reply=reply) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out) == (2, "")
+        assert err == (
+            "outpost-gateway: log_not_a_regular_file: The run's log is not a regular file, "
+            "so Outpost will not read it.\n"
+        )
+
+    def test_a_connection_cut_mid_chunk_is_a_dropped_log(self, cli):
+        with StubOutpost(view=view(), log_steps=["one\n", Cut()], log_chunked=True) as stub:
+            rc, _, err = self._log(cli, stub)
+        assert rc == 2
+        assert "was dropped" in err
+
+    def test_an_unknown_run_prints_no_run_in_this_workspace(self, cli):
+        with StubOutpost(view_reply=NOT_FOUND) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: no run 7 in this workspace\n"
+
+    def test_a_run_cancelled_before_it_started_says_so_instead_of_printing_nothing(self, cli):
+        run = view(result="cancelled", exit_code=None, started_at=None)
+        with StubOutpost(view=run, log_steps=[]) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out) == (0, "")
+        assert err == "outpost-gateway: run 7 never started, so it has no log\n"
+
+    def test_a_run_cancelled_while_running_still_prints_its_log(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None), log_steps=["so far\n"]) as stub:
+            rc, out, err = self._log(cli, stub)
+        assert (rc, out, err) == (0, "so far\n", "")
+
+    def test_without_the_flag_view_still_prints_the_fields_and_asks_for_no_log(self, cli):
+        with StubOutpost(view=view(), log_steps=["x\n"]) as stub:
+            rc, out, _ = cli(stub.port, "run", "view", "7")
+            asked = [q for q in stub.requests if "/log" in q.path]
+        assert rc == 0 and out.startswith("id:       7\n")
+        assert asked == []
+
+
+class TestRunCancel:
+    def _cancel(self, cli, stub):
+        return cli(stub.port, "run", "cancel", "7")
+
+    def test_a_queued_run_completes_cancelled_at_once(self, cli):
+        with StubOutpost() as stub:
+            rc, out, err = self._cancel(cli, stub)
+            sent = next(q for q in stub.requests if q.path.endswith("/cancel"))
+        assert rc == 0, err
+        assert (sent.method, sent.path) == ("POST", "/gateway/runs/7/cancel")
+        assert sent.headers["authorization"] == f"Bearer {TOKEN}"
+        assert out.splitlines() == [
+            "id:       7",
+            "state:    completed",
+            "result:   cancelled",
+            "cancel requested; run 7 will complete as cancelled",
+        ]
+
+    def test_a_cancel_the_route_answers_late_is_still_a_success(self, cli):
+        with StubOutpost(cancel_delay=3.5) as stub:
+            rc, out, err = self._cancel(cli, stub)
+        assert rc == 0, err
+        assert "cancel requested; run 7 will complete as cancelled" in out
+
+    def test_a_running_run_is_still_in_progress_with_no_result_yet(self, cli):
+        with StubOutpost(cancel_reply=(202, {"id": 7, "state": "in_progress", "result": None})) as stub:
+            rc, out, _ = self._cancel(cli, stub)
+        assert rc == 0
+        assert out.splitlines()[1:3] == ["state:    in_progress", "result:   -"]
+        assert "will complete as cancelled" in out
+
+    @pytest.mark.parametrize(
+        "reply, shown",
+        [
+            (
+                (409, {"reason": "run_completed", "result": "success",
+                       "message": "Run 7 has already completed with the result success, so it cannot be cancelled."}),
+                "run_completed: Run 7 has already completed with the result success, so it cannot be cancelled.",
+            ),
+            (
+                (409, {"reason": "run_completed", "result": "cancelled",
+                       "message": "Run 7 has already completed with the result cancelled, so it cannot be cancelled."}),
+                "run_completed: Run 7 has already completed with the result cancelled, so it cannot be cancelled.",
+            ),
+            (
+                (409, {"reason": "run_not_active",
+                       "message": "Run 7 is not being run by this Outpost, so it cannot be cancelled."}),
+                "run_not_active: Run 7 is not being run by this Outpost, so it cannot be cancelled.",
+            ),
+            (NOT_FOUND, "run_not_found: No run with that id."),
+            ((501, {"reason": "runs_not_configured", "message": "runs are not configured on this host"}),
+             "runs_not_configured: runs are not configured on this host"),
+            ((401, {"reason": "credential_unrecognised", "message": "The bearer token is not recognised."}),
+             "credential_unrecognised: The bearer token is not recognised."),
+            ((403, {"reason": "scope_missing", "message": "No scope."}), "scope_missing: No scope."),
+        ],
+        ids=["completed-success", "completed-cancelled", "not-active", "not-found", "not-configured", "401", "403"],
+    )
+    def test_a_refusal_prints_outposts_reason_and_message_and_exits_2(self, reply, shown, cli):
+        with StubOutpost(cancel_reply=reply) as stub:
+            rc, out, err = self._cancel(cli, stub)
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: {shown}\n"
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"id": 7, "state": "completed", "result": "aborted"},
+            {"id": 7, "state": "paused", "result": None},
+            {"id": 7, "state": "completed", "result": None},
+            {"id": 7, "state": "in_progress", "result": "cancelled"},
+        ],
+        ids=["unknown-result", "unknown-state", "completed-without-result", "result-before-completion"],
+    )
+    def test_a_202_outside_the_known_values_is_refused_as_unreadable(self, body, cli):
+        with StubOutpost(cancel_reply=(202, body)) as stub:
+            rc, out, err = self._cancel(cli, stub)
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
+    def test_an_unreachable_outpost_exits_2(self, cli):
+        rc, _, err = cli(free_port(), "run", "cancel", "7")
+        assert rc == 2
+        assert "not reachable" in err
+
+    def test_a_non_numeric_id_is_a_usage_error(self, cli):
+        with StubOutpost() as stub, pytest.raises(SystemExit) as stop:
+            cli(stub.port, "run", "cancel", "abc")
+        assert stop.value.code == 2
+
+
 class TestRunListRefusals:
     def test_a_state_outside_the_known_values_is_refused_not_listed(self, cli):
         bad = [{**RUNS[1], "state": "finished"}]
+        with StubOutpost(runs=bad) as stub:
+            rc, out, err = cli(stub.port, "run", "list")
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
+    def test_a_cancelled_run_is_listed_with_the_others(self, cli):
+        runs = [*RUNS, {**RUNS[1], "id": 3, "job": "docs", "state": "completed", "result": "cancelled"}]
+        with StubOutpost(runs=runs) as stub:
+            rc, out, err = cli(stub.port, "run", "list")
+        assert rc == 0, err
+        rows = [ln.split() for ln in out.splitlines()[1:]]
+        assert [r[0] for r in rows] == ["1", "2", "3"]
+        assert rows[2][:4] == ["3", "docs", "completed", "cancelled"]
+
+    def test_a_result_outside_the_known_values_is_refused_not_listed(self, cli):
+        bad = [{**RUNS[0], "result": "aborted"}]
         with StubOutpost(runs=bad) as stub:
             rc, out, err = cli(stub.port, "run", "list")
         assert (rc, out) == (2, "")
@@ -778,6 +994,15 @@ class TestHygieneAcrossVerbs:
             (("run", "view", "7"), dict(view=view())),
             (("run", "view", "7"), dict(view_reply=(401, {"reason": "credential_revoked", "message": "Revoked."}))),
             (("run", "list"), dict(runs=RUNS)),
+            (("run", "cancel", "7"), dict()),
+            (("run", "cancel", "7"), dict(cancel_reply=(401, {"reason": "credential_revoked", "message": "Revoked."}))),
+            (("run", "watch", "7", "--exit-status"), dict(view=view(result="cancelled"), log_steps=["x\n"])),
+            (("run", "view", "7", "--log"), dict(view=view(), log_steps=["x\n"])),
+            (("run", "view", "7", "--log"), dict(view=view(state="queued", result=None))),
+            (
+                ("run", "view", "7", "--log"),
+                dict(view=view(), log_reply=(500, {"reason": "log_not_a_regular_file", "message": "no"})),
+            ),
         ],
     )
     def test_secret_and_token_appear_in_no_output_or_environment(self, argv, stub_kwargs, cli, repo):

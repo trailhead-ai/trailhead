@@ -17,9 +17,9 @@ import pytest
 from conftest import load_script, run_cli, write_vault_config
 
 ROW_RE = re.compile(
-    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths)\s+(\S+)\s+(\S+)\s+(.*)$")
-CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths")
-GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths) — ")
+    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue)\s+(\S+)\s+(\S+)\s+(.*)$")
+CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths", "distill-queue")
+GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
@@ -934,7 +934,7 @@ def _unreadable_world(world):
 def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     r = _unreadable_world(world)
     assert r.returncode == 0, r.stderr
-    assert len(all_rows(r.stdout)) == 12
+    assert len(all_rows(r.stdout)) == 15
     for v in ("default", "trailhead"):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
         assert rows(r.stdout, "retired-links")[v][2] == (
@@ -1151,7 +1151,9 @@ def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_
     assert lines[third - 1] == "" and lines[third - 2].startswith("Act on these with /lore:correct")
     fourth = lines.index("missing-paths — skipped.")
     assert lines[fourth - 1] == "" and lines[fourth - 2] == ACTION
-    assert lines[-2] == "missing-paths — skipped."
+    fifth = lines.index("distill-queue — no findings.")
+    assert lines[fifth - 1] == "" and lines[fifth - 2] == "missing-paths — skipped."
+    assert lines[-2] == "distill-queue — no findings."
 
 
 TIMESTAMP_SHAPES = {
@@ -1220,7 +1222,7 @@ def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch
     monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
     now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
     report = health.build_report(now=now, stale_days=45)
-    assert len(seen) == 4 and all(c is report.ctx for c in seen)
+    assert len(seen) == 5 and all(c is report.ctx for c in seen)
     assert (seen[0].now, seen[0].stale_days) == (now, 45)
     assert health.build_report().ctx.now.tzinfo is not None
 
@@ -2223,3 +2225,220 @@ def test_help_names_every_registered_check(world):  # inert-gate: allow wiring: 
     health = importlib.import_module("lore.cli.health")
     flat = "".join(world.run("--help").stdout.split())  # argparse may wrap at a hyphen
     assert [c.name for c in health.CHECKS if c.name not in flat] == []
+
+
+# --- distill-queue: the fifth check ---------------------------------------------
+
+DQ = "distill-queue"
+DQ_ACTION = ("Act on these with /craft:distill: a sweep takes every waiting spec, including any not shown; "
+             "/craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.")
+DEFERRED_NOTE = ("deferred: no linked task; list them with lore distill-queue "
+                 "and distill each with /craft:distill spec/<name>")
+
+
+def _spec(root, name, status="planned", linked=True, updated="2026-03-01T00:00:00Z", **extra):
+    _put(root, "spec", name, status=status, updated=updated, **extra)
+    if linked:
+        _put(root, "task", f"t-{name}", status="open", related={"spec": [name]})
+
+
+def _queue_cli(world, *args):
+    return run_cli(["distill-queue", *args], vault=world.roots["default"], state_dir=world.state,
+                   env_extra={"XDG_CONFIG_HOME": str(world.cfg)})
+
+
+def _waiting_ids(queue_out):
+    lines = queue_out.splitlines()
+    start = lines.index("waiting:") + 1
+    end = lines.index("", start) if "" in lines[start:] else len(lines)
+    return [ln.split()[0] for ln in lines[start:end]]
+
+
+def _finding_ids(out):
+    return [ln.split()[0] for ln in group(out, DQ)[1:] if ln.startswith("  ") and "/spec/" in ln.split()[0]]
+
+
+def _mixed_world(world):
+    d, t = world.roots["default"], world.roots["trailhead"]
+    _spec(d, "waits", "planned", updated="2026-02-01T00:00:00Z")
+    _spec(t, "alone", "complete", linked=False, updated="2026-02-02T00:00:00Z")
+    _put(t, "adr", "decided", status="active")
+    _spec(t, "decided-already", "planned", related={"adr": ["decided"]}, updated="2026-02-03T00:00:00Z")
+    _spec(d, "was-distilled", "complete", annotations={"distilled": "adr"}, updated="2026-02-04T00:00:00Z")
+
+
+# inert-gate: allow seam smoke
+def test_seam_smoke_health_findings_name_what_distill_queue_lists_and_deferred_counts_match(world):
+    _mixed_world(world)
+    health, queue = world.run("--all"), _queue_cli(world)
+    assert health.returncode == 0 and queue.returncode == 0, (health.stderr, queue.stderr)
+    assert _finding_ids(health.stdout) == _waiting_ids(queue.stdout) == ["default/spec/waits"]
+    assert group(health.stdout, DQ)[0] == f"{DQ} — 1 finding, oldest first ({'1 ' + DEFERRED_NOTE})"
+    assert queue.stdout.splitlines()[0] == "lore distill-queue — 1 waiting, 1 deferred"
+    # one spec moves from waiting to excluded: both outputs change together
+    _put(world.roots["default"], "spec", "waits", status="planned", annotations={"distilled": "adr"})
+    health, queue = world.run("--all"), _queue_cli(world)
+    assert group(health.stdout, DQ)[0].startswith(f"{DQ} — no findings (1 deferred")
+    assert queue.stdout.splitlines()[0] == "lore distill-queue — 0 waiting, 1 deferred"
+
+
+def test_no_spec_waiting_and_none_deferred_says_so_and_counts_every_specs_as_checked(world):
+    _spec(world.roots["default"], "done", "complete", annotations={"distilled": "adr"})
+    r = world.run()
+    assert group(r.stdout, DQ) == [f"{DQ} — no findings."]
+    assert rows(r.stdout, DQ)["default"] == ("1", "0", "no")
+    assert rows(r.stdout, DQ)["trailhead"] == ("0", "0", "no")
+
+
+def test_no_spec_waiting_but_one_deferred_puts_the_count_in_the_heading(world):
+    _spec(world.roots["default"], "alone", "complete", linked=False)
+    r = world.run()
+    assert group(r.stdout, DQ) == [f"{DQ} — no findings (1 {DEFERRED_NOTE})."]
+    assert rows(r.stdout, DQ)["default"] == ("1", "0", "no")
+
+
+def test_one_spec_waiting_renders_the_finding_the_heading_and_the_action_line(world):
+    _spec(world.roots["trailhead"], "streaming-export", "ready", updated="2026-09-02T00:00:00Z",
+          labels={"craft/slice-loop": "complete"})
+    r = world.run()
+    assert group(r.stdout, DQ) == [
+        f"{DQ} — 1 finding, oldest first",
+        "  trailhead/spec/streaming-export  2026-09-02  ready  slice loop complete, not yet distilled",
+        DQ_ACTION,
+    ]
+    assert rows(r.stdout, DQ)["trailhead"] == ("1", "1", "no")
+
+
+def test_findings_are_oldest_first_and_a_deferred_spec_is_never_one(world):
+    d = world.roots["default"]
+    _spec(d, "newer", updated="2026-05-01T00:00:00Z")
+    _spec(d, "older", updated="2026-01-01T00:00:00Z")
+    _spec(d, "deferred", linked=False, updated="2025-01-01T00:00:00Z")
+    r = world.run()
+    assert _finding_ids(r.stdout) == ["default/spec/older", "default/spec/newer"]
+
+
+@pytest.mark.parametrize("extra,over", [(0, 0), (1, 1), (None, 0)])
+def test_the_per_check_cap_shows_the_cap_then_the_rest_and_all_lifts_it(world, extra, over):
+    cap = importlib.import_module("lore.cli.health").DEFAULT_LIMIT
+    count = cap + (extra if extra is not None else 3)
+    d = world.roots["default"]
+    for i in range(count):
+        _spec(d, f"s{i:02d}", updated=f"2026-01-{i + 1:02d}T00:00:00Z")
+    _spec(d, "alone", linked=False)
+    r = world.run("--all") if extra is None else world.run()
+    lines = group(r.stdout, DQ)
+    shown = [ln for ln in lines if "/spec/" in ln]
+    assert lines[0] == f"{DQ} — {count} findings, oldest first (1 {DEFERRED_NOTE})"
+    assert len(shown) == (count if extra is None else cap)
+    more = [ln for ln in lines if " more. Run" in ln]
+    if extra == 1:
+        assert more == ["  1 more. Run `lore health --all` to see every finding, or `--limit <n>` for more."]
+    else:
+        assert more == []
+    assert lines[-1] == DQ_ACTION
+
+
+def test_a_spec_kept_waiting_because_its_adr_could_not_be_read_says_so(world):
+    d = world.roots["default"]
+    _spec(d, "notes-are-records", related={"adr": ["anchor"]})
+    (d / "adr").mkdir()
+    (d / "adr" / "anchor.json").write_text("{not json")
+    (d / "adr" / "anchor.md").write_text("x\n")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert group(r.stdout, DQ)[1] == ("  default/spec/notes-are-records  2026-03-01  planned  "
+                                      "planned, not yet distilled; its ADR could not be read")
+
+
+def test_an_unreadable_spec_skips_the_check_on_every_row_naming_the_vault_and_the_reason(world):
+    _spec(world.roots["default"], "waits")
+    bad = world.roots["levr"] / "spec"
+    bad.mkdir()
+    (bad / "broken.json").write_text("{not json")
+    (bad / "broken.md").write_text("x\n")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout, DQ)
+    reason = ("yes: vault levr holds a spec or task record that could not be read, "
+              "so no spec's ADR or tasks can be confirmed")
+    assert got["default"] == ("—", "—", reason)
+    assert got["trailhead"] == got["default"] == got["levr"]
+    assert group(r.stdout, DQ) == [f"{DQ} — skipped."]
+
+
+def test_an_unreadable_adr_does_not_skip_the_check(world):
+    _spec(world.roots["default"], "waits")
+    bad = world.roots["levr"] / "adr"
+    bad.mkdir()
+    (bad / "broken.json").write_text("{not json")
+    (bad / "broken.md").write_text("x\n")
+    r = world.run()
+    assert group(r.stdout, DQ)[0] != f"{DQ} — skipped."
+    assert rows(r.stdout, DQ)["default"][2] == "no"
+
+
+def test_an_unreadable_vault_skips_the_check_on_every_row_naming_it(world):
+    _spec(world.roots["default"], "waits")
+    os.chmod(world.roots["levr"], 0)
+    try:
+        r = world.run()
+    finally:
+        os.chmod(world.roots["levr"], 0o755)
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout, DQ)
+    assert got["default"] == ("—", "—", "yes: vault levr could not be read, so no spec's ADR or tasks can be confirmed")
+    assert got["trailhead"] == got["default"]
+    assert got["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert group(r.stdout, DQ) == [f"{DQ} — skipped."]
+
+
+def test_a_distill_check_that_raises_is_errored_while_the_other_four_still_render(world, monkeypatch):
+    d = world.roots["default"]
+    _put(d, "decision", "gone", status="dropped")
+    _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
+
+    def boom(scans, selected, ctx):
+        raise RuntimeError("boom\nsecond line")
+
+    _with_checks(monkeypatch, DQ, boom)
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    for v in ("default", "trailhead", "levr"):
+        assert rows(r.stdout, DQ)[v] == ("—", "—", "errored: RuntimeError")
+        for other in CHECKS[:-1]:
+            assert rows(r.stdout, other)[v][2] != "errored: RuntimeError"
+    assert group(r.stdout, DQ) == [f"{DQ} — errored: RuntimeError."]
+    assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
+    assert "boom" not in r.stdout
+
+
+def test_vault_narrows_findings_while_a_task_in_another_vault_still_links_the_spec(world):
+    d, t = world.roots["default"], world.roots["trailhead"]
+    _spec(t, "elsewhere-task", linked=False)
+    _put(d, "task", "linker", status="open", related={"spec": ["elsewhere-task"]})
+    _spec(d, "mine")
+    _spec(t, "lonely", linked=False)
+    r = world.run("--vault", "trailhead", "--all")
+    assert _finding_ids(r.stdout) == ["trailhead/spec/elsewhere-task"]
+    assert group(r.stdout, DQ)[0] == f"{DQ} — 1 finding, oldest first (1 {DEFERRED_NOTE})"
+    assert [k for k, _ in all_rows(r.stdout) if k[1] == DQ] == [("trailhead", DQ)]
+
+
+def test_a_spec_name_that_is_not_a_record_id_prints_the_fixed_phrase_and_never_itself(world):
+    d = world.roots["default"]
+    bad = "Bad Name\x1b[31m"
+    _put(d, "spec", bad, status="planned")
+    _put(d, "task", "linker", status="open", related={"spec": [bad]})
+    r = world.run()
+    line = group(r.stdout, DQ)[1]
+    assert line.startswith("  default/spec/ (a record whose name is not a valid record id)  2026-03-01  planned")
+    assert "Bad Name" not in r.stdout and "\x1b" not in r.stdout
+
+
+def test_a_vault_name_with_control_characters_is_escaped_in_the_distill_group(tmp_path):
+    w = World(tmp_path, names=("default", "ev\nil\x1b[31mv"))
+    _spec(w.roots["ev\nil\x1b[31mv"], "waits")
+    r = w.run()
+    assert "\x1b" not in r.stdout
+    assert "ev\\nil\\x1b[31mv/spec/waits" in group(r.stdout, DQ)[1]

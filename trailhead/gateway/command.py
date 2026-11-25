@@ -6,8 +6,10 @@ the broker does not expire its tokens). The session key comes only from the pare
 process chain: there is no argument or environment variable that names one.
 
 ``run start`` uploads the working tree and prints the new run's id; ``run watch`` follows
-a run's log; ``run view`` and ``run list`` show runs. Exit codes: 0 done, 1 (``watch
---exit-status`` only) the job ran and failed, 3 (``watch --exit-status`` only) the run did
+a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
+log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run.
+Exit codes: 0 done, 1 (``watch --exit-status`` only) the job ran and failed or the run was
+cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
 unreachable or silent Outpost, a dropped stream and a usage error.
 
@@ -33,8 +35,11 @@ from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
 
 STATES = ("queued", "in_progress", "completed")
-RESULTS = ("success", "failure")
+RESULTS = ("success", "failure", "cancelled")
 CANNOT_READ = "Outpost answered with a reply this command cannot read"
+# Outpost answers a cancel only after the run's containers are removed: a list call plus a
+# force-delete per container, each allowed up to 10s.
+CANCEL_TIMEOUT_SECONDS = 30.0
 SANDBOXED = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
 
 
@@ -172,19 +177,64 @@ def _run_list(as_json: bool, port: int) -> int:
     return 0
 
 
+def _print_fields(fields: tuple[tuple[str, object], ...]) -> None:
+    for name, value in fields:
+        print(f"{name + ':':<9} {_cell(value)}")
+
+
 def _run_view(run_id: int, port: int) -> int:
     run = _get_view(_token(port), run_id, port)
-    fields = (
+    _print_fields((
         ("id", run_id),
         ("state", run["state"]),
         ("result", run["result"]),
         ("reason", run["reason"]),
         ("job", run.get("job")),
         ("workflow", run.get("workflow")),
-    )
-    for name, value in fields:
-        print(f"{name + ':':<9} {_cell(value)}")
+    ))
     print(f"{'matrix:':<9} {_matrix_text(run.get('matrix'))}")
+    return 0
+
+
+def _run_view_log(run_id: int, port: int) -> int:
+    token = _token(port)
+    run = _get_view(token, run_id, port)
+    if run["state"] == "queued":
+        print(f"outpost-gateway: run {run_id} has not started, so it has no log yet", file=sys.stderr)
+        return 0
+    if run["state"] == "completed" and run.get("started_at") is None:
+        print(f"outpost-gateway: run {run_id} never started, so it has no log", file=sys.stderr)
+        return 0
+    stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log", headers=_bearer(token), port=port)
+    try:
+        if stream.refusal is not None:
+            raise _refusal(stream.refusal, run_id)
+        try:
+            for line in stream.lines():
+                sys.stdout.buffer.write(line)
+        except outpost_http.StreamBroken:
+            raise _fail(f"the log stream was dropped before the whole log of run {run_id} was read") from None
+    finally:
+        sys.stdout.buffer.flush()
+        stream.close()
+    return 0
+
+
+def _run_cancel(run_id: int, port: int) -> int:
+    reply = outpost_http.request(
+        "POST",
+        f"/gateway/runs/{run_id}/cancel",
+        headers=_bearer(_token(port)),
+        port=port,
+        timeout=CANCEL_TIMEOUT_SECONDS,
+    )
+    if reply.status != 202:
+        raise _refusal(reply)
+    state, result = reply.body.get("state"), reply.body.get("result")
+    if state not in STATES or result not in (None, "cancelled") or (state == "completed") != (result is not None):
+        raise _fail(CANNOT_READ)
+    _print_fields((("id", run_id), ("state", state), ("result", result)))
+    print(f"cancel requested; run {run_id} will complete as cancelled")
     return 0
 
 
@@ -219,6 +269,9 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
         run = _get_view(token, run_id, port)
     if run["state"] != "completed":
         raise _fail(f"the log stream ended before run {run_id} completed")
+    if run["result"] == "cancelled":
+        print(f"outpost-gateway: run {run_id} was cancelled", file=sys.stderr)
+        return 1 if exit_status else 0
     if not exit_status or run["result"] == "success":
         return 0
     if run["reason"] is None:
@@ -283,8 +336,9 @@ def _parser() -> argparse.ArgumentParser:
         description="Reach Outpost's gateway from inside a sandboxed session. Run it on its own, not piped or chained.",
         epilog="commands:\n"
         "  run start <job> [--workflow <path>]   upload the working tree and start a run; prints its id\n"
-        "  run watch <id> [--exit-status]        follow a run's log (exit: 0 ok, 1 failed, 3 not run)\n"
-        "  run view <id>                         show a run\n"
+        "  run watch <id> [--exit-status]        follow a run's log (exit: 0 ok, 1 failed or cancelled, 3 not run)\n"
+        "  run view <id> [--log]                 show a run, or print its whole log once\n"
+        "  run cancel <id>                       cancel a queued or running run\n"
         "  run list [--json]                     list the workspace's runs\n\n"
         f"run it as: {shim} run list",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -299,10 +353,15 @@ def _parser() -> argparse.ArgumentParser:
     watch = run.add_parser("watch", help="follow a run's log")
     watch.add_argument("id", type=_run_id)
     watch.add_argument(
-        "--exit-status", action="store_true", help="exit 0 on success, 1 on failure, 3 if the run did not execute"
+        "--exit-status",
+        action="store_true",
+        help="exit 0 on success, 1 on failure or cancelled, 3 if the run did not execute",
     )
     view = run.add_parser("view", help="show a run")
     view.add_argument("id", type=_run_id)
+    view.add_argument("--log", action="store_true", help="print the run's whole log once, without following")
+    cancel = run.add_parser("cancel", help="cancel a queued or running run")
+    cancel.add_argument("id", type=_run_id)
     listing = run.add_parser("list", help="list the workspace's runs")
     listing.add_argument("--json", action="store_true", help="print JSON instead of a table")
     return parser
@@ -314,7 +373,9 @@ def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) ->
     if args.action == "watch":
         return _run_watch(args.id, args.exit_status, port)
     if args.action == "view":
-        return _run_view(args.id, port)
+        return _run_view_log(args.id, port) if args.log else _run_view(args.id, port)
+    if args.action == "cancel":
+        return _run_cancel(args.id, port)
     return _run_list(args.json, port)
 
 
