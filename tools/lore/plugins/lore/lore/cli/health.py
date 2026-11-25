@@ -1,6 +1,6 @@
 """``lore health`` — a read-only report of vault health, one check at a time.
 
-The five checks, in the order they print, are ``dangling-links`` (references that
+The six checks, in the order they print, are ``dangling-links`` (references that
 point at no record), ``retired-links`` (live records that link to dropped or
 superseded records), ``stale-tasks`` (unfinished tasks not updated within the
 staleness window, ``--stale-days``, or tied to a dropped or superseded spec) and
@@ -8,7 +8,9 @@ staleness window, ``--stale-days``, or tied to a dropped or superseded spec) and
 repository's default branch) and ``distill-queue`` (finished specs waiting to be
 condensed into ADRs, decided by :func:`..health.distill_queue.build_distill_queue`, the
 one definition ``lore distill-queue`` shares; deferred specs, which no task links to, are
-counted in the heading rather than listed). The command builds a plain-data :class:`HealthReport` from the scan of every
+counted in the heading rather than listed) and ``lesson-growth`` (the executor-dispatch
+lessons per vault and the ones added within the same ``--stale-days`` window, informational; skips
+per vault when a vault's lessons cannot all be counted). The command builds a plain-data :class:`HealthReport` from the scan of every
 configured vault and the registry of checks (:data:`CHECKS`), then renders it:
 one summary row per vault per check, then one findings group per check, each
 with its own ``--limit`` cap and action line. Nothing is written: no record, no
@@ -67,6 +69,7 @@ from datetime import datetime, timezone
 
 from ..health import dangling as dangling_mod
 from ..health import distill_queue as queue_mod
+from ..health import lessons as lessons_mod
 from ..health import paths as paths_mod
 from ..health import references as references_mod
 from ..health import repos as repos_mod
@@ -416,6 +419,40 @@ def _distill_note(sec: Section, ctx: RunContext) -> str | None:
         return None
     return (f" ({_num(n)} deferred: no linked task; list them with lore distill-queue "
             "and distill each with /craft:distill spec/<name>)")
+
+
+LESSONS_SKIP_TAIL = "so its lessons cannot all be counted"
+
+
+def _lessons_skip_reason(scan: VaultScan, scans: dict[str, VaultScan], code: str) -> str:
+    if code == lessons_mod.UNREADABLE_LESSON:
+        return f"vault {_safe(scan.vault)} holds a lesson record that could not be read, {LESSONS_SKIP_TAIL}"
+    return _skip_reason(scan, scans, (scan.vault,), LESSONS_SKIP_TAIL)
+
+
+def _run_lessons(scans, selected, ctx) -> CheckRun:
+    result = lessons_mod.check_lessons(scans, selected, now=ctx.now, window_days=ctx.stale_days)
+    by_name = {s.vault: s for s in scans}
+    skipped = {v: _lessons_skip_reason(by_name[v], by_name, code) for v, code in result.skipped.items()}
+    return CheckRun(None if skipped and not result.judged else list(result.findings),
+                    dict(result.judged), skipped=skipped)
+
+
+def _lesson_line(f: lessons_mod.Finding) -> str:
+    return f"  {_ident(f)}  {_when(f)}  added {_plural(f.age_days, 'day', 'days')} ago"
+
+
+def _percent(added: int, records: int) -> int:
+    return (200 * added + records) // (2 * records)
+
+
+def _lesson_note(sec: Section, ctx: RunContext) -> str:
+    added = Counter(f.vault for f in sec.findings or ())
+    totals = []
+    for vault, records in sec.run.judged.items():
+        share = f" ({_percent(added[vault], records)}%)" if records else ""
+        totals.append(f"{_safe(vault)} {_plural(records, 'lesson', 'lessons')}, {_num(added[vault])} added{share}")
+    return f" (window: {ctx.stale_days} days): " + "; ".join(totals)
 
 
 def build_report(only: str | None = None, *, env=None, now: datetime | None = None,
@@ -789,6 +826,15 @@ CHECKS: tuple[Check, ...] = (
                "The id is spec/<name>, without the vault prefix.",
         heading_note=_distill_note,
     ),
+    Check(
+        name="lesson-growth",
+        run=_run_lessons,
+        render=_lesson_line,
+        skip_reason=LESSONS_SKIP_TAIL,
+        action="These are informational, not problems to fix. If lessons pile up faster than they "
+               "are folded, run /craft:consolidate: it merges lessons that prevent the same failure.",
+        heading_note=_lesson_note,
+    ),
 )
 
 
@@ -929,11 +975,11 @@ def add_health_subparser(sub) -> None:
     p = sub.add_parser(
         "health",
         help=(
-            "Report dangling links, retired links, stale tasks, missing paths and specs "
-            "waiting to be distilled, across every vault (read-only)"
+            "Report dangling links, retired links, stale tasks, missing paths, specs "
+            "waiting to be distilled and lesson growth, across every vault (read-only)"
         ),
         description=(
-            "Read every record in every configured vault and run five checks. "
+            "Read every record in every configured vault and run six checks. "
             "dangling-links reports references (related, supersedes, depends-on, parent, "
             "[[wikilinks]]) that point at no record in any vault. retired-links reports "
             "live records that link to a dropped or superseded record. stale-tasks reports "
@@ -944,7 +990,11 @@ def add_health_subparser(sub) -> None:
             "has no repository, an unreadable one, or was not fully read. distill-queue reports the "
             "specs waiting to be distilled into ADRs, oldest first, to act on with /craft:distill; "
             "specs no task links to are counted in its heading and listed by lore distill-queue; "
-            "it is skipped for every vault when any vault was not fully read. Read-only: nothing is "
+            "it is skipped for every vault when any vault was not fully read. lesson-growth counts the "
+            "executor-dispatch lessons (kind lesson, label craft/dispatch-lesson=executor, not dropped "
+            "or superseded) per vault and lists those added within the staleness window, as "
+            "information rather than problems; it is skipped for one vault, not all, when that vault's "
+            "lessons cannot all be read. Read-only: nothing is "
             "fetched. "
             "Exit status: 0 whenever the report "
             "runs, with or without findings; 1 when it cannot run (unreadable config, "
@@ -956,7 +1006,7 @@ def add_health_subparser(sub) -> None:
     p.add_argument("--limit", type=_positive_int, default=DEFAULT_LIMIT, metavar="N",
                    help=f"Show up to N findings per check (default {DEFAULT_LIMIT})")
     p.add_argument("--stale-days", type=_stale_days, default=DEFAULT_STALE_DAYS, metavar="N",
-                   help=f"Staleness window for tasks, 1 to {MAX_STALE_DAYS:,} days "
+                   help=f"Window for stale-tasks and lesson-growth, 1 to {MAX_STALE_DAYS:,} days "
                         f"(default {DEFAULT_STALE_DAYS})")
     p.add_argument("--all", action="store_true", default=False,
                    help="Show every finding (wins over --limit)")

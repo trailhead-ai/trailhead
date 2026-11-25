@@ -17,9 +17,9 @@ import pytest
 from conftest import load_script, run_cli, write_vault_config
 
 ROW_RE = re.compile(
-    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue)\s+(\S+)\s+(\S+)\s+(.*)$")
-CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths", "distill-queue")
-GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue) — ")
+    r"^(\S+)\s+(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue|lesson-growth)\s+(\S+)\s+(\S+)\s+(.*)$")
+CHECKS = ("dangling-links", "retired-links", "stale-tasks", "missing-paths", "distill-queue", "lesson-growth")
+GROUP_RE = re.compile(r"^(dangling-links|retired-links|stale-tasks|missing-paths|distill-queue|lesson-growth) — ")
 FINDING_RE = re.compile(r"^  \S.*(not found in any vault|not shaped like a record id)$")
 
 
@@ -251,7 +251,7 @@ def test_unreadable_vault_skips_every_row_and_names_it(world):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing", v
     assert rows(r.stdout)["levr"][2] == "yes: its directory could not be read"
     assert finding_lines(r.stdout) == []
-    assert "no findings" not in r.stdout
+    assert "dangling-links — no findings" not in r.stdout
     assert "dangling-links — skipped." in r.stdout
     assert ("Could not confirm the count against the index: vault levr was not fully read. "
             "1 record the index would hold (sessions included).") in r.stdout
@@ -668,7 +668,7 @@ def test_unreadable_kind_directory_in_another_vault_skips_the_check(world):
         assert skipped.startswith("yes:"), vault
     assert got["default"][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
     assert finding_lines(r.stdout) == []
-    assert "no findings" not in r.stdout
+    assert "dangling-links — no findings" not in r.stdout
 
 
 def test_missing_vault_directory_skips_the_check_and_says_so(world):
@@ -932,14 +932,18 @@ def _unreadable_world(world):
 def test_an_unreadable_vault_skips_both_checks_each_with_its_own_reason(world):
     r = _unreadable_world(world)
     assert r.returncode == 0, r.stderr
-    assert len(all_rows(r.stdout)) == 15
+    assert len(all_rows(r.stdout)) == 18
     for v in ("default", "trailhead"):
         assert rows(r.stdout)[v][2] == "yes: vault levr could not be read, so no target can be confirmed missing"
         assert rows(r.stdout, "retired-links")[v][2] == (
             "yes: vault levr could not be read, so no target's status can be confirmed")
-    for check in CHECKS:
+    for check in CHECKS[:-1]:
         assert rows(r.stdout, check)["levr"] == ("—", "—", "yes: its directory could not be read")
         assert group(r.stdout, check) == [f"{check} — skipped."]
+    assert rows(r.stdout, "lesson-growth")["levr"] == ("—", "—", "yes: its directory could not be read")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("0", "0", "no")
+    assert group(r.stdout, "lesson-growth") == [
+        "lesson-growth — no findings (window: 30 days): default 0 lessons, 0 added; trailhead 0 lessons, 0 added."]
 
 
 def test_vault_flag_narrows_both_checks_while_a_successor_elsewhere_is_named(world):
@@ -1151,7 +1155,9 @@ def test_groups_are_separated_by_one_blank_line_and_the_report_ends_on_the_last_
     assert lines[fourth - 1] == "" and lines[fourth - 2] == ACTION
     fifth = lines.index("distill-queue — no findings.")
     assert lines[fifth - 1] == "" and lines[fifth - 2] == "missing-paths — skipped."
-    assert lines[-2] == "distill-queue — no findings."
+    sixth = lines.index(next(ln for ln in lines if ln.startswith("lesson-growth — ")))
+    assert lines[sixth - 1] == "" and lines[sixth - 2] == "distill-queue — no findings."
+    assert lines[-2] == lines[sixth]
 
 
 TIMESTAMP_SHAPES = {
@@ -1220,7 +1226,7 @@ def test_build_report_hands_every_runner_the_same_run_context(world, monkeypatch
     monkeypatch.setattr(health, "CHECKS", tuple(replace(c, run=spy) for c in health.CHECKS))
     now = datetime(2026, 7, 4, 12, 0, tzinfo=timezone.utc)
     report = health.build_report(now=now, stale_days=45)
-    assert len(seen) == 5 and all(c is report.ctx for c in seen)
+    assert len(seen) == 6 and all(c is report.ctx for c in seen)
     assert (seen[0].now, seen[0].stale_days) == (now, 45)
     assert health.build_report().ctx.now.tzinfo is not None
 
@@ -2391,7 +2397,7 @@ def test_an_unreadable_vault_skips_the_check_on_every_row_naming_it(world):
     assert group(r.stdout, DQ) == [f"{DQ} — skipped."]
 
 
-def test_a_distill_check_that_raises_is_errored_while_the_other_four_still_render(world, monkeypatch):
+def test_a_distill_check_that_raises_is_errored_while_the_other_five_still_render(world, monkeypatch):
     d = world.roots["default"]
     _put(d, "decision", "gone", status="dropped")
     _put(d, "decision", "live", related={"decision": ["gone", "missing"]})
@@ -2404,7 +2410,7 @@ def test_a_distill_check_that_raises_is_errored_while_the_other_four_still_rende
     assert r.returncode == 0, r.stderr
     for v in ("default", "trailhead", "levr"):
         assert rows(r.stdout, DQ)[v] == ("—", "—", "errored: RuntimeError")
-        for other in CHECKS[:-1]:
+        for other in (c for c in CHECKS if c != DQ):
             assert rows(r.stdout, other)[v][2] != "errored: RuntimeError"
     assert group(r.stdout, DQ) == [f"{DQ} — errored: RuntimeError."]
     assert group(r.stdout, "retired-links")[0] == "retired-links — 1 finding, oldest first"
@@ -2604,3 +2610,139 @@ def test_a_name_that_fails_the_shape_check_prints_no_command_only_the_vault_inst
     assert "`" not in line and "--status dropped" not in line
     assert "--vault" in line
     assert "\x1b" not in line
+
+
+# --- lesson-growth -------------------------------------------------------------
+
+LABEL = {"craft/dispatch-lesson": "executor"}
+
+
+def _stamp(days):
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lesson(root, name, days, **extra):
+    extra.setdefault("labels", LABEL)
+    _put(root, "lesson", name, **{"created-at": _stamp(days), **extra})
+
+
+def _growth(out):
+    return group(out, "lesson-growth")
+
+
+def test_lesson_growth_heading_totals_percentage_and_findings_oldest_first(world):
+    root = world.roots["trailhead"]
+    for i in range(181):
+        _lesson(root, f"old-{i}", 60 + i % 20)
+    for i in range(31):
+        _lesson(root, f"new-{i:02d}", 2 + i % 20)
+    _lesson(world.roots["default"], "d-new", 3)
+    for i in range(2):
+        _lesson(world.roots["default"], f"d-old-{i}", 90)
+    r = world.run("--all")
+    assert r.returncode == 0, r.stderr
+    got = rows(r.stdout, "lesson-growth")
+    assert got["trailhead"] == ("212", "31", "no")
+    assert got["default"] == ("3", "1", "no")
+    assert got["levr"] == ("0", "0", "no")
+    block = _growth(r.stdout)
+    assert block[0] == ("lesson-growth — 32 findings, oldest first (window: 30 days): "
+                        "default 3 lessons, 1 added (33%); trailhead 212 lessons, 31 added (15%); "
+                        "levr 0 lessons, 0 added")
+    body = block[1:-1]
+    assert len(body) == 32
+    assert body == sorted(body, key=lambda ln: -int(ln.rsplit("added ", 1)[1].split(" ")[0]))
+    assert re.fullmatch(r"  trailhead/lesson/new-\d\d  \d{4}-\d\d-\d\d  added \d+ days ago", body[0]), body[0]
+    assert block[-1].startswith("These are informational, not problems to fix.")
+    assert "/craft:consolidate" in block[-1]
+
+
+def test_lesson_growth_with_no_lessons_says_so_and_prints_no_action_line(world):
+    r = world.run("--vault", "default")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("0", "0", "no")
+    assert _growth(r.stdout) == ["lesson-growth — no findings (window: 30 days): default 0 lessons, 0 added."]
+
+
+def test_lesson_growth_vault_with_a_corpus_and_no_growth_reads_zero_added(world):
+    _lesson(world.roots["default"], "old", 90)
+    r = world.run("--vault", "default")
+    assert rows(r.stdout, "lesson-growth")["default"] == ("1", "0", "no")
+    assert _growth(r.stdout) == ["lesson-growth — no findings (window: 30 days): default 1 lesson, 0 added (0%)."]
+
+
+@pytest.mark.parametrize("days,window,added", [("--stale-days", "7", 0), ("--stale-days", "14", 1)])
+def test_lesson_growth_follows_the_stale_days_window(world, days, window, added):
+    _lesson(world.roots["default"], "l", 10)
+    r = world.run("--vault", "default", days, window)
+    assert rows(r.stdout, "lesson-growth")["default"][1] == str(added)
+    assert f"(window: {window} days)" in _growth(r.stdout)[0]
+
+
+def test_lesson_growth_skips_a_vault_with_an_unreadable_lesson_and_reports_the_rest(world):
+    _lesson(world.roots["default"], "ok", 1)
+    (world.roots["trailhead"] / "lesson").mkdir()
+    (world.roots["trailhead"] / "lesson" / "bad.json").write_text("{not json")
+    (world.roots["trailhead"] / "lesson" / "bad.md").write_text("x")
+    r = world.run()
+    got = rows(r.stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—",
+                                "yes: vault trailhead holds a lesson record that could not be read, "
+                                "so its lessons cannot all be counted")
+    assert _growth(r.stdout)[0].endswith("default 1 lesson, 1 added (100%); levr 0 lessons, 0 added")
+
+
+def test_lesson_growth_skips_a_vault_whose_lesson_escapes_and_reports_the_rest(world, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "n.md").write_text("x")
+    esc = world.roots["trailhead"] / "lesson"
+    esc.mkdir()
+    (esc / "esc.md").symlink_to(outside / "n.md")
+    (esc / "esc.json").write_text("{}")
+    _lesson(world.roots["default"], "ok", 1)
+    got = rows(world.run().stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["trailhead"] == ("—", "—", "yes: records lie outside its vault root and were not read")
+
+
+def test_lesson_growth_is_skipped_when_every_vault_is_skipped(world):
+    shutil.rmtree(world.roots["default"])
+    r = world.run("--vault", "default")
+    assert _growth(r.stdout) == ["lesson-growth — skipped."]
+    assert rows(r.stdout, "lesson-growth")["default"][2] == "yes: its directory does not exist"
+
+
+def test_lesson_growth_skips_a_vault_that_is_not_fully_read(world):
+    kind_dir = world.roots["levr"] / "lesson"
+    kind_dir.mkdir()
+    _lesson(world.roots["default"], "ok", 1)
+    os.chmod(kind_dir, 0)
+    try:
+        r = world.run()
+    finally:
+        os.chmod(kind_dir, 0o755)
+    got = rows(r.stdout, "lesson-growth")
+    assert got["default"] == ("1", "1", "no")
+    assert got["levr"] == ("—", "—", "yes: its directory could not be read")
+
+
+def test_lesson_growth_neutralizes_vault_names_in_its_heading(evil):
+    _lesson(evil.roots[EVIL_VAULT], "l", 1)
+    r = evil.run()
+    assert r.returncode == 0, r.stderr
+    heading = next(ln for ln in r.stdout.splitlines() if ln.startswith("lesson-growth — "))
+    assert "\x1b" not in r.stdout
+    assert "1 added (100%)" in heading
+
+
+def test_lesson_growth_result_is_plain_data_on_the_check_run(world, monkeypatch):
+    health = importlib.import_module("lore.cli.health")
+    _lesson(world.roots["trailhead"], "n", 1)
+    _lesson(world.roots["trailhead"], "o", 90)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    report = health.build_report()
+    (sec,) = [s for s in report.sections if s.check.name == "lesson-growth"]
+    assert sec.run.judged["trailhead"] == 2
+    assert [(f.vault, f.name) for f in sec.findings] == [("trailhead", "n")]
