@@ -3214,7 +3214,8 @@ def test_a_check_skipped_for_some_vaults_is_ran_with_those_vaults_in_skipped_and
     assert (summary["default"]["records"], summary["default"]["findings"]) == (None, None)
     assert summary["default"]["skipped"] == c["skipped"]["default"]
     assert summary["trailhead"]["findings"] == 1 and summary["trailhead"]["skipped"] is None
-    assert any("repository" in line for line in c["repositories"])
+    assert [r["root"] for r in _vault_repos(doc, "trailhead")["roots"]] == [
+        str((mp.tmp_path / "repos" / "alpha").resolve())]
 
 
 def test_an_errored_check_has_its_error_type_and_the_others_are_intact(world, monkeypatch):
@@ -3247,13 +3248,64 @@ def test_json_with_repo_and_no_vault_refuses_on_stderr_alone(world, tmp_path):
     assert r.stderr.startswith("lore: cannot run the health report: --repo needs --vault")
 
 
-def test_a_passed_repo_path_with_a_control_character_arrives_escaped(world, tmp_path):
+def _vault_repos(doc, vault):
+    (entry,) = [v for v in _check(doc, "missing-paths")["repositories"] if v["vault"] == vault]
+    return entry
+
+
+def test_a_passed_repo_path_with_a_control_character_arrives_escaped_in_a_structured_entry(world, tmp_path):
     r = world.run("--json", "--vault", "trailhead", "--repo", str(tmp_path / "re\x1bpo\ndir"))
     assert r.returncode == 0, r.stderr
     assert not [b for b in r.stdout.encode() if b < 0x20 and b not in b"\n "]
-    (line,) = [ln for ln in _check(json.loads(r.stdout), "missing-paths")["repositories"] if "re" in ln]
-    assert line.isprintable()
-    assert "re\\x1bpo\\ndir" in line and "(passed with --repo)" in line
+    (entry,) = _vault_repos(json.loads(r.stdout), "trailhead")["roots"]
+    assert entry["root"].isprintable() and entry["root"].endswith("re\\x1bpo\\ndir")
+    assert entry["passed"] is True
+    assert entry["unreadable_reason"] == "missing"
+    assert (entry["branch"], entry["local"], entry["fetched_at"], entry["age_days"]) == (None, None, None, None)
+
+
+def test_a_camp_bound_vault_with_repo_lists_camps_repository_unpassed_and_the_set_aside_paths(world, mp):
+    camp_repo = mp.repo("camp-one", {"tools/lore/x.py": "x\n"})
+    passed = mp.repo("passed-one", {"tools/lore/x.py": "x\n"})
+    mp.bind("g", ["trailhead"], [camp_repo])
+    doc, _ = _json(world, "--vault", "trailhead", "--repo", str(passed))
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["no_repositories_reason"] is None
+    assert entry["ignored_passed"] == [str(passed.resolve())]
+    (root,) = entry["roots"]
+    assert root["root"] == str(camp_repo.resolve())
+    assert (root["passed"], root["branch"], root["local"], root["unreadable_reason"]) == (False, "main", False, None)
+    assert (root["fetched_at"], root["age_days"]) == (None, None)
+
+
+def test_an_unbound_vault_served_by_repo_lists_the_passed_repository_as_passed_with_no_set_aside(world, mp):
+    passed = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    doc, _ = _json(world, "--vault", "trailhead", "--repo", str(passed))
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["ignored_passed"] == [] and entry["no_repositories_reason"] is None
+    (root,) = entry["roots"]
+    assert (root["root"], root["passed"], root["branch"], root["unreadable_reason"]) == (
+        str(passed.resolve()), True, "main", None)
+
+
+def test_a_repository_fetched_some_days_ago_carries_its_fetch_time_and_age(world, mp, monkeypatch):
+    repo = mp.repo("alpha", {"tools/lore/x.py": "x\n"})
+    mp.bind("g", ["trailhead"], [repo])
+    health = importlib.import_module("lore.cli.health")
+    fetched = datetime.now(timezone.utc) - timedelta(days=5, hours=2)
+    (repo / ".git" / "FETCH_HEAD").write_text("")
+    os.utime(repo / ".git" / "FETCH_HEAD", (fetched.timestamp(), fetched.timestamp()))
+    doc, _ = _json(world, "--vault", "trailhead")
+    (root,) = _vault_repos(doc, "trailhead")["roots"]
+    assert root["age_days"] == 5
+    assert datetime.fromisoformat(root["fetched_at"]) == datetime.fromtimestamp(fetched.timestamp(), timezone.utc)
+
+
+def test_a_vault_with_no_repositories_carries_its_reason_and_no_roots(world):
+    doc, _ = _json(world, "--vault", "trailhead")
+    entry = _vault_repos(doc, "trailhead")
+    assert entry["roots"] == [] and entry["ignored_passed"] == []
+    assert entry["no_repositories_reason"] == "unbound"
 
 
 def _hostile_stale(**kw):

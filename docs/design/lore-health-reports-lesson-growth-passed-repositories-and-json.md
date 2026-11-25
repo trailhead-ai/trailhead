@@ -129,6 +129,17 @@ JSON, and exits 1, exactly as the text form does.
 - A finding's `name` is `null` when the record's name is not shaped like a record id; no part of
   such a name is echoed, as in the text form. `evidence` is the same text the text form prints
   after the date. `date` is `null` where the text form prints `undated`.
+- `repositories` is empty except for a check that judges against repositories (`missing-paths`), where
+  it holds one object per selected vault: `{"vault", "no_repositories_reason", "ignored_passed",
+  "roots"}`. `no_repositories_reason` is `null` when the vault has repositories, else why it has none
+  (`unbound`, `camp-absent` or `config-unreadable`) with `roots` empty. `ignored_passed` lists the
+  `--repo` paths set aside because camp binds the vault's repositories (the text form's `--repo ignored`
+  line), empty otherwise. Each `roots` entry is `{"root", "passed", "branch", "local", "fetched_at",
+  "age_days", "unreadable_reason"}`: `passed` is true when the root came from `--repo`; `branch` is the
+  default branch read and `local` whether it is a local branch with no remote-tracking default;
+  `fetched_at` is an ISO 8601 UTC time and `age_days` whole days since it, both `null` when never
+  fetched; `unreadable_reason` is `missing`, `not-a-repository`, `no-default-branch` or `git-failed`
+  (and `branch`, `local`, `fetched_at`, `age_days` are then `null`), `null` for a readable repository.
 - A complete run of a check is `ran` with `skipped` empty. A consumer reads `skipped`, not
   `status` alone: a check that skipped some vaults is still `ran`.
 - An untrusted value echoed inside `evidence` (a wikilink target, a status, a reason, a branch)

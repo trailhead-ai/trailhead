@@ -1009,6 +1009,36 @@ def _finding_json(f, evidence: str) -> dict:
     }
 
 
+def _repository_json(item, now: datetime, passed: bool) -> dict:
+    """One repository as read: its root, whether ``--repo`` named it, and its default branch or why it could not be read."""
+    out = {"root": _safe(item.root), "passed": passed, "branch": None, "local": None,
+           "fetched_at": None, "age_days": None, "unreadable_reason": None}
+    if isinstance(item, repos_mod.Unreadable):
+        return {**out, "unreadable_reason": _safe(item.reason)}
+    out.update(branch=_cap(item.branch), local=item.local)
+    if item.fetched_at is not None:
+        out.update(fetched_at=item.fetched_at.isoformat(), age_days=max(0, (now - item.fetched_at).days))
+    return out
+
+
+def _repositories_json(sec: Section, ctx: RunContext) -> list[dict]:
+    """Per selected vault the group's repository lines are made of: its repositories, the ``--repo`` paths set aside, or why it has none."""
+    if sec.check.repository_lines is None:
+        return []
+    out = []
+    for vault, view in ctx.repos.items():
+        entry = {"vault": _safe(vault), "no_repositories_reason": None, "ignored_passed": [], "roots": []}
+        if isinstance(view, str):
+            entry["no_repositories_reason"] = _safe(view)
+        else:
+            used = isinstance(view, repos_mod.RepositoryView) and view.used
+            if isinstance(view, repos_mod.RepositoryView) and not view.used:
+                entry["ignored_passed"] = [_safe(p) for p in view.passed]
+            entry["roots"] = [_repository_json(item, ctx.now, used) for item in view]
+        out.append(entry)
+    return out
+
+
 def _check_json(sec: Section, report: HealthReport, limit: int | None) -> dict:
     name = sec.check.name
     skipped = {_safe(r.vault): _safe(r.skipped_reason)
@@ -1017,7 +1047,7 @@ def _check_json(sec: Section, report: HealthReport, limit: int | None) -> dict:
            "repositories": [], "total": None, "shown": None, "findings": [], "action": None}
     if sec.error is not None:
         return {**out, "status": "errored", "error": _safe(sec.error)}
-    out["repositories"] = [ln.strip() for ln in sec.repository_lines]
+    out["repositories"] = _repositories_json(sec, report.ctx)
     if sec.findings is None:
         return {**out, "status": "skipped"}
     shown = len(sec.findings) if limit is None else min(limit, len(sec.findings))
