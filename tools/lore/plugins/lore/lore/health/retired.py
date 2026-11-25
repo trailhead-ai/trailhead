@@ -125,6 +125,7 @@ def check_retired(
         return found
 
     accepted: dict[tuple[str, str, str, str | None], bool] = {}
+    related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]] = {}
 
     result = RetiredResult()
     skipped: list[str] = []
@@ -142,13 +143,12 @@ def check_retired(
             for ref, target, found in retired_references(record, candidates):
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
-                if any(key(record) in superseders_of(c)[1]
-                       for c in found if status(c) == "superseded"):
+                if any(key(record) in superseders_of(c)[1] for c in found):
                     continue
                 linker_duplicated = len(holders[(record.kind, record.name)]) > 1
                 shared = len({(c.kind, c.name) for c in found}) < len(found)
                 retired = tuple(
-                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted)
+                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted, related_to)
                     for c in sorted(found, key=key)
                 )
                 result.findings.append(
@@ -187,6 +187,7 @@ def _candidate(
     holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
     vault_flagged: bool,
     accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
+    related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]],
 ) -> RetiredCandidate:
     state = status(record)
     assert state is not None
@@ -205,7 +206,7 @@ def _candidate(
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
     links_back = (
         state == "superseded" and not successors and not nonconforming
-        and _relates_to(record, linker)
+        and (linker.kind, linker.name) in _related_records(record, related_to)
     )
     return RetiredCandidate(
         record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
@@ -263,8 +264,14 @@ def _supersede_accepted(
     )
 
 
-def _relates_to(record: ScannedRecord, other: ScannedRecord) -> bool:
-    return any(
-        ref.field.startswith("related ") and parsed == (other.kind, other.name)
-        for ref, parsed, _ in references.resolved_references(record)
-    )
+def _related_records(
+    record: ScannedRecord, cache: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]]
+) -> frozenset[tuple[str | None, str]]:
+    found = cache.get(key(record))
+    if found is None:
+        found = cache[key(record)] = frozenset(
+            parsed
+            for ref, parsed, _ in references.resolved_references(record)
+            if ref.field.startswith("related ") and parsed is not None
+        )
+    return found

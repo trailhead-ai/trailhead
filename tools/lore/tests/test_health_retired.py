@@ -420,3 +420,41 @@ def test_an_escaping_kind_directory_skips_that_vault_only_and_the_others_still_r
 def test_an_unattributed_escape_still_skips_the_whole_check():
     res = run([vault("a", skipped_escaping=1), vault("b")])
     assert res == retired.RetiredSkipped(("a",))
+
+
+def test_a_linker_that_supersedes_a_dropped_target_and_links_to_it_is_not_reported():
+    adr = _adr_superseding(related={"decision": ["old"]})
+    assert run([vault("a", adr, rec("a", "decision", "old", "dropped"))]).findings == []
+    adr = _adr_superseding("replaces [[decision/old]]")
+    assert run([vault("a", adr, rec("a", "decision", "old", "dropped"))]).findings == []
+
+
+def test_the_same_link_to_a_dropped_target_without_the_supersedes_entry_is_reported():
+    adr = rec("a", "adr", "new", "active", {"related": {"decision": ["old"]}})
+    f = single(run([vault("a", adr, rec("a", "decision", "old", "dropped"))]))
+    assert (f.name, f.retired[0].status) == ("new", "dropped")
+
+
+def test_the_relation_lookup_parses_each_candidate_body_once_however_many_linkers(monkeypatch):
+    marks = ("CAND-ONE", "CAND-TWO")
+    cands = [rec("a", "decision", f"old{i}", "superseded", body=f"{marks[i]} [[adr/x]]")
+             for i in range(2)]
+    linkers = [rec("a", "adr", f"l{i}", "active",
+                   {"related": {"decision": ["old0", "old1"]}}) for i in range(5)]
+    scans = [vault("a", *cands, *linkers)]
+    parsed = []
+    real = retired.references.extract_wikilink_lines
+    monkeypatch.setattr(retired.references, "extract_wikilink_lines",
+                        lambda body: parsed.append(body) or real(body))
+    res = run(scans)
+    assert len(res.findings) == 10
+    assert sorted(b for b in parsed if b.startswith("CAND")) == sorted(c.body for c in cands)
+    assert all(c.links_back is False for f in res.findings for c in f.retired)
+
+
+def test_the_relation_lookup_is_per_candidate_not_shared_between_candidates(monkeypatch):
+    linker = rec("a", "adr", "src", "active", {"related": {"decision": ["a1", "a2"]}})
+    a1 = rec("a", "decision", "a1", "superseded", {"related": {"adr": ["src"]}})
+    a2 = rec("a", "decision", "a2", "superseded", {"related": {"adr": ["other"]}})
+    res = run([vault("a", linker, a1, a2)])
+    assert {c.name: c.links_back for f in res.findings for c in f.retired} == {"a1": True, "a2": False}

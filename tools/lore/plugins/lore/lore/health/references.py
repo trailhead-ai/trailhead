@@ -10,6 +10,7 @@ are not strings); ``parent`` has none.
 from __future__ import annotations
 
 import re
+from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -52,10 +53,15 @@ def extract_wikilink_lines(body: str) -> list[tuple[str, int]]:
     without dropping a newline, so the count is unaffected by it.
     """
     prose = _strip_inline_code(_strip_block_code(body))
+    newlines = _newline_offsets(prose)
     return [
-        (re.split(r"[|#]", m.group(1), maxsplit=1)[0], prose.count("\n", 0, m.start()) + 1)
+        (re.split(r"[|#]", m.group(1), maxsplit=1)[0], bisect_left(newlines, m.start()) + 1)
         for m in _WIKILINK_RE.finditer(prose)
     ]
+
+
+def _newline_offsets(text: str) -> list[int]:
+    return [m.start() for m in re.finditer("\n", text)]
 
 
 def extract_wikilinks(body: str) -> list[str]:
