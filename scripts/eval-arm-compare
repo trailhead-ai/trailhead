@@ -98,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     for scenario in scenarios:
         parts, problems, errs = [], [], []
         counts: dict[str, int] = {}
+        totals: dict[str, int] = {}
         for arm in ARMS:
             runs = data[arm].get(scenario)
             if runs is None:
@@ -106,10 +107,15 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             passed, graded, errors = tally(runs)
             counts[arm] = passed
+            totals[arm] = graded
             parts.append(f"{arm}={passed}/{graded}")
             errs += [f"{arm}: {e}" for e in errors]
             if graded < MIN_GRADED:
                 problems.append(f"arm {arm} is under-sampled for scenario {scenario} ({graded} graded runs)")
+        if not problems and len(set(totals.values())) > 1:
+            problems.append(
+                f"scenario {scenario}: arms graded different numbers of runs ({', '.join(f'{a}={t}' for a, t in totals.items())})"
+            )
         if not problems and counts["slimmed"] < counts["frozen"]:
             problems.append(f"scenario {scenario}: slimmed passes fewer runs than frozen")
         if problems:

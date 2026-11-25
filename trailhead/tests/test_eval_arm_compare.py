@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 _SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "eval-arm-compare"
 
 
@@ -173,3 +175,15 @@ def test_skipped_paid_graders_run_is_not_a_pass_and_is_listed(tmp_path):
     assert r.returncode == 0, r.stdout + r.stderr
     assert "slimmed=3/3" in r.stdout
     assert "skippedPaidGraders" in r.stdout
+
+
+@pytest.mark.parametrize("s, f, n", [
+    (_run(3, total=4), _run(3), _run(0)),
+    (_run(3), _run(3, total=4), _run(0)),
+    (_run(3), _run(2), _run(0, total=4)),
+])
+def test_arms_with_different_graded_totals_fail_naming_the_scenario(s, f, n, tmp_path):
+    r = _one(s, f, n, tmp_path=tmp_path)
+    assert r.returncode == 1, r.stdout + r.stderr
+    assert "exporter-case" in r.stderr and "graded" in r.stderr
+    assert "verdict=fail" in r.stdout
