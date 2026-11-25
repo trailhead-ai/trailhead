@@ -250,7 +250,8 @@ class _GitReader:
 
     Modes come from ``tree`` (``{repo path: mode}``), so a path the tree lacks is ``None`` and anything but a
     plain blob raises ``NotRegularFile``. Contents come from one lazily started ``git cat-file --batch``;
-    a process that dies, answers anything but a whole blob or stops short raises, never an empty text."""
+    a process that dies, answers anything but a whole blob or stops short raises, never an empty text. A whole
+    blob that is not UTF-8 raises ``UnicodeDecodeError`` unchanged, which ``loads`` reads as a leaf."""
 
     def __init__(self, repo: Path, rev: str, tree: dict[str, str], root: str, git: Git = GIT,
                  charged: set[str] | None = None):
@@ -273,6 +274,8 @@ class _GitReader:
             self._charged.add(full)
         try:
             return self._fetch(full)
+        except UnicodeDecodeError:
+            raise
         except (GitError, OSError, ValueError):
             raise LoadError(f"{_q(path, 1)} could not be read at {label}") from None
 

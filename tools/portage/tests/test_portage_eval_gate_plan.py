@@ -2543,3 +2543,58 @@ class TestSelectionFollowsLoadsAndUndeclaredMentions:
         assert not plan.get("mapping_invalid")
         assert _entry_of(plan, "decl")["derived"] == ["skills/entry.md", "skills/b-declared.md",
                                                       "rules/core.md", "rules/rule-a.md"]
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n\xff\xfe\x00bytes"
+
+
+class _ShortBlob(select.Git):
+    """A git whose ``cat-file --batch`` hands back one byte too few for any object of ``size`` bytes."""
+
+    class _Stdout:
+        def __init__(self, real, size: int):
+            self._real, self._size = real, size
+
+        def read(self, n: int = -1):
+            data = self._real.read(n)
+            return data[:-1] if n == self._size else data
+
+        def __getattr__(self, name):
+            return getattr(self._real, name)
+
+    def __init__(self, size: int):
+        self.size = size
+
+    def open_cat_file(self, repo):
+        proc = super().open_cat_file(repo)
+        proc.stdout = self._Stdout(proc.stdout, self.size)
+        return proc
+
+
+class TestCommittedBinaryMention:
+    def _binary_corpus(self, repo, content: bytes = PNG_BYTES) -> None:
+        _declared_corpus(repo, cases={"decl": {"entry": "skills/entry.md"}},
+                         files={"skills/entry.md": "# Entry\n\nThe layout is in `img.png`.\n"})
+        (repo / "p/skills/img.png").write_bytes(content)
+        _commit(repo)
+        _branch(repo)
+        (repo / "p/skills/img.png").write_bytes(content + b"changed")
+        _commit(repo)
+
+    def test_a_committed_non_utf8_file_the_entry_mentions_is_a_leaf_that_selects_the_case(self, repo, capsys):
+        self._binary_corpus(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["status"] == "cases-selected"
+        assert _names(plan) == ["decl"]
+        assert _entry_of(plan, "decl")["derived"] == ["skills/entry.md", "skills/img.png"]
+
+    def test_a_committed_utf8_file_with_the_same_name_is_parsed_not_a_leaf_fault(self, repo, capsys):
+        self._binary_corpus(repo, b"plain text\n")
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert _entry_of(plan, "decl")["derived"] == ["skills/entry.md", "skills/img.png"]
+
+    def test_a_binary_object_that_cat_file_returns_short_is_still_a_fault_naming_head(self, repo):
+        self._binary_corpus(repo)
+        _, plan = select.plan(repo, "base", git=_ShortBlob(len(PNG_BYTES + b"changed")))
+        assert plan["status"] == "mapping-invalid"
+        assert plan["mapping_invalid"]["fault"] == "case 'decl': 'skills/img.png' could not be read at HEAD"
