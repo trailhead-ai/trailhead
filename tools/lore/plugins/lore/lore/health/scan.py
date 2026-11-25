@@ -104,7 +104,7 @@ class _IndexerProbe:
         for statement in index_mod._DDL_STATEMENTS:
             self._conn.execute(statement)
 
-    def holds(self, kind: str, name: str, sidecar: dict, body: str = "") -> bool:
+    def holds(self, kind: str, name: str, sidecar: dict, body: str) -> bool:
         """Whether the indexer would keep the record.
 
         The indexer's skip guard leaves whatever row the projection had inserted
@@ -257,10 +257,7 @@ def _read_record(result, probe, kind, name, sidecar_path, body_path) -> ScannedR
         result.sidecar_only.append(SidecarOnlyRecord(result.vault, kind, name, sidecar))
         unreadable(REASON_OVERSIZE)
         return None
-    except ValueError:
-        unreadable(REASON_BODY_UNREADABLE)
-        return None
-    except OSError:
+    except (ValueError, OSError):
         unreadable(REASON_BODY_UNREADABLE)
         return None
     if probe is not None and probe.holds(kind, name, sidecar, ""):

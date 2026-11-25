@@ -1606,7 +1606,7 @@ def _line_for(finding_name, candidate_name, *, links_back=True):
                                     links_back=links_back, supersede_allowed=True)
     f = retired.Finding("default", "adr", finding_name, "2026-03-01", "related decision",
                         "decision/old", (cand,))
-    return health._retired_line(f)
+    return health._line(f, health._retired_evidence(f))
 
 
 @pytest.mark.parametrize("linker,target", [("Bad Name", "old"), ("src", "Bad Name"),
@@ -2608,7 +2608,7 @@ def test_a_name_that_fails_the_shape_check_prints_no_command_only_the_vault_inst
     stale_mod = importlib.import_module("lore.health.stale")
     f = stale_mod.Finding(vault_name, "task", task_name, "2026-09-01T00:00:00+00:00", "open", 60, False,
                           duplicated_in=("default",))
-    line = health._stale_line(f)
+    line = health._line(f, health._stale_evidence(f))
     assert "`" not in line and "--status dropped" not in line
     assert "--vault" in line
     assert "\x1b" not in line

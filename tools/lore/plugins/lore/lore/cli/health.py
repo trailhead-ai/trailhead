@@ -381,13 +381,20 @@ def _check_run(result, skipped: type, completed: type) -> CheckRun:
     return CheckRun(list(result.findings), dict(result.judged))
 
 
+def _per_vault_run(findings, judged: Mapping[str, int], skipped: dict[str, str]) -> CheckRun:
+    """The run of a check that skips some vaults alone and judges the rest.
+
+    ``findings`` is ``None`` only when vaults were skipped and none was judged.
+    """
+    return CheckRun(None if skipped and not judged else list(findings), dict(judged), skipped=skipped)
+
+
 def _escape_aware_run(result, skipped: type, completed: type) -> CheckRun:
     """Like :func:`_check_run` for a check that skips a vault holding an escape alone."""
     run = _check_run(result, skipped, completed)
-    if run.findings is None or not result.skipped:
+    if run.findings is None:
         return run
-    return CheckRun(None if not run.judged else run.findings, run.judged,
-                    skipped={v: ESCAPE_SKIP_REASON for v in result.skipped})
+    return _per_vault_run(run.findings, run.judged, {v: ESCAPE_SKIP_REASON for v in result.skipped})
 
 
 # Each runner classifies through the module that produced the result, looked up
@@ -442,8 +449,7 @@ def _run_paths(scans, selected, ctx) -> CheckRun:
     by_name = {s.vault: s for s in scans}
     skipped = {v: _paths_skip_reason(by_name[v], by_name, skip, ctx.repos.get(v))
                for v, skip in result.skipped.items()}
-    return CheckRun(None if skipped and not result.judged else list(result.findings),
-                    dict(result.judged), skipped=skipped)
+    return _per_vault_run(result.findings, result.judged, skipped)
 
 
 DISTILL_SKIP_TAIL = "so no spec's ADR or tasks can be confirmed"
@@ -492,8 +498,7 @@ def _run_lessons(scans, selected, ctx) -> CheckRun:
     result = lessons_mod.check_lessons(scans, selected, now=ctx.now, window_days=ctx.stale_days)
     by_name = {s.vault: s for s in scans}
     skipped = {v: _lessons_skip_reason(by_name[v], by_name, code) for v, code in result.skipped.items()}
-    return CheckRun(None if skipped and not result.judged else list(result.findings),
-                    dict(result.judged), skipped=skipped)
+    return _per_vault_run(result.findings, result.judged, skipped)
 
 
 def _lesson_evidence(f: lessons_mod.Finding) -> str:
@@ -755,10 +760,6 @@ def _retired_evidence(f: retired_mod.Finding) -> str:
     return f"{_cap(f.field)} → {_cap(f.target)}: {what}"
 
 
-def _retired_line(f: retired_mod.Finding) -> str:
-    return _line(f, _retired_evidence(f))
-
-
 MAX_NAMED_SPECS = 3
 STALE_ACTION = (
     "Act on these: if the work already landed, mark the task done; if it still applies, "
@@ -817,10 +818,6 @@ def _stale_evidence(f: stale_mod.Finding) -> str:
     return f"{_cap(f.status)}  {'; '.join(reasons)}"
 
 
-def _stale_line(f: stale_mod.Finding) -> str:
-    return _line(f, _stale_evidence(f))
-
-
 def _stale_note(sec: Section, ctx: RunContext) -> str:
     window = f" (window: {ctx.stale_days} days)"
     counts = Counter(
@@ -836,6 +833,11 @@ def _missing_evidence(f: paths_mod.MissingPath) -> str:
     return f"{_safe(f.location)} {f.number}: `{_cap(f.path)}` is on no repository's default branch"
 
 
+def _age_days(item: repos_mod.Repository, now: datetime) -> int:
+    """Whole days since *item* was last fetched, never negative; *item* has a fetch time."""
+    return max(0, (now - item.fetched_at).days)
+
+
 def _repository_line(vault: str, item, now: datetime, passed: bool = False) -> str:
     head = f"  {_safe(vault)}: repository {_safe(item.root)}{' (passed with --repo)' if passed else ''}: "
     if isinstance(item, repos_mod.Unreadable):
@@ -844,9 +846,8 @@ def _repository_line(vault: str, item, now: datetime, passed: bool = False) -> s
     where = f"local {branch} (no remote-tracking default branch)" if item.local else f"origin/{branch}"
     if item.fetched_at is None:
         return f"{head}{where}, no fetch recorded"
-    days = max(0, (now - item.fetched_at).days)
     return (f"{head}{where}, last fetched {item.fetched_at:%Y-%m-%d %H:%M} UTC "
-            f"({_plural(days, 'day', 'days')} ago)")
+            f"({_plural(_age_days(item, now), 'day', 'days')} ago)")
 
 
 def _repository_lines(sec: Section, ctx: RunContext) -> list[str]:
@@ -1017,7 +1018,7 @@ def _repository_json(item, now: datetime, passed: bool) -> dict:
         return {**out, "unreadable_reason": _safe(item.reason)}
     out.update(branch=_cap(item.branch), local=item.local)
     if item.fetched_at is not None:
-        out.update(fetched_at=item.fetched_at.isoformat(), age_days=max(0, (now - item.fetched_at).days))
+        out.update(fetched_at=item.fetched_at.isoformat(), age_days=_age_days(item, now))
     return out
 
 
