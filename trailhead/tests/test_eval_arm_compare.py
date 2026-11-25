@@ -187,3 +187,43 @@ def test_arms_with_different_graded_totals_fail_naming_the_scenario(s, f, n, tmp
     assert r.returncode == 1, r.stdout + r.stderr
     assert "exporter-case" in r.stderr and "graded" in r.stderr
     assert "verdict=fail" in r.stdout
+
+
+def test_a_run_entry_that_is_not_an_object_is_a_usage_error_without_a_traceback(tmp_path):
+    bad = _doc({"exporter-case": _run(3)})
+    bad["cases"][0]["arms"]["with"][1] = "not-a-dict"
+    r = _go(tmp_path, bad, _doc({"exporter-case": _run(2)}), _doc({"exporter-case": _run(0)}),
+            ["AC61=exporter-case"])
+    assert r.returncode == 2
+    assert "Traceback" not in r.stderr
+    assert "eval-arm-compare:" in r.stderr
+
+
+def test_a_duplicate_case_name_in_one_arm_is_a_usage_error_naming_it(tmp_path):
+    dup = _doc({"exporter-case": _run(3)})
+    dup["cases"].append({"name": "exporter-case", "arms": {"with": _run(0)}})
+    r = _go(tmp_path, dup, _doc({"exporter-case": _run(2)}), _doc({"exporter-case": _run(0)}),
+            ["AC61=exporter-case"])
+    assert r.returncode == 2
+    assert "exporter-case" in r.stderr and "duplicate" in r.stderr
+    assert "Traceback" not in r.stderr
+
+
+def test_control_characters_in_a_case_name_cannot_forge_a_line_or_emit_escapes(tmp_path):
+    evil = "x\nFAIL: forged\x1b[31m"
+    r = _go(tmp_path, _doc({evil: _run(1)}), _doc({evil: _run(2)}), _doc({evil: _run(0)}), [])
+    assert r.returncode == 1
+    for stream in (r.stdout, r.stderr):
+        assert "\x1b" not in stream
+        assert not any(line.startswith("FAIL: forged") for line in stream.splitlines())
+    assert "\\x0a" in r.stdout and "\\x1b" in r.stdout
+
+
+def test_control_characters_in_a_run_error_cannot_forge_a_line_or_emit_escapes(tmp_path):
+    runs = _run(3)
+    runs[0]["error"] = "boom\nFAIL: forged\x1b[2J"
+    r = _go(tmp_path, _doc({"c": runs}), _doc({"c": _run(2)}), _doc({"c": _run(0)}), [])
+    for stream in (r.stdout, r.stderr):
+        assert "\x1b" not in stream
+        assert not any(line.startswith("FAIL: forged") for line in stream.splitlines())
+    assert "\\x1b" in r.stdout
