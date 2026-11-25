@@ -2977,3 +2977,151 @@ def test_the_report_keeps_which_paths_were_passed_and_whether_they_were_used_on_
     assert (ignored.passed, ignored.used) == ((a.resolve(),), False)
     assert [r.root for r in ignored] == [b.resolve()]
     assert health.build_report("trailhead").ctx.repos["trailhead"].__class__ is tuple
+
+
+# --- characterization: every check's text lines and distill-queue's lines -------
+
+CHAR_NOW = datetime(2026, 11, 25, 12, 0, tzinfo=timezone.utc)
+
+
+def _characterization_world(world, mp):
+    """One vault set holding every line shape each check and ``lore distill-queue`` prints."""
+    d, t, lv = world.roots["default"], world.roots["trailhead"], world.roots["levr"]
+    stamp = lambda days: (CHAR_NOW - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    mp.all_to(mp.repo("alpha", {"tools/lore/x.py": "x\n"}))
+    # dangling-links: unresolved related edge, a bad wikilink and a bad related entry
+    _put(d, "decision", "uses-gone", updated="2026-03-02T00:00:00Z", related={"decision": ["gone-one"]})
+    _put(d, "lesson", "wl", updated="2026-03-03T00:00:00Z", body="see [[nowhere-wiki]]\n[[Bad Name]]\n")
+    _put(t, "lesson", "bad-rel", updated="2026-03-04T00:00:00Z", related={"spec": ["bad name!"]})
+    _put(lv, "lesson", "Bad Name", updated="2026-03-05T00:00:00Z", related={"lesson": ["gone-two"]})
+    # retired-links: dropped, superseded with a successor, superseded with no successor, and linking back
+    _put(d, "decision", "dropped-d", status="dropped")
+    _put(d, "decision", "uses-dropped", updated="2026-03-06T00:00:00Z", related={"decision": ["dropped-d"]})
+    _put(d, "decision", "sup-old", status="superseded")
+    _put(d, "adr", "sup-new", supersedes=["decision/sup-old"])
+    _put(d, "decision", "uses-sup", updated="2026-03-07T00:00:00Z", related={"decision": ["sup-old"]})
+    _put(t, "decision", "lone-old", status="superseded", related={"adr": ["src"]})
+    _put(t, "adr", "src", updated="2026-03-08T00:00:00Z", related={"decision": ["lone-old"]})
+    # stale-tasks: aged, undated, tied to a retired spec, and a name shared by two vaults
+    _put(d, "task", "aged", status="open", updated=stamp(60))
+    _put(t, "task", "undated", status="open", updated=None)
+    _put(d, "spec", "dead-spec", status="dropped")
+    _put(d, "task", "tied", status="open", updated=stamp(2), related={"spec": ["dead-spec"]})
+    for v in (d, t):
+        _put(v, "task", "shared", status="open", updated=stamp(61))
+    # missing-paths: a body line and a related file
+    _put(d, "decision", "names-gone", updated="2026-03-09T00:00:00Z", body="see `tools/lore/gone.py`\n")
+    _put(t, "adr", "names-file", updated="2026-03-10T00:00:00Z",
+         **{"related-files-or-folders": ["tools/lore/x.py", "tools/lore/gone2.py"]})
+    # distill-queue: one waiting spec per reason shape, and a deferred one
+    _put(d, "spec", "waits", status="ready", updated="2026-02-01T00:00:00Z", labels={"craft/slice-loop": "complete"})
+    _put(d, "task", "t-waits", status="open", related={"spec": ["waits"]})
+    _put(t, "adr", "drafty", status="draft")
+    _put(t, "spec", "adr-draft", status="planned", updated="2026-02-02T00:00:00Z", related={"adr": ["drafty"]})
+    _put(t, "task", "t-adr-draft", status="open", related={"spec": ["adr-draft"]})
+    _put(t, "spec", "alone", status="complete", updated="2026-02-03T00:00:00Z")
+    # lesson-growth: one lesson inside the window and one outside, per vault
+    for v, n in ((d, "d"), (t, "t")):
+        _put(v, "lesson", f"{n}-new", labels=LABEL_CHAR, **{"created-at": stamp(5)})
+        _put(v, "lesson", f"{n}-old", labels=LABEL_CHAR, **{"created-at": stamp(90)})
+
+
+LABEL_CHAR = {"craft/dispatch-lesson": "executor"}
+
+
+def _characterized(world, mp, monkeypatch, tmp_path):
+    health = importlib.import_module("lore.cli.health")
+    _characterization_world(world, mp)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(world.cfg))
+    monkeypatch.setenv("XDG_STATE_HOME", str(world.state))
+    text = "\n".join(health.render(health.build_report(now=CHAR_NOW), None, None))
+    queue = _queue_cli(world)
+    assert queue.returncode == 0, queue.stderr
+    scrub = lambda s: s.replace(str(tmp_path.resolve()), "<tmp>")
+    return scrub(text).splitlines(), scrub(queue.stdout).splitlines()
+
+
+CHAR_HEALTH = """\
+lore health — 3 vaults
+
+vault      check           records  findings  skipped
+default    dangling-links  16       3         no
+default    retired-links   9        2         no
+default    stale-tasks     4        4         no
+default    missing-paths   5        1         no
+default    distill-queue   2        1         no
+default    lesson-growth   2        1         no
+trailhead  dangling-links  12       1         no
+trailhead  retired-links   5        1         no
+trailhead  stale-tasks     3        3         no
+trailhead  missing-paths   2        1         no
+trailhead  distill-queue   2        1         no
+trailhead  lesson-growth   2        1         no
+levr       dangling-links  1        1         no
+levr       retired-links   0        0         no
+levr       stale-tasks     0        0         no
+levr       missing-paths   0        0         no
+levr       distill-queue   0        0         no
+levr       lesson-growth   0        0         no
+
+Could not confirm the count against the index: no index found. 28 records the index would hold (sessions included).
+
+dangling-links — 5 findings, oldest first
+  default/decision/uses-gone  2026-03-02  related decision → decision/gone-one: not found in any vault
+  default/lesson/wl  2026-03-03  wikilink → nowhere-wiki: not found in any vault
+  default/lesson/wl  2026-03-03  wikilink → malformed reference on body line 2: not shaped like a record id
+  trailhead/lesson/bad-rel  2026-03-04  related spec → malformed reference at entry 1: not shaped like a record id
+  levr/lesson/ (a record whose name is not a valid record id)  2026-03-05  related lesson → lesson/gone-two: not found in any vault
+Act on these with /lore:correct: point the reference at the record that replaced its target, or remove it.
+
+retired-links — 3 findings, oldest first
+  default/decision/uses-dropped  2026-03-06  related decision → decision/dropped-d: dropped
+  default/decision/uses-sup  2026-03-07  related decision → decision/sup-old: superseded by adr/sup-new
+  trailhead/adr/src  2026-03-08  related decision → decision/lone-old: superseded, and no record supersedes it; it links back to this record, so if this record replaced it, record that: `lore record supersede decision/lone-old --by adr/src`
+Act on these with /lore:correct: point a superseded link at a named live successor; for a superseded record that links back, run the lore record supersede command shown; remove a link to a dropped record, or to one with no live successor, unless it still applies.
+
+stale-tasks — 7 findings, oldest first (window: 30 days): 5 stale on age, 1 tied to a retired spec, 1 undated
+  trailhead/task/undated  undated  open  no readable last-updated time
+  default/task/t-waits  2026-03-01  open  last updated 269 days ago
+  trailhead/task/t-adr-draft  2026-03-01  open  last updated 269 days ago
+  default/task/shared  2026-09-25  open  last updated 61 days ago; a task of this name is also in vault trailhead; to drop this one, run `lore record update task/shared --status dropped --diff --vault default`
+  trailhead/task/shared  2026-09-25  open  last updated 61 days ago; a task of this name is also in vault default; to drop this one, run `lore record update task/shared --status dropped --diff --vault trailhead`
+  default/task/aged  2026-09-26  open  last updated 60 days ago
+  default/task/tied  2026-11-23  open  linked to spec/dead-spec, which is dropped
+Act on these: if the work already landed, mark the task done; if it still applies, resume it with /craft:execute; if it was abandoned, drop it with a note saying why (lore record update task/<name> --status dropped --diff). The id is task/<name>, without the vault prefix.
+
+missing-paths — 2 findings, oldest first
+  default: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  trailhead: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  levr: repository <tmp>/repos/alpha: origin/main, no fetch recorded
+  default/decision/names-gone  2026-03-09  body line 1: `tools/lore/gone.py` is on no repository's default branch
+  trailhead/adr/names-file  2026-03-10  related file 2: `tools/lore/gone2.py` is on no repository's default branch
+Act on these with /lore:correct: point the record at where the code now lives, or, if the feature it describes was removed, drop or supersede the record. If a repository line above is old, fetch it first; a path added on a branch not yet merged clears once it merges.
+
+distill-queue — 2 findings, oldest first (1 deferred: no linked task; list them with lore distill-queue and distill each with /craft:distill spec/<name>)
+  default/spec/waits  2026-02-01  ready  slice loop complete, not yet distilled
+  trailhead/spec/adr-draft  2026-02-02  planned  planned, not yet distilled; its ADR is still draft
+Act on these with /craft:distill: a sweep takes every waiting spec, including any not shown; /craft:distill spec/<name> takes one. The id is spec/<name>, without the vault prefix.
+
+lesson-growth — 2 findings, oldest first (window: 30 days): default 2 lessons, 1 added (50%); trailhead 2 lessons, 1 added (50%); levr 0 lessons, 0 added
+  default/lesson/d-new  2026-11-20  added 5 days ago
+  trailhead/lesson/t-new  2026-11-20  added 5 days ago
+These are informational, not problems to fix. If lessons pile up faster than they are folded, run /craft:consolidate: it merges lessons that prevent the same failure.
+"""
+
+CHAR_QUEUE = """\
+lore distill-queue — 2 waiting, 1 deferred
+
+waiting:
+  default/spec/waits  2026-02-01  ready  slice loop complete, not yet distilled
+  trailhead/spec/adr-draft  2026-02-02  planned  planned, not yet distilled; its ADR is still draft
+
+deferred, no linked task (distill each by target):
+  trailhead/spec/alone  2026-02-03  complete  complete, never distilled
+"""
+
+
+def test_characterization_pins_every_check_line_and_the_distill_queue_lines(world, mp, monkeypatch, tmp_path):
+    health_lines, queue_lines = _characterized(world, mp, monkeypatch, tmp_path)
+    assert health_lines == CHAR_HEALTH.splitlines()
+    assert queue_lines == CHAR_QUEUE.splitlines()
