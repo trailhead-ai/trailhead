@@ -43,10 +43,11 @@ which kind of test to write or when to write it: that is what the rules are ther
 
 ## Graders
 
-- AC61, one `llm` grader per case with `target: files`, over the test files the run created: it passes a file
-  where a test runs the subject and asserts on what came back, and fails one whose only assertions are registry
-  membership, that an attribute exists, or a constant's value. A `file_exists` grader requires a new file under
-  `tests/` (`llm` and `file_exists` see only files created in the run, so the prompt asks for a new file).
+- AC61, one `llm` grader per case, shown the contents of the one test file the prompt names (`focus` with
+  `source: file` and that path; `focus: files` would list only paths, not contents). It passes a file where a
+  test runs the subject and checks what came back, and fails a missing or empty file or one whose only
+  assertions are registry membership, that an attribute exists, or a constant's value. A `file_exists` grader
+  checks that same path.
 - AC62, three `regex` graders over `run-tests.log`, which the wrapper creates on its first run: a failing run
   logged while the implementation was untouched, a passing run logged after it changed, and the first before the
   second. A run that implements first never logs a failing untouched run.

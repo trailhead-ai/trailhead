@@ -446,3 +446,44 @@ def test_the_recorded_fingerprint_matches_the_bar():
     done = subprocess.run(
         ["git", "hash-object", "--stdin"], input=ab.bar_text(), capture_output=True, text=True, timeout=60)
     assert done.stdout.strip() == recorded
+
+
+# --- what the AC61 graders can see: the contents of the one file the prompt names ----------------
+
+
+def _llm_sees(grader_path, cwd):
+    """What an `llm` grader is shown: `focus: {source: file, path}` reads that file's contents; any other
+    focus (such as `files`, which lists created paths without contents) shows no file contents."""
+    g = ab.shared._front_matter(grader_path)
+    assert g["type"] == "llm", g
+    if g.get("focus") != "" or g.get("source") != "file":
+        return None
+    target = cwd / g["path"]
+    return target.read_text() if target.exists() else None
+
+
+@pytest.mark.parametrize("case", AC61)
+@pytest.mark.parametrize("which", ["good", "bad"])
+def test_the_llm_grader_is_shown_the_test_file_the_prompt_names(case, which, tmp_path):
+    plugin, cwd = _scaffolded(case, tmp_path)
+    copy = plugin / "evals" / EXP.name / case
+    rel, text = PLANTED[case][which]
+    judges = [p for p in (copy / "graders").glob("*.md") if ab.shared._front_matter(p)["type"] == "llm"]
+    assert len(judges) == 1
+    assert _llm_sees(judges[0], cwd) is None
+    assert f"`{rel}`" in (copy / "prompt.md").read_text()
+    (cwd / rel).write_text(text)
+    assert _llm_sees(judges[0], cwd) == text
+
+
+@pytest.mark.parametrize("case", AC61)
+def test_the_file_exists_grader_checks_the_path_the_prompt_names(case, tmp_path):
+    plugin, cwd = _scaffolded(case, tmp_path)
+    graders = plugin / "evals" / EXP.name / case / "graders"
+    exists = [ab.shared._front_matter(p) for p in graders.glob("*.md")]
+    exists = [g for g in exists if g["type"] == "file_exists"]
+    assert len(exists) == 1
+    rel, text = PLANTED[case]["good"]
+    assert not list(cwd.glob(exists[0]["path"]))
+    (cwd / rel).write_text(text)
+    assert [p.relative_to(cwd).as_posix() for p in cwd.glob(exists[0]["path"])] == [rel]

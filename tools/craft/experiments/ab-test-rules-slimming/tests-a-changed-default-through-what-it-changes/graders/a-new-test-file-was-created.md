@@ -1,4 +1,4 @@
 ---
 type: file_exists
-path: tests/*.py
+path: tests/test_retry_limit.py
 ---
