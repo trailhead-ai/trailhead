@@ -959,18 +959,21 @@ stop with its fixed reason, naming the entry by id, before any further drop of t
 
 The statement opens with one sentence beginning "You will be able to …", saying what the operator
 can do once the slice is built — for instance, "You will be able to export your invoices as a
-spreadsheet." On the enabler path, it says what the next slice will let the operator do once this
-enabler lands. A second sentence follows, beginning "Try it …": one concrete way to try the result
-once it is built, worded in the future tense — for instance, "Try it: open the invoice list, choose
-export, and open the file it saves." On the enabler path it says there is nothing to try until the
-next slice lands. Right after that sentence the statement names each urgent entry step 7's tier
-found, by id with its `where` path beside it, as `spec/<spec-name>#F<n>` and the path, and says in
-this skill's own words, never copied from the entry, which kind qualified it and on what evidence:
-the security marker the listing printed; or the ledger slice and the broken behaviour at a
-`path:line`; or the criterion it blocks, by its own words with its number after it. A judged kind is
-marked as a call the operator may want to reverse. When no entry was urgent, an attended statement
-says nothing here and an unattended one says `urgent tier: none`. The coverage calls, what is left
-of the spec, the visual-surface call and the value claim come after those two sentences.
+spreadsheet." That holds wherever the statement is made, including in a closing message that first
+reports what the pass did before choosing, such as a close, and in a run that stops once the slice
+is stated: the statement itself still opens with that sentence. On the enabler path, it says what
+the next slice will let the operator do once this enabler lands. A second sentence follows,
+beginning "Try it …": one concrete way to try the result once it is built, worded in the future
+tense — for instance, "Try it: open the invoice list, choose export, and open the file it saves." On
+the enabler path it says there is nothing to try until the next slice lands. Right after that
+sentence the statement names each urgent entry step 7's tier found, by id with its `where` path
+beside it, as `spec/<spec-name>#F<n>` and the path, and says in this skill's own words, never copied
+from the entry, which kind qualified it and on what evidence: the security marker the listing
+printed; or the ledger slice and the broken behaviour at a `path:line`; or the criterion it blocks,
+by its own words with its number after it. A judged kind is marked as a call the operator may want
+to reverse. When no entry was urgent, an attended statement says nothing here and an unattended one
+says `urgent tier: none`. The coverage calls, what is left of the spec, the visual-surface call and
+the value claim come after those two sentences.
 
 **Before the parent task record is written and before any planning is invoked**, state the chosen
 slice and its value claim — or, on the enabler path, its written justification — and its
