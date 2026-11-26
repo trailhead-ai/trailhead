@@ -20,13 +20,13 @@ Under one lock every named list is read and checked before anything is written. 
 stands as `was` says (another session changed it), the whole change is refused with exit 2, no list is
 touched, and the result carries `"stale": [<vault>, ...]` naming each vault that moved so the caller can
 reload and retry. A `now` that leaves out a current entry, repeats one or adds one that is not in the
-list is refused the same way, without `stale`. Entry statuses are `moved` and `in-place`; `live_count`
+list is refused the same way, without `stale`. Entry statuses are `moved` and `in-place`; `entry_count`
 holds the length of each named list. A reorder keeps each entry's workspace.
 
 vault-order stores the given vaults as the leading part of the vault order, refusing a vault that is
 not configured and a vault named twice. Its result lists each vault with status `stored` and carries
 `"order": [<vault>, ...]`, the effective order (the stored order, then the other vaults that have a
-list, alphabetically; `docket.store.resolve_order`). `live_count` is empty. After the second sync the
+list, alphabetically; `docket.store.resolve_order`). `entry_count` is empty. After the second sync the
 stored order is re-read; one the remote replaced is `lost-to-remote` (exit 4) and `order` shows what
 stands.
 
@@ -43,13 +43,14 @@ Result document:
      "command": "add",
      "message": "<one sentence>",
      "entries": [{"ref": "<vault>/<kind>/<slug>", "status": ...[, "workspace": "GROUP/SLUG"]}],
-     "live_count": {"<vault>": <entries in that vault's list>},
+     "entry_count": {"<vault>": <entries in that vault's list>},
      ["sync_warning": "<why a sync failed>",]
      ["lists": {"<vault>": [{"kind", "slug"[, "workspace": {"group", "slug"}]}]}]}    (lost-to-remote only)
 
 Entry statuses: added, already-present, removed, not-found, moved, already-at-top, attached,
-already-attached, detached, not-attached, refused. `live_count` counts the entries in each touched
-vault's list after the change (as the list stands now, for lost-to-remote).
+already-attached, detached, not-attached, refused. `entry_count` counts every entry (finished or not) in each touched
+vault's list after the change (as the list stands now, for lost-to-remote); whether an entry is live is known only to
+the bare `docket` report (`live_count`, `over_limit`).
 
 Commands are built by `make_commands(runner)`; the runner is how lore and git are reached, so tests
 hand in a fake and the shipped table uses the real one.
@@ -302,7 +303,7 @@ def _refs_of(p: argparse.Namespace) -> list[Ref]:
     return refs + ([anchor] if anchor else [])
 
 
-def _live_count(lists: Lists, touched: Sequence[str]) -> dict[str, int]:
+def _entry_count(lists: Lists, touched: Sequence[str]) -> dict[str, int]:
     return {v: len(lists[v].entries) for v in touched}
 
 
@@ -345,7 +346,7 @@ def _execute(name: str, args: argparse.Namespace, runner: Runner, store_kwargs: 
             return pipeline.Applied(changed, entries, {v: after[v] for v in touched}, expect)
 
         report = pipeline.run_pipeline(runner, store, vaults.default_name, apply)
-        doc.update(_result(report, report.outcome, _live_count(report.lists, touched)))
+        doc.update(_result(report, report.outcome, _entry_count(report.lists, touched)))
         if report.outcome == pipeline.LOST_TO_REMOTE:
             doc["lists"] = {v: [entry_doc(e) for e in lst.entries] for v, lst in report.lists.items()}
     except Refused as exc:
@@ -353,16 +354,16 @@ def _execute(name: str, args: argparse.Namespace, runner: Runner, store_kwargs: 
         if isinstance(exc, StaleOrder):
             doc["stale"] = exc.vaults
     except PartialWrite as exc:
-        doc.update(outcome=PARTIAL, message=str(exc), entries=[], live_count={}, written=exc.written,
+        doc.update(outcome=PARTIAL, message=str(exc), entries=[], entry_count={}, written=exc.written,
                    not_written=exc.not_written)
     except (UnreadableListError, ListTooLargeError, UnsafeNameError) as exc:
         doc.update(_refused(exc))
     return _emit(doc)
 
 
-def _result(report: pipeline.Report, outcome: str, live_count: dict[str, int], **extra: Any) -> dict[str, Any]:
+def _result(report: pipeline.Report, outcome: str, entry_count: dict[str, int], **extra: Any) -> dict[str, Any]:
     doc: dict[str, Any] = dict(outcome=outcome, message=_MESSAGES[outcome], entries=report.applied.entries,
-                               live_count=live_count, **extra)
+                               entry_count=entry_count, **extra)
     if report.sync_warning:
         doc["sync_warning"] = report.sync_warning
     return doc
@@ -370,7 +371,7 @@ def _result(report: pipeline.Report, outcome: str, live_count: dict[str, int], *
 
 def _refused(exc: Exception) -> dict[str, Any]:
     entries = exc.entries if isinstance(exc, Refused) else []
-    return dict(outcome=pipeline.REFUSED, message=str(exc), entries=entries, live_count={})
+    return dict(outcome=pipeline.REFUSED, message=str(exc), entries=entries, entry_count={})
 
 
 def _emit(doc: dict[str, Any]) -> int:

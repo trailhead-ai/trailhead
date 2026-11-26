@@ -92,7 +92,7 @@ def test_an_add_is_synced_and_the_list_file_is_on_the_remote(tmp_path, remote, m
     ref = host.note("First note")
     code, doc = host.docket(monkeypatch, capsys, "add", "--", ref)
     assert (code, doc["outcome"]) == (0, "saved"), doc
-    assert doc["live_count"] == {"main": 1}
+    assert doc["entry_count"] == {"main": 1}
     assert remote_list(remote, host.env) == ["first-note"]
 
 

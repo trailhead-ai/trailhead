@@ -224,7 +224,7 @@ class TestAddPlacement:
         assert (code, doc["outcome"]) == (0, "saved")
         assert env.entries() == ["task/a", "task/b", "task/c", "task/n1"]
         assert env.entries("other") == ["task/x", "task/y"]
-        assert doc["live_count"] == {"proj": 4, "other": 2}
+        assert doc["entry_count"] == {"proj": 4, "other": 2}
 
 
 class TestAddDuplicate:
@@ -324,7 +324,7 @@ class TestRemoveTopAttachDetach:
             {"ref": ref("task/zzz"), "status": "not-found"},
             {"ref": ref("task/c"), "status": "removed"},
         ]
-        assert doc["live_count"] == {"proj": 1}
+        assert doc["entry_count"] == {"proj": 1}
 
     def test_remove_of_only_absent_entries_is_unchanged_and_writes_nothing(self, env):
         env.put(DEFAULT, *BASE)
@@ -477,7 +477,7 @@ class TestNotSynced:
     def test_a_clean_sync_and_clean_git_is_saved_with_exit_0(self, env):
         code, doc, _ = env.run("add", "--", ref("task/n1"))
         assert (code, doc["outcome"]) == (0, "saved")
-        assert doc["live_count"] == {"proj": 1}
+        assert doc["entry_count"] == {"proj": 1}
 
 
 def _restore(env, text):

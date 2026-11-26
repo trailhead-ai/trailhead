@@ -85,7 +85,9 @@ nothing, search with `lore search` on plain words from the description. It must 
 When step 5 does not land (exit 1, 2 or 4), the note still exists: report it by its vault and slug so it is not left
 unseen, say it is not on the docket, and offer to add it again.
 
-When an add leaves a vault over 25 live entries (`live_count` above 25 for it), say so plainly.
+After an add that landed (exit 0 or 3), run bare `docket` and read the vault's `over_limit` there: when it is true, say so plainly
+that the vault is over the 25 live entries it should stay under. The change result's `entry_count` also counts finished entries, so
+never warn from it.
 
 ## Picking up and starting
 
@@ -116,7 +118,7 @@ asking again. When a description matches more than one entry, ask which; never p
 
 ## What the tool answers
 
-Every change prints one JSON document with `outcome`, `message`, `entries` (each with `ref` and `status`) and `live_count`,
+Every change prints one JSON document with `outcome`, `message`, `entries` (each with `ref` and `status`) and `entry_count` (how many entries the touched vault's list holds, finished ones included),
 and exits with a code. After every change, say which entries were touched, each with its resolved vault and title.
 
 - **Exit 0**, `saved` or `unchanged`: say it is done, naming the vault and title of each entry; for `unchanged` (or

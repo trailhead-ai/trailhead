@@ -51,7 +51,7 @@ class TestSetOrder:
         assert (code, doc["outcome"]) == (0, "saved")
         assert env.entries(DEFAULT) == [C, A, B]
         assert env.entries(OTHER) == [Y, X]
-        assert doc["live_count"] == {DEFAULT: 3, OTHER: 2}
+        assert doc["entry_count"] == {DEFAULT: 3, OTHER: 2}
         assert env.fake.tags().count("sync") == 2
         assert {e["ref"] for e in doc["entries"]} == {ref(s) for s in (A, B, C)} | {ref(s, OTHER) for s in (X, Y)}
 
