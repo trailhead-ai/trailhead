@@ -396,9 +396,15 @@ against. Order so that:
 - Tasks with unproven unknowns come first
 - Each task produces something testable
 - Later tasks build on validated earlier ones
+- Tasks run in the phase order `skills/plan/SKILL.md`'s step 7 sets
 
 Every task must include a test contract — the behaviors to prove with failing tests before writing
 implementation code.
+
+For a slice parent whose change is too large for one reviewable pull request, follow
+`skills/plan/SKILL.md`'s step 7 (Size the slice) and step 8's narrowed write. Where no cut passes
+the stop-here test, step 7's no-cut stop applies: ask, and write nothing. Never cut the slice on
+your own, and never write a dropped criterion as partial coverage.
 
 ### 8. Write the Plan
 

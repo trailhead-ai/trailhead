@@ -223,6 +223,13 @@ For `refused`, `stuck` and an early stop it is extended with a reason and a reme
 outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
 ```
 
+A `plan-ready` outcome for a slice that plan narrowed carries its own suffix, naming the dropped
+criteria by number only, ascending, and no remedy:
+
+```
+outcome: plan-ready <kind/name> parked=0 — narrowed: dropped AC<n>, …
+```
+
 - `<kind>` is one of `plan-ready`, `slice-chosen`, `pr-ready`, `stuck`, `needs-a-decision`,
   `waiting`, `spec-complete`, `refused`.
 - `<kind/name>` is the record the session ended on: the slice record for `plan-ready`,

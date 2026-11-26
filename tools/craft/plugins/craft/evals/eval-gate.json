@@ -176,6 +176,13 @@
       ],
       "merge_only": true
     },
+    "plan-orders-tasks-by-phase-and-records-a-reviewability-claim": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "templates/plan.md",
+        "agents/planner.md"
+      ]
+    },
     "plan-keeps-an-earlier-run-section": {
       "measures": [
         "skills/plan/SKILL.md",
@@ -700,6 +707,20 @@
       ],
       "merge_only": true
     },
+    "slice-first-slice-reads-and-creates-when-an-unknown-governs-the-create": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "slice-treats-a-set-aside-create-criterion-as-creation": {
+      "measures": [
+        "skills/_shared/slice.md",
+        "skills/slice/SKILL.md"
+      ],
+      "merge_only": true
+    },
     "slice-takes-an-all-reads-surface-as-one-ordinary-slice": {
       "measures": [
         "skills/_shared/slice.md",
@@ -980,6 +1001,51 @@
         "skills/execute/SKILL.md",
         "skills/_shared/unattended.md",
         "scripts/run_block.py"
+      ]
+    },
+    "unattended-plan-narrows-an-oversized-slice": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "skills/_shared/slice.md",
+        "agents/planner.md"
+      ]
+    },
+    "plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/slice.md",
+        "agents/planner.md"
+      ]
+    },
+    "plan-asks-when-an-oversized-slice-has-no-stopping-point": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "agents/planner.md"
+      ]
+    },
+    "unattended-plan-parks-an-oversized-slice-with-no-stopping-point": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/unattended.md",
+        "agents/planner.md"
+      ]
+    },
+    "plan-restores-the-whole-slice-when-the-cut-is-rejected": {
+      "measures": [
+        "skills/plan/SKILL.md"
+      ]
+    },
+    "plan-narrowing-keeps-the-access-check-the-surface-needs": {
+      "measures": [
+        "skills/plan/SKILL.md",
+        "skills/_shared/slice.md"
+      ]
+    },
+    "planner-narrows-an-oversized-slice-through-plans-procedure": {
+      "measures": [
+        "agents/planner.md",
+        "skills/plan/SKILL.md"
       ]
     }
   }

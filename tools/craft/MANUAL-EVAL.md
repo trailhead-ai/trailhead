@@ -5779,3 +5779,190 @@ Readings:
 - No case regressed against the baseline on a record or outcome grader that the final prose was meant to hold.
 
 Spend at runner list price plus judge votes: about 207.3 USD for the baseline (craft and portage), 257.1 for the final batch, 64.1 for the rerun.
+
+
+
+## Case: a plan orders its tasks by phase and records a reviewability claim (2026-11-20)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. The baseline is red, the treatment is green, each rule's all-carriers probe turns the case red on that rule's grader, and the three existing plan-ready cases stay green on the edited prose.
+
+One runner case for `skills/plan/SKILL.md`, `templates/plan.md` and `agents/planner.md`, in the core tier: it is the only case on the shared plan file that decides phase ordering and the reviewability line, and its 900 s timeout puts it past the gate budget.
+
+| Case | Fixture | Expected |
+|---|---|---|
+| `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` | `notes` spec, AC1 delete, AC2 edit, AC3 list, AC4 add (spec order is the reverse of phase order); a seeded slice parent covering all four; run with `--unattended` | add depends on list, edit and delete depend on add; the parent body carries a `**Reviewability:**` line naming a size; the last line is `outcome: plan-ready task/<name> parked=0` |
+
+Prose fingerprints (`git hash-object`): unedited `skills/plan/SKILL.md` `66cd54ee5f6f91574ae73df420daa4d0adbb1822`, `templates/plan.md` `d58e0b8554b6bd1a7966af7a5007290c9c3e8f2e`, `agents/planner.md` `87198d6b979b0827ebf82daf63091dc60623ab2d`; edited `skills/plan/SKILL.md` `09dacdad3db2a38ed998bdad54dc4d2de090a32c`, `templates/plan.md` `67bd87a411d3d1777aa78b40b06987c842fe8d29`, `agents/planner.md` `71f5c8ea80073e9a503851f2e4b503b82a05e882`.
+
+Bar: baseline 3 runs, expected red at least on the reviewability grader; treatment 3 of 3 runs; one rerun of a failed batch permitted and reported as such.
+
+### Runs
+
+| Arm | Runs | Result | Notes |
+|---|---|---|---|
+| baseline | 2 (runner stopped once decided) | **red**, 0.6 / 0.2 | the reviewability grader and create-after-read failed in both runs; edit-after-create and delete-after-create-or-edit failed in run 2 only. The ordering graders read real `./lore record create` calls, so the case is also the runner canary: the fixture writes landed. Request `local-b3d956lmafbl` |
+| treatment | 2 (runner stopped once decided) | **green**, 1 / 1 | every grader in every run. 2 of 2, not the 3 of 3 the bar names: the shim decides at 2. Request `local-wrj6v311oga1` |
+| regression: `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | 2 each | **green**, 1 / 1 on all three | the un-narrowed plan-ready final line is unchanged. Request `local-wrj6v311oga1` |
+
+### Carrier mutations
+
+Each probe ran against this case on the edited prose, then the tree was restored and checked clean against the edit.
+
+| Probe | What it removes | Result | Reading |
+|---|---|---|---|
+| phase order | step 7's phase-order rule, step 8's "in step 7's phase order, never spec order" and its creates-depend-on-read sentence, and the planner's pointer | **red**, 0.8 / 0.8 (request `local-njrhaw8p9qqn`): create-after-read failed in both runs | the create-after-read edge depends on the rule; the edit and delete edges stayed green without it, so on this fixture plan orders those unprompted and only the read-before-create edge is attributable to the rule |
+| reviewability | the template field, step 8's slice-rooted write and canonical-sections entry, and step 9's display | **red**, 0.6 / 0.8 (request `local-pn69qkcso9hh`): the reviewability grader failed in both runs; run 1 also missed the final line | the reviewability line depends on these carriers; the final-line miss in one run is incidental to the probe and was not seen on any other arm |
+
+## Case: a plan narrows an oversized slice at a point where the operator could stop (2026-11-20)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. Baselines are red on both fixtures, the treatment is green on the tightened fixture, three of the four targeted probes turn their case red, and the planner-pointer probe stays green (recorded as a coverage finding). The regression cases stay green.
+
+Four runner cases for `skills/plan/SKILL.md`, `skills/_shared/unattended.md`, `skills/_shared/slice.md` and `agents/planner.md`, all in the core tier: each declares a 900 s timeout, which `eval-gate.json`'s own check refuses for a `merge_only` case. They share one scaffold, `unattended-plan-narrows-an-oversized-slice/fixtures/scaffold.sh`, selected by its `VARIANT` variable (`stop` so far).
+
+| Case | Run as | Pre-registered cut | Expected on the unedited prose |
+|---|---|---|---|
+| `unattended-plan-narrows-an-oversized-slice` (the canary) | `/craft:plan <parent> --unattended` | keep AC1, AC2, AC3; drop AC4, AC5 | red: no narrowing exists, so the narrowed line, the reduced coverage line, the reduced-list gate call, the logged decision and the closing suffix all fail |
+| `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` | `/craft:plan <parent>`, stop at the approval step | same | red: same body graders fail, the final message presents all five criteria |
+| `plan-restores-the-whole-slice-when-the-cut-is-rejected` | same, with the answer "keep the whole slice" given in advance | same cut, then restored | red through the cut-was-made clauses; the three final-state graders (full coverage line, no `**Narrowed:**` line, no partial line) hold vacuously on the baseline |
+| `planner-narrows-an-oversized-slice-through-plans-procedure` | dispatches `craft:planner` on the parent | same | red: coverage stays at five criteria, no `**Narrowed:**` line |
+
+Prose fingerprints (`git hash-object`) of the unedited baseline: `skills/plan/SKILL.md` `09dacdad3db2a38ed998bdad54dc4d2de090a32c`, `skills/_shared/unattended.md` `a1bbc6e4727d005e45296e0be045cec3ba7510e0`, `skills/_shared/slice.md` `2265630e4dfe275b6ad4f64b213ed56d175eca9a`, `agents/planner.md` `71f5c8ea80073e9a503851f2e4b503b82a05e882`, `templates/plan.md` `67bd87a411d3d1777aa78b40b06987c842fe8d29`.
+
+Prose fingerprints (`git hash-object`) of the edited prose: `skills/plan/SKILL.md` `3ef145b1bdcda24d540c46ff64bf104bb1bc2148`, `skills/_shared/unattended.md` `d7c211c8ab8b5f66923fbca932cd4b21551144ae`, `skills/_shared/slice.md` `1cdf4bf2e21e2d9308ac80dcb35f936fab641dd9`, `agents/planner.md` `0ae0d58adb28a1d5d5aebca27da9d1fa7ba86f00`.
+
+Bar: baseline 3 runs, expected red; treatment 3 of 3 runs, which the shim decides at 2 (recorded as run, not as a met 3 of 3); one rerun of a failed batch permitted and reported as such; the planner case also a mutation arm with only the planner's pointer removed, expected red. The canary: if its treatment runs still disagree after the fixture is tightened, the run stops and the disagreement is reported; the case is never demoted and its bar never lowered. Regression: `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` and `plan-orders-tasks-by-phase-and-records-a-reviewability-claim` stay green.
+
+**Fixture tightened (one treatment batch of three, request `local-jvt916w4mjlf`, scored 1, 0.31 and a 900 s timeout).** In the 0.31 run plan judged the whole slice reviewable and did not narrow; the attended case narrowed 2 of 2 on the same fixture. The fixture was tightened rather than rerun, per unknown U1: the legacy reports no longer share one interface (each has its own entry function and row shape, so no generic exporter reads as sufficient), the 10 file / 300 line norm is also stated in `CONTRIBUTING.md`, `CLAUDE.md` says each report is handled in its own module and test, and AC4's text names every module under `shop/reports/`. Cut, ids, hostile wording and graders are unchanged; see the case's `expected.md`.
+
+Offline checks before any run: the two closing-line patterns do not overlap (the existing un-narrowed pattern fails every narrowed sample and the narrowed pattern fails every un-narrowed one), and each body, gate and record grader was run against hand-built tool inputs that satisfy it and ones that inject the failure it guards (a `**Covers:**` line naming a dropped criterion, a `**Partially covers:**` line naming one, a parked `Q<n>`, a child body for the legacy reports).
+
+### Runs
+
+| Arm | Runs | Result | Notes |
+|---|---|---|---|
+| baseline, first fixture | 2 each (runner stopped once decided) | **red on all four**: canary 0.31 / 0.46, approval 0.46 / 0.46, reject 0.7 / 0.7, planner 0.33 / 0.33 | no run wrote a `**Narrowed:**` line or certified a reduced list; the reject case's cut-was-made graders failed and its final-state graders held vacuously. Request `local-3ali3dto44o0` |
+| treatment, first fixture | 2 each; canary 3 | approval, reject, planner and the four regression cases **green** 1 / 1; canary **split**: 1, 0.31, and a 900 s timeout | the split is the reason the fixture was tightened (above). Request `local-jvt916w4mjlf` |
+| treatment, tightened fixture | 2 each (runner stopped once decided) | **green, 1 / 1 on all four**, canary runs 271 s and 245 s | every grader in every run; 2 of 2, not the 3 of 3 the bar names, as the shim decides at 2. Request `local-mr9kjjwhjt49` |
+| all-carriers probe (`t2-all`: every carrier of the narrowing removed), tightened fixture | 2 each | **red on all four**: canary 0.46 / 0.46, approval 0.77 / 0.77, reject 0.6 / 0.7, planner 0.67 / 0.67 | doubles as the baseline on the tightened fixture: no run wrote a `**Narrowed:**` line or certified a reduced list. Without the prose the approval and planner runs still left AC4 and AC5 off the coverage line, so the tightened fixture invites a cut on its own; the narrowed line, the gate call and the closing suffix are what the prose adds. Request `local-iykyvrea9vx8` |
+| regression on the edited prose: `plan-orders-tasks-by-phase-and-records-a-reviewability-claim`, `unattended-slice-then-plan-ends-plan-ready`, `plan-keeps-an-earlier-run-section`, `planning-builds-each-folded-entry-into-a-task-or-reopens-it` | 2 each | **green**, 1 / 1 on all four | request `local-jvt916w4mjlf` |
+
+### Carrier mutations
+
+Each probe ran on the edited prose with the tightened fixture, then the tree was restored and checked clean (`git status --porcelain` empty) against the edit.
+
+| Probe | What it removes | Case | Result | Reading |
+|---|---|---|---|---|
+| planner pointer | only the planner's pointer to plan's step 7 and step 8 narrowed write | planner | **green**, 1 / 1 (request `local-1wcbrkmh4gds`) | not attributable: the planner narrows without its pointer, so it reaches plan's procedure on its own. No case pins the pointer |
+| unattended suffix | the narrowed ending in plan's unattended section and `_shared/unattended.md` | canary | **red**, 0.85 / 0.85 (request `local-50ko2uyc6owo`): both final-line graders failed in both runs | the narrowed closing line depends on these carriers; the narrowing itself held |
+| restore | only step 9's redo after a non-accept answer | reject | **red**, 0.5 / 0.5 (request `local-w0a53aeva2dy`): the restored coverage line, restored-list gate call, removed `**Narrowed:**` line, redone children and the whole-slice report all failed | the restore on rejection depends on step 9's redo |
+
+**Limitation.** On the tightened fixture the AC1 to AC3 cut appears even without the narrowing prose (the all-carriers probe left AC4 and AC5 off the coverage line in the approval and planner runs), so the cut's placement is not attributable to the prose; the `**Narrowed:**` line, the gate call and the closing suffix are.
+
+## Cases: a plan stops and asks when an oversized slice has no stopping point (2026-11-20)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. Both baselines are red, both cases are green on the final prose, the all-carriers probe is red by identity with the baseline, and the narrowing and spec-change regression cases stay green. One treatment batch failed one unattended run of three on the no-question judge; the prose was fixed and the two cases re-run green.
+
+Two runner cases, both in the core tier (each declares a 900 s timeout, which `eval-gate.json`'s own check refuses for a `merge_only` case). Both use `VARIANT=nostop` of the shared scaffold `unattended-plan-narrows-an-oversized-slice/fixtures/scaffold.sh` (tree and records in that directory's `nostop.sh`): a spec `shop-database` with four mutually dependent criteria (a migration that writes a database, commands that read only it, the same output as before, a repeatable migration), too large for one pull request by the 10 file / 300 line norm in `CLAUDE.md` and `CONTRIBUTING.md` (fifteen dataset modules, each with its own test, plus wiring; over thirty files), where no kept subset passes the stop-here test.
+
+| Case | Run as | Expected on the unedited prose |
+|---|---|---|
+| `plan-asks-when-an-oversized-slice-has-no-stopping-point` | `/craft:plan <parent>`, slice approved, ask the slice question as the skill says and stop | red: plans the whole slice as one large pull request or invents a cut; a stop-and-ask naming why no stopping point exists is the least likely outcome |
+| `unattended-plan-parks-an-oversized-slice-with-no-stopping-point` | `/craft:plan <parent> --unattended` | red: ends `plan-ready` (whole or narrowed) or `stuck`; plan parks at exactly three stops, none of them this |
+
+Bar: baseline 3 runs, expected red; treatment 3 of 3 runs (the shim decides at 2, recorded as run); one all-carriers probe, expected red on both. Regression: `unattended-plan-narrows-an-oversized-slice` and `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` must still narrow and not ask.
+
+Offline checks before any run: the `stop` variant scaffolds to the same tree before and after the `nostop` edit (a recursive diff of two scaffold runs, excluding the vault's own state files, is empty); the `nostop` scaffold builds and its sixteen tests pass; the final-line pattern accepts `outcome: needs-a-decision task/<name> parked=1` as the last line and rejects `parked=2`, `parked=0`, a `plan-ready` line and a line followed by a trailing question; the `Q1` patterns accept a title or question naming two criteria and one `(recommended)` and reject a `Q1` naming none, none recommended and two recommended; and the no-side-effect graders were run against hand-built injecting tool inputs: a `--kind task --parent` record create (child task), a Write carrying `**Narrowed:** dropped AC3, AC4 — ...` and `covers_gate.py ... --covers "AC1, AC2, AC3"` or `"AC1"` (a reduced list) each trip their grader, while the full list `"AC1, AC2, AC3, AC4"`, a record `show` and a Write of a coverage-complete body do not.
+
+Prose fingerprints (`git hash-object`): unedited `skills/plan/SKILL.md` `3ef145b1bdcda24d540c46ff64bf104bb1bc2148`, `agents/planner.md` `0ae0d58adb28a1d5d5aebca27da9d1fa7ba86f00`; first edit `skills/plan/SKILL.md` `deafdab806a3b674bc86f20214c17de7b9303e64`, `agents/planner.md` `4d8b754b1006fdce04d26b6e415941cf2ed3c46e`; final `skills/plan/SKILL.md` `d3c153c852ae2247c4cdd5366d64df72eb7a6148` (planner unchanged from the first edit). `skills/_shared/unattended.md` was not edited.
+
+### Runs
+
+| Arm | Runs | Result | Notes |
+|---|---|---|---|
+| (not run) | 2 each | **errored, runner-error** | the first batch loaded no case: both prompts sat inline in `case.yaml` instead of `prompt.md`. Moved to `prompt.md` and re-run; the corpus checks that passed the inline shape are logged as a separate task. Request `local-hqfaajbnahno` |
+| baseline | 2 each (runner stopped once decided) | **red**: attended 0.83 / 0.83, unattended 0.33 / 0.89 | attended: no child, no `**Narrowed:**` line and no reduced-list gate call, but the judge failed the final message (it did not ask about a missing stopping point) FAIL×3 in both runs. Unattended run 1 parked nothing and did not end `needs-a-decision`; run 2 parked a `Q1` and ended `needs-a-decision parked=1` but its question was not the no-stopping-point question (judge FAIL). So the unattended case discriminates partly through its judge. Request `local-pnpabjzfbrl3` |
+| treatment, first edit (`deafdab…`) | attended 2, unattended 3 | attended **green** 1 / 1; unattended **2 of 3**, runs 1 / 0.89 / 1 | the failed run failed only `no-question-is-asked` (judge FAIL×3): its final message put a question to the reader. The step 7 paragraph says to "put the question about the slice", and the unattended bullet did not say the question lives only in the block. Regression in the same batch: `unattended-plan-narrows-an-oversized-slice`, `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` and `unattended-plan-parks-a-spec-change` **green**, 1 / 1. Request `local-yuoea8smdn35` |
+| treatment, final (`d3c153c…`, the unattended bullet now says the question lives only in the block and the final message asks nothing) | 2 each (runner stopped once decided) | **green**, 1 / 1 on both | every grader in every run; 2 of 2, not the 3 of 3 the bar names, as the shim decides at 2. Request `local-pd9bzve7yvjj` |
+| treatment, ordering clause (`6bce9d8…`, step 7 now says its safest-first order holds in place of the escalation question's recommended-first order) | 2 each | **green**, 1 / 1 on both | four unattended runs in a row green since the no-ask fix. Request `local-g69rbu6pmagd` |
+| all-carriers probe | — | **red, by identity with the baseline** | removing every carrier (the task's prose commits reversed) leaves `skills/plan/SKILL.md` and `agents/planner.md` byte-identical to the unedited fingerprints above, so this arm is the baseline arm and was not run again |
+
+
+
+## Cases: the first-slice rule decides on its own, and a set-aside create criterion still counts as creation (2026-11-20)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. The first-slice case is green on the current prose and red with the first-slice rule removed, so it is the first case in which that rule alone decides the answer. The set-aside case is red on the unedited prose and green on the final prose. The four existing slice cases that border these rules stay green.
+
+Two runner cases for `skills/_shared/slice.md` and `skills/slice/SKILL.md`, both `merge_only` (core cases for both files already exist). They resolve two follow-ups of the spec: an eval case where removing the first-slice rule alone changes the answer, and the ruling that a set-aside create criterion still counts as creation for the first-slice and all-reads rules.
+
+| Case | Fixture | Expected slice |
+|---|---|---|
+| `slice-first-slice-reads-and-creates-when-an-unknown-governs-the-create` | `notes` group: AC1 list (also prints the notes the old `jot` tool saved), AC2 add; an `## Open Questions` entry says whether two terminals adding at once lose a note must be learned before anything that writes is built | AC1, AC2 (the unknown cannot move the create criterion out of the first slice); with the first-slice rule removed, AC1 only |
+| `slice-treats-a-set-aside-create-criterion-as-creation` | `wallet` group: AC1 list, AC2 show (both read only what add saves), AC3 add that needs a live merchant account with the card network, which the company does not have and which has no test version | an enabler whose written justification names AC3, with no `**Covers:**` line and no covers-gate call; on the unedited prose an ordinary slice over AC1 and AC2 was expected, and the runs chose no slice at all (below) |
+
+Prose fingerprints (`git hash-object`) when the cases were written: `skills/_shared/slice.md` `1cdf4bf2e21e2d9308ac80dcb35f936fab641dd9`, `skills/slice/SKILL.md` `516322e39e3b008a1a1f21f28c9902dbb881949a`.
+
+Bar: first-slice case, current prose green and first-slice-rule-removed prose red, each 3 of 3; set-aside case, unedited prose red and edited prose green, each 3 of 3; one rerun of a failed batch permitted and reported as such; no grader is a judge (the body, the covers-gate call and the final line are the observation points).
+
+### Runs
+
+| Case | Arm | File fingerprint | Runs | Bar | Result |
+|---|---|---|---|---|---|
+| first-slice case | current prose | slice.md `1cdf4bf…`, SKILL.md `516322e…` | 2 (runner stopped once decided) | green | **green, 1 / 1**; request `local-phsq8370un78` |
+| first-slice case | first-slice-rule removed (the rule paragraph in "The first slice on a surface", `slice.md` 119-125, and step 7's pointer to it, `SKILL.md` 796-797; the heading and the all-reads paragraph stay) | — | 2 | red | **red, 0.5 / 0.5**: both covers graders failed in both runs, the chooser cut the create criterion for the unknown and took AC1 alone; request `local-r41k0oy8yxfh`. The rule decides this case on its own |
+| set-aside case | unedited prose | slice.md `1cdf4bf…`, SKILL.md `516322e…` | 2 | red | **red, 0.2 / 0.2**: no slice parent was created and the pass did not end `slice-chosen`. The chooser set AC3 aside, found no consuming slice for an enabler, and stopped, rather than shipping the reads as an ordinary slice as `expected.md` predicted; the never-gate-the-reads grader passed. Request `local-phsq8370un78` |
+| set-aside case | first edit | slice.md `04be108…`, SKILL.md `fb5b820…` | 3 | green | **2 of 3**, runs 0.8 / 1 / 1: the first run wrote the enabler but named the set-aside criterion without its identifier, failing the names-AC3 grader. The ruling then said the justification names the criterion by its identifier. Request `local-37132qf1ltun` |
+| set-aside case | final | slice.md `42238ba…`, SKILL.md `fb5b820…` | 2 (runner stopped once decided) | green | **green, 1 / 1**; request `local-tj1pdez80xwu` |
+| set-aside case | all-carriers probe (the ruling's commits reversed) | slice.md `1cdf4bf…`, SKILL.md `516322e…` | — | red | **red, by identity with the unedited arm**: the reversal restores the unedited fingerprints |
+| first-slice case and four bordering cases (`slice-takes-an-all-reads-surface-as-one-ordinary-slice`, `slice-reads-and-creates-despite-a-spec-note-arguing-for-read-only-first`, `slice-sets-aside-what-needs-an-outside-account`, `slice-stops-short-of-its-surface-for-an-unknown-and-still-reads-and-creates`) | first edit | slice.md `04be108…`, SKILL.md `fb5b820…` | 2 each | green | **green, 1 / 1 on all five**; request `local-37132qf1ltun`. `slice-sets-aside-what-needs-an-outside-account` also green on the final prose (`local-tj1pdez80xwu`) |
+
+Bar note: every green arm ran 2 of 2, not the 3 of 3 the bar names, as the shim decides at 2.
+
+## Fix pass after whole-change review (2026-11-20)
+
+**Status: run.** Every arm below ran through the `portage-eval` shim on 2026-11-20. These cases and graders were written test-first for the folds of the whole-change review of the slice-narrowing change. On the prose before the fix (plan SKILL `6bce9d8…`, slice.md `42238ba…`) only the restore's second council pass was red in both runs; the same-write, re-fold and tightened set-aside graders were already green, and the access-check case mostly kept the check. They are kept as regression guards, not as red-to-green evidence. After the fix and two follow-up edits to the unattended no-stopping-point bullet, every affected case and the plan and slice regression set is green. The table below is the pre-registration; the runs follow it.
+
+| Case | Change | What it reads | Expected on today's prose |
+|---|---|---|---|
+| `plan-narrowing-keeps-the-access-check-the-surface-needs` (new, core, `--unattended`, 900 s) | new `VARIANT=access` of the shared scaffold: the `stop` slice plus AC6, an access check the state-coverage floor makes core, on a surface the operator and the bookkeeper both reach; pre-registered cut keeps AC1, AC2, AC3, AC6 and drops AC4, AC5 | nine graders: the written `**Covers:**` line is `AC1, AC2, AC3, AC6`; no `**Narrowed:**` dropped list names AC6; the narrowed line is `dropped AC4, AC5 — <reason>`; no covers line names AC4 or AC5; a gate call certifies `AC1, AC2, AC3, AC6`; no child is titled for, and no child body delivers, removing the access check; a child body delivers it; the closing line names AC4 and AC5 | likely red: the cut rule names the stop-here test and never the floor, and AC6 is worded and placed to be dropped by usefulness alone; green only if a run applies the floor unprompted |
+| `unattended-plan-narrows-an-oversized-slice` | added `covers-and-narrowed-lines-are-written-together`: the reduced `**Covers:**` line and the `**Narrowed:**` line in one Write input | one Write whose input carries both lines | red (no narrowing exists); on the narrowed prose green only when step 8 writes both in its single full-body write |
+| `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` | same added grader | same | same |
+| `plan-restores-the-whole-slice-when-the-cut-is-rejected` | fixture now `VARIANT=stopfolded`: spec follow-up F1 (tied to AC4) folded into the parent by a `**Folds:**` line; the prompt gives the session id; five graders added: F1 is `folded into` the parent in the spec record, the parent's `**Folds:**` line names F1 again, a Write carries the `reopen` transition for F1, a Write carries a `fold` transition for F1, and the builder lens is dispatched at least twice | the spec record and the parent record at the end of the run; Write and Agent tool inputs | red on today's prose on the fold-back graders (the restore step never mentions entries), likely red on the second council pass (the council section says no automatic re-review); the reopen grader depends on the cut giving F1 back, which today's prose does without the case |
+| `slice-treats-a-set-aside-create-criterion-as-creation` | `the-written-justification-names-the-set-aside-create-criterion` tightened: AC3 must be on the `**Value claim:**` line itself | the Write input between the label and the next literal backslash-n | unsure: green when the run names AC3 on the claim line, red when only in a later section |
+| `tools/craft/tests/test_narrowed_parent_coverage.py` | the `criterion_gate` leg removed (it ran on the spec body alone and could not depend on the narrowed parent) | in-process gates on the parent body | green, 10 passed |
+
+Limitations: the grader that reads a `reopen` or `fold` transition reads the file-tool write of the transition document, so a document written through a shell command is missed; the second-council-pass grader counts builder-lens dispatches, not a council write; the `**Value claim:**` grader stops at the first escaped character on the line, so a claim with a double quote before AC3 would read as missing it.
+
+### Runs
+
+| Arm | Prose (`git hash-object`) | Result | Notes |
+|---|---|---|---|
+| before the fix | plan SKILL `6bce9d8…`, slice.md `42238ba…` | restore **red** 0.93 / 0.93 (only `the-council-reviewed-again-after-the-restore`, both runs); access check run 1 green, run 2 failed `no-child-body-delivers-the-access-check-removal`, run 3 timed out; canary run 1 failed both final-line graders, run 2 green, run 3 timed out; approval and set-aside green 1 / 1 | the same-write grader passed in both narrowing cases and the restore's re-fold graders passed, so those behaviours already held; the access-check case discriminates weakly. Request `local-cy66pjfbawih` |
+| the fix (`fix(craft)` folds: floor kept by the cut, slice.md's no-size sentence scoped to the chooser, full deferrable test in step 7, restore only on keep-whole or re-cut with re-fold and a second council pass, narrowing as its own give-back trigger, the no-cut answers named, the template field slice-rooted only, the plain ending only when nothing was narrowed) | plan SKILL `3a424ba…`, slice.md `5b65948…`, template `6335897…` | **14 of 15 cases green**, 1 / 1 in 2 runs each: access check, canary, restore, approval, planner, attended no-stopping-point, phase order, the three plan-ready cases, spec-change park, and the first-slice, set-aside and unknown-first slice cases. The unattended no-stopping-point case **regressed** to 1 of 3: run 2 parked nothing (0.33), run 3 failed `no-question-is-asked` | the answers to the no-cut question stood before the attended and unattended bullets, so an unattended run could read them as its own next step. Request `local-ol3grczjhjgh` |
+| answers moved under the attended bullet; the unattended bullet says the run carries out none of them | plan SKILL `533cfae…` | attended no-stopping-point **green** 1 / 1; unattended **1 of 3**, runs 0.89 / 1 / 0.89, failing only `no-question-is-asked` (judge votes split FAIL PASS FAIL) | every record grader passed: the run parked correctly but listed the options in its final message, which the judge reads as a choice left open. Request `local-kuz3nmbcvd5g` |
+| the parked report names `Q<n>` and does not lay the options out again | plan SKILL `ff6b8d4…` | unattended no-stopping-point **green** 1 / 1; `unattended-plan-parks-a-spec-change` **green** 1 / 1 | request `local-22lewp28omem`. Every green arm ran 2 of 2, not 3 of 3, as the shim decides at 2 |
+
+
+## Second review fix pass and security folds, after rebasing on main (2026-11-25)
+
+**Status: run, green with two unexplained runs.** The re-review's folds (plan writes no status and
+hands a drop to the slice ritual's drop procedure, the drop cost, a re-cut through step 7's cut
+rules, the second council pass, the give-back reason, the always-kept rule) and the security audit's
+four folds (an access-concerned or urgent folded entry is kept or asked about, where "more than one
+principal" is read from, the second council pass appended with undispositioned Criticals carried
+forward, a re-cut that names the access check refused) are prose-only. No case was added for them:
+the security folds have no eval coverage. The six cases that read the changed sentences were re-run
+on the rebased branch, plan SKILL `4ec61e9…`; `skills/_shared/slice.md` is unchanged by both passes.
+
+### Runs
+
+| Case | Result | Notes |
+|---|---|---|
+| `plan-asks-when-an-oversized-slice-has-no-stopping-point` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `unattended-plan-parks-an-oversized-slice-with-no-stopping-point` | **green**, runs 0.89 / 1 / 1 | run 1 failed only `no-question-is-asked` (judge votes PASS FAIL FAIL); request `local-kxtm32hecbkh` |
+| `plan-narrowing-keeps-the-access-check-the-surface-needs` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `plan-narrows-an-oversized-slice-and-shows-the-cut-at-approval` | **green** 1 / 1 | request `local-kxtm32hecbkh` |
+| `unattended-plan-narrows-an-oversized-slice` | first request split (0.79 / 1, deciding run cut by the shim's budget); resubmitted **green** 1 / 1 | the failing run parked a question and omitted the narrowed outcome line; no transcript kept. Requests `local-kxtm32hecbkh`, `local-yl8u1cssqct3` |
+| `plan-restores-the-whole-slice-when-the-cut-is-rejected` | through the shim: 2 passed, 2 failed (0.87 each), 5 killed at the shim's 540-second case budget; direct runner: **green 3 / 3** | both failing shim runs failed only the two `covers_gate` graders (no gate call matched, at the cut or after the restore), with no transcript kept. The direct runs (`claude plugin eval`, 3 runs at once, `--keep-temp`) each called the gate with the reduced list and again with the restored list; each run took 433–500 s, so a parallel pair sits at the shim's 540-second budget. Untested hypothesis for the failures: the runs are in don't-ask mode, so a gate call shaped outside the granted commands (the spec piped from `cat`, say) is denied and the run may go on uncertified. Requests `local-kxtm32hecbkh`, `local-yl8u1cssqct3`, `local-184tifg0nuj7` |
+
+A probe of the restore case on the prose before both passes (plan SKILL `ff6b8d4…`, request
+`local-8gr4p84pdowq`) had both runs killed at the shim's budget and decided nothing.

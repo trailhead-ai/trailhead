@@ -8,8 +8,12 @@ per task instead. -->
 
 **Goal:** <!-- One or two sentences: what this plan achieves when every child task is done. -->
 
-**Delta design:** <!-- High-level design of the change: the components touched, the data flow,
-key constraints. Keep it brief — the child tasks carry the per-task detail. -->
+**Delta design:** <!-- High-level design of the change: the components touched, the data flow, key
+constraints. Keep it brief — the child tasks carry the per-task detail. -->
+
+**Reviewability:** <!-- One line on why this change fits one reviewable pull request, naming the
+concrete sizes judged: how many tasks, files and eval cases, and how many surfaces — not the verdict
+alone. Slice-rooted parents only: a topic-rooted plan omits this field. -->
 
 **Given Axioms (ground truth this plan rests on):**
 <!-- The facts this plan depends on, each as a citation: a file:line reference, a recorded

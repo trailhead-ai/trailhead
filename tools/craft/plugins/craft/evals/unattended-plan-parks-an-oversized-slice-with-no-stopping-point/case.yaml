@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: unattended-plan-parks-an-oversized-slice-with-no-stopping-point
+runs: 3
+context:
+  scaffold_script: fixtures/scaffold.sh

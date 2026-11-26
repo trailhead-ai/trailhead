@@ -32,9 +32,9 @@ slice. These two words, and no others, name these two things.
 ## The quality bar: Valuable, Small, Testable
 
 A slice's quality bar is Valuable, Small, Testable. Small means reviewable as one pull request, and
-it is judged at plan time; the chooser does not size. This deliberately drops INVEST's Independent:
-slices build on each other by design, so importing the whole acronym would contradict the sequencing
-this design depends on.
+it is judged at plan time, where plan narrows an oversized slice at a stop-here point (its step 7);
+the chooser does not size. This deliberately drops INVEST's Independent: slices build on each other
+by design, so importing the whole acronym would contradict the sequencing this design depends on.
 
 ## The value floor is read against the spec's own consumer
 
@@ -72,7 +72,8 @@ The slice covering a surface's core is the chosen surface's whole capability: ev
 core criteria, whatever phase each belongs to, and none of its polish criteria. A surface whose
 remaining criteria are all polish takes them together as one recommended slice (see "Core and
 polish"). The chooser never splits a surface for size. Whether a slice is too large to review as one
-pull request is judged at plan time, not here.
+pull request is judged at plan time, not here, and plan's narrowing (its step 7) is the only cut
+made for size.
 
 ### Core and polish
 
@@ -90,9 +91,10 @@ ordering under "Interface leverage".
 
 ### Where a slice may end short of its surface
 
-A slice ends before its surface's core criteria (defined under "Core and polish") are all covered
-for one of three reasons, and for no other. Size is never one of them. Each cut still has to pass
-the stop-here test below.
+When choosing a slice, the chooser ends it before its surface's core criteria (defined under "Core
+and polish") are all covered for one of three reasons, and for no other. Size is never one of them
+for the chooser. Plan's narrowing of a slice too large for one pull request is the one cut made for
+size, under its own rule in `plan`'s step 7. Each cut still has to pass the stop-here test below.
 
 - **The remainder is independently deferrable.** The shipped part is complete for the consumer
   without the remainder: no criterion the slice covers is left half-working, and no remaining
@@ -123,8 +125,17 @@ mutate criteria, but none of them moves the surface's own create criterion out o
 create criterion spanning two surfaces is not the first-shipping surface's own: by the cross-surface
 reason it belongs to the surface that ships second.
 
-A surface whose remaining criteria are all reads has no creation to wait for: it is an ordinary
-slice with a value claim, covering every core read, and never an enabler.
+A create criterion the slice skill's set-aside rule sets aside still counts as creation for this
+rule and for the all-reads rule below: setting it aside takes it off the candidate set, not off the
+surface. A surface whose only create criterion is set aside is therefore not all-reads. Its reads
+ship only as an enabler whose written justification names the set-aside create criterion, by its
+identifier (`AC<n>`), as what it unblocks, or the chooser takes another surface. The set-aside
+create criterion counts as the slice that enabler unblocks: it ships once it is released, so the
+chooser writes the enabler slice instead of stopping for want of a consuming slice.
+
+A surface with no create criterion at all, open or set aside, whose remaining criteria are all reads
+has no creation to wait for: it is an ordinary slice with a value claim, covering every core read,
+and never an enabler.
 
 ### The stop-here test
 
@@ -193,9 +204,10 @@ prevent.
 
 A slice may deliver no consumer value only if it carries a written justification naming what it
 enables and why that cannot be folded into the slice needing it, and only if the slice consuming it
-comes next. Naming the consuming slice is prose, not a commitment: it writes no record. This is the
-one permitted forward reference, which is why the no-stored-sequence rule is scoped to records
-rather than to any mention of future work.
+comes next (a set-aside create criterion counts as that slice, see "The first slice on a surface").
+Naming the consuming slice is prose, not a commitment: it writes no record. This is the one
+permitted forward reference, which is why the no-stored-sequence rule is scoped to records rather
+than to any mention of future work.
 
 ## State coverage: the floor a visual surface owes
 
