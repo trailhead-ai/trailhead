@@ -5,8 +5,9 @@
 request (``portage.eval_command.request``), starts a detached worker and prints ``request: <id>``
 and ``wait: <paste-ready command>`` without waiting, then one ``derived: <plugin root> <case>: <files>`` line
 per named declared case (the files its entry's procedure derives, plugin-relative). Exit 0 started, 3 not run
-(the not-run block is printed), 2 refused (a stderr line names why: an undeclared case, a plugin whose mapping says ``"paused": true``, a plugin root that leaves
-the repo, a mapping that does not load, a ``--require-version`` that is not 1 to 6 ASCII decimal digits).
+(the not-run block is printed), 2 refused (a stderr line names why: an undeclared case, a plugin whose
+mapping says ``"paused": true``, a plugin root that leaves the repo, a mapping that does not load, a
+``--require-version`` that is not 1 to 6 ASCII decimal digits).
 
 ``--require-version N`` is a caller's statement of the eval command version it needs. When N is above
 ``request.EVAL_COMMAND_VERSION`` the request is not run ``eval-command-too-old``: nothing is created or

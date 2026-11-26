@@ -2,7 +2,8 @@
 
 ``check_pair`` decides, for one pull request's repo, whether a merge may go ahead and which head
 commit to pin it to. When the group's eval gate is off (``setting.gate_enabled``) and no ``--eval-state`` is
-given for the repo, the check does not apply; a state that is given is checked in full. Otherwise it applies only when the repo's change touches a ``merge_only`` or a
+given for the repo, the check does not apply; a state that is given is checked in full. Otherwise it
+applies only when the repo's change touches a ``merge_only`` or a
 ``split_procedure`` eval case (one whose entry loads a branch file; decided by ``select.backstop_touched``, the
 selection ``plan`` uses); anywhere else it answers "not applicable" and the merge is unchanged. Where it
 applies, every one of these refuses, and the check name is what the refusal prints::

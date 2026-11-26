@@ -3,16 +3,17 @@
 A command group: each subcommand is registered by its own ``_add_*`` function on
 the group's subparser, so a new one never reshapes the others.
 
-``plan --repo <path> [--base <ref>] [--tier push|merge] [--group-toml <path>] [--opt-in]`` selects the cases the branch touches (the
-push tier, the default, leaves out ``merge_only`` cases; the merge tier keeps them) and
+``plan --repo <path> [--base <ref>] [--tier push|merge] [--group-toml <path>] [--opt-in]`` selects the
+cases the branch touches (the push tier, the default, leaves out ``merge_only`` cases; the merge tier keeps them) and
 writes ``<state>/plan.json`` into a fresh 0700 state directory (shape documented in
 ``portage.eval_gate.select``). Output: ``state: <dir>``, ``status: <status>``,
 ``cases: <n>``, ``max_cost_usd: <sum>``, then one ``<plugin_root>:<case>`` line per
 selected case, then one ``case-flags: <plugin_root>:<case> merge_only=<true|false>
-split_procedure=<true|false>`` line per selected case (and a ``mapping-invalid: <file>: <fault>`` line when a mapping is
-refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0 whenever a plan was written,
-including every non-selecting status. The gate is off unless ``--opt-in`` is given or the group TOML's
-``[release].eval_gate`` is true; off writes a ``gate-off`` plan with no cases; exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
+split_procedure=<true|false>`` line per selected case (and a ``mapping-invalid: <file>: <fault>`` line
+when a mapping is refused); every branch-controlled string is printed through ``verdict._safe``. Exit 0
+whenever a plan was written, including every non-selecting status. The gate is off unless ``--opt-in`` is
+given or the group TOML's ``[release].eval_gate`` is true; off writes a ``gate-off`` plan with no cases;
+exit 2 only for usage errors (e.g. ``--repo`` is not a git work tree).
 
 ``run --state <dir> --case <name> [--timeout-seconds N]`` runs one planned case and
 writes ``<state>/results/<case>.json`` (shape in ``portage.eval_gate.run``). Output:

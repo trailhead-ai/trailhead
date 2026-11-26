@@ -32,7 +32,8 @@ Markers, each on its own line, wrapping the section::
    ``runner-sandbox-unwritable``: nothing about the branch will change them), or
    ``persistent: none``. When the outcome is ``base-unresolved`` the line is
    ``persistent: base-unresolved`` (a repo with no resolvable base hits it on every
-   push). ``case-removed-on-branch``, ``corpus-new-on-branch`` and ``corpus-paused`` are not persistent. ``persistent_reasons`` is the
+   push). ``case-removed-on-branch``, ``corpus-new-on-branch`` and ``corpus-paused`` are not persistent.
+   ``persistent_reasons`` is the
    classification of reason codes;
 3. ``ignored:`` lines for result files whose case is not in the plan, then one
    ``derived: <plugin_root> <case>: <file>, <file>, ...`` line per selected declared case (the plan entry's
@@ -66,8 +67,9 @@ repeated in the section. A ``split_procedure`` case (its entry loads a branch fi
 merge tier, under the report line ``split-procedure-not-run: <cases>`` with the same per-case lines; a case
 that is both is named under the split line only. Unlike a merge-only case, a split case in a corpus new on the
 branch (``corpus-new-on-branch``) stops too, its line saying to land the corpus mapping first; one removed on
-the branch (``case-removed-on-branch``) or in a paused corpus (``corpus-paused``) is exempt. A merge-only case that
-can never run (``case-removed-on-branch``, ``corpus-new-on-branch``, ``corpus-paused``) is reported as on push and does not stop the change. A not-run core case
+the branch (``case-removed-on-branch``) or in a paused corpus (``corpus-paused``) is exempt. A merge-only
+case that can never run (``case-removed-on-branch``, ``corpus-new-on-branch``, ``corpus-paused``) is
+reported as on push and does not stop the change. A not-run core case
 still lets the change through, as on push.
 
 Exit codes: 0 push, 1 stop, 2 usage, unusable state directory/plan, an OS error reading or writing, or a marker fault.
