@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
 import time
 from collections.abc import Callable
@@ -26,6 +27,9 @@ from pathlib import Path
 Runner = Callable[[list[str]], str]
 
 _MAX_DEPTH = 256
+
+# macOS ships lsof in /usr/sbin, which the gateway shim's pinned PATH omits; the caller's PATH is never consulted.
+_TOOL_DIRS = ("/usr/sbin", "/usr/bin", "/bin")
 
 
 @dataclass(frozen=True)
@@ -157,14 +161,19 @@ def session_key(**kwargs: object) -> str | None:
     return format_session_key(*found)
 
 
-def _read_cwd(pid: int, *, proc_root: Path, system: str | None, runner: Runner | None) -> Path | None:
+def _read_cwd(
+    pid: int, *, proc_root: Path, system: str | None, runner: Runner | None, tool_dirs: tuple[str, ...]
+) -> Path | None:
     if (system or platform.system()) == "Linux":
         try:
             return Path(os.readlink(proc_root / str(pid) / "cwd"))
         except OSError:
             return None
+    lsof = shutil.which("lsof", path=os.pathsep.join(tool_dirs))
+    if lsof is None:
+        return None
     try:
-        out = (runner or _default_runner)(["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
+        out = (runner or _default_runner)([lsof, "-a", "-p", str(pid), "-d", "cwd", "-Fn"])
     except (OSError, subprocess.SubprocessError):
         return None
     line = next((ln for ln in out.splitlines() if ln.startswith("n")), None)
@@ -177,6 +186,7 @@ def harness_cwd(
     proc_root: Path = Path("/proc"),
     system: str | None = None,
     runner: Runner | None = None,
+    tool_dirs: tuple[str, ...] = _TOOL_DIRS,
 ) -> Path | None:
     """The working folder of the harness process that owns this one, or ``None``.
 
@@ -185,4 +195,4 @@ def harness_cwd(
     found = harness_process(start_pid=start_pid, proc_root=proc_root, system=system, runner=runner)
     if found is None:
         return None
-    return _read_cwd(found[0], proc_root=proc_root, system=system, runner=runner)
+    return _read_cwd(found[0], proc_root=proc_root, system=system, runner=runner, tool_dirs=tool_dirs)
