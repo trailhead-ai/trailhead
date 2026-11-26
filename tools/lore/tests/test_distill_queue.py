@@ -425,3 +425,45 @@ def test_with_the_probe_off_an_unlistable_kind_directory_still_marks_the_vault_u
     finally:
         os.chmod(mixed_vault / "spec", 0o755)
     assert off.unreadable_reason == scan_mod.REASON_VAULT_UNREADABLE and not off.fully_read
+
+
+def _escaped(v, kind, name):
+    return model.EscapedRecord(v, kind, name)
+
+
+def test_an_escaping_session_record_skips_nothing():
+    res = queue(vault("a", spec("s", "planned"), linked("s"), skipped_escaping=1,
+                      escaped=[_escaped("a", "session", "x")]))
+    assert waiting_names(res) == ["s"]
+
+
+@pytest.mark.parametrize("kind", ["spec", "task"])
+def test_an_escaping_spec_or_task_refuses_and_names_the_record(kind):
+    res = dq.build_distill_queue([vault("a", spec("s", "planned"), linked("s"), skipped_escaping=1,
+                                        escaped=[_escaped("a", kind, "gone")])])
+    assert isinstance(res, dq.DistillSkipped)
+    assert res.vaults == ("a",)
+    assert res.records == (("a", kind, "gone"),)
+
+
+def test_an_escaping_kind_directory_of_specs_refuses_with_no_name():
+    res = dq.build_distill_queue([vault("a", linked("s"), skipped_escaping=1,
+                                        escaped=[_escaped("a", "spec", None)])])
+    assert res.records == (("a", "spec", None),)
+
+
+def test_an_unreadable_spec_is_named_in_the_refusal():
+    res = dq.build_distill_queue([vault("a", spec("s", "planned"), unreadable=(("spec", "broken"),))])
+    assert res.records == (("a", "spec", "broken"),)
+
+
+def test_an_escaping_adr_is_an_unreadable_edge_not_an_absent_or_excluding_one():
+    res = queue(vault("a", spec("s", "planned", adrs=["d"]), linked("s"), skipped_escaping=1,
+                      escaped=[_escaped("a", "adr", "d")]))
+    assert res.waiting[0].adr_note == "its ADR could not be read"
+
+
+def test_an_escaping_adr_directory_leaves_every_edge_unreadable():
+    res = queue(vault("a", spec("s", "planned", adrs=["d"]), linked("s"), skipped_escaping=1,
+                      escaped=[_escaped("a", "adr", None)]))
+    assert res.waiting[0].adr_note == "its ADR could not be read"

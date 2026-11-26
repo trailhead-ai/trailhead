@@ -14,11 +14,12 @@ be trusted.
 from __future__ import annotations
 
 from collections.abc import Collection, Iterator, Sequence
+import dataclasses
 from dataclasses import dataclass, field
 
 from ..record import guards
 from . import references
-from .model import RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
+from .model import LIVE_STATUSES, RETIRED_STATUSES, ScannedRecord, VaultScan, is_live, key, status
 
 
 @dataclass(frozen=True)
@@ -42,7 +43,9 @@ class RetiredCandidate:
     superseded candidate with no successor at all whose own ``related`` entries
     name the linking record. ``supersede_allowed`` is set when it is a links-back
     candidate and ``lore record supersede`` would accept the linker as its
-    successor, judged by the verb's own pairing guard.
+    successor, judged by the verb's own pairing guard. ``successor_unconfirmed`` is set
+    on a superseded candidate with no successor read while a scanned vault holds an
+    escaping record, which could be the successor; it is never a links-back candidate.
     """
 
     vault: str
@@ -53,6 +56,7 @@ class RetiredCandidate:
     nonconforming_successors: int = 0
     links_back: bool = False
     supersede_allowed: bool = False
+    successor_unconfirmed: bool = False
 
 
 @dataclass(frozen=True)
@@ -77,10 +81,12 @@ class Finding:
 
 @dataclass(frozen=True)
 class RetiredResult:
-    """Findings, and per selected vault the number of linking records judged."""
+    """Findings, per judged selected vault the number of linking records judged, and
+    the vaults skipped alone for an escape of a judged kind."""
 
     findings: list[Finding] = field(default_factory=list)
     judged: dict[str, int] = field(default_factory=dict)
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -94,7 +100,8 @@ def check_retired(
     scans: Sequence[VaultScan], selected: Collection[str]
 ) -> RetiredResult | RetiredSkipped:
     """Check the live records of every selected vault against the records of all *scans*."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    at_fault = tuple(s.vault for s in scans
+                     if not s.readable_for(LIVE_STATUSES) and not s.escapes_in(LIVE_STATUSES))
     if at_fault:
         return RetiredSkipped(at_fault)
 
@@ -121,9 +128,15 @@ def check_retired(
         return found
 
     accepted: dict[tuple[str, str, str, str | None], bool] = {}
+    related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]] = {}
 
+    escapes = any(s.escaped for s in scans)
     result = RetiredResult()
+    skipped: list[str] = []
     for s in scans:
+        if not s.readable_for(LIVE_STATUSES):
+            skipped.append(s.vault)
+            continue
         if s.vault not in selected:
             continue
         judged = 0
@@ -134,13 +147,15 @@ def check_retired(
             for ref, target, found in retired_references(record, candidates):
                 if record.kind == "task" and any(c.kind == "spec" for c in found):
                     continue
-                if any(key(record) in superseders_of(c)[1]
-                       for c in found if status(c) == "superseded"):
+                if any(key(record) in superseders_of(c)[1] for c in found):
                     continue
                 linker_duplicated = len(holders[(record.kind, record.name)]) > 1
                 shared = len({(c.kind, c.name) for c in found}) < len(found)
                 retired = tuple(
-                    _candidate(c, superseders_of(c)[0], record, holdings, shared or linker_duplicated, accepted)
+                    _candidate(
+                        c, superseders_of(c)[0], record, holdings, shared or linker_duplicated,
+                        accepted, related_to, escapes,
+                    )
                     for c in sorted(found, key=key)
                 )
                 result.findings.append(
@@ -151,7 +166,7 @@ def check_retired(
                     )
                 )
         result.judged[s.vault] = judged
-    return result
+    return dataclasses.replace(result, skipped=tuple(skipped))
 
 
 def retired_references(
@@ -179,6 +194,8 @@ def _candidate(
     holdings: dict[tuple[str, str], list[tuple[str, ScannedRecord | None]]],
     vault_flagged: bool,
     accepted: dict[tuple[str, str, str, str, str, str, str | None], bool],
+    related_to: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]],
+    escapes: bool,
 ) -> RetiredCandidate:
     state = status(record)
     assert state is not None
@@ -195,9 +212,10 @@ def _candidate(
             else:
                 successors.append(Successor(s.vault, s.kind, s.name, status(s)))
         successors.sort(key=lambda s: (s.kind, s.name, s.vault))
+    unconfirmed = state == "superseded" and not successors and not nonconforming and escapes
     links_back = (
-        state == "superseded" and not successors and not nonconforming
-        and _relates_to(record, linker)
+        state == "superseded" and not successors and not nonconforming and not unconfirmed
+        and (linker.kind, linker.name) in _related_records(record, related_to)
     )
     return RetiredCandidate(
         record.vault, record.kind, record.name, state, tuple(successors), nonconforming,
@@ -205,6 +223,7 @@ def _candidate(
         links_back and _accepted_once(
             accepted, record, linker, holdings, record.vault if vault_flagged else None
         ),
+        unconfirmed,
     )
 
 
@@ -255,8 +274,14 @@ def _supersede_accepted(
     )
 
 
-def _relates_to(record: ScannedRecord, other: ScannedRecord) -> bool:
-    return any(
-        ref.field.startswith("related ") and parsed == (other.kind, other.name)
-        for ref, parsed, _ in references.resolved_references(record)
-    )
+def _related_records(
+    record: ScannedRecord, cache: dict[tuple[str, str, str], frozenset[tuple[str | None, str]]]
+) -> frozenset[tuple[str | None, str]]:
+    found = cache.get(key(record))
+    if found is None:
+        found = cache[key(record)] = frozenset(
+            parsed
+            for ref, parsed, _ in references.resolved_references(record)
+            if ref.field.startswith("related ") and parsed is not None
+        )
+    return found

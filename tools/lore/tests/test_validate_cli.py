@@ -294,7 +294,7 @@ def test_a_scan_that_raises_exits_two_without_a_traceback(world):
     validate = importlib.import_module("lore.cli.validate")
     saved = validate._scan_vault
 
-    def boom(name, root):
+    def boom(name, root, **_):
         raise RuntimeError("scan exploded")
 
     validate._scan_vault = boom
@@ -335,6 +335,41 @@ def test_vault_that_cannot_be_listed_is_vault_unreadable(world):
         ["default", "links-not-checked"],
         ["default", "vault-unreadable"],
     ]
+
+
+def _over_a_mebibyte(root):
+    for i in range(3):
+        _put(root, "lesson", f"big{i}", body="x" * (900 * 1024))
+
+
+def test_a_vault_over_the_scan_budget_says_so_and_names_the_flag_that_raises_it(world):
+    _over_a_mebibyte(world.roots["default"])
+    r = world.run("--max-scan-mib", "1")
+    assert r.returncode == 1
+    assert sorted(lines(r)) == [
+        "default: links-not-checked: the vault could not be fully read, so links were not checked",
+        "default: vault-unreadable: its records exceed the report's size budget of 1 MiB; "
+        "pass --max-scan-mib to raise it",
+    ]
+
+
+def test_raising_the_scan_budget_lets_the_same_vault_validate_clean(world):
+    _over_a_mebibyte(world.roots["default"])
+    r = world.run("--max-scan-mib", "64")
+    assert r.returncode == 0, r.stderr
+    assert lines(r) == []
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root can list any directory")
+def test_a_vault_that_cannot_be_listed_is_not_blamed_on_the_budget(world):
+    root = world.roots["default"]
+    _put(root, "lesson", "good")
+    root.chmod(0)
+    try:
+        r = world.run("--max-scan-mib", "1")
+    finally:
+        root.chmod(0o755)
+    assert "default: vault-unreadable: the vault directory could not be read" in lines(r)
 
 
 def _symlink_kind_dir(root, kind, target):

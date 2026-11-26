@@ -45,7 +45,10 @@ class Finding:
 
     ``age_days`` is the whole days since the last update, set only when the task
     is stale on age; ``undated`` is true when ``updated-at`` does not parse;
-    ``retired_specs`` are the retired specs it refers to, sorted by name and vault.
+    ``retired_specs`` are the retired specs it refers to, sorted by name and vault;
+    ``duplicated_in`` are the other vaults holding a task of the same name (any
+    status), sorted, so a command naming ``task/<name>`` alone cannot be trusted
+    to reach this vault's copy.
     """
 
     vault: str
@@ -56,6 +59,7 @@ class Finding:
     age_days: int | None
     undated: bool
     retired_specs: tuple[RetiredSpec, ...] = ()
+    duplicated_in: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -81,12 +85,17 @@ def check_stale(
     window_days: int,
 ) -> StaleResult | StaleSkipped:
     """Judge the unfinished tasks of every selected vault against *now* and the window."""
-    at_fault = tuple(s.vault for s in scans if not s.fully_read)
+    at_fault = tuple(s.vault for s in scans if not s.readable_for(("task",)))
     if at_fault:
         return StaleSkipped(at_fault)
 
     candidates = references.build_candidates(scans)
     start = now - timedelta(days=window_days)
+    holders: dict[str, set[str]] = {}
+    for s in scans:
+        for record in (*s.records, *s.unreadable, *s.sidecar_only):
+            if record.kind == "task":
+                holders.setdefault(record.name, set()).add(s.vault)
 
     result = StaleResult()
     for s in scans:
@@ -103,7 +112,8 @@ def check_stale(
             if when is None or age is not None or specs:
                 result.findings.append(
                     Finding(record.vault, record.kind, record.name, record.updated_at,
-                            status(record), age, when is None, specs)
+                            status(record), age, when is None, specs,
+                            tuple(sorted(holders[record.name] - {s.vault})))
                 )
         result.judged[s.vault] = judged
     return result

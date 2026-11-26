@@ -181,6 +181,10 @@ def _malformed(root, kind, name):
     (d / f"{name}.md").write_text("x")
 
 
+def record_refusal(named):
+    return RECORD_REFUSAL.replace("could not be read, so", f"could not be read ({named}), so")
+
+
 RECORD_REFUSAL = ("lore: vault trailhead holds a spec or task record that could not be read, so the distill "
                   "queue is refused rather than built partial; repair or remove the record to sweep again, "
                   "or distill one spec by name with /craft:distill spec/<name>")
@@ -194,7 +198,7 @@ def test_an_unreadable_spec_refuses_the_queue_naming_the_vault_and_the_reason(wo
     r = world.run()
     assert r.returncode == 1
     assert r.stdout == ""
-    assert r.stderr.splitlines() == [RECORD_REFUSAL]
+    assert r.stderr.splitlines() == [record_refusal("trailhead/spec/big")]
 
 
 def test_an_unreadable_task_refuses_the_queue_rather_than_deferring_its_spec(world):
@@ -205,7 +209,7 @@ def test_an_unreadable_task_refuses_the_queue_rather_than_deferring_its_spec(wor
     r = world.run()
     assert r.returncode == 1
     assert r.stdout == ""
-    assert r.stderr.splitlines() == [RECORD_REFUSAL]
+    assert r.stderr.splitlines() == [record_refusal("trailhead/task/broken")]
 
 
 def test_an_unreadable_adr_does_not_refuse_and_the_spec_waits_with_the_note(world):
@@ -235,8 +239,8 @@ def test_a_vault_not_fully_read_and_another_holding_an_unreadable_spec_are_both_
     assert r.returncode == 1
     assert r.stderr.splitlines() == [
         "lore: vault trailhead could not be read and vault default holds a spec or task record that could "
-        "not be read, so the distill queue is refused rather than built partial; repair or remove what "
-        "could not be read to sweep again, or distill one spec by name with /craft:distill spec/<name>"]
+        "not be read (default/spec/x), so the distill queue is refused rather than built partial; repair or remove "
+        "what could not be read to sweep again, or distill one spec by name with /craft:distill spec/<name>"]
 
 
 def test_a_refusal_for_an_unreadable_record_escapes_the_vault_name(tmp_path):
@@ -359,3 +363,83 @@ def test_the_real_process_prints_the_queue_end_to_end(world):
     assert p.stdout.splitlines() == [
         "lore distill-queue — 1 waiting, 0 deferred", "", "waiting:",
         "  default/spec/s  2026-02-03  planned  planned, not yet distilled"]
+
+
+def _escape(root, tmp_path, kind, name):
+    outside = tmp_path / "outside"
+    outside.mkdir(exist_ok=True)
+    (outside / f"{name}.md").write_text("SECRET")
+    (outside / f"{name}.json").write_text(json.dumps({"title": "x", "status": "planned"}))
+    (root / kind).mkdir(exist_ok=True)
+    (root / kind / f"{name}.md").symlink_to(outside / f"{name}.md")
+    (root / kind / f"{name}.json").symlink_to(outside / f"{name}.json")
+
+
+def test_an_escaping_session_record_leaves_the_queue_built_and_exit_zero(world, tmp_path):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _escape(d, tmp_path, "session", "s")
+    r = world.run()
+    assert r.returncode == 0, r.stderr
+    assert "default/spec/s" in r.stdout
+
+
+def test_an_escaping_spec_refuses_and_names_it(world, tmp_path):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _escape(d, tmp_path, "spec", "hidden-spec")
+    r = world.run()
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert "default/spec/hidden-spec" in r.stderr
+    assert "SECRET" not in r.stderr and str(tmp_path / "outside") not in r.stderr
+
+
+def test_an_unreadable_spec_is_named_in_the_refusal(world):
+    _malformed(world.roots["default"], "spec", "broken-spec")
+    r = world.run()
+    assert r.returncode == 1
+    assert "spec/broken-spec" in r.stderr
+
+
+def test_a_badly_named_unreadable_spec_prints_the_fixed_phrase_and_no_part_of_its_name(world):
+    _malformed(world.roots["default"], "spec", "Bad Name\x1b[2J")
+    r = world.run()
+    assert r.returncode == 1
+    assert "a record whose name is not a valid record id" in r.stderr
+    assert "Bad Name" not in r.stderr and "\x1b" not in r.stderr
+
+
+def _big(root, n=3, size=900 * 1024):
+    for i in range(n):
+        _put(root, "lesson", f"big{i}", "active")
+        (root / "lesson" / f"big{i}.md").write_text("x" * size)
+
+
+def test_a_vault_past_the_budget_refuses_with_the_size_reason_and_the_override(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _big(d)
+    r = world.run("--max-scan-mib", "1")
+    assert r.returncode == 1
+    assert r.stdout == ""
+    assert ("lore: vault default's records exceed the report's size budget of 1 MiB, so the distill "
+            "queue is refused rather than built partial; pass --max-scan-mib to raise it") == r.stderr.strip()
+    assert "repair or remove" not in r.stderr
+
+
+def test_the_same_vault_with_the_budget_raised_builds_the_queue(world):
+    d = world.roots["default"]
+    _put(d, "spec", "s", "planned")
+    _link(d, "s")
+    _big(d)
+    r = world.run("--max-scan-mib", "64")
+    assert r.returncode == 0, r.stderr
+    assert "default/spec/s" in r.stdout
+
+
+def test_a_max_scan_mib_that_is_not_a_positive_whole_number_is_refused(world):
+    assert world.run("--max-scan-mib", "0").returncode == 2
