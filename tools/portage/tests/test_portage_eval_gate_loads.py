@@ -936,7 +936,7 @@ class TestDeclaredMentions:
         assert "\n" not in message
         assert "declared-mentions.json" in message
 
-    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000], ids=["open-brackets", "nested-objects"])
     def test_a_deeply_nested_list_is_refused_in_one_line_like_any_malformed_one(self, nested):
         with pytest.raises(LoadError) as caught:
             parse_declared_mentions(nested)

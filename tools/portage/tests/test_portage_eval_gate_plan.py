@@ -2533,7 +2533,7 @@ class TestSelectionFollowsLoadsAndUndeclaredMentions:
                                      declared={"skills/entry.md": ["skills/core-two.md"]})
         assert plan["status"] == "no-cases-mapped"
 
-    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000], ids=["open-brackets", "nested-objects"])
     def test_a_deeply_nested_declared_list_is_a_mapping_fault_not_a_traceback(self, repo, capsys, nested):
         _, plan, out = _closure_change(repo, capsys, self.MENTION, {**self.SIBLING,
                                        "declared-mentions.json": nested}, "skills/core-two.md")

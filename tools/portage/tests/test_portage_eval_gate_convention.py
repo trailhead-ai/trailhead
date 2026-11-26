@@ -497,7 +497,7 @@ class TestDeclaredMentions:
         assert len(rule_faults(faults, "declared-mentions-malformed")) == 1
         assert faults[0].startswith("declared-mentions.json:1: ")
 
-    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000])
+    @pytest.mark.parametrize("nested", ["[" * 100000, '{"a":' * 100000], ids=["open-brackets", "nested-objects"])
     def test_a_deeply_nested_list_is_refused_like_any_malformed_one(self, tmp_path, nested):
         faults = faults_of(tmp_path, {**self.FILES, "declared-mentions.json": nested})
         assert len(rule_faults(faults, "declared-mentions-malformed")) == 1
