@@ -165,11 +165,11 @@ branch name taken from `portage detect-repos`, and the outcome file's path. A va
 never echoed or substituted; the run ends where it stands (`refused` at an entry check, `stuck` once
 Step A has written).
 
-1. **Record argument.** Exactly one token other than `--unattended`, the whole token `--eval-gate`, one
-   `--resume` and a
-   `--deadline <seconds>` pair. Remove a leading `task/`; the rest must match `^[A-Za-z0-9._/-]+$` with no `..` segment and
-   no leading `-`. The deadline, when given, is a whole number from 1 to 1800. A missing, repeated or
-   failing value is never echoed; the line names `task/<unresolved>` and says
+1. **Record argument.** Exactly one token other than `--unattended`, the whole token `--eval-gate`,
+   one `--resume` and a `--deadline <seconds>` pair. Remove a leading `task/`; the rest must match
+   `^[A-Za-z0-9._/-]+$` with no `..` segment and no leading `-`. The deadline, when given, is a
+   whole number from 1 to 1800. A missing, repeated or failing value is never echoed; the line names
+   `task/<unresolved>` and says
    `the record argument is missing or failed validation; pass the name of the closed slice record`.
 2. **Resolve.** Bind `<vault>` once: ask `lore vault resolve --kind task --json` and read its
    `vault` field, which passes the shape check above. A name is the vault to bind: every
