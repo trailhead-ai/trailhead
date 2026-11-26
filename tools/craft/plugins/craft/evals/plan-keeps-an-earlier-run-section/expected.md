@@ -25,7 +25,7 @@ Every clause holds.
 |---|---|---|
 | The earlier block is still present byte for byte | `earlier-block-preserved-byte-for-byte` | `regex`, `source: file` |
 | A second block follows it | `a-second-block-follows` | `regex`, `source: file` |
-| The last line is `outcome: plan-ready task/<name> parked=0` | `final-line-is-plan-ready` | `regex` over the final message |
+| The last line is `outcome: plan-ready task/<name> parked=0`, or `needs-a-decision` when the council parks a Critical | `final-line-is-plan-ready-or-needs-a-decision` | `regex` over the final message |
 | The run got past step 8's full-body write (the council section is on the parent) | `plan-reached-the-council-review` | `regex`, `source: file` |
 
 ## Limitations
