@@ -88,6 +88,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Make the runner's Python writable only by its owner
+        # The gateway and eval shims refuse to pin an interpreter anyone but its owner could
+        # replace, and the hosted tool cache ships Python group-writable.
+        run: sudo chmod -R go-w "$(python -c 'import sys; print(sys.base_prefix)')"
+
       - name: Install tmux
         # tmux is not on the ubuntu-latest runner image. camp's real-tmux
         # tests (tools/camp/tests/test_*_real_tmux.py) drive a
@@ -191,6 +196,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
+      - name: Make the runner's Python writable only by its owner
+        # The gateway and eval shims refuse to pin an interpreter anyone but its owner could
+        # replace, and the hosted tool cache ships Python group-writable.
+        run: sudo chmod -R go-w "$(python -c 'import sys; print(sys.base_prefix)')"
 
       - name: Install pytest
         run: python -m pip install --upgrade pip "pytest==9.0.3" "pytest-xdist==3.8.0"
