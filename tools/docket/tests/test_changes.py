@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import subprocess
 
 import pytest
@@ -649,6 +650,20 @@ class TestUnreadableList:
         code, doc, err = env.run("add", "--", ref("task/n1"))
         assert code == 1
         assert err.startswith("docket: ")
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only directory")
+class TestUnwritableGitDir:
+    def test_the_first_change_prints_a_docket_line_not_a_traceback(self, env):
+        env.put(DEFAULT, *BASE)
+        os.chmod(env.vault_dir / ".git", 0o555)
+        try:
+            code, doc, err = env.run("add", "--", ref("task/n1"))
+        finally:
+            os.chmod(env.vault_dir / ".git", 0o755)
+        assert (code, doc) == (1, None)
+        assert err.startswith("docket: ")
+        assert env.entries() == list(BASE)
 
 
 class TestWriteLandedThenReReadFails:

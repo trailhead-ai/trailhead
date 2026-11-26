@@ -298,6 +298,8 @@ class Store:
                         os.mkdir(part, mode, dir_fd=fd)
                     except FileExistsError:
                         pass
+                    except OSError as exc:
+                        raise self._dir_refusal(refusal, part, OSError(exc.errno, exc.strerror)) from exc
                     child = self._open_child(fd, part, flags, refusal)
                 except OSError as exc:
                     raise self._dir_refusal(refusal, part, exc) from exc
@@ -316,7 +318,7 @@ class Store:
     def _dir_refusal(self, refusal: type[StoreError], part: str, exc: OSError) -> StoreError:
         if exc.errno in (errno.ELOOP, errno.ENOTDIR):
             return refusal(f"{self.vault_root}/.../{part} is not a real directory (a symlink or a file); refusing to use it")
-        return refusal(f"cannot open {part} in {self.vault_root}: {exc.strerror}")
+        return refusal(f"cannot open or create {part} in {self.vault_root}: {exc.strerror}")
 
     @contextmanager
     def _stage(self) -> Iterator[int]:

@@ -330,6 +330,16 @@ class TestStagingDirAndTempFiles:
         assert victim.read_text() == "keep"
         assert not list_file(vault).exists()
 
+    @pytest.mark.skipif(os.geteuid() == 0, reason="root writes through a read-only directory")
+    def test_a_git_dir_docket_cannot_create_its_staging_dir_in_is_a_staging_error(self, store, vault):
+        os.chmod(vault / ".git", 0o555)
+        try:
+            with pytest.raises(S.StagingDirError, match="cannot open or create docket"):
+                store.write_list("proj", DocketList((ONE,)))
+        finally:
+            os.chmod(vault / ".git", 0o755)
+        assert not list_file(vault).exists()
+
     def test_a_vault_without_a_git_dir_is_refused(self, tmp_path):
         bare = tmp_path / "plain"
         bare.mkdir()
