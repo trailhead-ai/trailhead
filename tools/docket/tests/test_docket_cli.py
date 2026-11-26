@@ -20,10 +20,13 @@ class TestHelp:
         assert proc.returncode == 0, proc.stderr
         assert "usage: docket" in proc.stdout
 
-    def test_bare_invocation_prints_help_and_exits_zero(self):
-        proc = _run([])
-        assert proc.returncode == 0, proc.stderr
-        assert "usage: docket" in proc.stdout
+    @pytest.mark.parametrize("argv", [[], ["report"]])
+    def test_bare_invocation_runs_the_report_command(self, monkeypatch, capsys, argv):
+        from docket import cli
+
+        monkeypatch.setitem(cli.COMMANDS, "report", cli.Command("r", lambda p: None, lambda args: print("report ran") or 0))
+        assert cli.main(argv) == 0
+        assert capsys.readouterr().out == "report ran\n"
 
     def test_the_bin_wrapper_resolves_the_cli_through_a_symlink(self, tmp_path):
         link = tmp_path / "docket-link"

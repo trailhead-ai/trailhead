@@ -7,6 +7,8 @@ Error convention: a failure prints ``docket: <message>`` on stderr and exits non
 traceback. A command signals one by raising ``DocketError`` (exit 1); a usage error (unknown
 command or flag) exits 2. A command that reports a result instead of failing returns its own exit
 code from ``run`` (the change commands use 0, 2, 3 and 4) and ``main`` passes it through.
+
+Bare ``docket`` runs the ``report`` command; ``docket --help`` prints the usage.
 """
 from __future__ import annotations
 
@@ -46,11 +48,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args_in and not args_in[0].startswith("-") and args_in[0] not in COMMANDS:
         parser.error(f"unknown command {args_in[0]!r}")
     args = parser.parse_args(args_in)
-    if args.command is None:
-        parser.print_help()
-        return 0
+    name = args.command or "report"
     try:
-        return COMMANDS[args.command].run(args) or 0
+        return COMMANDS[name].run(args) or 0
     except DocketError as exc:
         print(f"docket: {exc}", file=sys.stderr)
         return 1
@@ -58,4 +58,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 from docket import changes  # noqa: E402  (the table is complete only once the commands register)
 
+from docket import report  # noqa: E402
+
 COMMANDS.update(changes.make_commands())
+COMMANDS["report"] = report.make_command()
