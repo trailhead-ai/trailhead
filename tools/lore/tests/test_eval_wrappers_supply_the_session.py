@@ -8,8 +8,9 @@ exactly as the procedure gives them, with no session flag of its own.
 
 Each test runs a case's real scaffold in a fenced HOME, logs a candidate through each wrapper it wrote
 with the runner's session in the environment and no flag, and reads where it landed. A scaffold that
-writes no wrapper has nothing to supply a session, so its test ends once the scaffold has built cleanly and the case's prompt is shown not to name
-lore (graders are left out: one may assert lore is never called).
+writes no wrapper has nothing to supply a session, so its test ends once the scaffold has built
+cleanly and the case's prompt is shown not to name lore (graders are left out: one may assert that
+lore is never called).
 """
 
 from __future__ import annotations
