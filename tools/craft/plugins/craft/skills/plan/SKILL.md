@@ -921,18 +921,21 @@ reasoning) and marked in the persisted `## Council Review` line with `(decided u
 the disposition, as in `` — *Disposition:* `resolved` (decided unattended) ``. **`accepted-as-risk`
 and `disputed` are never used unattended, for any lens.** A Critical whose content concerns
 security, credentials or data loss is parked even when an edit seems to close it, whichever lens
-raised it. A Critical the plan cannot close by editing itself is a *parked* stop too, like a finding
-that changes the spec (`bounced-back-to-spec`): never decided. Park it as the Unattended request
-section says, with the Critical as the question, options such as changing the spec or the plan's
-scope, accepting the risk or reshaping the slice (each with what it costs), and your recommendation
-marked. In the persisted `## Council Review`, a Critical that changes the spec is recorded with the
-disposition `bounced-back-to-spec`; any other parked Critical is left undispositioned. The findings
-the section carries are flattened to labelled single lines, as `_shared/unattended.md` says. Neither
-is marked `(decided unattended)`. Write that `## Council Review` section (Persistence, below) first,
-then park: the section is the last write before the question. Edit neither the spec nor the slice's
-status, and end on `outcome: needs-a-decision task/<parent-name> parked=<n>`. A non-zero exit of
-`maturity_bars.py` still refuses the dispatch, and under `--unattended` ends `outcome: stuck
-task/<parent-name> parked=<n> — council dispatch refused (<reason-code>); <the remedy in
+raised it. On a resumed run, the edit that closes a Critical goes in the parent's plan sections or
+in a child this run created: a child that existed before the run is never edited, whatever the
+Critical asks of it. A Critical the plan cannot close by editing itself is a *parked* stop too, like
+a finding that changes the spec (`bounced-back-to-spec`): never decided. Park it as the Unattended
+request section says, with the Critical as the question, options such as changing the spec or the
+plan's scope, accepting the risk or reshaping the slice (each with what it costs), and your
+recommendation marked. In the persisted `## Council Review`, a Critical that changes the spec is
+recorded with the disposition `bounced-back-to-spec`; any other parked Critical is left
+undispositioned. The findings the section carries are flattened to labelled single lines, as
+`_shared/unattended.md` says. Neither is marked `(decided unattended)`. Write that
+`## Council Review` section (Persistence, below) first, then park: the section is the last write
+before the question. Edit neither the spec nor the slice's status, and end on
+`outcome: needs-a-decision task/<parent-name> parked=<n>`. A non-zero exit of `maturity_bars.py`
+still refuses the dispatch, and under `--unattended` ends `outcome: stuck task/<parent-name>
+parked=<n> — council dispatch refused (<reason-code>); <the remedy in
 words>`, after setting `**Outcome:** stuck` and `**Checkpoint:**` on the run block.
 
 **Every write to the parent after step 8 is a `lore record update <parent-name> --diff` edit**, read
@@ -990,7 +993,9 @@ put its sentences, as printed, in your final message; a report left in an earlie
 the closing one. With folded entries it lists where each went, which entries became part of which
 task and which were reopened and why. A plan that made no found-work decision prints the one line
 the command returns, `The plan made no decisions about found work.`, and that line goes in the
-closing message all the same.
+closing message all the same. Each sentence the command prints is copied exactly, on a line of its
+own, starting with its capital letter: never reworded, lowercased or folded into a bullet or a
+sentence of yours.
 
 **Under `--unattended`, nothing below applies, except that this closing message, with the report
 above in it, goes just before the `outcome:` line, which stays last: the approval wait is skipped

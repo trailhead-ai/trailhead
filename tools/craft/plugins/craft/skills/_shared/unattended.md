@@ -181,7 +181,9 @@ section runs to the next heading of any level, so a sub-heading would end the se
 - **A diff that does not apply is retried once.** The run environment shows transient diff failures
   (a hunk header whose counts do not match its lines is the usual cause). Read the record fresh,
   rebuild the diff and write it again. This is the one rule for every `--diff` write in a block, in
-  every ritual.
+  every ritual. The fresh read is the run's next step after the rejection, before it changes any
+  other record: another run writing the block is also a reason a diff stops applying, and that read
+  is where a takeover shows.
 - **A failed block write** — the update errors, or the diff still does not apply after that one
   retry — ends the session with
   `outcome: stuck <record> parked=<n> — run-section write failed; <what to do instead>`, and nothing
@@ -233,6 +235,11 @@ outcome: <kind> <kind/name> parked=<n> — <why>; <what to run instead>
   "read the record the line names", not "answer a question". The line's reason names the section to
   read: the spec for an early stop, `## Refine — unresolved` for a refine that did not promote a
   task, or the run block.
+- A parked question is reported as something the record now holds for a later run, never as a choice
+  put to the reader: the message says what was parked, its options and which is recommended, and
+  that an `**Answer:**` line under it settles it. It is not worded to the reader ("if you pick (a)",
+  "which do you want"); what follows an answer is said of the answer ("if the answer is (a), the fix
+  sent to `executor` is …").
 - It is the only line of the final message that contains the text `outcome:`. Anywhere else in the
   message, name the block's line in other words (its result, its `**Outcome:**` field), never as a
   label such as "Block outcome:", and never by quoting `run_block.py`'s `latest-outcome:` line
@@ -395,9 +402,11 @@ Answers are read with `run_block.py`, never by hand, and matched only by its rul
 or an option's exact text).
 
 - **A matched answer.** The run acts on it only when the reader reports `match=option:<letter>` for
-  a question whose options the ritual itself wrote, and applies the option it chooses. An answer the
-  reader already reports `applied=yes` is skipped. It logs a decision naming the `Q<n>`, carrying
-  the applied-answer marker as an indented sub-bullet of that decision entry in the new block:
+  a question whose options the ritual itself wrote, and applies the option it chooses. Right before
+  it makes that option's change to any record, it reads the slice record fresh and checks its own
+  block as How the block is written says, so a taken-over run changes nothing. An answer the reader
+  already reports `applied=yes` is skipped. It logs a decision naming the `Q<n>`, carrying the
+  applied-answer marker as an indented sub-bullet of that decision entry in the new block:
 
   ```
      - Applied: Q<n>

@@ -263,10 +263,13 @@ is acted on. What execute adds:
    whether `--resume` was given.
 2. **Read the answers.** Run `${CLAUDE_PLUGIN_ROOT}/scripts/run_block.py` over the body read in step
    7 and apply each answer as the shared contract's Reading answers says, logging each applied one
-   with its `- Applied: Q<n>` sub-bullet. Read this run's own block fresh before applying an
-   option's change to any record, as well as before each block write, so a taken-over run stops
-   before it changes anything. An option is applied by making its change first and then logging the
-   decision that carries the marker.
+   with its `- Applied: Q<n>` sub-bullet. Each option is applied in three steps, in this order: (1)
+   `lore record show` the slice record and check this run's own block, and when it has gained an
+   `**Outcome:**` line this run did not write, stop there as a taken-over run, with the option's
+   record untouched; (2) make the option's change; (3) log the decision that carries the marker.
+   Step 1 is a read of its own, made right before step 2 even when the run read the record a moment
+   earlier, and it is made before each block write as well, so a taken-over run stops before it
+   changes anything.
    - **A parked invalidated assumption kept inside the slice** is applied as [Loop
      stops](#loop-stops) does for a routine one: the child the option names is updated as options 1
      and 3 of [Handling Assumption-Prover Status](#handling-assumption-prover-status) prescribe.
@@ -317,7 +320,8 @@ execute adds:
   not write ends the run
   `outcome: stuck task/<name> parked=<n> — the run was taken over by a resumed run; nothing further was written`,
   with nothing more written, the other run's outcome standing. A diff that does not apply is rebuilt
-  from a fresh read and written once more; a write that still fails ends
+  from a fresh read, made before any other record is changed, and written once more; a write that
+  still fails ends
   `outcome: stuck task/<name> parked=<n> — run-section write failed; <what to do instead>`, with
   nothing further written.
 - **A terminating stop is written to the block before its line is printed.** Every outcome except
@@ -1812,6 +1816,10 @@ See the list any time with:
   /craft:checks
 Answering a check from that list arrives with a later command; until then it stays waiting.
 ```
+
+No line of the report says a check answered "Not yet" was confirmed, passed or verified, the phase
+lines included: `verify` and the observation gate are reported as the entries being recorded ("the
+entries for AC3 were recorded"), never as having passed or confirmed anything.
 
 A refused or failed discharge reports as the discharge above words it, and a "failed" answer reports
 that nothing was saved, the slice stays open, and the operator's own description of what failed.
