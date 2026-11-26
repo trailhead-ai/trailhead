@@ -1,11 +1,17 @@
 """``outpost-gateway`` — the sandbox's way to reach Outpost's gateway routes.
 
 Every verb finds the harness this process runs under, reads that session's
-gateway credential, and exchanges it for a broker bearer token (kept in memory only;
-the broker does not expire its tokens). The session key comes only from the parent
-process chain: there is no argument or environment variable that names one.
+gateway credential, and exchanges it for a broker bearer token (kept in memory only).
+A session with no credential file yet registers itself first, through the same step the
+SessionStart hook runs. A token Outpost refuses as expired is exchanged again once and the
+call retried, and so is one Outpost replaced with a newer token. The session key comes only from the
+parent process chain: there is no argument or environment variable that names one. Reaching Outpost
+has one overall budget (``outpost_http.start_reach_budget``), which starts when the command first
+turns to Outpost, not before it has built what it will send; text from Outpost is stripped of control
+characters before it reaches the terminal.
 
-``run start`` uploads the working tree and prints the new run's id; ``run watch`` follows
+``run start`` uploads the working tree and prints the new run's id, and refuses a tree whose real top level is not
+inside the camp workspace the harness process works in; ``run watch`` follows
 a run's log; ``run view`` and ``run list`` show runs (``run view --log`` prints a run's whole
 log once, without following); ``run cancel`` asks Outpost to cancel a queued or running run.
 Exit codes: 0 done, 1 (``watch --exit-status`` only) the job ran and failed or the run was
@@ -13,7 +19,15 @@ cancelled, 3 (``watch --exit-status`` only) the run did
 not execute, 2 anything else that went wrong, including every refusal from Outpost, an
 unreachable or silent Outpost, a dropped stream and a usage error.
 
-The secret and token are never printed, logged, written, exported or passed to a
+This command never prints a credential or an access token: it runs outside the sandbox, so
+anything it printed would reach the session's transcript. The harness's ``headersHelper`` for
+Outpost's tool server is a separate entry, ``auth_header_main``, run through its own shim that is
+not an excluded command: it prints one JSON object, ``{"Authorization": "Bearer <token>"}``, or
+``{}`` when the session has no usable credential, and always exits 0, so a session with no
+credential still connects (the tool server answers a tool call it cannot authenticate with a 401
+that makes the harness run the helper again). The reason it printed ``{}`` goes to stderr.
+
+The secret and token are never printed by this command, logged, written, exported or passed to a
 subprocess; an unexpected failure reports its exception type and nothing else.
 """
 
@@ -27,19 +41,21 @@ import sys
 from pathlib import Path
 from urllib.parse import urlencode
 
-from trailhead.gateway import outpost_http, tree_upload
-from trailhead.gateway.register import register_log
-from trailhead.harness import session_key
+from trailhead.gateway import outpost_http, register, tree_upload
+from trailhead.gateway.private_file import Unsafe, read_private_file
+from trailhead.harness import harness_cwd, session_key
+from trailhead.launch_profile import WorkspaceError, workspace_containing
 from trailhead.outpost_lifecycle import APP as OUTPOST_APP
 from trailhead.outpost_lifecycle import DAEMON_PORT
 from trailhead.paths import state_dir
 
 STATES = ("queued", "in_progress", "completed")
 RESULTS = ("success", "failure", "cancelled")
+STALE_TOKEN_REASONS = ("credential_expired", "token_replaced")
 CANNOT_READ = "Outpost answered with a reply this command cannot read"
-# Outpost answers a cancel only after the run's containers are removed: a list call plus a
-# force-delete per container, each allowed up to 10s.
-CANCEL_TIMEOUT_SECONDS = 30.0
+# Outpost answers a cancel once the run's stop is signalled; removing its containers goes on in
+# the background. A cancel that gets no answer in this long is reported as requested, not as lost.
+CANCEL_TIMEOUT_SECONDS = 10.0
 SANDBOXED = "outpost-gateway is running inside the sandbox; run it on its own, not piped or chained"
 
 
@@ -51,36 +67,89 @@ def _fail(message: str) -> CommandError:
     return CommandError(f"outpost-gateway: {message}")
 
 
+_CONTROL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
 def _clean(text: str) -> str:
-    """*text* from Outpost with control characters replaced, so it cannot drive the terminal."""
-    return re.sub(r"[\x00-\x1f\x7f]", "?", text)
+    """*text* from Outpost without its C0 and C1 control characters, newline and tab kept, so it cannot drive the
+    terminal."""
+    return _CONTROL.sub("", text)
+
+
+def _one_line(text: str) -> str:
+    """*text* cleaned and fit for one table cell or field: newlines and tabs become spaces."""
+    return _clean(text).replace("\n", " ").replace("\t", " ")
+
+
+class _NoCredential(Exception):
+    """The session has no usable credential file."""
+
+
+def _operator_uid() -> int:
+    return os.geteuid()
 
 
 def _read_credential(key: str) -> tuple[str, str]:
+    """The client id and secret in this session's credential file, which must be a regular file the
+    operator owns with mode 0600, opened without following a link: anything else is refused before
+    the contents are read."""
     path = state_dir(OUTPOST_APP) / "sessions" / key / "gateway-client.json"
-    no_credential = _fail(f"this session has no gateway credential; see {register_log()} for why")
     try:
-        raw = path.read_text()
+        raw = read_private_file(path, "gateway credential", _operator_uid())
     except FileNotFoundError:
-        raise no_credential from None
+        raise _NoCredential from None
+    except Unsafe as unsafe:
+        raise _fail(str(unsafe)) from None
     except OSError:
         raise CommandError(SANDBOXED) from None
     try:
         parsed = json.loads(raw)
         client_id, client_secret = parsed["client_id"], parsed["client_secret"]
     except (ValueError, KeyError, TypeError):
-        raise no_credential from None
+        raise _NoCredential from None
     if not isinstance(client_id, str) or not isinstance(client_secret, str):
-        raise no_credential
+        raise _NoCredential
     return client_id, client_secret
 
 
-def _token(port: int) -> str:
+def _register(port: int) -> str:
+    """Register this session through the registration step; its key, or the error saying why it is not registered."""
+    try:
+        return register.register(port=port, timeout=None)
+    except register.Refused as refusal:
+        if refusal.reason == register.OUTPOST_UNREACHABLE:
+            raise outpost_http.OutpostUnreachable(port) from None
+        if refusal.reason == "not_in_workspace":
+            raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
+        next_step = refusal.message or register.NEXT_STEPS.get(refusal.reason)
+        suffix = f": {_clean(next_step)}" if next_step else ""
+        raise _fail(f"this session is not registered: {_clean(refusal.reason)}{suffix}") from None
+
+
+def _credential(key: str, port: int) -> tuple[str, str]:
+    """The session's client id and secret, registering the session first when it has none."""
+    try:
+        return _read_credential(key)
+    except _NoCredential:
+        pass
+    key = _register(port)
+    try:
+        return _read_credential(key)
+    except _NoCredential:
+        raise _fail("this session registered but Outpost left it no gateway credential") from None
+
+
+def gateway_token(port: int) -> str:
+    """A fresh broker bearer token for this session: its credential read (the session registered first if it has
+    none) and exchanged. The one place a credential becomes a token."""
     key = session_key()
     if key is None:
         raise CommandError(SANDBOXED)
-    client_id, client_secret = _read_credential(key)
-    return _exchange(client_id, client_secret, port)
+    client_id, client_secret = _credential(key, port)
+    try:
+        return _exchange(client_id, client_secret, port)
+    except outpost_http.ReplyTimedOut:
+        raise outpost_http.OutpostUnreachable(port) from None
 
 
 def _exchange(client_id: str, client_secret: str, port: int) -> str:
@@ -94,10 +163,52 @@ def _exchange(client_id: str, client_secret: str, port: int) -> str:
     token = reply.body.get("access_token")
     if reply.status == 200 and isinstance(token, str) and token:
         return token
-    code = reply.body.get("error")
+    code, description = reply.body.get("error"), reply.body.get("error_description")
     if isinstance(code, str):
-        raise _fail(f"Outpost refused the credential: {code}")
+        detail = _clean(code)
+        if isinstance(description, str) and description:
+            reason, separator, message = description.partition(": ")
+            detail = f"{_clean(reason)}: {_clean(message)}" if separator else f"{detail}: {_clean(description)}"
+        raise _fail(f"Outpost refused the credential: {detail}")
     raise _fail(CANNOT_READ)
+
+
+class _Gateway:
+    """The gateway as one session sees it: a bearer token, replaced once when Outpost refuses it as expired or as
+    replaced by a newer one (it keeps only a few live tokens per client)."""
+
+    def __init__(self, port: int) -> None:
+        self.port = port
+        outpost_http.start_reach_budget()
+        self.token = gateway_token(port)
+
+    @staticmethod
+    def _expired(reply: outpost_http.Reply | None) -> bool:
+        return reply is not None and reply.status == 401 and reply.body.get("reason") in STALE_TOKEN_REASONS
+
+    def request(self, method: str, path: str, **kwargs) -> outpost_http.Reply:
+        reply = outpost_http.request(method, path, headers=_bearer(self.token), port=self.port, **kwargs)
+        if not self._expired(reply):
+            outpost_http.reached()
+            return reply
+        self.token = gateway_token(self.port)
+        body_file = kwargs.get("body_file")
+        if body_file is not None:
+            body_file[0].seek(0)
+        reply = outpost_http.request(method, path, headers=_bearer(self.token), port=self.port, **kwargs)
+        outpost_http.reached()
+        return reply
+
+    def open_stream(self, path: str) -> outpost_http.Stream:
+        stream = outpost_http.open_stream(path, headers=_bearer(self.token), port=self.port)
+        if not self._expired(stream.refusal):
+            outpost_http.reached()
+            return stream
+        stream.close()
+        self.token = gateway_token(self.port)
+        stream = outpost_http.open_stream(path, headers=_bearer(self.token), port=self.port)
+        outpost_http.reached()
+        return stream
 
 
 def _bearer(token: str) -> dict[str, str]:
@@ -124,18 +235,33 @@ def _known(run: object) -> dict:
         raise _fail(CANNOT_READ)
     if (state == "completed") != (result is not None) or not (reason is None or isinstance(reason, str)):
         raise _fail(CANNOT_READ)
+    cancel_reason = run.get("cancel_reason")
+    if not (cancel_reason is None or isinstance(cancel_reason, str)):
+        raise _fail(CANNOT_READ)
     return run
 
 
-def _get_view(token: str, run_id: int, port: int) -> dict:
-    reply = outpost_http.request("GET", f"/gateway/runs/{run_id}", headers=_bearer(token), port=port)
+CANCEL_REASONS = {"session_ended": "the session that started it ended"}
+"""What Outpost cancels a run for without its session asking, in words."""
+
+
+def _result_text(run: dict) -> object:
+    """The run's result, with why it was cancelled when Outpost cancelled it for a reason this command knows."""
+    explanation = CANCEL_REASONS.get(run.get("cancel_reason"))
+    if run["result"] == "cancelled" and explanation is not None:
+        return f"cancelled: {explanation}"
+    return run["result"]
+
+
+def _get_view(gateway: _Gateway, run_id: int) -> dict:
+    reply = gateway.request("GET", f"/gateway/runs/{run_id}")
     if reply.status != 200:
         raise _refusal(reply, run_id)
     return _known(reply.body)
 
 
-def _list_runs(token: str, port: int) -> dict:
-    reply = outpost_http.request("GET", "/gateway/runs", headers=_bearer(token), port=port)
+def _list_runs(gateway: _Gateway) -> dict:
+    reply = gateway.request("GET", "/gateway/runs")
     if reply.status != 200:
         raise _refusal(reply)
     body = reply.body
@@ -148,7 +274,7 @@ def _list_runs(token: str, port: int) -> dict:
 
 
 def _cell(value: object) -> str:
-    return _clean(str(value)) if value is not None else "-"
+    return _one_line(str(value)) if value is not None else "-"
 
 
 def _table(runs: list[dict]) -> str:
@@ -163,15 +289,15 @@ def _table(runs: list[dict]) -> str:
 def _matrix_text(matrix: object) -> str:
     if not isinstance(matrix, dict) or not matrix:
         return "-"
-    return ", ".join(f"{_clean(str(k))}={_clean(str(v))}" for k, v in matrix.items())
+    return ", ".join(f"{_one_line(str(k))}={_one_line(str(v))}" for k, v in matrix.items())
 
 
 def _run_list(as_json: bool, port: int) -> int:
-    listing = _list_runs(_token(port), port)
+    listing = _list_runs(_Gateway(port))
     if as_json:
-        print(json.dumps({"workspace": listing["workspace"], "runs": listing["runs"]}, indent=2))
+        print(_clean(json.dumps({"workspace": listing["workspace"], "runs": listing["runs"]}, indent=2)))
     elif not listing["runs"]:
-        print(f"No runs in workspace {_clean(listing['workspace'])}")
+        print(f"No runs in workspace {_one_line(listing['workspace'])}")
     else:
         print(_table(listing["runs"]))
     return 0
@@ -183,11 +309,11 @@ def _print_fields(fields: tuple[tuple[str, object], ...]) -> None:
 
 
 def _run_view(run_id: int, port: int) -> int:
-    run = _get_view(_token(port), run_id, port)
+    run = _get_view(_Gateway(port), run_id)
     _print_fields((
         ("id", run_id),
         ("state", run["state"]),
-        ("result", run["result"]),
+        ("result", _result_text(run)),
         ("reason", run["reason"]),
         ("job", run.get("job")),
         ("workflow", run.get("workflow")),
@@ -196,22 +322,27 @@ def _run_view(run_id: int, port: int) -> int:
     return 0
 
 
+def _emit(line: bytes) -> None:
+    """Write a line of a run's log to stdout, as UTF-8 with control characters stripped."""
+    sys.stdout.buffer.write(_clean(line.decode(errors="replace")).encode())
+
+
 def _run_view_log(run_id: int, port: int) -> int:
-    token = _token(port)
-    run = _get_view(token, run_id, port)
+    gateway = _Gateway(port)
+    run = _get_view(gateway, run_id)
     if run["state"] == "queued":
         print(f"outpost-gateway: run {run_id} has not started, so it has no log yet", file=sys.stderr)
         return 0
     if run["state"] == "completed" and run.get("started_at") is None:
         print(f"outpost-gateway: run {run_id} never started, so it has no log", file=sys.stderr)
         return 0
-    stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log", headers=_bearer(token), port=port)
+    stream = gateway.open_stream(f"/gateway/runs/{run_id}/log")
     try:
         if stream.refusal is not None:
             raise _refusal(stream.refusal, run_id)
         try:
             for line in stream.lines():
-                sys.stdout.buffer.write(line)
+                _emit(line)
         except outpost_http.StreamBroken:
             raise _fail(f"the log stream was dropped before the whole log of run {run_id} was read") from None
     finally:
@@ -221,13 +352,11 @@ def _run_view_log(run_id: int, port: int) -> int:
 
 
 def _run_cancel(run_id: int, port: int) -> int:
-    reply = outpost_http.request(
-        "POST",
-        f"/gateway/runs/{run_id}/cancel",
-        headers=_bearer(_token(port)),
-        port=port,
-        timeout=CANCEL_TIMEOUT_SECONDS,
-    )
+    gateway = _Gateway(port)
+    try:
+        reply = gateway.request("POST", f"/gateway/runs/{run_id}/cancel", timeout=CANCEL_TIMEOUT_SECONDS)
+    except outpost_http.ReplyTimedOut:
+        raise _fail(f"cancel requested; check run view {run_id}") from None
     if reply.status != 202:
         raise _refusal(reply)
     state, result = reply.body.get("state"), reply.body.get("result")
@@ -239,11 +368,11 @@ def _run_cancel(run_id: int, port: int) -> int:
 
 
 def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
-    token = _token(port)
+    gateway = _Gateway(port)
     written = 0
     while True:
         run = None
-        stream = outpost_http.open_stream(f"/gateway/runs/{run_id}/log?follow=1", headers=_bearer(token), port=port)
+        stream = gateway.open_stream(f"/gateway/runs/{run_id}/log?follow=1")
         try:
             if stream.refusal is not None:
                 raise _refusal(stream.refusal, run_id)
@@ -252,25 +381,25 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
                 for line in stream.lines():
                     end = position + len(line)
                     if end > written:
-                        sys.stdout.write(line[max(0, written - position) :].decode(errors="replace"))
+                        sys.stdout.write(_clean(line[max(0, written - position) :].decode(errors="replace")))
                         sys.stdout.flush()
                         written = end
                     position = end
             except outpost_http.StreamBroken as err:
                 if not err.timed_out:
                     raise _fail(f"the log stream was dropped before run {run_id} completed") from None
-                run = _get_view(token, run_id, port)
+                run = _get_view(gateway, run_id)
                 if run["state"] != "completed":
                     continue
             break
         finally:
             stream.close()
     if run is None:
-        run = _get_view(token, run_id, port)
+        run = _get_view(gateway, run_id)
     if run["state"] != "completed":
         raise _fail(f"the log stream ended before run {run_id} completed")
     if run["result"] == "cancelled":
-        print(f"outpost-gateway: run {run_id} was cancelled", file=sys.stderr)
+        print(f"outpost-gateway: run {run_id} was {_result_text(run)}", file=sys.stderr)
         return 1 if exit_status else 0
     if not exit_status or run["result"] == "success":
         return 0
@@ -280,9 +409,25 @@ def _run_watch(run_id: int, exit_status: bool, port: int) -> int:
     return 3
 
 
+def _session_workspace() -> Path:
+    """The camp workspace the harness this command runs under belongs to, derived from the harness's own working
+    folder as Outpost derives it; no argument, environment variable or working folder of this process names it."""
+    folder = harness_cwd()
+    if folder is None:
+        raise CommandError(SANDBOXED)
+    try:
+        return workspace_containing(folder)
+    except WorkspaceError:
+        raise _fail(register.NO_GATEWAY_OUTSIDE_WORKSPACE) from None
+
+
 def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | None) -> int:
     try:
         with tree_upload.top_level(Path(os.curdir), home=scratch_home) as tree:
+            workspace = _session_workspace()
+            top = tree.path()
+            if top != workspace and workspace not in top.parents:
+                raise _fail("the working tree is not inside this session's workspace; nothing was uploaded")
             workflow = workflow or tree_upload.workflow_defining(tree, job)
             spool = tree.spool()
             try:
@@ -295,13 +440,10 @@ def _run_start(job: str, workflow: str | None, port: int, scratch_home: Path | N
     with spool:
         size = spool.tell()
         spool.seek(0)
-        token = _token(port)
-        reply = outpost_http.request(
+        reply = _Gateway(port).request(
             "POST",
             f"/gateway/runs?{urlencode({'workflow': workflow, 'job': job})}",
-            headers=_bearer(token),
             body_file=(spool, size, "application/x-tar"),
-            port=port,
         )
     body = reply.body
     if reply.status != 202:
@@ -379,18 +521,37 @@ def _dispatch(args: argparse.Namespace, port: int, scratch_home: Path | None) ->
     return _run_list(args.json, port)
 
 
+def _report(err: Exception) -> None:
+    if isinstance(err, CommandError):
+        print(err, file=sys.stderr)
+    elif isinstance(err, outpost_http.OutpostUnreachable):
+        print(
+            _fail(f"Outpost is unreachable at {outpost_http.DAEMON_HOST}:{err.port}; is it running?"), file=sys.stderr
+        )
+    else:
+        print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
+
+
 def main(argv: list[str] | None = None, *, port: int = DAEMON_PORT, scratch_home: Path | None = None) -> int:
     """*scratch_home* is where ``run start`` makes its private upload folder; the default
     is the operator's home from the password database."""
     args = _parser().parse_args(sys.argv[1:] if argv is None else argv)
     try:
         return _dispatch(args, port, scratch_home)
-    except CommandError as err:
-        print(err, file=sys.stderr)
-    except outpost_http.OutpostUnreachable as err:
-        print(
-            _fail(f"Outpost is not reachable at {outpost_http.DAEMON_HOST}:{err.port}; is it running?"), file=sys.stderr
-        )
     except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
-        print(f"outpost-gateway: unexpected failure ({type(err).__name__})", file=sys.stderr)
-    return 2
+        _report(err)
+        return 2
+    finally:
+        outpost_http.reached()
+
+
+def auth_header_main(argv: list[str] | None = None, *, port: int = DAEMON_PORT) -> int:
+    """The headersHelper entry: print the session's ``Authorization`` header as JSON, or ``{}`` and the reason on
+    stderr, and exit 0 whatever happens. Takes no arguments (any given are ignored)."""
+    try:
+        with outpost_http.reach_budget():
+            print(json.dumps({"Authorization": f"Bearer {gateway_token(port)}"}))
+    except Exception as err:  # noqa: BLE001 — a traceback must never carry credential material
+        _report(err)
+        print("{}")
+    return 0

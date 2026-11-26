@@ -33,6 +33,7 @@ from trailhead.launch_profile import (
     broker_launch,
     hub_home,
     resolve_profile,
+    workspace_containing,
 )
 from trailhead.ranger import outpost_client
 from trailhead.ranger.config import HubConfig, write_hub_config
@@ -638,6 +639,75 @@ def test_each_user_unsandboxed_command_exemption_is_denied_in_the_session(tmp_pa
     _write_user_settings(env, settings)
     start = _start(env)
     assert _bash_denies(start) == [f"Bash({e})" for e in exclusions]
+
+
+def _gateway_shim(env, name="outpost-gateway") -> str:
+    return str(Path(env["TRAILHEAD_STATE_DIR"]) / "bin" / name)
+
+
+def _hub_launched_with_exclusions(env, exclusions):
+    settings = _user_allowing_hub(env)
+    settings["sandbox"]["excludedCommands"] = exclusions
+    _write_user_settings(env, settings)
+    return _settings_of(_start(env))
+
+
+def _launched_with_exclusions(env, exclusions):
+    """A ritual (workspace-role) launch under a user who excludes *exclusions* from the sandbox."""
+    _configure_hub(env, "default")
+    ws = _make_workspace(env)
+    Path(env["HOME"], ".claude").mkdir(parents=True, exist_ok=True)
+    _ritual_user(env, ws)
+    user = json.loads((Path(env["HOME"]) / ".claude" / "settings.json").read_text())
+    user["sandbox"]["excludedCommands"] = exclusions
+    _write_user_settings(env, user)
+    return _settings_of(_ritual_start(env, ws))
+
+
+def test_a_launched_profile_does_not_deny_the_pinned_gateway_shim_and_denies_the_other_exclusions(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _launched_with_exclusions(env, ["claude plugin eval *", shim, f"{shim} *", "portage eval-gate *"])
+    denied = [r for r in start["permissions"]["deny"] if r.startswith("Bash(")]
+    assert f"Bash({shim})" not in denied and f"Bash({shim} *)" not in denied
+    assert {"Bash(claude plugin eval *)", "Bash(portage eval-gate *)"} <= set(denied)
+
+
+def test_a_launched_profile_allows_the_pinned_gateway_shim_the_user_excludes(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert f"Bash({shim}:*)" in start["permissions"]["allow"]
+
+
+def test_a_launched_profile_does_not_allow_a_gateway_shim_the_user_does_not_exclude(tmp_path):
+    env = _fence(tmp_path)
+    start = _launched_with_exclusions(env, ["claude plugin eval *"])
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+
+
+def test_a_gateway_command_at_another_path_is_still_denied_in_a_launched_profile(tmp_path):
+    env = _fence(tmp_path)
+    start = _launched_with_exclusions(env, ["/elsewhere/bin/outpost-gateway", "/elsewhere/bin/outpost-gateway *"])
+    denied = [r for r in start["permissions"]["deny"] if r.startswith("Bash(")]
+    assert denied[:2] == ["Bash(/elsewhere/bin/outpost-gateway)", "Bash(/elsewhere/bin/outpost-gateway *)"]
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
+
+
+def test_a_launched_profile_that_runs_the_gateway_denies_the_header_shim(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    header = _gateway_shim(env, "trailhead-gateway-auth-header")
+    start = _launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert {f"Bash({header})", f"Bash({header} *)"} <= set(start["permissions"]["deny"])
+
+
+def test_a_hub_launch_keeps_the_pinned_gateway_shim_denied_and_does_not_allow_it(tmp_path):
+    env = _fence(tmp_path)
+    shim = _gateway_shim(env)
+    start = _hub_launched_with_exclusions(env, [shim, f"{shim} *"])
+    assert {f"Bash({shim})", f"Bash({shim} *)"} <= set(start["permissions"]["deny"])
+    assert not [r for r in start["permissions"].get("allow", []) if r.startswith("Bash(")]
 
 
 @pytest.mark.parametrize("bad", ["claude plugin eval *", [1], {"a": "b"}])
@@ -1643,7 +1713,8 @@ def test_the_denied_reads_cover_the_database_and_session_credentials_and_follow_
         settings = _settings_of(_start(env))
         denied = settings["sandbox"]["filesystem"]["denyRead"]
         base = Path(env["OUTPOST_STATE_DIR"])
-        assert _covered_by(denied, base / "state.db")
+        assert _covered_by(denied, base / "db" / "state.db")
+        assert _covered_by(denied, base / "db" / "late.db-wal")
         assert _covered_by(denied, base / "sessions" / "s1" / "broker-client.json")
         assert _covered_by(denied, base / "operator" / "credential")
         assert all(Path(d) == base for d in denied)
@@ -2639,6 +2710,35 @@ def test_a_symlink_inside_the_root_resolves_to_the_workspace_it_points_at(tmp_pa
     assert _ritual_resolved(env, link).paths["workspace"] == ws
 
 
+def test_the_workspace_containing_a_member_folder_is_the_workspace_not_the_member(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    member = ws / "trailhead" / "sub"
+    member.mkdir(parents=True)
+    assert workspace_containing(member, env=env, platform="linux") == ws
+
+
+def test_the_workspace_containing_a_folder_reached_through_a_symlink_is_where_the_link_leads(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    other = _make_workspace(env, slug="ws2")
+    link = ws / "link"
+    link.symlink_to(other)
+    assert workspace_containing(link, env=env, platform="linux") == other
+
+
+@pytest.mark.parametrize("where", ["outside-root", "root", "group", "no-manifest"])
+def test_a_folder_that_is_in_no_workspace_has_none(tmp_path, where):
+    env, ws = _ritual_ready(tmp_path)
+    folder = {
+        "outside-root": tmp_path / "elsewhere",
+        "root": _camp_root(env),
+        "group": _camp_root(env) / "grp",
+        "no-manifest": _make_workspace(env, slug="bare", manifest=False),
+    }[where]
+    folder.mkdir(parents=True, exist_ok=True)
+    with pytest.raises(WorkspaceError):
+        workspace_containing(folder, env=env, platform="linux")
+
+
 def test_a_workspace_with_no_manifest_is_refused(tmp_path):
     env, _ = _ritual_ready(tmp_path)
     bare = _make_workspace(env, slug="bare", manifest=False)
@@ -3062,6 +3162,41 @@ def test_setup_sandbox_only_still_equals_the_full_ritual_sections_with_the_crede
     assert only == full
     assert str(Path(env["HOME"]).resolve() / ".ssh") in only["denied_reads"]
 
+
+
+def _launched_deny_sets(env, ws):
+    settings = _settings_of(_ritual_start(env, ws))
+    return settings["sandbox"]["filesystem"]["denyRead"], settings["permissions"].get("deny", [])
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "operator/credential",
+        "registration/credential",
+        "sessions/ws-4242-99/gateway-client.json",
+        "db/state.db",
+        "db/late.db-wal",
+    ],
+)
+def test_an_outpost_launched_sessions_settings_deny_the_credentials_and_the_database_to_the_sandbox(
+    tmp_path, rel
+):  # AC83
+    env, ws = _ritual_ready(tmp_path)
+    denied, _ = _launched_deny_sets(env, ws)
+    assert _covered_by(denied, Path(env["OUTPOST_STATE_DIR"]).resolve() / rel)
+
+
+def test_an_outpost_launched_sessions_settings_do_not_deny_what_it_still_has_to_read(tmp_path):
+    env, ws = _ritual_ready(tmp_path)
+    denied, _ = _launched_deny_sets(env, ws)
+    assert not _covered_by(denied, ws / "read-control.txt")
+
+
+def test_an_outpost_launched_sessions_settings_deny_the_whole_state_folder_to_the_read_tool_too(tmp_path):  # AC83
+    env, ws = _ritual_ready(tmp_path)
+    _, rules = _launched_deny_sets(env, ws)
+    assert f"Read(/{Path(env['OUTPOST_STATE_DIR']).resolve()}/**)" in rules
 
 
 # -- a ritual writes records only in its spec's vault (F29) -------------------

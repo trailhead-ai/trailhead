@@ -127,6 +127,7 @@ class TestDetectionDrivenInstall:
             "trailhead",
             "outpost-gateway",
             "trailhead-gateway-register",
+            "trailhead-gateway-auth-header",
             "portage-eval",
         }
 

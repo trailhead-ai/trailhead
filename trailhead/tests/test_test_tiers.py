@@ -7,6 +7,7 @@ subject is what that config selects, not a function. Collection is serial (`-n 0
 
 from __future__ import annotations
 
+import os
 import subprocess
 import textwrap
 from pathlib import Path
@@ -19,8 +20,23 @@ ALL_TIERS_COMMAND = '-m "not benchmark"'
 CLOSING_PREFIX = "deselected tiers: "
 
 
-def _pytest(*args, cwd=REPO):
-    return run_pytest(*args, cwd=cwd)
+GATEWAY = "gateway-e2e"
+GATEWAY_NOTE = f" ({GATEWAY}: TRAILHEAD_GATEWAY_E2E=1, from a host terminal)"
+REAL_OUTPOST = "real-outpost"
+REAL_OUTPOST_NOTE = f" ({REAL_OUTPOST}: TRAILHEAD_REAL_OUTPOST=1, needs the sibling Outpost checkout)"
+ALL_NAMES = f"{', '.join(TIERS)}, {GATEWAY}, {REAL_OUTPOST}"
+CLOSING = (
+    f"{CLOSING_PREFIX}{ALL_NAMES} — run them with .venv/bin/python -m pytest "
+    f"{ALL_TIERS_COMMAND}{GATEWAY_NOTE}{REAL_OUTPOST_NOTE}"
+)
+
+
+def _ungated_env():
+    return {k: v for k, v in os.environ.items() if k not in ("TRAILHEAD_GATEWAY_E2E", "TRAILHEAD_REAL_OUTPOST")}
+
+
+def _pytest(*args, cwd=REPO, env=None):
+    return run_pytest(*args, cwd=cwd, env=_ungated_env() if env is None else env)
 
 
 def _config_of(area: str) -> Path:
@@ -78,11 +94,26 @@ def test_a_path_scoped_run_registers_the_tier_markers(area):
 def test_a_default_run_ends_by_naming_each_deselected_tier_and_the_all_tiers_command():
     result = _pytest("--collect-only", "-q", "trailhead/tests/test_paths.py")
     last = [line for line in result.stdout.splitlines() if line.strip()][-1]
-    assert last == f"{CLOSING_PREFIX}{', '.join(TIERS)} — run them with .venv/bin/python -m pytest {ALL_TIERS_COMMAND}"
+    assert last == CLOSING
 
 
-def test_the_all_tiers_command_ends_without_the_closing_line():
+def test_the_all_tiers_command_still_names_the_gateway_gate_until_it_is_set():
     result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py")
+    last = [line for line in result.stdout.splitlines() if line.strip()][-1]
+    assert last.startswith(f"{CLOSING_PREFIX}{GATEWAY}, {REAL_OUTPOST} ")
+    assert "chromium" not in last and "seam_real" not in last
+
+
+def test_the_all_tiers_command_with_the_gateway_gate_set_ends_without_the_closing_line():
+    env = {**_ungated_env(), "TRAILHEAD_GATEWAY_E2E": "1"}
+    result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py", env=env)
+    assert f"{CLOSING_PREFIX}{REAL_OUTPOST} " in result.stdout
+    assert GATEWAY not in result.stdout.split(CLOSING_PREFIX)[-1].split(" — ")[0]
+
+
+def test_the_all_tiers_command_with_both_gates_set_ends_without_the_closing_line():
+    env = {**_ungated_env(), "TRAILHEAD_GATEWAY_E2E": "1", "TRAILHEAD_REAL_OUTPOST": "1"}
+    result = _pytest("--collect-only", "-q", "-m", "not benchmark", "trailhead/tests/test_paths.py", env=env)
     assert CLOSING_PREFIX not in result.stdout
 
 
@@ -90,7 +121,7 @@ def test_the_closing_line_names_only_the_tiers_still_deselected():
     result = _pytest(
         "--collect-only", "-q", "-m", "not benchmark and not seam_real", "trailhead/tests/test_paths.py"
     )
-    assert f"{CLOSING_PREFIX}seam_real " in result.stdout
+    assert f"{CLOSING_PREFIX}seam_real, {GATEWAY}, {REAL_OUTPOST} " in result.stdout
     assert "chromium" not in result.stdout.split(CLOSING_PREFIX)[-1]
 
 
@@ -110,7 +141,7 @@ def test_a_tier_selection_that_matches_no_test_exits_nonzero():
 def test_a_path_scoped_run_ends_with_the_same_closing_line(path):
     result = _pytest("--collect-only", "-q", path)
     last = [line for line in result.stdout.splitlines() if line.strip()][-1]
-    assert last == f"{CLOSING_PREFIX}{', '.join(TIERS)} — run them with .venv/bin/python -m pytest {ALL_TIERS_COMMAND}"
+    assert last == CLOSING
 
 
 def test_a_run_that_loads_a_member_conftest_prints_the_closing_line_once():

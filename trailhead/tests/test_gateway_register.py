@@ -15,6 +15,7 @@ from trailhead.tests._gateway_support import (
     register_runner_cmd,
     run_under_harness,
     runner_env,
+    silent_listener,
     write_authority,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -56,6 +57,17 @@ def run(launcher, outpost_state, trailhead_state):
         return proc, found[0]
 
     return _run
+
+
+def _hook_output(proc):
+    """The one JSON object the hook printed, with the invariants every such object holds."""
+    assert proc.stdout.strip(), "the hook printed nothing"
+    out = json.loads(proc.stdout)
+    line = out["systemMessage"]
+    assert "\n" not in line and line.strip()
+    assert out["hookSpecificOutput"] == {"hookEventName": "SessionStart", "additionalContext": line}
+    assert set(out) == {"systemMessage", "hookSpecificOutput"}
+    return line
 
 
 def _log_lines(trailhead_state):
@@ -142,12 +154,13 @@ class TestFailurePaths:
         with StubOutpost(register_reply=(status, {"reason": reason, "message": ECHOED_SECRET})) as stub:
             proc, harness = run(stub.port)
         assert proc.returncode == 0
-        assert proc.stdout == ""
+        message = _hook_output(proc)
         assert proc.stderr.strip() == reason
         (line,) = _log_lines(trailhead_state)
         parts = line.split()
-        assert parts[-1] == reason
-        assert parts[-2] == f"ws-{harness[0]}-{harness[1]}"
+        assert parts[2] == reason
+        assert parts[1] == f"ws-{harness[0]}-{harness[1]}"
+        assert line.endswith(f" {message}")
 
     def test_a_missing_authority_file_exits_zero_and_is_reason_coded(self, run, trailhead_state):
         with StubOutpost() as stub:
@@ -156,7 +169,7 @@ class TestFailurePaths:
         assert proc.returncode == 0
         assert proc.stderr.strip() == "authority_missing"
         (line,) = _log_lines(trailhead_state)
-        assert line.split()[-1] == "authority_missing"
+        assert line.split()[2] == "authority_missing"
 
     def test_a_closed_port_exits_zero_well_inside_two_seconds(self, run, outpost_state, trailhead_state):
         write_authority(outpost_state)
@@ -165,7 +178,7 @@ class TestFailurePaths:
         elapsed = time.monotonic() - started
         assert proc.returncode == 0
         assert proc.stderr.strip() == "outpost_unreachable"
-        assert _log_lines(trailhead_state)[0].split()[-1] == "outpost_unreachable"
+        assert _log_lines(trailhead_state)[0].split()[2] == "outpost_unreachable"
         assert elapsed < 2.0
 
     def test_a_reply_that_is_not_the_contract_is_reason_coded_without_echoing_it(
@@ -176,7 +189,7 @@ class TestFailurePaths:
             proc, _ = run(stub.port)
         assert proc.returncode == 0
         assert proc.stderr.strip() == "unexpected_reply"
-        assert _log_lines(trailhead_state)[0].split()[-1] == "unexpected_reply"
+        assert _log_lines(trailhead_state)[0].split()[2] == "unexpected_reply"
 
     def test_no_harness_ancestor_registers_nothing_and_is_reason_coded(self, run, outpost_state, trailhead_state):
         write_authority(outpost_state)
@@ -186,7 +199,7 @@ class TestFailurePaths:
         assert proc.returncode == 0
         assert proc.stderr.strip() == "no_harness"
         (line,) = _log_lines(trailhead_state)
-        assert line.split()[-2:] == ["-", "no_harness"]
+        assert line.split()[1:3] == ["-", "no_harness"]
 
     @pytest.mark.parametrize("scenario", ["refused", "missing", "unreachable"])
     def test_no_secret_reaches_stdout_stderr_or_the_log(self, run, outpost_state, trailhead_state, scenario):
@@ -203,6 +216,127 @@ class TestFailurePaths:
         assert REGISTRATION_AUTHORITY not in everything
         assert ECHOED_SECRET not in everything
         assert _log_lines(trailhead_state), "a failure must leave a log line"
+
+
+class TestNoCredentialMessage:
+    """When no credential results, the hook says so in one line: on stdout for the session, and in the log."""
+
+    def test_unreachable_outpost_says_it_will_register_on_the_first_gateway_call(
+        self, run, outpost_state, trailhead_state
+    ):
+        write_authority(outpost_state)
+        proc, _ = run(free_port())
+        assert proc.returncode == 0
+        message = _hook_output(proc)
+        assert "no gateway credential" in message.lower()
+        assert "it will register on the first gateway call once Outpost is back" in message
+        assert _log_lines(trailhead_state)[0].endswith(f" {message}")
+
+    def test_a_refusal_carries_outposts_reason_and_its_next_step(self, run, outpost_state):
+        write_authority(outpost_state)
+        reply = (403, {"reason": "host_not_allowed", "message": "Open Outpost from the host."})
+        with StubOutpost(register_reply=reply) as stub:
+            proc, _ = run(stub.port)
+        message = _hook_output(proc)
+        assert "host_not_allowed" in message
+        assert "Open Outpost from the host." in message
+
+    def test_a_refusal_without_a_message_carries_the_reasons_next_step(self, run, outpost_state):
+        write_authority(outpost_state)
+        with StubOutpost(register_reply=(500, {"reason": "internal"})) as stub:
+            proc, _ = run(stub.port)
+        message = _hook_output(proc)
+        assert "internal" in message
+
+    def test_outside_a_camp_workspace_says_so_in_the_gateway_commands_words(self, run, outpost_state):
+        from trailhead.gateway.register import NO_GATEWAY_OUTSIDE_WORKSPACE
+
+        write_authority(outpost_state)
+        with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": ECHOED_SECRET})) as stub:
+            proc, _ = run(stub.port)
+        message = _hook_output(proc)
+        assert NO_GATEWAY_OUTSIDE_WORKSPACE in message
+        assert ECHOED_SECRET not in message
+
+    def test_a_local_failure_names_its_reason_and_next_step(self, run):
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        message = _hook_output(proc)
+        assert "authority_missing" in message
+        assert "Start Outpost" in message
+
+    def test_a_message_with_control_characters_and_newlines_stays_one_clean_line(self, run, outpost_state):
+        write_authority(outpost_state)
+        dirty = "Do this.\nThen\tthat\x1b[31m now\x07."
+        with StubOutpost(register_reply=(403, {"reason": "host_not_allowed", "message": dirty})) as stub:
+            proc, _ = run(stub.port)
+        message = _hook_output(proc)
+        assert "Do this. Then that" in message
+        assert not any(ord(c) < 0x20 or 0x7f <= ord(c) <= 0x9f for c in message)
+
+    def test_a_silent_outpost_exits_zero_with_the_line_well_inside_two_seconds(self, run, outpost_state):
+        write_authority(outpost_state)
+        with silent_listener() as port:
+            started = time.monotonic()
+            proc, _ = run(port)
+            elapsed = time.monotonic() - started
+        assert proc.returncode == 0
+        assert "once Outpost is back" in _hook_output(proc)
+        assert elapsed < 2.0, elapsed
+
+
+class TestAuthorityIsReadSafely:
+    """The registration authority is read as the gateway credential is: no link followed, a regular file, the
+    operator's, mode 0600."""
+
+    def test_an_authority_that_is_a_link_is_refused_with_a_message_and_nothing_is_sent(self, run, outpost_state):
+        real = write_authority(outpost_state)
+        planted = real.with_name("elsewhere")
+        real.rename(planted)
+        real.symlink_to(planted)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        assert proc.returncode == 0
+        message = _hook_output(proc)
+        assert "symbolic link" in message and "refusing to read" in message
+        assert REGISTRATION_AUTHORITY not in proc.stdout + proc.stderr
+
+    @pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o700, 0o400])
+    def test_an_authority_whose_mode_is_not_0600_is_refused_and_nothing_is_sent(self, run, outpost_state, mode):
+        write_authority(outpost_state, mode=mode)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        message = _hook_output(proc)
+        assert f"mode {mode:04o}" in message and "0600" in message
+
+    def test_an_authority_that_is_not_a_regular_file_is_refused_and_nothing_is_sent(self, run, outpost_state):
+        path = outpost_state / "registration" / "credential"
+        path.mkdir(parents=True)
+        with StubOutpost() as stub:
+            proc, _ = run(stub.port)
+        assert stub.requests == []
+        assert "not a regular file" in _hook_output(proc)
+
+    def test_an_authority_the_operator_does_not_own_is_refused_and_nothing_is_sent(self, outpost_state, monkeypatch):
+        import os
+
+        from trailhead.gateway import register
+
+        write_authority(outpost_state)
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        monkeypatch.setattr(register, "_operator_uid", lambda: os.geteuid() + 1)
+        with pytest.raises(register.Refused) as refused:
+            register._read_authority()
+        assert "not owned by you" in refused.value.message
+
+    def test_an_authority_the_operator_owns_with_mode_0600_is_read(self, outpost_state, monkeypatch):
+        from trailhead.gateway import register
+
+        write_authority(outpost_state, "an-authority-SEEDED-5")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        assert register._read_authority() == "an-authority-SEEDED-5"
 
 
 class TestWithoutHookFlag:
@@ -241,7 +375,7 @@ class TestAuthorityProblems:
         assert stub.requests == []
         assert proc.returncode == 0
         assert proc.stderr.strip() == reason
-        assert _log_lines(trailhead_state)[0].split()[-1] == reason
+        assert _log_lines(trailhead_state)[0].split()[2] == reason
 
     def test_an_unforeseen_failure_exits_zero_with_a_generic_reason(self, run, outpost_state, trailhead_state):
         write_authority(outpost_state, "authority-日本語")
@@ -249,5 +383,41 @@ class TestAuthorityProblems:
             proc, _ = run(stub.port)
         assert proc.returncode == 0
         assert proc.stderr.strip() == "unexpected_failure"
-        assert _log_lines(trailhead_state)[0].split()[-2:] == ["-", "unexpected_failure"]
+        assert _log_lines(trailhead_state)[0].split()[1:3] == ["-", "unexpected_failure"]
         assert "日本語" not in proc.stderr + "".join(_log_lines(trailhead_state))
+
+
+class TestRefusalCarriesOutpostsNextStep:
+    """What the on-demand registration of the gateway command reads from a refusal; the hook prints only the reason
+    code."""
+
+    def _register(self, monkeypatch, outpost_state, port, **kwargs):
+        from trailhead.gateway import register
+
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(outpost_state))
+        monkeypatch.setattr(register, "harness_process", lambda: (4242, 987654))
+        write_authority(outpost_state)
+        return register.register(port=port, **kwargs)
+
+    @pytest.mark.parametrize("message", ["Move to a camp workspace.", "Try again later."])
+    def test_a_refusal_holds_the_message_outpost_sent_with_its_reason(self, message, monkeypatch, outpost_state):
+        from trailhead.gateway import register
+
+        with StubOutpost(register_reply=(422, {"reason": "not_in_workspace", "message": message})) as stub:
+            with pytest.raises(register.Refused) as refused:
+                self._register(monkeypatch, outpost_state, stub.port)
+        assert (refused.value.reason, refused.value.message) == ("not_in_workspace", message)
+
+    def test_a_refusal_without_a_message_holds_none(self, monkeypatch, outpost_state):
+        from trailhead.gateway import register
+
+        with StubOutpost(register_reply=(500, {"reason": "internal"})) as stub:
+            with pytest.raises(register.Refused) as refused:
+                self._register(monkeypatch, outpost_state, stub.port)
+        assert (refused.value.reason, refused.value.message) == ("internal", None)
+
+    def test_the_port_asked_for_is_the_port_called(self, monkeypatch, outpost_state):
+        with StubOutpost() as stub:
+            key = self._register(monkeypatch, outpost_state, stub.port, timeout=None)
+            assert [q.path for q in stub.requests] == ["/gateway/sessions"]
+        assert key == "ws-4242-987654"

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from trailhead.harness import harness_process, session_key
-from trailhead.harness.process import parse_linux_stat, parse_lstart
+from trailhead.harness.process import _default_runner, harness_cwd, parse_linux_stat, parse_lstart
 from trailhead.tests._harness_process_support import make_fake_harness, run_under_fake_harness
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -93,6 +93,108 @@ class TestWalkOverFakeProc:
         self._proc(tmp_path, 20, 1, "claude", "/h/claude/versions/2")
         self._proc(tmp_path, 30, 20, "sh", "/bin/dash")
         assert session_key(start_pid=30, proc_root=tmp_path, system="Linux") == "ws-20-4242"
+
+
+class TestHarnessCwd:
+    """The working folder of the harness process: where Outpost finds the session's workspace."""
+
+    def _proc(self, root: Path, pid: int, ppid: int, comm: str, exe: str, cwd: str | None) -> None:
+        TestWalkOverFakeProc._proc(self, root, pid, ppid, comm, exe)  # type: ignore[arg-type]
+        if cwd is not None:
+            (root / str(pid) / "cwd").symlink_to(cwd)
+
+    def test_it_is_the_harness_s_folder_not_the_asking_process_s(self, tmp_path: Path) -> None:
+        self._proc(tmp_path, 20, 1, "claude", "/h/claude/versions/2", "/ws/one")
+        self._proc(tmp_path, 30, 20, "sh", "/bin/dash", "/ws/one/deeper")
+        assert harness_cwd(start_pid=30, proc_root=tmp_path, system="Linux") == Path("/ws/one")
+
+    def test_it_follows_the_harness_when_the_harness_changes_folder(self, tmp_path: Path) -> None:
+        self._proc(tmp_path, 20, 1, "claude", "/h/claude/versions/2", "/ws/two")
+        self._proc(tmp_path, 30, 20, "sh", "/bin/dash", "/ws/one")
+        assert harness_cwd(start_pid=30, proc_root=tmp_path, system="Linux") == Path("/ws/two")
+
+    def test_no_harness_gives_none(self, tmp_path: Path) -> None:
+        self._proc(tmp_path, 30, 1, "sh", "/bin/dash", "/ws/one")
+        assert harness_cwd(start_pid=30, proc_root=tmp_path, system="Linux") is None
+
+    def test_an_unreadable_folder_gives_none(self, tmp_path: Path) -> None:
+        self._proc(tmp_path, 20, 1, "claude", "/h/claude/versions/2", None)
+        self._proc(tmp_path, 30, 20, "sh", "/bin/dash", "/ws/one")
+        assert harness_cwd(start_pid=30, proc_root=tmp_path, system="Linux") is None
+
+    def test_on_macos_it_is_read_with_lsof(self, tmp_path: Path) -> None:
+        launcher = make_fake_harness(tmp_path)
+        tools = tmp_path / "tools"
+        tools.mkdir()
+        (tools / "lsof").write_text("")
+        (tools / "lsof").chmod(0o755)
+
+        def run(args: list[str]) -> str:
+            if args[0] == str(tools / "lsof"):
+                assert args[1:] == ["-a", "-p", "50", "-d", "cwd", "-Fn"]
+                return "p50\nfcwd\nn/ws/mac\n"
+            pid = int(args[-1])
+            table = {50: ("40", str(launcher)), 60: ("50", "/bin/zsh")}
+            ppid, comm = table[pid]
+            return _LSTART if "lstart=" in args else f"{ppid} {comm}"
+
+        assert harness_cwd(start_pid=60, system="Darwin", runner=run, tool_dirs=(str(tools),)) == Path("/ws/mac")
+
+    def _mac_runner(self, launcher: Path):
+        def run(args: list[str]) -> str:
+            if args[0] == "ps":
+                table = {50: ("40", str(launcher)), 60: ("50", "/bin/zsh")}
+                ppid, comm = table[int(args[-1])]
+                return _LSTART if "lstart=" in args else f"{ppid} {comm}"
+            return _default_runner(args)
+
+        return run
+
+    def test_on_macos_lsof_is_found_outside_the_shim_s_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        launcher = make_fake_harness(tmp_path)
+        sbin = tmp_path / "sbin"
+        sbin.mkdir()
+        lsof = sbin / "lsof"
+        lsof.write_text("#!/bin/sh\nprintf 'p50\\nfcwd\\nn/ws/found\\n'\n")
+        lsof.chmod(0o755)
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        assert harness_cwd(
+            start_pid=60, system="Darwin", runner=self._mac_runner(launcher), tool_dirs=(str(sbin),)
+        ) == Path("/ws/found")
+
+    def test_on_macos_lsof_is_not_taken_from_the_caller_s_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        launcher = make_fake_harness(tmp_path)
+        planted = tmp_path / "planted"
+        planted.mkdir()
+        lsof = planted / "lsof"
+        lsof.write_text("#!/bin/sh\nprintf 'p50\\nfcwd\\nn/ws/planted\\n'\n")
+        lsof.chmod(0o755)
+        monkeypatch.setenv("PATH", f"{planted}:/usr/bin:/bin")
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert harness_cwd(
+            start_pid=60, system="Darwin", runner=self._mac_runner(launcher), tool_dirs=(str(empty),)
+        ) is None
+
+    @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="needs /proc")
+    def test_a_real_harness_process_reports_its_real_folder(self, tmp_path: Path) -> None:
+        launcher = make_fake_harness(tmp_path)
+        folder = tmp_path / "harness-cwd"
+        folder.mkdir()
+        script = tmp_path / "child.py"
+        script.write_text(
+            f"import sys\nsys.path.insert(0, {str(REPO_ROOT)!r})\n"
+            "from trailhead.harness.process import harness_cwd\nprint(harness_cwd())\n"
+        )
+        proc = subprocess.run(
+            [str(launcher), "-c", f"/bin/sh -c 'cd /; {sys.executable} {script}'; :"],
+            cwd=folder, capture_output=True, text=True,
+        )
+        assert proc.stdout.strip() == str(folder.resolve()), proc.stderr
 
 
 class TestLinuxStatParsing:

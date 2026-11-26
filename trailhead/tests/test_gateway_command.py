@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from trailhead.gateway import command, outpost_http
+from trailhead.gateway import command, outpost_http, register
 
 from trailhead.tests._gateway_support import (
     CLIENT_ID,
@@ -24,6 +24,7 @@ from trailhead.tests._gateway_support import (
     free_port,
     run_gateway_runner,
     runner_env,
+    write_authority,
     write_credential,
 )
 from trailhead.tests._harness_process_support import make_fake_harness
@@ -153,13 +154,71 @@ class TestFailurePaths:
             assert stub.requests == []
         self._fails_with(r, SANDBOX_LINE)
 
-    def test_missing_credential_file_points_at_the_register_log(self, launcher, tmp_path, state):
+    def test_a_credential_file_that_is_a_symlink_is_refused_naming_it_and_no_request_is_sent(
+        self, launcher, tmp_path, state
+    ):
+        decoy = tmp_path / "another-sessions-credential.json"
+        decoy.write_text(json.dumps({"client_id": "other-id", "client_secret": "other-secret"}))
+        decoy.chmod(0o600)
+        links = []
+
+        def seed(key):
+            path = state / "sessions" / key / "gateway-client.json"
+            path.parent.mkdir(parents=True)
+            path.symlink_to(decoy)
+            links.append(path)
+
+        with StubOutpost(client_id="other-id", client_secret="other-secret", runs=RUNS) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        (line,) = r.proc.stderr.splitlines()
+        assert str(links[0]) in line and "symbolic link" in line
+
+    @pytest.mark.parametrize("mode", [0o644, 0o640, 0o660, 0o400, 0o700])
+    def test_a_credential_file_whose_mode_is_not_0600_is_refused_naming_it_and_no_request_is_sent(
+        self, launcher, tmp_path, state, mode
+    ):
+        paths = []
+
+        def seed(key):
+            paths.append(write_credential(state, key))
+            paths[0].chmod(mode)
+
         with StubOutpost(runs=RUNS) as stub:
-            r = _run(
-                launcher, tmp_path, state, stub.port, seed=None, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
-            )
-        expected_log = tmp_path / "xdg" / "trailhead" / "gateway" / "register.log"
-        self._fails_with(r, f"outpost-gateway: this session has no gateway credential; see {expected_log} for why")
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        (line,) = r.proc.stderr.splitlines()
+        assert str(paths[0]) in line and f"mode {mode:04o}" in line and "0600" in line
+
+    def test_a_credential_file_that_is_not_a_regular_file_is_refused_and_no_request_is_sent(
+        self, launcher, tmp_path, state
+    ):
+        def seed(key):
+            (state / "sessions" / key / "gateway-client.json").mkdir(parents=True)
+
+        with StubOutpost(runs=RUNS) as stub:
+            r = _run(launcher, tmp_path, state, stub.port, seed=seed)
+            assert stub.requests == []
+        assert r.proc.returncode == 2 and r.proc.stdout == ""
+        assert "not a regular file" in r.proc.stderr
+
+    def test_a_credential_file_the_operator_does_not_own_is_refused_and_no_request_is_sent(
+        self, tmp_path, state, monkeypatch
+    ):
+        # Running as the operator, no file can be made another user's, so the owner the command compares against is
+        # injected.
+        write_credential(state, "k1")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+        monkeypatch.setattr(command, "_operator_uid", lambda: os.geteuid() + 1)
+        with pytest.raises(command.CommandError, match=r"gateway-client\.json.*not owned by you"):
+            command._read_credential("k1")
+
+    def test_a_credential_file_the_operator_owns_with_mode_0600_is_read(self, tmp_path, state, monkeypatch):
+        write_credential(state, "k1", client_id="the-id", client_secret="the-secret")
+        monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+        assert command._read_credential("k1") == ("the-id", "the-secret")
 
     def test_credential_missing_refusal_is_named_by_its_reason_code(self, launcher, tmp_path, state):
         body = {"reason": "credential_missing", "message": "No credential was presented."}
@@ -185,22 +244,23 @@ class TestFailurePaths:
             assert [q.path for q in stub.requests] == ["/broker/token"]
         self._fails_with(r, "outpost-gateway: Outpost refused the credential: invalid_client")
 
+    def test_token_exchange_refusal_prints_the_reason_code_and_its_next_step(self, launcher, tmp_path, state):
+        refusal = {
+            "error": "invalid_client",
+            "error_description": "credential_revoked: This session has ended: start a new one.",
+        }
+        with StubOutpost(token_reply=(401, refusal)) as stub:
+            r = _run(launcher, tmp_path, state, stub.port)
+        self._fails_with(
+            r,
+            "outpost-gateway: Outpost refused the credential: "
+            "credential_revoked: This session has ended: start a new one.",
+        )
+
     def test_closed_port_says_outpost_is_unreachable(self, launcher, tmp_path, state):
         port = free_port()
         r = _run(launcher, tmp_path, state, port)
-        self._fails_with(r, f"outpost-gateway: Outpost is not reachable at 127.0.0.1:{port}; is it running?")
-
-    def test_malformed_credential_file_is_reported_as_no_usable_credential(self, launcher, tmp_path, state):
-        def seed(key):
-            (write_credential(state, key)).write_text("{not json")
-
-        with StubOutpost() as stub:
-            r = _run(
-                launcher, tmp_path, state, stub.port, seed=seed, extra_env={"XDG_STATE_HOME": str(tmp_path / "xdg")}
-            )
-            assert stub.requests == []
-        assert r.proc.returncode != 0
-        assert "this session has no gateway credential" in r.proc.stderr
+        self._fails_with(r, f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{port}; is it running?")
 
 
 class TestHygiene:
@@ -346,7 +406,7 @@ NOT_FOUND = (404, {"reason": "run_not_found", "message": "No run with that id."}
 def view(**over):
     base = {
         "id": 7, "workspace": "trailhead/ws", "workflow": WORKFLOW, "job": "build", "matrix": None,
-        "state": "completed", "result": "success", "reason": None,
+        "state": "completed", "result": "success", "reason": None, "cancel_reason": None,
         "created_at": "2026-11-10T09:00:00Z", "started_at": "2026-11-10T09:00:01Z",
         "finished_at": "2026-11-10T09:00:09Z", "exit_code": 0,
     }
@@ -357,9 +417,37 @@ def git(cwd, *args):
     subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
 
 
+def make_workspace(camp, slug, group="g"):
+    ws = camp / group / "worktrees" / slug
+    ws.mkdir(parents=True)
+    (ws / "manifest.json").write_text("{}")
+    return ws
+
+
+class HarnessFolder:
+    """Where the harness process the command runs under is working: the folder Outpost derives the workspace from."""
+
+    def __init__(self, path):
+        self.path = path
+
+
 @pytest.fixture
-def repo(tmp_path, hermetic_git_env):
-    root = tmp_path / "repo"
+def workspace(tmp_path, monkeypatch):
+    camp = tmp_path / "camp"
+    monkeypatch.setenv("CAMP_STATE_DIR", str(camp))
+    return make_workspace(camp, "ws-a")
+
+
+@pytest.fixture
+def harness_folder(workspace, monkeypatch):
+    folder = HarnessFolder(workspace)
+    monkeypatch.setattr(command, "harness_cwd", lambda: folder.path)
+    return folder
+
+
+@pytest.fixture
+def repo(workspace, hermetic_git_env):
+    root = workspace / "repo"
     (root / ".github" / "workflows").mkdir(parents=True)
     (root / "sub").mkdir()
     (root / WORKFLOW).write_text(CI_YML)
@@ -391,8 +479,12 @@ def scratch_home(tmp_path):
     return home
 
 
+HARNESS = (4242, 987654)
+HARNESS_KEY = "ws-4242-987654"
+
+
 @pytest.fixture
-def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
+def cli(tmp_path, state, scratch_home, harness_folder, monkeypatch, capsys):
     monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
     monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
     write_credential(state, "ws-test-1")
@@ -402,6 +494,58 @@ def cli(tmp_path, state, scratch_home, monkeypatch, capsys):
             monkeypatch.chdir(cwd)
         capsys.readouterr()
         rc = command.main(list(argv), port=port, scratch_home=scratch_home)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+@pytest.fixture
+def unregistered(tmp_path, state, monkeypatch, capsys):
+    """The command run in-process by a session that has no credential file yet; the harness is a fixed one."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: HARNESS_KEY)
+    monkeypatch.setattr(register, "harness_process", lambda: HARNESS)
+
+    def call(port, *argv, authority=True):
+        if authority:
+            write_authority(state)
+        capsys.readouterr()
+        rc = command.main(list(argv), port=port)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+@pytest.fixture
+def header(state, monkeypatch, capsys):
+    """The headersHelper entry run in-process by a registered session."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: "ws-test-1")
+    write_credential(state, "ws-test-1")
+
+    def call(port):
+        capsys.readouterr()
+        rc = command.auth_header_main([], port=port)
+        out, err = capsys.readouterr()
+        return rc, out, err
+
+    return call
+
+
+@pytest.fixture
+def header_unregistered(state, monkeypatch, capsys):
+    """The headersHelper entry run in-process by a session that has no credential file yet."""
+    monkeypatch.setenv("OUTPOST_STATE_DIR", str(state))
+    monkeypatch.setattr(command, "session_key", lambda: HARNESS_KEY)
+    monkeypatch.setattr(register, "harness_process", lambda: HARNESS)
+
+    def call(port, *, authority=True):
+        if authority:
+            write_authority(state)
+        capsys.readouterr()
+        rc = command.auth_header_main([], port=port)
         out, err = capsys.readouterr()
         return rc, out, err
 
@@ -452,6 +596,80 @@ class TestRunStart:
             names = set(uploaded(stub).getnames())
         assert rc == 0, err
         assert {"tracked.txt", "sub/inner.txt", WORKFLOW} <= names
+
+    def test_a_top_level_that_is_a_symlink_out_of_the_workspace_is_refused_before_anything_is_sent(
+        self, cli, workspace, tmp_path, hermetic_git_env
+    ):
+        denied = tmp_path / "denied-repo"
+        denied.mkdir()
+        (denied / "secret.txt").write_text("secret\n")
+        git(denied, "init", "-q")
+        git(denied, "add", ".")
+        git(denied, "commit", "-q", "-m", "init")
+        (workspace / "link").symlink_to(denied)
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", "--workflow", WORKFLOW, cwd=workspace / "link")
+            assert stub.requests == []
+        assert rc == 2
+        assert out == ""
+        assert err == "outpost-gateway: the working tree is not inside this session's workspace; nothing was uploaded\n"
+
+    def test_a_workspace_whose_name_is_a_prefix_of_the_trees_workspace_does_not_contain_it(
+        self, cli, workspace, tmp_path, hermetic_git_env
+    ):
+        sibling = make_workspace(tmp_path / "camp", "ws-ab")
+        other = sibling / "repo"
+        other.mkdir()
+        git(other, "init", "-q")
+        (other / "f.txt").write_text("f\n")
+        git(other, "add", ".")
+        git(other, "commit", "-q", "-m", "init")
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", "--workflow", WORKFLOW, cwd=other)
+            assert stub.requests == []
+        assert rc == 2
+        assert "not inside this session's workspace" in err
+
+    def test_a_tree_in_the_workspace_reached_through_a_symlink_from_elsewhere_is_uploaded(
+        self, cli, repo, tmp_path
+    ):
+        alias = tmp_path / "alias-into-workspace"
+        alias.symlink_to(repo)
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=alias)
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert "tracked.txt" in names
+
+    def test_a_workspace_that_is_itself_the_repository_is_uploaded(self, cli, workspace, hermetic_git_env):
+        (workspace / ".github" / "workflows").mkdir(parents=True)
+        (workspace / WORKFLOW).write_text(CI_YML)
+        git(workspace, "init", "-q")
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=workspace)
+            names = set(uploaded(stub).getnames())
+        assert rc == 0, err
+        assert WORKFLOW in names
+
+    def test_a_harness_that_is_in_no_camp_workspace_is_told_so_and_nothing_is_sent(
+        self, cli, repo, harness_folder, tmp_path
+    ):
+        harness_folder.path = tmp_path
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert err == f"outpost-gateway: {register.NO_GATEWAY_OUTSIDE_WORKSPACE}\n"
+
+    def test_a_process_with_no_harness_is_told_it_is_in_the_sandbox_and_nothing_is_sent(
+        self, cli, repo, harness_folder
+    ):
+        harness_folder.path = None
+        with StubOutpost() as stub:
+            rc, _, err = cli(stub.port, "run", "start", "build", cwd=repo)
+            assert stub.requests == []
+        assert rc == 2
+        assert err == f"{command.SANDBOXED}\n"
 
     def test_outside_a_git_work_tree_it_is_refused_before_anything_is_sent(self, cli, tmp_path):
         bare = tmp_path / "plain"
@@ -560,7 +778,7 @@ class TestRunStart:
         port = free_port()
         rc, _, err = cli(port, "run", "start", "build", cwd=repo)
         assert rc == 2
-        assert f"Outpost is not reachable at 127.0.0.1:{port}" in err
+        assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
 
     def test_a_scratch_folder_reached_through_a_symlink_is_refused_before_anything_is_sent(
         self, cli, repo, scratch_home, tmp_path
@@ -639,7 +857,7 @@ class TestRunWatch:
     def test_exit_status_is_2_when_outpost_is_unreachable(self, cli):
         rc, _, err = cli(free_port(), "run", "watch", "7", "--exit-status")
         assert rc == 2
-        assert "not reachable" in err
+        assert "Outpost is unreachable" in err
 
     def test_without_the_flag_a_failed_run_still_exits_0_once_complete(self, cli):
         with StubOutpost(view=view(result="failure", exit_code=1), log_steps=self.LOG) as stub:
@@ -720,6 +938,25 @@ class TestRunView:
         assert rc == 0
         assert "result:   cancelled" in out.splitlines()
 
+    def test_a_run_cancelled_because_its_session_ended_says_so(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="session_ended")
+        with StubOutpost(view=v) as stub:
+            rc, out, _ = cli(stub.port, "run", "view", "7")
+        assert rc == 0
+        assert "result:   cancelled: the session that started it ended" in out.splitlines()
+
+    def test_a_cancel_reason_it_does_not_know_leaves_the_result_as_plain_cancelled(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="something_new")
+        with StubOutpost(view=v) as stub:
+            _, out, _ = cli(stub.port, "run", "view", "7")
+        assert "result:   cancelled" in out.splitlines()
+
+    def test_a_cancel_reason_that_is_not_text_is_refused(self, cli):
+        with StubOutpost(view=view(result="cancelled", exit_code=None, cancel_reason=5)) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "7")
+        assert (rc, out) == (2, "")
+        assert "cannot read" in err
+
     def test_prints_state_result_reason_job_workflow_and_matrix(self, cli):
         v = view(result="failure", reason="no runner", matrix={"os": "linux", "node": "20"}, job="test")
         with StubOutpost(view=v) as stub:
@@ -775,6 +1012,21 @@ class TestRunWatchCancelled:
             rc, out, err = self._watch(cli, stub)
         assert (rc, out, err) == (0, "one\n", self.CANCELLED)
 
+    def test_a_run_cancelled_because_its_session_ended_says_so_and_still_exits_1(self, cli):
+        v = view(result="cancelled", exit_code=None, cancel_reason="session_ended")
+        with StubOutpost(view=v, log_steps=["one\n"]) as stub:
+            rc, out, err = self._watch(cli, stub, "--exit-status")
+        assert (rc, out, err) == (
+            1,
+            "one\n",
+            "outpost-gateway: run 7 was cancelled: the session that started it ended\n",
+        )
+
+    def test_a_session_ended_reason_on_a_run_that_was_not_cancelled_is_not_shown(self, cli):
+        with StubOutpost(view=view(result="success", cancel_reason="session_ended"), log_steps=[]) as stub:
+            _, _, err = self._watch(cli, stub)
+        assert "session that started it ended" not in err
+
     @pytest.mark.parametrize("result", ["success", "failure"])
     def test_no_cancelled_line_for_a_run_that_was_not_cancelled(self, result, cli):
         with StubOutpost(view=view(result=result), log_steps=[]) as stub:
@@ -796,7 +1048,7 @@ class TestRunViewLog:
         return cli(stub.port, "run", "view", "7", "--log")
 
     def test_prints_exactly_the_bytes_the_log_route_returned_without_following(self, cli):
-        log = "caf\u00e9 one\r\n\ttwo, no trailing newline"
+        log = "caf\u00e9 one\n\ttwo, no trailing newline"
         with StubOutpost(view=view(), log_steps=[log]) as stub:
             rc, out, err = self._log(cli, stub)
             asked = [q for q in stub.requests if "/log" in q.path]
@@ -944,7 +1196,7 @@ class TestRunCancel:
     def test_an_unreachable_outpost_exits_2(self, cli):
         rc, _, err = cli(free_port(), "run", "cancel", "7")
         assert rc == 2
-        assert "not reachable" in err
+        assert "Outpost is unreachable" in err
 
     def test_a_non_numeric_id_is_a_usage_error(self, cli):
         with StubOutpost() as stub, pytest.raises(SystemExit) as stop:
@@ -1017,3 +1269,423 @@ class TestHygieneAcrossVerbs:
             r = _run(launcher, tmp_path, state, stub.port, ("run", "watch", "7", "--exit-status"))
         assert r.proc.returncode == 1
         assert r.proc.stdout == "boom\n"
+
+
+class TestRegistersOnDemand:
+    LIST = ("run", "list")
+
+    def test_a_session_with_no_credential_registers_itself_then_makes_the_call(self, unregistered, state):
+        with StubOutpost(runs=RUNS, on_register=lambda key: write_credential(state, key)) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+            sent = [q for q in stub.requests if q.path == "/gateway/sessions"]
+            paths = [q.path for q in stub.requests]
+        assert rc == 0, err
+        assert out.splitlines()[0].split() == ["ID", "JOB", "STATE", "RESULT", "REASON", "CREATED"]
+        assert paths == ["/gateway/sessions", "/broker/token", "/gateway/runs"]
+        (registered,) = sent
+        assert json.loads(registered.body) == {"pid": HARNESS[0], "start_time": HARNESS[1]}
+        assert registered.headers["authorization"] == "Bearer registration-authority-SEEDED-7d4e"
+
+    def test_a_malformed_credential_file_is_registered_over(self, unregistered, state):
+        def rewrite(key):
+            write_credential(state, key)
+
+        write_credential(state, HARNESS_KEY).write_text("{not json")
+        with StubOutpost(runs=RUNS, on_register=rewrite) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+        assert rc == 0, err
+
+    def test_a_session_that_already_has_a_credential_does_not_register_again(self, unregistered, state):
+        write_credential(state, HARNESS_KEY)
+        with StubOutpost(runs=RUNS) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+            paths = [q.path for q in stub.requests]
+        assert rc == 0, err
+        assert paths == ["/broker/token", "/gateway/runs"]
+
+    @pytest.mark.parametrize(
+        "status, reason",
+        [
+            (401, "registration_authority_required"),
+            (400, "invalid_request"),
+            (409, "process_mismatch"),
+            (403, "host_not_allowed"),
+            (500, "internal"),
+        ],
+    )
+    def test_a_refused_registration_says_the_session_is_not_registered_with_outposts_reason_and_next_step(
+        self, status, reason, unregistered
+    ):
+        message = f"Outpost's next step for {reason}."
+        with StubOutpost(register_reply=(status, {"reason": reason, "message": message})) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+            paths = [q.path for q in stub.requests]
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: this session is not registered: {reason}: {message}\n"
+        assert paths == ["/gateway/sessions"]
+
+    def test_a_reason_and_next_step_carrying_control_characters_are_printed_cleaned(self, unregistered):
+        body = {"reason": "process_mismatch", "message": "Try\x1b[2J again\x07\x9b."}
+        with StubOutpost(register_reply=(409, body)) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err == "outpost-gateway: this session is not registered: process_mismatch: Try[2J again.\n"
+
+    def test_a_reason_the_command_does_not_know_is_not_echoed(self, unregistered):
+        with StubOutpost(register_reply=(409, {"reason": "who\x1b[31mknows", "message": "m"})) as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err.startswith("outpost-gateway: this session is not registered: unexpected_reply")
+        assert "who" not in err
+
+    def test_a_missing_registration_authority_says_the_session_is_not_registered_and_sends_nothing(self, unregistered):
+        with StubOutpost() as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST, authority=False)
+            assert stub.requests == []
+        assert rc == 2
+        assert err.startswith("outpost-gateway: this session is not registered: authority_missing: ")
+        assert len(err.splitlines()) == 1
+
+    def test_a_session_outside_any_camp_workspace_is_told_such_sessions_have_no_gateway(self, unregistered):
+        refusal = {"reason": "not_in_workspace", "message": "The process was not started in a camp workspace."}
+        with StubOutpost(register_reply=(422, refusal)) as stub:
+            rc, out, err = unregistered(stub.port, *self.LIST)
+        assert (rc, out) == (2, "")
+        assert err == (
+            "outpost-gateway: this session is not in a camp workspace; "
+            "sessions outside any camp workspace have no gateway\n"
+        )
+
+    def test_no_credential_and_nothing_listening_says_outpost_is_unreachable(self, unregistered):
+        port = free_port()
+        rc, out, err = unregistered(port, *self.LIST)
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{port}; is it running?\n"
+
+    def test_registering_but_getting_no_credential_file_is_reported(self, unregistered):
+        with StubOutpost() as stub:
+            rc, _, err = unregistered(stub.port, *self.LIST)
+        assert rc == 2
+        assert err == "outpost-gateway: this session registered but Outpost left it no gateway credential\n"
+
+
+class SilentOutpost:
+    """A loopback port that accepts connections and never answers."""
+
+    def __enter__(self):
+        import socket
+
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        return self
+
+    def __exit__(self, *exc):
+        self.sock.close()
+
+
+class TestReachingOutpost:
+    def test_an_outpost_that_accepts_and_never_answers_is_unreachable_in_under_five_seconds(self, cli):
+        import time
+
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, out, err = cli(silent.port, "run", "list")
+            elapsed = time.monotonic() - started
+        assert (rc, out) == (2, "")
+        assert err == f"outpost-gateway: Outpost is unreachable at 127.0.0.1:{silent.port}; is it running?\n"
+        assert elapsed < 5.0
+
+    def test_the_budget_is_one_for_registering_and_exchanging_together_not_one_per_call(
+        self, unregistered, state, monkeypatch
+    ):
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 1.2)
+        with StubOutpost(
+            runs=RUNS, register_delay=0.7, token_delay=0.7, on_register=lambda key: write_credential(state, key)
+        ) as stub:
+            rc, out, err = unregistered(stub.port, "run", "list")
+        assert (rc, out) == (2, "")
+        assert "Outpost is unreachable" in err
+
+    def test_calls_after_outpost_has_answered_are_not_cut_off_by_what_is_left_of_the_budget(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.8)
+        with StubOutpost(
+            view=view(result="failure", exit_code=1), log_connections=[["one\n", threading.Event()]]
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+        assert (rc, out) == (1, "one\n"), err
+
+
+class TestReplyTimeout:
+    """What an unanswered call is called depends on whether the request got out."""
+
+    def test_a_request_sent_to_an_outpost_that_never_answers_raises_reply_timed_out(self):
+        with SilentOutpost() as silent:
+            with pytest.raises(outpost_http.ReplyTimedOut):
+                outpost_http.request("POST", "/x", port=silent.port, timeout=0.3)
+
+    def test_a_request_to_a_closed_port_is_unreachable_not_a_reply_timeout(self):
+        with pytest.raises(outpost_http.OutpostUnreachable) as raised:
+            outpost_http.request("POST", "/x", port=free_port(), timeout=0.3)
+        assert not isinstance(raised.value, outpost_http.ReplyTimedOut)
+
+
+class TestReachBudgetAndTheTar:
+    def test_a_slow_tar_build_does_not_spend_the_budget_for_reaching_outpost(self, cli, repo, monkeypatch):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        real = command.tree_upload.write_tar
+
+        def slow(tree, spool):
+            time.sleep(0.8)
+            return real(tree, spool)
+
+        monkeypatch.setattr(command.tree_upload, "write_tar", slow)
+        with StubOutpost() as stub:
+            rc, out, err = cli(stub.port, "run", "start", "build", cwd=repo)
+        assert (rc, out) == (0, "7\n"), err
+
+    def test_an_outpost_that_never_answers_a_run_start_is_still_unreachable_within_the_budget(
+        self, cli, repo, monkeypatch
+    ):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.5)
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, _, err = cli(silent.port, "run", "start", "build", cwd=repo)
+            elapsed = time.monotonic() - started
+        assert rc == 2 and "Outpost is unreachable" in err
+        assert elapsed < 3.0
+
+
+class TestExpiredToken:
+    def test_a_token_refused_as_expired_is_exchanged_again_once_and_the_call_made_again(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0) as stub:
+            rc, out, err = cli(stub.port, "run", "list")
+            paths = [q.path for q in stub.requests]
+        assert (rc, err) == (2, "outpost-gateway: credential_expired: This access token has expired.\n")
+        assert paths == ["/broker/token", "/gateway/runs", "/broker/token", "/gateway/runs"]
+
+    def test_an_expired_token_is_replaced_even_when_the_first_call_is_a_view(self, cli):
+        with StubOutpost(token_uses=0, view=view()) as stub:
+            rc, _, err = cli(stub.port, "run", "view", "7")
+            views = [q for q in stub.requests if q.path == "/gateway/runs/7"]
+        assert rc == 2
+        assert "credential_expired" in err
+        assert len(views) == 2
+
+    def test_a_watch_whose_token_expires_between_calls_keeps_following_until_the_run_completes(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        running = view(state="in_progress", result=None, exit_code=None)
+        with StubOutpost(
+            token_uses=1,
+            log_connections=[["one\n", "tw", threading.Event()], ["one\n", "two\n", "three\n"]],
+            view_sequence=[running, view(result="failure", exit_code=1)],
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+            follows = [q for q in stub.requests if q.path.endswith("/log?follow=1")]
+        assert out == "one\ntwo\nthree\n"
+        assert rc == 1, err
+        assert exchanges >= 2
+        assert follows[-1].headers["authorization"] != follows[0].headers["authorization"]
+
+    def test_a_cancel_refused_as_expired_is_made_again_with_a_new_token(self, cli):
+        with StubOutpost(token_uses=0) as stub:
+            rc, _, err = cli(stub.port, "run", "cancel", "7")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+        assert rc == 2
+        assert "credential_expired" in err
+        assert exchanges == 2
+
+
+class TestReplacedToken:
+    """Outpost keeps a few live tokens per client, so a parallel call can evict this one."""
+
+    def test_a_token_refused_as_replaced_is_exchanged_again_once_and_the_call_made_again(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0, expiry_reason="token_replaced") as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+            paths = [q.path for q in stub.requests]
+        assert (rc, err) == (2, "outpost-gateway: token_replaced: This access token has expired.\n")
+        assert paths == ["/broker/token", "/gateway/runs", "/broker/token", "/gateway/runs"]
+
+    def test_a_watch_whose_token_was_replaced_reconnects_with_a_new_token(self, cli, monkeypatch):
+        monkeypatch.setattr(outpost_http, "IDLE_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(
+            token_uses=1,
+            expiry_reason="token_replaced",
+            log_connections=[["one\n", threading.Event()], ["one\n", "two\n"]],
+            view_sequence=[view(state="in_progress", result=None, exit_code=None), view(result="failure", exit_code=1)],
+        ) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7", "--exit-status")
+        assert (rc, out) == (1, "one\ntwo\n"), err
+
+    def test_another_refusal_reason_is_not_retried(self, cli):
+        with StubOutpost(runs=RUNS, token_uses=0, expiry_reason="credential_revoked") as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+            exchanges = [q.path for q in stub.requests].count("/broker/token")
+        assert rc == 2 and "credential_revoked" in err
+        assert exchanges == 1
+
+
+class TestServerTextIsCleaned:
+    def test_a_log_viewed_whole_reaches_stdout_with_no_control_sequence_and_keeps_newlines_and_tabs(self, cli):
+        log = "ok \x1b[31mred\x1b[0m\x1b]0;title\x07\tafter tab\r\nsecond \u009b31m line\x00\x7f\n"
+        with StubOutpost(view=view(), log_steps=[log]) as stub:
+            rc, out, err = cli(stub.port, "run", "view", "7", "--log")
+        assert rc == 0, err
+        assert out == "ok [31mred[0m]0;title\tafter tab\nsecond 31m line\n"
+
+    def test_a_watched_log_reaches_stdout_with_no_control_sequence_and_keeps_newlines_and_tabs(self, cli):
+        log = "ok \x1b[31mred\x1b]0;title\x07\tafter tab\r\nsecond \u009b31m line\x00\x7f\n"
+        with StubOutpost(view=view(), log_steps=[log]) as stub:
+            rc, out, err = cli(stub.port, "run", "watch", "7")
+        assert rc == 0, err
+        assert out == "ok [31mred]0;title\tafter tab\nsecond 31m line\n"
+
+    def test_a_log_line_split_across_reads_is_cleaned_whole(self, cli):
+        with StubOutpost(view=view(), log_steps=["a\x1b", "[2Jb\n"]) as stub:
+            rc, out, _ = cli(stub.port, "run", "watch", "7")
+        assert (rc, out) == (0, "a[2Jb\n")
+
+    def test_a_refusal_code_and_reason_with_control_characters_are_printed_cleaned(self, cli):
+        body = {"reason": "cred\x1b[2Jential_missing", "message": "No\x07 credential\x9b."}
+        with StubOutpost(runs_reply=(401, body)) as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+        assert (rc, err) == (2, "outpost-gateway: cred[2Jential_missing: No credential.\n")
+
+    def test_a_token_refusal_with_control_characters_is_printed_cleaned(self, cli):
+        refusal = {"error": "invalid_client", "error_description": "credential_revoked: Gone\x1b[31m!"}
+        with StubOutpost(token_reply=(401, refusal)) as stub:
+            rc, _, err = cli(stub.port, "run", "list")
+        assert (rc, err) == (2, "outpost-gateway: Outpost refused the credential: credential_revoked: Gone[31m!\n")
+
+
+class TestCancelTimeout:
+    def test_a_cancel_that_sent_its_request_and_got_no_answer_says_it_was_requested_not_that_outpost_is_unreachable(
+        self, cli, monkeypatch
+    ):
+        monkeypatch.setattr(command, "CANCEL_TIMEOUT_SECONDS", 0.3)
+        with StubOutpost(cancel_delay=1.5) as stub:
+            rc, out, err = cli(stub.port, "run", "cancel", "7")
+            sent = [q for q in stub.requests if q.path.endswith("/cancel")]
+        assert len(sent) == 1
+        assert (rc, out) == (2, "")
+        assert err == "outpost-gateway: cancel requested; check run view 7\n"
+        assert "unreachable" not in err
+
+    def test_a_cancel_to_a_closed_port_is_still_unreachable(self, cli):
+        port = free_port()
+        rc, _, err = cli(port, "run", "cancel", "7")
+        assert rc == 2
+        assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
+
+
+class TestTheSessionCommandHasNoTokenVerb:
+    """``outpost-gateway`` runs outside the sandbox, so what it prints reaches the session's transcript."""
+
+    def test_auth_header_is_refused_before_any_token_is_asked_for(self, cli, capsys):
+        with StubOutpost() as stub:
+            with pytest.raises(SystemExit) as refused:
+                cli(stub.port, "auth-header")
+            requests = list(stub.requests)
+        out, err = capsys.readouterr()
+        assert refused.value.code == 2
+        assert requests == []
+        assert TOKEN not in out + err and CLIENT_SECRET not in out + err
+
+
+class TestAuthHeader:
+    """The auth-header entry: the Outpost plugin's tool-server headersHelper. It never fails the connection."""
+
+    ARGV = ()
+
+    def test_prints_only_the_authorization_header_for_the_session_s_token(self, header):
+        with StubOutpost() as stub:
+            rc, out, err = header(stub.port)
+        assert rc == 0, err
+        assert json.loads(out) == {"Authorization": f"Bearer {TOKEN}"}
+        assert out.count("\n") == 1
+        assert CLIENT_SECRET not in out + err and CLIENT_ID not in out
+
+    def test_a_session_with_no_credential_registers_itself_and_prints_the_header_it_got(
+        self, header_unregistered, state
+    ):
+        with StubOutpost(on_register=lambda key: write_credential(state, key)) as stub:
+            rc, out, err = header_unregistered(stub.port)
+            paths = [q.path for q in stub.requests]
+        assert rc == 0, err
+        assert json.loads(out) == {"Authorization": f"Bearer {TOKEN}"}
+        assert paths == ["/gateway/sessions", "/broker/token"]
+
+    def test_a_credential_written_after_a_run_with_none_is_used_by_the_next_run(self, header_unregistered, state):
+        with StubOutpost() as stub:
+            first = header_unregistered(stub.port, authority=False)
+            write_credential(state, HARNESS_KEY)
+            second = header_unregistered(stub.port, authority=False)
+        assert (first[0], json.loads(first[1])) == (0, {})
+        assert (second[0], json.loads(second[1])) == (0, {"Authorization": f"Bearer {TOKEN}"})
+
+    @pytest.mark.parametrize(
+        "stub_kwargs, authority, says",
+        [
+            (dict(), False, "not registered"),
+            (
+                dict(token_reply=(401, {"error": "invalid_client", "error_description": "credential_revoked: ended"})),
+                True,
+                "credential_revoked",
+            ),
+            (dict(token_reply=(200, "<<not json>>")), True, "cannot read"),
+        ],
+    )
+    def test_a_session_that_cannot_get_a_token_exits_0_with_an_empty_header_and_says_why_on_stderr(
+        self, stub_kwargs, authority, says, header_unregistered, state
+    ):
+        if authority:
+            write_credential(state, HARNESS_KEY)
+        with StubOutpost(**stub_kwargs) as stub:
+            rc, out, err = header_unregistered(stub.port, authority=False)
+        assert (rc, json.loads(out)) == (0, {})
+        assert says in err
+        assert CLIENT_SECRET not in out + err and TOKEN not in out + err
+
+    def test_unreachable_outpost_exits_0_with_an_empty_header(self, header):
+        port = free_port()
+        rc, out, err = header(port)
+        assert (rc, json.loads(out)) == (0, {})
+        assert f"Outpost is unreachable at 127.0.0.1:{port}" in err
+
+    def test_an_outpost_that_accepts_and_never_answers_gives_up_within_the_reach_budget(self, header):
+        import time
+
+        with SilentOutpost() as silent:
+            started = time.monotonic()
+            rc, out, err = header(silent.port)
+            elapsed = time.monotonic() - started
+        assert (rc, json.loads(out)) == (0, {})
+        assert "Outpost is unreachable" in err
+        assert elapsed < 5.0
+
+    def test_the_reach_budget_ends_with_the_helper_so_a_later_call_is_not_cut_off_by_it(self, header, monkeypatch):
+        import time
+
+        monkeypatch.setattr(outpost_http, "REACH_BUDGET_SECONDS", 0.05)
+        with StubOutpost() as stub:
+            rc, _, err = header(stub.port)
+            time.sleep(0.1)
+            later = outpost_http.request("GET", "/nothing-here", port=stub.port)
+        assert rc == 0, err
+        assert later.status == 404
+
+    def test_the_header_reaches_a_real_process_through_the_entry_point_with_nothing_in_its_arguments(
+        self, launcher, tmp_path, state
+    ):
+        with StubOutpost() as stub:
+            r = _run(launcher, tmp_path, state, stub.port, self.ARGV, extra_env={"GATEWAY_RUNNER_ENTRY": "auth_header"})
+        assert r.proc.returncode == 0, r.proc.stderr
+        assert json.loads(r.proc.stdout) == {"Authorization": f"Bearer {TOKEN}"}
+        assert r.env_after is not None and all(TOKEN not in v for v in r.env_after.values())

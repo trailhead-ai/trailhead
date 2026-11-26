@@ -60,6 +60,7 @@ limit is never read and so defines no job.
 
 from __future__ import annotations
 
+import fcntl
 import os
 import pwd
 import re
@@ -150,6 +151,12 @@ class Tree:
             self._scratch = _make_scratch(self._home if self._home is not None else operator_home())
             self._held[0] = self._scratch
         return self._scratch
+
+    def path(self) -> Path:
+        """Where the open top level really is: the folder :attr:`fd` holds, with no symlink left in it."""
+        if hasattr(fcntl, "F_GETPATH"):
+            return Path(os.fsdecode(fcntl.fcntl(self.fd, fcntl.F_GETPATH, b"\0" * 1024).split(b"\0", 1)[0]))
+        return Path(os.readlink(f"/proc/self/fd/{self.fd}"))
 
     def spool(self) -> BinaryIO:
         """An unnamed file in the private folder, readable after the tree is closed."""

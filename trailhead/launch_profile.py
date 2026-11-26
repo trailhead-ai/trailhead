@@ -49,6 +49,7 @@ from __future__ import annotations
 import os
 import re
 import shlex
+import tempfile
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -148,11 +149,16 @@ def hub_config_path(
     return config_dir("ranger", env=env, platform=platform) / "hubs" / f"{account}.json"
 
 
+def hubs_root(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
+    """The folder holding every account's hub home."""
+    return state_dir("ranger", env=env, platform=platform) / "hubs"
+
+
 def hub_home(
     account: str, *, env: dict[str, str] | None = None, platform: str | None = None
 ) -> Path:
     validate_account(account)
-    return state_dir("ranger", env=env, platform=platform) / "hubs" / account
+    return hubs_root(env=env, platform=platform) / account
 
 
 def mirrors_path(
@@ -170,7 +176,7 @@ def operator_token_store(
 
 
 def outpost_state(*, env: dict[str, str] | None = None, platform: str | None = None) -> Path:
-    """Outpost's whole state directory: the database, the operator ``credential`` and
+    """Outpost's whole state directory: the database folder, the operator ``credential`` and
     every session's broker credentials."""
     return state_dir("outpost", env=env, platform=platform)
 
@@ -289,6 +295,25 @@ def validate_workspace(
             f"workspace {workspace} has no camp manifest ({real / 'manifest.json'}); refusing"
         )
     return real
+
+
+def workspace_containing(
+    directory: str | os.PathLike[str],
+    *,
+    env: dict[str, str] | None = None,
+    platform: str | None = None,
+) -> Path:
+    """The real path of the camp workspace *directory* is in, or :class:`WorkspaceError`.
+
+    Symlinks in *directory* are resolved first; the workspace is its first three components under camp's
+    state folder, checked as :func:`validate_workspace` checks one. This is the derivation Outpost makes
+    from a session's working folder when it registers the session.
+    """
+    root = Path(os.path.realpath(state_dir("camp", env=env, platform=platform)))
+    real = Path(os.path.realpath(directory))
+    if root not in real.parents:
+        raise WorkspaceError(f"{directory} resolves to {real}, which is outside camp's worktrees root {root}")
+    return validate_workspace(root.joinpath(*real.relative_to(root).parts[:3]), env=env, platform=platform)
 
 
 def _vaults_root(env, platform) -> Path:
@@ -538,6 +563,31 @@ RITUAL_PROFILE = LaunchProfile(
     model=None,
     effort=None,
 )
+
+
+def scratch_dirs() -> set[Path]:
+    """System temp, symlink-free: ``/tmp``, ``/private/tmp`` and the platform temp dir."""
+    return {Path(os.path.realpath(p)) for p in ("/tmp", "/private/tmp", tempfile.gettempdir())}
+
+
+def session_write_roots(
+    *, env: dict[str, str] | None = None, platform: str | None = None
+) -> tuple[Path, ...]:
+    """Every folder a launched session's sandbox may write, symlink-free: what the hub and ritual
+    profiles list as writable (a ritual's workspace lies under camp's state folder, a hub's home
+    under the hubs folder) and system temp. A path under one is one a session can change.
+    """
+    roots: list[Path] = []
+    for profile in (HUB_PROFILE, RITUAL_PROFILE):
+        for role in profile.writable_roles:
+            if role == ROLE_WORKSPACE:
+                roots.append(state_dir("camp", env=env, platform=platform))
+            elif role == ROLE_HUB_HOME:
+                roots.append(hubs_root(env=env, platform=platform))
+            else:
+                roots.append(_ROLE_RESOLVERS[role]("", env, platform))
+    roots.extend(scratch_dirs())
+    return tuple(dict.fromkeys(Path(os.path.realpath(r)) for r in roots))
 
 
 def resolve_profile(

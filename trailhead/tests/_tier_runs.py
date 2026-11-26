@@ -10,10 +10,11 @@ REPO = Path(__file__).resolve().parents[2]
 TIERS = ("chromium", "seam_real")
 
 
-def run_pytest(*args: str, cwd: Path = REPO) -> subprocess.CompletedProcess[str]:
+def run_pytest(*args: str, cwd: Path = REPO, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-p", "no:cacheprovider", "-n", "0", *args],
         cwd=cwd,
+        env=env,
         capture_output=True,
         text=True,
         timeout=300,

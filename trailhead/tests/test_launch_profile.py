@@ -16,6 +16,7 @@ from trailhead.launch_profile import (
     hub_home,
     mirrors_path,
     resolve_profile,
+    session_write_roots,
     validate_account,
 )
 from trailhead.paths import PathResolutionError, cache_home
@@ -161,3 +162,16 @@ def test_resolver_creates_nothing(tmp_path):
     resolve_profile(HUB_PROFILE, "a", env=env, platform="linux")
     hub_config_path("a", env=env, platform="linux")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_session_write_roots_are_the_folders_the_profiles_write_and_follow_their_overrides(tmp_path):
+    first = session_write_roots(env=_env(tmp_path), platform="linux")
+    for under in ("xdg/state/camp", "xdg/state/lore", "xdg/cache", "xdg/state/ranger/hubs"):
+        assert Path(tmp_path / under).resolve() in first
+    moved = session_write_roots(
+        env=_env(tmp_path, XDG_STATE_HOME=str(tmp_path / "moved"), XDG_CACHE_HOME=str(tmp_path / "cold")),
+        platform="linux",
+    )
+    assert (tmp_path / "moved" / "camp").resolve() in moved and (tmp_path / "xdg/state/camp").resolve() not in moved
+    assert (tmp_path / "cold").resolve() in moved and (tmp_path / "xdg/cache").resolve() not in moved
+    assert Path("/tmp").resolve() in moved

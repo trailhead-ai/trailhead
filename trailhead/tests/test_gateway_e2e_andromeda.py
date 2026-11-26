@@ -14,6 +14,13 @@ The sandboxed session needs the real Claude Code sandbox, so it cannot run insid
 the whole file from a host terminal (the operator's ``!``). Each sandboxed assertion is also run against
 a deliberately broken setup (no hook, no ``denyRead``, wrong workspace) and must fail there.
 
+The denial probes (``test_a_hand_started_session_*``, ``test_an_outpost_launched_session_*``, run by
+``run-e2e-sandbox-denials.sh``) put the operator and registration credentials, another session's credential and
+the database folder (with a ``-wal`` made after the probing command started) in front of a real sandboxed session,
+by shell and by the Read tool, under the dotfiles' rendered settings and under the settings the real launch profile
+renders, and also run a PATH-shadowed ``outpost-gateway`` and a page request that used to be handed the UI cookie.
+The pinned ``outpost-gateway`` those sessions run is the one ``trailhead install`` writes, not a wrapper.
+
 The run scenario (``test_run_scenario_*``) also needs the run account andromeda's dotfiles provision: an Outpost
 with the operator's ``[runs]`` table, the ``outpost-run`` group and the run engine. A preflight fails the
 whole scenario at once, saying what to do, when the host is not ready; among the things it checks is that the
@@ -33,8 +40,10 @@ import json
 import re
 import secrets
 import shlex
+import shutil
 import socket
 import stat
+import tempfile
 import threading
 import time
 import urllib.request
@@ -46,6 +55,29 @@ import pytest
 
 from ._gateway_e2e_support import (
     CHECKS,
+    ArgumentSampler,
+    TokenRecorder,
+    known_secrets,
+    outpost_request_records,
+    secrets_in_text,
+    stored_run_logs,
+    READ_CONTROL,
+    READ_CONTROL_TEXT,
+    LateFileActor,
+    check_a_shadowed_gateway_cannot_read_the_credential,
+    check_no_cookie_is_handed_to_a_page_request,
+    check_the_auth_header_helper_prints_no_token,
+    check_the_launched_session_reaches_its_own_workspace_runs,
+    check_read_is_refused,
+    check_the_late_side_file_is_refused,
+    check_the_read_control_is_readable,
+    check_the_read_tool_is_denied,
+    denial_facts,
+    denial_steps,
+    launched_session_settings,
+    read_tool_paths,
+    write_late_file_probe,
+    write_path_shadow,
     RUN_SESSION_TIMEOUT_SECONDS,
     SESSION_JOBS,
     HomeSentinel,
@@ -255,6 +287,145 @@ def test_a_session_started_in_w2_registers_w2_and_the_w1_checks_fail(tmp_path_fa
         check_run_list_prints_the_empty_list(facts, session)
 
 
+# --- what a sandboxed session must not read, run or be handed (AC82, AC83, AC84) ---------------------------
+
+
+def _denial_session(tmp_path_factory, label, *, kind, deny_read=True):
+    """One real sandboxed session probing the denials, against its own Outpost: ``(DenialFacts, Session, read paths)``.
+
+    *kind* is whose settings the session runs under: ``hand`` is a hand-started session, under the dotfiles' real
+    template; ``launched`` is one Outpost launched, under the settings the real launch profile renders.
+    Another workspace's session is registered first, so there is a credential that is not this session's to read.
+    """
+    root = tmp_path_factory.mktemp(label)
+    camp = make_camp(root)
+    with real_outpost(root, camp) as outpost:
+        env = step_env(root, outpost)
+        run_fake_harness(root, "other-session", camp.w2, [("register", register_cmd(outpost.port))], env)
+        [other] = outpost.credential_files()
+        other_key = other.parent.name
+        shim_bin = install_shims(root, outpost)
+        gateway = shim_bin / "outpost-gateway"
+        write_path_shadow(root / "shadow", outpost.state)
+        rendezvous = Path(tempfile.mkdtemp(prefix="gw-denial-", dir="/tmp"))
+        write_late_file_probe(rendezvous)
+        actor = LateFileActor(outpost.state / "db", rendezvous)
+        (camp.w1 / READ_CONTROL).write_text(READ_CONTROL_TEXT)
+        if kind == "hand":
+            settings = render_sandbox_settings(
+                dotfiles_checkout(), outpost.state, outpost.port, deny_read=deny_read, gateway=gateway
+            )
+        else:
+            settings = launched_session_settings(root, outpost.state, camp.w1)
+            settings["sandbox"]["autoAllowBashIfSandboxed"] = True
+            settings["sandbox"].setdefault("network", {}).setdefault("allowedDomains", []).append(
+                f"127.0.0.1:{outpost.port}"
+            )
+        steps = denial_steps(outpost.state, other_key, rendezvous, outpost.port)
+        if kind == "launched":
+            steps["gateway_run_list"] = f"{gateway} run list"
+        paths = read_tool_paths(outpost.state, other_key, camp.w1)
+        session = run_claude_session(
+            root,
+            label,
+            cwd=camp.w1,
+            settings=settings,
+            steps=steps,
+            env=env,
+            shim_bin=shim_bin,
+            with_hook=kind == "hand",
+            read_paths=paths,
+            extra_path=root / "shadow",
+            during=actor,
+        )
+        facts = denial_facts(outpost.state, other_key, actor)
+    shutil.rmtree(rendezvous, ignore_errors=True)
+    return facts, session, paths
+
+
+BASH_DENIAL_CHECKS = [
+    check_read_is_refused("operator_read"),
+    check_read_is_refused("registration_read"),
+    check_read_is_refused("other_session_read"),
+    check_read_is_refused("db_read"),
+    check_the_late_side_file_is_refused,
+    check_a_shadowed_gateway_cannot_read_the_credential,
+    check_no_cookie_is_handed_to_a_page_request,
+    check_the_auth_header_helper_prints_no_token,
+]
+READ_TOOL_DENIAL_CHECKS = [
+    check_the_read_tool_is_denied(name)
+    for name in ("operator_credential", "registration_authority", "other_session_credential", "database")
+]
+
+
+@pytest.fixture(scope="module")
+def hand_started_session(tmp_path_factory):
+    return _denial_session(tmp_path_factory, "denial-hand", kind="hand")
+
+
+@pytest.fixture(scope="module")
+def launched_session(tmp_path_factory):
+    return _denial_session(tmp_path_factory, "denial-launched", kind="launched")
+
+
+@pytest.mark.parametrize("check", BASH_DENIAL_CHECKS, ids=lambda c: c.__name__)
+def test_a_hand_started_session_cannot_read_or_run_what_it_must_not_by_shell(check, hand_started_session):  # AC82, AC84
+    facts, session, _ = hand_started_session
+    check(facts, session)
+
+
+@pytest.mark.parametrize("check", READ_TOOL_DENIAL_CHECKS, ids=lambda c: c.__name__)
+def test_a_hand_started_session_cannot_read_what_it_must_not_with_the_read_tool(check, hand_started_session):  # AC82
+    _, session, paths = hand_started_session
+    check(session.reads, paths)
+
+
+def test_the_read_tool_reads_a_file_the_hand_started_settings_leave_alone(hand_started_session):
+    _, session, paths = hand_started_session
+    check_the_read_control_is_readable(session.reads, paths)
+
+
+@pytest.mark.parametrize("check", BASH_DENIAL_CHECKS, ids=lambda c: c.__name__)
+def test_an_outpost_launched_session_cannot_read_or_run_what_it_must_not_by_shell(check, launched_session):  # AC83
+    facts, session, _ = launched_session
+    check(facts, session)
+
+
+def test_an_outpost_launched_session_runs_the_gateway_shim_as_itself(launched_session):
+    facts, session, _ = launched_session
+    check_the_launched_session_reaches_its_own_workspace_runs(facts, session)
+
+
+@pytest.mark.parametrize("check", READ_TOOL_DENIAL_CHECKS, ids=lambda c: c.__name__)
+def test_an_outpost_launched_session_cannot_read_what_it_must_not_with_the_read_tool(check, launched_session):  # AC83
+    _, session, paths = launched_session
+    check(session.reads, paths)
+
+
+def test_the_read_tool_reads_a_file_the_launched_settings_leave_alone(launched_session):
+    _, session, paths = launched_session
+    check_the_read_control_is_readable(session.reads, paths)
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        check_read_is_refused("operator_read"),
+        check_read_is_refused("db_read"),
+        check_the_late_side_file_is_refused,
+        check_a_shadowed_gateway_cannot_read_the_credential,
+    ],
+    ids=lambda c: c.__name__,
+)
+def test_without_the_denials_the_shell_probes_read_what_they_should_not_and_their_checks_fail(
+    check, tmp_path_factory
+):
+    facts, session, _ = _denial_session(tmp_path_factory, "denial-broken", kind="hand", deny_read=False)
+    with pytest.raises(AssertionError):
+        check(facts, session)
+
+
 # --- the dotfiles' rendered settings (need the operator's dotfiles checkout and chezmoi) -------------
 
 
@@ -264,6 +435,8 @@ def test_the_rendered_read_denials_name_the_absolute_temp_state_in_double_slash_
     deny = settings["permissions"]["deny"]
     assert f"Read(/{state}/sessions/**)" in deny
     assert f"Read(/{state}/registration/**)" in deny
+    assert f"Read(/{state}/db/**)" in deny
+    assert str(state / "db") in settings["sandbox"]["filesystem"]["denyRead"]
     assert render_sandbox_settings(dotfiles_checkout(), state, 7000, deny_read=False)["permissions"]["deny"] == []
 
 
@@ -307,6 +480,7 @@ class RunWorld:
     outpost_log: str
     marker: str
     ports: tuple
+    leaks: list
 
 
 def _gw(gateway, *argv):
@@ -339,14 +513,18 @@ def run_world(tmp_path_factory):
     try:
         sentinel.create()
         _control_the_listener(listener)
-        with real_outpost(root, camp, runs=host) as outpost:
+        with (
+            real_outpost(root, camp, runs=host) as outpost,
+            TokenRecorder(outpost.port) as recorder,
+            ArgumentSampler(interval=0.05) as sampler,
+        ):
             ssh = home / ".ssh"
             image = host.platforms["ubuntu-latest"]
             prepull_image(host.engine_socket, image)
             ports = (outpost.port, listener.server_address[1])
             for ws in (camp.w1, camp.w2):
                 build_fixture_repo(ws / "app", image=image, ssh=ssh, sentinel=sentinel, ports=ports, operator_home=home)
-            shim_bin = install_shims(root, outpost)
+            shim_bin = install_shims(root, outpost, port=recorder.port)
             gateway = shim_bin / "outpost-gateway"
             env = step_env(root, outpost)
             settings = render_sandbox_settings(dotfiles_checkout(), outpost.state, outpost.port, gateway=gateway)
@@ -418,6 +596,7 @@ def run_world(tmp_path_factory):
             for f in outpost.credential_files():
                 minted.append(json.loads(f.read_text())["client_secret"])
             minted.append((outpost.state / "registration" / "credential").read_text().strip())
+            leaks = _scan_leaks(outpost, recorder, sampler, host)
             yield RunWorld(
                 session,
                 rows_after_session,
@@ -432,6 +611,7 @@ def run_world(tmp_path_factory):
                 outpost.log.read_text()[-4000:],
                 sentinel.marker,
                 ports,
+                leaks,
             )
     finally:
         sentinel.remove()
@@ -555,6 +735,10 @@ def test_run_scenario_the_job_container_carries_no_bind_mount_no_secret_and_no_p
     assert check_container_inspect(run_world.inspected[0], run_world.secrets) == [], names
 
 
+def test_run_scenario_no_secret_or_token_reaches_any_arguments_run_log_or_request_record(run_world):  # AC81, AC85, AC86
+    assert run_world.leaks == [], run_world.leaks
+
+
 def test_run_scenario_a_run_reaches_a_public_host(run_world):  # AC65
     assert "public github.com:443: reached" in _followed(run_world, "public")[1]
 
@@ -659,6 +843,7 @@ class CancelWorld:
     hold_log: str
     listed: list
     outpost_log: str
+    leaks: list
 
 
 def _wait(deadline_seconds, observe):
@@ -669,6 +854,13 @@ def _wait(deadline_seconds, observe):
         time.sleep(0.25)
         value = observe()
     return value
+
+
+def _scan_leaks(outpost, recorder, sampler, host):
+    watched = known_secrets(outpost, recorder.tokens)
+    return sampler.problems(watched) + secrets_in_text(
+        watched, {**outpost_request_records(outpost), **stored_run_logs(host.runs_folder)}
+    )
 
 
 @pytest.fixture(scope="module")
@@ -682,7 +874,11 @@ def cancel_world(tmp_path_factory):
     sentinel = HomeSentinel(home / f".outpost-e2e-{secrets.token_hex(4)}", f"SENTINEL-{secrets.token_hex(8)}")
     try:
         sentinel.create()
-        with real_outpost(root, camp, runs=host) as outpost:
+        with (
+            real_outpost(root, camp, runs=host) as outpost,
+            TokenRecorder(outpost.port) as recorder,
+            ArgumentSampler(interval=0.05) as sampler,
+        ):
             image = host.platforms["ubuntu-latest"]
             prepull_image(host.engine_socket, image)
             build_fixture_repo(
@@ -693,7 +889,7 @@ def cancel_world(tmp_path_factory):
                 ports=(outpost.port, outpost.port),
                 operator_home=home,
             )
-            gateway = install_shims(root, outpost) / "outpost-gateway"
+            gateway = install_shims(root, outpost, port=recorder.port) / "outpost-gateway"
             env = step_env(root, outpost)
             port = outpost.port
             n = iter(range(10_000))
@@ -756,6 +952,7 @@ def cancel_world(tmp_path_factory):
                 gw(w1, "run", "view", str(hold_id), "--log"),
                 gw(w1, "run", "list", "--json"),
                 outpost.log.read_text()[-3000:],
+                _scan_leaks(outpost, recorder, sampler, host),
             )
     finally:
         remove_act_containers(host.engine_socket)
@@ -798,6 +995,12 @@ def test_cancel_scenario_another_workspaces_session_cannot_cancel_it_and_the_run
     assert w.foreign_cancel.splitlines()[-1] != "rc=0", w.foreign_cancel
     assert "run_not_found" in w.foreign_cancel, w.foreign_cancel
     assert w.hold_after_foreign == ("in_progress", None), w.hold_after_foreign
+
+
+def test_cancel_scenario_no_secret_or_token_reaches_any_arguments_run_log_or_request_record(
+    cancel_world,
+):  # AC81, AC85, AC86
+    assert cancel_world.leaks == [], cancel_world.leaks
 
 
 def test_cancel_scenario_the_cancelled_runs_log_holds_what_the_job_wrote_before_the_cancel(cancel_world):
