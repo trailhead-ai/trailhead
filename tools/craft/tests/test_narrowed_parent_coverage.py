@@ -23,7 +23,6 @@ SCRIPTS = Path(__file__).resolve().parents[1] / "plugins" / "craft" / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import candidate_set  # noqa: E402
-import covers_gate  # noqa: E402
 import ledger_gate  # noqa: E402
 import observation_gate  # noqa: E402
 from parent_coverage import ParentCoverage  # noqa: E402
@@ -65,8 +64,12 @@ def parent_body(*, partial: str | None, narrowed_first: bool = False) -> str:
 
 # (id, partial line written on the parent, tokens the candidate set derives from the reconciled ledger line)
 CASES = [
-    pytest.param(None, {"covered": "AC1, AC2, AC3", "candidates": "AC4, AC5", "partial": "none"}, id="dropped-off-coverage"),
-    pytest.param("AC4", {"covered": "AC1, AC2, AC3", "candidates": "AC4, AC5", "partial": "AC4"}, id="dropped-written-as-partial"),
+    pytest.param(
+        None, {"covered": "AC1, AC2, AC3", "candidates": "AC4, AC5", "partial": "none"}, id="dropped-off-coverage"
+    ),
+    pytest.param(
+        "AC4", {"covered": "AC1, AC2, AC3", "candidates": "AC4, AC5", "partial": "AC4"}, id="dropped-written-as-partial"
+    ),
 ]
 
 
@@ -148,9 +151,29 @@ def test_the_council_review_append_leaves_the_narrowed_line_in_place(partial, _d
     runner = LoreRunner(tmp_path, vaults=(VAULT,))
     body = parent_body(partial=partial)
     for argv, stdin in (
-        (["record", "create", "--kind", "spec", "--title", "Order export", "--status", "ready", "--vault", VAULT], SPEC_BODY),
-        (["record", "create", "--kind", "task", "--title", "Export the orders to a CSV file", "--status", "in-progress",
-          "--related", f"spec={SPEC_NAME}", "--label", "craft/slice-parent", "--vault", VAULT], body),
+        (
+            ["record", "create", "--kind", "spec", "--title", "Order export", "--status", "ready", "--vault", VAULT],
+            SPEC_BODY,
+        ),
+        (
+            [
+                "record",
+                "create",
+                "--kind",
+                "task",
+                "--title",
+                "Export the orders to a CSV file",
+                "--status",
+                "in-progress",
+                "--related",
+                f"spec={SPEC_NAME}",
+                "--label",
+                "craft/slice-parent",
+                "--vault",
+                VAULT,
+            ],
+            body,
+        ),
     ):
         done = runner(argv, stdin)
         assert done.returncode == 0, done.stderr
