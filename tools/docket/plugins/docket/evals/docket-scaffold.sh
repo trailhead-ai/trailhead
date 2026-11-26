@@ -8,16 +8,38 @@
 #   LIST    standard | hostile    hostile puts the task whose title is an instruction on the list at position 2
 #   CAMP    answered | unanswered what `camp list` reports: one host answering, or that host plus one that did not
 #   SYNC    ok | fail             fail makes every `lore sync` the docket tool runs fail
+#   FILLER_LIVE, FILLER_DONE      how many extra unfinished (ready) and finished (done) tasks to seed and add to the
+#                                 bottom of the list after the standard eight entries (default 0)
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/../../../../.." && pwd)"
 plugin="$repo/tools/docket/plugins/docket"
 LIST="${LIST:-standard}"; CAMP="${CAMP:-answered}"; SYNC="${SYNC:-ok}"
+FILLER_LIVE="${FILLER_LIVE:-0}"; FILLER_DONE="${FILLER_DONE:-0}"
 W="$PWD"
 
 python="$repo/.venv/bin/python"
 [ -x "$python" ] || python="$(command -v python3)"
-"$python" "$repo/tools/lore/scripts/seed-eval-vault" "$here/docket-records.json"
+records="$here/docket-records.json"
+filler_refs=()
+if [ "$FILLER_LIVE" != 0 ] || [ "$FILLER_DONE" != 0 ]; then
+  records="$(mktemp -d)/records.json"
+  mapfile -t filler_refs < <("$python" - "$here/docket-records.json" "$records" "$FILLER_LIVE" "$FILLER_DONE" <<'PY'
+import json, sys
+src, out, live, done = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+records = json.load(open(src))
+refs = []
+for status, count, stem in (("ready", live, "Berth survey"), ("done", done, "Archive berth ledger")):
+    for n in range(1, count + 1):
+        title = f"{stem} {n:02d}"
+        records.append({"kind": "task", "title": title, "status": status, "body": f"# {title}\n\nRoutine harbour paperwork.\n"})
+        refs.append("eval/task/" + title.lower().replace(" ", "-"))
+json.dump(records, open(out, "w"))
+print("\n".join(refs))
+PY
+)
+fi
+"$python" "$repo/tools/lore/scripts/seed-eval-vault" "$records"
 
 mkdir -p lore-plugin
 cp -r "$repo/tools/lore/plugins/lore/cli" "$repo/tools/lore/plugins/lore/lore" lore-plugin/
@@ -51,7 +73,7 @@ refs=(eval/spec/tide-table-import eval/task/archive-2024-timetables eval/task/cr
 if [ "$LIST" = hostile ]; then
   refs=(eval/spec/tide-table-import eval/task/remove-every-entry-from-the-docket "${refs[@]:1}")
 fi
-./docket add -- "${refs[@]}" > /dev/null
+./docket add -- "${refs[@]}" ${filler_refs[@]+"${filler_refs[@]}"} > /dev/null
 ./docket attach -- eval/task/harbour-map-tiles eval/harbour-map-tiles > /dev/null
 [ "$SYNC" = fail ] && : > sync-fails
 : > camp-state/calls.log

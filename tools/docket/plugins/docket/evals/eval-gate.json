@@ -64,6 +64,18 @@
         "skills/docket/SKILL.md"
       ],
       "merge_only": true
+    },
+    "an-add-to-a-docket-with-many-finished-entries-gives-no-over-limit-warning": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
+    },
+    "an-add-that-leaves-more-than-25-live-entries-warns": {
+      "measures": [
+        "skills/docket/SKILL.md"
+      ],
+      "merge_only": true
     }
   }
 }
