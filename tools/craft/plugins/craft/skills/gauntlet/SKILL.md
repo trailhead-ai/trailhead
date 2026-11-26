@@ -32,15 +32,15 @@ failed at its job.
 
 ## Two independent failure axes
 
-**Read `gauntlet/calibration.md` now and follow it in full.** Before adjudicating anything, it
-establishes why a spec can be wrong about the world and underdetermined about the design
-independently — so a clean fact pass is never read as evidence the spec is sound.
+**Read `calibration.md` now and follow it in full.** Before adjudicating anything, it establishes
+why a spec can be wrong about the world and underdetermined about the design independently — so a
+clean fact pass is never read as evidence the spec is sound.
 
 ## Mandatory
 
 This step runs on **every** spec before it flips to `ready`. There is no skip flag. Calibration is
-tuned through the per-lens Critical bars in `_shared/council.md` and the severity rules below —
-never through per-invocation opt-outs.
+tuned through the Critical bars for each lens in `_shared/council.md` and the severity rules below —
+never through opt-outs on any single invocation.
 
 ## Process
 
@@ -118,7 +118,7 @@ isolated context and sees only what its prompt points it at.
 |---|---|---|---|
 | 1 | Fact verification | `Explore` | The spec path + the **Fact** claims from step 2 |
 | 2 | Premise attack | `premise-attacker` | The spec path + the **Premise** claims from step 2 |
-| 3–6 | The four lenses | `builder`, `breaker`, `attacker`, `advocate` | Per `_shared/council.md` |
+| 3–6 | The four lenses | `builder`, `breaker`, `attacker`, `advocate` | As `_shared/council.md` sets out |
 | 7 | Consistency audit | `consistency-auditor` | The spec path |
 | 8 | Divergence probe | `divergence-prober` | The spec path |
 
@@ -151,14 +151,15 @@ the code.
 It is the only pass licensed to reject the spec's framing outright — do not soften its mandate in
 the prompt.
 
-**Passes 3–6 — the four lenses.** Dispatch per the dispatch contract in `_shared/council.md` — do
-not re-inline the roster, prompt template, or bars here. Fill every substitution token **before**
-sending each member its prompt (never ship a literal `<token>`):
+**Passes 3–6 — the four lenses.** Read `../_shared/council.md` now and follow it in full. Dispatch
+as the dispatch contract in `_shared/council.md` sets out — do not re-inline the roster, prompt
+template, or bars here. Fill every substitution token **before** sending each member its prompt
+(never ship a literal `<token>`):
 
 - the context-pointer line → `Review the draft spec against your lens.` then `Spec: <spec-path>`.
-- `<lens-critical-bars>` → **"Per-lens Critical bars — spec review"** in `_shared/council.md`.
-  **Not** the plan bars — a spec has no tasks, and the plan bars fire on things that don't exist
-  yet.
+- `<lens-critical-bars>` → the block of `_shared/council.md` headed **"Per-lens Critical bars — spec
+  review"**. **Not** the plan bars — a spec has no tasks, and the plan bars fire on things that
+  don't exist yet.
 - `<cross-cutting>` → the empty string (the plan-drift block is planning-only).
 - `<maturity-calibration>` → the block `scripts/maturity_bars.py` renders, per **"Filling the
   calibration token"** in `_shared/council.md`: pipe the spec body in with `--agent-instruction-file
@@ -183,8 +184,8 @@ adjudication — it is delegation of the work you were dispatched to do.** Conso
    Rank convergent findings above single-pass findings of nominally equal severity.
 4. **Drop the editorial.** Wording preferences, section-ordering suggestions, and style notes are
    not spec defects. Cut them silently.
-5. **Auto-downgrade speculative Criticals**, per the synthesis rules in `_shared/council.md`. State
-   which and why.
+5. **Auto-downgrade speculative Criticals**, as the synthesis rules in `_shared/council.md` set out.
+   State which and why.
 6. **Rate a criterion the consistency pass reports as compound Critical.** Not one it merely reads
    as long or complex — the compound-criteria section of the auditor's output shape (its item 3),
    naming an assertion the auditor judged independently deliverable. Important and Minor take no
@@ -234,7 +235,7 @@ disposition, and the same parts minus the table on a run that produced none (`di
 1. **The narrative synthesis** — prose, and the part that carries the deliverable. Three movements,
    one short paragraph each — what the passes found, whether it holds and where it came from, and
    what to do about it — written in the shape **"How the synthesis reads"** defines in
-   `_shared/council.md`. Read it there; do not restate it here. Two things about it are worth naming
+   `_shared/council.md`, loaded above. Do not restate it here. Two things about it are worth naming
    for this caller in particular:
 
    - **No sentence cap.** A cap tight enough to squeeze three movements squeezes two of them into
@@ -357,35 +358,35 @@ not yet a disposition. Ask, and record nothing until the operator answers. A dra
 blank one are the same failure, and both put text you are responsible for into the permanent trail
 under the operator's signature.
 
-**Read `gauntlet/dispositions.md` now and follow it in full.** It defines what each of the five
-terms — `resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` —
-means and requires.
+**Read `dispositions.md` now and follow it in full.** It defines what each of the five terms —
+`resolved`, `revise` and its two scopes, `accepted-as-risk`, `disputed`, and `answered` — means and
+requires.
 
 #### Advancing, revise rounds, and runs
 
-**Read `gauntlet/dispositions.md` now and follow it in full.** It defines when a record advances,
-the run/revise-round distinction, why a revise round still lands its `resolved` edits and
-provenance, and why `answered` blocks the advance check until re-adjudicated.
+**Read `dispositions.md` now and follow it in full.** It defines when a record advances, the
+run/revise-round distinction, why a revise round still lands its `resolved` edits and provenance,
+and why `answered` blocks the advance check until re-adjudicated.
 
 #### Zero Criticals is still a decision
 
-**Read `gauntlet/dispositions.md` now and follow it in full.** It defines why a clean run still
-presents the deliverable — minus the per-Critical table, since there are no Critical rows to hold
-one — and still gates on operator acceptance.
+**Read `dispositions.md` now and follow it in full.** It defines why a clean run still presents the
+deliverable — minus the per-Critical table, since there are no Critical rows to hold one — and still
+gates on operator acceptance.
 
 #### Accepting, and overriding in one round-trip
 
-**Read `gauntlet/dispositions.md` now and follow it in full.** It defines how the operator's
-acceptance and overrides are taken and applied, including the one-round-trip rule, the post-override
-echo, what makes an override incomplete or out of range, what an override withdraws, when a
-re-present is forced before anything is written, and the round-number rule.
+**Read `dispositions.md` now and follow it in full.** It defines how the operator's acceptance and
+overrides are taken and applied, including the one-round-trip rule, the post-override echo, what
+makes an override incomplete or out of range, what an override withdraws, when a re-present is
+forced before anything is written, and the round-number rule.
 
 #### Escalation points
 
-**Read `gauntlet/dispositions.md` now and follow it in full.** It defines every point where this
-step hands control to a human and what each waits for. Only the failed-write report's behaviour is
-inline below, being a fail-closed rule this skill fires unprompted; at every other point it names,
-this skill has already stopped and is waiting.
+**Read `dispositions.md` now and follow it in full.** It defines every point where this step hands
+control to a human and what each waits for. Only the failed-write report's behaviour is inline
+below, being a fail-closed rule this skill fires unprompted; at every other point it names, this
+skill has already stopped and is waiting.
 
 #### The accepted tail
 
@@ -525,5 +526,5 @@ writes no status for "still revising."
 
 ## Calibration
 
-**Read `gauntlet/calibration.md` now and follow it in full.** It holds pilot-run provenance and
-tuning notes, consulted after a run rather than restated here.
+**Read `calibration.md` now and follow it in full.** It holds pilot-run provenance and tuning notes,
+consulted after a run rather than restated here.

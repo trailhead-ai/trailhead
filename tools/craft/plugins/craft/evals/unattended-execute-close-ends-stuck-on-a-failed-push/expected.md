@@ -36,3 +36,7 @@ One failure mode of the push (unreachable remote); a rejection by a hook or a no
 ## Dropped as a detector, kept as a guard (2026-11-09)
 
 The baseline on the unedited prose came back green in 3 of 3 runs, so under the registered rule this case is dropped as a detector and recorded as a guard, and not retried. Its pass lines and graders are unchanged. See `tools/craft/MANUAL-EVAL.md`.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

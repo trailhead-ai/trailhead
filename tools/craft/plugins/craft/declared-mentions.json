@@ -1,0 +1,89 @@
+{
+  "skills/_shared/council.md": [
+    "skills/plan/SKILL.md"
+  ],
+  "skills/_shared/execute.md": [
+    "agents/executor.md",
+    "skills/execute/SKILL.md"
+  ],
+  "skills/_shared/refine.md": [
+    "skills/receiving-code-review/SKILL.md"
+  ],
+  "skills/_shared/security.md": [
+    "skills/brainstorm/SKILL.md",
+    "skills/consolidate/SKILL.md",
+    "skills/distill/SKILL.md",
+    "skills/drive/SKILL.md",
+    "skills/plan/SKILL.md",
+    "skills/review/SKILL.md",
+    "skills/slice/SKILL.md",
+    "skills/tidy-followups/SKILL.md"
+  ],
+  "skills/_shared/status-ownership.md": [
+    "skills/execute/SKILL.md"
+  ],
+  "skills/_shared/unattended.md": [
+    "skills/plan/SKILL.md",
+    "skills/slice/SKILL.md"
+  ],
+  "skills/brainstorm/SKILL.md": [
+    "skills/_shared/execute.md",
+    "skills/_shared/security.md",
+    "skills/_shared/slice.md",
+    "skills/distill/SKILL.md",
+    "skills/drive/SKILL.md",
+    "skills/gauntlet/SKILL.md",
+    "skills/plan/SKILL.md",
+    "skills/slice/SKILL.md"
+  ],
+  "skills/consolidate/SKILL.md": [
+    "skills/_shared/refine.md",
+    "skills/slice/SKILL.md"
+  ],
+  "skills/consult/SKILL.md": [
+    "skills/plan/SKILL.md"
+  ],
+  "skills/distill/SKILL.md": [
+    "skills/_shared/security.md",
+    "skills/plan/SKILL.md",
+    "skills/slice/SKILL.md"
+  ],
+  "skills/drive/SKILL.md": [
+    "skills/execute/SKILL.md"
+  ],
+  "skills/gauntlet/SKILL.md": [
+    "skills/_shared/refine.md",
+    "skills/receiving-code-review/SKILL.md"
+  ],
+  "skills/gauntlet/calibration.md": [
+    "agents/consistency-auditor.md",
+    "skills/gauntlet/SKILL.md"
+  ],
+  "skills/gauntlet/dispositions.md": [
+    "skills/gauntlet/SKILL.md"
+  ],
+  "skills/plan/SKILL.md": [
+    "skills/_shared/slice.md"
+  ],
+  "skills/polish/SKILL.md": [
+    "skills/_shared/note-storage.md"
+  ],
+  "skills/review/SKILL.md": [
+    "skills/_shared/status-ownership.md",
+    "skills/tidy-followups/SKILL.md"
+  ],
+  "skills/tidy-followups/SKILL.md": [
+    "skills/_shared/refine.md",
+    "templates/plan.md",
+    "templates/task.md"
+  ],
+  "agents/consistency-auditor.md": [
+    "skills/gauntlet/SKILL.md"
+  ],
+  "agents/planner.md": [
+    "skills/_shared/note-storage.md",
+    "skills/_shared/slice.md",
+    "skills/brainstorm/SKILL.md",
+    "skills/plan/SKILL.md"
+  ]
+}

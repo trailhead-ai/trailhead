@@ -16,9 +16,9 @@ description: >
 Convene the four-lens **council** on a specific question and synthesize what comes back. This is the
 council-review step made standalone — dispatchable on any decision, not just a freshly-written plan.
 
-The council membership is defined once in `_shared/council.md`. Read it — it names the four agents
-and the dispatch contract. This skill does **not** redefine the roster; it reads it from there so
-`consult` and `planning` can never drift apart.
+The council membership is defined once in `_shared/council.md`. Read `../_shared/council.md` now and
+follow it in full. It names the four agents and the dispatch contract. This skill does **not**
+redefine the roster; it reads it from there so `consult` and `planning` can never drift apart.
 
 ## When to use this vs. a single agent
 
@@ -42,9 +42,9 @@ run in isolated contexts and only see what the prompt points them at.
 
 ### 2. Dispatch the four members (parallel, isolated)
 
-Per `_shared/council.md`: make **four parallel `Agent` tool calls** — one each to `builder`,
+As `_shared/council.md` sets out: make **four parallel `Agent` tool calls** — one each to `builder`,
 `breaker`, `attacker`, `advocate` — in a **single message** so they run concurrently in isolated
-contexts. Use the **prompt template, per-lens Critical bars, and synthesis rules in
+contexts. Take the **prompt template, the Critical bars for each lens, and the synthesis rules from
 `_shared/council.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE
 sending each member its prompt (never ship a literal `<token>`):
 
@@ -54,9 +54,9 @@ sending each member its prompt (never ship a literal `<token>`):
   Question: <question>
   Context to read: <context-pointers>
   ```
-- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/council.md`.
-  Those bars are phrased for plan review; read each as applying to the question / design / diff
-  under review (map "task" → the unit under review) and skip any bar with no analogue for this
+- `<lens-critical-bars>` → the matching block of `_shared/council.md` headed "Per-lens Critical
+  bars". Those bars are phrased for plan review; read each as applying to the question / design /
+  diff under review (map "task" → the unit under review) and skip any bar with no analogue for this
   question.
 - `<cross-cutting>` → the empty string (the cross-cutting plan-drift block is planning-only; consult
   reviews a standalone question, not a plan)
@@ -68,7 +68,7 @@ sending each member its prompt (never ship a literal `<token>`):
   ```sh
   : | ${CLAUDE_PLUGIN_ROOT}/scripts/maturity_bars.py --agent-instruction-file <repo-root>/CLAUDE.md
   ```
-**A non-zero exit still refuses the dispatch** — do not review at an uncalibrated severity. Read the
+**A non-zero exit still refuses the dispatch** — do not review at an uncalibrated severity. Take the
 `reason-code:` stderr line and refuse with the remedy the code names — mirror `plan/SKILL.md`'s step
 8.5 remedy table and worked refusal example rather than re-deriving a second one. The only
 reason-codes reachable here are the agent-instruction-file ones
@@ -87,7 +87,7 @@ in a voice that stands on content, not on the role tag.
 
 ### 3. Synthesize (main session, NOT a subagent)
 
-Synthesize per `_shared/council.md`: de-duplicate by issue (not by member), auto-downgrade
+Synthesize as `_shared/council.md` sets out: de-duplicate by issue (not by member), auto-downgrade
 speculative Criticals (stating which and why), then **lead with the narrative synthesis** in the
 shape "How the synthesis reads" defines there — what the lenses found, whether it holds and where it
 came from, and what to do about it. The consolidated list follows it as supporting detail, with the

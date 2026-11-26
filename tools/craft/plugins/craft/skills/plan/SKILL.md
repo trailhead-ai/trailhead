@@ -34,7 +34,7 @@ see Step 1. Step 8 is where they diverge — writing the plan differently per pa
 ## Unattended request
 
 The invocation may carry the whole argument token `--unattended`. **Read `../_shared/unattended.md`
-and `../_shared/escalation.md` now when `--unattended` is present, and follow them in full.** The
+now and follow it in full.** **Read `../_shared/escalation.md` now and follow it in full.** The
 first defines the request, the decision rule, the `## Unattended run` section on the slice record,
 the outcome line and the no-next-command rule; this skill states what each of its own stops does
 under the request and does not restate those shapes. Without the whole token, every step below is
@@ -75,8 +75,9 @@ instead>` is plain words, not a command to paste: for a topic, plan it attended 
 unattended first and plan the slice that comes out; for a task that is not a slice parent, plan it
 attended.
 
-**The run block, once the check passes.** Read `../_shared/unattended.md` for the block's shape, the
-`Q<n>` shape and numbering, and the outcome grammar; this skill never restates them.
+**The run block, once the check passes.** Read `../_shared/unattended.md` now and follow it in full.
+It defines the block's shape, the `Q<n>` shape and numbering, and the outcome grammar; this skill
+never restates them.
 
 - **Continue or open.** Continue an existing block only on a positive same-session signal: this
   session's own `/craft:slice` pass, run with `--then-plan`, opened it on this record (its output is
@@ -91,14 +92,14 @@ attended.
   edit, not collected for the end, so a session interrupted part-way leaves the calls so far on
   record. A decision names the question, the choice and the reasoning. Bring `**Checkpoint:**` up to
   date with each write.
-- **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, read
-  fresh immediately beforehand, after the credential scrub (`_shared/security.md`) has run over the
-  text to be written. The same scrub runs before step 8's full-body parent write and before every
-  later write to the parent. Each of those bodies and diffs reaches `lore` from a temp file by stdin
-  redirect, never on a command line, and the file is removed after the write when removal is
-  available (`_shared/unattended.md`, Record writes). When an update reports that the diff did not
-  apply, read the record fresh and rebuild the diff once, as `_shared/unattended.md` says; a write
-  that still fails, or fails for any other reason, ends the session with
+- **Every write is a `lore record update task/<parent-name> --diff` confined to the block**, taken
+  from a fresh copy immediately beforehand, after the credential scrub (`_shared/security.md`) has
+  run over the text to be written. The same scrub runs before step 8's full-body parent write and
+  before every later write to the parent. Each of those bodies and diffs reaches `lore` from a temp
+  file by stdin redirect, never on a command line, and the file is removed after the write when
+  removal is available (`_shared/unattended.md`, Record writes). As `_shared/unattended.md` says,
+  when an update reports that the diff did not apply, read the record fresh and rebuild the diff
+  once; a write that still fails, or fails for any other reason, ends the session with
   `outcome: stuck task/<parent-name> parked=<n> — run-section write failed; <what to do instead>`
   and nothing further is written.
 - **Parked questions** take the next `Q<n>` after the highest on the record, in any block, as
@@ -565,11 +566,12 @@ on, and what test behaviors prove the task works.
 
 **Slice-rooted, with folded entries from step 1: place every one.** Each entry step 1 listed is
 either part of a child task or given back, and none is left unplaced. Placing an entry is a
-found-work decision, decided as `../_shared/escalation.md` says (read it now): the two placements
-below are routine and are made and logged without asking, unless the only fix for the entry would
-change the spec's objectives, non-goals or acceptance criteria, cannot be undone, or lies outside
-that rule's allowed actions. Then neither placement is made: put the blocking prompt that file
-defines about the entry and end the turn, writing nothing about it until the answer arrives.
+found-work decision, decided as `../_shared/escalation.md` says. Read `../_shared/escalation.md` now
+and follow it in full. The two placements below are routine and are made and logged without asking,
+unless the only fix for the entry would change the spec's objectives, non-goals or acceptance
+criteria, cannot be undone, or lies outside that rule's allowed actions. Then neither placement is
+made: put the blocking prompt that file defines about the entry and end the turn, writing nothing
+about it until the answer arrives.
 
 - **Make it part of a task.** Name it in that child's **Delivers** on a line of its own that begins
   `Resolves spec/<spec-name>#F<n>: <title>`, with the title as `entries` printed it, flattened to
@@ -624,10 +626,10 @@ that existing parent, exactly as the topic-rooted path does below.
      record create --kind task --title '<topic>' --status ready --vault <vault> <
      <body-path>`, the body written to a `mktemp` file with the file-writing tool and read by
      redirect. This stores the plan as a searchable lore `task` record, linkable from session notes
-     and future planning. Before creating it, check whether the resolved spec already has an open
-     slice parent — validate `<spec-name>` against the safe-value shape `_shared/security.md`
-     codifies for any vault-sourced value entering a command before it is substituted into this
-     query:
+     and future planning. Before creating it, check whether the resolved spec already has an
+     unfinished slice parent — validate `<spec-name>` against the safe-value shape
+     `_shared/security.md` codifies for any vault-sourced value entering a command before it is
+     substituted into this query:
      `lore search "kind:task related-spec:<spec-name> has:label.craft.slice-parent -status:done -status:dropped -status:superseded"`.
      The `has:label.craft.slice-parent` filter is what makes this a question about slice parents
      rather than about any task linked to the spec — a follow-up or a coordination task carries
@@ -645,7 +647,7 @@ that existing parent, exactly as the topic-rooted path does below.
      pass, and the enumerated states section is what Phase 6's close gate reads, so a full-body
      write that drops it would silently disarm that gate; preserving it also keeps a
      `craft/design-doc` label already on the parent from an earlier interrupted pass meaningful.
-     Read the record fresh immediately before this write so the run block is current, and, under
+     Fetch the record fresh immediately before this write so the run block is current, and, under
      `--unattended`, run the credential scrub over the combined body first (the plan text is vault
      material that ships), write the combined body to a `mktemp` file with the file-writing tool and
      feed it in by redirect, `lore record update <parent-name> < <body-path>`, as
@@ -733,19 +735,20 @@ council members review the plan + its linked spec in parallel; the main session 
 findings and gates approval on disposition of any Critical findings.
 
 **Membership is defined in `_shared/council.md`** — the single source of truth for who the council
-is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read it; do not
-hardcode the roster here. Planning dispatches the council **directly** off that shared list — it
-does **not** call the `/craft:consult` skill (a skill→skill chain is unreliable). `consult` is the
-standalone-invocable form of this same panel for questions outside the planning flow.
+is (`builder` / `breaker` / `attacker` / `advocate`) and the dispatch contract. Read
+`../_shared/council.md` now and follow it in full. Do not hardcode the roster here. Planning
+dispatches the council **directly** off that shared list — it does **not** call the `/craft:consult`
+skill (a skill→skill chain is unreliable). `consult` is the standalone-invocable form of this same
+panel for questions outside the planning flow.
 
-This step is mandatory on every plan. There is no skip flag — calibration is tuned via the per-lens
-Critical bars in `_shared/council.md`, not via per-invocation opt-outs.
+This step is mandatory on every plan. There is no skip flag — calibration is tuned via the Critical
+bars for each lens in `_shared/council.md`, not via opt-outs on any single invocation.
 
-**Dispatch:** per `_shared/council.md`, make four parallel `Agent` tool calls — one each to
-`builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Use the
-**prompt template, per-lens Critical bars, and synthesis rules in `_shared/council.md`** — do not
-re-inline them here. Fill the template's substitution tokens BEFORE sending each member its prompt
-(never ship a literal `<token>`):
+**Dispatch:** as `_shared/council.md` sets out, make four parallel `Agent` tool calls — one each to
+`builder`, `breaker`, `attacker`, `advocate` — in a single message so they run concurrently. Take
+the **prompt template, the Critical bars for each lens, and the synthesis rules in
+`_shared/council.md`** — do not re-inline them here. Fill the template's substitution tokens BEFORE
+sending each member its prompt (never ship a literal `<token>`):
 - the context-pointer line → these two lines (substitute `<spec-path>` with the plan's linked spec
   absolute path; if the plan has no `related-spec` frontmatter, replace the whole `Spec:` line with
   `Spec: none — review against the plan's own Goal and Delta design blocks`):
@@ -756,7 +759,8 @@ re-inline them here. Fill the template's substitution tokens BEFORE sending each
   ```
 (`<plan-path>` points at the parent task; the reviewer reads its child tasks via `lore task graph
 <parent-name>`.)
-- `<lens-critical-bars>` → the matching block from "Per-lens Critical bars" in `_shared/council.md`
+- `<lens-critical-bars>` → the matching block of `_shared/council.md` headed "Per-lens Critical
+  bars"
 - `<cross-cutting>` → this plan-specific extra Critical block:
   ```text
 
@@ -808,7 +812,7 @@ default without re-deriving it. Restate any `stand-down:` and `waiver-not-recogn
 block carries beside it too, so the operator sees a waiver was exercised without opening the block
 itself.
 
-Then synthesize per `_shared/council.md` (de-duplicate by issue, auto-downgrade speculative
+Then synthesize as `_shared/council.md` sets out (de-duplicate by issue, auto-downgrade speculative
 Criticals, lead with the narrative synthesis in the shape "How the synthesis reads" defines there,
 then present the list below it grouped by severity, writing every finding in the shape "How a
 finding reads" defines there — both shapes govern what you show the user in session, not the
@@ -899,7 +903,7 @@ skipped."
 
 **Re-review:** no automatic re-review after the user resolves Critical findings inline. The user
 attests the fix is in (or that the finding is accepted/disputed), and planning proceeds. This keeps
-mandatory-review cost bounded; if first-pass calibration is wrong, tune the per-lens bars in
+mandatory-review cost bounded; if first-pass calibration is wrong, tune the bars for each lens in
 `_shared/council.md` rather than adding iteration cycles.
 
 **Hard-floor gate:** the "reply `build` to hand off" prompt in Step 9 must NOT be printed until

@@ -7,15 +7,21 @@ The three cases (`slice-carries-out-a-free-text-answer-to-its-question`,
 `slice-asks-again-on-a-free-text-answer-that-cannot-be-undone`,
 `slice-amends-the-spec-on-a-free-text-answer-that-changes-it`) resume the same
 seeded conversation: the operator ran `/craft:slice spec/invoice-summary`, the
-session read the spec, and put the blocking prompt about the urgent entry F1.
+session loaded the slice skill, read the spec, and put the blocking prompt about the urgent entry F1.
 
 The one tool_result is the captured output of the real `./lore record show`
 command the tool_use names, run in a throwaway vault built by the urgent-entry
 case's own scaffold (so the spec revision embedded in it is the one a run sees).
-Only the operator's and the agent's prose is written here. The history carries no
-read of `skills/_shared/escalation.md` or of the slice skill and none of the
-sentences those files are measured on. Run it again whenever the scaffold's spec
-changes; it writes the same history.jsonl into all three fixtures directories.
+Only the operator's and the agent's prose is written here. The skill load is what a
+real launch leaves in a conversation: the Skill call, its launch line, and the
+skill's text as the harness shows it (a "Base directory for this skill" line, the
+body without its front matter, the plugin root filled in, and the arguments).
+The plugin root is `./craft`, the copy of the plugin each case's scaffold installs
+in the run directory, because a seeded conversation is resumed literally and an
+absolute path would hold only on the machine that built it. The history carries
+no text of `skills/_shared/escalation.md`: the resumed session reads it itself.
+Run it again whenever the slice skill or the scaffold's spec changes; it writes the
+same history.jsonl into all three fixtures directories.
 """
 from __future__ import annotations
 
@@ -28,6 +34,10 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 EVALS = HERE.parents[1]
+PLUGIN = EVALS.parent
+SLICE_SKILL = PLUGIN / "skills" / "slice" / "SKILL.md"
+PLUGIN_IN_RUN = "./craft"
+SKILL_ARGS = "spec/invoice-summary"
 URGENT = EVALS / "slice-asks-before-dropping-an-urgent-entry"
 CASES = [
     EVALS / "slice-carries-out-a-free-text-answer-to-its-question",
@@ -56,6 +66,16 @@ task is broader, so the finding may wait behind other audit work.
 until someone builds or drops F1.
 
 Reply with a number, or tell me in your own words what to do."""
+
+
+def launch_text(skill_md: Path, args: str) -> str:
+    """The text a real skill launch adds to the conversation, for the plugin copy in the run."""
+    text = skill_md.read_text(encoding="utf-8")
+    if text.startswith("---\n"):
+        text = text.split("\n---\n", 1)[1]
+    body = text.replace("${CLAUDE_PLUGIN_ROOT}", PLUGIN_IN_RUN)
+    base = f"{PLUGIN_IN_RUN}/skills/{skill_md.parent.name}"
+    return f"Base directory for this skill: {base}\n\n{body}\n\nARGUMENTS: {args}"
 
 
 def clean_env(home: Path) -> dict[str, str]:
@@ -110,29 +130,36 @@ class Writer:
     def user(self, text: str) -> None:
         self._base("user", {"role": "user", "content": text})
 
-    def assistant(self, text: str, command: str | None = None, description: str = "") -> str | None:
-        content: list[dict] = [{"type": "text", "text": text}]
+    def meta(self, text: str, source_tool_id: str) -> None:
+        self._base("user", {"role": "user", "content": [{"type": "text", "text": text}]},
+                   {"isMeta": True, "sourceToolUseID": source_tool_id})
+
+    def assistant(self, text: str, command: str | None = None, description: str = "",
+                  tool: tuple[str, dict] | None = None) -> str | None:
+        content: list[dict] = [{"type": "text", "text": text}] if text else []
         tool_id = None
         if command is not None:
-            tool_id = "toolu_free01"
-            content.append({"type": "tool_use", "id": tool_id, "name": "Bash",
-                            "input": {"command": command, "description": description}})
+            tool = ("Bash", {"command": command, "description": description})
+        if tool is not None:
+            tool_id = f"toolu_free{self.counter + 1:02d}"
+            content.append({"type": "tool_use", "id": tool_id, "name": tool[0], "input": tool[1]})
         self._base("assistant", {
             "id": f"msg_free{self.counter}", "type": "message", "role": "assistant",
             "model": "claude-opus-5-5", "content": content,
-            "stop_reason": "tool_use" if command is not None else "end_turn", "stop_sequence": None,
+            "stop_reason": "tool_use" if tool is not None else "end_turn", "stop_sequence": None,
             "usage": {"input_tokens": 100, "output_tokens": 100},
         })
         return tool_id
 
-    def result(self, tool_id: str, output: str) -> None:
+    def result(self, tool_id: str, output: str, tool_use_result: dict | None = None) -> None:
         self._base(
             "user",
             {
                 "role": "user",
                 "content": [{"tool_use_id": tool_id, "type": "tool_result", "content": output, "is_error": False}],
             },
-            {"toolUseResult": {"stdout": output, "stderr": "", "interrupted": False, "isImage": False}},
+            {"toolUseResult": tool_use_result
+             or {"stdout": output, "stderr": "", "interrupted": False, "isImage": False}},
         )
 
     def dump(self) -> str:
@@ -142,6 +169,9 @@ class Writer:
 def build() -> str:
     w = Writer()
     w.user(operator_prompt())
+    skill_id = w.assistant("", tool=("Skill", {"skill": "craft:slice", "args": SKILL_ARGS}))
+    w.result(skill_id, "Launching skill: craft:slice", {"success": True, "commandName": "craft:slice"})
+    w.meta(launch_text(SLICE_SKILL, SKILL_ARGS), skill_id)
     tool_id = w.assistant("I'll read the spec first.", SHOW, "Read the spec")
     w.result(tool_id, captured_show())
     w.assistant(QUESTION)

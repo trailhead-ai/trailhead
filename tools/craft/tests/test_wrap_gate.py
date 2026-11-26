@@ -6,7 +6,7 @@ while its successor's first word (or code span) would still have fit. A bare
 "no line over N" check cannot tell a document wrapped at 100 from one wrapped
 at 70 — both pass — so the under-fill rule is what actually pins the column.
 
-Exit-code contract (matches `toc_gate.py` and `reference_depth_gate.py`):
+Exit-code contract (matches `toc_gate.py`):
   0 → clean (every prose line is within budget and fully filled)
   1 → finding (an over-budget line or an under-filled line — prints a
       `reason:` line per finding, naming the file, line number, which rule

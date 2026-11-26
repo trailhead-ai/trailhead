@@ -37,3 +37,7 @@ Every clause holds.
 - One fixture, one phrasing, one model tier, two runs as run.
 - If the chooser still splits the page from the API on the edited prose in some run, that is a prose finding, not a fixture defect, as long as the spec's Problem stays as explicit as above.
 - The baseline is red by design. A green baseline (the chooser merged the two entry points on today's text by reading the Problem prose) means the fixture is strengthened or the case is reported as non-discriminating, never kept silently.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

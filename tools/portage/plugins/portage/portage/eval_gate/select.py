@@ -39,37 +39,35 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                 "case_removed": bool,   # true: selected, but its case.yaml is gone at head
                 "paused": bool}, ...]}  # true: HEAD's mapping of the corpus says "paused": true
 
-The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched
-case. ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters
-by tier. Both mappings and the case files are read from commits (the merge-base and HEAD), never the
-working tree. On the push tier the base takes precedence for ``merge_only``; at the merge tier (and in
-``backstop_touched``) a case is ``merge_only`` when the base's or HEAD's mapping marks it, so a stale
-base cannot hide a flag. A case that HEAD still declares, whose entry is a split procedure core at either
-revision and whose HEAD case does not say ``merge_only``, is not ``merge_only`` at any tier, even when the
-base marks it. Base takes precedence over the branch for the rest: cases are selected from the base and head
-mappings combined, and a corpus whose mapping exists at the base runs under the
-base's runner block, runs and pass_at. The base also supplies the mark and both model ids: a mark added on the branch
-takes effect once merged. A corpus new on the branch uses its own and
-is flagged ``new_runner_grants``; ``run`` records each of its cases as not-run
-``corpus-new-on-branch`` without starting a runner (the grants are unreviewed), and they add
-nothing to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head
-stays in the plan with ``case_removed`` true; ``run`` records it as not-run
-``case-removed-on-branch`` without starting a runner, and it adds nothing to
-``total_max_cost_usd``. A selected case whose corpus HEAD's mapping marks ``"paused": true`` stays in the plan
-with ``paused`` true (the pause is read at HEAD, so a branch that lifts it runs the case); ``run`` records it as
-not-run ``corpus-paused`` without starting a runner, and it adds nothing to
-``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the
-plan is ``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
-``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an
-empty file): a declared case's entry or branch is missing, or the entry never loads a declared branch (a base
-fault says so and is ``revision`` ``base``); a mapped corpus's procedures (``skills/**/*.md``, ``agents/*.md``)
-at HEAD load a file that does not exist; a hand-written ``measures`` path at HEAD is or holds a split core (a
-procedure that loads a branch file) or a branch file; two corpora hold a case of the same name at one revision;
-a case moves from one corpus at the base to another at HEAD; or HEAD's case is ``merge_only`` with no
-``needs_merge_model`` mark while its entry is a split procedure core at either revision. A tracked file modified in
-the working tree (``git status --porcelain --untracked-files=no`` non-empty) makes the status ``tree-dirty``:
-the gate grades committed prose, so it selects nothing. Changed files come from ``git diff --no-renames``, so a
-renamed file counts as both its old and its new path.
+The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched case.
+``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters by tier. Both mappings and
+the case files are read from commits (the merge-base and HEAD), never the working tree. On the push tier the base
+takes precedence for ``merge_only``; at the merge tier (and in ``backstop_touched``) a case is ``merge_only`` when the
+base's or HEAD's mapping marks it, so a stale base cannot hide a flag. A case that HEAD still declares, whose entry is
+a split procedure core at either revision and whose HEAD case does not say ``merge_only``, is not ``merge_only`` at
+any tier, even when the base marks it. Base takes precedence over the branch for the rest: cases are selected from the
+base and head mappings combined, and a corpus whose mapping exists at the base runs under the base's runner block,
+runs and pass_at. The base also supplies the mark and both model ids: a mark added on the branch takes effect once
+merged. A corpus new on the branch uses its own and is flagged ``new_runner_grants``; ``run`` records each of its
+cases as not-run ``corpus-new-on-branch`` without starting a runner (the grants are unreviewed), and they add nothing
+to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head stays in the plan with ``case_removed``
+true; ``run`` records it as not-run ``case-removed-on-branch`` without starting a runner, and it adds nothing to
+``total_max_cost_usd``. A selected case whose corpus HEAD's mapping marks ``"paused": true`` stays in the plan with
+``paused`` true (the pause is read at HEAD, so a branch that lifts it runs the case); ``run`` records it as not-run
+``corpus-paused`` without starting a runner, and it adds nothing to ``total_max_cost_usd``.
+Every corpus path must pass ``mapping.valid_corpus_path``, else the plan is
+``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
+``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an empty
+file): a declared case's entry or branch is missing, or the entry never loads a declared branch (at HEAD the branch
+must be a parsed load; the base revision is lenient and also accepts one the entry merely mentions, so an older
+wording does not fault; a base fault says so and is ``revision`` ``base``); a mapped corpus's procedures
+(``skills/**/*.md``, ``agents/*.md``) at HEAD load a file that does not exist; a hand-written ``measures`` path at
+HEAD is or holds a split core (a procedure that loads a branch file) or a branch file; two corpora hold a case of the
+same name at one revision; a case moves from one corpus at the base to another at HEAD; or HEAD's case is
+``merge_only`` with no ``needs_merge_model`` mark while its entry is a split procedure core at either revision. A
+tracked file modified in the working tree (``git status --porcelain --untracked-files=no`` non-empty) makes the status
+``tree-dirty``: the gate grades committed prose, so it selects nothing. Changed files come from
+``git diff --no-renames``, so a renamed file counts as both its old and its new path.
 
 Bounds. A revision (the merge-base, HEAD) holds at most ``MAX_MAPPING_FILES`` mapping files, charged on
 the count of ``evals/eval-gate.json`` paths in its tree before any is read; a mapping holds at most
@@ -256,7 +254,8 @@ class _GitReader:
 
     Modes come from ``tree`` (``{repo path: mode}``), so a path the tree lacks is ``None`` and anything but a
     plain blob raises ``NotRegularFile``. Contents come from one lazily started ``git cat-file --batch``;
-    a process that dies, answers anything but a whole blob or stops short raises, never an empty text."""
+    a process that dies, answers anything but a whole blob or stops short raises, never an empty text. A whole
+    blob that is not UTF-8 raises ``UnicodeDecodeError`` unchanged, which ``loads`` reads as a leaf."""
 
     def __init__(self, repo: Path, rev: str, tree: dict[str, str], root: str, git: Git = GIT,
                  charged: set[str] | None = None):
@@ -279,12 +278,14 @@ class _GitReader:
             self._charged.add(full)
         try:
             return self._fetch(full)
+        except UnicodeDecodeError:
+            raise
         except (GitError, OSError, ValueError):
             raise LoadError(f"{_q(path, 1)} could not be read at {label}") from None
 
     def _fetch(self, full: str) -> str:
-        if "\n" in full:
-            raise GitError("a path with a newline cannot be read through cat-file --batch")
+        if any(ord(ch) < 0x20 or ord(ch) == 0x7F for ch in full):
+            raise GitError("a path with a control character cannot be read through cat-file --batch")
         if self._proc is None:
             self._proc = self._git.open_cat_file(self._repo)
         proc = self._proc
@@ -292,6 +293,7 @@ class _GitReader:
         proc.stdin.flush()
         head = proc.stdout.readline().split()
         if len(head) != 3 or head[1] != b"blob" or not head[2].isdigit():
+            self.close(kill=True)
             raise GitError("git cat-file --batch did not return a blob")
         size = int(head[2])
         if size > MAX_BLOB_BYTES:
@@ -386,7 +388,7 @@ def _derive(path: str, mapping: Mapping | None, name: str, read, revision: str):
     if case is None or case.entry is None:
         return None
     try:
-        return derive(case.entry, case.branches, read)
+        return derive(case.entry, case.branches, read, base_tolerant=revision == "base")
     except LoadError as e:
         raise _fault(path, _q(name, list(mapping.cases).index(name) + 1), e, revision) from None
 

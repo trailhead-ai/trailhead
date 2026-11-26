@@ -441,7 +441,7 @@ If `pr_pairs` is unknown (i.e. `rest` was empty), the agent will detect it via
 
 A caller that cannot wait on this dispatch's prose
 reply passes `outcome_file: <absolute path>` too — an optional machine-readable completion
-channel monitor writes exactly one line to at its terminal state (see `agents/monitor.md`'s
+channel monitor writes exactly one line to at its terminal state (see `../../agents/monitor.md`'s
 "Outcome file" section for the grammar). The caller pre-creates the file's parent directory;
 monitor never does.
 
@@ -610,7 +610,7 @@ No issue tracker configured — status transitions skipped. Configure
   lands on `main`. An unrecognized value refuses before any merge call. `automatic`
   prefers rebase, then a sole-permitted strategy, then squash/merge driven by the
   pull request's commit series — see "Automatic merge-strategy selection" in
-  `docs/pr-merge-rituals.md` for the fallback rule.
+  `../../docs/pr-merge-rituals.md` for the fallback rule.
 - No issue tracker configured — status transitions skipped. Configure
   `[release].external_tracker` in the group TOML to wire a tracker.
 - The `portage` CLI is on `$PATH` via trailhead's CLI shim dir (same mechanism as

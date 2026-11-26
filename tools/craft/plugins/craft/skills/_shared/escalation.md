@@ -99,11 +99,15 @@ urgent entry, or moving it out of the spec's loop (a drop whose reason names a `
 session asks.** The question is put before any further drop of that pass is written, and no drop is
 written until the operator's answer arrives.
 
-The fixes this trigger offers, in the order the session judges them, are whichever of these apply:
+The fixes this trigger offers, in the order the session judges them, are these. A move applies once
+per task the searches find; the other three always apply, so every one of them is in the question,
+listed or described as a further fix with its cost:
 
 - **Move it to an existing task.** The entry is dropped with a reason that names that task, and the
-  work stays tracked there. Offered once per existing task that credibly holds the work, found with
-  `lore search`.
+  work stays tracked there. Offered once per existing task that credibly holds the work. Find them
+  with two searches: one for the file name in each of the entry's `where` paths, and one for two or
+  three plain words from its title. Read every task either search returns, because a task that holds
+  the work often describes it in other words than the entry does.
 - **Keep it open and stop the loop.** The entry stays open and the ritual takes its early stop; its
   cost is that the spec cannot be reported complete until someone builds or drops the entry.
 - **Drop it with no task to hold it.** The entry is dropped with a reason beginning `nowhere:`; its
@@ -129,7 +133,9 @@ read nothing the session printed before it.
 **At most three fixes are listed, plus free text.** When more than three are real, the session lists
 the recommended fix and the best others up to three, and the question itself describes each further
 fix with what choosing it costs, saying that the operator can ask for one of them by naming it in
-their own words. A fix is never left out for want of room.
+their own words. Put those in the question as their own short paragraph, one sentence per further
+fix naming the fix and its cost; an example of what the operator could say is not a substitute for
+it. A fix is never left out for want of room.
 
 ## Where the question is shown
 

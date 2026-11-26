@@ -3,7 +3,7 @@ allowed_tools: [Skill, Read, Write, Glob, Grep]
 max_turns: 120
 timeout_seconds: 540
 ---
-Run `/craft:slice spec/schedule-courier-pickups`. This is a bounded session: stop as soon as the pass has stated the slice it chose and its value claim, and write no parent task for it. Say in your final message what you did. The spec's vault is `eval`.
+Run `/craft:slice spec/schedule-courier-pickups`. This is a bounded session: stop as soon as the pass has stated the new slice it chose and its value claim, and write no parent task for that new slice. The limit is on the new slice only; whatever the procedure does before choosing it goes ahead as written. Say in your final message what you did. The spec's vault is `eval`.
 
 The lore CLI is installed in this directory as `./lore`. Wherever a document or instruction says `lore`, run `./lore` instead. The plugin's scripts are installed in this directory's `scripts/`: wherever a document says `${CLAUDE_PLUGIN_ROOT}/scripts/`, run `./scripts/` instead.
 

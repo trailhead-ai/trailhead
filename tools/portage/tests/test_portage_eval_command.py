@@ -330,7 +330,8 @@ class TestStart:
         plugin = ws.repo / "plugins" / "p"
         (plugin / "rules").mkdir()
         (plugin / "rules" / "core.md").write_text("core\n")
-        (plugin / "skills" / "e.md").write_text("Read `rules/core.md`.\n\nRead `skills/b.md` for B.\n")
+        (plugin / "skills" / "e.md").write_text(
+            "Read `../rules/core.md` now and follow it in full.\n\nRead `b.md` now and follow it in full.\n")
         (plugin / "skills" / "b.md").write_text("Applies when B.\n")
         (plugin / "evals" / "decl").mkdir()
         (plugin / "evals" / "decl" / "case.yaml").write_text("name: x\n")

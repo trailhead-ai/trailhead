@@ -33,3 +33,7 @@ The harness's choice prompt is not observable headless; the prompt-shape graders
 ## Limitations
 
 The session cannot dispatch an executor or run git, so a fold is judged by the decision it logs. The runner deletes the trace; a trace judge sees only the first and last 12 events. One fixture, one phrasing, one model tier. The unlisted routes are closed by the fixture's own statement of the finding, which is the case's device, not something the prompt says.
+
+## Deviation from pre-registration (2026-11-25): the run directory supplies the session
+
+The prompt told the model to add `--session-id aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee` to its lore and script commands. Across the cases whose prompts carried that instruction, `claude-sonnet-5-5` runs sometimes left the flag off, so their entries went to the runner's own session, where no grader reads, and some placed it after a stdin redirect, which the run's permission grants refused: the prompt's extra argument, not the procedure under test, decided those runs. The case's lore wrappers now set the case's session themselves, as Claude Code sets a real session's, and the prompt no longer names the flag, so the model runs each command as the procedure writes it. No grader, fixture record or bar changed.

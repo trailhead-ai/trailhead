@@ -42,7 +42,8 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 **3. Dispatch code-reviewer subagent:**
 
-Use Task tool with code-reviewer type, fill template at `code-reviewer.md`
+Read `code-reviewer.md` now and follow it in full. Use the Task tool with the code-reviewer type,
+filling in that template.
 
 **4. For security-sensitive diffs, also dispatch `security-auditor`.** If the change touches auth,
 input validation, crypto, secrets, or session handling, run both reviews in parallel — they're
@@ -56,8 +57,8 @@ complementary.
 - `{DESCRIPTION}` - Brief summary
 
 **5. Act on feedback:**
-- Read `../_shared/council.md` now: its "How a finding reads" section governs how you tell the user
-  what the reviewer found
+- Read `../_shared/council.md` now. Use its "How a finding reads" section, which governs how you
+  tell the user what the reviewer found
 - Fix Critical issues immediately
 - Fix Important issues before proceeding
 - Note Minor issues for later, except a verified finding that a different record is wrong with a

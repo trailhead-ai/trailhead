@@ -14,7 +14,7 @@ case "$base" in
   /Users/*|/home/*) cp -R "$base" py-home ;;
   *) ln -s "$base" py-home ;;
 esac
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 chmod +x lore
 mkdir -p bin scripts
 cp -r "$repo/tools/craft/plugins/craft/scripts" real-scripts
@@ -24,7 +24,7 @@ cat > bin/lore <<'EOW'
 #!/bin/sh
 here=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$here/script-lore-calls.log"
-LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
+CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"
 EOW
 # scripts/pending_check.py runs the plugin's own writer against bin/lore.
 cat > scripts/pending_check.py <<'EOW'

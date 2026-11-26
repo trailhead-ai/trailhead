@@ -752,7 +752,7 @@ class TestOptionLikeBaseIsNotNoTouch:
 
 
 SPLIT_FILES = {
-    "skills/entry.md": "# Entry\n\nRead `skills/b.md` now.\n",
+    "skills/entry.md": "# Entry\n\nRead `b.md` now and follow it in full.\n",
     "skills/b.md": "Applies when the user asks for B.\n\nbody\n",
 }
 SPLIT_CASE = {"entry": "skills/entry.md", "branches": ["skills/b.md"]}
@@ -931,7 +931,7 @@ class TestSplitProcedureBackstop:
         from portage.eval_gate.select import backstop_touched
 
         repo, _ = make_split_repo(tmp_path, "unresolved")
-        (repo / "p/skills/entry.md").write_text("# Entry\n\nRead `skills/b.md` now.\n\nmore\n")
+        (repo / "p/skills/entry.md").write_text("# Entry\n\nRead `b.md` now and follow it in full.\n\nmore\n")
         status, entries = backstop_touched(repo, "no-such-ref")
         assert status == "base-unresolved"
         assert [(e["case"], e["split_procedure"]) for e in entries] == [("decl", True)]

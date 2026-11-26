@@ -19,13 +19,13 @@ esac
 cp -r "$repo/tools/craft/plugins/craft/scripts" real-scripts
 rm -rf real-scripts/__pycache__
 # ./lore is the agent's own door to the vault; every call is logged by its arguments.
-printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nLORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
+printf '#!/bin/sh\nhere=$(cd "$(dirname "$0")" && pwd)\nprintf "%%s\\n" "$*" >> "$here/lore-calls.log"\nCLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" exec "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"\n' > lore
 # bin/lore is what the plugin's scripts reach as `lore`; their calls go to a log of their own.
 cat > bin/lore <<'EOW'
 #!/bin/sh
 here=$(cd "$(dirname "$0")/.." && pwd)
 printf '%s\n' "$*" >> "$here/script-lore-calls.log"
-real() { LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"; }
+real() { CLAUDE_CODE_SESSION_ID=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee LORE_EMAIL=eval@example.invalid PYTHONPATH="$here" "$here/py-home/bin/python3" "$here/lore-plugin/cli/lore" "$@"; }
 real "$@"
 EOW
 # scripts/ is the plugin's scripts directory for this run: the writer and the gate, run against bin/lore.

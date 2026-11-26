@@ -1,0 +1,10 @@
+{
+  "skills/pull_request/SKILL.md": [
+    "agents/monitor.md",
+    "docs/pr-merge-rituals.md"
+  ],
+  "agents/monitor.md": [
+    "agents/green-driver.md",
+    "docs/pr-merge-rituals.md"
+  ]
+}

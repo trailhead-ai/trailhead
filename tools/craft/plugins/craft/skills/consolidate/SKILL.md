@@ -102,9 +102,9 @@ write, and nothing else reads around the CLI.
 
 **Every vault-sourced value is shape-checked before it enters a command line.** Record ids and names
 arrive from a git-synced vault a teammate can write, and this ritual substitutes them into commands
-throughout. Validate each against `^[A-Za-z0-9._/-]+$` **before any substitution**, per
-`../_shared/security.md`. A value that fails is never substituted, quoted, or escaped in — refuse
-loudly and stop.
+throughout. Validate each against `^[A-Za-z0-9._/-]+$` **before any substitution**, as
+`../_shared/security.md` says. A value that fails is never substituted, quoted, or escaped in —
+refuse loudly and stop.
 
 That shape alone still admits `..` and a leading `/`, and the check runs at **every** site a folded
 or survivor name reaches — the sites below are the ones this ritual uses, not a closed list, and
@@ -120,7 +120,7 @@ none of them is a droppable flag, so there is no well-formed "omit it" form to f
 
 Reject any value carrying a `.` or `..` path segment as well as failing the shape check. `lore`
 confines record ids to the vault root on its own, but that is a backstop this ritual does not get to
-assume: a folded name is checked here, at the substitution site, per the traversal rule
+assume: a folded name is checked here, at the substitution site, as the traversal rule
 `../_shared/security.md` leaves to each consuming site to state.
 
 **Every update and delete passes `--vault <name>` explicitly.** `lore record update` and
