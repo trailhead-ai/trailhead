@@ -630,6 +630,32 @@ def test_a_not_run_for_a_new_corpus_says_the_grants_are_unreviewed_and_still_pus
     assert "new-runner-grants" in sec
 
 
+def test_a_not_run_for_a_paused_corpus_says_the_operator_paused_it_and_still_pushes(st, capsys):
+    st.plan([_entry("held", root="plugins/demo")])
+    st.result("held", verdict="not-run", reason="corpus-paused", passed=0, errored=3)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    lines = out.splitlines()
+    assert lines[0] == "eval-gate: not-run"
+    assert lines[1] == "persistent: none"
+    assert ("`held` — `corpus-paused`: this corpus's evals are paused by the operator, so its cases "
+            "were not run") in section_of(out)
+
+
+class TestPausedCorpusAtTheMergeTier:
+    def test_a_paused_merge_only_case_does_not_stop_the_change(self, st, capsys):
+        _slow_not_run(st, "corpus-paused")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "merge-only-not-run" not in out
+
+    def test_a_paused_split_case_does_not_stop_the_change(self, st, capsys):
+        _split_plan(st, result="not-run", reason="corpus-paused")
+        code, out, _ = verdict(capsys, st)
+        assert code == 0
+        assert "split-procedure-not-run" not in out
+
+
 def test_tree_dirty_stops_the_push_with_the_commit_or_stash_message(st, capsys):
     st.plan([], status="tree-dirty")
     code, out, _ = verdict(capsys, st)
@@ -640,6 +666,26 @@ def test_tree_dirty_stops_the_push_with_the_commit_or_stash_message(st, capsys):
     assert msg in out
     assert msg in section_of(out)
     assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
+def test_gate_off_pushes_and_says_the_gate_is_off_and_how_to_run_it(st, capsys):
+    st.plan([], status="gate-off")
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[:2] == ["eval-gate: off", "persistent: none"]
+    sec = section_of(out)
+    assert "off for this group" in sec
+    assert "no cases were run" in sec
+    assert "/portage:pull_request create --eval-gate" in sec
+    assert (st.dir / "eval-gate-section.md").read_text().startswith(START)
+
+
+def test_gate_off_ignores_stray_results(st, capsys):
+    st.plan([_entry("a")], status="gate-off")
+    st.result("a", verdict="fail", passed=0, failed=3)
+    code, out, _ = verdict(capsys, st)
+    assert code == 0
+    assert out.splitlines()[0] == "eval-gate: off"
 
 
 # --- splice --out is written atomically and never through a symlink -------

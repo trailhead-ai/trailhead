@@ -5,8 +5,9 @@
 request (``portage.eval_command.request``), starts a detached worker and prints ``request: <id>``
 and ``wait: <paste-ready command>`` without waiting, then one ``derived: <plugin root> <case>: <files>`` line
 per named declared case (the files its entry's procedure derives, plugin-relative). Exit 0 started, 3 not run
-(the not-run block is printed), 2 refused (a stderr line names why: an undeclared case, a plugin root that leaves
-the repo, a mapping that does not load, a ``--require-version`` that is not 1 to 6 ASCII decimal digits).
+(the not-run block is printed), 2 refused (a stderr line names why: an undeclared case, a plugin whose
+mapping says ``"paused": true``, a plugin root that leaves the repo, a mapping that does not load, a
+``--require-version`` that is not 1 to 6 ASCII decimal digits).
 
 ``--require-version N`` is a caller's statement of the eval command version it needs. When N is above
 ``request.EVAL_COMMAND_VERSION`` the request is not run ``eval-command-too-old``: nothing is created or
@@ -106,6 +107,11 @@ def _plan(args: argparse.Namespace) -> tuple[Path, str, list[dict], dict[str, tu
     for name in names:
         if not CASE_NAME.match(name) or name not in mapping.cases:
             raise request.Refused(f"case {name!r} is not declared in {mapping_file}")
+    if mapping.paused:
+        raise request.Refused(
+            f"evals for {root} are paused by the operator; nothing was run. Record the eval as not run in the "
+            "task or work you are doing and carry on. The operator re-enables them by removing "
+            f'"paused": true from {PurePosixPath(root, "evals", MAPPING_NAME)}')
     read = cached(tree_reader(plugin_dir))
     derived: dict[str, tuple[str, ...]] = {}
     for position, name in enumerate(names, 1):

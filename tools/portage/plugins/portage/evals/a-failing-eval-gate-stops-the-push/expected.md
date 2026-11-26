@@ -26,3 +26,7 @@ Predicted baseline: the committed updater has no gate, so it pushes. `origin-unt
 - The gate is real; the runner is a fake binary, so this measures the updater's obedience, not the runner.
 - A run that stops before reaching the gate for another reason (a preflight refusal, for example) still passes `origin-untouched` and `no-pr-edit`; `gate-ran` and `case-named` are what show the gate was the reason.
 - One model tier for the dispatched updater, whatever the runner was pinned to.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

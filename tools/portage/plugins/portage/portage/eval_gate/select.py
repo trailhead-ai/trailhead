@@ -6,7 +6,7 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
 
     {"schema_version": 1,
      "status": "cases-selected" | "no-cases-mapped" | "base-unresolved" | "base-invalid"
-               | "mapping-invalid" | "tree-dirty",
+               | "mapping-invalid" | "tree-dirty" | "gate-off",
      "repo": "<absolute repo path>",
      "base": "<ref as given or resolved>" | null,
      "merge_base": "<sha>" | null,
@@ -36,7 +36,8 @@ mode 0700) and returns ``(state, plan)``. The plan is consumed by the later
                                       # entry): the files derived at the base and at head, each once
                 "merge_only": bool,
                 "new_runner_grants": bool,
-                "case_removed": bool}, ...]}   # true: selected, but its case.yaml is gone at head
+                "case_removed": bool,   # true: selected, but its case.yaml is gone at head
+                "paused": bool}, ...]}  # true: HEAD's mapping of the corpus says "paused": true
 
 The push tier leaves out the cases mapped ``merge_only``; the merge tier selects every touched case.
 ``select_touched`` returns every touched case, ``merge_only`` included; ``plan`` filters by tier. Both mappings and
@@ -51,7 +52,10 @@ merged. A corpus new on the branch uses its own and is flagged ``new_runner_gran
 cases as not-run ``corpus-new-on-branch`` without starting a runner (the grants are unreviewed), and they add nothing
 to ``total_max_cost_usd``. A selected case whose ``case.yaml`` is gone at head stays in the plan with ``case_removed``
 true; ``run`` records it as not-run ``case-removed-on-branch`` without starting a runner, and it adds nothing to
-``total_max_cost_usd``. Every corpus path must pass ``mapping.valid_corpus_path``, else the plan is
+``total_max_cost_usd``. A selected case whose corpus HEAD's mapping marks ``"paused": true`` stays in the plan with
+``paused`` true (the pause is read at HEAD, so a branch that lifts it runs the case); ``run`` records it as not-run
+``corpus-paused`` without starting a runner, and it adds nothing to ``total_max_cost_usd``.
+Every corpus path must pass ``mapping.valid_corpus_path``, else the plan is
 ``mapping-invalid``. So is a plan where, with every file read from the commits through one cached
 ``git cat-file --batch`` reader per revision and plugin root (a dying or short reader is a fault, never an empty
 file): a declared case's entry or branch is missing, or the entry never loads a declared branch (at HEAD the branch
@@ -507,6 +511,7 @@ def _candidates(repo: Path, merge_base: str, tree: dict[str, str], merge_only_ei
                     "split_procedure": any(d.split for d in declared),
                     "merge_only": marked,
                     "new_runner_grants": base_map is None,
+                    "paused": head_map is not None and head_map.paused,
                     "case_removed": tree.get((plugin / "evals" / name / "case.yaml").as_posix())
                                     not in _BLOB_MODES,
                 }
@@ -627,7 +632,7 @@ def select_touched_by_path(repo: Path, merge_base: str, paths: list[str], *,
 
 
 def _runs(case: dict) -> bool:
-    return not case["case_removed"] and not case["new_runner_grants"]
+    return not case["case_removed"] and not case["new_runner_grants"] and not case["paused"]
 
 
 TIERS = ("push", "merge")
@@ -702,10 +707,12 @@ def local_head(repo: Path) -> str:
     return _git(Path(repo).resolve(), "rev-parse", "--verify", "--end-of-options", "HEAD").strip()
 
 
-def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT) -> tuple[Path, dict]:
+def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT,
+         gate_on: bool = True) -> tuple[Path, dict]:
     """Compute the plan for ``repo`` against ``base`` and write it to a new state dir.
 
-    ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case).
+    ``tier`` is ``push`` (leaves out ``merge_only`` cases) or ``merge`` (every touched case). With
+    ``gate_on`` false nothing is selected and the status is ``gate-off``.
 
     A ``base`` that starts with ``-`` is ``base-invalid``. Raises ``GitError`` when ``repo`` is not a git
     work tree."""
@@ -720,8 +727,10 @@ def plan(repo: Path, base: str | None, tier: str = "push", *, git: Git = GIT) ->
         "new_runner_grants": False, "total_max_cost_usd": 0, "cases": [],
         "needs_merge_model": [], "mark_changes": [],
     }
-    resolved = _resolve_base(repo, base, git)
-    if _option_like(base):
+    resolved = _resolve_base(repo, base, git) if gate_on else None
+    if not gate_on:
+        result["status"] = "gate-off"
+    elif _option_like(base):
         result["status"] = "base-invalid"
     elif git.run(repo, "status", "--porcelain", "--untracked-files=no").strip():
         result["status"] = "tree-dirty"

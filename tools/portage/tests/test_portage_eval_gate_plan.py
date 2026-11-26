@@ -73,9 +73,10 @@ def _branch(repo: Path) -> None:
     _git(repo, "checkout", "-b", "feature")
 
 
-def _plan(repo: Path, capsys, *extra: str):
+def _plan(repo: Path, capsys, *extra: str, opt_in: bool = True):
     capsys.readouterr()
-    rc = dispatch.main(["eval-gate", "plan", "--repo", str(repo), *extra])
+    gate = ["--opt-in"] if opt_in else []
+    rc = dispatch.main(["eval-gate", "plan", "--repo", str(repo), *gate, *extra])
     out = capsys.readouterr().out
     state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
     plan = json.loads((state / "plan.json").read_text())
@@ -334,9 +335,65 @@ class TestLookupAndStateDir:
         assert stat.S_IMODE(os.stat(state).st_mode) == 0o700
 
 
+class TestGateOptIn:
+    def _touching_a(self, repo):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+
+    def _toml(self, tmp_path, text):
+        path = tmp_path / "group.toml"
+        path.write_text(text)
+        return str(path)
+
+    def test_no_flag_and_no_setting_writes_a_gate_off_plan_with_no_cases(self, repo, capsys):
+        self._touching_a(repo)
+        rc, plan, out = _plan(repo, capsys, "--base", "base", opt_in=False)
+        assert rc == 0
+        assert plan["status"] == "gate-off"
+        assert plan["cases"] == []
+        assert "status: gate-off" in out.splitlines()
+        assert "cases: 0" in out
+
+    def test_opt_in_selects_the_touched_cases(self, repo, capsys):
+        self._touching_a(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "cases-selected"
+        assert _names(plan) == ["alpha"]
+
+    @pytest.mark.parametrize("text, status", [
+        ("[release]\neval_gate = true\n", "cases-selected"),
+        ("[release]\neval_gate = false\n", "gate-off"),
+        ("[release]\n", "gate-off"),
+        ("[release]\neval_gate = \"true\"\n", "gate-off"),
+        ("[release]\neval_gate = 1\n", "gate-off"),
+        ("[release\neval_gate = true\n", "gate-off"),
+    ])
+    def test_the_group_setting_alone_decides(self, repo, tmp_path, capsys, text, status):
+        self._touching_a(repo)
+        toml = self._toml(tmp_path, text)
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--group-toml", toml, opt_in=False)
+        assert plan["status"] == status
+
+    def test_a_missing_group_file_reads_as_off(self, repo, tmp_path, capsys):
+        self._touching_a(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base",
+                           "--group-toml", str(tmp_path / "absent.toml"), opt_in=False)
+        assert plan["status"] == "gate-off"
+
+    def test_opt_in_wins_over_a_group_that_is_off(self, repo, tmp_path, capsys):
+        self._touching_a(repo)
+        toml = self._toml(tmp_path, "[release]\neval_gate = false\n")
+        _, plan, _ = _plan(repo, capsys, "--base", "base", "--group-toml", toml)
+        assert plan["status"] == "cases-selected"
+
+
 class TestUsage:
     def test_a_path_that_is_not_a_git_repo_exits_2(self, tmp_path, capsys):
-        rc = dispatch.main(["eval-gate", "plan", "--repo", str(tmp_path)])
+        rc = dispatch.main(["eval-gate", "plan", "--repo", str(tmp_path), "--opt-in"])
         assert rc == 2
         assert capsys.readouterr().err.strip()
 
@@ -1566,7 +1623,7 @@ class TestDeclaredCases:
                     "needs_merge_model": mark, "push_model": base.runner.get("push_model"),
                     "merge_model": base.runner["model"],
                     "measures": list(dict.fromkeys((b.measures if b else ()) + (h.measures if h else ()))),
-                    "merge_only": case.merge_only, "new_runner_grants": False, "case_removed": False})
+                    "merge_only": case.merge_only, "new_runner_grants": False, "case_removed": False, "paused": False})
             return entries
 
         old = pre_change(_mapping(base_cases, runner), _mapping(head_cases, runner), "merge")
@@ -2242,7 +2299,7 @@ class TestNonUtf8Path:
 
     def test_plan_refuses_a_committed_path_that_is_not_utf8_with_a_clean_exit(self, hostile, capsys):
         capsys.readouterr()
-        rc = dispatch.main(["eval-gate", "plan", "--repo", str(hostile), "--base", "base"])
+        rc = dispatch.main(["eval-gate", "plan", "--repo", str(hostile), "--opt-in", "--base", "base"])
         captured = capsys.readouterr()
         assert rc == 2
         assert captured.err.startswith("eval-gate plan: ")
@@ -2645,3 +2702,78 @@ class TestCommittedBinaryMention:
         _, plan = select.plan(repo, "base", git=_ShortBlob(len(PNG_BYTES + b"changed")))
         assert plan["status"] == "mapping-invalid"
         assert plan["mapping_invalid"]["fault"] == "case 'decl': 'skills/img.png' could not be read at HEAD"
+
+
+def _paused_mapping(paused, cases: dict = M) -> str:
+    doc = {"schema_version": 1, "runner": RUNNER, "cases": cases}
+    if paused is not None:
+        doc["paused"] = paused
+    return json.dumps(doc)
+
+
+class TestPausedKey:
+    @pytest.mark.parametrize("value, expected", [(True, True), (False, False), (None, False)])
+    def test_only_boolean_true_pauses(self, value, expected):
+        from portage.eval_gate.mapping import load_mapping
+
+        assert load_mapping(_paused_mapping(value), "p/evals/eval-gate.json").paused is expected
+
+    @pytest.mark.parametrize("value", ["true", 1, 0, None, [], {}])
+    def test_a_non_boolean_value_is_a_mapping_fault_naming_the_key(self, value):
+        assert "paused must be a boolean" in _fault(
+            json.dumps({"schema_version": 1, "runner": RUNNER, "cases": {}, "paused": value}))
+
+
+class TestPausedCorpusInPlan:
+    def _two_corpora(self, repo, p_paused=True, q_paused=False):
+        _corpus(repo, "p", M)
+        _corpus(repo, "q", {"gamma": {"measures": ["skills/a.md"]}})
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(p_paused or None))
+        _write(repo, "q/evals/eval-gate.json",
+               _paused_mapping(q_paused or None, {"gamma": {"measures": ["skills/a.md"]}}))
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/skills/a.md", "changed\n")
+        _write(repo, "q/skills/a.md", "changed\n")
+        _commit(repo)
+
+    def test_a_paused_corpus_is_marked_on_its_entries_and_its_neighbour_is_not(self, repo, capsys):
+        self._two_corpora(repo)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert plan["status"] == "cases-selected"
+        assert {(c["plugin_root"], c["case"]): c["paused"] for c in plan["cases"]} == {
+            ("p", "alpha"): True, ("q", "gamma"): False}
+
+    def test_a_paused_case_adds_nothing_to_the_planned_cost(self, repo, capsys):
+        self._two_corpora(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert plan["total_max_cost_usd"] == RUNNER["max_cost_usd"]
+
+    def test_a_plan_whose_every_case_is_paused_costs_nothing_and_is_not_an_error(self, repo, capsys):
+        self._two_corpora(repo, q_paused=True)
+        rc, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert rc == 0
+        assert all(c["paused"] for c in plan["cases"]) and plan["cases"]
+        assert plan["total_max_cost_usd"] == 0
+
+    def test_the_pause_is_read_at_head_so_unpausing_on_the_branch_runs_the_case(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(True))
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(None))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [c["paused"] for c in plan["cases"]] == [False]
+
+    def test_the_pause_is_read_at_head_so_pausing_on_the_branch_pauses_the_case(self, repo, capsys):
+        _corpus(repo, "p", M)
+        _commit(repo)
+        _branch(repo)
+        _write(repo, "p/evals/eval-gate.json", _paused_mapping(True))
+        _write(repo, "p/skills/a.md", "changed\n")
+        _commit(repo)
+        _, plan, _ = _plan(repo, capsys, "--base", "base")
+        assert [c["paused"] for c in plan["cases"]] == [True]

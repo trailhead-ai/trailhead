@@ -36,8 +36,9 @@ pytestmark = pytest.mark.usefixtures("hermetic_git_env")
 RUNNER = {"model": "sonnet", "allow_tools": ["Read"], "max_cost_usd": 2.0}
 CORE = {"measures": ["skills/a.md"]}
 SLOW = {"measures": ["skills/a.md"], "merge_only": True}
-AUTO = "[release]\nauto_merge = true\nmerge_method = \"squash\"\n"
-NO_AUTO = "[release]\n"
+AUTO = "[release]\nauto_merge = true\nmerge_method = \"squash\"\neval_gate = true\n"
+NO_AUTO = "[release]\neval_gate = true\n"
+GATE_OFF = "[release]\nauto_merge = true\nmerge_method = \"squash\"\n"
 PR = "42"
 
 
@@ -79,7 +80,7 @@ def make_repo(root: Path, name: str, cases: dict | None, *, origin: bool = True)
 
 def make_state(repo: Path, capsys, *, tier="merge", passing=True) -> Path:
     capsys.readouterr()
-    assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--tier", tier]) == 0
+    assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--opt-in", "--tier", tier]) == 0
     out = capsys.readouterr().out
     state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
     plan = json.loads((state / "plan.json").read_text())
@@ -180,6 +181,54 @@ class TestPinnedMerge:
         merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}")
         (argv,) = spy.merges
         assert head in argv and "0" * 40 not in argv
+
+
+class TestGateOff:
+    def test_a_merge_only_change_merges_without_a_state_when_the_gate_is_off(
+        self, tmp_path, monkeypatch, capsys, mo
+    ):
+        repo, head = mo
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, toml=GATE_OFF)
+        assert rc == 0
+        assert len(spy.merges) == 1
+
+    def test_the_gate_off_merge_is_still_pinned_to_the_remote_head(
+        self, tmp_path, monkeypatch, capsys, mo
+    ):
+        repo, head = mo
+        spy = Spy(head)
+        merge(tmp_path, monkeypatch, repo, spy, toml=GATE_OFF)
+        (argv,) = spy.merges
+        assert argv[argv.index("--match-head-commit") + 1] == head
+
+    def test_a_gate_off_merge_still_refuses_a_remote_only_head(
+        self, tmp_path, monkeypatch, capsys, mo
+    ):
+        repo, _ = mo
+        spy = Spy("f" * 40)
+        rc = merge(tmp_path, monkeypatch, repo, spy, toml=GATE_OFF)
+        assert rc == 2
+        assert spy.merges == []
+        assert merge_check.STALE_HEAD in capsys.readouterr().err
+
+    def test_a_state_given_with_the_gate_off_is_checked_as_ever(
+        self, tmp_path, monkeypatch, capsys, mo
+    ):
+        repo, head = mo
+        state = make_state(repo, capsys, passing=False)
+        spy = Spy(head)
+        rc = merge(tmp_path, monkeypatch, repo, spy, "--eval-state", f"{repo}={state}",
+                   toml=GATE_OFF)
+        assert rc == 2
+        assert spy.merges == []
+        assert "verdict-stops-the-change" in capsys.readouterr().err
+
+    def test_the_gate_on_still_refuses_a_missing_state(self, tmp_path, monkeypatch, capsys, mo):
+        repo, head = mo
+        spy = Spy(head)
+        refused(merge(tmp_path, monkeypatch, repo, spy, toml=GATE_OFF + "eval_gate = true\n"),
+                spy, capsys, repo, "no-state")
 
 
 class TestRefusals:
@@ -639,7 +688,7 @@ class TestEndToEndSeam:
     ):
         repo, head = mo
         capsys.readouterr()
-        assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--tier", "merge"]) == 0
+        assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--opt-in", "--tier", "merge"]) == 0
         out = capsys.readouterr().out
         state = Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])
         planned = [c["case"] for c in json.loads((state / "plan.json").read_text())["cases"]]
@@ -932,6 +981,6 @@ class TestMarkedSplitCaseReusesItsPushRun:
 
 def make_state_plan_only(repo: Path, capsys, tier: str) -> Path:
     capsys.readouterr()
-    assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--tier", tier]) == 0
+    assert dispatch.main(["eval-gate", "plan", "--repo", str(repo), "--opt-in", "--tier", tier]) == 0
     out = capsys.readouterr().out
     return Path(next(ln for ln in out.splitlines() if ln.startswith("state: "))[len("state: "):])

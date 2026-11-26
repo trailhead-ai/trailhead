@@ -40,6 +40,8 @@ profile, so invoke it as bare `portage <subcommand>`.
 - `group_toml_path` — absolute path to the group TOML file (used for `[release]` config including
   `review_bot_login`, `external_tracker`, `merge_order`, `merge_method`, and
   `green_driver_agent`)
+- `eval_gate` — optional. `on` runs the merge-tier gate whatever the group setting says; absent means
+  the group's `[release].eval_gate` decides (off unless it is `true`)
 - `pr_pairs` — comma-separated `<repo_path>:<pr_number>:<member_name>` list (optional — detected if absent)
 - `outcome_file` — absolute path to a machine-readable completion channel (optional — see
   "Outcome file" below)
@@ -221,16 +223,19 @@ change touches no `merge_only` or `split_procedure` case skips it and behaves as
 1. **Plan.** Run, as one command on its own line:
 
    ```bash
-   portage eval-gate plan --repo <repo_path> --tier merge
+   portage eval-gate plan --repo <repo_path> --tier merge --group-toml <group_toml_path> [--opt-in]
    ```
 
-   It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>` line per
+   Add `--opt-in` only when your prompt has `eval_gate: on`. It prints `state: <dir>`, `status:`, `cases: N`, `max_cost_usd: X`, one `<plugin_root>:<case>` line per
    selected case, then one `case-flags: <plugin_root>:<case> merge_only=<true|false>
    split_procedure=<true|false>` line per selected case. The merge tier selects every touched case; the
    `case-flags:` lines say which are `merge_only` or `split_procedure`.
    - `status: cases-selected` and at least one `case-flags:` line has `merge_only=true` or
      `split_procedure=true`: the gate applies.
      Keep `<dir>`.
+   - `status: gate-off`: the gate is off for this group. Skip the merge tier for this repo (never
+     `BLOCKED`), go straight on to its `portage merge` pair with no `--eval-state`, and `READY` or the
+     merge proceeds as it would without a gate.
    - Any other `status` (`no-cases-mapped`, or `tree-dirty`, `base-unresolved`, `mapping-invalid`
      where the plan cannot tell), or no `merge_only` or `split_procedure` entry: no gate for this repo. Go straight on to
      its `portage merge` pair with no `--eval-state`; `portage merge` makes the same decision from
@@ -368,7 +373,8 @@ portage merge \
   <repo1_path>:<pr1_number>:<member1_name> [<repo2_path>:<pr2_number>:<member2_name> ...]
 ```
 
-`--eval-state` is passed for each repo the merge-tier gate ran for, and only after its verdict exited 0.
+`--eval-state` is passed for each repo the merge-tier gate ran for, and only after its verdict exited 0;
+a repo whose plan said `gate-off` gets none.
 Each pair is `<repo_path>:<pr_number>:<member_name>` where `member_name` comes from
 `members[].name` in the camp manifest (not the worktree basename, which may differ).
 

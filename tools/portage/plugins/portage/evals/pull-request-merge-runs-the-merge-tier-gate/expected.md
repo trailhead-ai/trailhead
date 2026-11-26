@@ -26,3 +26,7 @@ Predicted baseline: the committed skill's `merge` verb runs `portage merge` with
 - The ordering clause is a regex over the invocation log, so it pins the order of the stand-in calls, not the wording of the progress lines monitor prints.
 - One model tier for the dispatched monitor (the agent's own pin), whatever the runner was pinned to.
 - Only the pass path is covered for the verb; the blocked outcomes belong to the monitor cases, because the verb has no outcome file.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt runs `/portage:pull_request merge --eval-gate`). It measures the same behaviour as before; no grader and no bar changed.

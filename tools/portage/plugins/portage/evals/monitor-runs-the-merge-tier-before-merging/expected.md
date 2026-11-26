@@ -27,3 +27,7 @@ Predicted baseline: the committed monitor sees every PR done, `auto_merge = true
 - The ordering clause is a regex over the invocation log, so it pins the order of the stand-in calls, not the wording of the progress lines monitor prints.
 - One model tier for the dispatched monitor (the agent's own pin), whatever the runner was pinned to.
 - The `--eval-state` pattern pins the `<repo>=<state>` shape and the state directory the stand-in printed; it does not read the state's contents.
+
+## Deviation from pre-registration (2026-11-25): the gate is opt-in
+
+The eval gate is now off unless the group setting or the run turns it on, so this case opts in (the prompt passes `eval_gate: on`). It measures the same behaviour as before; no grader and no bar changed.

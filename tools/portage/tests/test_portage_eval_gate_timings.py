@@ -381,7 +381,7 @@ class TestGateToTimingsSeam:
             (plugin / "skills" / "s.md").write_text("changed\n")
             env.commit()
             capsys.readouterr()
-            assert dispatch.main(["eval-gate", "plan", "--repo", str(env.repo),
+            assert dispatch.main(["eval-gate", "plan", "--repo", str(env.repo), "--opt-in",
                                   "--base", "base", "--tier", "push"]) == 0
             planned = capsys.readouterr().out
             env.state = Path(next(x for x in planned.splitlines()
